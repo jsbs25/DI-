@@ -1,20 +1,22 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { GlobeUserNode, GlobeCountryStat, Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
+import { latLngToVector3 } from './proceduralEarthTextures.ts';
 import {
-  createRealisticEarthDayTexture,
-  createRealisticEarthRoughnessTexture,
-  createRealisticEarthBumpTexture,
-  createRealisticEarthNightTexture,
-  createRealisticEarthCloudTexture,
-  createRealisticMilkyWayTexture,
-  latLngToVector3
-} from './proceduralEarthTextures.ts';
-import {
-  createJupiterTexture,
-  createSaturnRingTexture
-} from '../../universe/proceduralPlanets.ts';
+  earthSurfaceVertexShader,
+  earthSurfaceFragmentShader,
+  atmosphereVertexShader,
+  atmosphereFragmentShader,
+  innerAtmosphereVertexShader,
+  innerAtmosphereFragmentShader
+} from './earthShaders.ts';
+import { buildOrbitSystem, buildConnectionArcs, buildStarField } from './sceneBuilders.ts';
 import {
   ArrowRight,
   Compass,
@@ -28,7 +30,6 @@ import {
   RotateCw,
   Eye,
   EyeOff,
-  Cloud,
   ChevronRight
 } from 'lucide-react';
 
@@ -71,31 +72,15 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     scene: null as THREE.Scene | null,
     camera: null as THREE.PerspectiveCamera | null,
     renderer: null as THREE.WebGLRenderer | null,
+    controls: null as OrbitControls | null,
+    composer: null as EffectComposer | null,
     earthGroup: null as THREE.Group | null,
-    cloudsMesh: null as THREE.Mesh | null,
-    jupiterMesh: null as THREE.Mesh | null,
-    saturnGroup: null as THREE.Group | null,
-    moonMesh: null as THREE.Mesh | null,
-    asteroidBelt: [] as {
-      mesh: THREE.Mesh;
-      baseX: number;
-      baseY: number;
-      baseZ: number;
-      speed: number;
-      rot: THREE.Vector3;
-    }[],
+    orbitSystem: null as { update: (elapsed: number) => void } | null,
+    connectionArcs: null as { update: (elapsed: number) => void } | null,
     beaconGroup: null as THREE.Group | null,
     interactiveMeshes: [] as { mesh: THREE.Object3D; data: GlobeUserNode }[],
     autoRotate: true,
     showBeacons: true,
-    isDragging: false,
-    previousMousePosition: { x: 0, y: 0 },
-    rotationVelocity: { x: 0, y: 0.001 },
-    targetCameraDistance: 13.5,
-    cameraDistance: 13.5,
-    targetCameraPos: new THREE.Vector3(0, 0, 13.5),
-    targetCameraLookAt: new THREE.Vector3(0, 0, 0),
-    currentCameraLookAt: new THREE.Vector3(0, 0, 0),
     targetSphericalRotation: null as { x: number; y: number } | null,
     frameId: 0
   });
@@ -112,7 +97,9 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     }
   }, [showBeacons]);
 
-  // Smoothly fly camera to country or citizen coordinate
+  // Smoothly rotate the earth to a country or citizen coordinate.
+  // Camera stays managed by OrbitControls (no zoom), so we only rotate the
+  // globe itself toward the target latitude/longitude.
   const flyToCoordinates = useCallback((lat: number, lng: number) => {
     setIsZoomedIn(true);
     if (!stateRef.current.earthGroup) return;
@@ -123,8 +110,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     const targetX = lat * (Math.PI / 180);
 
     stateRef.current.targetSphericalRotation = { x: targetX, y: targetY };
-    stateRef.current.targetCameraPos.set(0.6, 0.2, 7.5);
-    stateRef.current.targetCameraLookAt.set(0.6, 0.2, 0);
   }, []);
 
   useEffect(() => {
@@ -140,20 +125,17 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     }
   }, [focusCoordinates, flyToCoordinates]);
 
-  // Toggle between Cinematic Overview and Close-up Earth Orbit
+  // Toggle between Overview and Explore modes. Zoom is intentionally disabled
+  // (per OrbitControls config), so this only toggles auto-rotation and resets
+  // any targeted globe rotation back to the natural overview state.
   const handleToggleExplore = () => {
     if (isZoomedIn) {
-      // Zoom out to cinematic vista
       setIsZoomedIn(false);
-      stateRef.current.targetCameraPos.set(0, 0, 13.5);
-      stateRef.current.targetCameraLookAt.set(0, 0, 0);
       stateRef.current.targetSphericalRotation = null;
       setAutoRotate(true);
     } else {
-      // Zoom in to Earth
       setIsZoomedIn(true);
-      stateRef.current.targetCameraPos.set(0.6, 0.2, 8.2);
-      stateRef.current.targetCameraLookAt.set(0.6, 0.2, 0);
+      setAutoRotate(false);
     }
   };
 
@@ -176,6 +158,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
     // 2. Scene, Camera, Renderer
     const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000); // pure deep space
     stateRef.current.scene = scene;
 
     const width = container.clientWidth || window.innerWidth;
@@ -187,144 +170,96 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
     const renderer = new THREE.WebGLRenderer({
       antialias: !isSoftwareGl,
-      alpha: true,
+      alpha: false,
       powerPreference: 'high-performance'
     });
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.25;
+    renderer.toneMappingExposure = 1.1;
 
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
     stateRef.current.renderer = renderer;
 
-    // 3. DEEP SPACE BACKDROP & ASTROMETRIC STARS
-    // 3.1 Milky Way Celestial Sky Sphere
-    const skyGeo = new THREE.SphereGeometry(300, 48, 48);
-    const skyMat = new THREE.MeshBasicMaterial({
-      map: createRealisticMilkyWayTexture(2048, 1024),
-      side: THREE.BackSide,
-      depthWrite: false
-    });
-    scene.add(new THREE.Mesh(skyGeo, skyMat));
+    // 3. DEEP SPACE BACKDROP — pure black with a subtle distant star field
+    const starCount = isSoftwareGl ? 500 : 1400;
+    scene.add(buildStarField(starCount));
 
-    // 3.2 Deep Space Star Points with realistic magnitude distribution
-    const starCount = isSoftwareGl ? 900 : 2500;
-    const starGeo = new THREE.BufferGeometry();
-    const starPos = new Float32Array(starCount * 3);
-    const starCol = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
-      const r = 110 + Math.random() * 150;
-      const th = Math.random() * Math.PI * 2;
-      const ph = Math.acos(2 * Math.random() - 1);
-      starPos[i * 3] = r * Math.sin(ph) * Math.cos(th);
-      starPos[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th);
-      starPos[i * 3 + 2] = r * Math.cos(ph);
-
-      const b = 0.6 + Math.random() * 0.4;
-      const isBlue = Math.random() > 0.8;
-      const isGold = Math.random() > 0.85;
-      starCol[i * 3] = isGold ? 1.0 : isBlue ? 0.85 * b : b;
-      starCol[i * 3 + 1] = isGold ? 0.9 * b : isBlue ? 0.92 * b : b;
-      starCol[i * 3 + 2] = isBlue ? 1.0 : isGold ? 0.7 * b : b;
-    }
-    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    starGeo.setAttribute('color', new THREE.BufferAttribute(starCol, 3));
-    const starMat = new THREE.PointsMaterial({
-      size: 1.6,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.9,
-      sizeAttenuation: true
-    });
-    scene.add(new THREE.Points(starGeo, starMat));
-
-    // 4. LIGHTING RIG (MATCHING THE REFERENCE IMAGE SUN ANGLE: TOP-LEFT SUNLIGHT)
-    // Primary Sunlight casting crisp planetary light from upper-left
-    const sunLight = new THREE.DirectionalLight(0xfffbf0, 3.8);
-    sunLight.position.set(-28, 22, 24);
-    scene.add(sunLight);
-
-    // Subtle cosmic rim back light for deep space definition
-    const cosmicRimLight = new THREE.DirectionalLight(0x38bdf8, 1.4);
-    cosmicRimLight.position.set(24, -12, -18);
-    scene.add(cosmicRimLight);
-
-    // Deep space ambient fill (slightly raised to reveal the night hemisphere,
-    // which was previously near-black and looked flat)
-    const ambientLight = new THREE.AmbientLight(0x223044, 1.7);
+    // 4. LIGHTING — the surface shader computes day/night itself via a sun
+    // direction uniform, so we keep only a subtle ambient to avoid dead-black
+    // night-side oceans.
+    const sunDirection = new THREE.Vector3(-0.55, 0.35, 0.55).normalize();
+    const ambientLight = new THREE.AmbientLight(0x223044, 0.6);
     scene.add(ambientLight);
 
-    // Natural skylight: blue sky from above, dark ocean below — this gives the
-    // planet's unlit side the soft blue fill of scattered light instead of black.
-    const hemiLight = new THREE.HemisphereLight(0x3d5a80, 0x0a1020, 0.9);
-    scene.add(hemiLight);
-
-    // 5. CENTRAL REALISTIC EARTH SYSTEM
+    // 5. CENTRAL EARTH SYSTEM
     const earthRadius = 4.5;
     const earthGroup = new THREE.Group();
-    // Positioned slightly right to harmoniously frame the hero typography on the left
-    earthGroup.position.set(0.65, 0.25, 0);
+    const isNarrow = width < 768;
+    // Desktop: offset right to frame the hero typography on the left.
+    // Mobile: center the earth, slightly raised so it doesn't collide with
+    // the title block above or the stat cards below.
+    earthGroup.position.set(isNarrow ? 0 : 0.65, isNarrow ? 0.55 : 0.25, 0);
     earthGroup.rotation.x = 0.234; // 23.4° axial tilt
     scene.add(earthGroup);
     stateRef.current.earthGroup = earthGroup;
 
-    // 5.1 Earth Albedo, Specular Oceans & Mountain Relief
-    const dayTexture = createRealisticEarthDayTexture();
-    const nightTexture = createRealisticEarthNightTexture();
-    const roughnessTexture = createRealisticEarthRoughnessTexture();
-    const bumpTexture = createRealisticEarthBumpTexture();
+    // 5.1 Earth surface — custom day/night shader blending Blue Marble (day)
+    // and Black Marble city lights (night) across a smooth terminator.
+    const textureLoader = new THREE.TextureLoader();
 
-    const earthGeo = new THREE.SphereGeometry(earthRadius, isSoftwareGl ? 40 : 64, isSoftwareGl ? 40 : 64);
-    const earthMat = new THREE.MeshStandardMaterial({
-      map: dayTexture,
-      roughnessMap: roughnessTexture,
-      roughness: 0.6,
-      metalness: 0.0,
-      bumpMap: bumpTexture,
-      bumpScale: 0.035,
-      emissiveMap: nightTexture,
-      emissive: new THREE.Color(0xffe6b0),
-      emissiveIntensity: 0.5
+    const loadTexture = (url: string, fallbackColor: number) => {
+      const tex = textureLoader.load(
+        url,
+        undefined,
+        undefined,
+        () => {
+          // Fallback: create a 1x1 solid-color texture on load failure
+          const canvas = document.createElement('canvas');
+          canvas.width = 1;
+          canvas.height = 1;
+          const ctx = canvas.getContext('2d')!;
+          ctx.fillStyle = `#${fallbackColor.toString(16).padStart(6, '0')}`;
+          ctx.fillRect(0, 0, 1, 1);
+          tex.image = canvas as unknown as HTMLImageElement;
+          tex.needsUpdate = true;
+        }
+      );
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.anisotropy = 8;
+      return tex;
+    };
+
+    const dayTexture = loadTexture('/assets/earth/earth_day_2048.jpg', 0x0a1a3a);
+    const nightTexture = loadTexture('/assets/earth/earth_night_2048.jpg', 0x020408);
+    const normalTexture = loadTexture('/assets/earth/earth_normal_2048.jpg', 0x808080);
+
+    const earthGeo = new THREE.SphereGeometry(earthRadius, isSoftwareGl ? 64 : 128, isSoftwareGl ? 64 : 128);
+    const earthMat = new THREE.ShaderMaterial({
+      vertexShader: earthSurfaceVertexShader,
+      fragmentShader: earthSurfaceFragmentShader,
+      uniforms: {
+        uDayMap: { value: dayTexture },
+        uNightMap: { value: nightTexture },
+        uNormalMap: { value: normalTexture },
+        uSunDirection: { value: sunDirection },
+        uDayIntensity: { value: 0.85 },
+        uNightIntensity: { value: 1.0 },
+        uNormalStrength: { value: 0.35 }
+      }
     });
     const earthMesh = new THREE.Mesh(earthGeo, earthMat);
     earthGroup.add(earthMesh);
 
-    // 5.2 Atmospheric Rayleigh Scattering Rim Glow
-    // A Fresnel-based shader: glow is strongest at the limb (where the view
-    // grazes the sphere) and fades to nothing facing the camera — this is what
-    // produces a believable thin blue atmosphere halo rather than a flat disc.
-    const atmoGeo = new THREE.SphereGeometry(earthRadius * 1.04, 96, 96);
+    // 5.2 Atmospheric Fresnel rim glow (outer + inner layers)
+    const atmoGeo = new THREE.SphereGeometry(earthRadius * 1.045, 96, 96);
     const atmoMat = new THREE.ShaderMaterial({
-      vertexShader: `
-        varying vec3 vNormal;
-        varying vec3 vViewDir;
-        void main() {
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          vNormal = normalize(normalMatrix * normal);
-          vViewDir = normalize(-mvPosition.xyz);
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: `
-        varying vec3 vNormal;
-        varying vec3 vViewDir;
-        void main() {
-          // BackSide sphere: flip the normal so the rim faces outward
-          vec3 n = normalize(vNormal);
-          float fresnel = pow(1.0 - abs(dot(n, vViewDir)), 3.5);
-
-          // Rayleigh-ish blue: deeper blue at the limb, paler toward the edge
-          vec3 deepBlue = vec3(0.08, 0.32, 0.95);
-          vec3 paleBlue = vec3(0.38, 0.72, 1.0);
-          vec3 atmoColor = mix(deepBlue, paleBlue, fresnel * 0.8);
-
-          float alpha = fresnel * 1.35;
-          gl_FragColor = vec4(atmoColor, 1.0) * alpha;
-        }
-      `,
+      vertexShader: atmosphereVertexShader,
+      fragmentShader: atmosphereFragmentShader,
       blending: THREE.AdditiveBlending,
       side: THREE.BackSide,
       transparent: true,
@@ -332,28 +267,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     });
     earthGroup.add(new THREE.Mesh(atmoGeo, atmoMat));
 
-    // Inner atmosphere: a subtle forward-scattered glow just above the surface
     const innerAtmoGeo = new THREE.SphereGeometry(earthRadius * 1.008, 64, 64);
     const innerAtmoMat = new THREE.ShaderMaterial({
-      vertexShader: `
-        varying vec3 vNormal;
-        varying vec3 vViewDir;
-        void main() {
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          vNormal = normalize(normalMatrix * normal);
-          vViewDir = normalize(-mvPosition.xyz);
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: `
-        varying vec3 vNormal;
-        varying vec3 vViewDir;
-        void main() {
-          vec3 n = normalize(vNormal);
-          float fresnel = pow(1.0 - abs(dot(n, vViewDir)), 2.0);
-          gl_FragColor = vec4(0.5, 0.78, 1.0, 1.0) * fresnel * 0.35;
-        }
-      `,
+      vertexShader: innerAtmosphereVertexShader,
+      fragmentShader: innerAtmosphereFragmentShader,
       blending: THREE.AdditiveBlending,
       side: THREE.FrontSide,
       transparent: true,
@@ -361,19 +278,14 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     });
     earthGroup.add(new THREE.Mesh(innerAtmoGeo, innerAtmoMat));
 
-    // 5.3 Dynamic Weather Cloud Layer
-    const cloudsGeo = new THREE.SphereGeometry(earthRadius * 1.012, 48, 48);
-    const cloudsTexture = createRealisticEarthCloudTexture();
-    const cloudsMat = new THREE.MeshStandardMaterial({
-      map: cloudsTexture,
-      transparent: true,
-      opacity: 0.82,
-      blending: THREE.NormalBlending,
-      depthWrite: false
-    });
-    const cloudsMesh = new THREE.Mesh(cloudsGeo, cloudsMat);
-    earthGroup.add(cloudsMesh);
-    stateRef.current.cloudsMesh = cloudsMesh;
+    // 5.3 Orbital system + global data connection arcs
+    const orbitSystem = buildOrbitSystem(earthRadius);
+    scene.add(orbitSystem.group);
+    stateRef.current.orbitSystem = orbitSystem;
+
+    const connectionArcs = buildConnectionArcs(earthRadius);
+    earthGroup.add(connectionArcs.group);
+    stateRef.current.connectionArcs = connectionArcs;
 
     // 5.4 Human Citizen Beacons
     const beaconGroup = new THREE.Group();
@@ -416,159 +328,39 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     });
     stateRef.current.interactiveMeshes = interactiveMeshes;
 
-    // 6. CELESTIAL BACKGROUND: JUPITER (UPPER RIGHT)
-    const jupiterGeo = new THREE.SphereGeometry(2.2, 36, 36);
-    const jupiterMat = new THREE.MeshStandardMaterial({
-      map: createJupiterTexture(1024, 512),
-      roughness: 0.85,
-      metalness: 0.05
-    });
-    const jupiterMesh = new THREE.Mesh(jupiterGeo, jupiterMat);
-    jupiterMesh.position.set(11.5, 5.0, -9.5);
-    jupiterMesh.rotation.x = 0.05;
-    scene.add(jupiterMesh);
-    stateRef.current.jupiterMesh = jupiterMesh;
+    // 6. ORBIT CONTROLS — drag to rotate, no zoom, damped, limited pitch
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableZoom = false;         // disable scroll/pinch zoom
+    controls.enablePan = false;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.rotateSpeed = 0.4;
+    controls.minPolarAngle = Math.PI * 0.25;  // limit vertical rotation
+    controls.maxPolarAngle = Math.PI * 0.75;
+    controls.autoRotate = false;
+    controls.target.set(isNarrow ? 0 : 0.65, isNarrow ? 0.55 : 0.25, 0);
+    stateRef.current.controls = controls;
 
-    // 7. CELESTIAL BACKGROUND: SATURN WITH RINGS (MID RIGHT)
-    const saturnGroup = new THREE.Group();
-    saturnGroup.position.set(8.2, 0.4, -7.0);
-    saturnGroup.rotation.z = -0.38;
-    saturnGroup.rotation.x = 0.48;
+    // 7. BLOOM POST-PROCESSING (subtle, city lights only)
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(width, height),
+      isSoftwareGl ? 0.0 : 0.28,  // bloom strength
+      0.6,                         // radius
+      0.85                          // threshold (only bright lights bloom)
+    );
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+    stateRef.current.composer = composer;
 
-    const saturnGeo = new THREE.SphereGeometry(1.2, 32, 32);
-    const saturnMat = new THREE.MeshStandardMaterial({
-      color: 0xecd5b0,
-      roughness: 0.82,
-      metalness: 0.08
-    });
-    const saturnMesh = new THREE.Mesh(saturnGeo, saturnMat);
-    saturnGroup.add(saturnMesh);
-
-    // Saturn Rings with Cassini Division
-    const ringGeo = new THREE.RingGeometry(1.5, 3.2, 64);
-    const ringPos = ringGeo.attributes.position;
-    const ringUv = ringGeo.attributes.uv;
-    for (let i = 0; i < ringPos.count; i++) {
-      const vx = ringPos.getX(i);
-      const vy = ringPos.getY(i);
-      const dist = Math.sqrt(vx * vx + vy * vy);
-      const u = (dist - 1.5) / (3.2 - 1.5);
-      ringUv.setXY(i, u, 0.5);
-    }
-    ringGeo.attributes.uv.needsUpdate = true;
-
-    const ringMat = new THREE.MeshStandardMaterial({
-      map: createSaturnRingTexture(1024),
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.95,
-      roughness: 0.6
-    });
-    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-    ringMesh.rotation.x = Math.PI / 2;
-    saturnGroup.add(ringMesh);
-    scene.add(saturnGroup);
-    stateRef.current.saturnGroup = saturnGroup;
-
-    // 8. CELESTIAL BACKGROUND: MOON (UPPER LEFT ABOVE EARTH)
-    const moonGeo = new THREE.SphereGeometry(0.55, 24, 24);
-    const moonMat = new THREE.MeshStandardMaterial({
-      color: 0xd0d5dd,
-      roughness: 0.95
-    });
-    const moonMesh = new THREE.Mesh(moonGeo, moonMat);
-    moonMesh.position.set(-6.8, 5.2, -4.5);
-    scene.add(moonMesh);
-    stateRef.current.moonMesh = moonMesh;
-
-    // 9. FOREGROUND 3D ASTEROID BELT (陨石带 / 小行星群)
-    // Irregular rocky dodecahedron geometry generator
-    const createFacetedRockGeometry = (radius: number) => {
-      const geo = new THREE.DodecahedronGeometry(radius, 1);
-      const pos = geo.attributes.position;
-      for (let i = 0; i < pos.count; i++) {
-        const vx = pos.getX(i);
-        const vy = pos.getY(i);
-        const vz = pos.getZ(i);
-        const noise = 1 + Math.sin(vx * 4.2) * Math.cos(vy * 3.8) * 0.35;
-        pos.setXYZ(i, vx * noise, vy * noise, vz * noise);
-      }
-      geo.computeVertexNormals();
-      return geo;
-    };
-
-    const asteroidBelt: {
-      mesh: THREE.Mesh;
-      baseX: number;
-      baseY: number;
-      baseZ: number;
-      speed: number;
-      rot: THREE.Vector3;
-    }[] = [];
-
-    const asteroidCount = isSoftwareGl ? 35 : 75;
-    const rockMat = new THREE.MeshStandardMaterial({
-      color: 0x948b82,
-      roughness: 0.88,
-      metalness: 0.12
-    });
-
-    for (let i = 0; i < asteroidCount; i++) {
-      // Distribute along an arc sweeping from bottom-left to bottom-right across the foreground
-      const t = i / asteroidCount; // 0 to 1
-      const sz = 0.08 + Math.random() * 0.38 + (i % 7 === 0 ? 0.3 : 0);
-      const rockGeo = createFacetedRockGeometry(sz);
-      const rockMesh = new THREE.Mesh(rockGeo, rockMat);
-
-      // Sweeping curve across bottom foreground
-      const angle = (t - 0.5) * 1.8;
-      const x = Math.sin(angle) * 14.5;
-      const y = -4.6 + Math.cos(angle) * 1.5 + (Math.random() - 0.5) * 1.8;
-      const z = 2.5 + Math.cos(angle) * 3.5 + (Math.random() - 0.5) * 2.5;
-
-      rockMesh.position.set(x, y, z);
-      rockMesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      scene.add(rockMesh);
-
-      asteroidBelt.push({
-        mesh: rockMesh,
-        baseX: x,
-        baseY: y,
-        baseZ: z,
-        speed: 0.02 + Math.random() * 0.04,
-        rot: new THREE.Vector3(
-          (Math.random() - 0.5) * 0.02,
-          (Math.random() - 0.5) * 0.02,
-          (Math.random() - 0.5) * 0.02
-        )
-      });
-    }
-    stateRef.current.asteroidBelt = asteroidBelt;
-
-    // 10. RAYCASTING & POINTER INTERACTION
+    // 8. RAYCASTING & POINTER INTERACTION
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
-
-    const onPointerDown = (e: MouseEvent | TouchEvent) => {
-      stateRef.current.isDragging = true;
-      const cx = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      const cy = 'touches' in e ? e.touches[0].clientY : e.clientY;
-      stateRef.current.previousMousePosition = { x: cx, y: cy };
-      stateRef.current.targetSphericalRotation = null;
-    };
 
     const onPointerMove = (e: MouseEvent | TouchEvent) => {
       const cx = 'touches' in e ? e.touches[0].clientX : e.clientX;
       const cy = 'touches' in e ? e.touches[0].clientY : e.clientY;
-
-      if (stateRef.current.isDragging && stateRef.current.earthGroup) {
-        const dx = cx - stateRef.current.previousMousePosition.x;
-        const dy = cy - stateRef.current.previousMousePosition.y;
-        stateRef.current.earthGroup.rotation.y += dx * 0.005;
-        stateRef.current.earthGroup.rotation.x += dy * 0.005;
-        stateRef.current.rotationVelocity = { x: dy * 0.002, y: dx * 0.002 };
-        stateRef.current.previousMousePosition = { x: cx, y: cy };
-      }
 
       // Check pin raycast hover
       const rect = renderer.domElement.getBoundingClientRect();
@@ -591,11 +383,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       }
       setHoveredNode(null);
       setHoverPosition(null);
-      renderer.domElement.style.cursor = 'default';
-    };
-
-    const onPointerUp = () => {
-      stateRef.current.isDragging = false;
+      renderer.domElement.style.cursor = 'grab';
     };
 
     const onClick = (e: MouseEvent) => {
@@ -617,26 +405,12 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       }
     };
 
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const zoomDelta = e.deltaY * 0.008;
-      stateRef.current.targetCameraPos.z = Math.max(
-        6.5,
-        Math.min(20.0, stateRef.current.targetCameraPos.z + zoomDelta)
-      );
-    };
-
     const dom = renderer.domElement;
-    dom.addEventListener('mousedown', onPointerDown);
     window.addEventListener('mousemove', onPointerMove);
-    window.addEventListener('mouseup', onPointerUp);
     dom.addEventListener('click', onClick);
-    dom.addEventListener('wheel', onWheel, { passive: false });
 
-    // Touch
-    dom.addEventListener('touchstart', onPointerDown, { passive: true });
+    // Touch hover
     window.addEventListener('touchmove', onPointerMove, { passive: true });
-    window.addEventListener('touchend', onPointerUp, { passive: true });
 
     // Window resize
     const onResize = () => {
@@ -646,72 +420,61 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      composer.setSize(w, h);
     };
     window.addEventListener('resize', onResize);
 
-    // 11. ANIMATION LOOP
+    // Pause rendering when the tab is hidden (save battery / GPU)
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(stateRef.current.frameId);
+      } else {
+        clock.getDelta(); // reset delta to avoid a jump after resume
+        animate();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    // 9. ANIMATION LOOP
     const clock = new THREE.Clock();
     const animate = () => {
       const delta = clock.getDelta();
       const elapsed = clock.getElapsedTime();
 
-      // Camera position & look-at smooth dampening
-      camera.position.lerp(stateRef.current.targetCameraPos, 0.06);
-      stateRef.current.currentCameraLookAt.lerp(stateRef.current.targetCameraLookAt, 0.06);
-      camera.lookAt(stateRef.current.currentCameraLookAt);
+      // OrbitControls manages camera rotation, damping, and look-at.
+      controls.update();
 
-      // Earth rotation
+      // Earth slow, natural rotation
       if (stateRef.current.earthGroup) {
         if (stateRef.current.targetSphericalRotation) {
           stateRef.current.earthGroup.rotation.y = THREE.MathUtils.damp(
             stateRef.current.earthGroup.rotation.y,
             stateRef.current.targetSphericalRotation.y,
-            3.5,
+            3.0,
             delta
           );
           stateRef.current.earthGroup.rotation.x = THREE.MathUtils.damp(
             stateRef.current.earthGroup.rotation.x,
             stateRef.current.targetSphericalRotation.x,
-            3.5,
+            3.0,
             delta
           );
-        } else if (!stateRef.current.isDragging) {
-          if (stateRef.current.autoRotate) {
-            stateRef.current.earthGroup.rotation.y += 0.0012;
-          } else {
-            stateRef.current.earthGroup.rotation.y += stateRef.current.rotationVelocity.y;
-            stateRef.current.earthGroup.rotation.x += stateRef.current.rotationVelocity.x;
-            stateRef.current.rotationVelocity.x *= 0.94;
-            stateRef.current.rotationVelocity.y *= 0.94;
-          }
+        } else if (stateRef.current.autoRotate) {
+          stateRef.current.earthGroup.rotation.y += 0.0012;
         }
       }
 
-      // Weather cloud rotation
-      if (stateRef.current.cloudsMesh) {
-        stateRef.current.cloudsMesh.rotation.y += 0.0005;
+      // Orbit rings rotate independently
+      if (stateRef.current.orbitSystem) {
+        stateRef.current.orbitSystem.update(elapsed);
       }
 
-      // Jupiter slow axial rotation
-      if (stateRef.current.jupiterMesh) {
-        stateRef.current.jupiterMesh.rotation.y += 0.0004;
+      // Connection arc pulses
+      if (stateRef.current.connectionArcs) {
+        stateRef.current.connectionArcs.update(elapsed);
       }
 
-      // Saturn slow axial rotation
-      if (stateRef.current.saturnGroup) {
-        stateRef.current.saturnGroup.rotation.y += 0.0003;
-      }
-
-      // Asteroid belt orbital drift and tumbling
-      stateRef.current.asteroidBelt.forEach(item => {
-        item.mesh.rotation.x += item.rot.x;
-        item.mesh.rotation.y += item.rot.y;
-        item.mesh.rotation.z += item.rot.z;
-        const wave = Math.sin(elapsed * 0.4 + item.baseX * 0.2) * 0.15;
-        item.mesh.position.y = item.baseY + wave;
-      });
-
-      renderer.render(scene, camera);
+      composer.render();
       stateRef.current.frameId = requestAnimationFrame(animate);
     };
 
@@ -721,15 +484,12 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       cancelAnimationFrame(stateRef.current.frameId);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('mousemove', onPointerMove);
-      window.removeEventListener('mouseup', onPointerUp);
       window.removeEventListener('touchmove', onPointerMove);
-      window.removeEventListener('touchend', onPointerUp);
-
-      dom.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       dom.removeEventListener('click', onClick);
-      dom.removeEventListener('wheel', onWheel);
-      dom.removeEventListener('touchstart', onPointerDown);
 
+      controls.dispose();
+      composer.dispose();
       renderer.dispose();
       if (container.contains(dom)) container.removeChild(dom);
     };
