@@ -610,7 +610,8 @@ export async function searchWikisource(query: string, limit = 10): Promise<BookS
 
 /**
  * Fetch the full plain text of a Chinese Wikisource page (wikitext → text).
- * Returns title and chapter list (split by == headings ==).
+ * Returns title and chapter list, splitting on wikitext `== heading ==`
+ * section markers so books keep their natural chapter structure.
  */
 export async function fetchWikisourceFullText(pageTitle: string): Promise<{ title: string; author: string; chapters: { title: string; content: string }[] }> {
   const url = `https://zh.wikisource.org/w/api.php?action=parse&page=${encodeURIComponent(
@@ -619,38 +620,74 @@ export async function fetchWikisourceFullText(pageTitle: string): Promise<{ titl
   const data = JSON.parse(await fetchText(url, 15000));
   const wikitext: string = data?.parse?.wikitext || '';
 
-  // Strip templates, file embeds, and wiki markup noise
-  let text = wikitext
-    .replace(/\{\{[^}]*\}\}/g, ' ')          // templates
-    .replace(/\[\[File:[^\]]*\]\]/g, ' ')      // file embeds
-    .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1') // internal links → label
-    .replace(/\[https?:[^\]\s]+\s([^\]]+)\]/g, '$1')  // external links → label
-    .replace(/<ref[^>]*>[\s\S]*?<\/ref>/g, ' ') // references
-    .replace(/<[^>]+>/g, ' ')                   // any remaining HTML
-    .replace(/={2,6}/g, ' ')                    // heading markers
-    .replace(/['*#\[\]{}|]/g, ' ')              // wiki markup symbols
-    .replace(/\s+/g, ' ')
-    .trim();
-
   const title = pageTitle.replace(/\([^)]*\)/g, '').trim();
   const author = '维基文库 · 公版文献';
 
-  // Split into chapters by blank-ish long chunks
-  const paragraphs = text.split(/\s{2,}/).map(p => p.trim()).filter(p => p.length > 15);
-  const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 8));
+  // Clean wiki markup from a chunk of text while preserving newlines
+  const cleanChunk = (chunk: string): string => {
+    return chunk
+      .replace(/\{\{[^}]*\}\}/g, ' ')                 // templates
+      .replace(/\[\[File:[^\]]*\]\]/g, ' ')             // file embeds
+      .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1') // internal links → label
+      .replace(/\[https?:[^\]\s]+\s([^\]]+)\]/g, '$1')  // external links → label
+      .replace(/<ref[^>]*>[\s\S]*?<\/ref>/g, ' ')       // references
+      .replace(/<[^>]+>/g, ' ')                           // remaining HTML
+      .replace(/['*#\[\]{}|]/g, ' ')                      // wiki markup symbols
+      .replace(/[ \t]+/g, ' ')                             // collapse spaces (keep newlines)
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  };
+
+  // Split on `== heading ==` section markers to preserve real chapter structure
+  const sections = wikitext.split(/\n\s*(?=={2,6}[^=])/);
+
   const chapters: { title: string; content: string }[] = [];
-  for (let i = 0; i < paragraphs.length; i += chunkSize) {
-    const chunk = paragraphs.slice(i, i + chunkSize);
-    chapters.push({ title: `第 ${chapters.length + 1} 节`, content: chunk.join('\n\n') });
+  let preamble = '';
+
+  for (const section of sections) {
+    const m = section.match(/^\s*(={2,6})\s*(.+?)\s*\1\s*\n?/);
+    if (m) {
+      const heading = m[2].trim();
+      const body = cleanChunk(section.slice(m[0].length));
+      if (body.length > 0) {
+        chapters.push({ title: heading, content: body });
+      }
+    } else {
+      preamble += section + '\n';
+    }
   }
 
-  return { title, author, chapters: chapters.slice(0, 8) };
+  // If no `==` headings found (e.g. a single prose page), chunk by paragraphs
+  if (chapters.length === 0) {
+    const cleaned = cleanChunk(wikitext);
+    const paragraphs = cleaned.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 15);
+    const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 8));
+    for (let i = 0; i < paragraphs.length; i += chunkSize) {
+      const chunk = paragraphs.slice(i, i + chunkSize);
+      chapters.push({ title: `第 ${chapters.length + 1} 节`, content: chunk.join('\n\n') });
+    }
+  }
+
+  // Prepend any preamble (intro text before first heading) as its own chapter
+  const intro = cleanChunk(preamble);
+  if (intro.length > 0) {
+    chapters.unshift({ title: '序言', content: intro });
+  }
+
+  return { title, author, chapters: chapters.slice(0, 50) };
 }
 
 /**
  * Download a book's full plain text and split it into chapters.
- * Gutenberg texts use clear structural markers; we chunk into ~8 chapters
- * for comfortable reading/recitation, and strip the license header/footer.
+ * Gutenberg texts use explicit "CHAPTER I." / "Chapter 1" / "BOOK IV."
+ * markers; we split on those so each chapter is a readable, natural unit.
+ *
+ * Tolerates Gutenberg footnote artifacts like "Chapter I.]" or missing
+ * trailing periods ("CHAPTER XIII").
  */
 export async function fetchBookFullText(textUrl: string): Promise<{ title: string; author: string; chapters: { title: string; content: string }[] }> {
   const raw = await fetchText(textUrl, 15000);
@@ -675,19 +712,43 @@ export async function fetchBookFullText(textUrl: string): Promise<{ title: strin
   const title = titleMatch?.[1]?.trim() || 'Untitled Book';
   const author = authorMatch?.[1]?.trim() || 'Unknown Author';
 
-  // Split into chapters by blank-line paragraphs, grouped into ~8 chunks
-  const paragraphs = body.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 20);
-  const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 8));
-  const chapters: { title: string; content: string }[] = [];
+  // Match chapter headings, tolerating Gutenberg artifacts like "Chapter I.]"
+  const headingRe = /^\s*(?:CHAPTER|Chapter|BOOK|Book)\s+[IVXLC0-9]+[.\]\s]*$/gm;
 
-  for (let i = 0; i < paragraphs.length; i += chunkSize) {
-    const chunk = paragraphs.slice(i, i + chunkSize);
-    chapters.push({
-      title: `Chapter ${chapters.length + 1}`,
-      content: chunk.join('\n\n')
-    });
+  const chapters: { title: string; content: string }[] = [];
+  let lastIndex = 0;
+  let lastHeading = '';
+  let m: RegExpExecArray | null;
+
+  while ((m = headingRe.exec(body)) !== null) {
+    const heading = m[0].trim().replace(/[.\] ]+$/, '');
+    const start = m.index;
+    // Text between the previous heading and this one belongs to the previous chapter
+    if (lastHeading) {
+      const content = body.slice(lastIndex, start).trim();
+      if (content.length >= 40) chapters.push({ title: lastHeading, content });
+    }
+    lastHeading = heading;
+    lastIndex = headingRe.lastIndex;
   }
 
-  // Cap at 8 chapters to keep storage/reading reasonable
-  return { title, author, chapters: chapters.slice(0, 8) };
+  // Trailing content after the final heading
+  if (lastHeading) {
+    const content = body.slice(lastIndex).trim();
+    if (content.length >= 40) chapters.push({ title: lastHeading, content });
+  }
+
+  // If no chapter markers were found, fall back to paragraph chunking
+  if (chapters.length <= 1) {
+    const paragraphs = body.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 20);
+    const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 12));
+    const fallback: { title: string; content: string }[] = [];
+    for (let i = 0; i < paragraphs.length; i += chunkSize) {
+      const chunk = paragraphs.slice(i, i + chunkSize);
+      fallback.push({ title: `Chapter ${fallback.length + 1}`, content: chunk.join('\n\n') });
+    }
+    return { title, author, chapters: fallback.slice(0, 40) };
+  }
+
+  return { title, author, chapters: chapters.slice(0, 80) };
 }
