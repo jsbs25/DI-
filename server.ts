@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { store } from './server/store.ts';
 import { aiGateway } from './server/aiGateway.ts';
-import { fetchAndExtract, searchWeb, searchBooks, fetchBookFullText } from './server/webFetcher.ts';
+import { fetchAndExtract, searchWeb, searchBooks, searchWikisource, fetchBookFullText, fetchWikisourceFullText } from './server/webFetcher.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 
 dotenv.config();
@@ -438,14 +438,19 @@ app.post('/api/ai/translate', async (req, res) => {
 // 8. DIGITAL LIBRARY (CHAPTER 5)
 // -------------------------------------------------------------
 
-// Search public-domain books online (Project Gutenberg via Gutendex)
+// Search public-domain books online (Gutenberg + Chinese Wikisource)
 app.get('/api/library/search', async (req, res) => {
   const { q } = req.query;
   if (!q || typeof q !== 'string' || !q.trim()) {
     return res.status(400).json({ success: false, error: 'Search query required' });
   }
   try {
-    const results = await searchBooks(q, 12);
+    // Run both sources in parallel
+    const [gutenberg, wikisource] = await Promise.all([
+      searchBooks(q, 8),
+      searchWikisource(q, 6)
+    ]);
+    const results = [...gutenberg, ...wikisource];
     res.json({ success: true, query: q, results });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Book search failed' });
@@ -454,19 +459,32 @@ app.get('/api/library/search', async (req, res) => {
 
 // Download a book's full text and save it to the library
 app.post('/api/library/ingest', async (req, res) => {
-  const { textUrl, title, author, coverImage, description, language } = req.body;
-  if (!textUrl) return res.status(400).json({ success: false, error: 'textUrl required' });
+  const { textUrl, pageTitle, source, title, author, coverImage, description, language } = req.body;
 
   try {
-    const fullText = await fetchBookFullText(textUrl);
-    const bookId = `gutenberg_${Date.now()}`;
+    let fullText: { title: string; author: string; chapters: { title: string; content: string }[] };
+    let bookId: string;
+    let sourceLabel: 'Project Gutenberg' | 'Internet Archive' | 'Open Library' | 'Open Access';
+
+    if (source === 'wikisource' && pageTitle) {
+      fullText = await fetchWikisourceFullText(pageTitle);
+      bookId = `wikisource_${Date.now()}`;
+      sourceLabel = 'Open Access';
+    } else if (textUrl) {
+      fullText = await fetchBookFullText(textUrl);
+      bookId = `gutenberg_${Date.now()}`;
+      sourceLabel = 'Project Gutenberg';
+    } else {
+      return res.status(400).json({ success: false, error: 'textUrl or pageTitle required' });
+    }
+
     const book: import('./src/types/index.ts').Book = {
       id: bookId,
       title: title || fullText.title,
       author: author || fullText.author,
       category: 'literature',
       language: language || 'en',
-      source: 'Project Gutenberg',
+      source: sourceLabel,
       coverImage,
       description: description || `Full public-domain text of ${fullText.title}.`,
       readProgress: 0,

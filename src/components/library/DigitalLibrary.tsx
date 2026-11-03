@@ -47,7 +47,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang }) => {
 
   // Online book search state
   const [onlineResults, setOnlineResults] = useState<
-    Array<{ id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string }>
+    Array<{ id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; source: string; pageTitle?: string }>
   >([]);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
@@ -120,8 +120,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang }) => {
   };
 
   // Download full text and save a book to the library, then open the reader
-  const handleIngestBook = async (r: { id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string }) => {
-    if (!r.textUrl || ingestingId) return;
+  const handleIngestBook = async (r: { id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; source: string; pageTitle?: string }) => {
+    if ((!r.textUrl && !r.pageTitle) || ingestingId) return;
     setIngestingId(r.id);
     setIngestError(null);
     try {
@@ -130,6 +130,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           textUrl: r.textUrl,
+          pageTitle: r.pageTitle,
+          source: r.source,
           title: r.title,
           author: r.author,
           coverImage: r.coverImage,
@@ -386,11 +388,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang }) => {
                   )}
                   <div className="flex-1 min-w-0">
                     <h4 className="text-xs font-bold text-white line-clamp-1">{r.title}</h4>
-                    <p className="text-[11px] text-amber-400 mb-1">{r.author} · {r.language?.toUpperCase()}</p>
+                    <p className="text-[11px] text-amber-400 mb-1">
+                      {r.author} · {r.language?.toUpperCase()}
+                      {r.source === 'wikisource' ? ' · 维基文库' : ' · Gutenberg'}
+                    </p>
                     <p className="text-[11px] text-slate-400 line-clamp-2 mb-2">{r.description}</p>
                     <button
                       onClick={() => handleIngestBook(r)}
-                      disabled={ingestingId === r.id || !r.textUrl}
+                      disabled={ingestingId === r.id || (!r.textUrl && !r.pageTitle)}
                       className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer transition-all"
                     >
                       {ingestingId === r.id ? (

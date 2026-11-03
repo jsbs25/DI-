@@ -508,6 +508,8 @@ export interface BookSearchResult {
   description: string;
   year?: string;
   textUrl?: string;
+  source: 'gutenberg' | 'wikisource';
+  pageTitle?: string; // wikisource page title for full-text retrieval
 }
 
 const GUTENDEX_USER_AGENT =
@@ -555,12 +557,91 @@ export async function searchBooks(query: string, limit = 12): Promise<BookSearch
         coverImage: formats['image/jpeg'] || undefined,
         description: summary.slice(0, 300) || `A public-domain work by ${author}.`,
         year: r.authors?.[0]?.birth_year ? undefined : undefined,
-        textUrl
+        textUrl,
+        source: 'gutenberg' as const
       };
     }).filter(b => b.textUrl); // only books we can actually read aloud
   } catch {
     return [];
   }
+}
+
+/**
+ * Search Chinese classical / public-domain texts via Wikisource.
+ * Returns metadata + the page title used to fetch full wikitext content.
+ */
+export async function searchWikisource(query: string, limit = 10): Promise<BookSearchResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const url = `https://zh.wikisource.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
+      q
+    )}&format=json&formatversion=2&srlimit=${limit}&srnamespace=0`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': GUTENDEX_USER_AGENT, Accept: 'application/json' },
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    const results: any[] = data?.query?.search || [];
+
+    return results.map((r: any) => ({
+      id: `wikisource_${r.pageid}`,
+      title: r.title || 'Untitled',
+      author: '维基文库 · 公版文献',
+      language: 'zh',
+      description: stripHtml(r.snippet || '').slice(0, 260) || '中文维基文库收录的公版文献。',
+      textUrl: undefined,
+      source: 'wikisource' as const,
+      pageTitle: r.title
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch the full plain text of a Chinese Wikisource page (wikitext → text).
+ * Returns title and chapter list (split by == headings ==).
+ */
+export async function fetchWikisourceFullText(pageTitle: string): Promise<{ title: string; author: string; chapters: { title: string; content: string }[] }> {
+  const url = `https://zh.wikisource.org/w/api.php?action=parse&page=${encodeURIComponent(
+    pageTitle
+  )}&prop=wikitext&format=json&formatversion=2`;
+  const data = JSON.parse(await fetchText(url, 15000));
+  const wikitext: string = data?.parse?.wikitext || '';
+
+  // Strip templates, file embeds, and wiki markup noise
+  let text = wikitext
+    .replace(/\{\{[^}]*\}\}/g, ' ')          // templates
+    .replace(/\[\[File:[^\]]*\]\]/g, ' ')      // file embeds
+    .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1') // internal links → label
+    .replace(/\[https?:[^\]\s]+\s([^\]]+)\]/g, '$1')  // external links → label
+    .replace(/<ref[^>]*>[\s\S]*?<\/ref>/g, ' ') // references
+    .replace(/<[^>]+>/g, ' ')                   // any remaining HTML
+    .replace(/={2,6}/g, ' ')                    // heading markers
+    .replace(/['*#\[\]{}|]/g, ' ')              // wiki markup symbols
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const title = pageTitle.replace(/\([^)]*\)/g, '').trim();
+  const author = '维基文库 · 公版文献';
+
+  // Split into chapters by blank-ish long chunks
+  const paragraphs = text.split(/\s{2,}/).map(p => p.trim()).filter(p => p.length > 15);
+  const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 8));
+  const chapters: { title: string; content: string }[] = [];
+  for (let i = 0; i < paragraphs.length; i += chunkSize) {
+    const chunk = paragraphs.slice(i, i + chunkSize);
+    chapters.push({ title: `第 ${chapters.length + 1} 节`, content: chunk.join('\n\n') });
+  }
+
+  return { title, author, chapters: chapters.slice(0, 8) };
 }
 
 /**
