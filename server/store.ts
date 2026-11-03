@@ -22,6 +22,7 @@ import {
 } from '../src/types/index.ts';
 import { resolveCoordinates } from '../src/utils/geoData.ts';
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
+import { crawlWebsite } from './webFetcher.ts';
 
 const DATA_FILE = path.resolve(process.cwd(), 'server_data.json');
 
@@ -1168,32 +1169,45 @@ class DataStore {
     return task;
   }
 
-  executeCrawl(taskId: string): { success: boolean; newPagesCount: number; error?: string } {
+  async executeCrawl(taskId: string): Promise<{ success: boolean; newPagesCount: number; error?: string }> {
     const task = this.crawlerTasks.find(t => t.id === taskId);
     if (!task) return { success: false, newPagesCount: 0, error: 'Task not found' };
 
     task.status = 'running';
     task.lastRunAt = new Date().toISOString();
-
-    const mockExtracted = [
-      {
-        id: `crawled_${Date.now()}_1`,
-        taskId: task.id,
-        url: `${task.startUrl}/article/global-sustainability-2026`,
-        title: `${task.name} - Global Planetary Biosphere Dynamics`,
-        author: `${task.targetDomain} Editorial Staff`,
-        cleanContent: `Autonomous satellite observation systems monitor Earth's terrestrial photosynthetic productivity and oceanic current thermoclines. Open scientific collaboration across 190 nations is essential for managing shared atmospheric resources.`,
-        crawledAt: new Date().toISOString(),
-        status: 'pending_review' as const
-      }
-    ];
-
-    this.crawledPages.unshift(...mockExtracted);
-    task.pagesCrawled += mockExtracted.length;
-    task.status = 'completed';
     this.saveToDisk();
 
-    return { success: true, newPagesCount: mockExtracted.length };
+    try {
+      const results = await crawlWebsite(task.startUrl, task.maxPages, task.respectsRobotsTxt);
+
+      const newPages: CrawledPage[] = results.map((r, i) => ({
+        id: `crawled_${Date.now()}_${i}`,
+        taskId: task.id,
+        url: r.url,
+        title: r.title,
+        author: r.author,
+        cleanContent: r.cleanContent,
+        crawledAt: new Date().toISOString(),
+        status: 'pending_review' as const
+      }));
+
+      if (newPages.length > 0) {
+        this.crawledPages.unshift(...newPages);
+      }
+      task.pagesCrawled += newPages.length;
+      task.status = newPages.length > 0 ? 'completed' : 'error';
+      this.saveToDisk();
+
+      return {
+        success: newPages.length > 0,
+        newPagesCount: newPages.length,
+        error: newPages.length === 0 ? 'No pages could be extracted from this site (blocked, empty, or unreachable).' : undefined
+      };
+    } catch (err: any) {
+      task.status = 'error';
+      this.saveToDisk();
+      return { success: false, newPagesCount: 0, error: err.message || 'Crawl failed' };
+    }
   }
 
   approveCrawledPage(pageId: string): CrawledPage | null {

@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { store } from './server/store.ts';
 import { aiGateway } from './server/aiGateway.ts';
+import { fetchAndExtract, searchWeb } from './server/webFetcher.ts';
+import { runBookHarvest } from './server/bookHarvester.ts';
 
 dotenv.config();
 
@@ -374,7 +376,17 @@ app.get('/api/ai/stats', (req, res) => {
 });
 
 app.post('/api/ai/chat', async (req, res) => {
-  const { prompt, messages, modelId = 'gemini-2.5-flash', mode = 'general' } = req.body;
+  const { prompt, messages, modelId, model, mode = 'general', apiKey, baseUrl, customModel } = req.body;
+
+  // If the user supplied a custom API key, register it as the custom provider
+  // and route this request through it.
+  if (apiKey) {
+    aiGateway.registerCustomProvider(apiKey, baseUrl, customModel);
+  }
+
+  const resolvedModelId = apiKey
+    ? 'custom'
+    : (modelId || model || 'deepseek-v3');
   const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
   if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
 
@@ -386,7 +398,7 @@ app.post('/api/ai/chat', async (req, res) => {
   };
 
   const systemPrompt = systemInstructions[mode] || systemInstructions.general;
-  const result = await aiGateway.generateContent(modelId, userPrompt, systemPrompt);
+  const result = await aiGateway.generateContent(resolvedModelId, userPrompt, systemPrompt);
 
   if (result.success) {
     res.json({
@@ -398,7 +410,7 @@ app.post('/api/ai/chat', async (req, res) => {
         timestamp: new Date().toISOString()
       },
       tokens: result.tokens,
-      model: modelId
+      model: resolvedModelId
     });
   } else {
     res.status(result.errorMessage?.includes('429') ? 429 : 503).json({
@@ -413,7 +425,7 @@ app.post('/api/ai/translate', async (req, res) => {
   if (!text) return res.status(400).json({ success: false, error: 'Text required' });
 
   const prompt = `Translate the following text to ${targetLang}. Return ONLY the direct natural translation:\n"${text}"`;
-  const result = await aiGateway.generateContent('gemini-2.5-flash', prompt);
+  const result = await aiGateway.generateContent('', prompt);
 
   if (result.success) {
     res.json({ success: true, translation: result.content.trim() });
@@ -475,8 +487,8 @@ app.post('/api/crawler/tasks', (req, res) => {
   res.json({ success: true, task });
 });
 
-app.post('/api/crawler/tasks/:id/run', (req, res) => {
-  const result = store.executeCrawl(req.params.id);
+app.post('/api/crawler/tasks/:id/run', async (req, res) => {
+  const result = await store.executeCrawl(req.params.id);
   res.json(result);
 });
 
@@ -524,23 +536,26 @@ app.post('/api/browser/fetch-preview', async (req, res) => {
   if (!url) return res.status(400).json({ success: false, error: 'URL required' });
 
   try {
-    let hostname = 'web';
-    try { hostname = new URL(url).hostname; } catch (e) {}
-
-    const title = `${hostname.toUpperCase()} Open Knowledge Portal`;
-    const cleanContent = `This is a secure preview of ${url}. EARTH ONE Web Browser provides sandboxed content extraction, Reader Mode, and AI-assisted comprehension. The article discusses open science, cultural exchanges, and global planetary stewardship.`;
-
-    res.json({
-      success: true,
-      url,
-      title,
-      hostname,
-      content: cleanContent,
-      author: `${hostname} Editorial Team`,
-      readTime: '3 min read'
-    });
+    const extracted = await fetchAndExtract(url);
+    res.json({ success: true, ...extracted, hostname: new URL(url).hostname });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(502).json({ success: false, error: err.message || 'Unable to fetch this URL' });
+  }
+});
+
+// Live web search (Bing / DuckDuckGo / Wikipedia)
+app.get('/api/browser/search', async (req, res) => {
+  const { q, engine, lang } = req.query;
+  if (!q || typeof q !== 'string' || !q.trim()) {
+    return res.status(400).json({ success: false, error: 'Search query required' });
+  }
+  const engineParam = engine === 'bing' || engine === 'duckduckgo' || engine === 'wikipedia' ? engine : 'auto';
+  const langParam = lang === 'zh' || lang === 'ar' || lang === 'es' || lang === 'fr' || lang === 'ru' ? lang : 'en';
+  try {
+    const results = await searchWeb(q, 10, engineParam, langParam);
+    res.json({ success: true, query: q, results, engine: engineParam, lang: langParam });
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err.message || 'Search failed' });
   }
 });
 
@@ -571,6 +586,19 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌍 EARTH ONE Server listening on http://0.0.0.0:${PORT}`);
   });
+
+  // --- Automated Book Harvester (backend-only, no UI entry) ---
+  // Runs immediately on boot, then once every hour. Books are merged into
+  // the Digital Library store, de-duplicated by id.
+  const runHarvest = async () => {
+    const log = await runBookHarvest();
+    console.log(log);
+  };
+
+  runHarvest();
+  const harvestInterval = setInterval(runHarvest, 60 * 60 * 1000);
+  // Prevent the interval from keeping the process alive in tests/edge cases
+  harvestInterval.unref?.();
 }
 
 startServer().catch(err => {

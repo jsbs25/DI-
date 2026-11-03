@@ -23,7 +23,9 @@ import {
   Eye,
   EyeOff,
   LogOut,
-  Layers
+  Layers,
+  BookOpen,
+  Search
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -107,7 +109,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Home className="w-3.5 h-3.5" />
-              <span>Home</span>
+              <span>{t.globeTab}</span>
             </button>
 
             {/* Explore (Feed / Social) */}
@@ -120,7 +122,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Compass className="w-3.5 h-3.5" />
-              <span>Explore</span>
+              <span>{t.feedTab}</span>
             </button>
 
             {/* Discover (Universe Engine & Planets) */}
@@ -133,7 +135,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Orbit className="w-3.5 h-3.5" />
-              <span>Discover</span>
+              <span>{t.universeTab}</span>
             </button>
 
             {/* About (Global Community) */}
@@ -146,7 +148,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Info className="w-3.5 h-3.5" />
-              <span>About</span>
+              <span>{t.communityTab}</span>
             </button>
 
             {/* Ecosystem Apps Dropdown */}
@@ -183,6 +185,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                   >
                     <Cpu className="w-3.5 h-3.5 text-purple-400" />
                     <span>EARTH ONE AI HUB</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      onSelectTab('library');
+                      setEcosystemMenuOpen(false);
+                    }}
+                    className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Digital Library</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      onSelectTab('browser');
+                      setEcosystemMenuOpen(false);
+                    }}
+                    className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
+                  >
+                    <Search className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Web Browser</span>
                   </button>
                   <button
                     onClick={() => {
@@ -236,7 +258,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => setLangMenuOpen(!langMenuOpen)}
                 className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full border border-slate-700/60 bg-slate-900/70 hover:bg-slate-800 text-xs font-semibold text-slate-200 backdrop-blur-md cursor-pointer transition-all"
               >
-                <span>Language</span>
+                <span>{languages.find(l => l.code === lang)?.label || 'Language'}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
 

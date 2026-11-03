@@ -252,9 +252,15 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     cosmicRimLight.position.set(24, -12, -18);
     scene.add(cosmicRimLight);
 
-    // Deep space ambient fill
-    const ambientLight = new THREE.AmbientLight(0x0a1630, 1.5);
+    // Deep space ambient fill (slightly raised to reveal the night hemisphere,
+    // which was previously near-black and looked flat)
+    const ambientLight = new THREE.AmbientLight(0x223044, 1.7);
     scene.add(ambientLight);
+
+    // Natural skylight: blue sky from above, dark ocean below — this gives the
+    // planet's unlit side the soft blue fill of scattered light instead of black.
+    const hemiLight = new THREE.HemisphereLight(0x3d5a80, 0x0a1020, 0.9);
+    scene.add(hemiLight);
 
     // 5. CENTRAL REALISTIC EARTH SYSTEM
     const earthRadius = 4.5;
@@ -275,33 +281,48 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     const earthMat = new THREE.MeshStandardMaterial({
       map: dayTexture,
       roughnessMap: roughnessTexture,
-      roughness: 0.5,
-      metalness: 0.05,
+      roughness: 0.6,
+      metalness: 0.0,
       bumpMap: bumpTexture,
-      bumpScale: 0.04,
+      bumpScale: 0.035,
       emissiveMap: nightTexture,
-      emissive: new THREE.Color(0xfff0c4),
-      emissiveIntensity: 0.28
+      emissive: new THREE.Color(0xffe6b0),
+      emissiveIntensity: 0.5
     });
     const earthMesh = new THREE.Mesh(earthGeo, earthMat);
     earthGroup.add(earthMesh);
 
     // 5.2 Atmospheric Rayleigh Scattering Rim Glow
-    const atmoGeo = new THREE.SphereGeometry(earthRadius * 1.025, 48, 48);
+    // A Fresnel-based shader: glow is strongest at the limb (where the view
+    // grazes the sphere) and fades to nothing facing the camera — this is what
+    // produces a believable thin blue atmosphere halo rather than a flat disc.
+    const atmoGeo = new THREE.SphereGeometry(earthRadius * 1.04, 96, 96);
     const atmoMat = new THREE.ShaderMaterial({
       vertexShader: `
         varying vec3 vNormal;
+        varying vec3 vViewDir;
         void main() {
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
           vNormal = normalize(normalMatrix * normal);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          vViewDir = normalize(-mvPosition.xyz);
+          gl_Position = projectionMatrix * mvPosition;
         }
       `,
       fragmentShader: `
         varying vec3 vNormal;
+        varying vec3 vViewDir;
         void main() {
-          float intensity = pow(0.72 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 3.2);
-          vec3 atmoColor = mix(vec3(0.35, 0.75, 1.0), vec3(0.12, 0.38, 0.95), intensity * 0.7);
-          gl_FragColor = vec4(atmoColor, 1.0) * intensity * 1.8;
+          // BackSide sphere: flip the normal so the rim faces outward
+          vec3 n = normalize(vNormal);
+          float fresnel = pow(1.0 - abs(dot(n, vViewDir)), 3.5);
+
+          // Rayleigh-ish blue: deeper blue at the limb, paler toward the edge
+          vec3 deepBlue = vec3(0.08, 0.32, 0.95);
+          vec3 paleBlue = vec3(0.38, 0.72, 1.0);
+          vec3 atmoColor = mix(deepBlue, paleBlue, fresnel * 0.8);
+
+          float alpha = fresnel * 1.35;
+          gl_FragColor = vec4(atmoColor, 1.0) * alpha;
         }
       `,
       blending: THREE.AdditiveBlending,
@@ -310,6 +331,35 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       depthWrite: false
     });
     earthGroup.add(new THREE.Mesh(atmoGeo, atmoMat));
+
+    // Inner atmosphere: a subtle forward-scattered glow just above the surface
+    const innerAtmoGeo = new THREE.SphereGeometry(earthRadius * 1.008, 64, 64);
+    const innerAtmoMat = new THREE.ShaderMaterial({
+      vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        void main() {
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          vNormal = normalize(normalMatrix * normal);
+          vViewDir = normalize(-mvPosition.xyz);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        void main() {
+          vec3 n = normalize(vNormal);
+          float fresnel = pow(1.0 - abs(dot(n, vViewDir)), 2.0);
+          gl_FragColor = vec4(0.5, 0.78, 1.0, 1.0) * fresnel * 0.35;
+        }
+      `,
+      blending: THREE.AdditiveBlending,
+      side: THREE.FrontSide,
+      transparent: true,
+      depthWrite: false
+    });
+    earthGroup.add(new THREE.Mesh(innerAtmoGeo, innerAtmoMat));
 
     // 5.3 Dynamic Weather Cloud Layer
     const cloudsGeo = new THREE.SphereGeometry(earthRadius * 1.012, 48, 48);

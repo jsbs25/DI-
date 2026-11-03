@@ -2,15 +2,28 @@ import * as THREE from 'three';
 
 /**
  * EARTH ONE - PHOTOREALISTIC PROCEDURAL PLANETARY TEXTURE ENGINE
- * Synthesizes photorealistic NASA Blue Marble / Apollo 17 grade Earth textures,
- * ocean roughness maps, continental elevation bump maps, night lights,
- * dynamic weather clouds, and deep-space celestial milky way backdrops.
- * 
+ * Synthesizes NASA Blue Marble / Apollo 17 grade Earth textures using
+ * fractal Brownian motion (fBm) terrain, midpoint-displaced natural coastlines,
+ * ocean depth gradients, continental shelf shallows, biome climate bands,
+ * night lights, dynamic weather clouds, and deep-space celestial backdrops.
+ *
  * 100% self-contained on HTML5 Canvas. Zero external 404 dependencies.
  */
 
 // Cache for generated textures to prevent re-generation overhead
 const textureCache = new Map<string, THREE.CanvasTexture>();
+
+// Cache for coastline-displaced land polygons (keyed by resolution)
+const landPathCache = new Map<string, number[][][]>();
+
+// Cache for terrain masks (land / coast / desert / rainforest)
+interface TerrainMasks {
+  land: Uint8ClampedArray;
+  coast: Uint8ClampedArray;
+  desert: Uint8ClampedArray;
+  rainforest: Uint8ClampedArray;
+}
+const maskCache = new Map<string, TerrainMasks>();
 
 // Helper to convert lat/long (-90..90, -180..180) to canvas (x, y)
 function geoToCanvas(lat: number, lng: number, width: number, height: number): [number, number] {
@@ -19,8 +32,82 @@ function geoToCanvas(lat: number, lng: number, width: number, height: number): [
   return [x, y];
 }
 
+/* ------------------------------------------------------------------------- */
+/*  Deterministic fractal noise (seamless in longitude, no external deps)     */
+/* ------------------------------------------------------------------------- */
+
+// Fast deterministic integer hash -> [0, 1)
+function hash2i(x: number, y: number, seed: number): number {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(seed | 0, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// 2D value noise with horizontal wrap (periodX in lattice cells) for seamless equirectangular tiling
+function valueNoise2(x: number, y: number, periodX: number, seed: number): number {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const xf = x - xi;
+  const yf = y - yi;
+
+  const x0 = ((xi % periodX) + periodX) % periodX;
+  const x1 = (x0 + 1) % periodX;
+  const y0 = yi;
+  const y1 = yi + 1;
+
+  const sx = xf * xf * (3 - 2 * xf);
+  const sy = yf * yf * (3 - 2 * yf);
+
+  const n00 = hash2i(x0, y0, seed);
+  const n10 = hash2i(x1, y0, seed);
+  const n01 = hash2i(x0, y1, seed);
+  const n11 = hash2i(x1, y1, seed);
+
+  const nx0 = n00 + (n10 - n00) * sx;
+  const nx1 = n01 + (n11 - n01) * sx;
+  return nx0 + (nx1 - nx0) * sy;
+}
+
+// Fractal Brownian motion (4-5 octaves) -> [0, 1]
+function fbm2(x: number, y: number, periodX: number, seed: number, octaves: number): number {
+  let amp = 0.5;
+  let freq = 1;
+  let sum = 0;
+  let norm = 0;
+  for (let o = 0; o < octaves; o++) {
+    sum += amp * valueNoise2(x * freq, y * freq, periodX * freq, seed + o * 101);
+    norm += amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return sum / norm;
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+function smoothstep(lo: number, hi: number, v: number): number {
+  const t = clamp((v - lo) / (hi - lo), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+// Linear RGB mix between two [r,g,b] tuples
+function mixc(a: number[], b: number[], t: number): number[] {
+  const tt = clamp(t, 0, 1);
+  return [
+    a[0] + (b[0] - a[0]) * tt,
+    a[1] + (b[1] - a[1]) * tt,
+    a[2] + (b[2] - a[2]) * tt
+  ];
+}
+
+/* ------------------------------------------------------------------------- */
+/*  Geographic polygon data                                                  */
+/* ------------------------------------------------------------------------- */
+
 /**
- * Detailed geographic continental polygon outlines
+ * Detailed geographic continental polygon outlines (equirectangular lat/lng)
  */
 const WORLD_LANDMASSES: [number, number][][] = [
   // North America & Canada & Alaska
@@ -137,7 +224,7 @@ const WORLD_LANDMASSES: [number, number][][] = [
 ];
 
 /**
- * Biome Overlays (Deserts, Rainforests, Mountain ranges, Polar Caps)
+ * Biome Overlays (Deserts, Rainforests)
  */
 const DESERT_ZONES: [number, number][][] = [
   // Sahara & Sahel
@@ -163,22 +250,166 @@ const RAINFOREST_ZONES: [number, number][][] = [
   [[8, 98], [4, 104], [-5, 105], [-5, 118], [7, 118], [15, 108]]
 ];
 
-const MOUNTAIN_CHAINS: [number, number][][] = [
-  // Himalayas & Tibetan Plateau
-  [[36, 75], [37, 95], [28, 97], [27, 85], [32, 75]],
-  // Andes Spine
-  [[8, -75], [-5, -78], [-18, -69], [-33, -70], [-52, -72]],
-  // Rockies
-  [[58, -125], [48, -115], [38, -106], [32, -104]],
-  // European Alps
-  [[47, 6], [48, 12], [45, 13], [44, 7]]
-];
+/* ------------------------------------------------------------------------- */
+/*  Natural coastline generation                                             */
+/* ------------------------------------------------------------------------- */
 
-/**
- * 1. PHOTOREALISTIC BLUE MARBLE ALBEDO TEXTURE
- * Renders authentic ocean depths, coastal shallows, biomes, deserts, vegetation,
- * mountain relief, and polar ice shelves.
- */
+// Deterministic PRNG (mulberry32)
+function mulberry32(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Midpoint displacement: subdivide each segment, jittering the midpoint
+// perpendicular to the edge. Produces fractal, organic coastlines.
+function subdividePolyline(pts: number[][], jag: number, rand: () => number): number[][] {
+  const out: number[][] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const mx = (a[0] + b[0]) / 2;
+    const my = (a[1] + b[1]) / 2;
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len;
+    const ny = dx / len;
+    const offset = (rand() - 0.5) * 2 * jag * len;
+    out.push(a, [mx + nx * offset, my + ny * offset]);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+// Convert lat/lng polygons to jittered canvas-space coastlines (cached per resolution)
+function getJitteredLandPolygons(width: number, height: number): number[][][] {
+  const key = `${width}x${height}`;
+  const cached = landPathCache.get(key);
+  if (cached) return cached;
+
+  const rand = mulberry32(20261104);
+  const polys = WORLD_LANDMASSES.map(poly => {
+    let pts = poly.map(([lat, lng]) => {
+      const [x, y] = geoToCanvas(lat, lng, width, height);
+      return [x, y];
+    });
+    // Close the loop so first == last after subdivision
+    pts = [...pts, pts[0]];
+    for (let it = 0; it < 3; it++) {
+      pts = subdividePolyline(pts, 0.22, rand);
+    }
+    return pts;
+  });
+
+  landPathCache.set(key, polys);
+  return polys;
+}
+
+// Trace a list of polygons onto the context (caller then fills or strokes)
+function tracePolys(ctx: CanvasRenderingContext2D, polys: number[][][]) {
+  for (const poly of polys) {
+    ctx.beginPath();
+    for (let i = 0; i < poly.length; i++) {
+      const [x, y] = poly[i];
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  }
+}
+
+// Trace lat/lng zones (biomes) and fill them
+function traceZones(ctx: CanvasRenderingContext2D, zones: [number, number][][], width: number, height: number) {
+  for (const zone of zones) {
+    ctx.beginPath();
+    for (let i = 0; i < zone.length; i++) {
+      const [x, y] = geoToCanvas(zone[i][0], zone[i][1], width, height);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  }
+}
+
+// Extract the alpha channel from an ImageData (1 byte per pixel)
+function alphaOf(img: ImageData): Uint8ClampedArray {
+  const d = img.data;
+  const out = new Uint8ClampedArray(img.width * img.height);
+  for (let i = 0, j = 3; i < out.length; i++, j += 4) out[i] = d[j];
+  return out;
+}
+
+// Build land / coast / desert / rainforest masks at a given resolution (cached)
+function getTerrainMasks(width: number, height: number): TerrainMasks {
+  const key = `masks_${width}x${height}`;
+  const cached = maskCache.get(key);
+  if (cached) return cached;
+
+  const landPolys = getJitteredLandPolygons(width, height);
+
+  // 1. Land mask
+  const landCanvas = document.createElement('canvas');
+  landCanvas.width = width;
+  landCanvas.height = height;
+  const lctx = landCanvas.getContext('2d')!;
+  lctx.fillStyle = '#ffffff';
+  tracePolys(lctx, landPolys);
+  lctx.fill();
+  const land = alphaOf(lctx.getImageData(0, 0, width, height));
+
+  // 2. Coastal / continental shelf halo (blurred land outline)
+  const coastCanvas = document.createElement('canvas');
+  coastCanvas.width = width;
+  coastCanvas.height = height;
+  const cctx = coastCanvas.getContext('2d')!;
+  cctx.strokeStyle = '#ffffff';
+  cctx.lineWidth = Math.max(8, width * 0.012);
+  cctx.lineJoin = 'round';
+  cctx.lineCap = 'round';
+  cctx.filter = 'blur(8px)';
+  tracePolys(cctx, landPolys);
+  cctx.stroke();
+  cctx.filter = 'none';
+  const coast = alphaOf(cctx.getImageData(0, 0, width, height));
+
+  // 3. Desert mask
+  const desertCanvas = document.createElement('canvas');
+  desertCanvas.width = width;
+  desertCanvas.height = height;
+  const dctx = desertCanvas.getContext('2d')!;
+  dctx.fillStyle = '#ffffff';
+  dctx.filter = 'blur(6px)';
+  traceZones(dctx, DESERT_ZONES, width, height);
+  dctx.fill();
+  dctx.filter = 'none';
+  const desert = alphaOf(dctx.getImageData(0, 0, width, height));
+
+  // 4. Rainforest mask
+  const rfCanvas = document.createElement('canvas');
+  rfCanvas.width = width;
+  rfCanvas.height = height;
+  const rctx = rfCanvas.getContext('2d')!;
+  rctx.fillStyle = '#ffffff';
+  rctx.filter = 'blur(6px)';
+  traceZones(rctx, RAINFOREST_ZONES, width, height);
+  rctx.fill();
+  rctx.filter = 'none';
+  const rainforest = alphaOf(rctx.getImageData(0, 0, width, height));
+
+  const masks = { land, coast, desert, rainforest };
+  maskCache.set(key, masks);
+  return masks;
+}
+
+/* ------------------------------------------------------------------------- */
+/*  1. PHOTOREALISTIC BLUE MARBLE ALBEDO TEXTURE                              */
+/* ------------------------------------------------------------------------- */
+
 export function createRealisticEarthDayTexture(width = 2048, height = 1024): THREE.CanvasTexture {
   const cacheKey = `earth_photoreal_day_${width}x${height}`;
   if (textureCache.has(cacheKey)) return textureCache.get(cacheKey)!;
@@ -188,149 +419,70 @@ export function createRealisticEarthDayTexture(width = 2048, height = 1024): THR
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
 
-  // 1.1 Deep Oceanic Abyss Gradient (true NASA Blue Marble navy & royal blue)
-  const oceanGrad = ctx.createLinearGradient(0, 0, 0, height);
-  oceanGrad.addColorStop(0, '#041126');   // Polar Arctic sea
-  oceanGrad.addColorStop(0.18, '#061d3d');
-  oceanGrad.addColorStop(0.5, '#041630');  // Deep equatorial ocean
-  oceanGrad.addColorStop(0.82, '#061d3d');
-  oceanGrad.addColorStop(1, '#030d20');   // Antarctic ocean
-  ctx.fillStyle = oceanGrad;
-  ctx.fillRect(0, 0, width, height);
+  const { land, coast, desert, rainforest } = getTerrainMasks(width, height);
 
-  // 1.2 Continental Shelves / Shallow Coastal Waters (turquoise aquamarine halo)
-  ctx.save();
-  ctx.strokeStyle = 'rgba(20, 150, 180, 0.45)';
-  ctx.lineWidth = 14;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.filter = 'blur(6px)';
+  // Feature scale: integer lattice period across the map width, seamless in longitude
+  const PERIOD = 48;
+  const s = PERIOD / width;
 
-  for (const land of WORLD_LANDMASSES) {
-    ctx.beginPath();
-    for (let i = 0; i < land.length; i++) {
-      const [x, y] = geoToCanvas(land[i][0], land[i][1], width, height);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+  const out = ctx.createImageData(width, height);
+  const outData = out.data;
+
+  for (let y = 0; y < height; y++) {
+    const lat = 90 - (y / height) * 180;
+    const absLat = Math.abs(lat);
+    const temp = 1 - absLat / 90; // 0 pole -> 1 equator
+
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      let r: number, g: number, b: number;
+
+      if (land[i] > 128) {
+        // ------- LAND -------
+        const e = fbm2(x * s, y * s, PERIOD, 1001, 4);   // elevation
+        const m = fbm2(x * s, y * s, PERIOD, 2053, 3);   // moisture
+
+        if (absLat > 72 || lat < -60) {
+          // Polar ice sheets
+          const ice = mixc([206, 220, 234], [250, 253, 255], m);
+          [r, g, b] = ice;
+        } else if (desert[i] > 120) {
+          // Arid desert belts
+          const d = mixc([206, 182, 132], [150, 122, 86], e);
+          [r, g, b] = d;
+        } else if (rainforest[i] > 120) {
+          // Lush tropical rainforest
+          const f = mixc([26, 70, 40], [14, 46, 28], e);
+          [r, g, b] = f;
+        } else {
+          // Temperate / boreal vegetation gradient with elevation relief
+          let veg = mixc([96, 122, 68], [52, 92, 44], temp);
+          veg = mixc(veg, [126, 112, 88], smoothstep(0.45, 0.75, e));
+          veg = mixc(veg, [veg[0] * 0.72, veg[1] * 0.78, veg[2] * 0.62], (1 - m) * 0.35);
+          veg = mixc(veg, [240, 244, 248], smoothstep(0.78, 0.92, e));
+          [r, g, b] = veg;
+        }
+      } else {
+        // ------- OCEAN -------
+        const d = fbm2(x * s, y * s, PERIOD, 3079, 3);
+        let ocean = mixc([5, 17, 42], [10, 36, 76], d);
+
+        // Continental shelf shallows near coastlines
+        if (coast[i] > 20) {
+          const t = (coast[i] / 255) * 0.85;
+          ocean = mixc(ocean, [36, 126, 164], t);
+        }
+        [r, g, b] = ocean;
+      }
+
+      outData[i * 4] = r;
+      outData[i * 4 + 1] = g;
+      outData[i * 4 + 2] = b;
+      outData[i * 4 + 3] = 255;
     }
-    ctx.closePath();
-    ctx.stroke();
   }
-  ctx.restore();
 
-  // 1.3 Base Continents (Temperate forest / savanna green)
-  ctx.save();
-  ctx.fillStyle = '#264a22'; // Realistic continental base green
-  ctx.strokeStyle = '#1b3b18';
-  ctx.lineWidth = 1.0;
-  ctx.lineJoin = 'round';
-
-  for (const land of WORLD_LANDMASSES) {
-    ctx.beginPath();
-    for (let i = 0; i < land.length; i++) {
-      const [x, y] = geoToCanvas(land[i][0], land[i][1], width, height);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // 1.4 Lush Dense Rainforest Biomes (Amazon, Congo, Southeast Asia)
-  ctx.save();
-  ctx.fillStyle = '#143615'; // Deep emerald jungle
-  ctx.filter = 'blur(8px)';
-  for (const zone of RAINFOREST_ZONES) {
-    ctx.beginPath();
-    for (let i = 0; i < zone.length; i++) {
-      const [x, y] = geoToCanvas(zone[i][0], zone[i][1], width, height);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // 1.5 Arid Desert Belts (Sahara, Arabia, Gobi, Australian Outback)
-  ctx.save();
-  ctx.filter = 'blur(5px)';
-  for (const desert of DESERT_ZONES) {
-    const isOutback = desert[0][1] > 100 && desert[0][0] < 0;
-    // Outback is reddish-terracotta; Sahara is golden sand
-    ctx.fillStyle = isOutback ? 'rgba(186, 92, 45, 0.92)' : 'rgba(214, 178, 118, 0.92)';
-    ctx.beginPath();
-    for (let i = 0; i < desert.length; i++) {
-      const [x, y] = geoToCanvas(desert[i][0], desert[i][1], width, height);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // 1.6 Rugged Mountain Ranges & Snow-capped Ridges
-  ctx.save();
-  ctx.filter = 'blur(3px)';
-  for (const mtn of MOUNTAIN_CHAINS) {
-    // Rocky brown elevation
-    ctx.strokeStyle = 'rgba(112, 92, 70, 0.85)';
-    ctx.lineWidth = 10;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    for (let i = 0; i < mtn.length; i++) {
-      const [x, y] = geoToCanvas(mtn[i][0], mtn[i][1], width, height);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    // Snow caps along the ridge
-    ctx.strokeStyle = 'rgba(245, 250, 255, 0.85)';
-    ctx.lineWidth = 3.5;
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // 1.7 Brilliant Polar Ice Shelves (Arctic, Greenland, Antarctica)
-  ctx.save();
-  // Arctic ice pack
-  const arcticGrad = ctx.createLinearGradient(0, 0, 0, height * 0.16);
-  arcticGrad.addColorStop(0, '#ffffff');
-  arcticGrad.addColorStop(0.65, '#e2effd');
-  arcticGrad.addColorStop(1, 'rgba(226, 239, 253, 0)');
-  ctx.fillStyle = arcticGrad;
-  ctx.fillRect(0, 0, width, height * 0.16);
-
-  // Greenland Ice Sheet
-  ctx.fillStyle = '#f8fbff';
-  ctx.beginPath();
-  const [gx, gy] = geoToCanvas(74, -40, width, height);
-  ctx.ellipse(gx, gy, width * 0.045, height * 0.12, 0.2, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Antarctic Glacial Continent
-  const antGrad = ctx.createLinearGradient(0, height * 0.82, 0, height);
-  antGrad.addColorStop(0, 'rgba(230, 243, 255, 0)');
-  antGrad.addColorStop(0.3, '#edf5fe');
-  antGrad.addColorStop(1, '#ffffff');
-  ctx.fillStyle = antGrad;
-  ctx.fillRect(0, height * 0.82, width, height * 0.18);
-  ctx.restore();
-
-  // 1.8 Realistic Earth Surface Grain & Geological Topography noise
-  const imgData = ctx.getImageData(0, 0, width, height);
-  const data = imgData.data;
-  for (let i = 0; i < data.length; i += 8) {
-    const n = (Math.random() - 0.5) * 8;
-    data[i] = Math.min(255, Math.max(0, data[i] + n));
-    data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + n));
-    data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + n));
-  }
-  ctx.putImageData(imgData, 0, 0);
+  ctx.putImageData(out, 0, 0);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -341,12 +493,10 @@ export function createRealisticEarthDayTexture(width = 2048, height = 1024): THR
   return texture;
 }
 
-/**
- * 2. OCEAN SPECULAR / ROUGHNESS MAP
- * In Three.js PBR:
- * - Oceans = dark (roughness ~0.15) -> produces brilliant Sun glint / reflection
- * - Land = white (roughness ~0.95) -> matte finish, no specular glare on dirt
- */
+/* ------------------------------------------------------------------------- */
+/*  2. OCEAN SPECULAR / ROUGHNESS MAP                                         */
+/* ------------------------------------------------------------------------- */
+
 export function createRealisticEarthRoughnessTexture(width = 1024, height = 512): THREE.CanvasTexture {
   const cacheKey = `earth_roughness_${width}x${height}`;
   if (textureCache.has(cacheKey)) return textureCache.get(cacheKey)!;
@@ -356,27 +506,31 @@ export function createRealisticEarthRoughnessTexture(width = 1024, height = 512)
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
 
-  // Oceans are glossy (low roughness = dark gray)
-  ctx.fillStyle = '#1c1c1c';
-  ctx.fillRect(0, 0, width, height);
+  const { land } = getTerrainMasks(width, height);
+  const out = ctx.createImageData(width, height);
+  const outData = out.data;
 
-  // Land is matte (high roughness = bright)
-  ctx.fillStyle = '#e8e8e8';
-  for (const land of WORLD_LANDMASSES) {
-    ctx.beginPath();
-    for (let i = 0; i < land.length; i++) {
-      const [x, y] = geoToCanvas(land[i][0], land[i][1], width, height);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+  for (let y = 0; y < height; y++) {
+    const lat = 90 - (y / height) * 180;
+    const absLat = Math.abs(lat);
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      let v: number;
+      if (land[i] > 128) {
+        // Land is matte (high roughness)
+        v = absLat > 72 || lat < -60 ? 175 : 235;
+      } else {
+        // Ocean is glossy (low roughness -> strong sun glint)
+        v = 30;
+      }
+      outData[i * 4] = v;
+      outData[i * 4 + 1] = v;
+      outData[i * 4 + 2] = v;
+      outData[i * 4 + 3] = 255;
     }
-    ctx.closePath();
-    ctx.fill();
   }
 
-  // Polar ice is semi-matte
-  ctx.fillStyle = '#b0b0b0';
-  ctx.fillRect(0, 0, width, height * 0.12);
-  ctx.fillRect(0, height * 0.85, width, height * 0.15);
+  ctx.putImageData(out, 0, 0);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
@@ -385,11 +539,10 @@ export function createRealisticEarthRoughnessTexture(width = 1024, height = 512)
   return texture;
 }
 
-/**
- * 3. ELEVATION / MOUNTAIN BUMP MAP
- * Renders topographical relief so mountains cast realistic physical shadows
- * under glancing sunlight.
- */
+/* ------------------------------------------------------------------------- */
+/*  3. ELEVATION / MOUNTAIN BUMP MAP                                          */
+/* ------------------------------------------------------------------------- */
+
 export function createRealisticEarthBumpTexture(width = 1024, height = 512): THREE.CanvasTexture {
   const cacheKey = `earth_bump_${width}x${height}`;
   if (textureCache.has(cacheKey)) return textureCache.get(cacheKey)!;
@@ -399,39 +552,31 @@ export function createRealisticEarthBumpTexture(width = 1024, height = 512): THR
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
 
-  // Neutral ocean base (128 gray)
-  ctx.fillStyle = '#808080';
-  ctx.fillRect(0, 0, width, height);
+  const { land } = getTerrainMasks(width, height);
+  const PERIOD = 48;
+  const s = PERIOD / width;
 
-  // Continents slight plateau (140)
-  ctx.fillStyle = '#909090';
-  for (const land of WORLD_LANDMASSES) {
-    ctx.beginPath();
-    for (let i = 0; i < land.length; i++) {
-      const [x, y] = geoToCanvas(land[i][0], land[i][1], width, height);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+  const out = ctx.createImageData(width, height);
+  const outData = out.data;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      let v: number;
+      if (land[i] > 128) {
+        const e = fbm2(x * s, y * s, PERIOD, 1001, 4);
+        v = 118 + e * 135; // 118..253 relief on land
+      } else {
+        v = 128; // neutral ocean
+      }
+      outData[i * 4] = v;
+      outData[i * 4 + 1] = v;
+      outData[i * 4 + 2] = v;
+      outData[i * 4 + 3] = 255;
     }
-    ctx.closePath();
-    ctx.fill();
   }
 
-  // Mountain ranges elevated (220 - 255)
-  ctx.save();
-  ctx.filter = 'blur(4px)';
-  for (const mtn of MOUNTAIN_CHAINS) {
-    ctx.strokeStyle = '#f0f0f0';
-    ctx.lineWidth = 12;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    for (let i = 0; i < mtn.length; i++) {
-      const [x, y] = geoToCanvas(mtn[i][0], mtn[i][1], width, height);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-  ctx.restore();
+  ctx.putImageData(out, 0, 0);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
@@ -440,10 +585,10 @@ export function createRealisticEarthBumpTexture(width = 1024, height = 512): THR
   return texture;
 }
 
-/**
- * 4. PHOTOREALISTIC NASA BLACK MARBLE NIGHT LIGHTS TEXTURE
- * Warm golden-amber urban clusters matching global human population corridors.
- */
+/* ------------------------------------------------------------------------- */
+/*  4. NASA BLACK MARBLE NIGHT LIGHTS TEXTURE                                 */
+/* ------------------------------------------------------------------------- */
+
 export function createRealisticEarthNightTexture(width = 2048, height = 1024): THREE.CanvasTexture {
   const cacheKey = `earth_photoreal_night_${width}x${height}`;
   if (textureCache.has(cacheKey)) return textureCache.get(cacheKey)!;
@@ -472,32 +617,27 @@ export function createRealisticEarthNightTexture(width = 2048, height = 1024): T
 
   // Major Human Metropolitan Corridors (NASA Black Marble accurate positions)
   const METROPOLISES = [
-    // East Asia & Japan
     { lat: 35.7, lng: 139.7, r: 24, i: 1.0 },   // Tokyo Greater Area
     { lat: 34.7, lng: 135.5, r: 18, i: 0.95 },  // Osaka/Kyoto
     { lat: 37.5, lng: 126.9, r: 18, i: 0.95 },  // Seoul Capital
     { lat: 31.2, lng: 121.5, r: 28, i: 1.0 },   // Shanghai / Yangtze Delta
     { lat: 39.9, lng: 116.4, r: 24, i: 0.98 },  // Beijing
-    { lat: 23.1, lng: 113.2, r: 26, i: 1.0 },   // Pearl River (Guangzhou/Shenzhen/HK)
+    { lat: 23.1, lng: 113.2, r: 26, i: 1.0 },   // Pearl River Delta
     { lat: 30.6, lng: 104.1, r: 16, i: 0.9 },   // Chengdu
     { lat: 29.5, lng: 106.5, r: 16, i: 0.9 },   // Chongqing
     { lat: 1.3, lng: 103.8, r: 12, i: 0.95 },   // Singapore
     { lat: 13.7, lng: 100.5, r: 14, i: 0.85 },  // Bangkok
     { lat: 14.6, lng: 121.0, r: 14, i: 0.85 },  // Manila
     { lat: -6.2, lng: 106.8, r: 16, i: 0.85 },  // Jakarta
-
-    // South Asia & India
     { lat: 28.6, lng: 77.2, r: 22, i: 0.95 },   // Delhi NCR
     { lat: 19.0, lng: 72.8, r: 20, i: 0.95 },   // Mumbai
     { lat: 12.9, lng: 77.6, r: 16, i: 0.9 },    // Bengaluru
     { lat: 22.5, lng: 88.3, r: 16, i: 0.9 },    // Kolkata
     { lat: 24.8, lng: 67.0, r: 15, i: 0.85 },   // Karachi
     { lat: 31.5, lng: 74.3, r: 14, i: 0.85 },   // Lahore
-
-    // Western Europe (The "Blue Banana" megalopolis ribbon)
     { lat: 51.5, lng: -0.1, r: 24, i: 1.0 },    // London
     { lat: 48.9, lng: 2.35, r: 22, i: 1.0 },    // Paris
-    { lat: 50.9, lng: 6.9, r: 26, i: 0.95 },    // Rhine-Ruhr / Cologne / Benelux
+    { lat: 50.9, lng: 6.9, r: 26, i: 0.95 },    // Rhine-Ruhr / Benelux
     { lat: 52.3, lng: 4.9, r: 16, i: 0.9 },     // Amsterdam
     { lat: 52.5, lng: 13.4, r: 18, i: 0.9 },    // Berlin
     { lat: 48.1, lng: 11.5, r: 14, i: 0.9 },    // Munich
@@ -505,9 +645,7 @@ export function createRealisticEarthNightTexture(width = 2048, height = 1024): T
     { lat: 40.4, lng: -3.7, r: 16, i: 0.9 },    // Madrid
     { lat: 55.7, lng: 37.6, r: 22, i: 0.95 },   // Moscow
     { lat: 59.9, lng: 30.3, r: 14, i: 0.85 },   // St. Petersburg
-
-    // Middle East & Africa
-    { lat: 30.0, lng: 31.2, r: 20, i: 0.95 },   // Cairo & Nile Valley ribbon
+    { lat: 30.0, lng: 31.2, r: 20, i: 0.95 },   // Cairo & Nile Valley
     { lat: 25.2, lng: 55.3, r: 16, i: 0.95 },   // Dubai / Abu Dhabi
     { lat: 24.7, lng: 46.7, r: 15, i: 0.9 },    // Riyadh
     { lat: 32.0, lng: 34.8, r: 14, i: 0.9 },    // Tel Aviv
@@ -516,12 +654,10 @@ export function createRealisticEarthNightTexture(width = 2048, height = 1024): T
     { lat: 6.5, lng: 3.4, r: 16, i: 0.85 },     // Lagos
     { lat: -26.2, lng: 28.0, r: 16, i: 0.9 },   // Johannesburg
     { lat: -33.9, lng: 18.4, r: 12, i: 0.85 },  // Cape Town
-
-    // North America
-    { lat: 40.7, lng: -74.0, r: 30, i: 1.0 },   // New York / Northeast Megalopolis
+    { lat: 40.7, lng: -74.0, r: 30, i: 1.0 },   // New York / Northeast
     { lat: 41.8, lng: -87.6, r: 24, i: 0.98 },  // Chicago & Great Lakes
     { lat: 34.0, lng: -118.2, r: 26, i: 1.0 },  // Los Angeles Basin
-    { lat: 37.7, lng: -122.4, r: 20, i: 0.98 }, // San Francisco Bay Area
+    { lat: 37.7, lng: -122.4, r: 20, i: 0.98 }, // San Francisco Bay
     { lat: 47.6, lng: -122.3, r: 16, i: 0.9 },  // Seattle
     { lat: 29.7, lng: -95.3, r: 20, i: 0.95 },  // Houston
     { lat: 32.7, lng: -96.8, r: 20, i: 0.95 },  // Dallas-Fort Worth
@@ -530,16 +666,12 @@ export function createRealisticEarthNightTexture(width = 2048, height = 1024): T
     { lat: 43.6, lng: -79.3, r: 18, i: 0.95 },  // Toronto
     { lat: 45.5, lng: -73.5, r: 16, i: 0.9 },   // Montreal
     { lat: 19.4, lng: -99.1, r: 24, i: 0.95 },  // Mexico City
-
-    // South America
     { lat: -23.5, lng: -46.6, r: 24, i: 0.98 }, // São Paulo
     { lat: -22.9, lng: -43.1, r: 20, i: 0.95 }, // Rio de Janeiro
     { lat: -34.6, lng: -58.3, r: 22, i: 0.95 }, // Buenos Aires
     { lat: -33.4, lng: -70.6, r: 16, i: 0.88 }, // Santiago
     { lat: 4.7, lng: -74.0, r: 16, i: 0.88 },   // Bogotá
     { lat: -12.0, lng: -77.0, r: 16, i: 0.88 }, // Lima
-
-    // Oceania
     { lat: -33.8, lng: 151.2, r: 18, i: 0.95 }, // Sydney
     { lat: -37.8, lng: 144.9, r: 18, i: 0.95 }, // Melbourne
     { lat: -27.4, lng: 153.0, r: 14, i: 0.88 }, // Brisbane
@@ -550,7 +682,7 @@ export function createRealisticEarthNightTexture(width = 2048, height = 1024): T
     drawCityGlow(city.lat, city.lng, city.r, city.i);
   }
 
-  // Draw Nile River light ribbon (famous orbital landmark)
+  // Nile River light ribbon (famous orbital landmark)
   ctx.strokeStyle = 'rgba(255, 210, 90, 0.65)';
   ctx.lineWidth = 2.5;
   ctx.beginPath();
@@ -564,10 +696,9 @@ export function createRealisticEarthNightTexture(width = 2048, height = 1024): T
   }
   ctx.stroke();
 
-  // Highway corridors & secondary townships scattered across populated landmasses
+  // Highway corridors & secondary townships across populated landmasses
   ctx.fillStyle = 'rgba(255, 215, 120, 0.7)';
   for (let i = 0; i < 1800; i++) {
-    // Bias towards continents
     const randLand = WORLD_LANDMASSES[Math.floor(Math.random() * WORLD_LANDMASSES.length)];
     const pt = randLand[Math.floor(Math.random() * randLand.length)];
     const [cx, cy] = geoToCanvas(
@@ -581,17 +712,17 @@ export function createRealisticEarthNightTexture(width = 2048, height = 1024): T
   }
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   textureCache.set(cacheKey, texture);
   return texture;
 }
 
-/**
- * 5. DYNAMIC PHOTOREALISTIC WEATHER CLOUD TEXTURE
- * Realistic cyclonic spirals, temperate storm fronts, ITCZ equatorial cloud bands,
- * and feathered cirrus formations.
- */
+/* ------------------------------------------------------------------------- */
+/*  5. DYNAMIC PHOTOREALISTIC WEATHER CLOUD TEXTURE                           */
+/* ------------------------------------------------------------------------- */
+
 export function createRealisticEarthCloudTexture(width = 2048, height = 1024): THREE.CanvasTexture {
   const cacheKey = `earth_clouds_${width}x${height}`;
   if (textureCache.has(cacheKey)) return textureCache.get(cacheKey)!;
@@ -603,7 +734,7 @@ export function createRealisticEarthCloudTexture(width = 2048, height = 1024): T
 
   ctx.clearRect(0, 0, width, height);
 
-  // 5.1 Intertropical Convergence Zone (ITCZ) equatorial fluffy cloud bands
+  // Intertropical Convergence Zone (ITCZ) equatorial fluffy cloud bands
   for (let y = height * 0.42; y <= height * 0.56; y += 4) {
     const norm = Math.sin(((y - height * 0.42) / (height * 0.14)) * Math.PI);
     for (let x = 0; x < width; x += 10) {
@@ -618,7 +749,7 @@ export function createRealisticEarthCloudTexture(width = 2048, height = 1024): T
     }
   }
 
-  // 5.2 Mid-latitude storm fronts & swirls (North Atlantic, North Pacific, Roaring Forties)
+  // Mid-latitude storm fronts & swirls
   const drawCyclone = (lat: number, lng: number, radius: number) => {
     const [cx, cy] = geoToCanvas(lat, lng, width, height);
     for (let theta = 0; theta < Math.PI * 4; theta += 0.15) {
@@ -633,14 +764,13 @@ export function createRealisticEarthCloudTexture(width = 2048, height = 1024): T
     }
   };
 
-  // Tropical cyclones & storms
   drawCyclone(24, -65, 75);  // Atlantic Hurricane
   drawCyclone(18, 135, 90);  // Pacific Typhoon
   drawCyclone(48, -35, 110); // North Atlantic gale
   drawCyclone(52, 160, 110); // Aleutian Low
   drawCyclone(-45, 90, 120); // Southern Ocean storm
 
-  // 5.3 Wispy cirrus filaments across temperate zones
+  // Wispy cirrus filaments across temperate zones
   ctx.save();
   ctx.filter = 'blur(4px)';
   for (let y = height * 0.2; y <= height * 0.8; y += 8) {
@@ -659,17 +789,17 @@ export function createRealisticEarthCloudTexture(width = 2048, height = 1024): T
   ctx.restore();
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   textureCache.set(cacheKey, texture);
   return texture;
 }
 
-/**
- * 6. MAJESTIC DEEP COSMOS & MILKY WAY SKYBOX TEXTURE
- * Creates a vast, cinematic deep space backdrop with the glowing galactic band,
- * dark molecular dust rifts, and billions-of-stars feeling to replace ugly flat backdrops.
- */
+/* ------------------------------------------------------------------------- */
+/*  6. DEEP COSMOS & MILKY WAY SKYBOX TEXTURE                                 */
+/* ------------------------------------------------------------------------- */
+
 export function createRealisticMilkyWayTexture(width = 2048, height = 1024): THREE.CanvasTexture {
   const cacheKey = `milky_way_${width}x${height}`;
   if (textureCache.has(cacheKey)) return textureCache.get(cacheKey)!;
@@ -686,21 +816,19 @@ export function createRealisticMilkyWayTexture(width = 2048, height = 1024): THR
   // Milky Way celestial band diagonal across sky
   ctx.save();
   ctx.translate(width / 2, height / 2);
-  ctx.rotate(-0.35); // 20 deg tilt of galactic plane
+  ctx.rotate(-0.35);
 
-  // Primary galactic glow (warm core + deep indigo halo)
   const galGrad = ctx.createLinearGradient(0, -height * 0.2, 0, height * 0.2);
   galGrad.addColorStop(0, 'rgba(12, 18, 45, 0)');
   galGrad.addColorStop(0.3, 'rgba(30, 42, 90, 0.28)');
-  galGrad.addColorStop(0.48, 'rgba(165, 140, 195, 0.42)'); // Sagittarius bright core
+  galGrad.addColorStop(0.48, 'rgba(165, 140, 195, 0.42)');
   galGrad.addColorStop(0.52, 'rgba(190, 165, 215, 0.48)');
   galGrad.addColorStop(0.7, 'rgba(30, 42, 90, 0.28)');
   galGrad.addColorStop(1, 'rgba(12, 18, 45, 0)');
-
   ctx.fillStyle = galGrad;
   ctx.fillRect(-width, -height * 0.3, width * 2, height * 0.6);
 
-  // Dark molecular dust rifts (The Great Rift)
+  // Dark molecular dust rifts
   ctx.fillStyle = 'rgba(2, 4, 10, 0.65)';
   for (let x = -width * 0.8; x <= width * 0.8; x += 18) {
     const waveY = Math.sin(x * 0.004) * 25 + Math.sin(x * 0.01) * 12;
@@ -718,7 +846,6 @@ export function createRealisticMilkyWayTexture(width = 2048, height = 1024): THR
     const sz = Math.random() > 0.92 ? 1.8 : 0.9;
     ctx.fillRect(sx, sy, sz, sz);
   }
-
   ctx.restore();
 
   // General field background stars
@@ -727,25 +854,24 @@ export function createRealisticMilkyWayTexture(width = 2048, height = 1024): THR
     const y = Math.random() * height;
     const bright = Math.random();
     const size = bright > 0.95 ? 2.0 : bright > 0.7 ? 1.2 : 0.7;
-
-    // Astronomical color temperatures (O/B blue-white, G yellow, M red)
     if (bright > 0.9) ctx.fillStyle = 'rgba(195, 220, 255, 0.95)';
     else if (bright > 0.8) ctx.fillStyle = 'rgba(255, 242, 210, 0.9)';
     else ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
-
     ctx.fillRect(x, y, size, size);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   textureCache.set(cacheKey, texture);
   return texture;
 }
 
-/**
- * Converts Latitude & Longitude to 3D Cartesian coordinates on a sphere of radius R.
- */
+/* ------------------------------------------------------------------------- */
+/*  Lat/Lng -> 3D Cartesian on a sphere                                       */
+/* ------------------------------------------------------------------------- */
+
 export function latLngToVector3(lat: number, lng: number, radius: number): THREE.Vector3 {
   const phi = (90 - lat) * (Math.PI / 180);
   const theta = (lng + 180) * (Math.PI / 180);

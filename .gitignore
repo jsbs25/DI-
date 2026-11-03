@@ -8,3 +8,5 @@ coverage/
 !.env.example
 .aistudio/
 server_data.json
+package-lock.json
+zed:open settings file

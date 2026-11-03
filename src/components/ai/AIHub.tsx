@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import {
@@ -13,7 +13,8 @@ import {
   Layers,
   RotateCcw,
   CheckCircle2,
-  Copy
+  Copy,
+  ChevronDown
 } from 'lucide-react';
 
 interface AIHubProps {
@@ -24,10 +25,20 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const t = translations[lang];
 
   const [activeMode, setActiveMode] = useState<'general' | 'translator' | 'writer' | 'tutor'>('general');
-  const [selectedModel, setSelectedModel] = useState<'gemini-3.8-flash' | 'gemini-4-argon'>('gemini-3.8-flash');
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [availableModels, setAvailableModels] = useState<
+    Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string }>
+  >([]);
   const [useSearchGrounding, setUseSearchGrounding] = useState(true);
   const [promptInput, setPromptInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Custom AI provider settings (any OpenAI-compatible service)
+  const [showCustomConfig, setShowCustomConfig] = useState(false);
+  const [customApiKey, setCustomApiKey] = useState('');
+  const [customBaseUrl, setCustomBaseUrl] = useState('https://api.openai.com/v1');
+  const [customModel, setCustomModel] = useState('gpt-3.5-turbo');
+  const [useCustomProvider, setUseCustomProvider] = useState(false);
   const [chatLog, setChatLog] = useState<Array<{
     role: 'user' | 'ai';
     text: string;
@@ -37,9 +48,27 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     {
       role: 'ai',
       text: t.aiAssistantGreeting,
-      model: 'gemini-3.8-flash'
+      model: 'DeepSeek'
     }
   ]);
+
+  // Load available models from the backend gateway
+  useEffect(() => {
+    fetch('/api/ai/models')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success && Array.isArray(d.models)) {
+          const models = d.models as Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string }>;
+          setAvailableModels(models);
+          const defaultModel = models.find(m => m.isDefault) || models.find(m => m.status === 'active') || models[0];
+          if (defaultModel && !selectedModel) {
+            setSelectedModel(defaultModel.id);
+          }
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const modes = [
     { id: 'general', label: 'Global Assistant (全球智慧)', icon: Sparkles, desc: 'Omniscient knowledge on geography, civilizations, and science.' },
@@ -84,12 +113,22 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: textToSend.trim(),
-          model: selectedModel,
-          mode: activeMode,
-          useSearchGrounding
-        })
+        body: JSON.stringify(
+          useCustomProvider && customApiKey.trim()
+            ? {
+                prompt: textToSend.trim(),
+                mode: activeMode,
+                apiKey: customApiKey.trim(),
+                baseUrl: customBaseUrl.trim(),
+                customModel: customModel.trim()
+              }
+            : {
+                prompt: textToSend.trim(),
+                model: selectedModel,
+                mode: activeMode,
+                useSearchGrounding
+              }
+        )
       });
       const data = await res.json();
       if (data.success && data.reply) {
@@ -125,7 +164,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         <div className="relative z-10 space-y-2">
           <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-mono">
             <Zap className="w-3.5 h-3.5" />
-            <span>UNIFIED AI GATEWAY · GOOGLE GEMINI POWERED</span>
+            <span>UNIFIED AI GATEWAY · MULTI-MODEL</span>
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-100">
             {t.aiHubTab}
@@ -171,11 +210,18 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             <span className="text-slate-300 font-medium">Model:</span>
             <select
               value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value as any)}
+              onChange={e => setSelectedModel(e.target.value)}
               className="bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1 text-slate-200 text-xs focus:outline-none"
             >
-              <option value="gemini-3.8-flash">Gemini 3.8 Flash (High Speed · Multimodal)</option>
-              <option value="gemini-4-argon">Gemini 4 Argon (Advanced STEM & Complex Reasoning)</option>
+              {availableModels.length === 0 ? (
+                <option value="">Loading models...</option>
+              ) : (
+                availableModels.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} {m.status === 'active' ? '· Active' : '· Unconfigured'}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 
@@ -199,6 +245,71 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           <span>·</span>
           <span>Zero Client Leak</span>
         </div>
+      </div>
+
+      {/* Custom AI Provider (any OpenAI-compatible service) */}
+      <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setShowCustomConfig(!showCustomConfig)}
+            className="flex items-center space-x-2 text-xs font-semibold text-slate-300 hover:text-white"
+          >
+            <Cpu className="w-4 h-4 text-purple-400" />
+            <span>接入自定义 AI（任意 OpenAI 兼容服务）</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showCustomConfig ? 'rotate-180' : ''}`} />
+          </button>
+          <label className="flex items-center space-x-2 text-xs text-slate-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useCustomProvider}
+              onChange={e => {
+                setUseCustomProvider(e.target.checked);
+                if (e.target.checked) setShowCustomConfig(true);
+              }}
+              className="accent-purple-500"
+            />
+            <span>使用自定义 AI</span>
+          </label>
+        </div>
+
+        {showCustomConfig && (
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1 font-medium">API Key</label>
+              <input
+                type="password"
+                value={customApiKey}
+                onChange={e => setCustomApiKey(e.target.value)}
+                placeholder="sk-..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1 font-medium">Base URL</label>
+              <input
+                type="text"
+                value={customBaseUrl}
+                onChange={e => setCustomBaseUrl(e.target.value)}
+                placeholder="https://api.openai.com/v1"
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500 font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1 font-medium">模型名</label>
+              <input
+                type="text"
+                value={customModel}
+                onChange={e => setCustomModel(e.target.value)}
+                placeholder="gpt-3.5-turbo / deepseek-chat / moonshot-v1-8k / glm-4"
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500 font-mono"
+              />
+            </div>
+            <p className="md:col-span-3 text-[11px] text-slate-500">
+              支持任何 OpenAI 兼容接口的服务：OpenAI、DeepSeek、Moonshot、智谱 GLM、通义千问、Ollama 本地模型等。Base URL 填服务的 API 地址（如 <span className="font-mono text-slate-400">https://api.deepseek.com/v1</span>）。密钥仅保存在当前会话，不会写入磁盘。
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Chat & Interaction Stream */}
