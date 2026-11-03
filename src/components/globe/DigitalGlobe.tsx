@@ -512,10 +512,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             EARTH ONE
           </h1>
           <h2 className="font-bold text-3xl sm:text-4xl md:text-5xl text-slate-100 tracking-tight mt-2 font-sans drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]">
-            A New World Awaits
+            {t.heroSubtitle}
           </h2>
           <p className="text-base sm:text-lg text-slate-300 mt-5 font-normal leading-relaxed drop-shadow-md">
-            Explore the universe, discover infinite possibilities.
+            {t.heroDescription}
           </p>
 
           {/* Start Exploring Action Button */}
@@ -524,7 +524,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
               onClick={handleToggleExplore}
               className="inline-flex items-center space-x-3 px-8 py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-sm sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
             >
-              <span>{isZoomedIn ? 'Overview View' : 'Start Exploring'}</span>
+              <span>{isZoomedIn ? t.overviewView : t.startExploring}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </button>
 
@@ -534,7 +534,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                 className="inline-flex items-center space-x-2 px-5 py-3.5 rounded-full bg-slate-900/80 hover:bg-slate-800/90 border border-slate-700/80 text-slate-200 text-sm font-medium backdrop-blur-md cursor-pointer transition-all hover:text-white"
               >
                 <Orbit className="w-4 h-4 text-purple-400" />
-                <span>Solar System</span>
+                <span>{t.solarSystem}</span>
               </button>
             )}
           </div>
@@ -546,7 +546,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           <div className="w-full max-w-lg p-5 rounded-3xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl">
             <div className="flex items-center space-x-2 text-xs font-semibold text-slate-300 tracking-wide mb-4">
               <Compass className="w-4 h-4 text-cyan-400" />
-              <span>Universe Overview</span>
+              <span>{t.universeOverview}</span>
             </div>
 
             <div className="flex items-center justify-between">
@@ -556,7 +556,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                   8.0B+
                 </div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  People on Earth
+                  {t.peopleOnEarth}
                 </div>
               </div>
 
@@ -568,7 +568,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                   8
                 </div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  Planets
+                  {t.planets}
                 </div>
               </div>
 
@@ -580,7 +580,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                   100B+
                 </div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  Stars in Galaxy
+                  {t.starsInGalaxy}
                 </div>
               </div>
 
@@ -613,13 +613,13 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
             <div className="flex-1 min-w-0">
               <h4 className="font-bold text-sm sm:text-base text-white group-hover:text-cyan-300 transition-colors">
-                Our Galaxy
+                {t.ourGalaxy}
               </h4>
               <p className="text-xs text-slate-400 mt-0.5 truncate">
-                A vast home in the cosmos
+                {t.vastHome}
               </p>
               <div className="mt-2 text-xs font-semibold text-cyan-400 flex items-center space-x-1 group-hover:translate-x-1 transition-transform">
-                <span>Learn More</span>
+                <span>{t.learnMore}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </div>
             </div>
@@ -628,7 +628,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
         {/* Centered Footer Motto */}
         <div className="w-full text-center mt-6 pt-4 border-t border-slate-900/80 text-[11px] text-slate-500 font-mono tracking-wider">
-          EARTH ONE · Explore the Universe · Build a Better Tomorrow
+          {t.footerMotto}
         </div>
       </div>
 
@@ -645,7 +645,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40'
                 : 'hover:bg-slate-800/80 hover:text-white'
             }`}
-            title={isZoomedIn ? 'Zoom out to cosmos' : 'Inspect Earth close-up'}
+            title={isZoomedIn ? t.zoomOut : t.inspectEarth}
           >
             <Orbit className="w-4 h-4" />
           </button>
@@ -655,7 +655,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             <button
               onClick={onExploreUniverse}
               className="p-2.5 rounded-xl hover:bg-slate-800/80 hover:text-purple-300 transition-colors cursor-pointer"
-              title="Solar System Engine"
+              title={t.solarSystemEngine}
             >
               <Sparkles className="w-4 h-4" />
             </button>
@@ -667,7 +667,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             className={`p-2.5 rounded-xl transition-colors cursor-pointer ${
               showBeacons ? 'text-cyan-400 bg-cyan-950/60' : 'hover:bg-slate-800/80 hover:text-white'
             }`}
-            title="Toggle Citizen Beacons"
+            title={t.toggleBeacons}
           >
             <Network className="w-4 h-4" />
           </button>
@@ -678,7 +678,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             className={`p-2.5 rounded-xl transition-colors cursor-pointer ${
               autoRotate ? 'text-cyan-400' : 'text-slate-600'
             }`}
-            title="Auto Rotation"
+            title={t.autoRotation}
           >
             <RotateCw className="w-4 h-4" />
           </button>
@@ -687,7 +687,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
             className="p-2.5 rounded-xl hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            title={soundEnabled ? 'Mute' : 'Play Cosmic Sound'}
+            title={soundEnabled ? t.mute : t.playCosmicSound}
           >
             {soundEnabled ? <Volume2 className="w-4 h-4 text-cyan-400" /> : <VolumeX className="w-4 h-4" />}
           </button>

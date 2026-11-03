@@ -62,6 +62,39 @@ export interface TranslationDictionary {
   model: string;
   aiAssistantGreeting: string;
   sponsored: string;
+  // Home / globe hero
+  heroSubtitle: string;
+  heroDescription: string;
+  startExploring: string;
+  overviewView: string;
+  solarSystem: string;
+  universeOverview: string;
+  peopleOnEarth: string;
+  planets: string;
+  starsInGalaxy: string;
+  ourGalaxy: string;
+  vastHome: string;
+  learnMore: string;
+  footerMotto: string;
+  zoomOut: string;
+  inspectEarth: string;
+  solarSystemEngine: string;
+  toggleBeacons: string;
+  autoRotation: string;
+  mute: string;
+  playCosmicSound: string;
+  // Navigation
+  apps: string;
+  globalMessenger: string;
+  digitalLibrary: string;
+  webBrowser: string;
+  creatorArticles: string;
+  worldVideoCenter: string;
+  globalGameCenter: string;
+  editGlobeBeacon: string;
+  logOut: string;
+  signIn: string;
+  brandTagline: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -126,7 +159,38 @@ export const translations: Record<Language, TranslationDictionary> = {
     close: '关闭',
     model: 'AI 模型',
     aiAssistantGreeting: '你好！我是 EARTH ONE 全球智能助理，连接地球八十亿智慧。',
-    sponsored: '全球精选赞助'
+    sponsored: '全球精选赞助',
+    heroSubtitle: '一个新世界正等待着你',
+    heroDescription: '探索宇宙，发现无限可能。',
+    startExploring: '开始探索',
+    overviewView: '总览视角',
+    solarSystem: '太阳系',
+    universeOverview: '宇宙总览',
+    peopleOnEarth: '地球人口',
+    planets: '行星',
+    starsInGalaxy: '银河系恒星',
+    ourGalaxy: '我们的银河',
+    vastHome: '无垠宇宙中的家园',
+    learnMore: '了解更多',
+    footerMotto: 'EARTH ONE · 探索宇宙 · 建设更美好的明天',
+    zoomOut: '缩放回宇宙视角',
+    inspectEarth: '近距离观察地球',
+    solarSystemEngine: '太阳系引擎',
+    toggleBeacons: '切换公民信标',
+    autoRotation: '自动旋转',
+    mute: '静音',
+    playCosmicSound: '播放宇宙之声',
+    apps: '应用',
+    globalMessenger: '全球即时通讯',
+    digitalLibrary: '数字图书馆',
+    webBrowser: '网页浏览器',
+    creatorArticles: '创作者文章',
+    worldVideoCenter: '全球视频中心',
+    globalGameCenter: '全球游戏中心',
+    editGlobeBeacon: '编辑地球信标',
+    logOut: '退出登录',
+    signIn: '登录',
+    brandTagline: '探索 · 连接 · 建设'
   },
   en: {
     appName: 'EARTH ONE',
@@ -189,7 +253,38 @@ export const translations: Record<Language, TranslationDictionary> = {
     close: 'Close',
     model: 'AI Model',
     aiAssistantGreeting: 'Greetings! I am EARTH ONE AI, uniting minds across continents.',
-    sponsored: 'Featured Global Sponsor'
+    sponsored: 'Featured Global Sponsor',
+    heroSubtitle: 'A New World Awaits',
+    heroDescription: 'Explore the universe, discover infinite possibilities.',
+    startExploring: 'Start Exploring',
+    overviewView: 'Overview View',
+    solarSystem: 'Solar System',
+    universeOverview: 'Universe Overview',
+    peopleOnEarth: 'People on Earth',
+    planets: 'Planets',
+    starsInGalaxy: 'Stars in Galaxy',
+    ourGalaxy: 'Our Galaxy',
+    vastHome: 'A vast home in the cosmos',
+    learnMore: 'Learn More',
+    footerMotto: 'EARTH ONE · Explore the Universe · Build a Better Tomorrow',
+    zoomOut: 'Zoom out to cosmos',
+    inspectEarth: 'Inspect Earth close-up',
+    solarSystemEngine: 'Solar System Engine',
+    toggleBeacons: 'Toggle Citizen Beacons',
+    autoRotation: 'Auto Rotation',
+    mute: 'Mute',
+    playCosmicSound: 'Play Cosmic Sound',
+    apps: 'Apps',
+    globalMessenger: 'Global Messenger',
+    digitalLibrary: 'Digital Library',
+    webBrowser: 'Web Browser',
+    creatorArticles: 'Creator Articles',
+    worldVideoCenter: 'World Video Center',
+    globalGameCenter: 'Global Game Center',
+    editGlobeBeacon: 'Edit Globe Beacon',
+    logOut: 'Log Out',
+    signIn: 'Sign In',
+    brandTagline: 'Explore · Connect · Build'
   },
   ar: {
     appName: 'EARTH ONE',
@@ -252,7 +347,38 @@ export const translations: Record<Language, TranslationDictionary> = {
     close: 'إغلاق',
     model: 'نموذج الذكاء الاصطناعي',
     aiAssistantGreeting: 'مرحباً! أنا المساعد الذكي لـ EARTH ONE، أصل العقول عبر القارات.',
-    sponsored: 'راعي عالمي مميز'
+    sponsored: 'راعي عالمي مميز',
+    heroSubtitle: 'عالم جديد في انتظارك',
+    heroDescription: 'استكشف الكون واكتشف إمكانيات لا نهائية.',
+    startExploring: 'ابدأ الاستكشاف',
+    overviewView: 'نظرة عامة',
+    solarSystem: 'النظام الشمسي',
+    universeOverview: 'نظرة عامة على الكون',
+    peopleOnEarth: 'سكان الأرض',
+    planets: 'الكواكب',
+    starsInGalaxy: 'نجوم المجرة',
+    ourGalaxy: 'مجرتنا',
+    vastHome: 'موطن شاسع في الكون',
+    learnMore: 'اعرف المزيد',
+    footerMotto: 'EARTH ONE · استكشف الكون · ابنِ غداً أفضل',
+    zoomOut: 'تصغير إلى رؤية كونية',
+    inspectEarth: 'فحص الأرض عن قرب',
+    solarSystemEngine: 'محرك النظام الشمسي',
+    toggleBeacons: 'تبديل منارات المواطنين',
+    autoRotation: 'دوران تلقائي',
+    mute: 'كتم الصوت',
+    playCosmicSound: 'تشغيل صوت كوني',
+    apps: 'التطبيقات',
+    globalMessenger: 'المراسلة الفورية العالمية',
+    digitalLibrary: 'المكتبة الرقمية',
+    webBrowser: 'متصفح الويب',
+    creatorArticles: 'مقالات المبدعين',
+    worldVideoCenter: 'مركز الفيديو العالمي',
+    globalGameCenter: 'مركز الألعاب العالمي',
+    editGlobeBeacon: 'تعديل منارة الأرض',
+    logOut: 'تسجيل الخروج',
+    signIn: 'تسجيل الدخول',
+    brandTagline: 'استكشف · تواصل · ابنِ'
   },
   es: {
     appName: 'EARTH ONE',
@@ -315,7 +441,38 @@ export const translations: Record<Language, TranslationDictionary> = {
     close: 'Cerrar',
     model: 'Modelo IA',
     aiAssistantGreeting: '¡Saludos! Soy la IA de EARTH ONE, uniendo continentes.',
-    sponsored: 'Patrocinador Global Destacado'
+    sponsored: 'Patrocinador Global Destacado',
+    heroSubtitle: 'Un Nuevo Mundo te Espera',
+    heroDescription: 'Explora el universo, descubre infinitas posibilidades.',
+    startExploring: 'Comenzar a Explorar',
+    overviewView: 'Vista General',
+    solarSystem: 'Sistema Solar',
+    universeOverview: 'Resumen del Universo',
+    peopleOnEarth: 'Personas en la Tierra',
+    planets: 'Planetas',
+    starsInGalaxy: 'Estrellas en la Galaxia',
+    ourGalaxy: 'Nuestra Galaxia',
+    vastHome: 'Un vasto hogar en el cosmos',
+    learnMore: 'Saber Más',
+    footerMotto: 'EARTH ONE · Explora el Universo · Construye un Mañana Mejor',
+    zoomOut: 'Alejar al cosmos',
+    inspectEarth: 'Inspeccionar la Tierra',
+    solarSystemEngine: 'Motor del Sistema Solar',
+    toggleBeacons: 'Alternar Balizas Ciudadanas',
+    autoRotation: 'Rotación Automática',
+    mute: 'Silenciar',
+    playCosmicSound: 'Reproducir Sonido Cósmico',
+    apps: 'Aplicaciones',
+    globalMessenger: 'Mensajería Global',
+    digitalLibrary: 'Biblioteca Digital',
+    webBrowser: 'Navegador Web',
+    creatorArticles: 'Artículos de Creadores',
+    worldVideoCenter: 'Centro Mundial de Vídeo',
+    globalGameCenter: 'Centro de Juegos Global',
+    editGlobeBeacon: 'Editar Baliza del Globo',
+    logOut: 'Cerrar Sesión',
+    signIn: 'Iniciar Sesión',
+    brandTagline: 'Explora · Conecta · Construye'
   },
   fr: {
     appName: 'EARTH ONE',
@@ -378,7 +535,38 @@ export const translations: Record<Language, TranslationDictionary> = {
     close: 'Fermer',
     model: 'Modèle IA',
     aiAssistantGreeting: 'Bonjour ! Je suis l’IA de EARTH ONE, reliant les esprits par-delà les frontières.',
-    sponsored: 'Sponsor Mondial Partenaire'
+    sponsored: 'Sponsor Mondial Partenaire',
+    heroSubtitle: 'Un Nouveau Monde vous Attend',
+    heroDescription: 'Explorez l’univers, découvrez des possibilités infinies.',
+    startExploring: 'Commencer l’Exploration',
+    overviewView: 'Vue d’Ensemble',
+    solarSystem: 'Système Solaire',
+    universeOverview: 'Aperçu de l’Univers',
+    peopleOnEarth: 'Personnes sur Terre',
+    planets: 'Planètes',
+    starsInGalaxy: 'Étoiles dans la Galaxie',
+    ourGalaxy: 'Notre Galaxie',
+    vastHome: 'Un vaste foyer dans le cosmos',
+    learnMore: 'En Savoir Plus',
+    footerMotto: 'EARTH ONE · Explorez l’Univers · Construisez un Avenir Meilleur',
+    zoomOut: 'Éloigner vers le cosmos',
+    inspectEarth: 'Inspecter la Terre',
+    solarSystemEngine: 'Moteur du Système Solaire',
+    toggleBeacons: 'Basculer les Balises Citoyennes',
+    autoRotation: 'Rotation Automatique',
+    mute: 'Couper le Son',
+    playCosmicSound: 'Jouer le Son Cosmique',
+    apps: 'Applications',
+    globalMessenger: 'Messagerie Mondiale',
+    digitalLibrary: 'Bibliothèque Numérique',
+    webBrowser: 'Navigateur Web',
+    creatorArticles: 'Articles des Créateurs',
+    worldVideoCenter: 'Centre Vidéo Mondial',
+    globalGameCenter: 'Centre de Jeux Mondial',
+    editGlobeBeacon: 'Modifier la Balise du Globe',
+    logOut: 'Se Déconnecter',
+    signIn: 'Se Connecter',
+    brandTagline: 'Explorez · Connectez · Construisez'
   },
   ru: {
     appName: 'EARTH ONE',
@@ -441,6 +629,37 @@ export const translations: Record<Language, TranslationDictionary> = {
     close: 'Закрыть',
     model: 'Модель ИИ',
     aiAssistantGreeting: 'Приветствую! Я искусственный интеллект EARTH ONE, объединяющий мир.',
-    sponsored: 'Глобальный партнер'
+    sponsored: 'Глобальный партнер',
+    heroSubtitle: 'Новый мир ждёт вас',
+    heroDescription: 'Исследуйте вселенную, откройте безграничные возможности.',
+    startExploring: 'Начать исследование',
+    overviewView: 'Общий вид',
+    solarSystem: 'Солнечная система',
+    universeOverview: 'Обзор Вселенной',
+    peopleOnEarth: 'Людей на Земле',
+    planets: 'Планеты',
+    starsInGalaxy: 'Звёзд в галактике',
+    ourGalaxy: 'Наша галактика',
+    vastHome: 'Безбрежный дом в космосе',
+    learnMore: 'Узнать больше',
+    footerMotto: 'EARTH ONE · Исследуйте Вселенную · Стройте лучшее завтра',
+    zoomOut: 'Отдалить до космоса',
+    inspectEarth: 'Рассмотреть Землю',
+    solarSystemEngine: 'Движок Солнечной системы',
+    toggleBeacons: 'Переключить маяки граждан',
+    autoRotation: 'Автоповорот',
+    mute: 'Выключить звук',
+    playCosmicSound: 'Включить космический звук',
+    apps: 'Приложения',
+    globalMessenger: 'Глобальный мессенджер',
+    digitalLibrary: 'Цифровая библиотека',
+    webBrowser: 'Веб-браузер',
+    creatorArticles: 'Статьи авторов',
+    worldVideoCenter: 'Мировой видеоцентр',
+    globalGameCenter: 'Глобальный игровой центр',
+    editGlobeBeacon: 'Изменить маяк на глобусе',
+    logOut: 'Выйти',
+    signIn: 'Войти',
+    brandTagline: 'Исследуй · Общайся · Создавай'
   }
 };

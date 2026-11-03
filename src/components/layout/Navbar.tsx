@@ -92,7 +92,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 EARTH ONE
               </span>
               <span className="block text-[11px] text-slate-400 font-sans tracking-tight">
-                Explore · Connect · Build
+                {t.brandTagline}
               </span>
             </div>
           </div>
@@ -157,7 +157,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => setEcosystemMenuOpen(!ecosystemMenuOpen)}
                 className="flex items-center space-x-1 px-3 py-1.5 rounded-full text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 cursor-pointer transition-all"
               >
-                <span>Apps</span>
+                <span>{t.apps}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
 
@@ -174,7 +174,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
                   >
                     <MessageSquare className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Global Messenger</span>
+                    <span>{t.globalMessenger}</span>
                   </button>
                   <button
                     onClick={() => {
@@ -184,7 +184,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
                   >
                     <Cpu className="w-3.5 h-3.5 text-purple-400" />
-                    <span>EARTH ONE AI HUB</span>
+                    <span>{t.aiHubTab}</span>
                   </button>
                   <button
                     onClick={() => {
@@ -194,7 +194,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
                   >
                     <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Digital Library</span>
+                    <span>{t.digitalLibrary}</span>
                   </button>
                   <button
                     onClick={() => {
@@ -204,7 +204,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
                   >
                     <Search className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Web Browser</span>
+                    <span>{t.webBrowser}</span>
                   </button>
                   <button
                     onClick={() => {
@@ -214,7 +214,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
                   >
                     <PenTool className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Creator Articles</span>
+                    <span>{t.creatorArticles}</span>
                   </button>
                   <button
                     onClick={() => {
@@ -224,7 +224,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
                   >
                     <Film className="w-3.5 h-3.5 text-red-400" />
-                    <span>World Video Center</span>
+                    <span>{t.worldVideoCenter}</span>
                   </button>
                   <button
                     onClick={() => {
@@ -234,7 +234,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
                   >
                     <Gamepad2 className="w-3.5 h-3.5 text-yellow-400" />
-                    <span>Global Game Center</span>
+                    <span>{t.globalGameCenter}</span>
                   </button>
                 </div>
               )}
@@ -350,7 +350,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       className="w-full text-left px-3.5 py-1.5 text-slate-300 hover:text-white hover:bg-slate-800/70 flex items-center space-x-2"
                     >
                       <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Edit Globe Beacon</span>
+                      <span>{t.editGlobeBeacon}</span>
                     </button>
 
                     <button
@@ -361,7 +361,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       className="w-full text-left px-3.5 py-1.5 text-red-400 hover:bg-red-950/40 flex items-center space-x-2 mt-1 border-t border-slate-800/80 pt-2"
                     >
                       <LogOut className="w-3.5 h-3.5" />
-                      <span>Log Out</span>
+                      <span>{t.logOut}</span>
                     </button>
                   </div>
                 )}
@@ -371,7 +371,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={onOpenAuth}
                 className="px-4 py-1.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/30 transition-all cursor-pointer"
               >
-                Sign In
+                {t.signIn}
               </button>
             )}
           </div>

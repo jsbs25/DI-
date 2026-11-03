@@ -32,6 +32,7 @@ import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('zh');
+  const t = translations[lang] || translations.zh;
   const [currentTab, setCurrentTab] = useState<string>('globe');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -518,16 +519,16 @@ export default function App() {
             <Globe2 className="w-4 h-4 text-cyan-500" />
             <span className="font-serif font-bold text-slate-300">EARTH ONE</span>
             <span>—</span>
-            <span className="text-slate-400">ONE EARTH. ONE WORLD. ONE HUMANITY.</span>
+            <span className="text-slate-400">{t.motto}</span>
           </div>
           <div className="flex items-center space-x-4 text-slate-400 text-[11px]">
-            <span>颗地球 · 一个世界 · 一个人类</span>
+            <span>{t.motto}</span>
             <span>·</span>
-            <span>Polyglot Spatial Twin</span>
+            <span>{t.tagline}</span>
             <span>·</span>
             <span className="flex items-center space-x-1 text-emerald-400">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Privacy Verified</span>
+              <span>{t.locationPrivate}</span>
             </span>
           </div>
         </div>
