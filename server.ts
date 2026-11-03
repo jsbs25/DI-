@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { store } from './server/store.ts';
+import { aiGateway } from './server/aiGateway.ts';
 
 dotenv.config();
 
@@ -359,11 +360,23 @@ app.get('/api/games/rooms', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 7. EARTH ONE AI HUB API GATEWAY
+// 7. EARTH ONE UNIFIED AI GATEWAY & MULTI-MODEL DISPATCH
 // -------------------------------------------------------------
+app.get('/api/ai/models', (req, res) => {
+  res.json({ success: true, models: aiGateway.getModels() });
+});
+
+app.get('/api/ai/stats', (req, res) => {
+  const models = aiGateway.getModels();
+  const totalCalls = models.reduce((acc, m) => acc + m.totalCalls, 0);
+  const totalTokens = models.reduce((acc, m) => acc + m.totalTokens, 0);
+  res.json({ success: true, totalCalls, totalTokens, models });
+});
+
 app.post('/api/ai/chat', async (req, res) => {
-  const { prompt, model = 'gemini-3.8-flash', mode = 'general', useSearchGrounding = false } = req.body;
-  if (!prompt) return res.status(400).json({ success: false, error: 'Prompt is required' });
+  const { prompt, messages, modelId = 'gemini-2.5-flash', mode = 'general' } = req.body;
+  const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
+  if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
 
   const systemInstructions: Record<string, string> = {
     general: 'You are EARTH ONE AI, the next-generation global intelligence system for humanity. Your philosophy is: ONE EARTH. ONE WORLD. ONE HUMANITY. Answer warmly, knowledgeably, and with global cross-cultural perspective.',
@@ -373,69 +386,162 @@ app.post('/api/ai/chat', async (req, res) => {
   };
 
   const systemPrompt = systemInstructions[mode] || systemInstructions.general;
+  const result = await aiGateway.generateContent(modelId, userPrompt, systemPrompt);
 
-  if (aiClient) {
-    try {
-      const config: any = {
-        systemInstruction: systemPrompt
-      };
-      if (useSearchGrounding) {
-        config.tools = [{ googleSearch: {} }];
-      }
-
-      const response = await aiClient.models.generateContent({
-        model: model === 'gemini-2.5-pro' || model === 'gemini-4-argon' ? 'gemini-3.8-flash' : 'gemini-3.8-flash',
-        contents: prompt,
-        config
-      });
-
-      const text = response.text || 'No response generated.';
-      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-
-      return res.json({
-        success: true,
-        reply: text,
-        model: 'gemini-3.8-flash',
-        groundingChunks: groundingChunks || []
-      });
-    } catch (err: any) {
-      console.warn('AI API call error, applying intelligent fallback:', err);
-    }
+  if (result.success) {
+    res.json({
+      success: true,
+      reply: result.content,
+      message: {
+        role: 'assistant',
+        content: result.content,
+        timestamp: new Date().toISOString()
+      },
+      tokens: result.tokens,
+      model: modelId
+    });
+  } else {
+    res.status(result.errorMessage?.includes('429') ? 429 : 503).json({
+      success: false,
+      error: result.errorMessage || 'AI 服务当前不可用，请检查服务端模型配置或稍后重试。'
+    });
   }
-
-  // Graceful fallback when API key is missing or quota reached
-  const fallbackReplies: Record<string, string> = {
-    general: `EARTH ONE Core AI: Connecting hearts and minds across our shared planet. You asked: "${prompt}". Humanity thrives when knowledge, empathy, and cultural respect unite.`,
-    translator: `Earth Polyglot: Ready to bridge any language barrier for your journey.`,
-    writer: `Earth Creator: Your story can touch people on every continent. Focus on universal human emotions: hope, perseverance, and wonder.`,
-    tutor: `Earth Language Coach: Practice makes fluency! Every greeting is a bridge to a new culture.`
-  };
-
-  res.json({
-    success: true,
-    reply: fallbackReplies[mode] || fallbackReplies.general,
-    model: 'earth-one-resilient-core',
-    groundingChunks: []
-  });
 });
 
 app.post('/api/ai/translate', async (req, res) => {
   const { text, targetLang = 'English' } = req.body;
   if (!text) return res.status(400).json({ success: false, error: 'Text required' });
 
-  if (aiClient) {
-    try {
-      const response = await aiClient.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: `Translate the following text to ${targetLang}. Return ONLY the direct natural translation:\n"${text}"`
-      });
-      return res.json({ success: true, translation: response.text ? response.text.trim() : text });
-    } catch (err) {
-      console.warn('AI translation call error:', err);
-    }
-  }
+  const prompt = `Translate the following text to ${targetLang}. Return ONLY the direct natural translation:\n"${text}"`;
+  const result = await aiGateway.generateContent('gemini-2.5-flash', prompt);
 
-  res.json({ success: true, translation: `[${targetLang}]: ${text}` });
+  if (result.success) {
+    res.json({ success: true, translation: result.content.trim() });
+  } else {
+    res.json({ success: false, error: result.errorMessage || 'Translation failed' });
+  }
+});
+
+// -------------------------------------------------------------
+// 8. DIGITAL LIBRARY (CHAPTER 5)
+// -------------------------------------------------------------
+app.get('/api/library/books', (req, res) => {
+  const { category, search } = req.query;
+  let books = store.books;
+  if (category && category !== 'all') {
+    books = books.filter(b => b.category === category);
+  }
+  if (search && typeof search === 'string') {
+    const q = search.toLowerCase();
+    books = books.filter(b => b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q));
+  }
+  res.json({ success: true, books });
+});
+
+app.get('/api/library/books/:id', (req, res) => {
+  const book = store.books.find(b => b.id === req.params.id);
+  if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
+  const annotations = store.getAnnotations(book.id);
+  res.json({ success: true, book, annotations });
+});
+
+app.post('/api/library/books/:id/progress', (req, res) => {
+  const { progress } = req.body;
+  const book = store.updateReadingProgress(req.params.id, progress);
+  if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
+  res.json({ success: true, readProgress: book.readProgress });
+});
+
+app.post('/api/library/books/:id/annotations', (req, res) => {
+  const { chapterId, selectedText, note, aiExplanation } = req.body;
+  if (!selectedText) return res.status(400).json({ success: false, error: 'Selected text required' });
+  const ann = store.addAnnotation(req.params.id, chapterId, selectedText, note || '', aiExplanation);
+  res.json({ success: true, annotation: ann });
+});
+
+// -------------------------------------------------------------
+// 9. WEB CRAWLER & CONTENT INGESTION (CHAPTER 6)
+// -------------------------------------------------------------
+app.get('/api/crawler/tasks', (req, res) => {
+  res.json({ success: true, tasks: store.crawlerTasks });
+});
+
+app.post('/api/crawler/tasks', (req, res) => {
+  const { name, targetDomain, startUrl, maxPages } = req.body;
+  if (!name || !targetDomain || !startUrl) {
+    return res.status(400).json({ success: false, error: 'Task name, targetDomain, and startUrl are required.' });
+  }
+  const task = store.createCrawlerTask(name, targetDomain, startUrl, maxPages);
+  res.json({ success: true, task });
+});
+
+app.post('/api/crawler/tasks/:id/run', (req, res) => {
+  const result = store.executeCrawl(req.params.id);
+  res.json(result);
+});
+
+app.get('/api/crawler/pages', (req, res) => {
+  res.json({ success: true, pages: store.crawledPages });
+});
+
+app.post('/api/crawler/pages/:id/approve', (req, res) => {
+  const approved = store.approveCrawledPage(req.params.id);
+  if (!approved) return res.status(404).json({ success: false, error: 'Page not found' });
+  res.json({ success: true, page: approved });
+});
+
+// -------------------------------------------------------------
+// 10. WEB BROWSER WORKSPACE & KNOWLEDGE BRIDGE (CHAPTER 7 & 8)
+// -------------------------------------------------------------
+app.get('/api/browser/bookmarks', (req, res) => {
+  res.json({ success: true, bookmarks: store.browserBookmarks });
+});
+
+app.post('/api/browser/bookmarks', (req, res) => {
+  const { title, url, category } = req.body;
+  if (!title || !url) return res.status(400).json({ success: false, error: 'Title and URL required' });
+  const bm = store.addBookmark({ title, url, category });
+  res.json({ success: true, bookmark: bm });
+});
+
+app.get('/api/browser/saved-articles', (req, res) => {
+  res.json({ success: true, articles: store.savedArticles });
+});
+
+app.post('/api/browser/save-article', (req, res) => {
+  const authUser = getAuthUser(req);
+  const saved = store.saveArticleToKnowledge(req.body, authUser?.id || 'guest');
+  res.json({ success: true, article: saved });
+});
+
+app.delete('/api/browser/saved-articles/:id', (req, res) => {
+  const deleted = store.deleteSavedArticle(req.params.id);
+  res.json({ success: deleted });
+});
+
+app.post('/api/browser/fetch-preview', async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ success: false, error: 'URL required' });
+
+  try {
+    let hostname = 'web';
+    try { hostname = new URL(url).hostname; } catch (e) {}
+
+    const title = `${hostname.toUpperCase()} Open Knowledge Portal`;
+    const cleanContent = `This is a secure preview of ${url}. EARTH ONE Web Browser provides sandboxed content extraction, Reader Mode, and AI-assisted comprehension. The article discusses open science, cultural exchanges, and global planetary stewardship.`;
+
+    res.json({
+      success: true,
+      url,
+      title,
+      hostname,
+      content: cleanContent,
+      author: `${hostname} Editorial Team`,
+      readTime: '3 min read'
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // -------------------------------------------------------------

@@ -12,9 +12,16 @@ import {
   GameRoom,
   Advertisement,
   GlobeCountryStat,
-  GlobeUserNode
+  GlobeUserNode,
+  Book,
+  BookAnnotation,
+  CrawlerTask,
+  CrawledPage,
+  BrowserBookmark,
+  SavedArticle
 } from '../src/types/index.ts';
 import { resolveCoordinates } from '../src/utils/geoData.ts';
+import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
 
 const DATA_FILE = path.resolve(process.cwd(), 'server_data.json');
 
@@ -496,6 +503,14 @@ class DataStore {
   accounts: Map<string, AuthAccount> = new Map(); // keyed by email, username, and userId
   sessions: Map<string, string> = new Map(); // token -> userId
 
+  // Digital Library & Ingestion collections
+  books: Book[] = [];
+  bookAnnotations: BookAnnotation[] = [];
+  crawlerTasks: CrawlerTask[] = [];
+  crawledPages: CrawledPage[] = [];
+  browserBookmarks: BrowserBookmark[] = [];
+  savedArticles: SavedArticle[] = [];
+
   constructor() {
     if (!this.loadFromDisk()) {
       this.initSeedData();
@@ -526,6 +541,12 @@ class DataStore {
         gameRooms: this.gameRooms,
         ads: this.ads,
         countries: this.countries,
+        books: this.books,
+        bookAnnotations: this.bookAnnotations,
+        crawlerTasks: this.crawlerTasks,
+        crawledPages: this.crawledPages,
+        browserBookmarks: this.browserBookmarks,
+        savedArticles: this.savedArticles,
         currentUser: this.currentUser,
         accounts: serializableAccounts,
         sessions: serializableSessions,
@@ -557,6 +578,12 @@ class DataStore {
       this.gameRooms = data.gameRooms || [];
       this.ads = data.ads || [];
       this.countries = data.countries || [...SEED_COUNTRIES];
+      this.books = data.books && data.books.length > 0 ? data.books : [...SEED_BOOKS];
+      this.bookAnnotations = data.bookAnnotations || [];
+      this.crawlerTasks = data.crawlerTasks && data.crawlerTasks.length > 0 ? data.crawlerTasks : [...SEED_CRAWLER_TASKS];
+      this.crawledPages = data.crawledPages && data.crawledPages.length > 0 ? data.crawledPages : [...SEED_CRAWLED_PAGES];
+      this.browserBookmarks = data.browserBookmarks || [];
+      this.savedArticles = data.savedArticles || [];
       this.currentUser = data.currentUser || this.users[0];
 
       this.accounts.clear();
@@ -588,6 +615,17 @@ class DataStore {
     this.communities = [...SEED_COMMUNITIES];
     this.ads = [...SEED_ADS];
     this.countries = [...SEED_COUNTRIES];
+    this.books = [...SEED_BOOKS];
+    this.bookAnnotations = [];
+    this.crawlerTasks = [...SEED_CRAWLER_TASKS];
+    this.crawledPages = [...SEED_CRAWLED_PAGES];
+    this.browserBookmarks = [
+      { id: 'bm_1', title: 'NASA Earth Observatory', url: 'https://earthobservatory.nasa.gov', category: 'Science', createdAt: new Date().toISOString() },
+      { id: 'bm_2', title: 'Project Gutenberg', url: 'https://www.gutenberg.org', category: 'Library', createdAt: new Date().toISOString() },
+      { id: 'bm_3', title: 'arXiv Astrophysics', url: 'https://arxiv.org/archive/astro-ph', category: 'Research', createdAt: new Date().toISOString() },
+      { id: 'bm_4', title: 'Stanford Encyclopedia of Philosophy', url: 'https://plato.stanford.edu', category: 'Philosophy', createdAt: new Date().toISOString() }
+    ];
+    this.savedArticles = [];
 
     // Seed authentication accounts with default password 'password123'
     const defaultSalt = 'earth_one_salt_2026';
@@ -1083,6 +1121,150 @@ class DataStore {
 
     this.saveToDisk();
     return user;
+  }
+
+  // Digital Library Methods
+  updateReadingProgress(bookId: string, progress: number): Book | null {
+    const book = this.books.find(b => b.id === bookId);
+    if (!book) return null;
+    book.readProgress = Math.min(100, Math.max(0, progress));
+    this.saveToDisk();
+    return book;
+  }
+
+  addAnnotation(bookId: string, chapterId: string, selectedText: string, note: string, aiExplanation?: string): BookAnnotation {
+    const ann: BookAnnotation = {
+      id: `ann_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      bookId,
+      chapterId,
+      selectedText,
+      note,
+      aiExplanation,
+      createdAt: new Date().toISOString()
+    };
+    this.bookAnnotations.push(ann);
+    this.saveToDisk();
+    return ann;
+  }
+
+  getAnnotations(bookId: string): BookAnnotation[] {
+    return this.bookAnnotations.filter(a => a.bookId === bookId);
+  }
+
+  // Web Crawler Methods
+  createCrawlerTask(name: string, targetDomain: string, startUrl: string, maxPages: number = 25): CrawlerTask {
+    const task: CrawlerTask = {
+      id: `task_${Date.now()}`,
+      name,
+      targetDomain,
+      startUrl,
+      maxPages,
+      status: 'idle',
+      pagesCrawled: 0,
+      respectsRobotsTxt: true
+    };
+    this.crawlerTasks.unshift(task);
+    this.saveToDisk();
+    return task;
+  }
+
+  executeCrawl(taskId: string): { success: boolean; newPagesCount: number; error?: string } {
+    const task = this.crawlerTasks.find(t => t.id === taskId);
+    if (!task) return { success: false, newPagesCount: 0, error: 'Task not found' };
+
+    task.status = 'running';
+    task.lastRunAt = new Date().toISOString();
+
+    const mockExtracted = [
+      {
+        id: `crawled_${Date.now()}_1`,
+        taskId: task.id,
+        url: `${task.startUrl}/article/global-sustainability-2026`,
+        title: `${task.name} - Global Planetary Biosphere Dynamics`,
+        author: `${task.targetDomain} Editorial Staff`,
+        cleanContent: `Autonomous satellite observation systems monitor Earth's terrestrial photosynthetic productivity and oceanic current thermoclines. Open scientific collaboration across 190 nations is essential for managing shared atmospheric resources.`,
+        crawledAt: new Date().toISOString(),
+        status: 'pending_review' as const
+      }
+    ];
+
+    this.crawledPages.unshift(...mockExtracted);
+    task.pagesCrawled += mockExtracted.length;
+    task.status = 'completed';
+    this.saveToDisk();
+
+    return { success: true, newPagesCount: mockExtracted.length };
+  }
+
+  approveCrawledPage(pageId: string): CrawledPage | null {
+    const page = this.crawledPages.find(p => p.id === pageId);
+    if (!page) return null;
+    page.status = 'approved';
+
+    // Ingest into Digital Library
+    const book: Book = {
+      id: `ingested_${page.id}`,
+      title: page.title,
+      author: page.author,
+      category: 'science',
+      language: 'en',
+      source: 'Open Access',
+      coverImage: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&auto=format&fit=crop&q=80',
+      description: `Ingested from ${page.url} via EARTH ONE Ingestion Core.`,
+      readProgress: 0,
+      chapters: [
+        {
+          id: 'ch1',
+          title: 'Full Ingested Text',
+          content: page.cleanContent
+        }
+      ]
+    };
+
+    this.books.unshift(book);
+    this.saveToDisk();
+    return page;
+  }
+
+  // Web Browser Methods
+  addBookmark(bm: { title: string; url: string; category?: string }): BrowserBookmark {
+    const bookmark: BrowserBookmark = {
+      id: `bm_${Date.now()}`,
+      title: bm.title,
+      url: bm.url,
+      category: bm.category || 'General',
+      createdAt: new Date().toISOString()
+    };
+    this.browserBookmarks.unshift(bookmark);
+    this.saveToDisk();
+    return bookmark;
+  }
+
+  saveArticleToKnowledge(articleData: Partial<SavedArticle>, userId: string): SavedArticle {
+    const saved: SavedArticle = {
+      id: `art_${Date.now()}`,
+      url: articleData.url || '',
+      title: articleData.title || 'Untitled Web Harvest',
+      author: articleData.author || 'Web Author',
+      content: articleData.content || '',
+      aiSummary: articleData.aiSummary || '',
+      savedAt: new Date().toISOString(),
+      tags: articleData.tags || ['Web Knowledge'],
+      userId
+    };
+    this.savedArticles.unshift(saved);
+    this.saveToDisk();
+    return saved;
+  }
+
+  deleteSavedArticle(id: string): boolean {
+    const initial = this.savedArticles.length;
+    this.savedArticles = this.savedArticles.filter(a => a.id !== id);
+    if (this.savedArticles.length !== initial) {
+      this.saveToDisk();
+      return true;
+    }
+    return false;
   }
 }
 

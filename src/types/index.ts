@@ -218,3 +218,76 @@ export interface GlobeCountryStat {
   onlineCount: number;
   postsCount: number;
 }
+
+export interface Chapter {
+  id: string;
+  title: string;
+  content: string;
+}
+
+export interface Book {
+  id: string;
+  title: string;
+  author: string;
+  category: 'literature' | 'history' | 'philosophy' | 'science' | 'geography' | 'languages' | 'education' | 'religion' | 'islamic_studies' | 'computer_science' | 'ai' | 'economics' | 'social_sciences';
+  language: string;
+  year?: string;
+  source: 'Project Gutenberg' | 'Internet Archive' | 'Open Library' | 'Open Access';
+  coverImage?: string;
+  description: string;
+  readProgress: number;
+  chapters: Chapter[];
+}
+
+export interface BookAnnotation {
+  id: string;
+  bookId: string;
+  chapterId: string;
+  selectedText: string;
+  note: string;
+  aiExplanation?: string;
+  createdAt: string;
+}
+
+export interface CrawlerTask {
+  id: string;
+  name: string;
+  targetDomain: string;
+  startUrl: string;
+  maxPages: number;
+  status: 'idle' | 'running' | 'completed' | 'error';
+  lastRunAt?: string;
+  pagesCrawled: number;
+  respectsRobotsTxt: boolean;
+}
+
+export interface CrawledPage {
+  id: string;
+  taskId: string;
+  url: string;
+  title: string;
+  author: string;
+  cleanContent: string;
+  crawledAt: string;
+  status: 'pending_review' | 'approved' | 'rejected';
+}
+
+export interface BrowserBookmark {
+  id: string;
+  title: string;
+  url: string;
+  category: string;
+  createdAt: string;
+}
+
+export interface SavedArticle {
+  id: string;
+  url: string;
+  title: string;
+  author: string;
+  content: string;
+  aiSummary: string;
+  savedAt: string;
+  tags: string[];
+  userId: string;
+}

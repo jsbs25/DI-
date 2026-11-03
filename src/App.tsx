@@ -24,6 +24,9 @@ import { UserProfileModal } from './components/profile/UserProfileModal.tsx';
 import { LuxuryAdBanner } from './components/commercial/LuxuryAdBanner.tsx';
 import { AuthModal } from './components/auth/AuthModal.tsx';
 import { OnboardingModal } from './components/auth/OnboardingModal.tsx';
+import { DigitalLibrary } from './components/library/DigitalLibrary.tsx';
+import { WebBrowser } from './components/browser/WebBrowser.tsx';
+import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
 import { UniverseEngine } from './universe/UniverseEngine.tsx';
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 
@@ -444,6 +447,12 @@ export default function App() {
         )}
 
         {currentTab === 'aihub' && <AIHub lang={lang} />}
+
+        {currentTab === 'library' && <DigitalLibrary lang={lang} />}
+
+        {currentTab === 'browser' && <WebBrowser lang={lang} />}
+
+        {currentTab === 'crawler' && <CrawlerDashboard lang={lang} />}
 
         {currentTab === 'creator' && (
           <CreatorHub
