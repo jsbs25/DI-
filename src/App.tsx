@@ -449,7 +449,7 @@ export default function App() {
 
         {currentTab === 'aihub' && <AIHub lang={lang} />}
 
-        {currentTab === 'library' && <DigitalLibrary lang={lang} />}
+        {currentTab === 'library' && <DigitalLibrary lang={lang} currentUser={currentUser} />}
 
         {currentTab === 'browser' && <WebBrowser lang={lang} />}
 

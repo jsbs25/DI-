@@ -225,18 +225,56 @@ export interface Chapter {
   content: string;
 }
 
+export type BookCategory =
+  | 'literature'
+  | 'history'
+  | 'philosophy'
+  | 'science'
+  | 'geography'
+  | 'languages'
+  | 'education'
+  | 'religion'
+  | 'islamic_studies'
+  | 'computer_science'
+  | 'ai'
+  | 'economics'
+  | 'social_sciences';
+
+export type BookCopyrightStatus = 'public_domain' | 'open_access' | 'licensed' | 'copyrighted';
+
 export interface Book {
   id: string;
   title: string;
   author: string;
-  category: 'literature' | 'history' | 'philosophy' | 'science' | 'geography' | 'languages' | 'education' | 'religion' | 'islamic_studies' | 'computer_science' | 'ai' | 'economics' | 'social_sciences';
+  category: BookCategory;
   language: string;
+  originalLanguage?: string;
   year?: string;
+  publisher?: string;
+  isbn?: string;
   source: 'Project Gutenberg' | 'Internet Archive' | 'Open Library' | 'Open Access';
   coverImage?: string;
   description: string;
   readProgress: number;
   chapters: Chapter[];
+  copyrightStatus?: BookCopyrightStatus;
+  formatType?: 'text' | 'epub' | 'pdf';
+  /** External link to a legally accessible resource (read/borrow/download). */
+  externalReadUrl?: string;
+  /** Comma-separated subject tags. */
+  subjects?: string;
+}
+
+export type BookshelfStatus = 'reading' | 'finished' | 'want_to_read' | 'favorite';
+
+export interface BookShelfItem {
+  id: string;
+  userId: string;
+  bookId: string;
+  status: BookshelfStatus;
+  progress: number; // 0-100
+  savedAt: string;
+  updatedAt: string;
 }
 
 export interface BookAnnotation {

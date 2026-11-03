@@ -15,6 +15,8 @@ import {
   GlobeUserNode,
   Book,
   BookAnnotation,
+  BookShelfItem,
+  BookshelfStatus,
   CrawlerTask,
   CrawledPage,
   BrowserBookmark,
@@ -507,6 +509,7 @@ class DataStore {
   // Digital Library & Ingestion collections
   books: Book[] = [];
   bookAnnotations: BookAnnotation[] = [];
+  bookShelf: BookShelfItem[] = [];
   crawlerTasks: CrawlerTask[] = [];
   crawledPages: CrawledPage[] = [];
   browserBookmarks: BrowserBookmark[] = [];
@@ -544,6 +547,7 @@ class DataStore {
         countries: this.countries,
         books: this.books,
         bookAnnotations: this.bookAnnotations,
+        bookShelf: this.bookShelf,
         crawlerTasks: this.crawlerTasks,
         crawledPages: this.crawledPages,
         browserBookmarks: this.browserBookmarks,
@@ -581,6 +585,7 @@ class DataStore {
       this.countries = data.countries || [...SEED_COUNTRIES];
       this.books = data.books && data.books.length > 0 ? data.books : [...SEED_BOOKS];
       this.bookAnnotations = data.bookAnnotations || [];
+      this.bookShelf = data.bookShelf || [];
       this.crawlerTasks = data.crawlerTasks && data.crawlerTasks.length > 0 ? data.crawlerTasks : [...SEED_CRAWLER_TASKS];
       this.crawledPages = data.crawledPages && data.crawledPages.length > 0 ? data.crawledPages : [...SEED_CRAWLED_PAGES];
       this.browserBookmarks = data.browserBookmarks || [];
@@ -1146,6 +1151,55 @@ class DataStore {
     book.readProgress = Math.min(100, Math.max(0, progress));
     this.saveToDisk();
     return book;
+  }
+
+  // ---- Personal Bookshelf Methods ----
+  getBookShelf(userId: string): BookShelfItem[] {
+    return this.bookShelf.filter(s => s.userId === userId);
+  }
+
+  addToBookShelf(userId: string, bookId: string, status: BookshelfStatus = 'want_to_read'): BookShelfItem {
+    const existing = this.bookShelf.find(s => s.userId === userId && s.bookId === bookId);
+    if (existing) {
+      existing.status = status;
+      existing.updatedAt = new Date().toISOString();
+      this.saveToDisk();
+      return existing;
+    }
+    const item: BookShelfItem = {
+      id: `shelf_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      userId,
+      bookId,
+      status,
+      progress: 0,
+      savedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    this.bookShelf.push(item);
+    this.saveToDisk();
+    return item;
+  }
+
+  removeFromBookShelf(userId: string, bookId: string): boolean {
+    const initial = this.bookShelf.length;
+    this.bookShelf = this.bookShelf.filter(s => !(s.userId === userId && s.bookId === bookId));
+    if (this.bookShelf.length !== initial) {
+      this.saveToDisk();
+      return true;
+    }
+    return false;
+  }
+
+  updateBookShelfProgress(userId: string, bookId: string, progress: number): BookShelfItem | null {
+    const item = this.bookShelf.find(s => s.userId === userId && s.bookId === bookId);
+    if (!item) return null;
+    item.progress = Math.min(100, Math.max(0, progress));
+    item.updatedAt = new Date().toISOString();
+    if (progress >= 100 && item.status !== 'finished') {
+      item.status = 'finished';
+    }
+    this.saveToDisk();
+    return item;
   }
 
   addAnnotation(bookId: string, chapterId: string, selectedText: string, note: string, aiExplanation?: string): BookAnnotation {

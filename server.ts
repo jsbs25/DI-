@@ -501,6 +501,42 @@ app.post('/api/library/ingest', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// Personal bookshelf
+// -------------------------------------------------------------
+app.get('/api/library/shelf', (req, res) => {
+  const user = getAuthUser(req);
+  const items = store.getBookShelf(user.id);
+  const books = items
+    .map(item => {
+      const book = store.books.find(b => b.id === item.bookId);
+      return book ? { ...item, book } : null;
+    })
+    .filter(Boolean);
+  res.json({ success: true, items: books });
+});
+
+app.post('/api/library/shelf', (req, res) => {
+  const user = getAuthUser(req);
+  const { bookId, status } = req.body;
+  if (!bookId) return res.status(400).json({ success: false, error: 'bookId required' });
+  const item = store.addToBookShelf(user.id, bookId, status || 'want_to_read');
+  res.json({ success: true, item });
+});
+
+app.delete('/api/library/shelf/:bookId', (req, res) => {
+  const user = getAuthUser(req);
+  const removed = store.removeFromBookShelf(user.id, req.params.bookId);
+  res.json({ success: removed });
+});
+
+app.post('/api/library/shelf/:bookId/progress', (req, res) => {
+  const user = getAuthUser(req);
+  const { progress } = req.body;
+  const item = store.updateBookShelfProgress(user.id, req.params.bookId, Number(progress) || 0);
+  res.json({ success: !!item, item });
+});
+
 app.get('/api/library/books', (req, res) => {
   const { category, search } = req.query;
   let books = store.books;
