@@ -1125,6 +1125,21 @@ class DataStore {
   }
 
   // Digital Library Methods
+  addBook(book: Book): Book {
+    const existing = this.books.find(b => b.id === book.id);
+    if (existing) {
+      // Refresh content but keep reading progress
+      existing.chapters = book.chapters;
+      existing.description = book.description;
+      existing.coverImage = book.coverImage || existing.coverImage;
+      this.saveToDisk();
+      return existing;
+    }
+    this.books.unshift(book);
+    this.saveToDisk();
+    return book;
+  }
+
   updateReadingProgress(bookId: string, progress: number): Book | null {
     const book = this.books.find(b => b.id === bookId);
     if (!book) return null;

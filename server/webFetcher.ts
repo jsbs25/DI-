@@ -494,3 +494,116 @@ function isDisallowed(pathname: string, disallowed: string[]): boolean {
     return pathname.startsWith(pattern);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Book search & full-text retrieval (Project Gutenberg via Gutendex)
+// ---------------------------------------------------------------------------
+
+export interface BookSearchResult {
+  id: string;
+  title: string;
+  author: string;
+  language: string;
+  coverImage?: string;
+  description: string;
+  year?: string;
+  textUrl?: string;
+}
+
+const GUTENDEX_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 EARTH-ONE-Library/1.0';
+
+/**
+ * Search public-domain books by title/author via Gutendex (Project Gutenberg
+ * JSON API). Returns metadata + the plain-text URL used to fetch full content.
+ */
+export async function searchBooks(query: string, limit = 12): Promise<BookSearchResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    // Note: use /books/ (trailing slash) — Gutendex 301-redirects /books to /books/
+    const res = await fetch(
+      `https://gutendex.com/books/?search=${encodeURIComponent(q)}`,
+      { headers: { 'User-Agent': GUTENDEX_USER_AGENT, Accept: 'application/json' }, signal: controller.signal }
+    );
+    clearTimeout(timer);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    const results: any[] = data?.results || [];
+
+    return results.slice(0, limit).map((r: any) => {
+      const formats: Record<string, string> = r.formats || {};
+      // Prefer UTF-8 plain text, then any text/plain variant
+      const textUrl =
+        formats['text/plain; charset=utf-8'] ||
+        formats['text/plain'] ||
+        formats['text/plain; charset=us-ascii'] ||
+        undefined;
+
+      const author = r.authors?.[0]?.name || 'Unknown Author';
+      const summary = (r.summaries?.[0] || '').replace(/\s+/g, ' ').trim();
+
+      return {
+        id: `gutenberg_${r.id}`,
+        title: r.title || 'Untitled',
+        author,
+        language: r.languages?.[0] || 'en',
+        coverImage: formats['image/jpeg'] || undefined,
+        description: summary.slice(0, 300) || `A public-domain work by ${author}.`,
+        year: r.authors?.[0]?.birth_year ? undefined : undefined,
+        textUrl
+      };
+    }).filter(b => b.textUrl); // only books we can actually read aloud
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Download a book's full plain text and split it into chapters.
+ * Gutenberg texts use clear structural markers; we chunk into ~8 chapters
+ * for comfortable reading/recitation, and strip the license header/footer.
+ */
+export async function fetchBookFullText(textUrl: string): Promise<{ title: string; author: string; chapters: { title: string; content: string }[] }> {
+  const raw = await fetchText(textUrl, 15000);
+
+  // Strip Gutenberg header (up to the first "*** START" marker) and footer
+  let body = raw;
+  const startMatch = raw.match(/\*\*\*\s*START[^*]*\*\*\*/i);
+  if (startMatch && startMatch.index !== undefined) {
+    body = raw.slice(startMatch.index + startMatch[0].length);
+  }
+  const endMatch = body.match(/\*\*\*\s*END[^*]*\*\*\*/i);
+  if (endMatch && endMatch.index !== undefined) {
+    body = body.slice(0, endMatch.index);
+  }
+
+  body = body.replace(/\r\n/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+
+  // Extract title/author from the header portion
+  const header = raw.slice(0, 2000);
+  const titleMatch = header.match(/Title:\s*(.+)/i);
+  const authorMatch = header.match(/Author:\s*(.+)/i);
+  const title = titleMatch?.[1]?.trim() || 'Untitled Book';
+  const author = authorMatch?.[1]?.trim() || 'Unknown Author';
+
+  // Split into chapters by blank-line paragraphs, grouped into ~8 chunks
+  const paragraphs = body.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 20);
+  const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 8));
+  const chapters: { title: string; content: string }[] = [];
+
+  for (let i = 0; i < paragraphs.length; i += chunkSize) {
+    const chunk = paragraphs.slice(i, i + chunkSize);
+    chapters.push({
+      title: `Chapter ${chapters.length + 1}`,
+      content: chunk.join('\n\n')
+    });
+  }
+
+  // Cap at 8 chapters to keep storage/reading reasonable
+  return { title, author, chapters: chapters.slice(0, 8) };
+}
