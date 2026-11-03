@@ -1,0 +1,47 @@
+# EARTH ONE CHANGELOG
+
+## [v1.1.0] - Secure Authentication & Citizen Onboarding Wizard - 2026-11-03
+
+### Added
+- **Secure Authentication System**:
+  - Full registration (`/api/auth/register`) and login (`/api/auth/login`) with SHA-256 password hashing + dynamic salt.
+  - Session verification (`/api/auth/me`) and secure logout (`/api/auth/logout`).
+  - Fast 1-click test credentials for preset global citizens (Li Wei, Sarah, Tariq, Noura, Julien, Dmitry).
+- **Post-Registration Profile Onboarding Wizard**:
+  - 3-step interactive onboarding modal (`OnboardingModal.tsx`):
+    - **Step 1 (Identity)**: Setting unique `@username`, display name, and avatar selection from 8 artistic presets or custom URL.
+    - **Step 2 (Planetary Location)**: Country selection, city resolution, and toggleable public 3D Earth beacon visibility with real-time latitude/longitude mapping.
+    - **Step 3 (Perspective)**: Personal bio and intellectual/cultural interest tags.
+  - Automated post-onboarding 3D Earth launch: switches to 3D Globe, highlights user's personal beacon with emerald-gold illumination, and glides the camera smoothly directly to their city!
+- **AI Hub Google Search Grounding**:
+  - Real-time live web verification with `gemini-3.8-flash` utilizing the `googleSearch` tool and returning citation sources.
+
+## [v1.0.0] - Initial Production Foundation - 2026-11-03
+
+### Added
+- **Interactive 3D Digital Globe**:
+  - Three.js procedural sphere with continent outlines, coordinate meridians, night-side city constellations.
+  - Rayleigh scattering atmospheric rim glow shader and dual-layer rotating cloud mesh.
+  - Interactive 3D pins for registered citizens with raycasted tooltips and camera flight.
+  - Curved 3D data arcs connecting world metropolises with traveling photon packets.
+  - Collapsible bottom control dock with auto-rotation, reset, and quick country exploration.
+- **Unified Global Social Network**:
+  - Global, Trending, Latest, and Following feeds.
+  - Category filters: Real Life, Culture, Tech, Travel, Philosophy.
+  - Rich post composer with media previews, country badges, likes, comments, and voluntary tipping.
+- **Global Instant Messaging & Real-Time AI Translation**:
+  - Real-time 1-on-1 and public channels.
+  - AI translation powered by Google Gemini 2.5 with one-click "View Original / 查看原文" toggle.
+- **Creator Hub & Planetary Video Stream**:
+  - Long-form essays with reading metrics and creator tipping.
+  - Streamlined video showcase with view and like counts.
+- **Global Game Center**:
+  - Interactive 13x13 Gomoku (Five-in-a-Row) game with win verification and AI opponent.
+  - Global Trivia Quiz covering world geography and planetary science.
+- **EARTH ONE AI HUB**:
+  - Multi-model gateway integrating Gemini 2.5 Flash and Pro.
+  - 4 specialized operating modes: Global Assistant, Polyglot Translator, Creator Co-Author, Language Coach.
+- **Multilingual & RTL Engine**:
+  - Full translations for Chinese, English, Arabic (with RTL bidirectional layout), Spanish, French, and Russian.
+- **Complete Documentation Suite**:
+  - `PROJECT_MASTER_PLAN.md`, `ARCHITECTURE.md`, `DATABASE_SCHEMA.md`, `API_DOCUMENTATION.md`, `DESIGN_SYSTEM.md`, `OPEN_SOURCE_AUDIT.md`, `LICENSE_COMPLIANCE.md`, `AI_HUB_ARCHITECTURE.md`, `SECURITY.md`, `DEVELOPMENT_ROADMAP.md`, `CHANGELOG.md`, `README.md`.

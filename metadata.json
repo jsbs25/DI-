@@ -1,0 +1,6 @@
+{
+  "name": "EARTH ONE",
+  "description": "The Next Generation Global Digital World - One Earth. One World. One Humanity. Interactive 3D Digital Globe, Global Social Network, Real-Time AI Translation, Creator Hub, and Multi-Model AI Ecosystem.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
