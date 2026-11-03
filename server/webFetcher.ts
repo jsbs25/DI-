@@ -508,6 +508,7 @@ export interface BookSearchResult {
   description: string;
   year?: string;
   textUrl?: string;
+  epubUrl?: string;
   source: 'gutenberg' | 'wikisource';
   pageTitle?: string; // wikisource page title for full-text retrieval
 }
@@ -545,6 +546,7 @@ export async function searchBooks(query: string, limit = 12): Promise<BookSearch
         formats['text/plain'] ||
         formats['text/plain; charset=us-ascii'] ||
         undefined;
+      const epubUrl = formats['application/epub+zip'] || undefined;
 
       const author = r.authors?.[0]?.name || 'Unknown Author';
       const summary = (r.summaries?.[0] || '').replace(/\s+/g, ' ').trim();
@@ -558,9 +560,10 @@ export async function searchBooks(query: string, limit = 12): Promise<BookSearch
         description: summary.slice(0, 300) || `A public-domain work by ${author}.`,
         year: r.authors?.[0]?.birth_year ? undefined : undefined,
         textUrl,
+        epubUrl,
         source: 'gutenberg' as const
       };
-    }).filter(b => b.textUrl); // only books we can actually read aloud
+    }).filter(b => b.textUrl || b.epubUrl); // only books we can actually read
   } catch {
     return [];
   }

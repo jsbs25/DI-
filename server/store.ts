@@ -1145,6 +1145,26 @@ class DataStore {
     return book;
   }
 
+  updateBook(bookId: string, updates: Partial<Book>): Book | null {
+    const book = this.books.find(b => b.id === bookId);
+    if (!book) return null;
+    Object.assign(book, updates);
+    this.saveToDisk();
+    return book;
+  }
+
+  deleteBook(bookId: string): boolean {
+    const initial = this.books.length;
+    this.books = this.books.filter(b => b.id !== bookId);
+    this.bookShelf = this.bookShelf.filter(s => s.bookId !== bookId);
+    this.bookAnnotations = this.bookAnnotations.filter(a => a.bookId !== bookId);
+    if (this.books.length !== initial) {
+      this.saveToDisk();
+      return true;
+    }
+    return false;
+  }
+
   updateReadingProgress(bookId: string, progress: number): Book | null {
     const book = this.books.find(b => b.id === bookId);
     if (!book) return null;

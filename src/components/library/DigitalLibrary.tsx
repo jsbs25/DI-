@@ -27,6 +27,8 @@ import {
   User
 } from 'lucide-react';
 import { Book, Chapter, BookAnnotation, BookShelfItem, BookshelfStatus, Language } from '../../types/index.ts';
+import { EpubReader } from './EpubReader.tsx';
+import { AdminLibrary } from './AdminLibrary.tsx';
 
 interface DigitalLibraryProps {
   lang: Language;
@@ -57,7 +59,7 @@ const SHELF_TABS: { id: BookshelfStatus | 'all'; label: string }[] = [
 
 export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUser }) => {
   // ---- View routing ----
-  const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf'>('home');
+  const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf' | 'admin'>('home');
   const [activeCategory, setActiveCategory] = useState<string>('all');
 
   // ---- Data ----
@@ -68,7 +70,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
   // ---- Online search ----
   const [onlineResults, setOnlineResults] = useState<
-    Array<{ id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; source: string; pageTitle?: string }>
+    Array<{ id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; epubUrl?: string; source: string; pageTitle?: string }>
   >([]);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
@@ -80,6 +82,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
   // ---- Reader modal ----
   const [readingBook, setReadingBook] = useState<Book | null>(null);
+  const [readingEpub, setReadingEpub] = useState<Book | null>(null);
   const [activeChapterIndex, setActiveChapterIndex] = useState(0);
   const [fontSize, setFontSize] = useState<number>(18);
   const [lineHeight, setLineHeight] = useState<number>(1.9);
@@ -161,8 +164,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
   };
 
-  const handleIngestBook = async (r: { id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; source: string; pageTitle?: string }) => {
-    if ((!r.textUrl && !r.pageTitle) || ingestingId) return;
+  const handleIngestBook = async (r: { id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; epubUrl?: string; source: string; pageTitle?: string }) => {
+    if ((!r.textUrl && !r.pageTitle && !r.epubUrl) || ingestingId) return;
     setIngestingId(r.id);
     setIngestError(null);
     try {
@@ -172,6 +175,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         body: JSON.stringify({
           textUrl: r.textUrl,
           pageTitle: r.pageTitle,
+          epubUrl: r.epubUrl,
           source: r.source,
           title: r.title,
           author: r.author,
@@ -201,6 +205,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   // Reader
   // =========================================================================
   const openReader = (book: Book) => {
+    // EPUB books use the epub.js reader; text books use the chapter reader
+    if (book.epubUrl) {
+      setReadingEpub(book);
+      return;
+    }
     setReadingBook(book);
     setActiveChapterIndex(0);
     setAiExplanation(null);
@@ -427,7 +436,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           <nav className="hidden md:flex items-center space-x-1 text-xs font-medium">
             {[
               { id: 'home', label: '首页' },
-              { id: 'shelf', label: '我的书架' }
+              { id: 'shelf', label: '我的书架' },
+              { id: 'admin', label: '管理' }
             ].map(n => (
               <button
                 key={n.id}
@@ -786,6 +796,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       )}
 
       {/* ===================================================================== */}
+      {/* ADMIN VIEW                                                           */}
+      {/* ===================================================================== */}
+      {view === 'admin' && <AdminLibrary onBack={() => setView('home')} />}
+
+      {/* ===================================================================== */}
       {/* READER MODAL                                                         */}
       {/* ===================================================================== */}
       {readingBook && activeChapter && (
@@ -987,6 +1002,13 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             )}
           </div>
         </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* EPUB READER                                                          */}
+      {/* ===================================================================== */}
+      {readingEpub && (
+        <EpubReader book={readingEpub} onClose={() => setReadingEpub(null)} />
       )}
     </div>
   );

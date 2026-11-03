@@ -459,7 +459,7 @@ app.get('/api/library/search', async (req, res) => {
 
 // Download a book's full text and save it to the library
 app.post('/api/library/ingest', async (req, res) => {
-  const { textUrl, pageTitle, source, title, author, coverImage, description, language } = req.body;
+  const { textUrl, pageTitle, epubUrl, source, title, author, coverImage, description, language } = req.body;
 
   try {
     let fullText: { title: string; author: string; chapters: { title: string; content: string }[] };
@@ -474,8 +474,13 @@ app.post('/api/library/ingest', async (req, res) => {
       fullText = await fetchBookFullText(textUrl);
       bookId = `gutenberg_${Date.now()}`;
       sourceLabel = 'Project Gutenberg';
+    } else if (epubUrl) {
+      // EPUB-only book (no plain text) — create a minimal placeholder
+      fullText = { title: title || 'Untitled', author: author || 'Unknown', chapters: [] };
+      bookId = `gutenberg_${Date.now()}`;
+      sourceLabel = 'Project Gutenberg';
     } else {
-      return res.status(400).json({ success: false, error: 'textUrl or pageTitle required' });
+      return res.status(400).json({ success: false, error: 'textUrl, pageTitle, or epubUrl required' });
     }
 
     const book: import('./src/types/index.ts').Book = {
@@ -492,13 +497,78 @@ app.post('/api/library/ingest', async (req, res) => {
         id: `ch${i + 1}`,
         title: ch.title,
         content: ch.content
-      }))
+      })),
+      epubUrl: epubUrl || undefined,
+      formatType: epubUrl ? 'epub' : 'text',
+      copyrightStatus: 'public_domain'
     };
     const saved = store.addBook(book);
     res.json({ success: true, book: saved });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Failed to ingest book' });
   }
+});
+
+// EPUB proxy: download an EPUB from a legal source and stream it back
+// (same-origin) so the browser epub.js reader is not blocked by CORS.
+app.get('/api/library/epub-proxy', async (req, res) => {
+  const { url } = req.query;
+  if (!url || typeof url !== 'string') {
+    return res.status(400).json({ success: false, error: 'url required' });
+  }
+  // Only allow known legal public-domain hosts
+  let host: string;
+  try { host = new URL(url).hostname; } catch { return res.status(400).json({ success: false, error: 'Invalid URL' }); }
+  const allowed = ['www.gutenberg.org', 'gutenberg.org', 'archive.org', 'openlibrary.org'];
+  if (!allowed.some(h => host === h || host.endsWith('.' + h))) {
+    return res.status(403).json({ success: false, error: 'Host not allowed' });
+  }
+
+  try {
+    const upstream = await fetch(url, { headers: { 'User-Agent': 'EARTH-ONE-Library/1.0' } });
+    if (!upstream.ok || !upstream.body) {
+      return res.status(502).json({ success: false, error: `Upstream ${upstream.status}` });
+    }
+    res.setHeader('Content-Type', 'application/epub+zip');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    // Stream the bytes to the client
+    const reader = upstream.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    res.end();
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err.message || 'EPUB proxy failed' });
+  }
+});
+
+// -------------------------------------------------------------
+// Admin library management
+// -------------------------------------------------------------
+app.put('/api/library/books/:id', (req, res) => {
+  const { title, author, category, language, year, publisher, isbn, description, coverImage, copyrightStatus, source } = req.body;
+  const updates: Partial<import('./src/types/index.ts').Book> = {};
+  if (title !== undefined) updates.title = title;
+  if (author !== undefined) updates.author = author;
+  if (category !== undefined) updates.category = category;
+  if (language !== undefined) updates.language = language;
+  if (year !== undefined) updates.year = year;
+  if (publisher !== undefined) updates.publisher = publisher;
+  if (isbn !== undefined) updates.isbn = isbn;
+  if (description !== undefined) updates.description = description;
+  if (coverImage !== undefined) updates.coverImage = coverImage;
+  if (copyrightStatus !== undefined) updates.copyrightStatus = copyrightStatus;
+  if (source !== undefined) updates.source = source;
+  const updated = store.updateBook(req.params.id, updates);
+  if (!updated) return res.status(404).json({ success: false, error: 'Book not found' });
+  res.json({ success: true, book: updated });
+});
+
+app.delete('/api/library/books/:id', (req, res) => {
+  const removed = store.deleteBook(req.params.id);
+  res.json({ success: removed });
 });
 
 // -------------------------------------------------------------

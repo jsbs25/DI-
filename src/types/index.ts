@@ -261,6 +261,8 @@ export interface Book {
   formatType?: 'text' | 'epub' | 'pdf';
   /** External link to a legally accessible resource (read/borrow/download). */
   externalReadUrl?: string;
+  /** EPUB download URL (served via backend proxy to avoid CORS). */
+  epubUrl?: string;
   /** Comma-separated subject tags. */
   subjects?: string;
 }
