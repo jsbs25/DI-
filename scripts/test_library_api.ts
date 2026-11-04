@@ -380,6 +380,33 @@ async function main() {
       invalidEpubState.status === 400 && invalidEpubState.body.success === false,
       'EPUB reading-state API rejects malformed CFI locations'
     );
+    const invalidParsedCfi = await post('/api/library/shelf/book_republic/epub-reading-state', {
+      cfi: 'epubcfi(/6/4!/4/2:NaN)',
+      progress: 63,
+      ownerId: accountA.body.user.id
+    }, accountA.body.token);
+    check(
+      invalidParsedCfi.status === 400 && invalidParsedCfi.body.success === false,
+      'EPUB reading-state API parses CFI syntax and rejects invalid character offsets'
+    );
+    const oversizedCfi = await post('/api/library/shelf/book_republic/epub-reading-state', {
+      cfi: `epubcfi(/6/4!${'/2'.repeat(1100)})`,
+      progress: 63,
+      ownerId: accountA.body.user.id
+    }, accountA.body.token);
+    check(
+      oversizedCfi.status === 400 && oversizedCfi.body.success === false,
+      'EPUB reading-state API rejects oversized CFI input'
+    );
+    const invalidEpubProgress = await post('/api/library/shelf/book_republic/epub-reading-state', {
+      cfi: savedEpubCfi,
+      progress: 101,
+      ownerId: accountA.body.user.id
+    }, accountA.body.token);
+    check(
+      invalidEpubProgress.status === 400 && invalidEpubProgress.body.success === false,
+      'EPUB reading-state API rejects progress outside the 0–100 range'
+    );
     const invalidReadingState = await post('/api/library/shelf/book_republic/reading-state', {
       chapterId: 'chapter-from-another-book',
       progress: 40

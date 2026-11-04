@@ -234,7 +234,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
       </header>
 
       <aside aria-label="EPUB 阅读说明" className="border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-[11px] leading-relaxed text-amber-200/90">
-        EPUB 阅读与续读可用；AI 段落解读暂不支持。正文仅在浏览器阅读器中呈现，服务器尚不能核验选文与 CFI 章节定位，因此不会发送给 AI，也不会生成虚构页码或引用。
+        <strong className="mr-1">EPUB AI 段落解读暂不可用。</strong>
+        阅读与续读仍可使用；这本 EPUB 的具体文件版本、服务器章节正文和 CFI 定位尚未建立可核验关联，因此不会把选文或阅读位置发送给 AI。公版/开放许可标签或已保存的续读 CFI 都不能替代这项核验。若馆藏提供已核实的 TXT/正文版本，可改用该版本的段落解读。
       </aside>
 
       {/* Body */}

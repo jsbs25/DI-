@@ -168,3 +168,13 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - 文本阅读器窄屏工具栏换行；正文的触屏选区以 `pointerup` 保留现有 AI/批注流程。阅读器补模态语义、Escape 关闭、Tab 首尾循环、焦点返回、可命名控件；手机 AI/批注区域成为可关闭底部抽屉。EPUB 阅读工具栏适配手机，目录改窄屏覆盖抽屉，章节入口至少 44px，并保留 EPUB AI 当前明确拒绝的权利/正文定位说明。
 - 使用 headless Chromium + 临时脚本 `/tmp/world_library_phase9_browser.py`，页面服务于本机 Vite；API 全部路由到合成桩，认证桩为未登录，外网拦截，EPUB 由本地合成文件代理。320/360/375/390px 的首页/搜索状态无横向溢出；书架筛选/返回与搜索结果交互目标均为 44px；320px 文本/EPUB 阅读、触屏批注抽屉、目录、Escape/Tab 焦点循环与返回通过；`PAGE_ERRORS=[]`。测试没有访问/写入真实书架、外部源、模型或真实 EPUB。
 - 验证：`npm run lint`、`npm run build`、隔离 `npm run test:library-api`（45/45）、合成 `npm run test:library-reading-ai`（19/19）、`npm run test:library-connectors`、`npm run test:api`（85/85）通过。既有 Three.js 551.65 kB 构建提示仍为非阻断。真机/真实登录或账户、实时连接器和真实 EPUB 仍未覆盖。
+
+
+### WORLD LIBRARY Phase 8/9 follow-up：EPUB AI 保持不可用，收紧读取边界（2026-11-04）
+
+- 复核 Gutenberg 导入后发现：权利在 OPDS 入库时重新核验，但记录没有绑定下载 EPUB 的哈希/版次、OPF spine、章节正文哈希或 CFI-to-spine 映射。因此不增加 AI 抽取路径，继续保留 `409 EPUB_TEXT_UNAVAILABLE`；浏览器 EPUB 阅读和书架续读行为保持可用。
+- 阅读器提示补充来源版本、正文、CFI 均未建立可核验关联；明确公版/开放许可标记和续读 CFI 不是 AI 证据；有服务器核验 TXT/正文版本时可改用该版本解读。文本书既有 AI 路径未改。
+- 新增 `server/libraryEpubSecurity.ts`：EPUB 代理最大 64 MiB；流式中检查大小并拒绝缺失/截断/非 ZIP local-file 头；服务端 `fetch` 禁止自动重定向，并对每跳重新检查 HTTPS、凭据和获准来源主机，限制跳转次数。此处仅做有界代理/ZIP 前缀检查，不解析、解包、提取或净化 EPUB。
+- 续读 API 复用 epub.js CFI parser 校验语法结构、数字偏移和 2048 字符上限；进度范围限制为 0–100%。这是续读输入校验，不是与书籍版次的定位核验；现有会话、用户 ID 和书架归属校验保留。
+- 新增本地合成 EPUB `scripts/fixtures/synthetic-world-library.epub`、离线安全回归 `scripts/test_library_epub_security.ts` 和 `test:library-epub-security` 命令。没有添加 npm 依赖、密钥或用户设置。
+- 更新 `PROJECT_AUDIT.md`、`TEST_REPORT.md`、`LIBRARY_CONNECTORS.md`。未下载真实 EPUB、访问用户书架/笔记或调用模型；未来服务端解析仍需在版本哈希、解压安全、HTML/XHTML 内容与真实 CFI-to-spine 映射完成后再单独评估。

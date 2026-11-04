@@ -7,6 +7,7 @@ import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
+import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
 import { fetchAndExtract, searchWeb } from './server/webFetcher.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
@@ -635,30 +636,28 @@ app.get('/api/library/epub-proxy', async (req, res) => {
   if (!url || typeof url !== 'string') {
     return res.status(400).json({ success: false, error: 'url required' });
   }
-  // Only allow known legal public-domain hosts
-  let host: string;
-  try { host = new URL(url).hostname; } catch { return res.status(400).json({ success: false, error: 'Invalid URL' }); }
-  const allowed = ['www.gutenberg.org', 'gutenberg.org', 'archive.org', 'openlibrary.org'];
-  if (!allowed.some(h => host === h || host.endsWith('.' + h))) {
-    return res.status(403).json({ success: false, error: 'Host not allowed' });
+  // Restrict transport to known library hosts; item-level rights are a separate check.
+  let parsedUrl: URL;
+  try { parsedUrl = new URL(url); } catch { return res.status(400).json({ success: false, error: 'Invalid URL' }); }
+  if (parsedUrl.protocol !== 'https:' || parsedUrl.username || parsedUrl.password) {
+    return res.status(403).json({ success: false, error: 'Only credential-free HTTPS EPUB sources are allowed' });
   }
-
   try {
-    const upstream = await fetch(url, { headers: { 'User-Agent': 'EARTH-ONE-Library/1.0' } });
+    const upstream = await fetchAllowedEpubResponse(parsedUrl);
     if (!upstream.ok || !upstream.body) {
       return res.status(502).json({ success: false, error: `Upstream ${upstream.status}` });
     }
+    const archive = await readBoundedEpubArchive(upstream.body, upstream.headers.get('content-length'));
     res.setHeader('Content-Type', 'application/epub+zip');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    // Stream the bytes to the client
-    const reader = upstream.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(Buffer.from(value));
-    }
-    res.end();
+    res.setHeader('Content-Length', String(archive.byteLength));
+    res.send(archive);
   } catch (err: any) {
+    if (err instanceof EpubArchiveError) {
+      const status = err.code === 'EPUB_TOO_LARGE' ? 413 :
+        err.code === 'EPUB_SOURCE_NOT_ALLOWED' || err.code === 'EPUB_REDIRECT_BLOCKED' ? 403 : 502;
+      return res.status(status).json({ success: false, code: err.code, error: err.message });
+    }
     res.status(502).json({ success: false, error: err.message || 'EPUB proxy failed' });
   }
 });
@@ -752,10 +751,10 @@ app.post('/api/library/shelf/:bookId/epub-reading-state', (req, res) => {
   const book = store.books.find(b => b.id === req.params.bookId);
   if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
   const { cfi, progress } = req.body;
-  if (typeof cfi !== 'string' || cfi.length > 2048 || !/^epubcfi\(.+\)$/.test(cfi)) {
+  if (!isSyntacticallyValidEpubCfi(cfi)) {
     return res.status(400).json({ success: false, error: 'A valid EPUB CFI location is required' });
   }
-  if (typeof progress !== 'number' || !Number.isFinite(progress)) {
+  if (typeof progress !== 'number' || !Number.isFinite(progress) || progress < 0 || progress > 100) {
     return res.status(400).json({ success: false, error: 'A valid reading progress percentage is required' });
   }
   const item = store.updateBookShelfEpubReadingState(user.id, book.id, cfi, progress);

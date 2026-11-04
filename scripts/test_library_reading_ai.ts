@@ -74,12 +74,21 @@ if (!epubAttempt.ok) {
   check(/EPUB AI 解读暂不支持/.test(epubAttempt.error) && /未向 AI 发送请求/.test(epubAttempt.error), 'EPUB refusal explains the unsupported behavior and confirms no model request');
 }
 
+for (const rightsClassification of ['PUBLIC_DOMAIN', 'OPEN_LICENSE', 'OPEN_ACCESS', 'UNKNOWN', 'COPYRIGHT_RESTRICTED']) {
+  const rightsAttempt = resolveReadingEvidence({
+    ...syntheticEpub,
+    rightsClassification,
+    rightsNote: `Synthetic rights fixture: ${rightsClassification}`
+  }, 'chapter-1', 'A synthetic passage from a test EPUB.');
+  check(!rightsAttempt.ok && rightsAttempt.code === 'EPUB_TEXT_UNAVAILABLE', `EPUB AI remains unavailable for ${rightsClassification}; a rights label alone is not parsed-text provenance`);
+}
+
 const unverifiedEpubChapter = resolveReadingEvidence({
   ...syntheticEpub,
   textAvailability: 'full_text',
   chapters: [{ id: 'chapter-1', title: 'Synthetic chapter', content: 'The river carried a silver leaf past the old bridge.' }]
 }, 'chapter-1', 'The river carried a silver leaf past the old bridge.');
-check(!unverifiedEpubChapter.ok && unverifiedEpubChapter.code === 'EPUB_TEXT_UNAVAILABLE', 'An EPUB record cannot bypass the refusal by claiming full text or supplying an unverified chapter/locator');
+check(!unverifiedEpubChapter.ok && unverifiedEpubChapter.code === 'EPUB_TEXT_UNAVAILABLE', 'An EPUB record cannot bypass the refusal by claiming full text or supplying an unverified chapter');
 
 const unverifiableEdition = resolveReadingEvidence({ ...fixture, externalId: undefined, sourceUrl: undefined, publisher: undefined }, 'chapter-1', 'The river carried a silver leaf past the old bridge.');
 check(!unverifiableEdition.ok && unverifiableEdition.code === 'CITATION_UNVERIFIABLE', 'Missing version/source identifiers prevent fabricated citations');

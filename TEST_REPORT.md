@@ -245,3 +245,21 @@ OpenAlex 官方说明基础 API 可免费且无需账号或 key。本次仅进�
 | 网络与用户数据边界 | ✅ 浏览器 API 全部被本地合成桩拦截；认证返回未登录，外网阻断。使用虚构书目与本地合成 EPUB；未读取或写入真实用户书架/笔记，未请求真实连接器、下载真实 EPUB 或调用模型。 |
 
 浏览器宽度为桌面 Chromium 的触控仿真，不是实体手机或真实账户端到端验收；也没有执行实时连接器 smoke。Phase 9 只覆盖移动响应式及当前可验证的搜索/书架/阅读器交互，不代表完成全站或 WORLD LIBRARY 全部验收。
+
+
+## WORLD LIBRARY Phase 8/9 follow-up：EPUB 代理边界与 AI provenance 复核（2026-11-04）
+
+**结论：EPUB AI 未开放；阅读和续读保留。** 官方来源和可复制权利在 Gutenberg 入库时复核，但服务端没有当前 EPUB 文件的哈希、解析章节或可验证 CFI/spine 映射。公版/开放许可标签、浏览器选文、续读 CFI 都不能证明某段文字来自当前服务器核验的同一版文件，因此 AI 路由继续在模型调用前返回 `409 EPUB_TEXT_UNAVAILABLE`。阅读器说明已明确解释原因和可用替代方式。没有采用部分解析器实现来伪造安全定位。
+
+| 检查 | 结果 |
+|---|---|
+| `npm run lint` | ✅ `tsc --noEmit` 通过。 |
+| `npm run test:library-epub-security` | ✅ 15 项合成测试通过：合法最小 EPUB fixture、声明/流式大小上限、非 ZIP/截断头拒绝、自动重定向关闭、拦截跳往私网 HTTP、允许获准 HTTPS 馆藏间有界跳转、标准点/范围 CFI、合法断言冒号、畸形/非数字偏移/超长 CFI。 |
+| `npm run test:library-reading-ai` | ✅ 24 项通过；含 EPUB-only 拒绝、伪造全文章节拒绝及 `PUBLIC_DOMAIN`、`OPEN_LICENSE`、`OPEN_ACCESS`、`UNKNOWN`、受限权利声明均不能单独启用 EPUB AI。 |
+| `npm run test:library-api` | ✅ 48 项通过；新增 CFI 结构/偏移、超长 CFI 和 0–100 进度边界测试，使用隔离临时数据。 |
+| `npm run test:library-connectors` | ✅ 离线连接器回归通过，导入权利复核无改动。 |
+| `npm run test:api` | ✅ 85 项通过。 |
+| `npm run build` | ✅ 生产构建成功；保留既有 Three.js 551.65 kB chunk 非阻断警告。 |
+| 合成 EPUB 文件 | ✅ `unzip -t scripts/fixtures/synthetic-world-library.epub` 通过。 |
+
+**边界说明。** EPUB 安全测试读取仓库内约 1 KiB 合成 fixture，不联网、不读取真实用户 EPUB/书架/笔记、不请求真实连接器、不调用模型。服务端代理只验证最大 64 MiB、ZIP local-file 头和获准 HTTPS 重定向；没有检查 ZIP 中央目录/CRC、解压内容、压缩炸弹、XML/HTML/脚本或文件路径，也没有做 DNS/IP 私网隔离，故不得视为完整格式校验、通用 URL 抓取防护或服务器解析器。CFI parser 结果只表示语法可解析，不证明此 CFI 对应某一本书或某一具体版本。未进行真实 EPUB、模型、实体手机或新一轮浏览器视觉端到端测试；之前 Phase 9 的移动仿真结果不等于本轮新 UI 的实机验收。
