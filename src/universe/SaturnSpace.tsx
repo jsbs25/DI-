@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Film, ExternalLink, Sparkles, Bookmark, BookmarkCheck, Library } from 'lucide-react';
+import { ArrowLeft, Film, ExternalLink, Sparkles, Bookmark, BookmarkCheck, Library, Tv } from 'lucide-react';
 import { Language } from '../types/index.ts';
 
 interface SaturnSpaceProps {
@@ -104,8 +104,24 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
             {isZh
-              ? '收录 NASA 深空公版影像与 Internet Archive 公版电影。所有片源均为公共领域或开放许可内容，未接入任何盗版源。'
-              : 'Public-domain NASA deep-space footage and Internet Archive classic films. Every title is public domain or openly licensed — no pirated sources.'}
+              ? '收录 NASA 深空公版影像与 Internet Archive 公版电影（公共领域 / 开放许可）；另提供第三方在线观影站入口（外部站点，新窗口打开）。'
+              : 'Public-domain NASA deep-space footage and Internet Archive classic films. A third-party online cinema entry is also provided (external site, opens in a new tab).'}
+          </p>
+
+          <a
+            href="https://souju6.ai/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-600/20 transition-all hover:from-purple-500 hover:to-indigo-500"
+          >
+            <Tv className="h-4 w-4" />
+            <span>{isZh ? '进入在线观影站（新窗口打开）' : 'Open Online Cinema (new tab)'}</span>
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          <p className="mt-2 text-xs text-slate-500">
+            {isZh
+              ? '该第三方站点禁止网页内嵌，只能新窗口打开。内容与版权归原站所有。'
+              : 'This third-party site blocks embedding, so it opens in a new tab. Content and rights belong to the original site.'}
           </p>
         </div>
       </header>
