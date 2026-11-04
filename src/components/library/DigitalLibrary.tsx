@@ -29,6 +29,7 @@ import {
 import { Book, Chapter, BookAnnotation, BookShelfItem, BookshelfStatus, Language } from '../../types/index.ts';
 import { EpubReader } from './EpubReader.tsx';
 import { AdminLibrary } from './AdminLibrary.tsx';
+import { filterLibrarySearchResults, getLibrarySearchFilterOptions, LIBRARY_RIGHTS_FILTER_LABELS } from './searchFilters.ts';
 
 interface DigitalLibraryProps {
   lang: Language;
@@ -124,9 +125,16 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   // ---- Online search ----
   const [onlineResults, setOnlineResults] = useState<OnlineLibraryResult[]>([]);
   const [onlineSourceStatuses, setOnlineSourceStatuses] = useState<OnlineSourceStatus[]>([]);
+  const [onlineSourceFilter, setOnlineSourceFilter] = useState('all');
+  const [onlineRightsFilter, setOnlineRightsFilter] = useState('all');
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
+  const onlineFilterOptions = useMemo(() => getLibrarySearchFilterOptions(onlineResults), [onlineResults]);
+  const visibleOnlineResults = useMemo(
+    () => filterLibrarySearchResults(onlineResults, onlineSourceFilter, onlineRightsFilter),
+    [onlineResults, onlineSourceFilter, onlineRightsFilter]
+  );
 
   // ---- Bookshelf ----
   const [shelf, setShelf] = useState<Array<BookShelfItem & { book: Book }>>([]);
@@ -219,6 +227,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     if (!searchQuery.trim()) return;
     setIsSearchingOnline(true);
     setIngestError(null);
+    setOnlineSourceFilter('all');
+    setOnlineRightsFilter('all');
     setOnlineResults([]);
     setOnlineSourceStatuses([]);
     try {
@@ -811,11 +821,51 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 </div>
               )}
               {ingestError && <div role="status" aria-live="polite" className="text-xs text-red-400 mb-3">{ingestError}</div>}
+              {!isSearchingOnline && onlineResults.length > 0 && (
+                <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:items-end">
+                  <label className="block text-[11px] text-slate-400">
+                    <span className="mb-1 block">按来源筛选</span>
+                    <select
+                      aria-label="按来源筛选全球检索结果"
+                      value={onlineSourceFilter}
+                      onChange={event => setOnlineSourceFilter(event.target.value)}
+                      className="min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="all">全部来源（{onlineResults.length}）</option>
+                      {onlineFilterOptions.sources.map(option => (
+                        <option key={option.source} value={option.source}>{option.name}（{option.count}）</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-slate-400">
+                    <span className="mb-1 block">按来源标注的权利状态筛选</span>
+                    <select
+                      aria-label="按权利状态筛选全球检索结果"
+                      value={onlineRightsFilter}
+                      onChange={event => setOnlineRightsFilter(event.target.value)}
+                      className="min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="all">全部权利状态</option>
+                      {onlineFilterOptions.rights.map(option => (
+                        <option key={option.value} value={option.value}>{LIBRARY_RIGHTS_FILTER_LABELS[option.value]}（{option.count}）</option>
+                      ))}
+                    </select>
+                  </label>
+                  <p role="status" aria-live="polite" className="text-[10px] text-slate-500 sm:col-span-2">
+                    显示 {visibleOnlineResults.length} / {onlineResults.length} 条；仅按返回记录的来源和权利分类筛选，未知状态仍保留为未知。
+                  </p>
+                </div>
+              )}
+              {!isSearchingOnline && onlineResults.length > 0 && visibleOnlineResults.length === 0 && (
+                <div role="status" className="rounded-lg border border-slate-800 px-4 py-6 text-center text-xs text-slate-400">
+                  没有符合当前筛选条件的结果，请尝试其他来源或权利状态。
+                </div>
+              )}
               {isSearchingOnline ? (
                 <div role="status" aria-live="polite" className="text-xs text-slate-400 py-4 text-center">正在查询全球图书馆与开放资源...</div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {onlineResults.map(r => {
+                  {visibleOnlineResults.map(r => {
                     const canImport = r.canImport === true;
                     const sourceName = r.sourceName || ({
                       openlibrary: 'Open Library',

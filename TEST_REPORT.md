@@ -285,3 +285,17 @@ OpenAlex 官方说明基础 API 可免费且无需账号或 key。本次仅进�
 | `npm run test:api` | ✅ 85/85 通过。 |
 | `npm run build` | ✅ 生产构建成功；既有 Three.js 551.65 kB chunk 警告非阻断。 |
 **边界。** 本次没有执行实时 provider smoke、没有产生外部网络请求、没有新增 key/配置或读取/写入真实用户数据。超时、403、429 都是本地模拟，结果只证明错误传播与状态隔离，不代表 provider 当前在线或其服务配额可用。
+
+## WORLD LIBRARY Phase 6：统一搜索筛选回归（2026-11-04）
+| 检查 | 结果 |
+|---|---|
+| `npm run test:library-search-filters` | ✅ 合成记录覆盖来源筛选、精确权利分类、来源+权利组合、缺失/未识别值保守归入 UNKNOWN、动态选项计数及不修改原记录。 |
+| `npm run test:library-connector-isolation` | ✅ 离线故障隔离回归通过；外部调用均由本地 mock 拦截。 |
+| `npm run test:library-connectors` | ✅ 既有离线连接器回归通过。 |
+| `npm run test:library-api` | ✅ 49/49 通过。 |
+| `npm run test:api` | ✅ 85/85 通过。 |
+| `npm run lint` | ✅ TypeScript 检查通过。 |
+| `npm run build` | ✅ 生产构建成功；保留既有 Three.js 大 chunk 非阻断提示。 |
+| `git diff --check` | ✅ 无空白/补丁格式错误。 |
+
+筛选 UI 使用服务端已经返回的来源和权利字段，不把搜索可见性解释成阅读/下载/再利用许可。来源状态（包含 disabled、unsupported、error）在结果筛选之外仍照常显示。合成筛选测试不联网、不访问账户数据；本轮未做浏览器视觉、真机或实时 provider smoke，故不声称这些场景已验收。

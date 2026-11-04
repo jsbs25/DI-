@@ -272,3 +272,7 @@ PubMed 只提供书目检索与官方 PubMed 记录页，固定为 `METADATA_ONL
 验证通过：`npm run test:library-connector-isolation`、`npm run test:library-connectors`、`npm run lint`、`npm run test:library-api`（49/49）、`npm run test:api`（85/85）和 `npm run build`。构建保留既有 Three.js 551.65 kB 非阻断 chunk 警告。测试全程用本地合成 `fetch`，没有真实外部请求、用户数据访问、密钥新增、批量查询或服务条款变更；因此测试证明故障隔离逻辑，不证明数据源此刻在线。
 
 同步基线补充：开始时本地 `main` 为 `1b34b9f`；提交前 fetch 发现 `origin/main` 新增 `88945ce`（只改 `server/bookHarvester.ts`），核对与本轮文件无重叠后以 `--ff-only` 快进，没有覆盖或重置其他更改。上述测试在快进后的 `88945ce` 上全部重跑通过。
+
+## WORLD LIBRARY Phase 6：统一搜索来源与权利筛选（2026-11-04）
+统一搜索结果新增动态筛选：来源选项及计数来自当前真实结果的 `source` / `sourceName` 字段；权利选项及计数来自服务端 `rightsClassification`。来源与权利条件可组合，未识别或缺少权利分类的结果仅归入“权利状态未知”，不推断开放阅读、借阅或再利用许可。筛选只改变卡片列表；服务端返回的来源健康状态徽标（成功、失败、禁用、不适用）继续完整显示。API、连接器和书目/用户数据均未改；无密钥或配置要求。
+验证：`npm run test:library-search-filters`、连接器隔离/离线回归、图书馆 API（49/49）、全站 API（85/85）、`npm run lint`、`npm run build` 通过。测试仅使用合成筛选记录与既有本地 mock；没有实时来源请求或数据写入。构建仍有既有 Three.js 大 chunk 非阻断提示；本次未做浏览器视觉或实体设备回归。

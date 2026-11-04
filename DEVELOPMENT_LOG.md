@@ -191,3 +191,9 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - 验证通过：连接器隔离测试、既有离线连接器测试、`npm run lint`、图书馆 API（49/49）、全站 API（85/85）和生产构建。构建只有既有 Three.js 551.65 kB chunk 非阻断提示。没有运行 live smoke、没有真实外部请求、没有使用/索取 API key 或触及真实用户数据。
 
 - 同步基线：提交前发现 `origin/main` 已从 `1b34b9f` 前进至 `88945ce`；远端仅改 `server/bookHarvester.ts`，与本轮文件无交叉，已先普通快进。随后隔离测试、离线连接器、类型检查、图书馆 API 49/49、全站 API 85/85 与 build 均在最新基线上重跑通过。
+
+### WORLD LIBRARY Phase 6：统一搜索结果筛选（2026-11-04）
+- `DigitalLibrary` 增加来源与权利状态两个可组合筛选器，选项及数量从本次搜索实际返回的来源标识/名称与权利分类动态统计；新搜索开始时重置筛选。结果数播报和无匹配空状态适配窄屏。
+- 筛选仅对精确 `source`、`rightsClassification` 字段匹配，不调用额外 API、不猜测全文可读性或再利用许可。缺少或未识别的权利值保守归为“权利状态未知”；现有访问/版权文字和 `canImport` 规则不变。来源状态徽标独立显示，disabled/unsupported/error 不会因筛选被隐藏或改写。
+- 新增纯函数 `searchFilters.ts` 与 `npm run test:library-search-filters`，合成回归覆盖来源、权利分类、显式/缺失/未识别 UNKNOWN、组合筛选、选项计数及不修改记录。
+- 验证：筛选测试、连接器故障隔离、离线连接器测试、图书馆 API 49/49、全站 API 85/85、`npm run lint` 与 `npm run build` 全部通过。构建仅有既有 Three.js 大 chunk 警告。未发起实时网络请求、未修改馆藏/书架数据、未新增密钥/配置；本次未做浏览器/实体手机验收。
