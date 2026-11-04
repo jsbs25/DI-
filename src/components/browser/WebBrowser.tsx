@@ -21,7 +21,8 @@ import {
   Check,
   Clock3,
   Trash2,
-  Download
+  Download,
+  FolderOpen
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { BrowserFrame } from './BrowserFrame.tsx';
@@ -256,6 +257,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [isBrowserDataOpen, setIsBrowserDataOpen] = useState(false);
   const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
   const [downloads, setDownloads] = useState<EarthOneBrowserDownload[]>([]);
+  const [downloadStorageWarning, setDownloadStorageWarning] = useState<string | null>(null);
   const [browserStorageWarning, setBrowserStorageWarning] = useState<string | null>(null);
   const [browserStorageReady, setBrowserStorageReady] = useState(!browserEngine?.getLocalData);
   const [browserStorageReadOnly, setBrowserStorageReadOnly] = useState(false);
@@ -413,18 +415,25 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   useEffect(() => {
     if (!browserEngine?.getDownloads || !browserEngine.onDownloads) {
       setDownloads([]);
+      setDownloadStorageWarning(null);
       return;
     }
     let cancelled = false;
     let receivedPush = false;
-    const unsubscribe = browserEngine.onDownloads(records => {
+    const unsubscribe = browserEngine.onDownloads((records, status) => {
       receivedPush = true;
       setDownloads(Array.isArray(records) ? records : []);
+      setDownloadStorageWarning(status?.warning || null);
     });
     browserEngine.getDownloads().then(records => {
       if (!cancelled && !receivedPush) setDownloads(Array.isArray(records) ? records : []);
     }).catch(() => {
       if (!cancelled) setDownloads([]);
+    });
+    browserEngine.getDownloadStorageStatus?.().then(status => {
+      if (!cancelled) setDownloadStorageWarning(status?.warning || null);
+    }).catch(() => {
+      if (!cancelled) setDownloadStorageWarning('无法读取本机下载记录状态。');
     });
     return () => {
       cancelled = true;
@@ -1036,7 +1045,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
           {browserEngine && (
             <button
-              onClick={() => { setIsBrowserDataOpen(false); setIsDownloadsOpen(true); }}
+              onClick={() => {
+                setIsBrowserDataOpen(false);
+                setIsDownloadsOpen(true);
+                void browserEngine.getDownloads().then(setDownloads).catch(() => {});
+              }}
               aria-label={`打开下载管理器，共 ${downloads.length} 项`}
               title="下载管理器"
               className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
@@ -1502,17 +1515,30 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                   <h2 className="text-lg font-semibold text-white">下载管理器</h2>
                 </div>
                 <p className="mt-2 max-w-lg text-xs leading-relaxed text-slate-400">
-                  每次下载都需在系统保存对话框中选择位置；完成后不会自动打开文件。列表只保存在当前会话，不同步到服务器，也不提供恶意文件扫描。
+                  每次下载都需在系统保存对话框中选择位置；记录仅保存在此设备，最多保留最近 50 条，不同步到服务器。完成后不会自动打开文件，也不提供恶意文件扫描。
                 </p>
               </div>
-              <button onClick={() => setIsDownloadsOpen(false)} aria-label="关闭下载管理器" className="shrink-0 rounded-lg p-2 text-slate-400 hover:bg-white/[0.06] hover:text-white">
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                {downloads.some(download => ['completed', 'cancelled', 'interrupted'].includes(download.state)) && (
+                  <button type="button" onClick={() => { void browserEngine.clearDownloadRecords().then(result => {
+                    if (!result.success) browserEngine.getDownloadStorageStatus().then(status => setDownloadStorageWarning(status.warning || '无法清除本机下载记录。'));
+                  }); }} disabled={Boolean(downloadStorageWarning)} aria-label="清除已结束的下载记录" title="只清除已结束记录；不会删除文件或取消正在下载的任务" className="rounded-lg px-2 py-2 text-[11px] text-slate-400 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
+                    清除记录
+                  </button>
+                )}
+                <button onClick={() => setIsDownloadsOpen(false)} aria-label="关闭下载管理器" className="rounded-lg p-2 text-slate-400 hover:bg-white/[0.06] hover:text-white">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
+
+            {downloadStorageWarning && (
+              <p role="status" className="mt-4 rounded-xl border border-amber-200/15 bg-amber-200/[0.05] px-3 py-2 text-xs leading-relaxed text-amber-100/80">{downloadStorageWarning}</p>
+            )}
 
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto py-5">
               {downloads.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-white/10 px-4 py-10 text-center text-xs text-slate-500">当前会话没有下载记录。</p>
+                <p className="rounded-xl border border-dashed border-white/10 px-4 py-10 text-center text-xs text-slate-500">此设备没有可显示的下载记录。</p>
               ) : downloads.map(download => {
                 const canCancel = download.state === 'awaiting-save' || download.state === 'progressing';
                 const canRemove = download.state === 'completed' || download.state === 'cancelled' || download.state === 'interrupted';
@@ -1544,15 +1570,25 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                             <div className="h-full rounded-full bg-cyan-300 transition-[width]" style={{ width: `${download.progress}%` }} />
                           </div>
                         )}
-                        {download.savePath && <p className="mt-2 break-all text-[11px] text-slate-500">保存位置：{download.savePath}</p>}
+                        {download.savePath && download.fileAvailable && <p className="mt-2 break-all text-[11px] text-slate-500">保存位置：{download.savePath}</p>}
+                        {download.savePath && !download.fileAvailable && <p className="mt-2 text-[11px] text-amber-200/70">文件不可用（可能已移动或删除）</p>}
                       </div>
+                      {download.fileAvailable && (
+                        <button type="button" onClick={() => { void browserEngine.showDownloadInFolder(download.id).then(result => {
+                          if (!result.success) browserEngine.getDownloads().then(setDownloads).catch(() => {});
+                        }); }} aria-label={`在文件夹中显示 ${download.filename}`} title="在文件夹中显示；不会打开文件" className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-cyan-300/[0.08] hover:text-cyan-100">
+                          <FolderOpen className="h-4 w-4" />
+                        </button>
+                      )}
                       {canCancel && (
                         <button type="button" onClick={() => { void browserEngine.cancelDownload(download.id); }} aria-label={`取消下载 ${download.filename}`} title="取消下载" className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-rose-300/[0.08] hover:text-rose-200">
                           <X className="h-4 w-4" />
                         </button>
                       )}
                       {canRemove && (
-                        <button type="button" onClick={() => { void browserEngine.removeDownload(download.id); }} aria-label={`从列表移除下载 ${download.filename}`} title="仅从列表移除，不删除文件" className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-white/[0.08] hover:text-slate-200">
+                        <button type="button" onClick={() => { void browserEngine.removeDownload(download.id).then(result => {
+                          if (!result.success) browserEngine.getDownloadStorageStatus().then(status => setDownloadStorageWarning(status.warning || '无法移除本机下载记录。'));
+                        }); }} disabled={Boolean(downloadStorageWarning)} aria-label={`从列表移除下载 ${download.filename}`} title="仅从记录中移除，不删除文件" className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-white/[0.08] hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">
                           <Trash2 className="h-4 w-4" />
                         </button>
                       )}

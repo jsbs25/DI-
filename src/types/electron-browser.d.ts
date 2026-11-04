@@ -50,7 +50,13 @@ declare global {
     totalBytes: number;
     progress: number | null;
     savePath: string | null;
+    fileAvailable: boolean;
     startedAt: string;
+  }
+
+  interface EarthOneDownloadStorageStatus {
+    readOnly: boolean;
+    warning: string | null;
   }
 
   interface EarthOneBrowserApi {
@@ -58,7 +64,10 @@ declare global {
     saveLocalData(data: { bookmarks: EarthOneLocalBookmark[]; history: EarthOneLocalHistoryItem[] }): Promise<{ success: boolean; error?: string }>;
     getDownloads(): Promise<EarthOneBrowserDownload[]>;
     cancelDownload(id: string): Promise<{ success: boolean }>;
-    removeDownload(id: string): Promise<{ success: boolean }>;
+    removeDownload(id: string): Promise<{ success: boolean; error?: string }>;
+    clearDownloadRecords(): Promise<{ success: boolean; cleared: number; error?: string }>;
+    getDownloadStorageStatus(): Promise<EarthOneDownloadStorageStatus>;
+    showDownloadInFolder(id: string): Promise<{ success: boolean; error?: string }>;
     setActive(active: boolean): Promise<void>;
     setBounds(bounds: EarthOneBrowserBounds | null): Promise<void>;
     selectTab(tabId: string, url: string): Promise<{ success: boolean; error?: string }>;
@@ -68,7 +77,7 @@ declare global {
     goForward(tabId: string): Promise<void>;
     reload(tabId: string): Promise<void>;
     onState(listener: (state: EarthOneBrowserState) => void): () => void;
-    onDownloads(listener: (downloads: EarthOneBrowserDownload[]) => void): () => void;
+    onDownloads(listener: (downloads: EarthOneBrowserDownload[], status: EarthOneDownloadStorageStatus) => void): () => void;
     onFocusAddressBar(listener: (tabId: string) => void): () => void;
   }
 

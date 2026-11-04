@@ -4,6 +4,7 @@ const TAB_ID_PATTERN = /^tab_[a-zA-Z0-9_-]{1,64}$/;
 const MAX_URL_LENGTH = 4096;
 const BARE_HTTP_HOST_PATTERN = /^(?:localhost(?::\d+)?|(?:[\w-]+\.)+[\w-]+(?::\d+)?|[\w-]+:\d+|\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?|\[[\da-f:]+\](?::\d+)?)(?:[/?#]|$)/i;
 const { createDownloadManager } = require('./download-manager.cjs');
+const { createDownloadStore } = require('./download-store.cjs');
 
 function normalizeBrowserUrl(input) {
   if (typeof input !== 'string') throw new TypeError('请输入有效的网址。');
@@ -47,6 +48,7 @@ function createBrowserEngine({
   onState = () => {},
   onFocusAddressBar = () => {},
   onDownloads = () => {},
+  downloadStorePath = null,
   getTestApprovalPath = null
 }) {
   const tabs = new Map();
@@ -54,11 +56,13 @@ function createBrowserEngine({
   let browserActive = false;
   let viewportBounds = null;
   let disposed = false;
+  const downloadStore = downloadStorePath ? createDownloadStore(downloadStorePath) : null;
   const downloadManager = createDownloadManager({
     browserSession,
     isOwnedContents: contents => [...tabs.values()].some(entry => entry.view.webContents === contents),
     onChange: onDownloads,
-    getTestApprovalPath
+    getTestApprovalPath,
+    store: downloadStore
   });
 
   function validTabId(tabId) {
@@ -293,6 +297,8 @@ function createBrowserEngine({
     getDownloads: () => downloadManager.list(),
     cancelDownload: id => downloadManager.cancel(id),
     removeDownload: id => downloadManager.remove(id),
+    clearDownloadRecords: () => downloadManager.clearTerminal(),
+    getDownloadStorageStatus: () => downloadManager.getStorageStatus(),
     dispose,
     getWebContentsForTesting,
     getViewBoundsForTesting

@@ -18,6 +18,7 @@
 - Clarified that the current integrity suite validates store/domain behavior and is not an HTTP/browser end-to-end suite.
 
 ### Improved
+- Persisted up to 50 approved desktop download records locally under Electron `userData`; restarts restore history and mark in-flight items interrupted. Added corrupt-store protection, existence-checked folder reveal, and clear/remove controls that never delete downloaded files; no download history or path is sent to a server.
 - Expanded isolated HTTP API coverage to 51 assertions across social posts, library search/details/bookshelf progress, browser bookmarks, and crawler task creation. Tests use temporary storage and do not execute external crawls.
 - Extended HTTP API coverage to 64 assertions with article/video list contracts and knowledge-graph search, filters, details, and 404 handling; no article content write, external media request, crawl, admin route, or private-message access was exercised.
 - Added read-only community, game-room, and advertisement list checks; the isolated HTTP suite now has 67 passing assertions, with no join/create/click writes.

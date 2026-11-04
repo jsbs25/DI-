@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
   getDownloads: () => ipcRenderer.invoke('browser:get-downloads'),
   cancelDownload: id => ipcRenderer.invoke('browser:cancel-download', id),
   removeDownload: id => ipcRenderer.invoke('browser:remove-download', id),
+  clearDownloadRecords: () => ipcRenderer.invoke('browser:clear-download-records'),
+  getDownloadStorageStatus: () => ipcRenderer.invoke('browser:get-download-storage-status'),
+  showDownloadInFolder: id => ipcRenderer.invoke('browser:show-download-in-folder', id),
   setActive: active => ipcRenderer.invoke('browser:set-active', Boolean(active)),
   setBounds: bounds => ipcRenderer.invoke('browser:set-bounds', bounds),
   selectTab: (tabId, url) => ipcRenderer.invoke('browser:select-tab', tabId, url),
@@ -22,7 +25,7 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
     return () => ipcRenderer.removeListener('browser:state', wrapped);
   },
   onDownloads: listener => {
-    const wrapped = (_event, downloads) => listener(downloads);
+    const wrapped = (_event, downloads, storageStatus) => listener(downloads, storageStatus);
     ipcRenderer.on('browser:downloads-state', wrapped);
     return () => ipcRenderer.removeListener('browser:downloads-state', wrapped);
   },

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, WebContentsView, ipcMain, session } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require('electron');
 const { createBrowserEngine, isAllowedNavigation } = require('./browser-engine.cjs');
 
 app.setName('EARTH ONE');
@@ -172,6 +172,23 @@ function registerBrowserIpc() {
     'browser:get-downloads': () => browserEngine.getDownloads(),
     'browser:cancel-download': (_event, id) => browserEngine.cancelDownload(id),
     'browser:remove-download': (_event, id) => browserEngine.removeDownload(id),
+    'browser:clear-download-records': () => browserEngine.clearDownloadRecords(),
+    'browser:get-download-storage-status': () => browserEngine.getDownloadStorageStatus(),
+    'browser:show-download-in-folder': async (_event, id) => {
+      if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/i.test(id)) return { success: false };
+      const record = browserEngine.getDownloads().find(download => download.id === id);
+      if (!record || !record.savePath || !path.isAbsolute(record.savePath)) {
+        return { success: false, error: '下载文件不可用。' };
+      }
+      try {
+        const stat = await fs.promises.stat(record.savePath);
+        if (!stat.isFile()) return { success: false, error: '下载文件不可用。' };
+        shell.showItemInFolder(record.savePath);
+        return { success: true };
+      } catch {
+        return { success: false, error: '下载文件已不存在或无法访问。' };
+      }
+    },
     'browser:set-active': (_event, active) => browserEngine.setActive(Boolean(active)),
     'browser:set-bounds': (_event, bounds) => browserEngine.setBounds(bounds),
     'browser:select-tab': (_event, tabId, url) => browserEngine.selectTab(tabId, url),
@@ -446,18 +463,28 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       if (completedDownload?.state === 'completed') break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    if (!completedDownload || completedDownload.state !== 'completed' ||
+    if (!completedDownload || completedDownload.state !== 'completed' || !completedDownload.fileAvailable ||
         completedDownload.source !== new URL('/download', testUrl).href ||
         completedDownload.savePath !== expectedDownload) {
       throw new Error('下载管理器未显示合成下载的安全来源、完成状态或已批准的临时保存位置。');
+    }
+    const downloadStorePath = path.join(app.getPath('userData'), 'earth-one-downloads.json');
+    const persistedDownloads = JSON.parse(fs.readFileSync(downloadStorePath, 'utf8'));
+    if (persistedDownloads.version !== 1 || !persistedDownloads.records?.some(record =>
+      record.id === completedDownload.id && record.savePath === expectedDownload &&
+      record.source === new URL('/download', testUrl).href)) {
+      throw new Error('下载历史没有写入隔离的 Electron userData 本机文件。');
     }
     await appContents.executeJavaScript(`document.querySelector('button[aria-label^="打开下载管理器"]').click()`);
     const downloadPanelText = await appContents.executeJavaScript(
       `document.querySelector('[data-browser-download-manager]')?.innerText || ''`
     );
+    const folderControlVisible = await appContents.executeJavaScript(
+      `Boolean(document.querySelector('button[aria-label="在文件夹中显示 earth-one-fixture.txt"]'))`
+    );
     if (!downloadPanelText.includes('earth-one-fixture.txt') ||
         !downloadPanelText.includes('已完成') || !downloadPanelText.includes('保存位置：') ||
-        downloadPanelText.includes('synthetic-only')) {
+        downloadPanelText.includes('synthetic-only') || !folderControlVisible) {
       throw new Error('下载管理器列表未展示记录，或来源查询参数未被隐藏。');
     }
     await appContents.executeJavaScript(`document.querySelector('button[aria-label="从列表移除下载 earth-one-fixture.txt"]').click()`);
@@ -469,7 +496,9 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       if (downloadRemoved) break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    if (!downloadRemoved || !fs.existsSync(expectedDownload)) {
+    const afterRemoveStore = JSON.parse(fs.readFileSync(downloadStorePath, 'utf8'));
+    if (!downloadRemoved || !fs.existsSync(expectedDownload) ||
+        afterRemoveStore.records.some(record => record.id === completedDownload.id)) {
       throw new Error('从列表移除已完成记录应保留下载文件本身。');
     }
     await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭下载管理器"]').click()`);
@@ -557,9 +586,10 @@ app.whenReady().then(async () => {
     onFocusAddressBar: tabId => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:focus-address-bar', tabId);
     },
-    onDownloads: downloads => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:downloads-state', downloads);
+    onDownloads: (downloads, storageStatus) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:downloads-state', downloads, storageStatus);
     },
+    downloadStorePath: path.join(app.getPath('userData'), 'earth-one-downloads.json'),
     getTestApprovalPath: testApprovalPath ? () => testApprovalPath : null
   });
 
