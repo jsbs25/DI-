@@ -18,6 +18,7 @@
     "test:crawler-api": "tsx scripts/test_crawler_api.ts",
     "test:creator-api": "tsx scripts/test_creator_api.ts",
     "test:catalog-api": "tsx scripts/test_catalogs_api.ts",
+    "test:social-feed-api": "tsx scripts/test_social_feed_api.ts",
     "test:i18n": "tsx scripts/test_i18n.ts",
     "test:globe": "tsx scripts/test_globe_render.tsx",
     "test:universe": "tsx scripts/test_universe_render.tsx"
