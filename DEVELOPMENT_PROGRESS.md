@@ -169,3 +169,4 @@
 - 对公开目录 `/api/users`、合成公开资料 `/api/users/:id` 和 `/api/search/global?q=Jordan` 各增加一次重复 GET 比较，要求 HTTP 状态和完整 JSON 响应均与首次读取一致。
 - `npm run test:public-users-api`：24 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。脚本使用随机本地端口、自动清理的临时 JSON，端点白名单仍只允许公开 GET。
 - 未访问身份/会话/消息路径、写接口、外部来源、正式 `server_data.json`；未检查、停止或修改既有服务、配置或日志。完整 `npm run test:api` 因包含待批准的会话读取路径未运行；本次未运行构建或浏览器测试。
+- GitHub 同步：代码与回归文档提交 `d1befd339bdc7c944085767137ef297672837d54` 从父提交 `6e348f8` 普通快进推送到 `main`；推送后授权连接器 fetch 与 GitHub API 回读均确认 `main`、`origin/main` 和本地 `HEAD` 为 `d1befd3`。未强推或修改全局 Git 配置。
