@@ -12,6 +12,7 @@ import {
 } from './types/index.ts';
 import { translations } from './i18n/translations.ts';
 import { Navbar } from './components/layout/Navbar.tsx';
+import { Sidebar } from './components/layout/Sidebar.tsx';
 const DigitalGlobe = lazy(() => import('./components/globe/DigitalGlobe.tsx').then(module => ({ default: module.DigitalGlobe })));
 const GlobalFeed = lazy(() => import('./components/social/GlobalFeed.tsx').then(module => ({ default: module.GlobalFeed })));
 const GlobalMessenger = lazy(() => import('./components/chat/GlobalMessenger.tsx').then(module => ({ default: module.GlobalMessenger })));
@@ -36,6 +37,7 @@ export default function App() {
   const t = translations[lang] || translations.zh;
   const [currentTab, setCurrentTab] = useState<string>('globe');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Core Data State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -371,7 +373,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#030712] text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#030712] text-slate-100 flex font-sans">
       {/* Welcome Banner Toast */}
       {welcomeToast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-950/95 border border-cyan-500/60 text-cyan-200 text-xs shadow-2xl backdrop-blur-md flex items-center space-x-2 animate-in fade-in slide-in-from-top-2">
@@ -380,6 +382,16 @@ export default function App() {
         </div>
       )}
 
+      {/* Left sidebar navigation (desktop) */}
+      <Sidebar
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        lang={lang}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed(v => !v)}
+      />
+
+      <div className="flex-1 flex flex-col min-w-0">
       {/* 1. Universal Top Navigation */}
       <Navbar
         currentTab={currentTab}
@@ -560,6 +572,7 @@ export default function App() {
           </div>
         </div>
       </footer>
+      </div>
     </div>
   );
 }

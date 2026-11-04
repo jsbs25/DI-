@@ -284,7 +284,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* 2. Center Navigation Capsule (Identical to User Reference Design) */}
-          <nav aria-label="Primary navigation" className={`${currentTab === 'globe' ? 'hidden' : 'hidden md:flex'} items-center p-1 rounded-full bg-slate-900/70 border border-slate-700/60 shadow-xl backdrop-blur-md`}>
+          <nav aria-label="Primary navigation" className={`${currentTab === 'globe' ? 'hidden' : 'hidden md:flex lg:hidden'} items-center p-1 rounded-full bg-slate-900/70 border border-slate-700/60 shadow-xl backdrop-blur-md`}>
             {/* Home */}
             <button
               onClick={() => onSelectTab('globe')}
