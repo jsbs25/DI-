@@ -72,7 +72,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
   // ---- Online search ----
   const [onlineResults, setOnlineResults] = useState<
-    Array<{ id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; epubUrl?: string; source: string; pageTitle?: string }>
+    Array<{ id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; epubUrl?: string; source: string; pageTitle?: string; identifier?: string }>
   >([]);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
@@ -183,8 +183,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
   };
 
-  const handleIngestBook = async (r: { id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; epubUrl?: string; source: string; pageTitle?: string }) => {
-    if ((!r.textUrl && !r.pageTitle && !r.epubUrl) || ingestingId) return;
+  const handleIngestBook = async (r: { id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; epubUrl?: string; source: string; pageTitle?: string; identifier?: string }) => {
+    if ((!r.textUrl && !r.pageTitle && !r.identifier && !r.epubUrl) || ingestingId) return;
     setIngestingId(r.id);
     setIngestError(null);
     try {
@@ -194,6 +194,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         body: JSON.stringify({
           textUrl: r.textUrl,
           pageTitle: r.pageTitle,
+          identifier: r.identifier,
           epubUrl: r.epubUrl,
           source: r.source,
           title: r.title,
@@ -558,12 +559,12 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                         <h4 className="text-xs font-bold text-white line-clamp-1">{r.title}</h4>
                         <p className="text-[11px] text-amber-400 mb-1">
                           {r.author} · {r.language?.toUpperCase()}
-                          {r.source === 'wikisource' ? ' · 维基文库' : ' · Gutenberg'}
+                          {r.source === 'wikisource' ? ' · 维基文库' : r.source === 'ar_wikisource' ? ' · 阿拉伯语维基文库' : r.source === 'archive' ? ' · Internet Archive' : ' · Gutenberg'}
                         </p>
                         <p className="text-[11px] text-slate-400 line-clamp-2 mb-2">{r.description}</p>
                         <button
                           onClick={() => handleIngestBook(r)}
-                          disabled={ingestingId === r.id || (!r.textUrl && !r.pageTitle)}
+                          disabled={ingestingId === r.id || (!r.textUrl && !r.pageTitle && !r.identifier)}
                           className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer transition-all"
                         >
                           {ingestingId === r.id ? <span>正在下载全文...</span> : <><BookOpen className="w-3 h-3" /><span>保存并诵读</span></>}

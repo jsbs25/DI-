@@ -509,8 +509,9 @@ export interface BookSearchResult {
   year?: string;
   textUrl?: string;
   epubUrl?: string;
-  source: 'gutenberg' | 'wikisource';
+  source: 'gutenberg' | 'wikisource' | 'ar_wikisource' | 'archive';
   pageTitle?: string; // wikisource page title for full-text retrieval
+  identifier?: string; // Internet Archive item identifier
 }
 
 const GUTENDEX_USER_AGENT =
@@ -681,6 +682,235 @@ export async function fetchWikisourceFullText(pageTitle: string): Promise<{ titl
   return { title, author, chapters: chapters.slice(0, 50) };
 }
 
+// ---------------------------------------------------------------------------
+// Arabic Wikisource (Islamic / Arabic public-domain texts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Search Arabic Wikisource (ar.wikisource.org) — the richest open source for
+ * classical Islamic & Arabic public-domain texts (Quran, Hadith, Tafsir, etc.).
+ */
+export async function searchArabicWikisource(query: string, limit = 8): Promise<BookSearchResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const url = `https://ar.wikisource.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
+      q
+    )}&format=json&formatversion=2&srlimit=${limit}&srnamespace=0`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': GUTENDEX_USER_AGENT, Accept: 'application/json' },
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    const results: any[] = data?.query?.search || [];
+
+    return results.map((r: any) => ({
+      id: `ar_wikisource_${r.pageid}`,
+      title: r.title || 'Untitled',
+      author: 'المكتبة العربية · Arabic Wikisource',
+      language: 'ar',
+      description: stripHtml(r.snippet || '').slice(0, 260) || 'نص عربي من الملك العام (Arabic public-domain text).',
+      textUrl: undefined,
+      source: 'ar_wikisource' as const,
+      pageTitle: r.title
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch the rendered text of an Arabic Wikisource page. Uses the rendered
+ * (HTML) output so MediaWiki templates are already expanded into real text.
+ * Splits into chapters by section headings (`<h2>`/`<h3>`/`<h4>`).
+ */
+export async function fetchArabicWikisourceFullText(
+  pageTitle: string
+): Promise<{ title: string; author: string; chapters: { title: string; content: string }[] }> {
+  const url = `https://ar.wikisource.org/w/api.php?action=parse&page=${encodeURIComponent(
+    pageTitle
+  )}&prop=text&format=json&formatversion=2`;
+  const data = JSON.parse(await fetchText(url, 15000));
+  let html: string = data?.parse?.text || '';
+
+  // Remove embedded CSS blocks (MediaWiki injects a big <style> block)
+  html = html.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+
+  const toText = (chunk: string): string => {
+    return chunk
+      .replace(/<(?:p|div|li|tr|br|h[1-6])[^>]*>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#(\d+);/g, (_, c) => String.fromCodePoint(parseInt(c, 10)))
+      .replace(/&#x([0-9a-f]+);/gi, (_, c) => String.fromCodePoint(parseInt(c, 16)))
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0)
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  };
+
+  const navNoise = /(السابق|التالي|تصنيف|مصدر|ملاحظات|رأسية|نثر|صندوق)/i;
+
+  // Split by rendered section headings
+  const headingRe = /<h([2-4])[^>]*>([\s\S]*?)<\/h\1>/gi;
+  const sections: { heading: string; body: string }[] = [];
+  let lastIndex = 0;
+  let lastHeading = '';
+  let m: RegExpExecArray | null;
+
+  while ((m = headingRe.exec(html)) !== null) {
+    if (lastHeading) {
+      const body = toText(html.slice(lastIndex, m.index));
+      if (body.length > 20) sections.push({ heading: lastHeading, body });
+    }
+    lastHeading = toText(m[2]);
+    lastIndex = headingRe.lastIndex;
+  }
+  // trailing content
+  if (lastHeading) {
+    const body = toText(html.slice(lastIndex));
+    if (body.length > 20) sections.push({ heading: lastHeading, body });
+  }
+
+  const chapters = sections
+    .filter(s => !navNoise.test(s.heading))
+    .map(s => ({ title: s.heading || 'قسم', content: s.body }));
+
+  // If no headings found, chunk the whole rendered text by paragraphs
+  if (chapters.length === 0) {
+    const whole = toText(html);
+    const paragraphs = whole.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 20);
+    const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 20));
+    for (let i = 0; i < paragraphs.length; i += chunkSize) {
+      const chunk = paragraphs.slice(i, i + chunkSize);
+      chapters.push({ title: `قسم ${chapters.length + 1}`, content: chunk.join('\n\n') });
+    }
+  }
+
+  const title = pageTitle.replace(/\/.*$/, '').trim();
+  return { title, author: 'Arabic Wikisource · الملك العام', chapters: chapters.slice(0, 60) };
+}
+
+// ---------------------------------------------------------------------------
+// Internet Archive (public-domain scanned books, incl. Islamic & Arabic)
+// ---------------------------------------------------------------------------
+
+/**
+ * Search Internet Archive text collection (mediatype:texts) for public-domain
+ * books. Each result carries its identifier so full OCR text can be fetched.
+ */
+export async function searchInternetArchive(query: string, limit = 8): Promise<BookSearchResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    const params = new URLSearchParams({
+      q: `${q} AND mediatype:texts`,
+      fl: ['identifier', 'title', 'creator', 'language', 'year'].join(','),
+      rows: String(limit),
+      page: '1',
+      output: 'json'
+    });
+    const res = await fetch(`https://archive.org/advancedsearch.php?${params.toString()}`, {
+      headers: { 'User-Agent': GUTENDEX_USER_AGENT, Accept: 'application/json' },
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    const docs: any[] = data?.response?.docs || [];
+
+    return docs
+      .filter((d: any) => d.identifier)
+      .map((d: any) => ({
+        id: `archive_${d.identifier}`,
+        title: d.title || d.identifier,
+        author: d.creator || 'Internet Archive',
+        language: d.language || 'unknown',
+        description: 'Internet Archive 公共领域扫描文献（公版 OCR 全文）。',
+        year: d.year ? String(d.year) : undefined,
+        textUrl: `https://archive.org/download/${encodeURIComponent(d.identifier)}/${encodeURIComponent(d.identifier)}_djvu.txt`,
+        source: 'archive' as const,
+        identifier: d.identifier
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch the OCR full text of an Internet Archive item and split it into
+ * readable chunks. IA scanned books are OCR'd page-by-page and usually lack
+ * clean chapter markers, so we chunk by paragraphs/page breaks.
+ *
+ * Resolves the real `_djvu.txt` filename via the metadata API (the filename
+ * is not always `{identifier}_djvu.txt`).
+ */
+export async function fetchInternetArchiveFullText(
+  identifier: string
+): Promise<{ title: string; author: string; chapters: { title: string; content: string }[] }> {
+  // Resolve the actual OCR text filename
+  let textFilename: string | undefined;
+  try {
+    const metaRes = await fetch(`https://archive.org/metadata/${encodeURIComponent(identifier)}`, {
+      headers: { 'User-Agent': GUTENDEX_USER_AGENT, Accept: 'application/json' }
+    });
+    if (metaRes.ok) {
+      const meta = await metaRes.json();
+      const files: any[] = meta?.files || [];
+      const txt = files.find((f: any) => typeof f.name === 'string' && /_djvu\.txt$/i.test(f.name));
+      if (txt) textFilename = txt.name;
+    }
+  } catch {
+    textFilename = undefined;
+  }
+
+  if (!textFilename) {
+    throw new Error('该 Internet Archive 条目暂无可下载的 OCR 全文（可能只有扫描图片或音频）。');
+  }
+
+  const url = `https://archive.org/download/${encodeURIComponent(identifier)}/${encodeURIComponent(textFilename)}`;
+  const raw = await fetchText(url, 30000);
+
+  let body = raw.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+
+  // Some IA texts have a leading metadata header; drop obvious boilerplate lines
+  body = body
+    .split('\n')
+    .filter(l => !/^https?:\/\//i.test(l.trim()) && !/^Identifier:/i.test(l.trim()))
+    .join('\n')
+    .trim();
+
+  const paragraphs = body.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 25);
+  const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 30));
+  const chapters: { title: string; content: string }[] = [];
+  for (let i = 0; i < paragraphs.length; i += chunkSize) {
+    const chunk = paragraphs.slice(i, i + chunkSize);
+    chapters.push({ title: `Section ${chapters.length + 1}`, content: chunk.join('\n\n') });
+  }
+
+  if (chapters.length === 0) {
+    throw new Error('该条目的 OCR 全文为空，无法诵读。');
+  }
+
+  return { title: identifier, author: 'Internet Archive', chapters: chapters.slice(0, 60) };
+}
+
 /**
  * Download a book's full plain text and split it into chapters.
  * Gutenberg texts use explicit "CHAPTER I." / "Chapter 1" / "BOOK IV."
@@ -713,7 +943,8 @@ export async function fetchBookFullText(textUrl: string): Promise<{ title: strin
   const author = authorMatch?.[1]?.trim() || 'Unknown Author';
 
   // Match chapter headings, tolerating Gutenberg artifacts like "Chapter I.]"
-  const headingRe = /^\s*(?:CHAPTER|Chapter|BOOK|Book)\s+[IVXLC0-9]+[.\]\s]*$/gm;
+  // and common Islamic/classical section markers (SURA, PART, SECTION, BOOK).
+  const headingRe = /^\s*(?:CHAPTER|Chapter|BOOK|Book|SURA|SURAH|Surah|SECTION|Section|PART|Part)\s+[IVXLC0-9]+[.\]\s]*$/gm;
 
   const chapters: { title: string; content: string }[] = [];
   let lastIndex = 0;
@@ -738,16 +969,29 @@ export async function fetchBookFullText(textUrl: string): Promise<{ title: strin
     if (content.length >= 40) chapters.push({ title: lastHeading, content });
   }
 
-  // If no chapter markers were found, fall back to paragraph chunking
+  // If no chapter markers were found, fall back to paragraph chunking.
   if (chapters.length <= 1) {
-    const paragraphs = body.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 20);
-    const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 12));
+    let paragraphs = body.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 20);
+
+    // Poetry, Quranic verse and many scanned texts use single newlines instead
+    // of blank lines. If blank-line splitting yields almost nothing, group
+    // single lines into readable chunks so the book is never collapsed to 1 page.
+    if (paragraphs.length <= 1) {
+      const lines = body.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      const linesPerChunk = Math.max(1, Math.ceil(lines.length / 24));
+      paragraphs = [];
+      for (let i = 0; i < lines.length; i += linesPerChunk) {
+        paragraphs.push(lines.slice(i, i + linesPerChunk).join('\n'));
+      }
+    }
+
+    const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 20));
     const fallback: { title: string; content: string }[] = [];
     for (let i = 0; i < paragraphs.length; i += chunkSize) {
       const chunk = paragraphs.slice(i, i + chunkSize);
       fallback.push({ title: `Chapter ${fallback.length + 1}`, content: chunk.join('\n\n') });
     }
-    return { title, author, chapters: fallback.slice(0, 40) };
+    return { title, author, chapters: fallback.slice(0, 60) };
   }
 
   return { title, author, chapters: chapters.slice(0, 80) };

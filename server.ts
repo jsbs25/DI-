@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { store } from './server/store.ts';
 import { aiGateway } from './server/aiGateway.ts';
-import { fetchAndExtract, searchWeb, searchBooks, searchWikisource, fetchBookFullText, fetchWikisourceFullText } from './server/webFetcher.ts';
+import { fetchAndExtract, searchWeb, searchBooks, searchWikisource, fetchBookFullText, fetchWikisourceFullText, searchArabicWikisource, fetchArabicWikisourceFullText, searchInternetArchive, fetchInternetArchiveFullText } from './server/webFetcher.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 import {
   searchKnowledge,
@@ -445,19 +445,21 @@ app.post('/api/ai/translate', async (req, res) => {
 // 8. DIGITAL LIBRARY (CHAPTER 5)
 // -------------------------------------------------------------
 
-// Search public-domain books online (Gutenberg + Chinese Wikisource)
+// Search public-domain books online (Gutenberg + Chinese/Arabic Wikisource + Internet Archive)
 app.get('/api/library/search', async (req, res) => {
   const { q } = req.query;
   if (!q || typeof q !== 'string' || !q.trim()) {
     return res.status(400).json({ success: false, error: 'Search query required' });
   }
   try {
-    // Run both sources in parallel
-    const [gutenberg, wikisource] = await Promise.all([
+    // Run all sources in parallel; each source degrades gracefully on failure
+    const [gutenberg, wikisource, arWikisource, archive] = await Promise.all([
       searchBooks(q, 8),
-      searchWikisource(q, 6)
+      searchWikisource(q, 6),
+      searchArabicWikisource(q, 6),
+      searchInternetArchive(q, 6)
     ]);
-    const results = [...gutenberg, ...wikisource];
+    const results = [...gutenberg, ...wikisource, ...arWikisource, ...archive];
     res.json({ success: true, query: q, results });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Book search failed' });
@@ -466,14 +468,24 @@ app.get('/api/library/search', async (req, res) => {
 
 // Download a book's full text and save it to the library
 app.post('/api/library/ingest', async (req, res) => {
-  const { textUrl, pageTitle, epubUrl, source, title, author, coverImage, description, language } = req.body;
+  const { textUrl, pageTitle, epubUrl, source, title, author, coverImage, description, language, identifier } = req.body;
 
   try {
     let fullText: { title: string; author: string; chapters: { title: string; content: string }[] };
     let bookId: string;
     let sourceLabel: 'Project Gutenberg' | 'Internet Archive' | 'Open Library' | 'Open Access';
+    let category: import('./src/types/index.ts').Book['category'] = 'literature';
 
-    if (source === 'wikisource' && pageTitle) {
+    if (source === 'ar_wikisource' && pageTitle) {
+      fullText = await fetchArabicWikisourceFullText(pageTitle);
+      bookId = `ar_wikisource_${Date.now()}`;
+      sourceLabel = 'Open Access';
+      category = 'islamic_studies';
+    } else if (source === 'archive' && identifier) {
+      fullText = await fetchInternetArchiveFullText(identifier);
+      bookId = `archive_${Date.now()}`;
+      sourceLabel = 'Internet Archive';
+    } else if (source === 'wikisource' && pageTitle) {
       fullText = await fetchWikisourceFullText(pageTitle);
       bookId = `wikisource_${Date.now()}`;
       sourceLabel = 'Open Access';
@@ -487,14 +499,14 @@ app.post('/api/library/ingest', async (req, res) => {
       bookId = `gutenberg_${Date.now()}`;
       sourceLabel = 'Project Gutenberg';
     } else {
-      return res.status(400).json({ success: false, error: 'textUrl, pageTitle, or epubUrl required' });
+      return res.status(400).json({ success: false, error: 'textUrl, pageTitle, identifier, or epubUrl required' });
     }
 
     const book: import('./src/types/index.ts').Book = {
       id: bookId,
       title: title || fullText.title,
       author: author || fullText.author,
-      category: 'literature',
+      category,
       language: language || 'en',
       source: sourceLabel,
       coverImage,
