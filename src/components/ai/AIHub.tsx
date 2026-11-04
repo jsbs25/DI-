@@ -158,7 +158,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-4 py-8 space-y-6">
+    <div className="w-full min-w-0 max-w-5xl mx-auto px-4 py-8 space-y-6">
       {/* Header Banner */}
       <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-cyan-950/40 to-slate-900 border border-slate-800 shadow-2xl relative overflow-hidden">
         <div className="relative z-10 space-y-2">
@@ -203,15 +203,15 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
       </div>
 
       {/* Model Selection Bar */}
-      <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs flex-wrap gap-2">
-        <div className="flex items-center space-x-3 flex-wrap">
-          <div className="flex items-center space-x-2">
+      <div className="min-w-0 p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs flex-wrap gap-2">
+        <div className="min-w-0 flex items-center space-x-3 flex-wrap">
+          <div className="min-w-0 flex items-center space-x-2">
             <Shield className="w-4 h-4 text-emerald-400" />
             <span className="text-slate-300 font-medium">Model:</span>
             <select
               value={selectedModel}
               onChange={e => setSelectedModel(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1 text-slate-200 text-xs focus:outline-none"
+              className="min-w-0 max-w-full bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1 text-slate-200 text-xs focus:outline-none"
             >
               {availableModels.length === 0 ? (
                 <option value="">Loading models...</option>
@@ -240,7 +240,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           </button>
         </div>
 
-        <div className="flex items-center space-x-3 text-[11px] text-slate-400 font-mono">
+        <div className="min-w-0 flex items-center space-x-3 text-[11px] text-slate-400 font-mono">
           <span>Server-Side Proxy: Protected</span>
           <span>·</span>
           <span>Zero Client Leak</span>
@@ -319,7 +319,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           {chatLog.map((entry, idx) => (
             <div
               key={idx}
-              className={`flex items-start space-x-3 ${entry.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}
+              className={`flex min-w-0 items-start space-x-3 ${entry.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}
             >
               <div
                 className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-xs font-bold ${
@@ -332,7 +332,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
               </div>
 
               <div
-                className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed max-w-xl whitespace-pre-line shadow-md ${
+                className={`min-w-0 p-4 rounded-2xl text-xs sm:text-sm leading-relaxed max-w-xl whitespace-pre-line break-words shadow-md ${
                   entry.role === 'user'
                     ? 'bg-cyan-500 text-slate-950 font-medium rounded-tr-none'
                     : 'bg-slate-950/80 text-slate-200 border border-slate-800 rounded-tl-none'
@@ -405,14 +405,14 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         </div>
 
         {/* Input Composer */}
-        <div className="p-3 bg-slate-950/90 border-t border-slate-800 flex items-center space-x-2">
+        <div className="min-w-0 p-3 bg-slate-950/90 border-t border-slate-800 flex items-center space-x-2">
           <input
             type="text"
             value={promptInput}
             onChange={e => setPromptInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}
             placeholder="Ask anything or request translation, article summary, language tips..."
-            className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+            className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
           />
           <button
             onClick={() => handleSend()}

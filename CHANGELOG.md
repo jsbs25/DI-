@@ -6,6 +6,7 @@
 - Moved the Universe telemetry drawer below the desktop celestial selector (`md:top-32`) while preserving the compact small-screen position and all existing controls; visual remeasurement refined the initial offset to leave a real gap.
 - Added original EARTH ONE SVG and multi-size ICO favicon assets and explicit HTML icon links to resolve the missing `/favicon.ico` resource.
 - Reflowed the globe overview into three metric columns with a separate responsive waveform row, wrapping labels and logical-direction dividers; existing values, translations and controls are preserved. Isolated Chromium geometry checks now pass at desktop Chinese/Arabic RTL and narrow Chinese viewports.
+- Fixed narrow-screen flex minimum-width overflow in the AI HUB model selector/status area and Web Browser toolbar/split pane; retained all existing controls and confined toolbar scrolling to its own area.
 - Named the telemetry close icon control for assistive technology, added a non-submit button type and kept the original close callback unchanged.
 - Integrity tests now use an isolated temporary JSON store and clean it up on success or failure, preventing test users, posts, and messages from being written into persistent project data.
 - The store data path can be overridden with `EARTH_ONE_DATA_FILE`; the existing `server_data.json` default remains unchanged.
@@ -21,7 +22,7 @@
 - Added read-only community, game-room, and advertisement list checks; the isolated HTTP suite now has 67 passing assertions, with no join/create/click writes.
 - Added `npm run test:globe`: 24 static-render assertions across all six existing languages protect overview content and markup contracts without browser, WebGL, effects or API calls.
 - Added `npm run test:universe`: 9 static-render checks for the close control, celestial labels, focus text, conditional Earth entry and empty selection. Keyboard, screen-reader and camera behavior remain outside this test scope.
-- Expanded the isolated HTTP regression from 67 to 73 checks with read-only globe statistics/countries, AI model/usage metadata, crawler pages and saved-article list contracts; no model call, crawl or write was triggered by the new checks.
+- Expanded the isolated HTTP regression from 67 to 77 checks with read-only globe statistics/countries/nodes, AI model/usage metadata, crawler task/page lists, saved-article list, book annotation collection and unknown-book 404 contracts; no model call, crawl or write was triggered by the new checks.
 - Navigation modules now load on demand behind an accessible loading state. The entry chunk decreased from about 1,160.76 KB (gzip 306.07 KB) to 316.71 KB (gzip 97.92 KB); the shared Three.js chunk remains about 551.65 KB and still triggers the build warning.
 - No authentication, authorization, administrator-permission, or private-message access-control policy was changed.
 
@@ -34,6 +35,8 @@
 - A separate headless Chromium run against a temporary production build confirmed actual language-menu switching to Arabic RTL, three non-overlapping metrics on desktop and narrow Chinese layouts, no horizontal overflow, and globe→universe→globe navigation; the local API stub only served empty GET responses and rejected writes. This does not resolve the earlier iframe operation, verify mobile RTL, or constitute a hardware-GPU/production-data test.
 - The isolated browser recorded first-home requests for Three.js (551,943 raw bytes), the entry script (316,969 bytes), and DigitalGlobe (72,209 bytes). Build gzip estimates are approximately 137.29 KB, 97.92 KB, and 18.06 KB respectively. Three.js is still loaded with the default 3D home; further deferral is pending lifecycle review to avoid breaking existing Earth/Universe behavior.
 - This continuation used an auto-cleaned temporary API JSON store and an in-memory mock for the visual preview. The separate `server_data.json` write observed at 04:56:30 remains unexplained; its source was not inferred or changed, and existing ports 3000/3001 were left untouched.
+- A follow-up isolated production-build Chromium run covered 12 mobile-navigation destinations at 390×844 Arabic RTL, plus AI HUB/Web Browser at 1274×649 Arabic RTL desktop and 390×844 Chinese mobile, and the desktop Crawler dashboard; all 18 viewport/module samples had document/body widths equal to the viewport. It exposed and verified fixes for both layout overflow issues.
+- Final checks passed: API 77, store/domain 44, globe static render 24, universe static render 9, TypeScript, and the isolated production build. The visual-browser session used a separate temporary JSON store and GET only; 44 external requests were blocked intentionally, causing network-load notices but no page errors. Crawler loaded only task/page lists; no create/run/approve/reject action occurred, and the browser session attempted no non-GET. Existing services and formal data were not touched.
 
 ## [v1.1.0] - Secure Authentication & Citizen Onboarding Wizard - 2026-11-03
 

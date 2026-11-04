@@ -130,8 +130,9 @@ async function main() {
       bio: 'profile update regression test'
     }, token);
     check(updatedProfile.status === 200 && updatedProfile.body.user.displayName === 'Privacy Probe Updated', 'Valid session can update its own profile');
-    const privateNodeList = await request('/api/globe/nodes');
-    check(!privateNodeList.body.nodes.some((node: any) => node.userId === userId), 'Private location is omitted from globe nodes');
+	    const privateNodeList = await request('/api/globe/nodes');
+	    check(privateNodeList.status === 200 && privateNodeList.body.success === true && Array.isArray(privateNodeList.body.nodes), 'Globe node endpoint returns a successful collection contract');
+	    check(!privateNodeList.body.nodes.some((node: any) => node.userId === userId), 'Private location is omitted from globe nodes');
 
     const profile = await request(`/api/users/${userId}`);
     const publicUser = profile.body.user;
@@ -186,9 +187,12 @@ async function main() {
     const books = await request('/api/library/books?search=Plato');
     const republic = books.body.books.find((book: any) => book.id === 'book_republic');
     check(books.status === 200 && !!republic, 'Library search returns the seeded Plato book');
-    const bookDetails = await request('/api/library/books/book_republic');
-    check(bookDetails.status === 200 && bookDetails.body.book.chapters.length > 0, 'Book detail includes readable chapter content');
-    check((await request('/api/library/shelf', 'POST', {}, token)).status === 400, 'Bookshelf rejects a request without a book ID');
+	    const bookDetails = await request('/api/library/books/book_republic');
+	    check(bookDetails.status === 200 && bookDetails.body.book.chapters.length > 0, 'Book detail includes readable chapter content');
+	    check(Array.isArray(bookDetails.body.annotations), 'Book detail returns an annotations collection');
+	    const missingBook = await request('/api/library/books/not-a-real-book');
+	    check(missingBook.status === 404 && missingBook.body.success === false, 'Unknown book detail returns a structured 404');
+	    check((await request('/api/library/shelf', 'POST', {}, token)).status === 400, 'Bookshelf rejects a request without a book ID');
     const shelfAdded = await request('/api/library/shelf', 'POST', { bookId: 'book_republic', status: 'reading' }, token);
     check(shelfAdded.status === 200 && shelfAdded.body.item.userId === userId, 'A valid session can add a seeded book to its shelf');
     const shelf = await request('/api/library/shelf', 'GET', undefined, token);
@@ -221,6 +225,7 @@ async function main() {
     });
     check(crawlerTask.status === 200 && crawlerTask.body.task.status === 'idle', 'Crawler task can be queued without starting a network crawl');
     const crawlerTasks = await request('/api/crawler/tasks');
+    check(crawlerTasks.status === 200 && crawlerTasks.body.success === true && Array.isArray(crawlerTasks.body.tasks), 'Crawler task listing returns a successful collection contract');
     check(crawlerTasks.body.tasks.some((task: any) => task.id === crawlerTask.body.task.id), 'Created crawler task appears in the task list');
 
     const articles = await request('/api/articles');
