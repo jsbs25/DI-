@@ -26,13 +26,15 @@ interface PlanetTelemetryDrawerProps {
   onClose: () => void;
   onFocusPlanet: (planetId: string) => void;
   onSwitchToEarthWorld?: () => void;
+  onSwitchToSaturnWorld?: () => void;
 }
 
 export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
   planet,
   onClose,
   onFocusPlanet,
-  onSwitchToEarthWorld
+  onSwitchToEarthWorld,
+  onSwitchToSaturnWorld
 }) => {
   if (!planet) return null;
 
@@ -105,6 +107,16 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
             >
               <Globe2 className="w-3.5 h-3.5" />
               进入地球生态 (Enter Social World)
+            </button>
+          )}
+
+          {planet.id === 'saturn' && onSwitchToSaturnWorld && (
+            <button
+              onClick={onSwitchToSaturnWorld}
+              className="py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white rounded-xl font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              进入土星生态 (Enter Saturn Cinema)
             </button>
           )}
         </div>

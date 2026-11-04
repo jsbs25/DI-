@@ -30,6 +30,7 @@ import { WebBrowser } from './components/browser/WebBrowser.tsx';
 import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
 import { KnowledgeUniverse } from './components/knowledge/KnowledgeUniverse.tsx';
 import { UniverseEngine } from './universe/UniverseEngine.tsx';
+import { SaturnSpace } from './universe/SaturnSpace.tsx';
 import { HolographicAICompanion } from './components/ai/HolographicAICompanion.tsx';
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 
@@ -449,8 +450,15 @@ export default function App() {
 
         {currentTab === 'universe' && (
           <div className="flex-1 flex flex-col min-h-[calc(100vh-4rem)]">
-            <UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} />
+            <UniverseEngine
+              onSwitchToEarthWorld={() => setCurrentTab('globe')}
+              onSwitchToSaturnWorld={() => setCurrentTab('saturn')}
+            />
           </div>
+        )}
+
+        {currentTab === 'saturn' && (
+          <SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} />
         )}
 
         {currentTab === 'feed' && (

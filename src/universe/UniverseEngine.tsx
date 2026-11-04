@@ -37,6 +37,7 @@ import {
 
 interface UniverseEngineProps {
   onSwitchToEarthWorld: () => void;
+  onSwitchToSaturnWorld: () => void;
 }
 
 interface PlanetMeshNode {
@@ -49,7 +50,7 @@ interface PlanetMeshNode {
   currentAngle: number;
 }
 
-export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthWorld }) => {
+export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthWorld, onSwitchToSaturnWorld }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedPlanet, setSelectedPlanet] = useState<CelestialBody | null>(() => getCelestialBodyById('saturn') || null);
   const [simSpeed, setSimSpeed] = useState<number>(1);
@@ -625,6 +626,7 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
         onClose={() => setSelectedPlanet(null)}
         onFocusPlanet={handleFocusPlanet}
         onSwitchToEarthWorld={onSwitchToEarthWorld}
+        onSwitchToSaturnWorld={onSwitchToSaturnWorld}
       />
     </div>
   );
