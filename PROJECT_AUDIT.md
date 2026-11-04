@@ -265,3 +265,10 @@ PubMed 只提供书目检索与官方 PubMed 记录页，固定为 `METADATA_ONL
 ### WORLD LIBRARY Phase 7/9 follow-up：服务器重启后的续读持久性与账户隔离（2026-11-04）
 本次仅扩展隔离 API 回归测试，不修改阅读器、服务端读写逻辑、书架 schema、用户配置或正式书架数据。测试显式将 `EARTH_ONE_DATA_FILE` 指向操作系统临时目录，在随机本机回环端口启动服务，并使用两个 `example.invalid` 合成账户把同一本合成书目加入各自书架。账户 A 保存文本章节 ID 与 EPUB CFI 后，停止并重启服务进程，使用新建 HTTP 请求及原账户令牌从同一临时文件重新读取：A 恢复章节、CFI 和 63% 进度；B 仍无章节/CFI 且进度为 0。两账户令牌也能在重启后通过认证读取，说明会话与书架状态均由测试 JSON 文件持久化，而非进程内存。
 本次 `npm run test:library-api` 49/49 通过，`npm run lint`（`tsc --noEmit`）通过。没有运行完整服务测试或外部连接器请求，没有下载 EPUB、调用 AI、访问或修改真实用户书架/笔记，也没有新增配置。该结果证明服务端跨进程持久化与账户级隔离；不是实体设备、真实账户或跨部署同步验收。EPUB CFI 仍仅做语法/边界校验，不构成版本定位或 AI 正文证据。
+
+## WORLD LIBRARY 外部来源故障隔离验收（2026-11-04）
+从已同步的 `1b34b9f`、干净的 `main` 工作区继续检查统一搜索。各适配器原本会把常见 HTTP/网络异常转换成自己的 `error` 响应，但聚合器仍直接使用 `Promise.all`；若某个连接器异常拒绝 Promise 而未自行捕获，整次统一搜索会被拒绝，API 顶层随即返回 502。此行为不符合“一个外部来源不可用时其他来源继续工作”的隔离要求。
+现已在聚合边界按来源捕获异常：拒绝的适配器仅得到 `status: error`、`count: 0` 和该异常原因；其他来源仍参与结果归一化与去重，环境禁用来源继续返回 `disabled`，不会发出请求。新增的离线隔离回归同时模拟 Open Library 超时、Internet Archive HTTP 403、Crossref HTTP 429、Europe PMC 正常返回和 Project Gutenberg 配置禁用，并验证规范化结果、来源状态、错误原因与禁用来源零请求。另验证一个 connector `search()` Promise 意外拒绝时，其余免费来源仍返回结果。
+验证通过：`npm run test:library-connector-isolation`、`npm run test:library-connectors`、`npm run lint`、`npm run test:library-api`（49/49）、`npm run test:api`（85/85）和 `npm run build`。构建保留既有 Three.js 551.65 kB 非阻断 chunk 警告。测试全程用本地合成 `fetch`，没有真实外部请求、用户数据访问、密钥新增、批量查询或服务条款变更；因此测试证明故障隔离逻辑，不证明数据源此刻在线。
+
+同步基线补充：开始时本地 `main` 为 `1b34b9f`；提交前 fetch 发现 `origin/main` 新增 `88945ce`（只改 `server/bookHarvester.ts`），核对与本轮文件无重叠后以 `--ff-only` 快进，没有覆盖或重置其他更改。上述测试在快进后的 `88945ce` 上全部重跑通过。

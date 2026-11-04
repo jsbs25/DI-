@@ -2262,7 +2262,14 @@ export async function searchLibrary(query: string, options: LibrarySearchOptions
     .filter(connector => !isLibraryConnectorEnabled(connector.source))
     .map(connector => ({ source: connector.source, name: SOURCE_NAMES[connector.source], status: 'disabled', count: 0, reason: disabledSourceReason(connector.source) }));
 
-  const settled = await Promise.all(enabled.map(async connector => ({ connector, response: await connector.search(query, limit) })));
+  const settled = await Promise.all(enabled.map(async connector => {
+    try {
+      return { connector, response: await connector.search(query, limit) };
+    } catch (error) {
+      // A single adapter rejection must not fail the unified search for every source.
+      return { connector, response: failed<ExternalLibraryRecord[]>(error) };
+    }
+  }));
   const results: ExternalLibraryRecord[] = [];
   const sources: SourceSearchStatus[] = [...disabledStatuses];
   for (const { connector, response } of settled) {

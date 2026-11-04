@@ -184,3 +184,10 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - 使用两个 `example.invalid` 合成账户及同一本合成书目验证账户隔离。账户 A 保存 `lastReadChapterId`、`lastReadEpubCfi` 和 63% 进度后，服务进程重启；新的 HTTP 请求使用原账户令牌分别读取两份书架，A 恢复完整续读状态，B 仍无章节/CFI 且进度为 0。没有改 API、数据结构或实际存储实现。
 - `npm run test:library-api`：49/49 通过；`npm run lint`：通过。未运行全站 API/构建/外部连接器 smoke；本次不访问外部资源、模型或真实用户书架/笔记，不下载 EPUB，也不改配置。
 - 此测试覆盖服务端 JSON 跨进程持久化和账户级隔离，不等于实体设备、真实账户或跨部署同步验收。CFI 仅经语法和范围校验，EPUB AI 仍 fail-closed。
+
+### WORLD LIBRARY follow-up：外部来源故障隔离（2026-11-04）
+- 复核统一搜索后发现聚合器用 `Promise.all` 直接等待各来源；连接器意外拒绝 Promise 会中断整个搜索并触发 API 502，即使其他免费来源可正常返回。现在在每个连接器的聚合边界捕获拒绝，并仅把该来源标为 `error`（数量为 0，保留异常原因），不中止其余来源。
+- 新增 `scripts/test_library_connector_isolation.ts` 与 `npm run test:library-connector-isolation`。离线 mock 覆盖 Open Library 超时、Internet Archive 403、Crossref 429、Europe PMC 成功归一化、Gutenberg 显式禁用/不请求，以及连接器意外拒绝时继续聚合其他免费来源。
+- 验证通过：连接器隔离测试、既有离线连接器测试、`npm run lint`、图书馆 API（49/49）、全站 API（85/85）和生产构建。构建只有既有 Three.js 551.65 kB chunk 非阻断提示。没有运行 live smoke、没有真实外部请求、没有使用/索取 API key 或触及真实用户数据。
+
+- 同步基线：提交前发现 `origin/main` 已从 `1b34b9f` 前进至 `88945ce`；远端仅改 `server/bookHarvester.ts`，与本轮文件无交叉，已先普通快进。随后隔离测试、离线连接器、类型检查、图书馆 API 49/49、全站 API 85/85 与 build 均在最新基线上重跑通过。

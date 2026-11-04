@@ -273,3 +273,15 @@ OpenAlex 官方说明基础 API 可免费且无需账号或 key。本次仅进�
 | 数据与网络边界 | ✅ 仅使用合成账户和临时书架/会话 JSON；没有访问/修改真实用户书架或笔记，没有外部连接器请求、EPUB 下载或模型调用。测试覆盖服务端跨进程持久化，不是实体设备、真实账户或跨部署同步验收。 |
 
 本次增量未重跑全站 API、构建、连接器离线套件或在线 smoke；此前阶段结果继续见上文。EPUB CFI 校验仍只是语法/边界检查，不能作为具体书籍版次的正文定位或 AI 证据。
+
+## WORLD LIBRARY：外部来源故障隔离（2026-11-04）
+**结果：通过。** 统一搜索现在将意外拒绝的单个 connector Promise 转成该来源的 `error` 状态，而不让它拒绝整次搜索。常见 provider HTTP 状态仍由各 adapter 以来源级错误返回。测试覆盖单来源故障与其他免费来源成功并存，且显式禁用来源维持 `disabled` 状态并零请求。
+| 检查 | 结果 |
+|---|---|
+| `npm run test:library-connector-isolation` | ✅ 通过。完全离线 mock：Open Library 超时、Internet Archive 403、Crossref 429；Europe PMC 返回规范化成功记录；Project Gutenberg 配置禁用；另测试 adapter Promise 意外拒绝时其他来源仍返回结果。 |
+| `npm run test:library-connectors` | ✅ 离线连接器回归通过。 |
+| `npm run lint` | ✅ `tsc --noEmit` 通过。 |
+| `npm run test:library-api` | ✅ 49/49 通过，使用隔离临时存储。 |
+| `npm run test:api` | ✅ 85/85 通过。 |
+| `npm run build` | ✅ 生产构建成功；既有 Three.js 551.65 kB chunk 警告非阻断。 |
+**边界。** 本次没有执行实时 provider smoke、没有产生外部网络请求、没有新增 key/配置或读取/写入真实用户数据。超时、403、429 都是本地模拟，结果只证明错误传播与状态隔离，不代表 provider 当前在线或其服务配额可用。

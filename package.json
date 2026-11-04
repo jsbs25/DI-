@@ -18,6 +18,7 @@
     "test:library-reading-ai": "tsx scripts/test_library_reading_ai.ts",
     "test:library-epub-security": "tsx scripts/test_library_epub_security.ts",
     "test:library-connectors": "tsx scripts/test_library_connectors.ts",
+    "test:library-connector-isolation": "tsx scripts/test_library_connector_isolation.ts",
     "test:library-connectors:live": "tsx scripts/test_library_connectors_live.ts",
     "test:crawler-api": "tsx scripts/test_crawler_api.ts",
     "test:creator-api": "tsx scripts/test_creator_api.ts",
