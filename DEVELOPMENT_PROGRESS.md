@@ -257,3 +257,6 @@
 - 本轮验证：`npm run lint` ✅；`npm run test:library-connectors` ✅；`npm run test:library-api` 20/20 ✅；`npm run test:library-connectors:live` ✅（Open Library、Internet Archive 限量搜索 + Gutenberg 官方搜索/单书 OPDS/隔离书目详情）；`npm run build` ✅。生产构建既有约 551.65 KB Three.js chunk 警告保留。实时测试不下载 EPUB；所有写操作使用临时目录。
 - 下一阶段按简报继续评估 Google Books / Europeana 官方 API 与凭据配置，再接 OpenAlex / Crossref / arXiv / PubMed Central / DOAB；对 Waqfeya、Shamela、Qatar Digital Library 先审条款与正式接口，不做未授权批量抓取。另需评估多语种筛选、rights 法域、授权展示和管理后台。
 - GitHub 同步待最终代码/文档复核后仅使用现有授权入口普通快进，不强推；当前没有执行账户或仓库设置变更。
+
+
+- **同步状态更正（2026-11-04）**：上方“待最终复核同步”的状态已被后续操作取代。实现提交 `2cb84e9f7093cc03aa942a5d2540a3fda96f6a8c` 从 `4f6fe82c784ad4bf63d63217f971437046684536` 普通快进推送至 `main`；推送后 `git fetch origin main` 与 GitHub connector API 均核实远端 `main`、`origin/main`、本地 `HEAD` 等于 `2cb84e9f7093cc03aa942a5d2540a3fda96f6a8c`。未强推、未改远端或全局 Git 配置，未触碰 `/workspace/DI-review`。

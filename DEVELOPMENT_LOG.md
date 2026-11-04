@@ -55,3 +55,6 @@
 - 验证：TypeScript 检查通过；离线连接器测试通过；隔离图书馆 API 回归 20 项通过；生产构建成功；实时官方来源烟测通过（Open Library、Internet Archive 搜索，以及 Gutenberg 搜索至隔离书目详情链路，未下载 EPUB）。全站浏览器回归和其他待批准权限相关路由未执行。
 
 - UI 搜索卡片/详情页显示来源权利说明及通过 HTTPS 校验的许可原文链接；客户端仅在来源明确返回 `canImport: true` 时提供本地导入按钮，服务器仍再次验证来源记录和权限。该 UI 变更通过类型检查与生产构建，未进行本轮浏览器视觉验收。
+
+
+- GitHub 同步：实现提交 `2cb84e9f7093cc03aa942a5d2540a3fda96f6a8c` 已从 `4f6fe82c784ad4bf63d63217f971437046684536` 普通快进推送至 `main`；推送后 fetch 和 GitHub connector API 均确认远端、跟踪分支和本地 HEAD 一致。未强推、未持久保存凭据或改变 Git 全局配置。
