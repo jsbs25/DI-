@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import { OpenAICompatibleProvider, type OpenAICompatibleMessage } from './ai/providers/openAICompatibleProvider.ts';
 
 // Load .env here as well — ESM imports are hoisted above `dotenv.config()`
 // in server.ts, so the gateway (instantiated at import time) must load env itself.
@@ -30,11 +31,12 @@ export interface ChatMessage {
 class AIGateway {
   private models: AIModelMeta[] = [];
   private geminiClient: GoogleGenAI | null = null;
+  private readonly openAICompatibleProvider = new OpenAICompatibleProvider();
   private geminiKey: string = '';
   private deepseekKey: string = '';
   private customKey: string = '';
-  private customBaseUrl: string = 'http://localhost:11434/v1';
-  private customModel: string = 'llama3';
+  private customBaseUrl: string = process.env.CUSTOM_BASE_URL || 'http://localhost:11434/v1';
+  private customModel: string = process.env.CUSTOM_MODEL || 'llama3';
 
   constructor() {
     this.initProviders();
@@ -49,6 +51,7 @@ class AIGateway {
   private initProviders() {
     this.geminiKey = process.env.GEMINI_API_KEY || '';
     this.deepseekKey = process.env.DEEPSEEK_API_KEY || '';
+    this.customKey = process.env.CUSTOM_API_KEY || '';
 
     if (this.geminiKey) {
       try {
@@ -568,50 +571,31 @@ export class ResilientEngine<T, R> {
    */
   public async callOpenAICompatible(opts: {
     baseUrl: string;
-    apiKey: string;
+    apiKey?: string;
     model: string;
     prompt: string;
     systemInstruction?: string;
   }): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
-    const base = (opts.baseUrl || 'http://localhost:11434/v1').replace(/\/+$/, '');
-    const endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`;
-
     const messages: ChatMessage[] = [];
     if (opts.systemInstruction) messages.push({ role: 'system', content: opts.systemInstruction });
     messages.push({ role: 'user', content: opts.prompt });
 
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (opts.apiKey) {
-        headers['Authorization'] = `Bearer ${opts.apiKey}`;
-      }
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: opts.model,
-          messages,
-          temperature: 0.7,
-          stream: false
-        })
+      const result = await this.openAICompatibleProvider.generate({
+        baseUrl: opts.baseUrl,
+        apiKey: opts.apiKey,
+        model: opts.model,
+        messages: messages as OpenAICompatibleMessage[]
       });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errText.slice(0, 300)}`);
-      }
-
-      const data = await response.json();
-      const text = data?.choices?.[0]?.message?.content || '';
-      const tokens = data?.usage?.total_tokens || Math.ceil((opts.prompt.length + text.length) / 3.5);
-
-      if (!text) throw new Error('该服务返回了空响应');
-      return { success: true, content: text, tokens };
+      return {
+        success: true,
+        content: result.content,
+        tokens: result.tokens || Math.ceil((opts.prompt.length + result.content.length) / 3.5)
+      };
     } catch (err: any) {
       const errorMsg = String(err?.message || err);
       // If localhost:11434 fails because user hasn't started ollama yet, provide clear instruction
-      if (base.includes('localhost:11434') || errorMsg.includes('ECONNREFUSED')) {
+      if (opts.baseUrl.includes('localhost:11434') || opts.baseUrl.includes('127.0.0.1:11434') || errorMsg.includes('ECONNREFUSED')) {
         return {
           success: false,
           content: '',

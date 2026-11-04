@@ -12,6 +12,14 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  source?: 'web' | 'github';
+  repository?: string;
+  stars?: number;
+  forks?: number;
+  language?: string;
+  license?: string;
+  updatedAt?: string;
+  openIssues?: number;
 }
 
 export interface ExtractedPage {
@@ -229,16 +237,40 @@ export async function searchWeb(
     return searchWikipedia(q, limit, lang);
   }
 
-  // auto: Wikipedia first (accurate + multilingual), then DuckDuckGo, then Bing.
-  // Bing is last because its HTML endpoint is unreliable and often returns
-  // unrelated regional content regardless of query.
-  const wiki = await searchWikipedia(q, limit, lang);
-  if (wiki.length > 0) return wiki;
+  // auto: prefer broad search providers for normal queries. Wikipedia is a
+  // fallback for knowledge lookups, not the default result set for every query.
+  const bing = await searchBing(q, limit);
+  if (bing.length > 0) return bing.map(result => ({ ...result, source: 'web' as const }));
 
   const ddg = await searchDuckDuckGo(q, limit);
-  if (ddg.length > 0) return ddg;
+  if (ddg.length > 0) return ddg.map(result => ({ ...result, source: 'web' as const }));
 
-  return searchBing(q, limit);
+  return (await searchWikipedia(q, limit, lang)).map(result => ({ ...result, source: 'web' as const }));
+}
+
+/** Search GitHub's public repository index. Results are discovery metadata only;
+ * importing or executing repository code is intentionally a separate approval step. */
+export async function searchGitHubRepositories(query: string, limit = 10): Promise<SearchResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const apiUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc&per_page=${Math.min(limit, 20)}`;
+  const raw = await fetchText(apiUrl, 8000);
+  const data = JSON.parse(raw);
+  if (!Array.isArray(data?.items)) return [];
+
+  return data.items.map((repo: any) => ({
+    title: repo.full_name || repo.name || 'GitHub repository',
+    url: repo.html_url,
+    snippet: repo.description || 'No repository description provided.',
+    source: 'github' as const,
+    repository: repo.full_name,
+    stars: Number(repo.stargazers_count || 0),
+    forks: Number(repo.forks_count || 0),
+    language: repo.language || '未标注',
+    license: repo.license?.spdx_id || repo.license?.name || '许可证未标注',
+    updatedAt: repo.pushed_at || repo.updated_at,
+    openIssues: Number(repo.open_issues_count || 0)
+  }));
 }
 
 async function searchBing(query: string, limit: number): Promise<SearchResult[]> {

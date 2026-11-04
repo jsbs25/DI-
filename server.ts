@@ -8,7 +8,7 @@ import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
-import { fetchAndExtract, searchWeb } from './server/webFetcher.ts';
+import { fetchAndExtract, searchGitHubRepositories, searchWeb } from './server/webFetcher.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 import {
@@ -1022,10 +1022,12 @@ app.get('/api/browser/search', async (req, res) => {
   if (!q || typeof q !== 'string' || !q.trim()) {
     return res.status(400).json({ success: false, error: 'Search query required' });
   }
-  const engineParam = engine === 'bing' || engine === 'duckduckgo' || engine === 'wikipedia' ? engine : 'auto';
+  const engineParam = engine === 'bing' || engine === 'duckduckgo' || engine === 'wikipedia' || engine === 'github' ? engine : 'auto';
   const langParam = lang === 'zh' || lang === 'ar' || lang === 'es' || lang === 'fr' || lang === 'ru' ? lang : 'en';
   try {
-    const results = await searchWeb(q, 10, engineParam, langParam);
+    const results = engineParam === 'github'
+      ? await searchGitHubRepositories(q, 12)
+      : await searchWeb(q, 10, engineParam, langParam);
     res.json({ success: true, query: q, results, engine: engineParam, lang: langParam });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Search failed' });
