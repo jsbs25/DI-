@@ -21,7 +21,7 @@ for (const id of ['earth', 'saturn']) {
       planet={planet}
       onClose={noop}
       onFocusPlanet={noop}
-      onSwitchToEarthWorld={noop}
+      onEnterEcosystem={noop}
     />
   );
 
@@ -35,7 +35,7 @@ for (const id of ['earth', 'saturn']) {
   );
   check(html.includes('对焦轨道观测 (Focus Orbit)'), `${id}: focus action text is retained`);
   check(
-    html.includes('进入地球生态 (Enter Social World)') === (id === 'earth'),
+    html.includes('进入人类世界 (Enter Humanity)') === (id === 'earth'),
     `${id}: Earth-world action remains conditional on the Earth selection`
   );
 }

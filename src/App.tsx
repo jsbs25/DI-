@@ -31,6 +31,7 @@ import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
 import { KnowledgeUniverse } from './components/knowledge/KnowledgeUniverse.tsx';
 import { UniverseEngine } from './universe/UniverseEngine.tsx';
 import { SaturnSpace } from './universe/SaturnSpace.tsx';
+import { getPlanetEcosystem } from './universe/planetEcosystems.ts';
 import { HolographicAICompanion } from './components/ai/HolographicAICompanion.tsx';
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 
@@ -377,6 +378,12 @@ export default function App() {
     setCurrentTab('chat');
   };
 
+  const handleEnterPlanet = (planetId: string) => {
+    const eco = getPlanetEcosystem(planetId);
+    if (!eco || !eco.available) return;
+    setCurrentTab(eco.tab);
+  };
+
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100 flex font-sans">
       {/* Welcome Banner Toast */}
@@ -452,7 +459,7 @@ export default function App() {
           <div className="flex-1 flex flex-col min-h-[calc(100vh-4rem)]">
             <UniverseEngine
               onSwitchToEarthWorld={() => setCurrentTab('globe')}
-              onSwitchToSaturnWorld={() => setCurrentTab('saturn')}
+              onEnterEcosystem={handleEnterPlanet}
             />
           </div>
         )}

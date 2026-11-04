@@ -20,21 +20,20 @@ import {
   Rocket
 } from 'lucide-react';
 import { CelestialBody } from './celestialBodies';
+import { getPlanetEcosystem } from './planetEcosystems';
 
 interface PlanetTelemetryDrawerProps {
   planet: CelestialBody | null;
   onClose: () => void;
   onFocusPlanet: (planetId: string) => void;
-  onSwitchToEarthWorld?: () => void;
-  onSwitchToSaturnWorld?: () => void;
+  onEnterEcosystem?: (planetId: string) => void;
 }
 
 export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
   planet,
   onClose,
   onFocusPlanet,
-  onSwitchToEarthWorld,
-  onSwitchToSaturnWorld
+  onEnterEcosystem
 }) => {
   if (!planet) return null;
 
@@ -100,48 +99,28 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
             对焦轨道观测 (Focus Orbit)
           </button>
 
-          {planet.id === 'earth' && onSwitchToEarthWorld && (
-            <button
-              onClick={onSwitchToEarthWorld}
-              className="py-2 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
-            >
-              <Globe2 className="w-3.5 h-3.5" />
-              进入地球生态 (Enter Social World)
-            </button>
-          )}
-
-          {planet.id === 'saturn' && onSwitchToSaturnWorld && (
-            <button
-              onClick={onSwitchToSaturnWorld}
-              className="py-2 px-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white rounded-xl font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              进入土星生态 (Enter Saturn Cinema)
-            </button>
-          )}
+          {(() => {
+            const eco = getPlanetEcosystem(planet.id);
+            if (!eco) return null;
+            if (!eco.available) {
+              return (
+                <div className="flex-1 py-2 px-3 bg-white/5 text-white/45 border border-white/10 rounded-xl text-xs flex items-center justify-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  生态建设中 (Under Construction)
+                </div>
+              );
+            }
+            return (
+              <button
+                onClick={() => onEnterEcosystem?.(planet.id)}
+                className={`flex-1 py-2 px-3 bg-gradient-to-r ${eco.buttonClass} text-white rounded-xl font-medium text-xs flex items-center justify-center gap-1.5 transition-all shadow-md`}
+              >
+                <Globe2 className="w-3.5 h-3.5" />
+                {`进入${eco.titleZh} (Enter ${eco.titleEn})`}
+              </button>
+            );
+          })()}
         </div>
-
-        {/* Saturn Cinema: the target streaming site blocks iframe embedding
-            (X-Frame-Options), so instead of a blank frame we show a clear
-            one-click entry that opens the full site in a new tab. */}
-        {planet.id === 'saturn' && (
-          <div className="space-y-3 rounded-xl border border-purple-500/20 bg-gradient-to-r from-purple-500/10 to-transparent p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-purple-300">
-              土星观影站 (Saturn Cinema)
-            </h3>
-            <p className="text-xs leading-relaxed text-white/60">
-              该影视站点禁止网页内嵌播放器，因此这里无法直接嵌入画面。点击下方按钮会在新标签页打开完整观影站。
-            </p>
-            <a
-              href="https://souju6.ai/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-600/30 transition-all hover:bg-purple-500"
-            >
-              进入观影站（新窗口打开）↗
-            </a>
-          </div>
-        )}
 
         {/* Physical Astrophysical Metrics Grid */}
         <div>

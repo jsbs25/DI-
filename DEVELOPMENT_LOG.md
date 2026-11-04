@@ -3,6 +3,20 @@
 
 ---
 
+### [2026-11-04] Commit feat(universe): 统一十个天体生态入口，清理盗版观影链接
+* **星球生态入口统一接线**:
+  - 新增单一事实来源 `src/universe/planetEcosystems.ts`，将十个天体映射到对应数字生态与 `currentTab`。
+  - `PlanetTelemetryDrawer` 的「进入生态」按钮改为由该映射驱动：已实现生态显示「进入 XX 生态」并跳转；水星/金星/月球显示「生态建设中 (Under Construction)」真实空状态。
+  - 贯通 `UniverseEngine` 的 `onEnterEcosystem` 回调与 `App.tsx` 的 `handleEnterPlanet` 路由，土星/太阳/火星/木星/天王星/海王星均可从宇宙引擎进入对应模块。
+* **版权清理**:
+  - 移除遥测抽屉与浏览器书签中的盗版站点 `souju6.ai`（用户已明确要求替换为 NASA 公版内容），土星观影统一走 `SaturnSpace` 的 NASA 公版影像。
+* **文档**:
+  - 新增 `PLANET_ECOSYSTEM_MAP.md`（十个生态映射与状态）与 `UNIVERSE_ARCHITECTURE.md`（三层架构）。
+* **验证**:
+  - `tsc --noEmit` 0 报错；`vite build` 成功；`scripts/test_universe_render.tsx` 9 passed 0 failed。
+
+---
+
 ### [2026-11-04] Commit feat(globe): 剔除旧版底部卡片，上线 ISS 实时空间站轨道与 USGS 全球地震遥测图层
 * **用户指令响应与主屏净化**:
   - 响应用户「主界面的宇宙总览、我们的银河、全球社区这些都可以去掉，借鉴 GitHub 开源方案」要求。
