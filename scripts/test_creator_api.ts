@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { isDeepStrictEqual } from 'node:util';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import fs from 'node:fs';
@@ -120,6 +121,11 @@ async function main() {
       articleIds.has('art_1') && articleIds.has('art_2'),
       'Existing seeded creator articles remain present in the isolated catalog'
     );
+    const repeatedArticlesResponse = await get('/api/articles');
+    check(
+      repeatedArticlesResponse.status === 200 && isDeepStrictEqual(repeatedArticlesResponse.body, articlesResponse?.body),
+      'Repeated article catalog GET returns the same response without changing article data'
+    );
 
     const videosResponse = await get('/api/videos');
     check(
@@ -152,6 +158,11 @@ async function main() {
     check(
       videoIds.has('vid_1') && videoIds.has('vid_2'),
       'Existing seeded video catalog entries remain present'
+    );
+    const repeatedVideosResponse = await get('/api/videos');
+    check(
+      repeatedVideosResponse.status === 200 && isDeepStrictEqual(repeatedVideosResponse.body, videosResponse.body),
+      'Repeated video catalog GET returns the same response without changing video data'
     );
     check(
       [...ALLOWED_ENDPOINTS].every(endpoint => requested.some(request => request.endpoint === endpoint)) &&
