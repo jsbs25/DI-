@@ -157,6 +157,9 @@ async function main() {
     check(toggledOn.status === 200 && toggledOn.body.isPublic === true, 'Authenticated location toggle enables public sharing');
     const persistedOn = JSON.parse(fs.readFileSync(dataFile, 'utf8')).users.find((user: any) => user.id === userId);
     check(persistedOn.location.isPublic === true, 'Location privacy change is persisted to disk');
+    const sharedNodes = await request('/api/globe/nodes');
+    const sharedNode = sharedNodes.body.nodes.find((node: any) => node.userId === userId);
+    check(sharedNodes.status === 200 && !!sharedNode && Number.isFinite(sharedNode.lat) && Number.isFinite(sharedNode.lng), 'Consented public location appears as a globe node with coordinates');
     const publicLocation = await request(`/api/users/${userId}`);
     check(publicLocation.body.user.location.lat !== 0 && publicLocation.body.user.location.lng !== 0, 'Consented public city coordinates remain available');
 
@@ -164,6 +167,8 @@ async function main() {
     check(toggledOff.status === 200 && toggledOff.body.isPublic === false, 'Authenticated location toggle disables public sharing');
     const finalProfile = await request(`/api/users/${userId}`);
     check(finalProfile.body.user.location.lat === 0 && finalProfile.body.user.location.lng === 0, 'Coordinates are masked again when sharing is disabled');
+    const hiddenNodes = await request('/api/globe/nodes');
+    check(hiddenNodes.status === 200 && !hiddenNodes.body.nodes.some((node: any) => node.userId === userId), 'Globe node disappears after location sharing is disabled');
 
     const marker = `api-regression-${suffix}`;
     const emptyPost = await request('/api/posts', 'POST', { content: '   ' }, token);
