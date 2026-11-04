@@ -123,3 +123,4 @@
 - `npm run test:globe-api` 现使用临时合成用户文件覆盖 `/api/globe/nodes`、`/api/globe/countries`、`/api/globe/stats` 三个 GET 白名单端点；11 项通过。新增检查确保公开位置用户节点及预期共享字段保留、关闭位置分享的用户和坐标哨兵不出现在响应中。
 - `npm run lint` 与 `git diff --check` 通过。测试服务使用随机本地端口，后台书籍采集关闭；不运行完整 `test:api`（其含待批准会话读取路径），不运行构建或浏览器测试，不访问外部来源、正式 `server_data.json` 或既有服务。
 - 下一步继续选择普通、无外部副作用、无权限策略变更的回归任务；会话/消息边界、既有服务配置/日志和正式数据继续保持未触碰。
+- GitHub 同步：回归代码与项目记录提交 `17561300293bf7782445e7f80bf0a43bf665faa6` 从父提交 `3cf4386ddd978fcfd0036fd6bcf7c9679b59e2ea` 正常快进推送到 `main`；推送后 `git fetch` 与授权 connector API 回读均确认远端 `main`、`origin/main`、本地 `HEAD` 同为 `1756130`，工作区干净。未强推、未更改账户设置或全局 Git 配置。
