@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Film, ExternalLink, Sparkles, Bookmark, BookmarkCheck, Library, Tv } from 'lucide-react';
+import { ArrowLeft, Film, ExternalLink, Sparkles, Bookmark, BookmarkCheck, Library, Tv, Globe } from 'lucide-react';
 import { Language } from '../types/index.ts';
 
 interface SaturnSpaceProps {
@@ -39,6 +39,33 @@ const CATEGORIES: { key: FilmCategory | 'all'; zh: string; en: string }[] = [
   { key: 'all', zh: '全部', en: 'All' },
   { key: 'space', zh: '太空探索', en: 'Space' },
   { key: 'public', zh: '公版电影', en: 'Public Domain' }
+];
+
+// 第三方影视搜索与发现站（外部站点，新窗口打开；均为合法站点，不含盗版源）
+type ExternalSiteCategory = 'AI 搜索' | '数据库' | '社区' | '流媒体' | '评分' | '动漫';
+
+interface ExternalSite {
+  id: string;
+  name: string;
+  nameZh: string;
+  url: string;
+  descEn: string;
+  descZh: string;
+  category: ExternalSiteCategory;
+}
+
+const EXTERNAL_SITES: ExternalSite[] = [
+  { id: 'souju', name: '搜剧AI', nameZh: '搜剧AI', url: 'https://souju6.ai/', descEn: 'AI movie/TV search & discovery', descZh: 'AI 影视搜索与内容发现', category: 'AI 搜索' },
+  { id: 'douban', name: '豆瓣电影', nameZh: '豆瓣电影', url: 'https://movie.douban.com/', descEn: 'Reviews, ratings & watchlists', descZh: '影评、评分与片单', category: '社区' },
+  { id: 'maoyan', name: '猫眼', nameZh: '猫眼', url: 'https://www.maoyan.com/', descEn: 'Movie info & box office', descZh: '电影资讯与票房', category: '数据库' },
+  { id: 'imdb', name: 'IMDb', nameZh: 'IMDb', url: 'https://www.imdb.com/', descEn: 'The world movie database', descZh: '全球电影数据库', category: '数据库' },
+  { id: 'tmdb', name: 'TMDB', nameZh: 'TMDB', url: 'https://www.themoviedb.org/', descEn: 'Open movie & TV database', descZh: '开放影视数据库', category: '数据库' },
+  { id: 'letterboxd', name: 'Letterboxd', nameZh: 'Letterboxd', url: 'https://letterboxd.com/', descEn: 'Film community & lists', descZh: '影迷社区与片单', category: '社区' },
+  { id: 'trakt', name: 'Trakt', nameZh: 'Trakt', url: 'https://trakt.tv/', descEn: 'Track what you watch', descZh: '观影追踪', category: '社区' },
+  { id: 'justwatch', name: 'JustWatch', nameZh: 'JustWatch', url: 'https://www.justwatch.com/', descEn: 'Find where to stream', descZh: '流媒体聚合搜索', category: '流媒体' },
+  { id: 'rottentomatoes', name: 'Rotten Tomatoes', nameZh: '烂番茄', url: 'https://www.rottentomatoes.com/', descEn: 'Tomatometer ratings', descZh: '烂番茄评分', category: '评分' },
+  { id: 'myanimelist', name: 'MyAnimeList', nameZh: 'MyAnimeList', url: 'https://myanimelist.net/', descEn: 'Anime & manga database', descZh: '动漫数据库', category: '动漫' },
+  { id: 'anilist', name: 'AniList', nameZh: 'AniList', url: 'https://anilist.co/', descEn: 'Anime tracking & lists', descZh: '动漫追踪与片单', category: '动漫' },
 ];
 
 const WATCHLIST_KEY = 'earth-one.saturn.watchlist.v1';
@@ -225,6 +252,47 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
             {isZh ? '该分类暂无内容。' : 'No titles in this category yet.'}
           </div>
         )}
+
+        {/* 第三方影视搜索与发现站（类似搜剧AI，外部站点，新窗口打开） */}
+        <section className="mt-12">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+              <Globe className="h-5 w-5 text-amber-400" />
+              <span>{isZh ? '影视搜索与发现站' : 'Movie & TV Discovery'}</span>
+            </h2>
+            <span className="text-xs text-slate-500">
+              {isZh ? '外部站点 · 新窗口打开 · 均为合法站点' : 'External sites · new tab · legitimate only'}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {EXTERNAL_SITES.map((site) => (
+              <a
+                key={site.id}
+                href={site.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex items-start gap-3 rounded-2xl border border-slate-800 bg-slate-900/40 p-4 transition-colors hover:border-amber-500/40 hover:bg-slate-900/70"
+              >
+                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-300">
+                  <ExternalLink className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate text-sm font-bold text-white">
+                      {isZh ? site.nameZh : site.name}
+                    </h3>
+                    <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                      {site.category}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                    {isZh ? site.descZh : site.descEn}
+                  </p>
+                </div>
+              </a>
+            ))}
+          </div>
+        </section>
 
         {/* Legitimate external libraries */}
         <div className="mt-8 flex flex-wrap gap-3">
