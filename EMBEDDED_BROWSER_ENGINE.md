@@ -1,0 +1,58 @@
+# EARTH ONE 内嵌浏览器引擎原型
+
+## 结论
+
+EARTH ONE 当前是 React/Vite/Express Web 应用；普通网页无法自行捆绑或启动浏览器进程。此原型因此增加了一个**可选桌面运行目标**：Electron 外层承载原有 EARTH ONE 界面，Browser 仍是侧栏中的独立模块，而它的网页内容在桌面目标下由 Electron 的 `WebContentsView` 直接使用 Chromium 渲染。它不是 Google Chrome，也不宣称具有 Chrome 的全部产品能力。
+
+在普通 Web 部署中，Browser 继续保留现有 iframe/正文预览回退，并明确显示“网页预览”；它不会把 iframe 假称为浏览器引擎。Browser 模块可用 `?module=browser` 直接打开，测试/深链可以用 `browserUrl` 指定一个 HTTP(S) 地址。
+
+## 选型与许可
+
+| 方案 | 实际引擎 | 许可证/特点 | 结论 |
+| --- | --- | --- | --- |
+| Electron `WebContentsView` | 随 Electron 提供的 Chromium，独立于系统默认浏览器 | Electron 主项目 MIT；Chromium 和随附依赖各有上游许可证及通知 | 选用。与目前 TypeScript/React 项目衔接直接，适合先做可选桌面原型。 |
+| Chromium Embedded Framework (CEF) | Chromium | CEF 项目 BSD 许可，另需跟踪 Chromium 安全版本；需维护 C/C++/CEF 构建和绑定层 | 可作为未来原生壳替代，但不是此 Web 项目最小落地路径。 |
+| Tauri 2 / WRY | 操作系统 WebView（各平台提供的组件） | Tauri MIT/Apache-2.0；体积较小，但不是统一随应用捆绑的 Chromium | 不满足“有自己的 Chromium 引擎”这一明确要求，因此未选。 |
+
+许可核对： [Electron 项目许可证](https://github.com/electron/electron/blob/main/LICENSE)、[Chromium 许可信息](https://www.chromium.org/chromium-os/licensing/)、[CEF 项目及 BSD 许可说明](https://github.com/chromiumembedded/cef)、[Tauri 架构与许可证](https://v2.tauri.app/concept/architecture/)。发布桌面安装包时仍须随对应 Electron/Chromium 二进制保留并分发其版本所需的第三方许可/归属通知；上表不是法律意见。
+
+## 现在能做什么
+
+- Browser 模块在桌面目标内真实加载 HTTP 和 HTTPS 页面，提供 Chromium 渲染、多标签独立的页面历史、地址栏、后退/前进和重载。
+- 原有搜索、书签、阅读/正文提取、AI 入口和归档能力仍由 EARTH ONE React/Express 部分承载。桌面 Chromium 导航不会把目标 URL 发给服务器 `/api/browser/fetch-preview`；因此普通网页正文不会自动提取，AI 总结、翻译和归档只有在标签已有可用正文时才会执行。Web 回退仍保留原有预览路径。
+- Chromium 视图由占位框的实际位置和尺寸驱动，切换到其他 EARTH ONE 模块、进入阅读模式或打开覆盖层时会隐藏；Browser 标签的界面与地址栏仍留在 EARTH ONE 内。
+- 普通 Web 版继续使用原有回退界面；用户可从工具栏识别当前是“真实 Chromium”还是“网页预览”。
+
+## 安全边界
+
+- 远程网页在无 Node.js 集成、启用 `contextIsolation`、启用渲染器 sandbox 和默认 Web 安全的 Chromium WebContents 中运行；远程网页没有 preload。
+- 只有 EARTH ONE 本地壳的 preload 暴露少量导航/尺寸 API；主进程校验调用方 WebContents 和来源 origin，并拒绝 `file:`, `javascript:`, `data:`, `ftp:` 等非 HTTP(S) 地址。拒绝弹出窗口。
+- 浏览器会话为应用进程内存会话（非 `persist:`），标签共享该会话，应用退出后不保留网站 cookie。通知、定位等网页权限一律默认拒绝；没有权限设置界面。
+- 下载经 Electron 保存文件对话框，不静默写入；当前没有恶意文件扫描、下载大小/类型限制或下载管理器。证书错误不做绕过。桌面 Chromium 在用户设备上直接打开用户输入的 HTTP(S) 地址（包括 localhost/内网地址），不让 EARTH ONE 服务器代访该地址；它不是通用 SSRF 隔离器。**自动化测试只连测试脚本在 127.0.0.1 上创建的合成页面/下载夹具，不探测或访问任意私网目标。**
+- 普通 Web 回退仍保留原有服务器端 `/api/browser/fetch-preview` 行为；该旧 API 未纳入本次 SSRF 硬化。若以公网可访问服务部署，需另行校验解析后的目标 IP 与每次重定向，不能把它当作通用公开 URL 代理。桌面 Chromium 不调用此端点。
+- 尚无扩展、Chrome 同步、密码管理/自动填充、跨重启 cookie、完整下载管理、书签持久化或 Chrome 兼容承诺。用户可访问的网页可能不受 iframe 回退支持，因此桌面引擎仍是有实质意义的模式差异。
+
+## 本地启动
+
+在该仓库安装依赖后运行：
+
+```sh
+bun install
+bun run desktop:dev
+```
+
+`electron` 已列入 Bun 的 `trustedDependencies`，以运行其必需的安装脚本并下载匹配的桌面 Chromium 二进制。启动器会在本机 loopback 临时端口启动既有 Express/Vite 服务（跳过启动时的书籍抓取），然后打开 Electron 窗口；关闭窗口会结束本地服务。普通 Web 开发仍使用 `bun run dev`，静态构建仍使用 `bun run build`。这次交付的是源码级可运行原型，不包含签名安装包、自动更新器或生产发布配置。
+
+## 测试
+
+```sh
+bun run lint
+bun run build
+bun run test:browser-engine
+```
+
+引擎集成测试在 Linux 使用 Xvfb 启动真正的 Electron/Chromium 窗口，并验证 Browser 页面启动、两个本机合成页面间导航与返回历史、`javascript:`/`file:` 拒绝、通知权限默认拒绝、经保存路径完成本地下载，以及窄窗口下原生视口跟随 EARTH ONE 模块布局。为应对无 GPU 的 Xvfb 环境，该 smoke test 临时启用 Chromium SwiftShader 软件 WebGL；普通桌面启动不设置这项参数。测试只绑定 `127.0.0.1`，不需要访问外部网站。
+
+## 平台与维护
+
+原型需要 Electron 对应的桌面二进制；面向 Windows/macOS/Linux 的可分发包尚未配置/签名。Smoke test 已在 Linux/Xvfb 单一缩放环境运行；Windows/macOS、跨显示器 DPI、签名与自动更新尚未验证。它不能把 Chromium 引擎嵌进普通浏览器网页，也不适用于 iOS/Android 原生容器。Electron/Chromium 必须持续升级以接收安全修复；CEF 也有 Chromium 更新时差。目标 Electron 当前以 `^45.2.2` 声明，维护者应在每次发布前核对实际锁定版本、Chromium 版本和安全公告，并同步第三方通知。

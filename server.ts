@@ -23,6 +23,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const HOST = process.env.EARTH_ONE_HOST || '0.0.0.0';
 
 app.use(express.json());
 
@@ -1132,8 +1133,8 @@ async function startServer() {
 
   app.use(vite.middlewares);
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌍 地球计划 Server listening on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`🌍 地球计划 Server listening on http://${HOST}:${PORT}`);
   });
 
   if (process.env.EARTH_ONE_SKIP_BOOK_HARVEST !== 'true') {

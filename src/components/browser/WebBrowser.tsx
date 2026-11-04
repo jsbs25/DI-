@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Globe,
   ArrowLeft,
@@ -139,23 +139,44 @@ Earth's interior remains active with a solid iron inner core, a liquid outer cor
   }
 };
 
+function getInitialBrowserUrl(): string {
+  const fallback = 'https://earthobservatory.nasa.gov';
+  if (typeof window === 'undefined') return fallback;
+  const requested = new URLSearchParams(window.location.search).get('browserUrl');
+  if (!requested) return fallback;
+  try {
+    const parsed = new URL(requested);
+    if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && !parsed.username && !parsed.password) {
+      return parsed.href;
+    }
+  } catch {
+    // Ignore invalid deep links and keep the established default page.
+  }
+  return fallback;
+}
+
 export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
+  const [initialUrl] = useState(getInitialBrowserUrl);
+  const initialPreset = PRESET_PAGES[initialUrl];
+  const browserEngine = typeof window === 'undefined' ? undefined : window.earthOneBrowser;
+  const nativeViewportRef = useRef<HTMLDivElement | null>(null);
+
   // Browser-local language (defaults to global app language; user can override)
   const [browserLang, setBrowserLang] = useState<Language>(lang);
 
   const [tabs, setTabs] = useState<BrowserTab[]>([
     {
       id: 'tab_1',
-      title: 'NASA Earth Observatory',
-      url: 'https://earthobservatory.nasa.gov',
+      title: initialPreset?.title || initialUrl,
+      url: initialUrl,
       readerMode: false,
-      content: PRESET_PAGES['https://earthobservatory.nasa.gov'].content,
-      author: PRESET_PAGES['https://earthobservatory.nasa.gov'].author,
-      readTime: PRESET_PAGES['https://earthobservatory.nasa.gov'].readTime
+      content: initialPreset?.content || '',
+      author: initialPreset?.author || '',
+      readTime: initialPreset?.readTime || ''
     }
   ]);
   const [activeTabId, setActiveTabId] = useState('tab_1');
-  const [inputUrl, setInputUrl] = useState('https://earthobservatory.nasa.gov');
+  const [inputUrl, setInputUrl] = useState(initialUrl);
   const [isLoading, setIsLoading] = useState(false);
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(DEFAULT_BOOKMARKS);
   const [isSavedDrawerOpen, setIsSavedDrawerOpen] = useState(false);
@@ -168,7 +189,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [isSearching, setIsSearching] = useState(false);
 
   // Navigation history per tab (real back/forward)
-  const [history, setHistory] = useState<Record<string, string[]>>({ tab_1: ['https://earthobservatory.nasa.gov'] });
+  const [history, setHistory] = useState<Record<string, string[]>>({ tab_1: [initialUrl] });
   const [historyIndex, setHistoryIndex] = useState<Record<string, number>>({ tab_1: 0 });
 
   // Search engine selection
@@ -191,8 +212,71 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [translatedContent, setTranslatedContent] = useState<string>('');
   const [showTranslation, setShowTranslation] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [browserEngineState, setBrowserEngineState] = useState<EarthOneBrowserState | null>(null);
+  const [browserEngineError, setBrowserEngineError] = useState<string | null>(null);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+
+  useEffect(() => {
+    if (!browserEngine) return;
+    void browserEngine.setActive(true);
+    return () => {
+      void browserEngine.setBounds(null);
+      void browserEngine.setActive(false);
+    };
+  }, [browserEngine]);
+
+  useEffect(() => {
+    if (!browserEngine || !activeTab) return;
+    browserEngine.selectTab(activeTabId, activeTab.url).then(result => {
+      if (!result.success) setBrowserEngineError(result.error || 'Chromium 网页无法打开。');
+      else setBrowserEngineError(null);
+    }).catch(error => setBrowserEngineError(error?.message || 'Chromium 引擎暂不可用。'));
+  }, [browserEngine, activeTabId]);
+
+  useEffect(() => {
+    if (!browserEngine) return;
+    return browserEngine.onState(state => {
+      setBrowserEngineState(state);
+      setIsLoading(state.loading);
+      if (state.url) {
+        setTabs(previous => previous.map(tab => tab.id === state.tabId
+          ? { ...tab, url: state.url, title: state.title || tab.title }
+          : tab));
+        if (state.tabId === activeTabId) setInputUrl(state.url);
+      }
+    });
+  }, [browserEngine, activeTabId]);
+
+  useEffect(() => {
+    if (!browserEngine) return;
+    const syncViewport = () => {
+      const element = nativeViewportRef.current;
+      const mobileAiOverlay = isAiPanelOpen && window.innerWidth < 768;
+      if (!element || !activeTab || activeTab.readerMode || searchResults.length > 0 || isSearching || isSavedDrawerOpen || mobileAiOverlay) {
+        void browserEngine.setBounds(null);
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) {
+        void browserEngine.setBounds(null);
+        return;
+      }
+      void browserEngine.setBounds({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+    };
+    const scheduleSync = () => window.requestAnimationFrame(syncViewport);
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleSync) : null;
+    if (nativeViewportRef.current) observer?.observe(nativeViewportRef.current);
+    window.addEventListener('resize', scheduleSync);
+    document.addEventListener('scroll', scheduleSync, true);
+    scheduleSync();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', scheduleSync);
+      document.removeEventListener('scroll', scheduleSync, true);
+      void browserEngine.setBounds(null);
+    };
+  }, [browserEngine, activeTabId, activeTab?.readerMode, searchResults.length, isSearching, isSavedDrawerOpen, isAiPanelOpen]);
 
   const pushHistory = (tabId: string, url: string) => {
     setHistory(prev => {
@@ -243,11 +327,16 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     let cleanUrl = targetUrl.trim();
     if (!cleanUrl) return;
 
-    // A search term (no scheme and either has spaces or no TLD) -> run live web search
+    // Bare hosts with ports (for example localhost:3000) are URLs, not schemes.
+    const isBareHttpHost = /^(?:localhost(?::\d+)?|(?:[\w-]+\.)+[\w-]+(?::\d+)?|[\w-]+:\d+|\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?|\[[\da-f:]+\](?::\d+)?)(?:[/?#]|$)/i.test(cleanUrl);
+    const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(cleanUrl) && !isBareHttpHost && !/\s/.test(cleanUrl);
+    const bareHostPort = isBareHttpHost && /:\d+(?:[/?#]|$)/.test(cleanUrl) && !/^https?:\/\//i.test(cleanUrl);
+    // A search term without a URL scheme, a dotted host, or an explicit host:port -> run live web search.
     const looksLikeUrl =
-      cleanUrl.startsWith('http://') ||
-      cleanUrl.startsWith('https://') ||
-      (cleanUrl.includes('.') && !cleanUrl.includes(' '));
+      /^https?:\/\//i.test(cleanUrl) ||
+      hasScheme ||
+      (browserEngine && isBareHttpHost) ||
+      (!bareHostPort && cleanUrl.includes('.') && !cleanUrl.includes(' '));
 
     if (!looksLikeUrl) {
       setIsSearching(true);
@@ -270,7 +359,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       return;
     }
 
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+    if (hasScheme && !/^https?:\/\//i.test(cleanUrl)) {
+      setBrowserEngineError('出于安全考虑，只支持 HTTP 或 HTTPS 网页地址。');
+      return;
+    }
+
+    if (!/^https?:\/\//i.test(cleanUrl)) {
       cleanUrl = 'https://' + cleanUrl;
     }
 
@@ -290,6 +384,23 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     );
 
     const preset = PRESET_PAGES[cleanUrl];
+    if (browserEngine) {
+      const result = await browserEngine.navigate(activeTabId, cleanUrl);
+      if (!result.success) {
+        setBrowserEngineError(result.error || 'Chromium 网页无法打开。');
+        setIsLoading(false);
+        return;
+      }
+      setBrowserEngineError(null);
+      setTabs(prev => prev.map(tab => tab.id === activeTabId
+        ? preset
+          ? { ...tab, url: cleanUrl, title: preset.title, content: preset.content, author: preset.author, readTime: preset.readTime }
+          : { ...tab, url: cleanUrl, title: tab.title === 'Loading…' ? new URL(cleanUrl).hostname : tab.title, content: '', author: cleanUrl, readTime: '' }
+        : tab));
+      setIsLoading(false);
+      return;
+    }
+
     if (preset) {
       setTabs(prev =>
         prev.map(t =>
@@ -387,6 +498,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   };
 
   const goBack = () => {
+    if (browserEngine) {
+      void browserEngine.goBack(activeTabId);
+      return;
+    }
     const stack = history[activeTabId] || [];
     const idx = historyIndex[activeTabId] ?? 0;
     if (idx <= 0) return;
@@ -396,6 +511,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   };
 
   const goForward = () => {
+    if (browserEngine) {
+      void browserEngine.goForward(activeTabId);
+      return;
+    }
     const stack = history[activeTabId] || [];
     const idx = historyIndex[activeTabId] ?? 0;
     if (idx >= stack.length - 1) return;
@@ -407,6 +526,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const handleCloseTab = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (tabs.length === 1) return;
+    void browserEngine?.closeTab(id);
     const remaining = tabs.filter(t => t.id !== id);
     setTabs(remaining);
     if (activeTabId === id) {
@@ -493,6 +613,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
   const handleSaveToLibrary = async () => {
     if (!activeTab) return;
+    if (browserEngine && !activeTab.content?.trim()) {
+      setSaveSuccessMessage('桌面 Chromium 模式不会把当前网址交给服务器提取正文；此页目前没有可归档的正文。');
+      setTimeout(() => setSaveSuccessMessage(null), 4500);
+      return;
+    }
     try {
       const res = await fetch('/api/browser/save-article', {
         method: 'POST',
@@ -519,6 +644,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
   const handleRunAiAnalysis = async (type: 'summary' | 'entities' | 'qa') => {
     setAiAnalysisType(type);
+    if (browserEngine && !activeTab.content?.trim()) {
+      setAiOutput('为避免服务器代访当前网址，桌面 Chromium 模式不会自动提取网页正文。此页暂无可分析正文，请直接在上方 Chromium 页面阅读。');
+      setIsAiLoading(false);
+      return;
+    }
     setIsAiLoading(true);
 
     const promptText =
@@ -564,7 +694,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
         <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/[0.06] bg-white/[0.025] p-1 text-slate-400">
           <button
             onClick={goBack}
-            disabled={(historyIndex[activeTabId] ?? 0) <= 0}
+            disabled={browserEngine
+              ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoBack)
+              : (historyIndex[activeTabId] ?? 0) <= 0}
             className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
             aria-label="后退"
             title="Back"
@@ -573,7 +705,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
           </button>
           <button
             onClick={goForward}
-            disabled={(historyIndex[activeTabId] ?? 0) >= (history[activeTabId]?.length ?? 1) - 1}
+            disabled={browserEngine
+              ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoForward)
+              : (historyIndex[activeTabId] ?? 0) >= (history[activeTabId]?.length ?? 1) - 1}
             className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
             aria-label="前进"
             title="Forward"
@@ -581,7 +715,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
             <ArrowRight className="w-4 h-4" />
           </button>
           <button
-            onClick={() => handleNavigate(inputUrl)}
+            onClick={() => browserEngine ? void browserEngine.reload(activeTabId) : void handleNavigate(inputUrl)}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white ${
               isLoading ? 'animate-spin text-cyan-400' : ''
             }`}
@@ -620,6 +754,21 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
             </button>
           )}
         </form>
+
+        <div
+          role="status"
+          aria-label={browserEngine ? '真实 Chromium 浏览器引擎' : '网页预览模式'}
+          title={browserEngine
+            ? '此桌面版由 Electron 内嵌的 Chromium 渲染网页'
+            : '此 Web 版为网页预览，不具备桌面浏览器引擎'}
+          className={`inline-flex min-h-8 shrink-0 items-center rounded-full border px-3 text-[11px] font-medium ${
+            browserEngine
+              ? 'border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-200'
+              : 'border-amber-300/20 bg-amber-300/[0.05] text-amber-200'
+          }`}
+        >
+          {browserEngine ? '真实 Chromium' : '网页预览'}
+        </div>
 
         <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 sm:w-auto">
           {/* Language selector (controls search result language) */}
@@ -727,6 +876,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
           </button>
         ))}
       </div>
+
+      {browserEngineError && (
+        <div role="alert" className="border-b border-rose-300/15 bg-rose-950/40 px-4 py-2 text-xs text-rose-200">
+          {browserEngineError}
+        </div>
+      )}
 
       {saveSuccessMessage && (
         <div role="status" className="flex items-center gap-2 border-b border-emerald-300/15 bg-emerald-950/50 px-4 py-2 text-xs text-emerald-100">
@@ -871,7 +1026,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                       </p>
                     ))
                   ) : (
-                    <p className="text-slate-400 italic">正在提取网页纯净正文或该站点允许直接访问...</p>
+                    <p className="text-slate-400 italic">
+                      {browserEngine
+                        ? '桌面 Chromium 页面由本机直接打开，不会转交服务器代访或提取正文；请直接在上方网页中阅读。'
+                        : '正在提取网页纯净正文或该站点允许直接访问...'}
+                    </p>
                   )}
                 </div>
 
@@ -896,12 +1055,25 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
               </div>
             ) : (
               <div className="relative flex h-full min-h-[480px] w-full flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-slate-950">
-                <iframe
-                  src={toEmbedUrl(activeTab.url)}
-                  title={activeTab.title}
-                  className="w-full flex-1 border-0 bg-white"
-                  sandbox="allow-scripts allow-same-origin allow-popups"
-                />
+                <div
+                  ref={nativeViewportRef}
+                  data-browser-engine-viewport
+                  aria-label={browserEngine ? 'Chromium 网页内容' : '网页预览内容'}
+                  className="relative flex min-h-[480px] w-full flex-1 bg-white"
+                >
+                  {browserEngine ? (
+                    <div className="flex h-full min-h-[480px] w-full items-center justify-center bg-[#080d13] text-sm text-slate-400">
+                      正在启动 Chromium 网页视图…
+                    </div>
+                  ) : (
+                    <iframe
+                      src={toEmbedUrl(activeTab.url)}
+                      title={activeTab.title}
+                      className="w-full flex-1 border-0 bg-white"
+                      sandbox="allow-scripts allow-same-origin allow-popups"
+                    />
+                  )}
+                </div>
               </div>
             )
           ) : null}
