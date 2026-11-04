@@ -756,7 +756,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             <Globe2 className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <div className="text-[11px] font-bold tracking-[.12em] text-white">地球计划</div>
+            <div className="text-[11px] font-bold tracking-[.12em] text-white">EARTH ONE</div>
             <div className="text-[9px] text-slate-400">One Universe. One World.</div>
           </div>
         </div>
@@ -1088,7 +1088,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             <Globe2 className="h-7 w-7" />
           </span>
           <div>
-            <div className="text-xs font-semibold text-slate-100">{lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}</div>
+            <div className="text-xs font-semibold text-slate-100">EARTH ONE</div>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-400">{t.motto}</p>
           </div>
         </div>
