@@ -12,15 +12,15 @@
 | 社交动态与趋势 | `src/components/social/`、`/api/posts*` | 动态发布/筛选/点赞/评论 HTTP 契约通过，桌面列表加载通过；完整 UI、真实鉴权及数据隔离仍待后续验证/批准。 |
 | 消息与 AI 翻译 | `src/components/chat/`、`/api/conversations/*` | 消息持久化与翻译路径存在；翻译依赖模型配置，回退内容不能冒充真实翻译。 |
 | AI HUB | `src/components/ai/`、`server/aiGateway.ts`、`/api/ai/*` | 多模式及模型网关代码存在；真实模型调用需服务端凭据和服务可用，不提交或暴露密钥。 |
-| 创作者中心与文章 | `src/components/creator/`、`/api/articles*` | 发布/阅读路径存在；赞赏统计不等同真实支付。 |
-| 视频中心 | `src/components/video/`、`/api/videos` | 视频目录与播放能力存在；HLS 转码/托管尚属基础设施待办，不得宣称已完成。 |
-| 游戏中心 | `src/components/games/`、`/api/games/*` | 五子棋/问答与房间路径存在；多人权威 WebSocket 对战需后续实现。 |
-| 社区 | `src/components/community/`、`/api/communities*` | 社区列表与加入路径存在；需要验证用户隔离及成员数持久化。 |
+| 创作者中心与文章 | `src/components/creator/`、`/api/articles*` | 文章列表响应与缺少必填正文的校验已有 HTTP 回归；文章成功写入及完整 UI 仍待验证；赞赏统计不等同真实支付。 |
+| 视频中心 | `src/components/video/`、`/api/videos` | 视频目录列表响应已有 HTTP 回归，不发起媒体请求；播放实测及 HLS 转码/托管仍待基础设施验证，不得宣称已完成。 |
+| 游戏中心 | `src/components/games/`、`/api/games/*` | 房间只读列表 API 已有 HTTP 回归；五子棋/问答交互与房间加入/创建仍待验证；多人权威 WebSocket 对战需后续实现。 |
+| 社区 | `src/components/community/`、`/api/communities*` | 社区只读列表 API 已有 HTTP 回归；加入路径、用户隔离及成员数持久化仍待验证。 |
 | 数字图书馆、阅读器、书架 | `src/components/library/`、`server/bookHarvester.ts`、`/api/library/*` | 图书检索/详情/书架进度 HTTP 契约通过，桌面目录到详情 smoke 通过；阅读器、外部来源、版权和管理权限仍需持续验证。 |
 | 网页浏览与收藏 | `src/components/browser/`、`/api/browser/*` | 搜索、预览、书签/保存路径存在；外部网页抓取须继续审查 SSRF、来源限制与隐私。 |
 | 爬虫与内容收集 | `src/components/crawler/`、`server/webFetcher.ts`、`/api/crawler/*` | 任务、抓取及审核路径存在；仅限合法公开内容，需权限/目标域约束与 SSRF 安全测试。 |
-| 知识图谱/知识宇宙 | `src/components/knowledge/`、`server/knowledgeGraph.ts`、`/api/knowledge/*` | 搜索、节点及关联路径存在；不得将种子/示例内容描述为实时全球知识数据。 |
-| 广告与赞助 | `src/components/commercial/`、`/api/ads/*` | 展示及点击统计代码存在；竞价和结算未列为已实现。 |
+| 知识图谱/知识宇宙 | `src/components/knowledge/`、`server/knowledgeGraph.ts`、`/api/knowledge/*` | HTTP 回归覆盖搜索、类别/国家筛选、关联节点、详情与不存在节点 404；不得将种子/示例内容描述为实时全球知识数据。 |
+| 广告与赞助 | `src/components/commercial/`、`/api/ads/*` | 广告只读列表 API 已有 HTTP 回归；点击写操作、竞价和结算未列为已实现。 |
 | 多语言与阿拉伯语 RTL | `src/i18n/translations.ts`、`src/index.css`、应用方向设置 | 中文、英语、阿拉伯语、西班牙语、法语、俄语翻译资源存在；每次导航或布局修改需覆盖 RTL。 |
 | 持久化数据与 API | `server/store.ts`、`server.ts`、`server_data.json`（本机忽略文件） | 保留现有 API 与用户数据；测试须使用临时数据文件；未经授权不得清空或不可逆迁移。 |
 

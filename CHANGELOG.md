@@ -15,11 +15,13 @@
 
 ### Improved
 - Expanded isolated HTTP API coverage to 51 assertions across social posts, library search/details/bookshelf progress, browser bookmarks, and crawler task creation. Tests use temporary storage and do not execute external crawls.
+- Extended HTTP API coverage to 64 assertions with article/video list contracts and knowledge-graph search, filters, details, and 404 handling; no article content write, external media request, crawl, admin route, or private-message access was exercised.
+- Added read-only community, game-room, and advertisement list checks; the isolated HTTP suite now has 67 passing assertions, with no join/create/click writes.
 - Navigation modules now load on demand behind an accessible loading state. The entry chunk decreased from about 1,160.76 KB (gzip 306.07 KB) to 316.71 KB (gzip 97.92 KB); the shared Three.js chunk remains about 551.65 KB and still triggers the build warning.
 - No authentication, authorization, administrator-permission, or private-message access-control policy was changed.
 
 ### Verification
-- `npm run lint`, `npm run build`, `npm run test:api` (51 assertions), and `npx tsx scripts/test_earth_one.ts` (44 assertions) passed after the drawer layout change; the production CSS contains the responsive desktop offset. Browser visual remeasurement remains pending.
+- `npm run lint`, `npm run build`, `npm run test:api` (67 assertions), and `npx tsx scripts/test_earth_one.ts` (44 assertions) passed; the production CSS contains the responsive desktop drawer offset. Browser visual remeasurement remains pending.
 - A bounded desktop production-build smoke check passed for globe → feed → library detail → universe → Earth telemetry → globe, using isolated temporary API data and no external AI/crawling.
 - The desktop drawer overlap was corrected after the smoke check; browser visual remeasurement remains pending. Production preview requests to `/favicon.ico` and `/favicon.svg` returned 200 with their expected image MIME types. Other modules, mobile/RTL, and real first-load resource measurements remain unverified.
 

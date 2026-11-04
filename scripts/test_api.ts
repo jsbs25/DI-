@@ -223,6 +223,39 @@ async function main() {
     const crawlerTasks = await request('/api/crawler/tasks');
     check(crawlerTasks.body.tasks.some((task: any) => task.id === crawlerTask.body.task.id), 'Created crawler task appears in the task list');
 
+    const articles = await request('/api/articles');
+    check(articles.status === 200 && articles.body.success === true && Array.isArray(articles.body.articles), 'Article listing returns a successful array response');
+    check(articles.body.articles.length > 0 && articles.body.articles.some((article: any) => typeof article.id === 'string' && typeof article.title === 'string'), 'Article listing preserves seeded article identifiers and titles');
+    const invalidArticle = await request('/api/articles', 'POST', { title: `${marker} incomplete` });
+    check(invalidArticle.status === 400 && invalidArticle.body.success === false, 'Article creation rejects a missing content field without writing data');
+
+    const videos = await request('/api/videos');
+    check(videos.status === 200 && videos.body.success === true && Array.isArray(videos.body.videos), 'Video listing returns a successful array response');
+    check(videos.body.videos.some((video: any) => video.id === 'vid_1' && typeof video.videoUrl === 'string'), 'Video listing preserves the catalog item contract without fetching external media');
+
+    const knowledgeNodes = await request('/api/knowledge/nodes');
+    check(knowledgeNodes.status === 200 && knowledgeNodes.body.success === true && knowledgeNodes.body.nodes.some((node: any) => node.id === 'civ_greek'), 'Knowledge graph node listing returns the curated civilization node');
+    const civilizationNodes = await request('/api/knowledge/nodes?category=civilization');
+    check(civilizationNodes.body.nodes.length > 0 && civilizationNodes.body.nodes.every((node: any) => node.type === 'civilization'), 'Knowledge graph category filter returns only matching node types');
+    const saNodes = await request('/api/knowledge/nodes?country=sa');
+    check(saNodes.body.nodes.some((node: any) => node.id === 'civ_islamic') && saNodes.body.nodes.every((node: any) => node.countryCode?.toUpperCase() === 'SA'), 'Knowledge graph country filter is case-insensitive and returns matching nodes');
+    const searchedKnowledge = await request('/api/knowledge/search?q=Avicenna');
+    check(searchedKnowledge.body.nodes.some((node: any) => node.id === 'per_ibn_sina'), 'Knowledge search matches an English alias');
+    const filteredKnowledgeSearch = await request('/api/knowledge/search?q=Islamic&category=civilization');
+    check(filteredKnowledgeSearch.body.nodes.some((node: any) => node.id === 'civ_islamic') && filteredKnowledgeSearch.body.nodes.every((node: any) => node.type === 'civilization'), 'Knowledge search combines text and category filters');
+    const greekCivilization = await request('/api/knowledge/nodes/civ_greek');
+    check(greekCivilization.status === 200 && greekCivilization.body.node.id === 'civ_greek', 'Knowledge node detail returns the requested node');
+    check(greekCivilization.body.related.some((node: any) => node.id === 'per_plato') && Array.isArray(greekCivilization.body.relatedBooks), 'Knowledge node detail includes related nodes and a related-books array');
+    const missingKnowledgeNode = await request('/api/knowledge/nodes/not-a-real-node');
+    check(missingKnowledgeNode.status === 404 && missingKnowledgeNode.body.success === false, 'Unknown knowledge node returns a structured 404');
+
+    const communities = await request('/api/communities');
+    check(communities.status === 200 && communities.body.success === true && communities.body.communities.some((community: any) => community.id === 'comm_1'), 'Community listing returns the seeded community catalog');
+    const gameRooms = await request('/api/games/rooms');
+    check(gameRooms.status === 200 && gameRooms.body.success === true && Array.isArray(gameRooms.body.rooms), 'Game room listing returns an array without creating or joining a room');
+    const ads = await request('/api/ads');
+    check(ads.status === 200 && ads.body.success === true && ads.body.ads.some((ad: any) => ad.id === 'ad_1' && typeof ad.clicks === 'number'), 'Advertisement listing returns the seeded catalog without recording a click');
+
     console.log(`HTTP API regression: ${passed} passed, 0 failed.`);
   } catch (error) {
     console.error('HTTP API regression failed:', error);
