@@ -39,7 +39,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('globe');
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [showGlobeTools, setShowGlobeTools] = useState(false);
+  const [showGlobeTools, setShowGlobeTools] = useState(true);
 
   // Core Data State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
