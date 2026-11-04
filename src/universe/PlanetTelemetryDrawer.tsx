@@ -109,35 +109,25 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
           )}
         </div>
 
-        {/* Saturn Cinema: embed the requested streaming page directly in the
-            Saturn viewport. If the site refuses iframe embedding it renders
-            blank — the "新窗口打开" link always works. */}
+        {/* Saturn Cinema: the target streaming site blocks iframe embedding
+            (X-Frame-Options), so instead of a blank frame we show a clear
+            one-click entry that opens the full site in a new tab. */}
         {planet.id === 'saturn' && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-cyan-300 uppercase tracking-wider">
-                土星观影站 (Saturn Cinema)
-              </h3>
-              <a
-                href="https://souju6.ai/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[11px] font-semibold text-cyan-400 hover:text-white"
-              >
-                新窗口打开 ↗
-              </a>
-            </div>
-            <div className="h-[420px] overflow-hidden rounded-xl border border-white/10 bg-black">
-              <iframe
-                src="https://souju6.ai/"
-                title="土星观影站"
-                className="h-full w-full border-0"
-                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-              />
-            </div>
-            <p className="text-[10px] leading-relaxed text-white/40">
-              若站点禁止内嵌，将显示空白，请点右上角「新窗口打开」直接观看。
+          <div className="space-y-3 rounded-xl border border-purple-500/20 bg-gradient-to-r from-purple-500/10 to-transparent p-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-purple-300">
+              土星观影站 (Saturn Cinema)
+            </h3>
+            <p className="text-xs leading-relaxed text-white/60">
+              该影视站点禁止网页内嵌播放器，因此这里无法直接嵌入画面。点击下方按钮会在新标签页打开完整观影站。
             </p>
+            <a
+              href="https://souju6.ai/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-600/30 transition-all hover:bg-purple-500"
+            >
+              进入观影站（新窗口打开）↗
+            </a>
           </div>
         )}
 
