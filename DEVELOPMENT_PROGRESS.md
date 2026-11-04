@@ -105,3 +105,4 @@
 - 新增 `scripts/test_social_feed_api.ts` 和 `npm run test:social-feed-api`。测试使用随机本地端口与自动清理的临时 JSON，仅请求公开 `/api/posts` 的十种预设 GET 变体。
 - 19 项断言通过：响应字段与既有隔离种子、默认列表和最新排序、热门互动评分顺序、约旦国家筛选（含小写代码）、类别筛选、`all`/`ALL` 兼容、国家与类别组合筛选、大小写不敏感的内容搜索，以及端点/方法白名单。
 - `npm run lint` 通过。未触发任何写接口、媒体 URL、会话/消息或身份接口；未访问正式数据、既有服务或外部来源。未运行包含待批准会话读取路径的完整 `npm run test:api`，也未运行构建或浏览器测试。
+- GitHub 同步：回归与项目记录提交 `72f7f96` 经现有授权 connector 快进推送；随后 `git fetch` 和 connector API 回读均显示远端 `main` 为 `72f7f96`，本地 `main`/`origin/main`/`HEAD` 对齐，工作区干净；未强推或更改账户设置。
