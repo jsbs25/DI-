@@ -1,0 +1,18 @@
+{
+  "date": "2026-11-05",
+  "generatedAt": "2026-11-05",
+  "source": "seed",
+  "count": 2,
+  "videos": [
+    {
+      "videoId": "xrGAQCq9BMU",
+      "title": "NASA at Saturn: Cassini's Grand Finale",
+      "author": "NASA Jet Propulsion Laboratory"
+    },
+    {
+      "videoId": "vl6jn-DdafM",
+      "title": "We Are Going — Artemis",
+      "author": "NASA"
+    }
+  ]
+}

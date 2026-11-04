@@ -1,0 +1,36 @@
+name: Saturn Daily Crawler
+
+# 每天 UTC 00:00 自动抓取最新宇宙/科技类 YouTube 视频元数据，
+# 写入 public/saturn_daily.json 作为土星观影站前端兜底数据。
+# 同时支持手动触发（workflow_dispatch）。
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Saturn crawler
+        env:
+          # 可选：配置 YouTube Data API v3 Key（走官方接口，更稳定）
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: python scripts/crawl_youtube.py
+
+      - name: Commit updated daily data
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore(saturn): 每日更新土星观影站视频数据'
+          file_pattern: 'public/saturn_daily.json'
