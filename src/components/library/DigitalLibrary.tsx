@@ -612,6 +612,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     const sourceName = r.sourceName || ({
                       openlibrary: 'Open Library',
                       gutenberg: 'Project Gutenberg',
+                      googlebooks: 'Google Books',
                       archive: 'Internet Archive',
                       wikisource: 'Wikisource',
                       ar_wikisource: '阿拉伯语维基文库'

@@ -4,6 +4,7 @@ import {
   getLibraryConnector,
   GutenbergConnector,
   InternetArchiveConnector,
+  GoogleBooksConnector,
   isLibraryConnectorEnabled,
   OpenLibraryConnector,
   RightsCategory,
@@ -18,6 +19,111 @@ const gutenbergText = `Title: Alice Fixture\nAuthor: Lewis Carroll\n\n*** START 
 
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
+
+const googlePublicDomain = {
+  id: 'pd-volume',
+  volumeInfo: {
+    title: 'Public Domain Fixture', authors: ['Test Author'], publisher: 'Fixture Press', publishedDate: '1890-01-01',
+    description: 'Fixture metadata', language: 'en',
+    industryIdentifiers: [{ type: 'ISBN_13', identifier: '9781234567890' }],
+    imageLinks: { thumbnail: 'http://books.google.com/books/content?id=pd-volume' },
+    canonicalVolumeLink: 'https://books.google.com/books?id=pd-volume',
+    previewLink: 'https://books.google.com/books?id=pd-volume&pg=PA1'
+  },
+  accessInfo: {
+    country: 'US', viewability: 'ALL_PAGES', accessViewStatus: 'FULL_PUBLIC_DOMAIN', publicDomain: true,
+    webReaderLink: 'https://books.google.com/books?id=pd-volume',
+    epub: { isAvailable: true, downloadLink: 'https://books.google.com/books/download?id=pd-volume&format=epub' },
+    pdf: { isAvailable: true, downloadLink: 'https://books.google.com/books/download?id=pd-volume&format=pdf' },
+    downloadAccess: { restricted: false }
+  }
+};
+const googlePreview = {
+  id: 'preview-volume',
+  volumeInfo: { title: 'Preview Fixture', authors: ['Preview Author'], language: 'fr', publishedDate: '2020', previewLink: 'https://books.google.com/books?id=preview-volume' },
+  accessInfo: { country: 'FR', viewability: 'PARTIAL', accessViewStatus: 'SAMPLE', publicDomain: false, epub: { isAvailable: true, downloadLink: 'https://books.google.com/books/download?id=preview-volume&format=epub' } }
+};
+const googleNoPages = {
+  id: 'metadata-volume',
+  volumeInfo: { title: 'Metadata Fixture', authors: ['Metadata Author'] },
+  accessInfo: { country: 'US', viewability: 'NO_PAGES', accessViewStatus: 'NONE', publicDomain: false }
+};
+const googleRestrictedDownload = {
+  id: 'restricted-volume',
+  volumeInfo: { title: 'Restricted download fixture' },
+  accessInfo: { country: 'US', viewability: 'ALL_PAGES', accessViewStatus: 'FULL_PUBLIC_DOMAIN', publicDomain: true, epub: { isAvailable: true, downloadLink: 'https://books.google.com/books/download?id=restricted-volume&format=epub' }, downloadAccess: { restricted: true, deviceAllowed: true } }
+};
+const googleUnknownDownload = {
+  id: 'unknown-download-volume',
+  volumeInfo: { title: 'Unknown download fixture' },
+  accessInfo: { country: 'US', viewability: 'ALL_PAGES', accessViewStatus: 'FULL_PUBLIC_DOMAIN', publicDomain: true, epub: { isAvailable: true, downloadLink: 'https://books.google.com/books/download?id=unknown-download-volume&format=epub' } }
+};
+
+async function testGoogleBooks() {
+  const oldGoogleKey = process.env.GOOGLE_BOOKS_API_KEY;
+  const oldGoogleEnabled = process.env.EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED;
+  process.env.GOOGLE_BOOKS_API_KEY = 'connector-test-key-not-a-real-secret';
+  process.env.EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED = 'true';
+  try {
+    const googleBooks = new GoogleBooksConnector();
+    const googleResults = await googleBooks.search('world literature', 3);
+    assert.equal(googleResults.status, 'ok');
+    assert.equal(googleResults.data?.length, 3);
+    const googlePD = googleResults.data?.[0];
+    assert.equal(googlePD?.title, 'Public Domain Fixture');
+    assert.equal(googlePD?.author, 'Test Author');
+    assert.equal(googlePD?.publisher, 'Fixture Press');
+    assert.equal(googlePD?.year, '1890');
+    assert.deepEqual(googlePD?.isbn, ['9781234567890']);
+    assert.equal(googlePD?.rights, RightsCategory.PUBLIC_DOMAIN);
+    assert.match(googlePD?.rightsNote || '', /US/);
+    assert.equal(googlePD?.availability, 'provider-download');
+    assert.equal(googlePD?.canImport, false, 'Google Books data is never imported as local full text');
+    assert.ok(googlePD?.coverImage?.startsWith('https://books.google.com/'), 'insecure image URLs are upgraded to HTTPS');
+    assert.equal(googleResults.data?.[1].rights, RightsCategory.PREVIEW_ONLY);
+    assert.equal(googleResults.data?.[1].availability, 'provider-preview');
+    assert.equal(googleResults.data?.[1].downloadLinks?.length, 0, 'preview-only downloads are not exposed');
+    assert.equal(googleResults.data?.[2].rights, RightsCategory.METADATA_ONLY);
+
+    const isbnSearch = await googleBooks.search('978-123-456-7890', 1);
+    assert.equal(isbnSearch.status, 'ok');
+    const isbnRequest = requests.filter(url => url.includes('www.googleapis.com/books/v1/volumes?')).at(-1)!;
+    assert.equal(new URL(isbnRequest).searchParams.get('q'), 'isbn:9781234567890');
+    assert.equal((await googleBooks.search('author:Test Author', 1)).status, 'ok');
+    const authorRequest = requests.filter(url => url.includes('www.googleapis.com/books/v1/volumes?')).at(-1)!;
+    assert.equal(new URL(authorRequest).searchParams.get('q'), 'inauthor:Test Author');
+    assert.equal(new URL(authorRequest).searchParams.get('maxResults'), '1');
+    assert.equal(new URL(authorRequest).searchParams.has('key'), true, 'API key is attached only to the server-side request');
+    assert.equal(googleBooks.getSourceInformation().data?.authentication, 'api-key');
+    assert.equal((await googleBooks.getBook({ id: '../pd-volume' })).status, 'error');
+
+    const googleDetails = await googleBooks.getBook({ id: 'pd-volume' });
+    assert.equal(googleDetails.status, 'ok');
+    assert.equal(googleDetails.data?.sourceUrl, 'https://books.google.com/books?id=pd-volume');
+    const googleAvailability = await googleBooks.getAvailability({ id: 'pd-volume' });
+    assert.equal(googleAvailability.status, 'ok');
+    assert.equal((googleAvailability.data as any).viewability, 'ALL_PAGES');
+    assert.equal((googleAvailability.data as any).downloadAvailable, true);
+    const googleDownloads = await googleBooks.getDownloadLinks({ id: 'pd-volume' });
+    assert.equal(googleDownloads.status, 'ok');
+    assert.equal(googleDownloads.data?.length, 2);
+    assertUnsupported(await googleBooks.getFullText({ id: 'pd-volume' }));
+    assertUnsupported(await googleBooks.getDownloadLinks({ id: 'preview-volume' }));
+    assert.deepEqual((await googleBooks.getDownloadLinks({ id: 'restricted-volume' })).data, [], 'downloads restricted by Google are withheld');
+    assert.deepEqual((await googleBooks.getDownloadLinks({ id: 'unknown-download-volume' })).data, [], 'missing download restriction status fails closed');
+
+    delete process.env.GOOGLE_BOOKS_API_KEY;
+    assert.equal(isLibraryConnectorEnabled('googlebooks'), false, 'Google Books stays disabled without an API key');
+    const beforeNoKey = requests.length;
+    assert.equal((await googleBooks.search('not called', 1)).status, 'error');
+    assert.equal(requests.length, beforeNoKey, 'missing API keys never produce external requests');
+  } finally {
+    if (oldGoogleKey === undefined) delete process.env.GOOGLE_BOOKS_API_KEY;
+    else process.env.GOOGLE_BOOKS_API_KEY = oldGoogleKey;
+    if (oldGoogleEnabled === undefined) delete process.env.EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED;
+    else process.env.EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED = oldGoogleEnabled;
+  }
 }
 
 function archiveDoc(query: string) {
@@ -41,6 +147,15 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
     ] });
   }
   if (url.hostname === 'openlibrary.org' && url.pathname === '/works/OL1W.json') return json({ title: 'Example Book', description: 'Metadata only' });
+  if (url.hostname === 'www.googleapis.com' && /^\/books\/v1\/volumes\/[A-Za-z0-9_-]+$/.test(url.pathname)) {
+    const id = url.pathname.split('/').at(-1);
+    return json(id === 'pd-volume' ? googlePublicDomain : id === 'preview-volume' ? googlePreview : id === 'restricted-volume' ? googleRestrictedDownload : id === 'unknown-download-volume' ? googleUnknownDownload : googleNoPages);
+  }
+  if (url.hostname === 'www.googleapis.com' && url.pathname === '/books/v1/volumes') {
+    const q = url.searchParams.get('q') || '';
+    const items = q.startsWith('isbn:') ? [googlePublicDomain] : [googlePublicDomain, googlePreview, googleNoPages];
+    return json({ totalItems: items.length, items });
+  }
 
   if (url.hostname === 'archive.org' && url.pathname === '/advancedsearch.php') {
     return json({ response: { docs: archiveDoc(url.searchParams.get('q') || '') } });
@@ -93,6 +208,7 @@ async function main() {
   assertUnsupported(await openLibrary.getAvailability({}));
   assertUnsupported(await openLibrary.getFullText({ id: '/works/OL1W' }));
   assertUnsupported(await openLibrary.getDownloadLinks({}));
+  await testGoogleBooks();
 
   const gutenberg = new GutenbergConnector();
     const gutenbergResults = await gutenberg.search('alice');
@@ -154,7 +270,7 @@ async function main() {
   if (oldToggle === undefined) delete process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED;
   else process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED = oldToggle;
 
-  for (const id of ['openlibrary', 'archive', 'gutenberg', 'wikisource', 'ar_wikisource'] as const) {
+  for (const id of ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'wikisource', 'ar_wikisource'] as const) {
     assert.ok(getLibraryConnector(id));
   }
   console.log('library connector offline tests: PASS');

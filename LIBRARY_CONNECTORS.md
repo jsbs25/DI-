@@ -41,7 +41,7 @@ This register is updated alongside the implementation and test report. Provider 
 
 ## Implemented provider milestone — 2026-11-04
 
-The first real connector milestone now exposes five independently switchable sources through `server/integrations/libraries/` and the existing `/api/library/*` surface:
+The initial real connector milestone exposed five independently switchable sources through `server/integrations/libraries/`. Phase 3 below adds Google Books; the current registry has six sources through the existing `/api/library/*` surface:
 
 - **Open Library** — official Search API (`/search.json`) plus Work/Edition JSON. Search maps available authors, language codes, first publication year, ISBN, publisher/edition metadata, and official Covers URLs. Search/record data is always classified `UNKNOWN` for rights; `ebook_access` is not treated as a license, and local full-text import, download links, and borrowability are explicitly unsupported.
 - **Internet Archive** — official Advanced Search and Item Metadata APIs. Search is constrained to title, creator, or identifier plus `mediatype:texts`, following the official [Advanced Search query guidance](https://archive.org/advancedsearch.php) that field-specific search is more relevant and faster. Each item is rechecked through `/metadata/{identifier}` before a local copy; import requires recognized public-domain/open-license evidence and a listed OCR text file. Restricted, missing-rights, open-access-only, and otherwise ambiguous items are not copied. This integration does not bypass loans/DRM or claim that an item can be borrowed.
@@ -52,11 +52,11 @@ The connector interface provides `search`, `getBook`, `getMetadata`, `getAvailab
 
 ### Configuration
 
-No API key is required for these five current connectors. `.env.example` documents the optional `EARTH_ONE_LIBRARY_CONTACT_EMAIL` and independent switches `EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED`, `EARTH_ONE_LIBRARY_ARCHIVE_ENABLED`, `EARTH_ONE_LIBRARY_GUTENBERG_ENABLED`, `EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED`, and `EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED`. A source is enabled by default unless its switch is explicitly set false/off/disabled. Keep any future paid or key-backed source credentials in server-side secret configuration, never in this register or client code.
+Open Library, Internet Archive, Project Gutenberg, Chinese Wikisource, and Arabic Wikisource need no API key. Google Books requires the server-side `GOOGLE_BOOKS_API_KEY` and is fail-closed when it is absent; `.env.example` documents that key name, the optional `EARTH_ONE_LIBRARY_CONTACT_EMAIL`, and independent switches `EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED`, `EARTH_ONE_LIBRARY_ARCHIVE_ENABLED`, `EARTH_ONE_LIBRARY_GUTENBERG_ENABLED`, `EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED`, `EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED`, and `EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED`. A source is enabled by default unless its switch is explicitly set false/off/disabled; Google Books additionally requires its key. Keep credentials in server-side secret configuration, never in this register or client code.
 
 ### Still not integrated
 
-Google Books, Europeana, OpenAlex, Crossref, arXiv, PubMed Central, DOAB, Waqfeya, Shamela, Qatar Digital Library, additional Arabic repositories, separate author/ISBN/DOI filters, language/year/category filters, catalog refresh/new-release feeds, and an editable administration console remain future work. The current source registry is environment-configured and read-only, not a full sync-log/cache-health/data-review administration system. Search over the five sources is real, but the brief's full multi-database academic and cultural-heritage acceptance criteria are not complete.
+Europeana, OpenAlex, Crossref, arXiv, PubMed Central, DOAB, Waqfeya, Shamela, Qatar Digital Library, additional Arabic repositories, separate author/ISBN/DOI filters, language/year/category filters, catalog refresh/new-release feeds, and an editable administration console remain future work. The current source registry is environment-configured and read-only, not a full sync-log/cache-health/data-review administration system. Search over the six sources is real, but the brief's full multi-database academic and cultural-heritage acceptance criteria are not complete.
 
 
 ### Search relevance evidence
@@ -65,3 +65,23 @@ The official [Internet Archive Advanced Search page](https://archive.org/advance
 
 
 The WORLD LIBRARY result and detail views display provider rights notes and a license link only when it is a valid HTTPS URL. The local-import button is fail-closed: the client requires an explicit provider `canImport: true`, and the server independently rechecks the official record and rights before saving.
+
+
+## Google Books connector — Phase 3 (2026-11-04)
+
+### Official references reviewed
+
+- [Google Books API: Using the API](https://developers.google.com/books/docs/v1/using) documents Volume searches through `GET https://www.googleapis.com/books/v1/volumes`, the `q` search syntax (including ISBN and author fields), pagination, and API key usage/quota guidance.
+- [Google Books Volumes resource](https://developers.google.com/books/docs/v1/reference/volumes) defines `volumeInfo` and `accessInfo`, including `country`, `viewability`, `accessViewStatus`, `publicDomain`, `webReaderLink`, `epub`, `pdf`, and `downloadAccess` fields used by the adapter.
+
+### Implementation and access boundaries
+
+`GoogleBooksConnector` uses the official Volumes API from the server. Search supports ordinary title/query text, maps `author:` to Google's `inauthor:` field, and recognizes 10/13-character ISBNs. It requests a bounded page (`maxResults` is clamped by the shared connector limit), selects only needed fields, uses the shared per-provider serialized rate limit and short cache, and removes the API key from the cache key. `GOOGLE_BOOKS_API_KEY` is server-only; `EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED` is an independent on/off switch. Without a configured key the source reports disabled and sends no provider request.
+
+The adapter treats Google's fields as service-access signals, not a general reuse license. `publicDomain: true` is shown with the returned country when available and an explicit jurisdiction caveat; `PARTIAL` maps to preview-only, `NO_PAGES` to metadata-only, and ambiguous states remain unknown. It only surfaces Google-hosted EPUB/PDF links when the volume is explicitly reported public-domain, the format is available, `downloadAccess.restricted` is explicitly `false`, and the link host passes the HTTPS Google-domain allowlist. These links remain provider links: the connector does not fetch/copy the preview or full text, and `canImport` stays false for every Google Books result. `/api/library/ingest` independently refuses Google Books imports.
+
+### Verification status
+
+Offline tests use mocked responses for the Volume API and cover metadata/ISBN/author queries, viewability classifications, restricted/preview download gating, source information, invalid IDs, and the missing-key no-request behavior. The isolated API suite passes 21 checks and explicitly rejects local Google Books ingestion. TypeScript and production build pass. A live Google Books smoke has **not** been performed because no server API key is configured; official documentation was reviewed, but mocked responses are not evidence of current online API availability.
+
+The source registry now exposes six providers. Europeana, OpenAlex, Crossref, arXiv, PubMed Central, DOAB, Waqfeya, Shamela, Qatar Digital Library and other Arabic repositories remain future work; this connector does not complete the full WORLD LIBRARY brief.

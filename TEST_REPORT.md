@@ -50,7 +50,20 @@
 
 ### 本轮未覆盖
 
-未运行全项目全量 API/浏览器/实体移动设备回归；未实测 Open Library 借阅可用性（适配器明确返回 unsupported）；未验证 Google Books、Europeana、学术数据库、阿拉伯语专项数字馆藏或跨设备真实用户书架；也未通过 IA 借阅接口尝试借阅或下载受限制内容。实时检查只证明在该时刻官方搜索端点可返回记录，不保证外部服务长期可用。
+此前 Phase 1/2 未验证 Google Books；该连接器已在下方 Phase 3 完成离线/API 回归，但仍因缺少密钥而未做在线 smoke。全项目全量 API/浏览器/实体移动设备回归、Open Library 借阅可用性（适配器明确返回 unsupported）、Europeana/学术数据库/阿拉伯语专项数字馆藏与跨设备真实用户书架尚未覆盖；也未通过 IA 借阅接口尝试借阅或下载受限制内容。限量实时检查仅证明当时对应官方搜索端点可返回记录，不保证外部服务长期可用。
 
 
 UI 补充：搜索结果/详情显示来源权利说明，并仅对有效 HTTPS 许可地址提供链接；导入动作仅在 `canImport === true` 时出现，服务端另行复核。`npm run lint` 与 `npm run build` 覆盖编译；本轮没有新增浏览器视觉/交互断言，故不将该 UI 标记为浏览器验收通过。
+
+
+## WORLD LIBRARY Phase 3：Google Books 回归（2026-11-04）
+
+| 测试 | 结果 |
+|---|---|
+| `npm run lint` | ✅ TypeScript 全项目检查通过。 |
+| `npm run test:library-connectors` | ✅ 通过；所有网络由 mock 拦截。覆盖 Google Books 元数据字段、ISBN 与 `author:` 搜索、公共领域/预览/仅元数据分类、地区说明、HTTP 封面链接升级到 HTTPS、Google 官方书籍/预览链接、下载格式 gating、无密钥不发请求，以及不支持全文/本地导入；既有来源用例一并通过。 |
+| `npm run test:library-api` | ✅ 21 项通过、0 失败；隔离临时存储验证六源目录、启用状态以及 Google Books 不能本地全文入库。 |
+| `npm run build` | ✅ Vite 生产构建成功；保留既有 Three.js 大 chunk 提示。 |
+| Google Books 在线 API | ⏸️ 未执行：本环境未配置 `GOOGLE_BOOKS_API_KEY`。不把 mock 回归描述成真实 API 连通性证明。 |
+
+配置完成后可另行运行带密钥的限量只读 smoke。当前无实时请求、无正式用户数据写入；Google Books 文本仍留在官方阅读器，测试没有下载任何书籍正文。旧测试报告中的 20 项为此前阶段的基线，本阶段新增隔离 API 回归计数为 21 项。

@@ -51,10 +51,19 @@
 - 新增 `/api/library/connectors`、`/api/library/search`，并将 `/api/library/ingest` 改为使用来源 ID 在服务端重新查询官方记录后再判断权利和可用文件；Open Library 元数据、权利未知/借阅受限记录不会伪装为全文。既有本地图书目录、书架、进度、详情和阅读器流程保留。
 - Internet Archive 查询按官方 Lucene 语法限制在 `title`、`creator`、`identifier` 字段和 `mediatype:texts`，降低全文索引的无关结果；导入还要求明确可复制权利标记及官方元数据列出的 OCR 文件。Gutenberg 使用官方 OPDS `query` 参数，并在导入时再读取单书 OPDS 验证 TXT/EPUB 链接；公共领域说明带美国法域提醒。OPDS 语言字段从命名空间 XML 读取，不存在时返回 `und`，不再默认误标为英语。
 - 新增 `LIBRARY_CONNECTORS.md`、`scripts/test_library_connectors.ts`、`scripts/test_library_connectors_live.ts`，并注册 `test:library-connectors` 与 `test:library-connectors:live` 命令；更新功能清单与项目专项审计。
-- 配置只新增可选联系邮箱与五个连接器开关示例，无新增 API 密钥；未实现的学术、Europeana、Google Books 与阿拉伯语资源清楚列为后续事项。
+- 在 Phase 1/2 阶段，配置只新增可选联系邮箱与五个连接器开关示例；当时尚未接入的学术、Europeana、Google Books 与阿拉伯语资源列为后续事项。Google Books 已在下方 Phase 3 独立接入。
 - 验证：TypeScript 检查通过；离线连接器测试通过；隔离图书馆 API 回归 20 项通过；生产构建成功；实时官方来源烟测通过（Open Library、Internet Archive 搜索，以及 Gutenberg 搜索至隔离书目详情链路，未下载 EPUB）。全站浏览器回归和其他待批准权限相关路由未执行。
 
 - UI 搜索卡片/详情页显示来源权利说明及通过 HTTPS 校验的许可原文链接；客户端仅在来源明确返回 `canImport: true` 时提供本地导入按钮，服务器仍再次验证来源记录和权限。该 UI 变更通过类型检查与生产构建，未进行本轮浏览器视觉验收。
 
 
 - GitHub 同步：实现提交 `2cb84e9f7093cc03aa942a5d2540a3fda96f6a8c` 已从 `4f6fe82c784ad4bf63d63217f971437046684536` 普通快进推送至 `main`；推送后 fetch 和 GitHub connector API 均确认远端、跟踪分支和本地 HEAD 一致。未强推、未持久保存凭据或改变 Git 全局配置。
+
+
+### WORLD LIBRARY Phase 3：Google Books（2026-11-04）
+
+- 基于已同步 `main` 提交 `938fbe2` 在安全工作树中继续；未改动 `/workspace/DI-review`。新增 `GoogleBooksConnector` 并纳入六源注册表、默认聚合搜索、`/api/library/search` 来源白名单和前端来源标签；`.env.example` 增加服务端 `GOOGLE_BOOKS_API_KEY` 与 `EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED`。没有密钥时来源保持禁用；各 Google 请求有官方 API key，但密钥不进入浏览器、缓存键或日志。
+- 支持 Google Books Volumes API 书目搜索、ISBN 查询、`author:` 查询、卷详情与访问状态查询；映射作者、出版社、日期、ISBN、语言、描述、封面、官方页面/预览、地区、`viewability` 和下载可用性。
+- 权利限制保持 fail-closed：预览/仅元数据/未知状态不会得到下载入口；只在 API 报告当地 public-domain、下载未受限、EPUB/PDF 可用且官方下载 URL 在 Google 主机白名单时返回提供方链接。Google Books 全文复制与本地导入一律不支持，API 入库路由有独立拒绝分支；来源说明区分服务内可见性与再利用许可。
+- 更新 `PROJECT_AUDIT.md`、`TEST_REPORT.md`、`LIBRARY_CONNECTORS.md`，记下官方 API/schema 链接和本阶段验证边界。
+- 验证：`npm run lint`、`npm run test:library-connectors` 通过；隔离 `npm run test:library-api` 为 21/21；`npm run build` 成功。Google Books API key 未配置，未对 Google Books 执行真实网络请求；其他连接器保持既有实现和数据不变。

@@ -51,6 +51,8 @@ async function main() {
       EARTH_ONE_LIBRARY_GUTENBERG_ENABLED: 'false',
       EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED: 'false',
       EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED: 'false',
+      EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED: 'true',
+      GOOGLE_BOOKS_API_KEY: 'api-test-key-not-a-real-secret',
       GEMINI_API_KEY: '',
       OPENAI_API_KEY: '',
       ANTHROPIC_API_KEY: '',
@@ -131,8 +133,10 @@ async function main() {
     const connectors = await get('/api/library/connectors');
     check(
       connectors.status === 200 && connectors.body.success === true && Array.isArray(connectors.body.sources) &&
-      connectors.body.sources.length === 5 && connectors.body.sources.filter((source: any) => source.enabled).length === 1 &&
-      connectors.body.sources.find((source: any) => source.name === 'Open Library')?.enabled === true,
+      connectors.body.sources.length === 6 && connectors.body.sources.filter((source: any) => source.enabled).length === 2 &&
+      connectors.body.sources.find((source: any) => source.name === 'Open Library')?.enabled === true &&
+      connectors.body.sources.find((source: any) => source.name === 'Google Books')?.authentication === 'api-key' &&
+      connectors.body.sources.find((source: any) => source.name === 'Google Books')?.enabled === true,
       'Connector registry reports all sources and honors per-source environment flags'
     );
     const disabledSearch = await get('/api/library/search?q=valid&source=gutenberg');
@@ -147,6 +151,8 @@ async function main() {
     check(invalidSource.status === 400 && invalidSource.body.success === false, 'Unknown connector names are rejected');
     const metadataOnlyImport = await post('/api/library/ingest', { source: 'openlibrary', externalId: '/works/OL1W' });
     check(metadataOnlyImport.status === 403 && metadataOnlyImport.body.success === false, 'Metadata-only Open Library records cannot be imported as full text');
+    const googleBooksImport = await post('/api/library/ingest', { source: 'googlebooks', externalId: 'sample-volume' });
+    check(googleBooksImport.status === 403 && googleBooksImport.body.success === false, 'Google Books previews and protected text cannot be imported locally');
     const disabledImport = await post('/api/library/ingest', { source: 'gutenberg', externalId: '11' });
     check(disabledImport.status === 503 && disabledImport.body.success === false, 'Disabled sources cannot be used for full-text import');
 

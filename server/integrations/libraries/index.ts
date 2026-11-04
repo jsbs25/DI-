@@ -19,7 +19,7 @@ export enum RightsCategory {
   UNKNOWN = 'UNKNOWN'
 }
 
-export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'wikisource' | 'ar_wikisource';
+export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'googlebooks' | 'wikisource' | 'ar_wikisource';
 export type ConnectorStatus = 'ok' | 'error' | 'unsupported';
 
 export interface ExternalLibraryRecord {
@@ -115,6 +115,7 @@ const SOURCE_NAMES: Record<LibrarySource, string> = {
   openlibrary: 'Open Library',
   archive: 'Internet Archive',
   gutenberg: 'Project Gutenberg',
+  googlebooks: 'Google Books',
   wikisource: 'Wikisource',
   ar_wikisource: 'Arabic Wikisource'
 };
@@ -122,6 +123,7 @@ const SOURCE_CONFIG: Record<LibrarySource, { env: string; website: string; api: 
   openlibrary: { env: 'EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED', website: 'https://openlibrary.org', api: 'https://openlibrary.org/search.json' },
   archive: { env: 'EARTH_ONE_LIBRARY_ARCHIVE_ENABLED', website: 'https://archive.org', api: 'https://archive.org/advancedsearch.php' },
   gutenberg: { env: 'EARTH_ONE_LIBRARY_GUTENBERG_ENABLED', website: 'https://www.gutenberg.org', api: 'https://www.gutenberg.org/ebooks/search.opds/' },
+  googlebooks: { env: 'EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED', website: 'https://books.google.com', api: 'https://www.googleapis.com/books/v1/volumes' },
   wikisource: { env: 'EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED', website: 'https://zh.wikisource.org', api: 'https://zh.wikisource.org/w/api.php' },
   ar_wikisource: { env: 'EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED', website: 'https://ar.wikisource.org', api: 'https://ar.wikisource.org/w/api.php' }
 };
@@ -145,7 +147,15 @@ function cap(value = 10): number {
 
 export function isLibraryConnectorEnabled(source: LibrarySource): boolean {
   const configured = process.env[SOURCE_CONFIG[source].env];
+  if (source === 'googlebooks' && !process.env.GOOGLE_BOOKS_API_KEY?.trim()) return false;
   return !configured || !['false', '0', 'off', 'no', 'disabled'].includes(configured.trim().toLowerCase());
+}
+
+function disabledSourceReason(source: LibrarySource): string {
+  if (source === 'googlebooks' && !process.env.GOOGLE_BOOKS_API_KEY?.trim()) {
+    return 'Requires a server-side GOOGLE_BOOKS_API_KEY; the connector stays disabled until configured.';
+  }
+  return 'Disabled by environment configuration.';
 }
 
 function userAgent(): string {
@@ -153,8 +163,8 @@ function userAgent(): string {
   return `EARTH-ONE-Library/1.0${email ? ` (contact: ${email})` : ''}`;
 }
 
-async function requestText(source: LibrarySource, url: string, timeoutMs = 10_000): Promise<string> {
-  const cached = cache.get(url);
+async function requestText(source: LibrarySource, url: string, timeoutMs = 10_000, cacheKey = url): Promise<string> {
+  const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
   const previous = requestQueueBySource.get(source) || Promise.resolve();
@@ -164,7 +174,7 @@ async function requestText(source: LibrarySource, url: string, timeoutMs = 10_00
   requestQueueBySource.set(source, queued);
   await previous.catch(() => undefined);
   try {
-    const freshCache = cache.get(url);
+    const freshCache = cache.get(cacheKey);
     if (freshCache && freshCache.expiresAt > Date.now()) return freshCache.value;
     const lastRequest = lastRequestBySource.get(source) || 0;
     const delay = Math.max(0, MIN_REQUEST_INTERVAL_MS - (Date.now() - lastRequest));
@@ -183,7 +193,7 @@ async function requestText(source: LibrarySource, url: string, timeoutMs = 10_00
       });
       if (!response.ok) throw new Error(`${SOURCE_NAMES[source]} returned HTTP ${response.status}`);
       const value = await response.text();
-      cache.set(url, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+      cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, value });
       return value;
     } finally {
       clearTimeout(timer);
@@ -211,7 +221,7 @@ function baseRecord(source: LibrarySource, record: Partial<ExternalLibraryRecord
   };
 }
 
-function enabledSourceInformation(source: LibrarySource, policies: string[]): ConnectorResponse<SourceInformation> {
+function enabledSourceInformation(source: LibrarySource, policies: string[], authentication: SourceInformation['authentication'] = 'none'): ConnectorResponse<SourceInformation> {
   const config = SOURCE_CONFIG[source];
   return ok({
     source,
@@ -219,7 +229,7 @@ function enabledSourceInformation(source: LibrarySource, policies: string[]): Co
     websiteUrl: config.website,
     apiUrl: config.api,
     enabled: isLibraryConnectorEnabled(source),
-    authentication: 'none',
+    authentication,
     policies
   });
 }
@@ -408,6 +418,194 @@ export class OpenLibraryConnector implements LibraryConnector {
   async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('Open Library ebook access is not itself a redistribution license.'); }
   getSourceInformation() {
     return enabledSourceInformation(this.source, ['Search API and Work/Edition JSON are used.', 'ebook_access is not treated as a copyright or redistribution license.']);
+  }
+}
+
+const GOOGLE_BOOKS_FIELDS = 'items(id,volumeInfo(title,authors,publisher,publishedDate,description,industryIdentifiers,language,imageLinks,previewLink,infoLink,canonicalVolumeLink,categories),accessInfo(country,viewability,accessViewStatus,publicDomain,webReaderLink,epub,pdf,downloadAccess))';
+
+function googleBooksId(locator: BookLocator): string | undefined {
+  const candidate = locator.id || locator.identifier || locator.record?.externalId || '';
+  return /^[A-Za-z0-9_-]{1,128}$/.test(candidate) ? candidate : undefined;
+}
+
+function trustedGoogleBooksUrl(raw: unknown): string | undefined {
+  if (typeof raw !== 'string' || !raw) return undefined;
+  try {
+    const url = new URL(raw);
+    const hostAllowed = url.hostname === 'books.google.com' || url.hostname === 'books.googleusercontent.com' || url.hostname.endsWith('.books.googleusercontent.com');
+    if (!hostAllowed || url.username || url.password || !['http:', 'https:'].includes(url.protocol)) return undefined;
+    url.protocol = 'https:';
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function googleBooksRights(access: any): RightsCategory {
+  if (access?.publicDomain === true) return RightsCategory.PUBLIC_DOMAIN;
+  if (access?.viewability === 'PARTIAL') return RightsCategory.PREVIEW_ONLY;
+  if (access?.viewability === 'NO_PAGES') return RightsCategory.METADATA_ONLY;
+  return RightsCategory.UNKNOWN;
+}
+
+function googleBooksDownloadLinks(access: any): string[] {
+  if (access?.publicDomain !== true || access?.downloadAccess?.restricted !== false) return [];
+  return ['epub', 'pdf'].flatMap(format => {
+    const item = access?.[format];
+    if (item?.isAvailable !== true) return [];
+    const link = trustedGoogleBooksUrl(item.downloadLink);
+    return link ? [link] : [];
+  });
+}
+
+function mapGoogleBooksVolume(volume: any): ExternalLibraryRecord | undefined {
+  const id = typeof volume?.id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(volume.id) ? volume.id : undefined;
+  if (!id) return undefined;
+  const info = volume.volumeInfo || {};
+  const access = volume.accessInfo || {};
+  const rights = googleBooksRights(access);
+  const authors = textList(info.authors);
+  const isbn = (Array.isArray(info.industryIdentifiers) ? info.industryIdentifiers : [])
+    .filter((identifier: any) => identifier?.type === 'ISBN_10' || identifier?.type === 'ISBN_13')
+    .map((identifier: any) => String(identifier.identifier || '').trim())
+    .filter(Boolean);
+  const coverImage = trustedGoogleBooksUrl(info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail);
+  const previewUrl = trustedGoogleBooksUrl(info.previewLink) || trustedGoogleBooksUrl(access.webReaderLink);
+  const sourceUrl = trustedGoogleBooksUrl(info.canonicalVolumeLink) || trustedGoogleBooksUrl(info.infoLink) || `https://books.google.com/books?id=${encodeURIComponent(id)}`;
+  const downloadLinks = googleBooksDownloadLinks(access);
+  const year = typeof info.publishedDate === 'string' ? info.publishedDate.match(/^\d{4}/)?.[0] : undefined;
+  const country = typeof access.country === 'string' && /^[A-Za-z]{2}$/.test(access.country) ? access.country.toUpperCase() : undefined;
+  const rightsNote = rights === RightsCategory.PUBLIC_DOMAIN
+    ? `Google Books reports public-domain status${country ? ` for ${country}` : ' for the returned access region'}; status varies by jurisdiction and does not itself grant redistribution permission.`
+    : 'Google Books viewability describes access on its service, not a reuse license. Follow the official preview/reader restrictions; local import is not permitted.';
+  const availability = downloadLinks.length ? 'provider-download' : access.viewability === 'ALL_PAGES'
+    ? 'provider-full-view'
+    : access.viewability === 'PARTIAL' ? 'provider-preview'
+      : access.viewability === 'NO_PAGES' ? 'metadata-only' : 'access-unknown';
+  return baseRecord('googlebooks', {
+    id: `googlebooks:${id}`,
+    externalId: id,
+    title: typeof info.title === 'string' && info.title.trim() ? info.title.trim() : 'Untitled',
+    author: authors[0] || 'Unknown Author',
+    authors,
+    language: typeof info.language === 'string' && info.language ? info.language : 'und',
+    year,
+    publisher: typeof info.publisher === 'string' ? info.publisher : undefined,
+    isbn,
+    description: typeof info.description === 'string' ? info.description.slice(0, 3000) : '',
+    coverImage,
+    sourceUrl,
+    rights,
+    rightsNote,
+    availability,
+    canImport: false,
+    downloadLinks,
+    metadata: {
+      country,
+      viewability: typeof access.viewability === 'string' ? access.viewability : 'UNKNOWN',
+      accessViewStatus: typeof access.accessViewStatus === 'string' ? access.accessViewStatus : 'UNKNOWN',
+      publicDomain: access.publicDomain === true,
+      previewUrl,
+      categories: textList(info.categories)
+    }
+  });
+}
+
+export class GoogleBooksConnector implements LibraryConnector {
+  readonly source = 'googlebooks' as const;
+
+  private apiKey(): string | undefined {
+    return process.env.GOOGLE_BOOKS_API_KEY?.trim() || undefined;
+  }
+
+  private async requestVolume(url: URL): Promise<any> {
+    const key = this.apiKey();
+    if (!key) throw new Error('Google Books requires a server-side GOOGLE_BOOKS_API_KEY.');
+    url.searchParams.set('key', key);
+    const cacheUrl = new URL(url);
+    cacheUrl.searchParams.delete('key');
+    return JSON.parse(await requestText(this.source, url.toString(), 10_000, cacheUrl.toString()));
+  }
+
+  async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
+    if (!query.trim()) return ok([]);
+    if (!this.apiKey()) return failed(new Error('Google Books requires a server-side GOOGLE_BOOKS_API_KEY.'));
+    try {
+      const normalized = query.trim().replace(/[\s-]/g, '');
+      const searchQuery = /^\d{9}[\dXx]$|^\d{13}$/.test(normalized)
+        ? `isbn:${normalized}`
+        : query.trim().replace(/^author\s*:/i, 'inauthor:');
+      const url = new URL(SOURCE_CONFIG[this.source].api);
+      url.searchParams.set('q', searchQuery);
+      url.searchParams.set('maxResults', String(cap(limit)));
+      url.searchParams.set('startIndex', '0');
+      url.searchParams.set('printType', 'books');
+      url.searchParams.set('fields', GOOGLE_BOOKS_FIELDS);
+      const response = await this.requestVolume(url);
+      return ok((Array.isArray(response.items) ? response.items : []).slice(0, cap(limit))
+        .map(mapGoogleBooksVolume).filter((record: ExternalLibraryRecord | undefined): record is ExternalLibraryRecord => !!record));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  async getBook(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
+    if (!this.apiKey()) return failed(new Error('Google Books requires a server-side GOOGLE_BOOKS_API_KEY.'));
+    const id = googleBooksId(locator);
+    if (!id && locator.isbn && /^[0-9Xx -]{10,20}$/.test(locator.isbn)) {
+      const result = await this.search(locator.isbn, 1);
+      if (result.status !== 'ok') return propagateFailure<ExternalLibraryRecord>(result, 'Google Books ISBN lookup failed.');
+      const match = result.data?.[0];
+      return match ? ok(match) : failed(new Error('Google Books ISBN record was not found.'));
+    }
+    if (!id) return failed(new Error('Google Books requires a valid volume ID or ISBN.'));
+    try {
+      const url = new URL(`${SOURCE_CONFIG[this.source].api}/${encodeURIComponent(id)}`);
+      url.searchParams.set('fields', GOOGLE_BOOKS_FIELDS.replace(/^items\(/, '').replace(/\)$/, ''));
+      const response = await this.requestVolume(url);
+      const record = mapGoogleBooksVolume(response);
+      return record ? ok(record) : failed(new Error('Google Books volume response did not include a valid volume ID.'));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  getMetadata(locator: BookLocator) { return this.getBook(locator); }
+
+  async getAvailability(locator: BookLocator): Promise<ConnectorResponse<unknown>> {
+    const record = await this.getBook(locator);
+    if (record.status !== 'ok' || !record.data) return propagateFailure<unknown>(record, 'Could not verify the Google Books volume.');
+    const metadata = record.data.metadata || {};
+    return ok({
+      country: metadata.country,
+      viewability: metadata.viewability,
+      accessViewStatus: metadata.accessViewStatus,
+      publicDomain: metadata.publicDomain,
+      previewUrl: metadata.previewUrl,
+      downloadAvailable: (record.data.downloadLinks || []).length > 0,
+      downloadFormats: (record.data.downloadLinks || []).map(url => {
+        try { return new URL(url).searchParams.get('format')?.toUpperCase() || 'UNKNOWN'; } catch { return 'UNKNOWN'; }
+      })
+    });
+  }
+
+  async getFullText(_locator: BookLocator) {
+    return unsupported<FullText>('Google Books text must remain in the official preview/reader; full text is not copied into EARTH ONE.');
+  }
+
+  async getDownloadLinks(locator: BookLocator): Promise<ConnectorResponse<string[]>> {
+    const record = await this.getBook(locator);
+    if (record.status !== 'ok' || !record.data) return propagateFailure<string[]>(record, 'Could not verify Google Books download access.');
+    if (record.data.rights !== RightsCategory.PUBLIC_DOMAIN) return unsupported<string[]>('Google Books did not report public-domain status for this access region.');
+    return ok(record.data.downloadLinks || []);
+  }
+
+  getSourceInformation() {
+    return enabledSourceInformation(this.source, [
+      'Uses the official Google Books Volumes API; searches and ISBN queries run server-side.',
+      'Requires GOOGLE_BOOKS_API_KEY in server environment; never expose the key to the browser.',
+      'Viewability and public-domain status are country-specific; previews are not copied and all local imports are disabled.'
+    ], 'api-key');
   }
 }
 
@@ -707,6 +905,7 @@ export function createLibraryConnectors(): Record<LibrarySource, LibraryConnecto
     openlibrary: new OpenLibraryConnector(),
     archive: new InternetArchiveConnector(),
     gutenberg: new GutenbergConnector(),
+    googlebooks: new GoogleBooksConnector(),
     wikisource: new WikisourceConnector(),
     ar_wikisource: new ArabicWikisourceConnector()
   };
@@ -744,13 +943,13 @@ function dedupeByExactIdentifier(records: ExternalLibraryRecord[]): ExternalLibr
 }
 
 export async function searchLibrary(query: string, options: LibrarySearchOptions = {}): Promise<{ results: ExternalLibraryRecord[]; sources: SourceSearchStatus[] }> {
-  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'wikisource', 'ar_wikisource'];
+  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'wikisource', 'ar_wikisource'];
   const limit = cap(options.limit || 10);
   const selected = selectedIds.map(id => getLibraryConnector(id)).filter((connector): connector is LibraryConnector => !!connector);
   const enabled = selected.filter(connector => isLibraryConnectorEnabled(connector.source));
   const disabledStatuses: SourceSearchStatus[] = selected
     .filter(connector => !isLibraryConnectorEnabled(connector.source))
-    .map(connector => ({ source: connector.source, name: SOURCE_NAMES[connector.source], status: 'disabled', count: 0, reason: 'Disabled by environment configuration.' }));
+    .map(connector => ({ source: connector.source, name: SOURCE_NAMES[connector.source], status: 'disabled', count: 0, reason: disabledSourceReason(connector.source) }));
 
   const settled = await Promise.all(enabled.map(async connector => ({ connector, response: await connector.search(query, limit) })));
   const results: ExternalLibraryRecord[] = [];

@@ -119,7 +119,7 @@
 
 ### 实际范围与明确边界
 
-本次完成实现简报的 Phase 1、Phase 2 核心（Open Library、Internet Archive、Project Gutenberg）以及 Phase 6 中的初步统一搜索、精确去重与权利门控；这**不代表**整个 WORLD LIBRARY 简报或最终验收已完成。Google Books、Europeana、OpenAlex、Crossref、arXiv、PubMed Central、DOAB 和 Waqfeya/Shamela/Qatar Digital Library 等尚未接入；作者/ISBN/DOI 专用搜索、语言/年份/分类筛选、完整借阅可用性、资源管理后台、跨设备书架、移动端实测和完整 AI 阅读引用也未在本轮完成。
+此前阶段完成实现简报的 Phase 1、Phase 2 核心（Open Library、Internet Archive、Project Gutenberg）及 Phase 6 初步统一搜索；本轮新增独立交付 Phase 3 Google Books 连接器。此进度仍**不代表**整个 WORLD LIBRARY 简报或最终验收已完成。Europeana、OpenAlex、Crossref、arXiv、PubMed Central、DOAB、Waqfeya/Shamela/Qatar Digital Library 等尚未接入；作者/ISBN/DOI 专用搜索、语言/年份/分类筛选、完整借阅可用性、资源管理后台、跨设备书架、移动端实测和完整 AI 阅读引用仍未完成。
 
 Internet Archive 只在记录具备被识别为公共领域/开放许可的权利依据且存在 OCR 文本文件时允许本地文本导入；借阅状态并未被推断，也不绕过 DRM、借阅或登录限制。Project Gutenberg 的公共领域状态按其美国来源声明展示，并提示阅读地区适用法律可能不同。Open Library 与 Wikisource 的权利状态不被猜测为“公版”。
 
@@ -129,4 +129,13 @@ Internet Archive 只在记录具备被识别为公共领域/开放许可的权�
 
 ### 验证摘要
 
-`npm run lint` 通过；`npm run build` 成功（保留既有约 551.65 KB Three.js chunk 提示）；连接器离线回归通过；隔离图书馆 API 回归 20 项通过；可选实时烟测通过：Open Library 与 Internet Archive 各完成一次官方实时搜索，Gutenberg 完成官方搜索→单书 OPDS 复核→临时 EPUB 书目保存→本地详情读取，未下载 EPUB。完整项目全量测试套件及实体手机/浏览器 UI 验证未在本轮运行，不能据此声明无全站回归。
+此前 Phase 1/2：`npm run lint`、`npm run build` 通过，隔离图书馆 API 回归 20 项通过，Open Library、Internet Archive、Project Gutenberg 的可选限量 live smoke 通过且未下载 EPUB。Phase 3 的最新测试和 Google Books 未执行在线请求的限制见本审计后续阶段更新。完整项目全量测试套件及实体手机/浏览器 UI 验证未运行，不能据此声明无全站回归。
+
+
+## WORLD LIBRARY 阶段更新：Google Books（Phase 3，2026-11-04）
+
+本阶段在 `/workspace/DI-current` 安全工作树中基于最新同步的 `main` 提交 `938fbe2` 继续实施，没有触碰含既有改动的 `/workspace/DI-review`。在原有 Open Library、Internet Archive、Project Gutenberg 及两种 Wikisource 连接器基础上，新增 Google Books Volumes API 服务端适配器。来源目录现为六个连接器；Google Books 需要服务端 `GOOGLE_BOOKS_API_KEY`，缺少密钥时 fail-closed 并保持禁用；独立开关为 `EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED`。密钥不进入浏览器代码、来源响应或缓存键。
+
+Google Books 搜索将 ISBN 查询映射为 `isbn:`，将 `author:` 映射为官方 `inauthor:`；标准化结果保留书目、官方链接及访问状态。`accessInfo.publicDomain` 仅用于描述 Google 按返回访问地区报告的状态，并附地区差异/再利用许可提醒；`PARTIAL` 映射为预览、`NO_PAGES` 映射为仅元数据，其他未明状态保持未知。只有明确报告公共领域、API 明确报告下载 `restricted=false`、格式可用且官方下载链接主机符合 Google 白名单时才提供外部 EPUB/PDF 链接。Google Books 全文、本地导入始终不支持，服务端入库端点再次硬拒绝。
+
+验证：`npm run lint`（TypeScript）通过；`npm run test:library-connectors` 通过（mock 离线覆盖书目、ISBN/作者搜索、地区状态、下载链接、无密钥不发请求）；`npm run test:library-api` 为 21 项通过、0 失败（临时存储）并覆盖 Google Books 导入拒绝；`npm run build` 成功（既有 Three.js 大 chunk 提示仍在）。本轮未配置 Google Books API key，因此未对 Google 在线 API 发起实时搜索；此前阶段对另外三个实际连通源的限量 live smoke 结果不等同于本轮 Google Books 在线验证。实施仍不是完整 WORLD LIBRARY 验收，Europeana、学术库、阿拉伯语专项馆藏、筛选、后台与全设备 UI 验收仍待后续阶段。
