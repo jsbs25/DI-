@@ -14,8 +14,8 @@
 | `npm run test:ai-api` | 独立临时 Express 服务中 `/api/ai/models` 与 `/api/ai/stats` 的 GET-only 契约；检查模型元数据、唯一 ID、未配置状态/掩码、用量汇总及端点白名单 | 2026-11-04：9 项通过、0 失败；子进程模型密钥置空、临时 JSON 自动清理，不调用模型、不触及会话/消息接口。 |
 | `npm run test:knowledge-api` | 独立临时 Express 服务中的知识图谱只读契约：目录/33 个节点详情、关联边和书籍映射、别名搜索、类别/国家筛选、无匹配搜索成功返回空数组及未知节点 404；请求仅限白名单 GET | 2026-11-04：12 项通过、0 失败；临时 JSON 自动清理，后台采集及模型密钥关闭。仅验证 HTTP 数据契约，不覆盖 UI、权限策略或完整 API 套件；不访问会话/消息路径、外部服务、正式数据或既有服务。 |
 | `npm run test:library-api` | 独立临时 Express 服务的本地图书目录与详情 GET-only 契约：核心字段/ID 唯一、哲学类别过滤、未知类别空集合、Plato 本地目录搜索、已知图书章节结构及未知图书 404；端点白名单不含外部搜索、书架或写操作 | 2026-11-04：12 项通过、0 失败；使用自动清理的临时 JSON、随机端口并关闭后台采集/模型密钥；不访问会话/消息路径、外部服务、正式数据或既有服务。 |
-| `npm run test:crawler-api` | 独立临时 Express 服务中 `/api/crawler/tasks` 与 `/api/crawler/pages` 的 GET-only 契约；检查字段/ID 唯一、页任务关联、状态及 pending-review 样例，端点白名单不含任务创建、执行或审核 | 2026-11-04：12 项通过、0 失败；使用自动清理的临时 JSON 和随机端口；不执行抓取、不访问外部来源、正式数据、私信路径或既有服务。 |
-| `npm run test:creator-api` | 独立临时 Express 服务中 `/api/articles` 与 `/api/videos` 的 GET-only 目录契约；检查字段、ID 唯一性及既有文章/视频条目；不包含写操作或媒体获取 | 2026-11-04：11 项通过、0 失败；使用自动清理的临时 JSON 和随机端口，后台采集及模型密钥关闭；不访问会话/消息路径、外部媒体、正式数据或既有服务。 |
+| `npm run test:crawler-api` | 独立临时 Express 服务中 `/api/crawler/tasks` 与 `/api/crawler/pages` 的 GET-only 契约；检查字段/ID 唯一、页任务关联、状态、pending-review 样例及重复 GET 响应一致性，端点白名单不含任务创建、执行或审核 | 2026-11-04：14 项通过、0 失败；使用自动清理的临时 JSON 和随机本地端口；不执行抓取、不访问外部来源、正式数据、会话/消息路径或既有服务。 |
+| `npm run test:creator-api` | 独立临时 Express 服务中 `/api/articles` 与 `/api/videos` 的 GET-only 目录契约；检查字段、ID 唯一性及既有文章/视频条目；不包含写操作或媒体获取 | 2026-11-04：11 项通过、0 失败；使用自动清理的临时 JSON 和随机本地端口，后台采集及模型密钥关闭；不访问会话/消息路径、外部媒体、正式数据或既有服务。 |
 | `npm run test:catalog-api` | 独立临时 Express 服务中 `/api/communities`、`/api/games/rooms` 与 `/api/ads` 的 GET-only 目录契约；检查字段、唯一 ID/slug、预置样例及重复读取不改变成员/棋盘/回合/曝光/点击状态；不包含加入、游戏状态变更或广告点击 | 2026-11-04：19 项通过、0 失败；使用自动清理的临时 JSON 和随机端口；不访问会话/消息路径、外部媒体、正式数据或既有服务。 |
 | `npm run test:social-feed-api` | 独立临时 Express 服务的公开 `/api/posts` GET-only 契约；检查字段/种子、默认与最新顺序、热门评分、国家大小写、类别与国家组合筛选、`all`/`ALL` 兼容及内容搜索；只允许十种预设查询 | 2026-11-04：19 项通过、0 失败；自动清理临时 JSON 与随机端口；不触发写接口、媒体 URL、身份/会话/消息路径、外部来源、正式数据或既有服务。 |
 | `npm run test:public-users-api` | 使用临时合成用户数据，独立验证 `/api/users` 目录筛选、`/api/users/:id` 公开资料、`/api/search/global` 用户检索；仅允许白名单 GET | 2026-11-04：21 项通过、0 失败；覆盖邮箱/onboarding 脱敏、私密坐标遮蔽、筛选、结构化 404 和全局搜索边界；未访问身份、会话/消息路径、正式数据或既有服务。 |
@@ -110,3 +110,10 @@
 - `npm run test:knowledge-api` 现为 12 项通过、0 失败（33 个节点详情）。新增断言对 `GET /api/knowledge/search?q=no-such-earth-one-node-9f31` 检查 HTTP 200、`success: true`、查询字符串原样回显及空 `nodes` 数组。
 - 本测试固定白名单为 `GET /api/knowledge/nodes`、`GET /api/knowledge/nodes?country=sa`、`GET /api/knowledge/search?q=Avicenna`、`GET /api/knowledge/search?q=Islamic&category=civilization`、`GET /api/knowledge/search?q=no-such-earth-one-node-9f31`、`GET /api/knowledge/nodes/not-a-real-node`；另外仅对本地目录返回的 33 个 ID 请求 `GET /api/knowledge/nodes/:id`。所有非白名单路径及非 GET 方法均被测试辅助函数拒绝。
 - `npm run test:globe-api` 复跑 11 项通过；`npm run lint` 与 `git diff --check` 通过。临时 JSON 自动清理，随机本地端口；完整 `npm run test:api` 未运行，因为其中含有尚待批准的会话读取路径。未访问身份、会话/消息或写接口、外部来源、正式数据或既有服务。
+
+
+## 2026-11-04 爬虫任务与页面列表重复 GET 幂等性续测
+
+- `npm run test:crawler-api` 现为 14 项通过、0 失败。新断言分别重复读取 `/api/crawler/tasks` 与 `/api/crawler/pages`，验证 HTTP 200 及完整 JSON 响应一致，保护任务状态/进度和页面审核状态不因 GET 改变。
+- 固定端点白名单只有上述两个 GET；服务使用随机本地端口、自动清理的临时 JSON，模型密钥为空并关闭后台书籍采集。未创建或运行抓取任务、批准/拒绝页面、执行写操作、请求外部来源或会话/消息路径。
+- `npm run lint` 与 `git diff --check` 通过。完整 `npm run test:api` 因含待批准的会话读取路径未运行；本次也未运行生产构建或浏览器测试，未访问正式数据或既有服务。

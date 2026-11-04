@@ -113,6 +113,12 @@ async function main() {
     );
     const taskIds = new Set<string>((tasks || []).map((task: any) => task.id));
     check(taskIds.size === (tasks?.length || 0), 'Crawler task identifiers are unique');
+    const repeatedTasksResponse = await get('/api/crawler/tasks');
+    check(
+      repeatedTasksResponse.status === 200 &&
+      JSON.stringify(repeatedTasksResponse.body) === JSON.stringify(tasksResponse?.body),
+      'Repeated crawler-task list GETs do not change task progress or status'
+    );
     check(
       taskIds.has('task_nasa') && taskIds.has('task_gutenberg'),
       'Existing seeded public-source tasks remain present in the isolated catalog'
@@ -148,6 +154,12 @@ async function main() {
       pages.some((page: any) => page.id === 'page_nasa_01' && page.taskId === 'task_nasa' &&
         page.status === 'pending_review'),
       'Existing pending-review sample remains linked to its source task without approving or changing it'
+    );
+    const repeatedPagesResponse = await get('/api/crawler/pages');
+    check(
+      repeatedPagesResponse.status === 200 &&
+      JSON.stringify(repeatedPagesResponse.body) === JSON.stringify(pagesResponse.body),
+      'Repeated crawled-page list GETs do not change stored page or review state'
     );
     check(
       [...ALLOWED_ENDPOINTS].every(endpoint => requested.some(request => request.endpoint === endpoint)) &&

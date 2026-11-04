@@ -2,7 +2,7 @@
 
 更新时间：2026-11-04
 仓库：`https://github.com/jsbs25/DI-`
-分支：`main` / `origin/main`；本次续作基线 `97e6234`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
+分支：`main` / `origin/main`；本轮续作基线 `3555a74`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
 
 ## 本轮已完成
 
@@ -143,3 +143,11 @@
 - `npm run test:catalog-api`：19 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。服务运行于随机本地端口，使用自动清理的临时 JSON，端点白名单仅包含三个目录 GET。
 - 未运行完整 `npm run test:api`（该套件含等待批准的会话读取路径）、构建或浏览器测试；未访问会话/消息接口、写接口、外部服务、正式 `server_data.json` 或既有服务，也未检查既有服务配置/日志。
 - GitHub 同步：提交 `386fcf6c32a7cf1da12b903fc8e18666ea5103fe` 从 `97e6234` 经现有授权连接器普通快进推送至 `main`；推送后 fetch 与 connector API 回读均确认 `HEAD`、`origin/main` 和远端一致，工作区干净。未强推或修改账户/全局 Git 配置。
+
+
+## 2026-11-04 爬虫只读列表重复 GET 幂等性续测
+
+- 从干净的 `main` / `3555a74` 继续；只扩展 `scripts/test_crawler_api.ts` 与测试/进度文档，没有改动服务端路由、爬虫行为、权限策略或业务数据。
+- 对固定白名单 `GET /api/crawler/tasks` 与 `GET /api/crawler/pages` 各增加重复读取比对，要求 HTTP 200 且完整 JSON 响应与首次读取一致，以保护任务进度、状态和页面审核状态不被 GET 改变。
+- `npm run test:crawler-api`：14 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。测试使用随机本地端口及脚本自动清理的临时 JSON，仅发送 GET。
+- 未执行任务创建/抓取/审核、外部网络请求、身份或会话/消息接口；未读写正式 `server_data.json`，未检查或修改既有服务、配置或日志。完整 `npm run test:api` 因包含待批准会话读取路径未运行；本次也未运行构建或浏览器测试。
