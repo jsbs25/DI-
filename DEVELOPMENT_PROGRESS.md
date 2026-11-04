@@ -193,3 +193,4 @@
 - 在隔离生产构建及系统 Chromium 151 / SwiftShader 中，使用 390×844 CSS px 视口，通过真实语言菜单依次验证中文、英语、阿拉伯语 RTL、西班牙语、法语和俄语；每种语言依次打开首页地球、动态、宇宙、社区、Messenger、AI HUB、图书馆、知识、网页浏览器、创作者、视频与游戏，共 72 个语言/模块样本。72 个样本均保持预期 `lang`/`dir`，`documentElement.scrollWidth` 与 `body.scrollWidth` 均为 390px，无页面级横向溢出。
 - 浏览器发出的 48 个 API GET 均由 Playwright 路由在网络发送前拦截并回复合成空数据；不启动 Express/API 后端。应用尝试的身份、会话目录、书架/书签/保存文章列表等读取只得到本地合成响应；本次不测试认证、授权或私信行为，未请求消息详情路径。无写请求；所有外网请求被阻断（观察到 1 次）。JavaScript `pageerror` 为 0；控制台有 1 条 `net::ERR_FAILED` 资源提示，与被阻断的外网加载相符。
 - 未读取、修改或暂存正式 `server_data.json`，未检查、停止或改动现有服务、配置或日志。该回归只证明模拟浏览器中的语言方向和页面级宽度，不证明实体设备、硬件 GPU、逐页业务功能、翻译准确度或真实后端行为。
+- GitHub 同步：回归与项目记录提交 `23bd0f2afbe5c5329fd33066a2f7661d96fc5871` 从 `ced585d83bf17206fb8597b29eabc78dc57c8bcb` 普通快进推送至 `main`；推送前连接器 API 与 `origin/main` 确认远端仍在基线，推送后 `git fetch` 和连接器 API 均核验 `HEAD`、`origin/main`、远端 `main` 一致。未强推或修改全局 Git 配置。
