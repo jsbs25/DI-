@@ -50,6 +50,8 @@
 - 在 390×844 下实测移动导航可达的 12 个模块：首页地球、动态、宇宙、社区、消息、AI HUB、图书馆、知识、浏览器、创作者、视频、游戏；另测 AI HUB 与浏览器 1274×649 RTL 桌面、两者 390×844 中文移动状态，以及地球侧栏打开的桌面 Crawler 仪表盘。共 18 个视口/模块样本，`documentElement.scrollWidth` 和 `body.scrollWidth` 均等于视口宽度。
 - 首轮发现 AI HUB 模型状态/选择栏撑宽至 499px，网页浏览器内容面板撑宽至 621px。分别通过 flex 子项 `min-w-0`、模型选择器限宽、浏览器地址栏工具条内部滚动修复；没有删控件或以全局裁切掩盖问题。修复后上述样本无页面级水平溢出。
 - 本次测试过程中 43 个外部资源请求被按设计阻断，产生的网络加载提示来自拦截；JavaScript 页面错误为 0，非 GET 请求尝试为 0。浏览器内容/远程图像完整性不在本次结论内。
+- 单次隔离生产 Chromium Resource Timing：首屏 7 个 JS encoded body 合计 253,077 B/decoded 942,755 B，CSS 为 16,324/112,399 B；Three.js 单块为 136,323/551,656 B。另 12 个页面 JS 块在首次导航到对应模块后才请求，CrawlerDashboard 为 4,849/17,678 B。此为单次模拟器本地资源快照，不含响应头、外部资源、网络带宽或实体设备性能。
+- 隐私范围更正：App 启动会自动读取 `/api/conversations`；访问 Messenger 时，预置的 `conv_global` 会触发消息列表 GET。DigitalLibrary 与 WebBrowser 挂载也请求 `/api/library/shelf`、`/api/browser/bookmarks`、`/api/browser/saved-articles`。这些请求只到本轮隔离 API 的合成种子/空数据，没有连接正式数据或既有服务；会话/消息读取不是本轮授权测试，未记录响应内容或逐请求计数。后续视觉回归应在代理层先 stub 这些路径。
 - Crawler 从地球侧栏进入桌面仪表盘；挂载只发出 `/api/crawler/tasks` 与 `/api/crawler/pages` 的 GET。没有点击新建、运行、批准或拒绝控件，因此抓取执行与审核流程仍未验证。
 - 地球与宇宙页面均挂载 canvas；此检查只验证展示、导航和视口几何，不证明真实 GPU 画质、完整业务交互或真实后端端到端通过。实体设备仍待验证。
 

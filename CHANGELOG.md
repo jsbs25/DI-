@@ -24,6 +24,7 @@
 - Added `npm run test:universe`: 9 static-render checks for the close control, celestial labels, focus text, conditional Earth entry and empty selection. Keyboard, screen-reader and camera behavior remain outside this test scope.
 - Expanded the isolated HTTP regression from 67 to 78 checks with read-only globe statistics/countries/nodes, AI model/usage metadata, crawler task/page lists, saved-article list, book annotation collection, unknown-book 404 and unknown-public-profile 404 contracts; no model call, crawl or write was triggered by the new checks.
 - Localized the existing Crawler menu label across all six languages and added one static label-presence check per locale; the Arabic RTL browser check opens the same existing desktop dashboard without invoking crawler actions.
+- A one-run production Chromium resource-timing capture found 253,077 encoded / 942,755 decoded JavaScript body bytes on the default 3D home, plus 16,324 / 112,399 CSS bytes. The 12 non-initial page chunks loaded only on first navigation; no Three.js deferral was made because it would change the default interactive-globe experience without a product decision.
 - Navigation modules now load on demand behind an accessible loading state. The entry chunk decreased from about 1,160.76 KB (gzip 306.07 KB) to 316.71 KB (gzip 97.92 KB); the shared Three.js chunk remains about 551.65 KB and still triggers the build warning.
 - No authentication, authorization, administrator-permission, or private-message access-control policy was changed.
 
@@ -38,6 +39,8 @@
 - This continuation used an auto-cleaned temporary API JSON store and an in-memory mock for the visual preview. The separate `server_data.json` write observed at 04:56:30 remains unexplained; its source was not inferred or changed, and existing ports 3000/3001 were left untouched.
 - A follow-up isolated production-build Chromium run covered 12 mobile-navigation destinations at 390×844 Arabic RTL, plus AI HUB/Web Browser at 1274×649 Arabic RTL desktop and 390×844 Chinese mobile, and the desktop Crawler dashboard; all 18 viewport/module samples had document/body widths equal to the viewport. It exposed and verified fixes for both layout overflow issues.
 - Final checks passed: API 78, store/domain 44, globe static render 30, universe static render 9, TypeScript, and the isolated production build. The visual-browser session used a separate temporary JSON store and GET only; 43 external requests were blocked intentionally, causing network-load notices but no page errors. Crawler loaded only task/page lists; no create/run/approve/reject action occurred, and the browser session attempted no non-GET. Existing services and formal data were not touched.
+- Scope correction: the visual app shell and opened modules also fetched seeded/empty conversation, message, shelf, bookmark and saved-article lists from that temporary store. This was not an authorization test; it did not read formal user data or use existing services. Future visual runs must stub those paths before proxying API requests.
+- Resource measurements use local `PerformanceResourceTiming` encoded/decoded body sizes in one isolated Chromium run; they are not a repeated network, bandwidth or hardware benchmark and exclude response headers.
 
 ## [v1.1.0] - Secure Authentication & Citizen Onboarding Wizard - 2026-11-03
 
