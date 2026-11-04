@@ -9,7 +9,6 @@ import {
   BookOpen,
   Sparkles,
   ExternalLink,
-  Plus,
   X,
   Shield,
   CheckCircle,
@@ -18,6 +17,7 @@ import {
   Search
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
+import { BrowserFrame } from './BrowserFrame.tsx';
 
 interface BrowserTab {
   id: string;
@@ -142,7 +142,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   }, [lang]);
 
   // AI Web Companion State
-  const [isAiPanelOpen, setIsAiPanelOpen] = useState(true);
+  const [isAiPanelOpen, setIsAiPanelOpen] = useState(false);
   const [aiAnalysisType, setAiAnalysisType] = useState<'summary' | 'entities' | 'qa'>('summary');
   const [aiOutput, setAiOutput] = useState<string>('');
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -490,48 +490,23 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   };
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-[#020512] text-slate-100 min-h-[calc(100vh-4rem)]">
-      {/* 1. Browser Tab Strip */}
-      <div className="flex items-center bg-[#070d20] border-b border-slate-800/80 px-3 pt-2 gap-1 overflow-x-auto select-none">
-        {tabs.map(tab => {
-          const isActive = tab.id === activeTabId;
-          return (
-            <div
-              key={tab.id}
-              onClick={() => setActiveTabId(tab.id)}
-              className={`group flex items-center max-w-[220px] min-w-[140px] px-3 py-1.5 rounded-t-xl text-xs font-medium cursor-pointer border-t border-x transition-all ${
-                isActive
-                  ? 'bg-[#0b132b] border-slate-700 text-cyan-300 shadow-md'
-                  : 'bg-transparent border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'
-              }`}
-            >
-              <Globe className={`w-3.5 h-3.5 mr-2 shrink-0 ${isActive ? 'text-cyan-400' : 'text-slate-500'}`} />
-              <span className="truncate flex-1">{tab.title}</span>
-              <button
-                onClick={e => handleCloseTab(tab.id, e)}
-                className="opacity-0 group-hover:opacity-100 hover:bg-slate-700/60 p-0.5 rounded-md ml-1 transition-opacity text-slate-400 hover:text-white"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-          );
-        })}
-        <button
-          onClick={handleNewTab}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-800/60 transition-colors ml-1"
-          title="New Tab"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-      </div>
+    <div className="flex min-h-[calc(100vh-4rem)] min-w-0 flex-1 flex-col bg-[#05080d] p-3 text-slate-100 sm:p-5">
+      <BrowserFrame
+        tabs={tabs}
+        activeTabId={activeTabId}
+        onSelectTab={setActiveTabId}
+        onCloseTab={handleCloseTab}
+        onNewTab={handleNewTab}
+      >
 
       {/* 2. Omnibox Toolbar */}
-      <div className="flex min-w-0 items-center gap-2 px-4 py-2 bg-[#0b132b] border-b border-slate-800/90 shadow-sm overflow-x-auto">
-        <div className="flex items-center space-x-1 text-slate-400">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/[0.06] bg-[#0d151d] px-3 py-3 sm:px-5">
+        <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/[0.06] bg-white/[0.025] p-1 text-slate-400">
           <button
             onClick={goBack}
             disabled={(historyIndex[activeTabId] ?? 0) <= 0}
-            className="p-1.5 rounded-lg hover:bg-slate-800 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="后退"
             title="Back"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -539,16 +514,18 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
           <button
             onClick={goForward}
             disabled={(historyIndex[activeTabId] ?? 0) >= (history[activeTabId]?.length ?? 1) - 1}
-            className="p-1.5 rounded-lg hover:bg-slate-800 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="前进"
             title="Forward"
           >
             <ArrowRight className="w-4 h-4" />
           </button>
           <button
             onClick={() => handleNavigate(inputUrl)}
-            className={`p-1.5 rounded-lg hover:bg-slate-800 hover:text-white transition-colors ${
+            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white ${
               isLoading ? 'animate-spin text-cyan-400' : ''
             }`}
+            aria-label="重新加载"
             title="Reload"
           >
             <RotateCw className="w-4 h-4" />
@@ -560,35 +537,39 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
             e.preventDefault();
             handleNavigate(inputUrl);
           }}
-          className="flex-1 min-w-0 flex items-center bg-[#050a18] border border-slate-700/80 rounded-xl px-3 py-1.5 focus-within:border-cyan-500/80 focus-within:ring-1 focus-within:ring-cyan-500/40 transition-all shadow-inner"
+          className="flex min-h-10 min-w-[220px] flex-1 items-center rounded-full border border-white/[0.09] bg-[#080f16] px-4 shadow-inner transition-all focus-within:border-cyan-400/50 focus-within:ring-2 focus-within:ring-cyan-400/10"
         >
           <Shield className="w-3.5 h-3.5 text-emerald-400 mr-2 shrink-0" />
           <input
             type="text"
             value={inputUrl}
             onChange={e => setInputUrl(e.target.value)}
+            aria-label="输入网址或搜索词"
             placeholder="输入网址或知识关键词 (如: https://earthobservatory.nasa.gov)..."
-            className="w-full bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
+            className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-500 focus:outline-none"
           />
           {inputUrl && (
             <button
               type="button"
               onClick={() => setInputUrl('')}
               className="text-slate-500 hover:text-slate-300 ml-1.5"
+              aria-label="清空地址栏"
+              title="清空地址栏"
             >
               <X className="w-3 h-3" />
             </button>
           )}
         </form>
 
-        <div className="flex items-center space-x-1.5">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 sm:w-auto">
           {/* Language selector (controls search result language) */}
-          <div className="flex items-center space-x-1 px-2 py-1 rounded-lg bg-slate-800/70 border border-slate-700">
-            <span className="text-xs shrink-0">🌐</span>
+          <div className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3">
+            <Globe className="h-3.5 w-3.5 shrink-0 text-slate-400" />
             <select
               value={browserLang}
               onChange={e => setBrowserLang(e.target.value as Language)}
-              className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer"
+              className="cursor-pointer bg-transparent text-xs text-slate-300 focus:outline-none"
+              aria-label="搜索结果语言"
               title="Language"
             >
               <option value="zh">中文</option>
@@ -601,12 +582,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
           </div>
 
           {/* Search engine selector */}
-          <div className="flex items-center space-x-1 px-2 py-1 rounded-lg bg-slate-800/70 border border-slate-700">
+          <div className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3">
             <Search className="w-3.5 h-3.5 text-blue-400 shrink-0" />
             <select
               value={searchEngine}
               onChange={e => setSearchEngine(e.target.value as any)}
-              className="bg-transparent text-xs text-slate-300 focus:outline-none cursor-pointer"
+              className="cursor-pointer bg-transparent text-xs text-slate-300 focus:outline-none"
+              aria-label="搜索引擎"
               title="Search engine"
             >
               <option value="auto">自动</option>
@@ -618,7 +600,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
           <button
             onClick={handleAddBookmark}
-            className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-amber-400 border border-slate-700 transition-colors"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.035] text-amber-300 transition hover:bg-white/[0.08]"
+            aria-label="收藏当前页面"
             title="Bookmark this page"
           >
             <Star className="w-4 h-4" />
@@ -630,10 +613,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                 prev.map(t => (t.id === activeTabId ? { ...t, readerMode: !t.readerMode } : t))
               );
             }}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+            aria-label="切换纯净阅读模式"
+            title="切换纯净阅读模式"
+            className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all ${
               activeTab?.readerMode
-                ? 'bg-cyan-950/80 text-cyan-300 border-cyan-500/50 shadow-sm'
-                : 'bg-slate-800/70 text-slate-300 border-slate-700 hover:bg-slate-700'
+                ? 'border-cyan-300/25 bg-cyan-300/10 text-cyan-100 shadow-sm shadow-cyan-950/30'
+                : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'
             }`}
           >
             <BookOpen className="w-3.5 h-3.5" />
@@ -642,10 +627,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
           <button
             onClick={() => setIsAiPanelOpen(!isAiPanelOpen)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+            aria-label={isAiPanelOpen ? '关闭 AI 伴侣' : '打开 AI 伴侣'}
+            title={isAiPanelOpen ? '关闭 AI 伴侣' : '打开 AI 伴侣'}
+            className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all ${
               isAiPanelOpen
-                ? 'bg-purple-950/80 text-purple-300 border-purple-500/60 shadow-md shadow-purple-500/20'
-                : 'bg-slate-800/70 text-slate-300 border-slate-700 hover:bg-slate-700'
+                ? 'border-violet-300/25 bg-violet-300/10 text-violet-100 shadow-sm shadow-violet-950/30'
+                : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-purple-400" />
@@ -654,7 +641,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
           <button
             onClick={() => setIsSavedDrawerOpen(true)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800/70 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-colors"
+            aria-label={`打开已归档网页知识库，共 ${savedArticles.length} 篇`}
+            title="已归档网页知识库"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
           >
             <Database className="w-3.5 h-3.5 text-blue-400" />
             <span className="hidden md:inline">已归档 ({savedArticles.length})</span>
@@ -663,15 +652,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       </div>
 
       {/* 3. Bookmarks Bar */}
-      <div className="flex items-center gap-2 px-4 py-1.5 bg-[#050a18]/90 border-b border-slate-800/60 overflow-x-auto text-[11px]">
-        <span className="text-slate-500 flex items-center font-semibold shrink-0">
+      <div className="flex items-center gap-2 overflow-x-auto border-b border-white/[0.06] bg-[#0a1118] px-4 py-2 text-[11px] [scrollbar-width:thin]">
+        <span className="flex shrink-0 items-center font-semibold text-slate-500">
           <Bookmark className="w-3 h-3 mr-1 text-slate-400" /> 书签:
         </span>
         {bookmarks.map(bm => (
           <button
             key={bm.id}
             onClick={() => handleNavigate(bm.url)}
-            className="px-2.5 py-1 rounded-md bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-cyan-300 shrink-0 transition-colors"
+            className="min-h-8 shrink-0 rounded-full border border-white/[0.06] bg-white/[0.025] px-3 text-slate-300 transition-colors hover:border-cyan-200/20 hover:bg-cyan-200/[0.06] hover:text-cyan-100"
           >
             {bm.title}
           </button>
@@ -679,20 +668,20 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       </div>
 
       {saveSuccessMessage && (
-        <div className="bg-emerald-950/90 border-b border-emerald-500/40 text-emerald-200 text-xs px-4 py-2 flex items-center space-x-2">
+        <div role="status" className="flex items-center gap-2 border-b border-emerald-300/15 bg-emerald-950/50 px-4 py-2 text-xs text-emerald-100">
           <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{saveSuccessMessage}</span>
         </div>
       )}
 
       {/* 4. Split Layout */}
-      <div className="flex-1 min-w-0 flex overflow-hidden">
-        <div className="flex-1 min-w-0 overflow-y-auto p-4 sm:p-8 bg-[#030714]">
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[#080d13]">
+        <div className="min-w-0 flex-1 overflow-y-auto bg-[#080d13] p-4 sm:p-8">
           {searchResults.length > 0 || isSearching ? (
             <div className="max-w-3xl mx-auto">
               <div className="mb-6">
                 <div className="flex items-center space-x-2 text-xs text-slate-400 mb-2">
-                  <span className="px-2.5 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-800/60 font-medium">
+                  <span className="rounded-full border border-cyan-200/15 bg-cyan-200/[0.06] px-2.5 py-1 font-medium text-cyan-100">
                     全网搜索
                   </span>
                   {!isSearching && <span>约 {searchResults.length} 条结果</span>}
@@ -718,13 +707,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                     <button
                       key={idx}
                       onClick={() => handleNavigate(result.url)}
-                      className="w-full text-left p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/80 transition-all cursor-pointer group"
+                      className="group w-full cursor-pointer rounded-2xl border border-white/[0.07] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6"
                     >
-                      <div className="flex items-center space-x-2 text-[11px] text-emerald-400 font-mono truncate">
+                      <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-emerald-300/80">
                         <Globe className="w-3 h-3 shrink-0" />
                         <span className="truncate">{result.url}</span>
                       </div>
-                      <h2 className="mt-1 text-base sm:text-lg font-semibold text-blue-300 group-hover:text-cyan-300 transition-colors leading-snug">
+                      <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-cyan-100 sm:text-lg">
                         {result.title}
                       </h2>
                       {result.snippet && (
@@ -739,10 +728,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
             </div>
           ) : activeTab ? (
             activeTab.readerMode ? (
-              <div className="max-w-3xl mx-auto bg-slate-900/50 border border-slate-800/80 rounded-2xl p-6 sm:p-10 shadow-2xl backdrop-blur-sm">
+              <div className="mx-auto max-w-3xl rounded-3xl border border-white/[0.07] bg-[#0d151d] p-6 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-10">
                 <div className="border-b border-slate-800 pb-6 mb-6">
                   <div className="flex items-center space-x-3 mb-3 text-xs text-slate-400">
-                    <span className="px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/60 font-medium">
+                    <span className="rounded-full border border-cyan-200/15 bg-cyan-200/[0.06] px-2.5 py-1 font-medium text-cyan-100">
                       Reader Mode
                     </span>
                     <span>{activeTab.author || 'EARTH ONE Knowledge Archive'}</span>
@@ -763,7 +752,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                       href={activeTab.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-sm transition-all"
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-cyan-300 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm shadow-cyan-950/30 transition hover:bg-cyan-200"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       <span>在新窗口打开</span>
@@ -771,7 +760,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                     <button
                       onClick={handleTranslatePage}
                       disabled={!activeTab.content || isTranslating}
-                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 text-xs font-semibold border border-slate-700 transition-all"
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08] disabled:opacity-40"
                     >
                       {isTranslating ? (
                         <RotateCw className="w-3.5 h-3.5 animate-spin" />
@@ -783,7 +772,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                     {showTranslation && translatedContent && (
                       <button
                         onClick={() => setShowTranslation(false)}
-                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-950/80 hover:bg-purple-900 text-purple-200 text-xs font-semibold border border-purple-600/50 transition-all"
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-violet-200/15 bg-violet-200/[0.06] px-4 py-2 text-xs font-semibold text-violet-100 transition hover:bg-violet-200/10"
                       >
                         <span>显示原文</span>
                       </button>
@@ -791,7 +780,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                   </div>
                 </div>
 
-                <div className="prose prose-invert max-w-none text-slate-200 font-serif leading-relaxed text-base sm:text-lg space-y-5">
+                <div className="prose prose-invert max-w-none space-y-5 font-serif text-base leading-relaxed text-slate-200 sm:text-lg">
                   {isLoading ? (
                     <div className="flex flex-col items-center justify-center py-12 text-slate-400 space-y-3">
                       <RotateCw className="w-6 h-6 animate-spin text-cyan-400" />
@@ -820,14 +809,14 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={handleSaveToLibrary}
-                      className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-xs shadow-lg shadow-cyan-600/30 transition-all cursor-pointer"
+                      className="flex min-h-10 items-center gap-2 rounded-full bg-cyan-300 px-4 py-2 text-xs font-semibold text-slate-950 shadow-sm shadow-cyan-950/30 transition hover:bg-cyan-200"
                     >
                       <Database className="w-4 h-4" />
                       <span>保存至全球数字图书馆</span>
                     </button>
                     <button
                       onClick={() => handleRunAiAnalysis('summary')}
-                      className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-medium text-xs shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
+                      className="flex min-h-10 items-center gap-2 rounded-full border border-violet-200/15 bg-violet-300/[0.12] px-4 py-2 text-xs font-semibold text-violet-100 transition hover:bg-violet-300/20"
                     >
                       <Sparkles className="w-4 h-4" />
                       <span>AI 总结当前文章</span>
@@ -836,7 +825,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                 </div>
               </div>
             ) : (
-              <div className="w-full h-full min-h-[600px] flex flex-col bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden relative">
+              <div className="relative flex h-full min-h-[480px] w-full flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-slate-950">
                 <iframe
                   src={activeTab.url}
                   title={activeTab.title}
@@ -849,8 +838,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
         </div>
 
         {isAiPanelOpen && (
-          <aside className="w-80 sm:w-96 border-l border-slate-800 bg-[#060c22] flex flex-col overflow-hidden select-none">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-[#08102b]">
+          <>
+            <button
+              type="button"
+              aria-label="关闭 AI 网页研究伴侣"
+              onClick={() => setIsAiPanelOpen(false)}
+              className="absolute inset-0 z-20 cursor-default bg-black/50 backdrop-blur-[2px] md:hidden"
+            />
+            <aside className="absolute inset-x-3 bottom-3 top-3 z-30 flex select-none flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#101720] shadow-2xl md:relative md:inset-auto md:z-0 md:w-[340px] md:shrink-0 md:rounded-none md:border-y-0 md:border-r-0 md:border-l md:border-white/[0.07] md:shadow-none">
+            <div className="flex items-center justify-between border-b border-white/[0.07] bg-[#121b25] p-4">
               <div className="flex items-center space-x-2">
                 <Sparkles className="w-4 h-4 text-purple-400" />
                 <span className="font-semibold text-sm text-purple-200">AI 网页研究伴侣</span>
@@ -940,8 +936,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
               </button>
             </div>
           </aside>
+          </>
         )}
       </div>
+
+      </BrowserFrame>
 
       {isSavedDrawerOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end">
@@ -951,7 +950,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                 <Database className="w-5 h-5 text-cyan-400" />
                 <h3 className="text-base font-semibold text-white">已归档网页知识库</h3>
               </div>
-              <button onClick={() => setIsSavedDrawerOpen(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setIsSavedDrawerOpen(false)} aria-label="关闭已归档网页知识库" className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
