@@ -55,6 +55,7 @@ function createBrowserEngine({
   onFocusFind = () => {},
   onFindResult = () => {},
   onDownloads = () => {},
+  onPermissionContextChange = () => {},
   downloadStorePath = null,
   getTestApprovalPath = null
 }) {
@@ -117,6 +118,7 @@ function createBrowserEngine({
   function attachEvents(tabId, entry) {
     const contents = entry.view.webContents;
     const validateNavigation = (event, url) => {
+      onPermissionContextChange(contents);
       if (!isAllowedNavigation(url)) event.preventDefault();
     };
 
@@ -161,7 +163,10 @@ function createBrowserEngine({
       contents.on(eventName, () => publish(tabId, entry));
     }
     contents.on('did-navigate', () => publish(tabId, entry, true));
-    contents.on('did-navigate-in-page', () => publish(tabId, entry, true));
+    contents.on('did-navigate-in-page', () => {
+      onPermissionContextChange(contents);
+      publish(tabId, entry, true);
+    });
   }
 
   function createTab(tabId) {
@@ -191,7 +196,10 @@ function createBrowserEngine({
     if (!validTabId(tabId)) return { success: false, error: '浏览器标签 ID 无效。' };
     if (activeTabId && activeTabId !== tabId) {
       const previousEntry = tabs.get(activeTabId);
-      if (previousEntry) stopFindForEntry(activeTabId, previousEntry);
+      if (previousEntry) {
+        onPermissionContextChange(previousEntry.view.webContents);
+        stopFindForEntry(activeTabId, previousEntry);
+      }
     }
     let entry = tabs.get(tabId);
     const isNew = !entry;
@@ -282,6 +290,7 @@ function createBrowserEngine({
       return selected.success ? { success: true, url } : selected;
     }
     stopFindForEntry(tabId, entry);
+    onPermissionContextChange(entry.view.webContents);
     activeTabId = tabId;
     applyVisibility();
     entry.lastUrl = url;
@@ -297,6 +306,7 @@ function createBrowserEngine({
     const entry = tabs.get(tabId);
     if (!entry) return;
     stopFindForEntry(tabId, entry);
+    onPermissionContextChange(entry.view.webContents);
     tabs.delete(tabId);
     window.contentView.removeChildView(entry.view);
     if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close();
@@ -410,6 +420,21 @@ function createBrowserEngine({
     return success ? { success: true } : { success: false, error: '当前页面无法清除查找高亮。' };
   }
 
+  function isPermissionContext(contents, origin, details) {
+    if (!contents || details?.isMainFrame !== true || !browserActive || !viewportBounds || !activeTabId) return false;
+    const entry = tabs.get(activeTabId);
+    if (!entry || entry.view.webContents !== contents || contents.isDestroyed()) return false;
+    try {
+      const current = new URL(contents.getURL());
+      const frame = new URL(contents.mainFrame?.url || '');
+      return current.origin === origin && frame.origin === origin &&
+        (current.protocol === 'http:' || current.protocol === 'https:') &&
+        (frame.protocol === 'http:' || frame.protocol === 'https:');
+    } catch {
+      return false;
+    }
+  }
+
   function getWebContentsForTesting(tabId) {
     return tabs.get(tabId)?.view.webContents ?? null;
   }
@@ -465,6 +490,7 @@ function createBrowserEngine({
     getDownloadStorageStatus: () => downloadManager.getStorageStatus(),
     findInPage,
     stopFindInPage,
+    isPermissionContext,
     getSessionSnapshot,
     dispose,
     getWebContentsForTesting,

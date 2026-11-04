@@ -8,6 +8,7 @@ const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require
 const { createBrowserEngine, isAllowedNavigation } = require('./browser-engine.cjs');
 const { createBrowserSessionStore } = require('./session-store.cjs');
 const { assertTrustedAppSender: assertTrustedAppSenderForContext } = require('./browser-ipc-security.cjs');
+const { createBrowserPermissionManager } = require('./browser-permissions.cjs');
 
 app.setName('EARTH ONE');
 if (process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1' && process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR) {
@@ -18,9 +19,11 @@ if (process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1' && process.env.EARTH_ONE_BR
 
 let mainWindow = null;
 let browserEngine = null;
+let browserPermissionManager = null;
 let appOrigin = null;
 let testDownloadDir = null;
 let browserBookmarkApiRequests = 0;
+const browserFixtureRequestAudit = [];
 let localBrowserDataReadOnly = false;
 let localBrowserDataWriteQueue = Promise.resolve();
 let browserSessionStore = null;
@@ -235,6 +238,10 @@ function registerBrowserIpc() {
     'browser:get-local-data': () => readLocalBrowserData(),
     'browser:save-local-data': (_event, data) => writeLocalBrowserData(data),
     'browser:get-session-state': () => ({ ...browserSessionStatus, tabs: browserSessionStatus.tabs.map(tab => ({ ...tab })) }),
+    'browser:get-permission-state': () => browserPermissionManager?.getState() || { pending: [], grants: [] },
+    'browser:resolve-permission-request': (_event, requestId, decision) => browserPermissionManager?.resolve(requestId, decision) || { success: false },
+    'browser:revoke-permission': (_event, origin, permission) => browserPermissionManager?.revoke(origin, permission) || { success: false },
+    'browser:revoke-all-permissions': () => browserPermissionManager?.revokeAll() || { success: false },
     'browser:set-session-enabled': (_event, enabled) => setBrowserSessionEnabled(Boolean(enabled)),
     'browser:restore-session': async () => {
       if (browserSessionRestoreStarted) return browserSessionRestorePromise || browserSessionRestoreResult || { success: true, tabs: [] };
@@ -269,19 +276,28 @@ function registerBrowserIpc() {
         return { success: false, error: '下载文件已不存在或无法访问。' };
       }
     },
-    'browser:set-active': (_event, active) => browserEngine.setActive(Boolean(active)),
-    'browser:set-bounds': (_event, bounds) => browserEngine.setBounds(bounds),
+    'browser:set-active': (_event, active) => {
+      browserEngine.setActive(Boolean(active));
+      browserPermissionManager?.revalidatePending();
+    },
+    'browser:set-bounds': (_event, bounds) => {
+      browserEngine.setBounds(bounds);
+      browserPermissionManager?.revalidatePending();
+    },
     'browser:select-tab': (_event, tabId, url) => {
       const result = browserEngine.selectTab(tabId, url);
+      browserPermissionManager?.revalidatePending();
       scheduleBrowserSessionPersist();
       return result;
     },
     'browser:close-tab': (_event, tabId) => {
       browserEngine.closeTab(tabId);
+      browserPermissionManager?.revalidatePending();
       scheduleBrowserSessionPersist();
     },
     'browser:navigate': (_event, tabId, url) => {
       const result = browserEngine.navigate(tabId, url);
+      browserPermissionManager?.revalidatePending();
       scheduleBrowserSessionPersist();
       return result;
     },
@@ -365,6 +381,19 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
       throw new Error(`等待本地标签页失败：${tabId} ${pathname}`);
+    };
+
+    const waitForPermissionPrompt = async (permission, origin) => {
+      const deadline = Date.now() + 7000;
+      while (Date.now() < deadline) {
+        const prompt = await appContents.executeJavaScript(`(() => {
+          const element = document.querySelector('[data-browser-permission-prompt]');
+          return element ? { permission: element.getAttribute('data-permission'), origin: element.getAttribute('data-origin') } : null;
+        })()`);
+        if (prompt?.permission === permission && prompt.origin === origin) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error(`等待 ${permission} 权限提示超时或来源错误：${origin}`);
     };
 
     const waitForFindStatus = async (activeMatch, totalMatches) => {
@@ -578,11 +607,22 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       await untrustedWindow.loadURL(`${new URL(testUrl).origin}/one`);
       const unauthorizedResults = await untrustedWindow.webContents.executeJavaScript(`Promise.all([
         window.earthOneBrowser.findInPage('EARTHONE_FIND_FIXTURE', 'new').then(() => false, () => true),
-        window.earthOneBrowser.stopFindInPage().then(() => false, () => true)
+        window.earthOneBrowser.stopFindInPage().then(() => false, () => true),
+        window.earthOneBrowser.getPermissionState().then(() => false, () => true),
+        window.earthOneBrowser.resolvePermissionRequest('forged-request', 'allow').then(() => false, () => true),
+        window.earthOneBrowser.revokePermission('https://example.test', 'notifications').then(() => false, () => true),
+        window.earthOneBrowser.revokeAllPermissions().then(() => false, () => true)
       ])`);
       if (!Array.isArray(unauthorizedResults) || unauthorizedResults.some(rejected => rejected !== true)) {
-        throw new Error('非应用 WebContents 的查找 IPC 调用必须被拒绝。');
+        throw new Error('非应用 WebContents 的查找和站点权限 IPC 调用必须被拒绝。');
       }
+      const subframeBridge = await untrustedWindow.webContents.executeJavaScript(`new Promise(resolve => {
+        const frame = document.createElement('iframe');
+        frame.src = location.href;
+        frame.onload = () => resolve(typeof frame.contentWindow.earthOneBrowser);
+        document.body.appendChild(frame);
+      })`);
+      if (subframeBridge !== 'undefined') throw new Error('子框架不得获得 EARTH ONE preload 权限 bridge。');
     } finally {
       if (!untrustedWindow.isDestroyed()) untrustedWindow.destroy();
     }
@@ -649,6 +689,25 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     }
 
     if (process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'restart') {
+      const restartedPermissionState = browserPermissionManager.getState();
+      if (restartedPermissionState.pending.length || restartedPermissionState.grants.length ||
+          fs.existsSync(path.join(app.getPath('userData'), 'earth-one-browser-permissions.json'))) {
+        throw new Error('Electron 重启后必须清空内存授权，并且不得从磁盘恢复站点权限。');
+      }
+      console.log('BROWSER_PERMISSION_RESTART_RESET_PASS: a fresh Electron process has no previous site grants.');
+      const afterRestartNotification = testContents.executeJavaScript('Notification.requestPermission()');
+      await waitForPermissionPrompt('notifications', new URL(testUrl).origin);
+      const deniedAfterRestart = await appContents.executeJavaScript(`(() => {
+        const button = document.querySelector('[data-browser-permission-deny]');
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`);
+      if (!deniedAfterRestart || await afterRestartNotification !== 'denied') {
+        throw new Error('重启后的合成页面必须重新显示权限提示，且拒绝后不得沿用旧授权。');
+      }
+      console.log('BROWSER_PERMISSION_SMOKE_PASS: restarted process prompted again and denied the new synthetic request.');
+
       const restoredDownloads = browserEngine.getDownloads();
       const restoredCompleted = restoredDownloads.find(record => record.filename === 'earth-one-fixture.txt');
       const restoredInterrupted = restoredDownloads.find(record => record.filename === 'earth-one-interrupted.txt');
@@ -858,12 +917,140 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     if (browserBookmarkApiRequests !== 0) throw new Error('本地记录操作请求了服务端书签 API。');
     await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭本地浏览数据"]').click()`);
 
-    const deniedPermission = await testContents.executeJavaScript(
-      `new Promise(resolve => Notification.requestPermission().then(resolve))`
-    );
-    if (deniedPermission !== 'denied') {
-      throw new Error(`通知权限应默认拒绝，实际结果为 ${String(deniedPermission)}。`);
+    const permissionOriginA = new URL(testContents.getURL()).origin;
+    const permissionOriginB = new URL(process.env.EARTH_ONE_BROWSER_TEST_ALT_URL).origin;
+    const initialPermissionState = browserPermissionManager.getState();
+    if (initialPermissionState.pending.length || initialPermissionState.grants.length) {
+      throw new Error('每个 EARTH ONE 进程必须从无授权、无待决请求的权限默认状态开始。');
     }
+    const permissionStorePath = path.join(app.getPath('userData'), 'earth-one-browser-permissions.json');
+    if (fs.existsSync(permissionStorePath)) throw new Error('权限不应写入任何持久化权限文件。');
+    if (process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'restart') {
+      console.log('BROWSER_PERMISSION_RESTART_RESET_PASS: a fresh Electron process has no prior session grants.');
+    }
+
+    const clickPermissionDecision = async decision => {
+      const clicked = await appContents.executeJavaScript(`(() => {
+        const button = document.querySelector('[data-browser-permission-${decision}]');
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`);
+      if (!clicked) throw new Error(`站点权限提示缺少 ${decision} 决策按钮。`);
+    };
+    const notificationRequest = () => testContents.executeJavaScript('Notification.requestPermission()');
+
+    const deniedGeolocation = testContents.executeJavaScript(`new Promise(resolve => navigator.geolocation.getCurrentPosition(
+      () => resolve('position'), error => resolve(error.code), { timeout: 5000 }
+    ))`);
+    await waitForPermissionPrompt('geolocation', permissionOriginA);
+    await clickPermissionDecision('deny');
+    const deniedGeolocationResult = await deniedGeolocation;
+    if (deniedGeolocationResult !== 1 || browserPermissionManager.getState().grants.length !== 0) {
+      throw new Error('明确拒绝的定位请求应得到拒绝结果，且不得留下会话授权。');
+    }
+
+    const allowedNotification = notificationRequest();
+    await waitForPermissionPrompt('notifications', permissionOriginA);
+    await clickPermissionDecision('allow');
+    if (await allowedNotification !== 'granted') throw new Error('明确允许的通知请求未向 Chromium 返回 granted。');
+    const grantedState = browserPermissionManager.getState();
+    if (grantedState.grants.length !== 1 || grantedState.grants[0].origin !== permissionOriginA ||
+        grantedState.grants[0].permissions.join(',') !== 'notifications') {
+      throw new Error('会话授权应只包含用户明确允许的来源和能力。');
+    }
+    if (await notificationRequest() !== 'granted' || browserPermissionManager.getState().pending.length !== 0) {
+      throw new Error('同一 origin 的同一会话授权应被复用，且无需重复提示。');
+    }
+
+    const alternateNavigation = await browserEngine.navigate(testTabId, `${permissionOriginB}/two`);
+    if (!alternateNavigation.success) throw new Error('第二个 loopback 合成 origin 未能加载。');
+    await waitForTabPath(testTabId, '/two', 'EARTH ONE Fixture Two');
+    if (new URL(testContents.getURL()).origin !== permissionOriginB) throw new Error('跨 origin fixture 导航未完成。');
+    const isolatedNotification = notificationRequest();
+    await waitForPermissionPrompt('notifications', permissionOriginB);
+    await clickPermissionDecision('deny');
+    if (await isolatedNotification !== 'denied' || browserPermissionManager.getState().grants.some(grant => grant.origin === permissionOriginB)) {
+      throw new Error('另一 origin 不得继承已允许权限。');
+    }
+
+    const returnNavigation = await browserEngine.navigate(testTabId, `${permissionOriginA}/two`);
+    if (!returnNavigation.success) throw new Error('返回首个合成 origin 失败。');
+    await waitForTabPath(testTabId, '/two', 'EARTH ONE Fixture Two');
+    if (await notificationRequest() !== 'granted') throw new Error('授权应在本次应用会话中保持与首个 origin 隔离。');
+    await appContents.executeJavaScript(`document.querySelector('[data-browser-permissions-toggle]').click()`);
+    const permissionPanelText = await appContents.executeJavaScript(
+      `document.querySelector('[data-browser-permissions-panel]')?.innerText || ''`
+    );
+    if (!permissionPanelText.includes(permissionOriginA) || !permissionPanelText.includes('通知') ||
+        !await appContents.executeJavaScript(`Boolean(document.querySelector('[data-browser-revoke-permission="notifications"]'))`)) {
+      throw new Error('会话权限面板没有展示来源/能力或逐项撤销控件。');
+    }
+    await appContents.executeJavaScript(`document.querySelector('[data-browser-revoke-permission="notifications"]').click()`);
+    if (browserPermissionManager.getState().grants.length !== 0) throw new Error('逐项撤销没有清除会话授权。');
+    await appContents.executeJavaScript(`document.querySelector('[data-browser-permissions-panel] button[aria-label="关闭会话站点权限"]').click()`);
+    browserEngine.reload(testTabId);
+    await waitForTabPath(testTabId, '/two', 'EARTH ONE Fixture Two');
+    const afterRevokeNotification = notificationRequest();
+    await waitForPermissionPrompt('notifications', permissionOriginA);
+    await clickPermissionDecision('deny');
+    if (await afterRevokeNotification !== 'denied') throw new Error('撤销后该 origin 不得继续获得通知权限。');
+
+    const allowedGeolocation = testContents.executeJavaScript(`new Promise(resolve => navigator.geolocation.getCurrentPosition(
+      () => resolve(0), error => resolve(error.code), { timeout: 3000 }
+    ))`);
+    await waitForPermissionPrompt('geolocation', permissionOriginA);
+    await clickPermissionDecision('allow');
+    const geolocationResult = await allowedGeolocation;
+    if (geolocationResult === 1 || await testContents.executeJavaScript(`navigator.permissions.query({ name: 'geolocation' }).then(result => result.state)`) !== 'granted') {
+      throw new Error('明确允许的定位权限未在当前 origin/会话内生效。');
+    }
+
+    const frameNavigation = await browserEngine.navigate(testTabId, `${permissionOriginA}/permission-frame`);
+    if (!frameNavigation.success) throw new Error('跨 origin iframe 合成页面未能加载。');
+    await waitForTabPath(testTabId, '/permission-frame', 'Permission Frame Fixture');
+    const childFrameReady = await testContents.executeJavaScript(`new Promise(resolve => {
+      const frame = document.querySelector('#permission-child');
+      if (!frame) return resolve(false);
+      const timer = setTimeout(() => { window.removeEventListener('message', receive); resolve(false); }, 5000);
+      const receive = event => {
+        if (event.data !== 'permission-child-ready') return;
+        clearTimeout(timer);
+        window.removeEventListener('message', receive);
+        resolve(true);
+      };
+      window.addEventListener('message', receive);
+      const ping = setInterval(() => frame.contentWindow.postMessage('permission-ping', '*'), 50);
+      setTimeout(() => clearInterval(ping), 5100);
+    })`);
+    if (!childFrameReady) throw new Error('跨 origin 子框架没有响应本地权限测试握手。');
+    const childGeolocation = testContents.executeJavaScript(`new Promise(resolve => {
+      const frame = document.querySelector('#permission-child');
+      const timer = setTimeout(() => { window.removeEventListener('message', receive); resolve('timeout'); }, 5000);
+      const receive = event => {
+        if (event.data?.type !== 'location-result') return;
+        clearTimeout(timer);
+        window.removeEventListener('message', receive);
+        resolve(event.data.code);
+      };
+      window.addEventListener('message', receive);
+      frame.contentWindow.postMessage('request-location', '*');
+    })`);
+    const childGeolocationResult = await childGeolocation;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    if (childGeolocationResult !== 1 || browserPermissionManager.getState().pending.length !== 0) {
+      throw new Error('跨 origin 子框架权限请求必须直接拒绝，不显示授权提示。');
+    }
+    const finalPermissionState = browserPermissionManager.getState();
+    if (finalPermissionState.grants.length !== 1 || finalPermissionState.grants[0].origin !== permissionOriginA ||
+        finalPermissionState.grants[0].permissions.join(',') !== 'geolocation') {
+      throw new Error('最终会话授权应仅保留首个 origin 明确允许的定位权限。');
+    }
+    if (fs.existsSync(permissionStorePath)) throw new Error('会话权限不能写入磁盘或跨重启保存。');
+    if (browserFixtureRequestAudit.some(request => request.allowed && ![permissionOriginA, permissionOriginB].includes(request.origin))) {
+      throw new Error('权限集成测试允许了本机夹具白名单之外的网络 origin。');
+    }
+    console.log('BROWSER_PERMISSION_SMOKE_PASS: local synthetic top-frame prompts, explicit deny/allow, origin/capability isolation, revocation, cross-origin subframe rejection, and loopback-only network policy verified.');
 
     const beforeBounds = browserEngine.getViewBoundsForTesting(testTabId);
     if (!beforeBounds || beforeBounds.width < 100 || beforeBounds.height < 100) {
@@ -961,6 +1148,13 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     }
     if (!persistedProgress) throw new Error('进行中的合成下载没有在重启前写入临时 userData 目录。');
 
+    const preRestartPermissions = browserPermissionManager.getState();
+    if (preRestartPermissions.grants.length !== 1 || preRestartPermissions.grants[0].permissions.join(',') !== 'geolocation' ||
+        fs.existsSync(path.join(app.getPath('userData'), 'earth-one-browser-permissions.json'))) {
+      throw new Error('硬重启前应有一项仍在内存中的定位授权，且不存在权限持久化文件。');
+    }
+    console.log('BROWSER_PERMISSION_SESSION_READY: geolocation grant remains memory-only immediately before process restart.');
+
     console.log(`BROWSER_SMOKE_RESTART_READY:${process.pid}`);
     await new Promise(() => {});
   } catch (error) {
@@ -998,14 +1192,32 @@ app.whenReady().then(async () => {
   }
 
   const browserSession = session.fromPartition('earth-one-browser');
-  browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  browserSession.setPermissionCheckHandler(() => false);
+  browserSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    if (!browserPermissionManager) {
+      callback(false);
+      return;
+    }
+    browserPermissionManager.request(contents, permission, callback, details);
+  });
+  browserSession.setPermissionCheckHandler((contents, permission, requestingOrigin, details) =>
+    browserPermissionManager?.check(contents, permission, requestingOrigin, details) || false
+  );
   if (smokeTest && smokeUrl) {
-    const fixtureOrigin = new URL(smokeUrl).origin;
+    const fixtureOrigins = new Set([new URL(smokeUrl).origin]);
+    const alternateFixtureUrl = process.env.EARTH_ONE_BROWSER_TEST_ALT_URL;
+    if (alternateFixtureUrl) {
+      const alternate = new URL(alternateFixtureUrl);
+      if (alternate.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(alternate.hostname) || alternate.username || alternate.password) {
+        throw new Error('权限集成测试的第二 origin 必须是无凭据的 loopback HTTP 地址。');
+      }
+      fixtureOrigins.add(alternate.origin);
+    }
     browserSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details, callback) => {
       let requestedOrigin = '';
       try { requestedOrigin = new URL(details.url).origin; } catch {}
-      callback({ cancel: requestedOrigin !== fixtureOrigin });
+      const allowed = fixtureOrigins.has(requestedOrigin);
+      browserFixtureRequestAudit.push({ url: details.url, origin: requestedOrigin, allowed });
+      callback({ cancel: !allowed });
     });
   }
 
@@ -1049,8 +1261,10 @@ app.whenReady().then(async () => {
     window: mainWindow,
     WebContentsView,
     browserSession,
+    onPermissionContextChange: contents => browserPermissionManager?.cancelForContents(contents),
     onState: state => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('browser:state', state);
+      browserPermissionManager?.revalidatePending();
       scheduleBrowserSessionPersist();
     },
     onFocusAddressBar: tabId => {
@@ -1069,6 +1283,13 @@ app.whenReady().then(async () => {
     getTestApprovalPath: testApprovalPath || null
   });
 
+  browserPermissionManager = createBrowserPermissionManager({
+    isActiveContext: (contents, origin, details) => browserEngine?.isPermissionContext(contents, origin, details) === true,
+    onChange: state => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:permissions-state', state);
+    }
+  });
+
   registerBrowserIpc();
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -1081,6 +1302,8 @@ app.whenReady().then(async () => {
   });
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.on('closed', () => {
+    browserPermissionManager?.dispose();
+    browserPermissionManager = null;
     browserEngine?.dispose();
     browserEngine = null;
     mainWindow = null;
@@ -1099,6 +1322,8 @@ app.on('before-quit', () => {
     browserSessionPersistTimer = null;
   }
   persistBrowserSessionNow();
+  browserPermissionManager?.dispose();
+  browserPermissionManager = null;
   browserEngine?.dispose();
 });
 app.on('window-all-closed', () => app.quit());

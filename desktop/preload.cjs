@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
   getSessionState: () => ipcRenderer.invoke('browser:get-session-state'),
   setSessionEnabled: enabled => ipcRenderer.invoke('browser:set-session-enabled', Boolean(enabled)),
   restoreSession: () => ipcRenderer.invoke('browser:restore-session'),
+  getPermissionState: () => ipcRenderer.invoke('browser:get-permission-state'),
+  resolvePermissionRequest: (requestId, decision) => ipcRenderer.invoke('browser:resolve-permission-request', requestId, decision),
+  revokePermission: (origin, permission) => ipcRenderer.invoke('browser:revoke-permission', origin, permission),
+  revokeAllPermissions: () => ipcRenderer.invoke('browser:revoke-all-permissions'),
   getDownloads: () => ipcRenderer.invoke('browser:get-downloads'),
   cancelDownload: id => ipcRenderer.invoke('browser:cancel-download', id),
   removeDownload: id => ipcRenderer.invoke('browser:remove-download', id),
@@ -33,6 +37,11 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
     const wrapped = (_event, downloads, storageStatus) => listener(downloads, storageStatus);
     ipcRenderer.on('browser:downloads-state', wrapped);
     return () => ipcRenderer.removeListener('browser:downloads-state', wrapped);
+  },
+  onPermissions: listener => {
+    const wrapped = (_event, state) => listener(state);
+    ipcRenderer.on('browser:permissions-state', wrapped);
+    return () => ipcRenderer.removeListener('browser:permissions-state', wrapped);
   },
   onFocusAddressBar: listener => {
     const wrapped = (_event, tabId) => listener(tabId);

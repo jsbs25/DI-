@@ -62,6 +62,24 @@ declare global {
     error?: string;
   }
 
+  type EarthOneBrowserPermission = 'notifications' | 'geolocation';
+
+  interface EarthOneBrowserPermissionPrompt {
+    requestId: string;
+    origin: string;
+    permission: EarthOneBrowserPermission;
+  }
+
+  interface EarthOneBrowserPermissionGrant {
+    origin: string;
+    permissions: EarthOneBrowserPermission[];
+  }
+
+  interface EarthOneBrowserPermissionState {
+    pending: EarthOneBrowserPermissionPrompt[];
+    grants: EarthOneBrowserPermissionGrant[];
+  }
+
   interface EarthOneBrowserDownload {
     id: string;
     filename: string;
@@ -97,6 +115,10 @@ declare global {
     getSessionState(): Promise<EarthOneBrowserSessionState>;
     setSessionEnabled(enabled: boolean): Promise<{ success: boolean; enabled: boolean; error?: string }>;
     restoreSession(): Promise<EarthOneBrowserSessionRestoreResult>;
+    getPermissionState(): Promise<EarthOneBrowserPermissionState>;
+    resolvePermissionRequest(requestId: string, decision: 'allow' | 'deny'): Promise<{ success: boolean; granted?: boolean; error?: string }>;
+    revokePermission(origin: string, permission: EarthOneBrowserPermission): Promise<{ success: boolean }>;
+    revokeAllPermissions(): Promise<{ success: boolean; revoked?: boolean }>;
     getDownloads(): Promise<EarthOneBrowserDownload[]>;
     cancelDownload(id: string): Promise<{ success: boolean }>;
     removeDownload(id: string): Promise<{ success: boolean; error?: string }>;
@@ -115,6 +137,7 @@ declare global {
     stopFindInPage(returnFocus?: boolean): Promise<{ success: boolean; error?: string }>;
     onState(listener: (state: EarthOneBrowserState) => void): () => void;
     onDownloads(listener: (downloads: EarthOneBrowserDownload[], status: EarthOneDownloadStorageStatus) => void): () => void;
+    onPermissions(listener: (state: EarthOneBrowserPermissionState) => void): () => void;
     onFocusAddressBar(listener: (tabId: string) => void): () => void;
     onFocusFind(listener: (tabId: string) => void): () => void;
     onFindResult(listener: (result: EarthOneBrowserFindResult) => void): () => void;

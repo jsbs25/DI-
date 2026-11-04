@@ -22,8 +22,9 @@
 | `npm run test:browser-api` | 独立临时 Express 服务中 `/api/browser/bookmarks` 与 `/api/browser/saved-articles` 的 GET-only 兼容契约；使用合成记录检查集合字段、书签 ID 唯一性及两个列表重复读取时完整状态/JSON 一致性；请求白名单不含写操作、预览或删除 | 2026-11-05：12 项通过、0 失败；自动清理临时 JSON 和随机本地端口，仅请求两个列表 GET；未访问会话/消息路径、外部 URL、正式数据或既有服务。该旧 API 保留，但当前 Browser UI 不再调用书签端点。 |
 | `npm run test:browser-find` | 模拟 WebContents 查找控制：仅活动可见标签、`new/next/previous`、非字符串/超长查询拒绝、过期结果过滤、清除高亮/焦点恢复、隐藏/销毁保护，以及 Ctrl/Cmd+F 路由 | 2026-11-05：`BROWSER_FIND_ENGINE_TEST_PASS`；通过。 |
 | `npm run test:browser-ipc-security` | 合成 IPC 事件验证精确主窗口 WebContents、顶层 frame 和应用 origin；拒绝其他 WebContents、子框架及错误/畸形来源 | 2026-11-05：`BROWSER_IPC_SECURITY_TEST_PASS`；通过。 |
+| `npm run test:browser-permissions` | 权限状态机单测：默认拒绝、仅通知/定位、HTTPS/loopback 安全来源、显式会话允许、能力与 origin 隔离、拒绝/撤销、超时/导航取消、重建状态机后清空；无网络 | 2026-11-05：`BROWSER_PERMISSIONS_TEST_PASS`；通过。 |
 | `npm run test:download-manager` | 合成 DownloadItem/临时 userData：保存对话框批准前不落盘、成功/进度/完成、重启后恢复并将进行中的任务标为已中断、取消、来源 query 脱敏、最近 50 条限制、损坏存储只读保护、批准文件后来删除后的可用状态、写入失败时 remove/clear 回滚、清理保留活动传输、移除/清理不删除文件、无效 URL 与非浏览器来源拒绝 | 2026-11-05：`DOWNLOAD_MANAGER_TEST_PASS`；仅临时目录，无网络。 |
-| `npm run test:browser-engine` | Linux/Xvfb 实际 Electron/Chromium：既有导航、下载、收藏/历史、启动恢复、`Ctrl+L` 与视口回归；另在本机合成页验证远程 `Ctrl+F` 聚焦 EARTH ONE 查找框、3 个已知匹配数、下一/上一个序号、关闭清除并还焦点、远程页没有 preload/Node `require`，以及不同 origin 的本地 IPC 调用被拒绝 | 2026-11-05：查找 smoke、下载跨进程恢复、会话恢复/关闭与 session opt-out 均通过；所有 URL 仅访问 `127.0.0.1` 合成 fixture。 |
+| `npm run test:browser-engine` | Linux/Xvfb 实际 Electron/Chromium：既有导航、下载、收藏/历史、启动恢复、`Ctrl+L` 与视口回归；本机权限 fixture 验证默认拒绝、显示来源/能力、显式允许/拒绝、同源会话复用、双 origin 隔离、逐项撤销、重启清空并重新询问、跨源子框架拒绝、非应用权限 IPC 拒绝；所有非夹具 HTTP(S) 请求在请求层取消 | 2026-11-05：查找、权限、下载跨进程恢复、会话恢复/关闭与 session opt-out 均通过；两个合成服务只绑定 `127.0.0.1`，没有访问任意网络地址。 |
 | `npm run test:i18n` | 纯本地静态检查六种支持语言的字典键集合一致且所有翻译值非空 | 2026-11-04：13 项通过、0 失败；发现每种语言均有 104 个共用键；不调用 API，不验证翻译准确度、浏览器表现或 RTL 几何。 |
 | `npm run test:globe` | React 静态渲染：六种语言的总览标题/标签、Crawler 菜单翻译键、三个原有指标值、三列网格/逻辑边框和波形独立行 | 2026-11-04：30 项通过、0 失败；不运行 effect、WebGL、浏览器输入或 API，不证明实际视觉几何、交互或 RTL 布局。 |
 | `npm run test:universe` | 地球/土星/空选择的遥测静态渲染：关闭按钮名称和类型、天体双语名称、对焦文字、条件地球入口 | 2026-11-04：9 项通过、0 失败；不测试浏览器点击、键盘、读屏或相机行为，原关闭回调未更改。 |

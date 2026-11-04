@@ -31,7 +31,8 @@ const activeFixtureResponses = new Set();
 const activeFixtureSockets = new Set();
 const sessionRequestAudit = [];
 let sessionOneRequestCount = 0;
-const fixtureServer = http.createServer((request, response) => {
+let alternateFixtureOrigin = null;
+function handleFixtureRequest(request, response) {
   const pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname;
   if (pathname.startsWith('/session-')) {
     sessionRequestAudit.push({ pathname, cookie: request.headers.cookie || '' });
@@ -58,6 +59,29 @@ const fixtureServer = http.createServer((request, response) => {
   if (pathname === '/two') {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end('<!doctype html><html><head><title>EARTH ONE Fixture Two</title></head><body><h1>Local fixture two</h1></body></html>');
+    return;
+  }
+  if (pathname === '/permission-frame') {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end(`<!doctype html><html><head><title>Permission Frame Fixture</title></head><body><iframe id="permission-child" title="cross-origin location fixture" allow="geolocation" src="${alternateFixtureOrigin}/permission-child"></iframe></body></html>`);
+    return;
+  }
+  if (pathname === '/permission-child') {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end(`<!doctype html><html><head><title>Cross-Origin Permission Child</title></head><body><script>
+      window.addEventListener('message', event => {
+        if (event.data === 'permission-ping') {
+          window.parent.postMessage('permission-child-ready', '*');
+          return;
+        }
+        if (event.data !== 'request-location') return;
+        navigator.geolocation.getCurrentPosition(
+          () => window.parent.postMessage({ type: 'location-result', code: 0 }, '*'),
+          error => window.parent.postMessage({ type: 'location-result', code: error.code }, '*'),
+          { timeout: 2000 }
+        );
+      });
+    </script></body></html>`);
     return;
   }
   if (pathname === '/find') {
@@ -104,7 +128,9 @@ const fixtureServer = http.createServer((request, response) => {
   }
   response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
   response.end('Not found');
-});
+}
+const fixtureServer = http.createServer(handleFixtureRequest);
+const alternateFixtureServer = http.createServer(handleFixtureRequest);
 fixtureServer.on('connection', socket => {
   activeFixtureSockets.add(socket);
   socket.once('close', () => activeFixtureSockets.delete(socket));
@@ -123,6 +149,7 @@ function launchSmoke(phase, options = {}) {
       EARTH_ONE_BROWSER_SESSION_SMOKE_TEST: options.sessionSmoke ? '1' : '0',
       EARTH_ONE_BROWSER_TEST_PHASE: phase,
       EARTH_ONE_BROWSER_TEST_URL: startUrl,
+      EARTH_ONE_BROWSER_TEST_ALT_URL: options.altUrl || `${alternateFixtureOrigin}/one`,
       EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR: downloadDir,
       EARTH_ONE_BROWSER_TEST_PROFILE_DIR: runProfileDir,
       EARTH_ONE_DATA_FILE: path.join(downloadDir, 'server_data.json'),
@@ -199,11 +226,12 @@ async function stopRun(run) {
 async function cleanup() {
   if (activeRun) await stopRun(activeRun);
   for (const response of activeFixtureResponses) response.destroy();
-  if (fixtureServer.listening) {
-    const closed = new Promise(resolve => fixtureServer.close(() => resolve()));
+  for (const server of [fixtureServer, alternateFixtureServer]) {
+    if (!server.listening) continue;
+    const closed = new Promise(resolve => server.close(() => resolve()));
     for (const response of activeFixtureResponses) response.destroy();
     for (const socket of activeFixtureSockets) socket.destroy();
-    if (typeof fixtureServer.closeAllConnections === 'function') fixtureServer.closeAllConnections();
+    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
     await closed;
   }
   try { fs.rmSync(downloadDir, { recursive: true, force: true }); } catch {}
@@ -233,10 +261,16 @@ async function main() {
     fixtureServer.once('error', reject);
     fixtureServer.listen(0, '127.0.0.1', resolve);
   });
+  await new Promise((resolve, reject) => {
+    alternateFixtureServer.once('error', reject);
+    alternateFixtureServer.listen(0, '127.0.0.1', resolve);
+  });
+  alternateFixtureOrigin = `http://127.0.0.1:${alternateFixtureServer.address().port}`;
 
   const firstRun = launchSmoke('initial');
   activeRun = firstRun;
   const restartMarker = await firstRun.waitForMarker(/BROWSER_SMOKE_RESTART_READY:(\d+)/, 80000);
+  assert.match(firstRun.getOutput(), /BROWSER_PERMISSION_SESSION_READY:/, 'first process must hold an in-memory grant immediately before restart');
   console.log('BROWSER_TEST_DRIVER_FIRST_PROCESS_READY');
   const defaultSessionPath = path.join(profileDir, 'earth-one-browser-session.json');
   assert.equal(fs.existsSync(defaultSessionPath), false, 'default-off profile must not persist a tab snapshot');
@@ -267,6 +301,8 @@ async function main() {
   const secondRun = launchSmoke('restart');
   activeRun = secondRun;
   await secondRun.waitForMarker(/BROWSER_SMOKE_PASS:/, 80000);
+  assert.match(secondRun.getOutput(), /BROWSER_PERMISSION_RESTART_RESET_PASS:/, 'new process must start with no previous site grants');
+  assert.match(secondRun.getOutput(), /BROWSER_PERMISSION_SMOKE_PASS:/, 'restarted process must re-run the local permission flow');
   console.log('BROWSER_TEST_DRIVER_RESTART_PHASE_PASSED');
   const secondClose = await Promise.race([
     secondRun.closed,

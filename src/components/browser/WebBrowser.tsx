@@ -24,7 +24,9 @@ import {
   Clock3,
   Trash2,
   Download,
-  FolderOpen
+  FolderOpen,
+  Bell,
+  MapPin
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { BrowserFrame } from './BrowserFrame.tsx';
@@ -361,6 +363,21 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   }, [browserEngine]);
 
   useEffect(() => {
+    if (!browserEngine?.getPermissionState || !browserEngine.onPermissions) return;
+    let cancelled = false;
+    const unsubscribe = browserEngine.onPermissions(state => {
+      if (!cancelled) setBrowserPermissionState(state);
+    });
+    void browserEngine.getPermissionState().then(state => {
+      if (!cancelled) setBrowserPermissionState(state);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [browserEngine]);
+
+  useEffect(() => {
     if (!browserEngine?.getLocalData) {
       setBrowserStorageReady(true);
       return;
@@ -429,6 +446,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [browserSessionReadOnly, setBrowserSessionReadOnly] = useState(false);
   const [browserSessionWarning, setBrowserSessionWarning] = useState<string | null>(null);
   const [browserSessionTogglePending, setBrowserSessionTogglePending] = useState(false);
+  const [browserPermissionState, setBrowserPermissionState] = useState<EarthOneBrowserPermissionState>({ pending: [], grants: [] });
+  const [isPermissionsOpen, setIsPermissionsOpen] = useState(false);
   const [sessionRestoreNotice, setSessionRestoreNotice] = useState<{
     kind: 'restoring' | 'restored' | 'failed';
     restoredCount: number;
@@ -901,6 +920,40 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     }
   };
 
+  const handleResolveBrowserPermission = async (requestId: string, decision: 'allow' | 'deny') => {
+    if (!browserEngine?.resolvePermissionRequest) return;
+    try {
+      const result = await browserEngine.resolvePermissionRequest(requestId, decision);
+      if (!result.success) {
+        const latest = await browserEngine.getPermissionState();
+        setBrowserPermissionState(latest);
+      }
+    } catch {
+      const latest = await browserEngine.getPermissionState().catch(() => null);
+      if (latest) setBrowserPermissionState(latest);
+    }
+  };
+
+  const handleRevokeBrowserPermission = async (origin: string, permission: EarthOneBrowserPermission) => {
+    if (!browserEngine?.revokePermission) return;
+    try {
+      await browserEngine.revokePermission(origin, permission);
+      setBrowserPermissionState(await browserEngine.getPermissionState());
+    } catch {
+      // The main process remains the source of truth for the session permission list.
+    }
+  };
+
+  const handleRevokeAllBrowserPermissions = async () => {
+    if (!browserEngine?.revokeAllPermissions) return;
+    try {
+      await browserEngine.revokeAllPermissions();
+      setBrowserPermissionState(await browserEngine.getPermissionState());
+    } catch {
+      // Keep the last verified list if IPC is unavailable.
+    }
+  };
+
   const handleAddBookmark = () => {
     if (!browserStorageReady || browserStorageReadOnly || !activeTab || !isHttpUrl(activeTab.url)) return;
     if (bookmarks.some(bookmark => bookmark.url === activeTab.url)) {
@@ -1251,6 +1304,20 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
             >
               <Download className="h-3.5 w-3.5 text-cyan-300" />
               <span>下载 ({downloads.length})</span>
+            </button>
+          )}
+
+          {browserEngine && (
+            <button
+              type="button"
+              onClick={() => setIsPermissionsOpen(true)}
+              aria-label={`查看会话站点权限，共 ${browserPermissionState.grants.reduce((sum, grant) => sum + grant.permissions.length, 0)} 项授权`}
+              title="仅本次应用运行有效；可随时撤销"
+              data-browser-permissions-toggle
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
+            >
+              <Shield className="h-3.5 w-3.5 text-emerald-300" />
+              <span>站点权限 ({browserPermissionState.grants.reduce((sum, grant) => sum + grant.permissions.length, 0)})</span>
             </button>
           )}
 
@@ -1717,6 +1784,81 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       </div>
 
       </BrowserFrame>
+
+      {browserEngine && browserPermissionState.pending.length > 0 && (() => {
+        const request = browserPermissionState.pending[0];
+        const capability = request.permission === 'notifications' ? '通知' : '位置信息';
+        return (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="browser-permission-title" data-browser-permission-prompt data-permission={request.permission} data-origin={request.origin}>
+            <section className="w-full max-w-md rounded-2xl border border-cyan-200/15 bg-[#08111a] p-5 shadow-2xl shadow-black/60 sm:p-6">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl border border-cyan-200/15 bg-cyan-200/[0.06] p-2 text-cyan-200">
+                  {request.permission === 'notifications' ? <Bell className="h-5 w-5" /> : <MapPin className="h-5 w-5" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h2 id="browser-permission-title" className="text-base font-semibold text-white">EARTH ONE 站点权限请求</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-300">以下网站请求访问{capability}：</p>
+                  <code data-browser-permission-origin className="mt-2 block break-all rounded-lg border border-white/[0.08] bg-black/30 px-3 py-2 text-xs text-cyan-100">{request.origin}</code>
+                  <p className="mt-3 text-xs leading-relaxed text-slate-400">默认拒绝。允许仅在 EARTH ONE 本次运行中对该来源的{capability}请求生效；退出应用后自动清除。</p>
+                  {browserPermissionState.pending.length > 1 && <p className="mt-2 text-[11px] text-slate-500">另有 {browserPermissionState.pending.length - 1} 项请求等待处理。</p>}
+                </div>
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <button type="button" onClick={() => void handleResolveBrowserPermission(request.requestId, 'deny')} data-browser-permission-deny className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 transition hover:bg-white/[0.06]">拒绝</button>
+                <button type="button" onClick={() => void handleResolveBrowserPermission(request.requestId, 'allow')} data-browser-permission-allow className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.09] px-4 py-2 text-sm font-medium text-emerald-100 transition hover:bg-emerald-300/[0.15]">仅本次运行允许</button>
+              </div>
+            </section>
+          </div>
+        );
+      })()}
+
+      {isPermissionsOpen && browserEngine && (
+        <div className="fixed inset-0 z-[60] flex justify-end bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="会话站点权限" data-browser-permissions-panel>
+          <button type="button" aria-label="关闭会话站点权限背景" onClick={() => setIsPermissionsOpen(false)} className="absolute inset-0 cursor-default" />
+          <section className="relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[#08111a] p-5 shadow-2xl sm:p-6">
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
+              <div>
+                <div className="flex items-center gap-2 text-emerald-200">
+                  <Shield className="h-5 w-5" />
+                  <h2 className="text-lg font-semibold text-white">会话站点权限</h2>
+                </div>
+                <p className="mt-2 max-w-lg text-xs leading-relaxed text-slate-400">仅显示本次应用运行内由你明确允许的通知和位置信息权限。授权只在内存中，不写入磁盘，退出 EARTH ONE 后全部清除。</p>
+              </div>
+              <button type="button" onClick={() => setIsPermissionsOpen(false)} aria-label="关闭会话站点权限" className="shrink-0 rounded-lg p-2 text-slate-400 hover:bg-white/[0.06] hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-5">
+              {browserPermissionState.grants.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-slate-400">此会话没有已允许的站点权限。网站请求将由 EARTH ONE 明确询问，默认拒绝。</p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-slate-400">共 {browserPermissionState.grants.reduce((sum, grant) => sum + grant.permissions.length, 0)} 项会话授权</p>
+                    <button type="button" onClick={() => void handleRevokeAllBrowserPermissions()} data-browser-revoke-all-permissions className="rounded-lg border border-rose-300/15 px-3 py-2 text-xs text-rose-200 transition hover:bg-rose-300/[0.08]">撤销全部</button>
+                  </div>
+                  {browserPermissionState.grants.map(grant => (
+                    <section key={grant.origin} className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4">
+                      <code className="block break-all text-xs font-medium text-slate-100">{grant.origin}</code>
+                      <div className="mt-3 space-y-2">
+                        {grant.permissions.map(permission => {
+                          const label = permission === 'notifications' ? '通知' : '位置信息';
+                          const Icon = permission === 'notifications' ? Bell : MapPin;
+                          return (
+                            <div key={permission} className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] px-3 py-2">
+                              <span className="inline-flex items-center gap-2 text-xs text-emerald-100"><Icon className="h-3.5 w-3.5" />{label}</span>
+                              <button type="button" onClick={() => void handleRevokeBrowserPermission(grant.origin, permission)} data-browser-revoke-permission={permission} data-browser-revoke-origin={grant.origin} className="rounded-md px-2 py-1 text-xs text-rose-200 transition hover:bg-rose-300/[0.08]">撤销</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </>
+              )}
+              <p className="text-[11px] leading-relaxed text-slate-500">不支持摄像头、麦克风、剪贴板或 USB 权限。非安全来源、子框架和不属于活动 Chromium 页面的请求会被拒绝。</p>
+            </div>
+          </section>
+        </div>
+      )}
 
       {isBrowserDataOpen && (
         <div className="fixed inset-0 z-[60] flex justify-end bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="本地浏览数据">
