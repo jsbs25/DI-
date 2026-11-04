@@ -42,7 +42,7 @@ const CATEGORIES: { key: FilmCategory | 'all'; zh: string; en: string }[] = [
 ];
 
 // 第三方影视搜索与发现站（外部站点，新窗口打开；均为合法站点，不含盗版源）
-type ExternalSiteCategory = 'AI 搜索' | '数据库' | '社区' | '流媒体' | '评分' | '动漫';
+type ExternalSiteCategory = 'AI 搜索' | '数据库' | '评分' | '社区' | '流媒体' | '动漫' | '字幕';
 
 interface ExternalSite {
   id: string;
@@ -56,17 +56,29 @@ interface ExternalSite {
 
 const EXTERNAL_SITES: ExternalSite[] = [
   { id: 'souju', name: '搜剧AI', nameZh: '搜剧AI', url: 'https://souju6.ai/', descEn: 'AI movie/TV search & discovery', descZh: 'AI 影视搜索与内容发现', category: 'AI 搜索' },
-  { id: 'douban', name: '豆瓣电影', nameZh: '豆瓣电影', url: 'https://movie.douban.com/', descEn: 'Reviews, ratings & watchlists', descZh: '影评、评分与片单', category: '社区' },
-  { id: 'maoyan', name: '猫眼', nameZh: '猫眼', url: 'https://www.maoyan.com/', descEn: 'Movie info & box office', descZh: '电影资讯与票房', category: '数据库' },
   { id: 'imdb', name: 'IMDb', nameZh: 'IMDb', url: 'https://www.imdb.com/', descEn: 'The world movie database', descZh: '全球电影数据库', category: '数据库' },
   { id: 'tmdb', name: 'TMDB', nameZh: 'TMDB', url: 'https://www.themoviedb.org/', descEn: 'Open movie & TV database', descZh: '开放影视数据库', category: '数据库' },
+  { id: 'douban', name: '豆瓣电影', nameZh: '豆瓣电影', url: 'https://movie.douban.com/', descEn: 'Reviews, ratings & watchlists', descZh: '影评、评分与片单', category: '数据库' },
+  { id: 'maoyan', name: '猫眼', nameZh: '猫眼', url: 'https://www.maoyan.com/', descEn: 'Movie info & box office', descZh: '电影资讯与票房', category: '数据库' },
+  { id: 'mtime', name: '时光网', nameZh: '时光网', url: 'https://www.mtime.com/', descEn: 'Chinese film database & news', descZh: '中文影视资料与资讯', category: '数据库' },
+  { id: 'allmovie', name: 'AllMovie', nameZh: 'AllMovie', url: 'https://www.allmovie.com/', descEn: 'Comprehensive film guide', descZh: '综合电影指南', category: '数据库' },
+  { id: 'rottentomatoes', name: 'Rotten Tomatoes', nameZh: '烂番茄', url: 'https://www.rottentomatoes.com/', descEn: 'Tomatometer ratings', descZh: '烂番茄评分', category: '评分' },
+  { id: 'metacritic', name: 'Metacritic', nameZh: 'Metacritic', url: 'https://www.metacritic.com/', descEn: 'Aggregated critic scores', descZh: '影评聚合评分', category: '评分' },
   { id: 'letterboxd', name: 'Letterboxd', nameZh: 'Letterboxd', url: 'https://letterboxd.com/', descEn: 'Film community & lists', descZh: '影迷社区与片单', category: '社区' },
   { id: 'trakt', name: 'Trakt', nameZh: 'Trakt', url: 'https://trakt.tv/', descEn: 'Track what you watch', descZh: '观影追踪', category: '社区' },
+  { id: 'simkl', name: 'Simkl', nameZh: 'Simkl', url: 'https://simkl.com/', descEn: 'Anime & TV tracking', descZh: '动漫与剧集追踪', category: '社区' },
+  { id: 'serializd', name: 'Serializd', nameZh: 'Serializd', url: 'https://www.serializd.com/', descEn: 'TV series tracker', descZh: '剧集观影追踪', category: '社区' },
   { id: 'justwatch', name: 'JustWatch', nameZh: 'JustWatch', url: 'https://www.justwatch.com/', descEn: 'Find where to stream', descZh: '流媒体聚合搜索', category: '流媒体' },
-  { id: 'rottentomatoes', name: 'Rotten Tomatoes', nameZh: '烂番茄', url: 'https://www.rottentomatoes.com/', descEn: 'Tomatometer ratings', descZh: '烂番茄评分', category: '评分' },
+  { id: 'reelgood', name: 'Reelgood', nameZh: 'Reelgood', url: 'https://reelgood.com/', descEn: 'Streaming guide', descZh: '流媒体导航', category: '流媒体' },
   { id: 'myanimelist', name: 'MyAnimeList', nameZh: 'MyAnimeList', url: 'https://myanimelist.net/', descEn: 'Anime & manga database', descZh: '动漫数据库', category: '动漫' },
   { id: 'anilist', name: 'AniList', nameZh: 'AniList', url: 'https://anilist.co/', descEn: 'Anime tracking & lists', descZh: '动漫追踪与片单', category: '动漫' },
+  { id: 'bangumi', name: 'Bangumi', nameZh: '番组计划', url: 'https://bgm.tv/', descEn: 'Chinese anime database', descZh: '中文动漫资料库', category: '动漫' },
+  { id: 'bilibili', name: 'Bilibili 番剧', nameZh: '哔哩哔哩番剧', url: 'https://www.bilibili.com/anime/', descEn: 'Licensed anime streaming', descZh: '正版动漫在线观看', category: '动漫' },
+  { id: 'opensubtitles', name: 'OpenSubtitles', nameZh: 'OpenSubtitles', url: 'https://www.opensubtitles.org/', descEn: 'Movie subtitles database', descZh: '电影字幕库', category: '字幕' },
+  { id: 'subscene', name: 'Subscene', nameZh: 'Subscene', url: 'https://subscene.com/', descEn: 'Multi-language subtitles', descZh: '多语种字幕', category: '字幕' }
 ];
+
+const SITE_CATEGORIES: string[] = ['all', 'AI 搜索', '数据库', '评分', '社区', '流媒体', '动漫', '字幕'];
 
 const WATCHLIST_KEY = 'earth-one.saturn.watchlist.v1';
 
@@ -82,6 +94,7 @@ function loadWatchlist(): string[] {
 export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
   const [category, setCategory] = useState<FilmCategory | 'all'>('all');
   const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [siteCategory, setSiteCategory] = useState<string>('all');
 
   useEffect(() => {
     setWatchlist(loadWatchlist());
@@ -264,8 +277,23 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
               {isZh ? '外部站点 · 新窗口打开 · 均为合法站点' : 'External sites · new tab · legitimate only'}
             </span>
           </div>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {SITE_CATEGORIES.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setSiteCategory(cat)}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                  siteCategory === cat
+                    ? 'bg-amber-500/20 text-amber-200 border border-amber-500/30'
+                    : 'border border-slate-700 text-slate-400 hover:text-white'
+                }`}
+              >
+                {cat === 'all' ? (isZh ? '全部' : 'All') : cat}
+              </button>
+            ))}
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {EXTERNAL_SITES.map((site) => (
+            {EXTERNAL_SITES.filter(site => siteCategory === 'all' || site.category === siteCategory).map((site) => (
               <a
                 key={site.id}
                 href={site.url}
