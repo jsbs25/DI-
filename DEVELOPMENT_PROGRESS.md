@@ -51,7 +51,7 @@
 43. 新增 `npm run test:crawler-api` 独立 GET-only 契约：使用随机本地端口、临时 JSON，严格请求任务和采集页列表；12 项通过，验证字段/ID 唯一、任务关联、日期/状态结构及保留 pending-review 状态。首次运行暴露测试自己的启动重试计数假设过严，调整为只验证端点白名单及方法后重跑通过；`npm run lint` 通过。未创建/运行任务、抓取网页、批准/拒绝采集页或访问外部来源；没有触及私信路由、正式数据或既有服务，也未运行完整 `test:api`、浏览器测试或构建。
 44. 新增 `npm run test:creator-api` 独立 GET-only 契约：只请求本地文章/视频目录，检查响应字段、唯一标识及 `art_1`、`art_2`、`vid_1`、`vid_2` 保留；11 项通过，`npm run lint` 通过。使用临时 JSON 与随机端口，未写文章、获取外部媒体、请求会话/消息路径或访问正式数据/既有服务；完整 API 套件、构建和浏览器测试未运行。
 45. 新增 `npm run test:catalog-api`，只对社区、游戏房间、广告三项目录发送白名单 GET；16 项通过，覆盖响应字段、唯一标识及隔离存储中的现有样例。未加入社区、写入游戏/广告状态、获取媒体、访问会话/消息、正式数据或既有服务；`npm run lint` 通过。未运行完整 `test:api`、构建或浏览器测试。两套新回归及项目记录已包含于 `e4403a8`，经现有 GitHub connector wrapper 快进推送；推送后 fetch 确认 `main` 与 `origin/main` 一致，没有强推或修改账户设置。
-46. 从干净的 `main` / `9722da5` 继续；只扩展 `scripts/test_social_feed_api.ts` 与项目记录。对公开默认动态 feed 和 `feed=latest` 增加重复 GET 比对，要求 HTTP 状态及完整 JSON 响应保持一致。`npm run test:social-feed-api` 为 21 项通过、0 失败，`npm run lint` 与 `git diff --check` 通过；脚本仅访问固定 `/api/posts` GET 白名单，使用随机端口和自动清理的临时 JSON。未触及身份/会话/消息路径、写接口、外部来源、正式 `server_data.json`、既有服务/配置/日志；完整 `test:api` 未运行（包含待批准的会话读取路径），本轮也未运行构建或浏览器测试。
+46. 从干净的 `main` / `9722da5` 继续；只扩展 `scripts/test_social_feed_api.ts` 与项目记录。对公开默认动态 feed 和 `feed=latest` 增加重复 GET 比对，要求 HTTP 状态及完整 JSON 响应保持一致。`npm run test:social-feed-api` 为 21 项通过、0 失败，`npm run lint` 与 `git diff --check` 通过；脚本仅访问固定 `/api/posts` GET 白名单，使用随机端口和自动清理的临时 JSON。未触及身份/会话/消息路径、写接口、外部来源、正式 `server_data.json`、既有服务/配置/日志；完整 `test:api` 未运行（包含待批准的会话读取路径），本轮也未运行构建或浏览器测试。提交 `7bb3a147a576e55cda06b93c9cbb5d6e62e40394` 已从父提交 `9722da5` 通过授权连接器普通快进推送；推送后本地 `HEAD`、`origin/main` 与连接器 API 的 `main` SHA 一致，工作区干净，未强推或修改全局 Git 配置。
 
 ## 验证结果
 
