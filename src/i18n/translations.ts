@@ -172,7 +172,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     model: 'AI 模型',
     aiAssistantGreeting: '你好！我是 EARTH ONE 全球智能助理，连接地球八十亿智慧。',
     sponsored: '全球精选赞助',
-    heroSubtitle: '一个新世界正等待着你',
+    heroSubtitle: '连接世界 · 探索宇宙',
     heroDescription: '探索宇宙，发现无限可能。',
     startExploring: '开始探索',
     overviewView: '总览视角',

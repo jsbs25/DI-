@@ -158,7 +158,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-50 w-full bg-[#02050f]/95 backdrop-blur-xl border-b border-slate-800/60 transition-all select-none relative">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-6">
         <div className="flex items-center justify-between h-16 gap-3">
           {/* 1. Left Brand: Glowing Earth Sphere + EARTH ONE + Motto */}
           <div
@@ -284,7 +284,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* 2. Center Navigation Capsule (Identical to User Reference Design) */}
-          <nav aria-label="Primary navigation" className="hidden md:flex items-center p-1 rounded-full bg-slate-900/70 border border-slate-700/60 shadow-xl backdrop-blur-md">
+          <nav aria-label="Primary navigation" className={`${currentTab === 'globe' ? 'hidden' : 'hidden md:flex'} items-center p-1 rounded-full bg-slate-900/70 border border-slate-700/60 shadow-xl backdrop-blur-md`}>
             {/* Home */}
             <button
               onClick={() => onSelectTab('globe')}

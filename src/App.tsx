@@ -411,6 +411,7 @@ export default function App() {
             <DigitalGlobe
               nodes={nodes}
               countries={countries}
+              onSelectTab={setCurrentTab}
               activeCountry={activeCountry}
               currentUserId={currentUser?.id}
               focusCoordinates={focusCoordinates}

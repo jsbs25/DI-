@@ -19,7 +19,9 @@ import {
 import { buildOrbitSystem, buildConnectionArcs, buildStarField } from './sceneBuilders.ts';
 import {
   ArrowRight,
+  BookOpen,
   Compass,
+  Globe2,
   Orbit,
   Network,
   Volume2,
@@ -43,6 +45,7 @@ interface DigitalGlobeProps {
   focusCoordinates?: { lat: number; lng: number; timestamp?: number } | null;
   onSelectCountry: (countryCode: string | null) => void;
   onSelectUser: (user: GlobeUserNode) => void;
+  onSelectTab: (tab: string) => void;
   onExploreUniverse?: () => void;
   onExploreCommunity?: () => void;
   lang: Language;
@@ -56,12 +59,14 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   focusCoordinates,
   onSelectCountry,
   onSelectUser,
+  onSelectTab,
   onExploreUniverse,
   onExploreCommunity,
   lang
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const t = translations[lang] || translations.zh;
+  const [webglUnavailable, setWebglUnavailable] = useState(false);
   const [showFirstUseHint, setShowFirstUseHint] = useState(() => {
     try {
       return !localStorage.getItem('earth-one-globe-hint-dismissed');
@@ -75,6 +80,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   const [autoRotate, setAutoRotate] = useState(true);
   const [showBeacons, setShowBeacons] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(false);
+  const [appsExpanded, setAppsExpanded] = useState(false);
   const [hoveredNode, setHoveredNode] = useState<GlobeUserNode | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
 
@@ -174,16 +180,25 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
+    const isNarrow = width < 768;
 
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 1500);
-    camera.position.set(0, 0, 13.5);
+    camera.position.set(0, 0, isNarrow ? 70 : 13.5);
     stateRef.current.camera = camera;
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      alpha: false,
-      powerPreference: 'high-performance'
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !isSoftwareGl,
+        alpha: false,
+        powerPreference: 'high-performance'
+      });
+      setWebglUnavailable(false);
+    } catch (error) {
+      console.warn('WebGL is unavailable; showing the static Earth preview instead.', error);
+      setWebglUnavailable(true);
+      return;
+    }
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -208,7 +223,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     // 5. CENTRAL EARTH SYSTEM
     const earthRadius = 4.5;
     const earthGroup = new THREE.Group();
-    const isNarrow = width < 768;
     // Desktop: offset right to frame the hero typography on the left.
     // Mobile: center the earth, slightly raised so it doesn't collide with
     // the title block above or the stat cards below.
@@ -507,25 +521,113 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   }, [nodes, currentUserId, onSelectUser, flyToCoordinates]);
 
   return (
-    <div className="relative w-full h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] flex-1 overflow-hidden bg-[#010309] select-none">
+    <div className="relative w-full h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] flex-1 overflow-x-clip bg-[#010309] select-none md:overflow-hidden">
       {/* ============================================================== */}
       {/* 1. LIVE THREE.JS 3D WEBGL UNIVERSE CANVAS                      */}
       {/* ============================================================== */}
       <div ref={mountRef} className="absolute inset-0 z-0 cursor-grab active:cursor-grabbing" />
+      {webglUnavailable && (
+        <div className="absolute inset-0 z-0 flex items-center justify-center overflow-hidden bg-[#010309]" role="img" aria-label="Static Earth preview; WebGL is unavailable">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(10,35,82,.34),transparent_55%),radial-gradient(circle_at_18%_22%,#fff_0_1px,transparent_1.5px),radial-gradient(circle_at_76%_18%,#bfdbfe_0_1px,transparent_1.5px),radial-gradient(circle_at_86%_68%,#fff_0_1px,transparent_1.5px)]" />
+          <div
+            className="relative h-[40vw] w-[40vw] max-h-[48vh] max-w-[48vh] overflow-hidden rounded-full border border-blue-300/60 shadow-[0_0_70px_12px_rgba(37,99,235,.32)] md:h-[48vh] md:w-[48vh]"
+            style={{ backgroundImage: 'url(/assets/earth/earth_day_2048.jpg)', backgroundSize: 'auto 100%', backgroundPosition: '45% center' }}
+          >
+            <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_32%_24%,rgba(191,219,254,.28),transparent_22%),radial-gradient(circle_at_52%_54%,transparent_42%,rgba(1,5,18,.55)_76%,#010309_100%)]" />
+            <div className="absolute -inset-[12%] rounded-full border border-blue-300/25 rotate-[-22deg]" />
+            <div className="absolute inset-0 rounded-full shadow-[inset_-18px_-4px_44px_rgba(0,0,0,.72),inset_6px_0_24px_rgba(147,197,253,.24)]" />
+          </div>
+        </div>
+      )}
+
+      <aside className="absolute bottom-6 left-3 top-4 z-20 hidden w-[174px] flex-col rounded-[26px] border border-slate-700/70 bg-[#071020]/85 p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl md:flex">
+        <div className="flex items-center gap-2 border-b border-slate-800/90 px-2 pb-3 pt-1">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-blue-400/30 bg-blue-500/15 text-blue-300 shadow-[0_0_24px_rgba(37,99,235,.24)]">
+            <Globe2 className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold tracking-[.12em] text-white">EARTH ONE</div>
+            <div className="text-[9px] text-slate-400">One Universe. One World.</div>
+          </div>
+        </div>
+
+        <nav aria-label="Earth One navigation" className="mt-3 flex flex-col gap-1">
+          {[
+            { id: 'globe', label: t.globeTab, icon: <Globe2 className="h-4 w-4" /> },
+            { id: 'feed', label: t.feedTab, icon: <Compass className="h-4 w-4" /> },
+            { id: 'universe', label: t.universeTab, icon: <Orbit className="h-4 w-4" /> },
+            { id: 'community', label: t.communityTab, icon: <Users2 className="h-4 w-4" /> },
+            { id: 'knowledge', label: t.knowledgeTab, icon: <Network className="h-4 w-4" /> },
+            { id: 'library', label: t.digitalLibrary, icon: <BookOpen className="h-4 w-4" /> }
+          ].map(item => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onSelectTab(item.id)}
+              aria-current={item.id === 'globe' ? 'page' : undefined}
+              className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-[11px] font-semibold transition-all ${item.id === 'globe' ? 'bg-gradient-to-r from-blue-600/90 to-blue-500/50 text-white shadow-lg shadow-blue-900/40 ring-1 ring-blue-300/30' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'}`}
+            >
+              <span className={item.id === 'globe' ? 'text-blue-100' : 'text-slate-400'}>{item.icon}</span>
+              <span className="truncate">{item.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="mt-1">
+          <button
+            type="button"
+            onClick={() => setAppsExpanded(open => !open)}
+            aria-expanded={appsExpanded}
+            className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-[11px] font-semibold text-slate-300 transition-colors hover:bg-slate-800/80 hover:text-white"
+          >
+            <Sparkles className="h-4 w-4 text-cyan-300" />
+            <span className="flex-1">{t.apps}</span>
+            <ChevronRight className={`h-3.5 w-3.5 transition-transform ${appsExpanded ? 'rotate-90' : ''}`} />
+          </button>
+          {appsExpanded && (
+            <div className="ml-3 mt-1 flex flex-col gap-0.5 border-l border-slate-700 pl-2">
+              {[
+                { id: 'chat', label: t.globalMessenger },
+                { id: 'aihub', label: t.aiHubTab },
+                { id: 'browser', label: t.webBrowser },
+                { id: 'crawler', label: 'Crawler' },
+                { id: 'creator', label: t.creatorArticles },
+                { id: 'video', label: t.worldVideoCenter },
+                { id: 'game', label: t.globalGameCenter }
+              ].map(item => (
+                <button key={item.id} type="button" onClick={() => onSelectTab(item.id)} className="rounded-lg px-2 py-1.5 text-left text-[9px] text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white">
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-auto overflow-hidden rounded-2xl border border-blue-400/20 bg-[radial-gradient(ellipse_at_70%_20%,rgba(37,99,235,.35),transparent_54%),linear-gradient(145deg,#101e39,#070b17_75%)] p-3">
+          <div className="mb-2 flex h-12 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,.5),transparent_55%),radial-gradient(circle_at_20%_10%,#fff_0_1px,transparent_1.5px),radial-gradient(circle_at_74%_30%,#93c5fd_0_1px,transparent_1.5px),#050914]">
+            <Orbit className="h-7 w-7 text-blue-300 drop-shadow-[0_0_14px_rgba(96,165,250,.9)]" />
+          </div>
+          <p className="text-[10px] font-semibold text-white">{t.universeTab}</p>
+          <p className="mt-1 text-[9px] leading-relaxed text-slate-400">{t.vastHome}</p>
+          <button type="button" onClick={onExploreUniverse} className="mt-2 inline-flex items-center gap-1 text-[9px] font-semibold text-cyan-300 hover:text-white">
+            {t.learnMore}<ArrowRight className="h-3 w-3" />
+          </button>
+        </div>
+      </aside>
 
       {/* ============================================================== */}
       {/* 2. WORLD-CLASS USER HERO OVERLAY                               */}
       {/* ============================================================== */}
-      <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-7xl mx-auto px-5 sm:px-10 lg:px-12 flex flex-col justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
+      <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-[220px] lg:pl-[220px] flex flex-col justify-start md:justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
         {/* Left Hero Title & CTA */}
         <div className="max-w-xl pointer-events-auto">
-          <h1 className="font-extrabold text-5xl sm:text-6xl md:text-7xl tracking-tight text-white font-sans drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]">
+          <h1 className="font-extrabold text-3xl sm:text-6xl md:text-7xl tracking-tight text-white font-sans drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]">
             EARTH ONE
           </h1>
-          <h2 className="font-bold text-3xl sm:text-4xl md:text-5xl text-slate-100 tracking-tight mt-2 font-sans drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]">
+          <h2 className="font-bold text-lg sm:text-4xl md:text-5xl text-slate-100 tracking-tight mt-1 sm:mt-2 font-sans drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]">
             {t.heroSubtitle}
           </h2>
-          <p className="text-base sm:text-lg text-slate-300 mt-5 font-normal leading-relaxed drop-shadow-md">
+          <p className="text-xs sm:text-lg text-slate-300 mt-2 sm:mt-5 font-normal leading-relaxed drop-shadow-md">
             {t.heroDescription}
           </p>
 
@@ -549,10 +651,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           )}
 
           {/* Start Exploring Action Button */}
-          <div className="mt-6 flex flex-wrap items-center gap-3">
+          <div className="mt-4 sm:mt-6 flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={onExploreUniverse}
-              className="inline-flex items-center space-x-3 px-8 py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-sm sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
+              className="inline-flex items-center space-x-2 sm:space-x-3 px-4 sm:px-8 py-2.5 sm:py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-xs sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
             >
               <span>{t.startExploring}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
@@ -561,7 +663,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             {onExploreCommunity && (
               <button
                 onClick={onExploreCommunity}
-                className="inline-flex items-center space-x-2 px-5 py-3.5 rounded-full bg-slate-900/80 hover:bg-slate-800/90 border border-slate-700/80 text-slate-200 text-sm font-medium backdrop-blur-md cursor-pointer transition-all hover:text-white"
+                className="inline-flex items-center space-x-2 px-3 sm:px-5 py-2.5 sm:py-3.5 rounded-full bg-slate-900/80 hover:bg-slate-800/90 border border-slate-700/80 text-slate-200 text-xs sm:text-sm font-medium backdrop-blur-md cursor-pointer transition-all hover:text-white"
               >
                 <Users2 className="w-4 h-4 text-emerald-300" />
                 <span>{t.communityTab}</span>
@@ -570,7 +672,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           </div>
 
           {/* Mobile controls stay in document flow instead of covering the stats. */}
-          <div className="mt-4 flex items-center gap-2 pointer-events-auto md:hidden" aria-label={t.globeControls}>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden" aria-label={t.globeControls}>
             <button onClick={handleToggleExplore} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={isZoomedIn ? t.zoomOut : t.inspectEarth} title={isZoomedIn ? t.zoomOut : t.inspectEarth}>
               <Orbit className="h-4 w-4" />
             </button>
@@ -591,10 +693,12 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           </div>
         </div>
 
+        <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />
+
         {/* Bottom Cards Row: Universe Overview + Our Galaxy */}
-        <div className="w-full flex flex-col lg:flex-row items-end justify-between gap-6 pointer-events-auto pt-10">
+        <div className="w-full grid grid-cols-1 gap-3 pointer-events-auto pt-6 sm:pt-10 lg:grid-cols-3 lg:gap-4">
           {/* Bottom Left: Universe Overview Card */}
-          <div className="w-full max-w-lg p-5 rounded-3xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl">
+          <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl">
             <div className="flex items-center space-x-2 text-xs font-semibold text-slate-300 tracking-wide mb-4">
               <Compass className="w-4 h-4 text-cyan-400" />
               <span>{t.universeOverview}</span>
@@ -652,9 +756,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           </div>
 
           {/* Bottom Right: Our Galaxy Card */}
-          <div
+          <button
+            type="button"
             onClick={onExploreUniverse || handleToggleExplore}
-            className="w-full max-w-sm p-4 rounded-3xl bg-slate-950/70 hover:bg-slate-900/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex items-center space-x-4 cursor-pointer transition-all hover:scale-[1.02] group"
+            className="w-full min-w-0 p-4 rounded-3xl bg-slate-950/70 hover:bg-slate-900/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex items-center space-x-4 cursor-pointer transition-all hover:scale-[1.02] group text-left"
           >
             {/* Galaxy Thumbnail */}
             <div className="w-16 h-16 rounded-2xl overflow-hidden border border-purple-500/40 shadow-lg shadow-purple-500/20 shrink-0 relative bg-[#040817] flex items-center justify-center">
@@ -674,7 +779,26 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                 <ArrowRight className="w-3.5 h-3.5" />
               </div>
             </div>
-          </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={onExploreCommunity || (() => onSelectTab('community'))}
+            className="w-full min-w-0 p-4 rounded-3xl bg-slate-950/70 hover:bg-slate-900/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex items-center space-x-4 cursor-pointer transition-all hover:scale-[1.02] group text-left"
+          >
+            <div className="w-16 h-16 rounded-2xl overflow-hidden border border-cyan-500/40 shadow-lg shadow-blue-500/20 shrink-0 relative bg-[#040817] flex items-center justify-center">
+              <img src="/assets/earth/earth_night_2048.jpg" alt="Earth at night" className="absolute inset-0 h-full w-full object-cover opacity-70" />
+              <Globe2 className="relative z-10 h-8 w-8 text-cyan-100 drop-shadow-[0_0_12px_rgba(56,189,248,.9)]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-bold text-sm sm:text-base text-white group-hover:text-cyan-300 transition-colors">{t.communityTab}</h4>
+              <p className="text-xs text-slate-400 mt-0.5 truncate">{t.globalLounge}</p>
+              <div className="mt-2 text-xs font-semibold text-cyan-400 flex items-center space-x-1 group-hover:translate-x-1 transition-transform">
+                <span>{t.joinCommunity}</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </div>
+            </div>
+          </button>
         </div>
 
         {/* Centered Footer Motto */}
@@ -682,6 +806,38 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           {t.footerMotto}
         </div>
       </div>
+
+      <aside className="absolute right-[76px] top-[28%] z-20 hidden w-60 rounded-3xl border border-blue-400/30 bg-[#071020]/80 p-4 shadow-2xl shadow-blue-950/40 backdrop-blur-2xl xl:block">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-bold text-white">{t.globeTab}</span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-[9px] font-semibold text-emerald-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
+            {t.onlineUsers}
+          </span>
+        </div>
+        <div className="mt-4 flex items-center gap-3 border-b border-slate-800 pb-4">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full border border-cyan-400/30 bg-[radial-gradient(circle_at_35%_30%,#60a5fa,#102a56_60%,#020617)] text-cyan-100 shadow-[0_0_24px_rgba(59,130,246,.4)]">
+            <Globe2 className="h-7 w-7" />
+          </span>
+          <div>
+            <div className="text-xs font-semibold text-slate-100">EARTH ONE</div>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-400">{t.motto}</p>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+          <div className="rounded-xl bg-slate-900/70 p-2.5">
+            <div className="font-mono text-sm font-bold text-white">{nodes.length.toLocaleString()}</div>
+            <div className="mt-1 text-slate-400">{t.activeNodes}</div>
+          </div>
+          <div className="rounded-xl bg-slate-900/70 p-2.5">
+            <div className="font-mono text-sm font-bold text-white">{countries.length.toLocaleString()}</div>
+            <div className="mt-1 text-slate-400">{t.allCountries}</div>
+          </div>
+        </div>
+        <button type="button" onClick={onExploreCommunity} className="mt-3 flex w-full items-center justify-center gap-1 rounded-full border border-slate-700 bg-slate-900/70 py-2 text-[10px] font-semibold text-slate-200 transition-colors hover:border-blue-400/50 hover:text-white">
+          {t.learnMore}<ArrowRight className="h-3 w-3" />
+        </button>
+      </aside>
 
       {/* ============================================================== */}
       {/* 3. RIGHT FLOATING VERTICAL ACTION RAIL                         */}
