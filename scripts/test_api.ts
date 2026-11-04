@@ -161,6 +161,68 @@ async function main() {
     const finalProfile = await request(`/api/users/${userId}`);
     check(finalProfile.body.user.location.lat === 0 && finalProfile.body.user.location.lng === 0, 'Coordinates are masked again when sharing is disabled');
 
+    const marker = `api-regression-${suffix}`;
+    const emptyPost = await request('/api/posts', 'POST', { content: '   ' }, token);
+    check(emptyPost.status === 400, 'Empty social post is rejected with a client error');
+    const createdPost = await request('/api/posts', 'POST', {
+      content: `${marker} community post`,
+      category: 'study'
+    }, token);
+    check(createdPost.status === 200 && createdPost.body.post.userId === userId, 'A valid session can publish a post under its own identity');
+    check(createdPost.body.post.category === 'study', 'Post category is preserved in the response');
+    const postId = createdPost.body.post.id as string;
+    const filteredPosts = await request(`/api/posts?search=${encodeURIComponent(marker)}&country=JO&category=study`);
+    check(filteredPosts.body.posts.some((post: any) => post.id === postId), 'Post search, country, and category filters return the matching post');
+    const liked = await request(`/api/posts/${postId}/like`, 'POST', {});
+    check(liked.status === 200 && liked.body.liked === true && liked.body.likesCount === 1, 'Post like updates its visible count');
+    const emptyComment = await request(`/api/posts/${postId}/comment`, 'POST', { content: '' }, token);
+    check(emptyComment.status === 400, 'Empty post comment is rejected with a client error');
+    const comment = await request(`/api/posts/${postId}/comment`, 'POST', { content: `${marker} comment` }, token);
+    check(comment.status === 200 && comment.body.post.commentsCount === 1, 'A valid comment updates the post comment count');
+    check(comment.body.post.comments[0].userId === userId, 'Comment author matches the authenticated session');
+
+    const emptyBookSearch = await request('/api/library/search');
+    check(emptyBookSearch.status === 400, 'Library search requires a non-empty query without making an external request');
+    const books = await request('/api/library/books?search=Plato');
+    const republic = books.body.books.find((book: any) => book.id === 'book_republic');
+    check(books.status === 200 && !!republic, 'Library search returns the seeded Plato book');
+    const bookDetails = await request('/api/library/books/book_republic');
+    check(bookDetails.status === 200 && bookDetails.body.book.chapters.length > 0, 'Book detail includes readable chapter content');
+    check((await request('/api/library/shelf', 'POST', {}, token)).status === 400, 'Bookshelf rejects a request without a book ID');
+    const shelfAdded = await request('/api/library/shelf', 'POST', { bookId: 'book_republic', status: 'reading' }, token);
+    check(shelfAdded.status === 200 && shelfAdded.body.item.userId === userId, 'A valid session can add a seeded book to its shelf');
+    const shelf = await request('/api/library/shelf', 'GET', undefined, token);
+    check(shelf.body.items.some((item: any) => item.bookId === 'book_republic' && item.book.id === 'book_republic'), 'Bookshelf read joins the shelf entry to its book');
+    const progress = await request('/api/library/shelf/book_republic/progress', 'POST', { progress: 45 }, token);
+    check(progress.status === 200 && progress.body.item.progress === 45, 'Bookshelf reading progress is saved');
+    const finished = await request('/api/library/shelf/book_republic/progress', 'POST', { progress: 100 }, token);
+    check(finished.body.item.progress === 100 && finished.body.item.status === 'finished', 'Completing a book marks the shelf item finished');
+    const shelfRemoved = await request('/api/library/shelf/book_republic', 'DELETE', undefined, token);
+    check(shelfRemoved.status === 200 && shelfRemoved.body.success === true, 'Bookshelf entry can be removed');
+
+    const missingBookmarkFields = await request('/api/browser/bookmarks', 'POST', { title: 'Incomplete bookmark' });
+    check(missingBookmarkFields.status === 400, 'Bookmark creation requires both title and URL');
+    const bookmark = await request('/api/browser/bookmarks', 'POST', {
+      title: `${marker} bookmark`,
+      url: 'https://example.test/earth-one-regression',
+      category: 'Testing'
+    });
+    check(bookmark.status === 200 && bookmark.body.bookmark.category === 'Testing', 'Bookmark creation preserves its category');
+    const bookmarks = await request('/api/browser/bookmarks');
+    check(bookmarks.body.bookmarks.some((item: any) => item.id === bookmark.body.bookmark.id), 'Created bookmark appears in the list endpoint');
+
+    const invalidCrawlerTask = await request('/api/crawler/tasks', 'POST', { name: `${marker} task` });
+    check(invalidCrawlerTask.status === 400, 'Crawler task validation rejects missing target details');
+    const crawlerTask = await request('/api/crawler/tasks', 'POST', {
+      name: `${marker} task`,
+      targetDomain: 'example.test',
+      startUrl: 'https://example.test/earth-one-regression',
+      maxPages: 2
+    });
+    check(crawlerTask.status === 200 && crawlerTask.body.task.status === 'idle', 'Crawler task can be queued without starting a network crawl');
+    const crawlerTasks = await request('/api/crawler/tasks');
+    check(crawlerTasks.body.tasks.some((task: any) => task.id === crawlerTask.body.task.id), 'Created crawler task appears in the task list');
+
     console.log(`HTTP API regression: ${passed} passed, 0 failed.`);
   } catch (error) {
     console.error('HTTP API regression failed:', error);

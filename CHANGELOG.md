@@ -11,6 +11,11 @@
 - Added `npm run test:api`, an isolated HTTP regression suite for identity/privacy routes. It skips background book harvesting only in the test process.
 - Clarified that the current integrity suite validates store/domain behavior and is not an HTTP/browser end-to-end suite.
 
+### Improved
+- Expanded isolated HTTP API coverage to 51 assertions across social posts, library search/details/bookshelf progress, browser bookmarks, and crawler task creation. Tests use temporary storage and do not execute external crawls.
+- Navigation modules now load on demand behind an accessible loading state. The entry chunk decreased from about 1,160.76 KB (gzip 306.07 KB) to 316.71 KB (gzip 97.92 KB); the shared Three.js chunk remains about 551.65 KB and still triggers the build warning.
+- No authentication, authorization, administrator-permission, or private-message access-control policy was changed.
+
 ## [v1.1.0] - Secure Authentication & Citizen Onboarding Wizard - 2026-11-03
 
 ### Added
