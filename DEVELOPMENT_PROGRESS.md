@@ -160,3 +160,4 @@
 - 对白名单 `GET /api/articles` 与 `GET /api/videos` 分别增加重复读取比对，要求 HTTP 200 且完整 JSON 响应与首次读取一致，保护文章/视频目录不因 GET 改变。
 - `npm run test:creator-api`：13 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。服务使用随机本地端口和脚本自动清理的临时 JSON，仅发送 GET。
 - 未写入文章、获取外部媒体、访问身份或会话/消息接口、读取正式 `server_data.json`，也未检查或更改既有服务、配置或日志。完整 `npm run test:api` 因包含待批准的会话读取路径未运行；本次未运行构建或浏览器测试。
+- GitHub 同步：提交 `e9414282ea378edf4ccf654c184a38634da5837d` 已使用已授权 connector 进行普通快进推送；推送后的 fetch 与 connector API 均确认远端 `main`、`origin/main` 和本地 `HEAD` 一致。未强推或修改全局 Git 配置。
