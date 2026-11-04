@@ -55,6 +55,21 @@ function getAuthUser(req: express.Request) {
   return getSessionUser(req) || store.currentUser;
 }
 
+// Simple in-memory sliding-window rate limiter for auth endpoints (brute-force
+// mitigation). Keyed by client IP so repeated failed logins are throttled.
+const authAttempts = new Map<string, { count: number; resetAt: number }>();
+function checkAuthRateLimit(key: string, limit = 10, windowMs = 15 * 60 * 1000): boolean {
+  const now = Date.now();
+  const entry = authAttempts.get(key);
+  if (!entry || entry.resetAt <= now) {
+    authAttempts.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  entry.count += 1;
+  if (entry.count > limit) return false;
+  return true;
+}
+
 // -------------------------------------------------------------
 // 1. AUTH & USER PROFILE ENDPOINTS
 // -------------------------------------------------------------
@@ -65,6 +80,10 @@ app.post('/api/auth/register', (req, res) => {
   }
   if (password.length < 6) {
     return res.status(400).json({ success: false, error: 'Password must be at least 6 characters.' });
+  }
+  const clientKey = req.ip || req.socket.remoteAddress || 'unknown';
+  if (!checkAuthRateLimit(`register:${clientKey}`, 20)) {
+    return res.status(429).json({ success: false, error: '注册尝试过于频繁，请稍后再试。' });
   }
   try {
     const { user, token } = store.registerUser(email, password, displayName, username);
@@ -78,6 +97,10 @@ app.post('/api/auth/login', (req, res) => {
   const { identifier, password } = req.body;
   if (!identifier || !password) {
     return res.status(400).json({ success: false, error: 'Please enter your email/username and password.' });
+  }
+  const clientKey = req.ip || req.socket.remoteAddress || 'unknown';
+  if (!checkAuthRateLimit(`login:${clientKey}`)) {
+    return res.status(429).json({ success: false, error: '登录尝试过于频繁，请稍后再试。' });
   }
   try {
     const { user, token } = store.loginUser(identifier, password);

@@ -1047,9 +1047,25 @@ class DataStore {
     return target;
   }
 
-  // Password hashing helper
+  // Password hashing — scrypt (memory-hard), stored as a self-contained
+  // `scrypt$salt$hash` string so verification needs no separate salt lookup.
+  // Legacy accounts use plain SHA-256 hex and are transparently upgraded on
+  // their next successful login.
   hashPassword(password: string, salt: string): string {
-    return crypto.createHash('sha256').update(password + salt).digest('hex');
+    const derived = crypto.scryptSync(password, salt, 64);
+    return `scrypt$${salt}$${derived.toString('hex')}`;
+  }
+
+  verifyPassword(password: string, acc: AuthAccount): boolean {
+    if (acc.passwordHash.startsWith('scrypt$')) {
+      const parts = acc.passwordHash.split('$');
+      if (parts.length !== 3) return false;
+      const derived = crypto.scryptSync(password, parts[1], 64).toString('hex');
+      return derived === parts[2];
+    }
+    // Legacy SHA-256 hash
+    const legacy = crypto.createHash('sha256').update(password + acc.salt).digest('hex');
+    return legacy === acc.passwordHash;
   }
 
   // Register new citizen
@@ -1125,9 +1141,13 @@ class DataStore {
       throw new Error('Invalid email/username or password.');
     }
 
-    const checkHash = this.hashPassword(password, acc.salt);
-    if (checkHash !== acc.passwordHash) {
+    if (!this.verifyPassword(password, acc)) {
       throw new Error('Invalid email/username or password.');
+    }
+
+    // Transparently upgrade legacy SHA-256 hashes to scrypt on successful login
+    if (!acc.passwordHash.startsWith('scrypt$')) {
+      acc.passwordHash = this.hashPassword(password, acc.salt);
     }
 
     const user = this.users.find(u => u.id === acc.userId);
