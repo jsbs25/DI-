@@ -151,3 +151,4 @@
 - 对固定白名单 `GET /api/crawler/tasks` 与 `GET /api/crawler/pages` 各增加重复读取比对，要求 HTTP 200 且完整 JSON 响应与首次读取一致，以保护任务进度、状态和页面审核状态不被 GET 改变。
 - `npm run test:crawler-api`：14 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。测试使用随机本地端口及脚本自动清理的临时 JSON，仅发送 GET。
 - 未执行任务创建/抓取/审核、外部网络请求、身份或会话/消息接口；未读写正式 `server_data.json`，未检查或修改既有服务、配置或日志。完整 `npm run test:api` 因包含待批准会话读取路径未运行；本次也未运行构建或浏览器测试。
+- GitHub 同步：提交 `58472a1ceb6f2525658b76538bec6bdc4cb09a0a` 已通过已授权 connector 普通快进推送至 `main`；推送后 fetch 与 connector API 均确认 `HEAD`、`origin/main` 和远端一致。未强推或更改全局 Git 配置。
