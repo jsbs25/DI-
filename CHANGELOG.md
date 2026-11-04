@@ -6,6 +6,7 @@
 - Moved the Universe telemetry drawer below the desktop celestial selector (`md:top-32`) while preserving the compact small-screen position and all existing controls; visual remeasurement refined the initial offset to leave a real gap.
 - Added original EARTH ONE SVG and multi-size ICO favicon assets and explicit HTML icon links to resolve the missing `/favicon.ico` resource.
 - Reflowed the globe overview into three metric columns with a separate responsive waveform row, wrapping labels and logical-direction dividers; existing values, translations and controls are preserved. Browser visual remeasurement remains pending.
+- Named the telemetry close icon control for assistive technology, added a non-submit button type and kept the original close callback unchanged.
 - Integrity tests now use an isolated temporary JSON store and clean it up on success or failure, preventing test users, posts, and messages from being written into persistent project data.
 - The store data path can be overridden with `EARTH_ONE_DATA_FILE`; the existing `server_data.json` default remains unchanged.
 - Public user lists, profile responses, and global search now use a field allowlist that excludes email/internal onboarding state and masks coordinates when location sharing is disabled.
@@ -19,6 +20,7 @@
 - Extended HTTP API coverage to 64 assertions with article/video list contracts and knowledge-graph search, filters, details, and 404 handling; no article content write, external media request, crawl, admin route, or private-message access was exercised.
 - Added read-only community, game-room, and advertisement list checks; the isolated HTTP suite now has 67 passing assertions, with no join/create/click writes.
 - Added `npm run test:globe`: 24 static-render assertions across all six existing languages protect overview content and markup contracts without browser, WebGL, effects or API calls.
+- Added `npm run test:universe`: 9 static-render checks for the close control, celestial labels, focus text, conditional Earth entry and empty selection. Keyboard, screen-reader and camera behavior remain outside this test scope.
 - Navigation modules now load on demand behind an accessible loading state. The entry chunk decreased from about 1,160.76 KB (gzip 306.07 KB) to 316.71 KB (gzip 97.92 KB); the shared Three.js chunk remains about 551.65 KB and still triggers the build warning.
 - No authentication, authorization, administrator-permission, or private-message access-control policy was changed.
 

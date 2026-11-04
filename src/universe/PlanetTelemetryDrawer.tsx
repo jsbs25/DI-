@@ -63,10 +63,13 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
             </h2>
           </div>
           <button 
+            type="button"
+            aria-label="关闭天体遥测 (Close celestial telemetry)"
+            title="关闭天体遥测 (Close celestial telemetry)"
             onClick={onClose}
             className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
 
