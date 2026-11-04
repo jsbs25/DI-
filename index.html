@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>地球计划 - 全球数字空间平台</title>
-    <meta name="description" content="地球计划 - 全球数字空间平台。三维真实地球、全球公版数字图书馆、开普勒宇宙引擎与多模型人工智能生态。" />
+    <title>EARTH ONE - 全球数字宇宙</title>
+    <meta name="description" content="EARTH ONE - 全球数字宇宙。三维真实地球、全球公版数字图书馆、太阳系宇宙引擎与多模型人工智能生态。" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <meta property="og:title" content="地球计划 - 全球数字空间平台" />
-    <meta property="og:description" content="地球计划 - 全球数字空间平台。三维真实地球、全球公版数字图书馆、开普勒宇宙引擎与多模型人工智能生态。" />
+    <meta property="og:title" content="EARTH ONE - 全球数字宇宙" />
+    <meta property="og:description" content="EARTH ONE - 全球数字宇宙。三维真实地球、全球公版数字图书馆、太阳系宇宙引擎与多模型人工智能生态。" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <!-- Fonts for internationalized typography (Chinese, English, Arabic, Russian, French, Spanish) -->
@@ -17,7 +17,248 @@
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
   </head>
   <body class="bg-[#030712] text-slate-100 overflow-x-hidden antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
+    <!-- ================= 赛博机能风开机引导层 START ================= -->
+    <div id="boot-splash" class="boot-overlay">
+      <!-- 科技网格与扫描线背景 -->
+      <div class="boot-grid"></div>
+      <div class="boot-scanline"></div>
+
+      <!-- 四角 HUD 机能装饰 -->
+      <div class="boot-hud boot-hud-tl">SYS.VER // 2.0.26<br><span>STATUS: ONLINE</span></div>
+      <div class="boot-hud boot-hud-tr">
+        <button id="boot-skip" class="boot-skip-btn">[ SKIP // 跳过 ]</button>
+      </div>
+      <div class="boot-hud boot-hud-bl">COORD // 31.9539° N, 35.9106° E<br><span id="boot-random-num">00.491.882</span></div>
+      <div class="boot-hud boot-hud-br">AUTH_PROTOCOL // SECURE_CHANNEL</div>
+
+      <!-- 初始点击解锁层（解决浏览器语音自动播放限制） -->
+      <div id="boot-trigger" class="boot-center-box">
+        <div class="boot-init-btn" id="boot-start-btn">
+          <span class="boot-bracket">[</span> 点击接入系统 // INITIALIZE <span class="boot-bracket">]</span>
+        </div>
+      </div>
+
+      <!-- 阶段1：中央 Logo 闪现 -->
+      <div id="boot-stage-logo" class="boot-center-box boot-hidden">
+        <div class="boot-logo-icon">◈</div>
+        <div class="boot-logo-text">EARTH ONE // UNIVERSE SYSTEM</div>
+        <div class="boot-logo-sub">GLOBAL DIGITAL UNIVERSE</div>
+      </div>
+
+      <!-- 阶段2：核心 HUD 与线框视觉界面 -->
+      <div id="boot-stage-main" class="boot-main-container boot-hidden">
+        <!-- 左侧终端信息区 -->
+        <div class="boot-left-panel">
+          <div class="boot-tag">EARTH ONE // TERMINAL</div>
+          <h1 class="boot-title" data-text="EARTH ONE">EARTH ONE</h1>
+          <p class="boot-subtitle">—— 一个宇宙 · 一个世界 · 一个人类 ——</p>
+
+          <div class="boot-status-box">
+            <div class="boot-status-cn" id="boot-text-cn">需要访问许可</div>
+            <div class="boot-status-en" id="boot-text-en">ACCESS PERMISSION REQUIRED</div>
+            <div class="boot-progress-track">
+              <div class="boot-progress-bar" id="boot-bar"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧视觉渲染区（CSS 模拟线框到实景过渡） -->
+        <div class="boot-right-visual">
+          <div class="boot-visual-card" id="boot-visual-img"></div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      .boot-overlay {
+        position: fixed; inset: 0; z-index: 99999;
+        background: radial-gradient(circle at 70% 50%, #0a192f 0%, #02060d 75%);
+        color: #e2f1ff; font-family: 'SF Pro Display', 'PingFang SC', Consolas, monospace;
+        overflow: hidden; user-select: none;
+        transition: opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1), filter 0.5s ease;
+      }
+      .boot-overlay.boot-fadeout {
+        opacity: 0; filter: brightness(2) contrast(2); pointer-events: none;
+      }
+      .boot-grid {
+        position: absolute; inset: 0;
+        background-image:
+          linear-gradient(rgba(0, 229, 255, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0, 229, 255, 0.05) 1px, transparent 1px);
+        background-size: 40px 40px; pointer-events: none;
+      }
+      .boot-scanline {
+        position: absolute; inset: 0;
+        background: linear-gradient(to bottom, transparent 50%, rgba(0, 229, 255, 0.03) 51%);
+        background-size: 100% 4px; pointer-events: none;
+      }
+      .boot-hud {
+        position: absolute; font-size: 11px; letter-spacing: 2px;
+        color: rgba(0, 229, 255, 0.55); line-height: 1.6;
+      }
+      .boot-hud-tl { top: 28px; left: 36px; border-left: 2px solid #00e5ff; padding-left: 10px; }
+      .boot-hud-tr { top: 28px; right: 36px; z-index: 10; }
+      .boot-hud-bl { bottom: 28px; left: 36px; }
+      .boot-hud-br { bottom: 28px; right: 36px; border-right: 2px solid #00e5ff; padding-right: 10px; }
+      .boot-skip-btn {
+        background: rgba(0, 229, 255, 0.08); border: 1px solid rgba(0, 229, 255, 0.35);
+        color: #00e5ff; padding: 6px 14px; font-size: 11px; letter-spacing: 1.5px;
+        cursor: pointer; transition: all 0.25s;
+      }
+      .boot-skip-btn:hover { background: #00e5ff; color: #02060d; box-shadow: 0 0 12px #00e5ff; }
+      .boot-center-box {
+        position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; transition: opacity 0.4s ease;
+      }
+      .boot-hidden { opacity: 0; pointer-events: none; }
+      .boot-init-btn {
+        padding: 14px 32px; border: 1px solid rgba(0, 229, 255, 0.5);
+        background: rgba(0, 229, 255, 0.06); color: #00e5ff; font-size: 14px;
+        letter-spacing: 3px; cursor: pointer; transition: all 0.3s;
+        box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
+      }
+      .boot-init-btn:hover {
+        background: rgba(0, 229, 255, 0.18); box-shadow: 0 0 30px rgba(0, 229, 255, 0.45);
+        transform: scale(1.03);
+      }
+      .boot-logo-icon { font-size: 48px; color: #00e5ff; text-shadow: 0 0 20px #00e5ff; animation: bootPulse 1.2s infinite; }
+      .boot-logo-text { font-size: 22px; font-weight: 700; letter-spacing: 6px; margin-top: 12px; }
+      .boot-logo-sub { font-size: 10px; letter-spacing: 4px; color: #00e5ff; margin-top: 6px; opacity: 0.7; }
+
+      .boot-main-container {
+        position: absolute; inset: 0; display: flex; align-items: center;
+        justify-content: space-between; padding: 0 10%; transition: opacity 0.5s ease;
+      }
+      .boot-left-panel { z-index: 2; max-width: 480px; }
+      .boot-tag { font-size: 11px; color: #00e5ff; letter-spacing: 3px; margin-bottom: 8px; opacity: 0.8; }
+      .boot-title {
+        font-size: 56px; font-weight: 800; margin: 0; letter-spacing: 4px;
+        background: linear-gradient(90deg, #ffffff, #7ce8ff);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 35px rgba(0, 229, 255, 0.35);
+      }
+      .boot-subtitle { font-size: 13px; letter-spacing: 4px; color: #8ab4f8; margin: 12px 0 42px 0; }
+      .boot-status-box {
+        border-left: 3px solid #00e5ff; padding-left: 18px;
+        background: linear-gradient(90deg, rgba(0, 229, 255, 0.07), transparent);
+        padding-top: 10px; padding-bottom: 10px;
+      }
+      .boot-status-cn { font-size: 18px; font-weight: 600; letter-spacing: 3px; color: #fff; }
+      .boot-status-en { font-size: 11px; letter-spacing: 2.5px; color: #00e5ff; margin-top: 4px; }
+      .boot-progress-track {
+        width: 260px; height: 2px; background: rgba(255,255,255,0.12); margin-top: 14px; overflow: hidden;
+      }
+      .boot-progress-bar {
+        width: 0%; height: 100%; background: #00e5ff; box-shadow: 0 0 10px #00e5ff;
+        transition: width 0.6s ease;
+      }
+      /* 右侧视觉特效：模拟从发光线框过渡到实景 */
+      .boot-right-visual {
+        position: relative; width: 45%; height: 75%; display: flex; align-items: center; justify-content: center;
+      }
+      .boot-visual-card {
+        width: 100%; height: 100%;
+        background-image: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1200&auto=format&fit=crop');
+        background-size: cover; background-position: center;
+        border-radius: 4px;
+        /* 初始状态：高对比度科技线框感 */
+        filter: grayscale(100%) contrast(300%) invert(100%) sepia(100%) hue-rotate(155deg) brightness(0.9);
+        mix-blend-mode: screen; opacity: 0.4;
+        transition: filter 2.2s ease, opacity 1.5s ease, transform 3s ease;
+      }
+      .boot-visual-card.boot-rendered {
+        /* 激活状态：平滑还原为高清实景色彩 */
+        filter: grayscale(0%) contrast(115%) invert(0%) sepia(0%) hue-rotate(0deg) brightness(1);
+        opacity: 0.9; transform: scale(1.03);
+      }
+      @keyframes bootPulse { 0%, 100% { opacity: 0.4; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1.04); } }
+      @media (max-width: 768px) {
+        .boot-main-container { flex-direction: column; justify-content: center; text-align: center; }
+        .boot-right-visual { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; opacity: 0.25; }
+        .boot-status-box { border-left: none; border-top: 2px solid #00e5ff; padding-left: 0; }
+        .boot-progress-track { margin: 14px auto 0; }
+      }
+    </style>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+
+    <script>
+      (function() {
+        const splash = document.getElementById('boot-splash');
+        const trigger = document.getElementById('boot-trigger');
+        const stageLogo = document.getElementById('boot-stage-logo');
+        const stageMain = document.getElementById('boot-stage-main');
+        const textCn = document.getElementById('boot-text-cn');
+        const textEn = document.getElementById('boot-text-en');
+        const bar = document.getElementById('boot-bar');
+        const visualImg = document.getElementById('boot-visual-img');
+
+        // 随机坐标数字跳动
+        const numTimer = setInterval(() => {
+          const el = document.getElementById('boot-random-num');
+          if (el) el.innerText = (Math.random() * 99).toFixed(3) + '.' + Math.floor(100 + Math.random() * 899);
+        }, 120);
+
+        // 英文机械语音播报函数
+        function speak(text) {
+          if (!('speechSynthesis' in window)) return;
+          window.speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.lang = 'en-US';
+          utter.rate = 1.15;
+          utter.pitch = 0.9;
+          window.speechSynthesis.speak(utter);
+        }
+
+        function finishBoot() {
+          clearInterval(numTimer);
+          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+          splash.classList.add('boot-fadeout');
+          setTimeout(() => splash.remove(), 750);
+        }
+
+        document.getElementById('boot-skip').addEventListener('click', finishBoot);
+
+        const steps = [
+          { cn: '需要访问许可', en: 'ACCESS PERMISSION REQUIRED', speech: 'Access permission required', progress: '25%' },
+          { cn: '身份授权确认', en: 'IDENTITY CONFIRMED', speech: 'Identity confirmed', progress: '50%' },
+          { cn: '正在接入数字宇宙...', en: 'CONNECTING UNIVERSE ENGINE', speech: 'Connecting universe engine', progress: '75%' },
+          { cn: '系统就绪 · 核准通过', en: 'SYSTEMS ONLINE // AUTHORIZED', speech: 'Systems online. Authorized', progress: '95%' },
+          { cn: '欢迎来到 EARTH ONE', en: 'EARTH ONE // READY', speech: 'Welcome to Earth One', progress: '100%' }
+        ];
+
+        document.getElementById('boot-start-btn').addEventListener('click', () => {
+          trigger.classList.add('boot-hidden');
+          // 阶段1：显示中央 Logo
+          stageLogo.classList.remove('boot-hidden');
+
+          setTimeout(() => {
+            stageLogo.classList.add('boot-hidden');
+            // 阶段2：进入主界面并执行线框到实景渲染
+            stageMain.classList.remove('boot-hidden');
+            setTimeout(() => visualImg.classList.add('boot-rendered'), 600);
+
+            // 阶段3：逐步切换状态词与语音
+            steps.forEach((step, index) => {
+              setTimeout(() => {
+                textCn.innerText = step.cn;
+                textEn.innerText = step.en;
+                bar.style.width = step.progress;
+                speak(step.speech);
+                if (index === steps.length - 1) {
+                  textCn.style.color = '#00e5ff';
+                  textCn.style.textShadow = '0 0 15px #00e5ff';
+                }
+              }, index * 1150);
+            });
+
+            // 阶段4：动画结束，进入主网页
+            setTimeout(finishBoot, steps.length * 1150 + 900);
+          }, 1300);
+        });
+      })();
+    </script>
+    <!-- ================= 赛博机能风开机引导层 END ================= -->
   </body>
 </html>
