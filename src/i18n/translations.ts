@@ -105,6 +105,18 @@ export interface TranslationDictionary {
   relatedBooks: string;
   viewInLibrary: string;
   noResults: string;
+  // Telemetry & Geospatial Layers
+  issTracker?: string;
+  issAltitude?: string;
+  issVelocity?: string;
+  flyToIss?: string;
+  seismicMonitor?: string;
+  recentEarthquakes?: string;
+  geospatialLayers?: string;
+  layerISS?: string;
+  layerSeismic?: string;
+  layerBeacons?: string;
+  depth?: string;
   firstUseHint: string;
   dismissFirstUseHint: string;
   globeControls: string;
@@ -215,7 +227,18 @@ export const translations: Record<Language, TranslationDictionary> = {
     noResults: '暂无搜索结果',
     firstUseHint: '拖动地球来旋转，点击发光信标即可认识地球上的公民。',
     dismissFirstUseHint: '关闭首次使用提示',
-    globeControls: '地球控制'
+    globeControls: '地球控制',
+    issTracker: '国际空间站实时遥测',
+    issAltitude: '轨道高度',
+    issVelocity: '运行速度',
+    flyToIss: '锁定空间站',
+    seismicMonitor: '全球地震带实时监测',
+    recentEarthquakes: '最新震情 (USGS)',
+    geospatialLayers: '空间图层与遥感',
+    layerISS: '空间站与轨道',
+    layerSeismic: '地震与断裂带',
+    layerBeacons: '公民网络信标',
+    depth: '深度'
   },
   en: {
     appName: 'PROJECT EARTH',
@@ -321,7 +344,18 @@ export const translations: Record<Language, TranslationDictionary> = {
     noResults: 'No results found',
     firstUseHint: 'Drag to rotate Earth, then select a glowing beacon to meet a citizen.',
     dismissFirstUseHint: 'Dismiss first-use hint',
-    globeControls: 'Globe controls'
+    globeControls: 'Globe controls',
+    issTracker: 'ISS Live Orbit Tracker',
+    issAltitude: 'Orbital Altitude',
+    issVelocity: 'Orbital Velocity',
+    flyToIss: 'Lock Onto ISS',
+    seismicMonitor: 'Global Seismic Monitor',
+    recentEarthquakes: 'Recent Earthquakes (USGS)',
+    geospatialLayers: 'Geospatial Layers',
+    layerISS: 'Space Station (ISS)',
+    layerSeismic: 'Seismic & Faults',
+    layerBeacons: 'Citizen Beacons',
+    depth: 'Depth'
   },
   ar: {
     appName: 'EARTH ONE',

@@ -34,7 +34,13 @@ import {
   EyeOff,
   ChevronRight,
   Users2,
-  X
+  X,
+  Radio,
+  Activity,
+  Navigation,
+  Satellite,
+  Flame,
+  Layers
 } from 'lucide-react';
 
 interface DigitalGlobeProps {
@@ -79,10 +85,31 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   const [isZoomedIn, setIsZoomedIn] = useState(false);
   const [autoRotate, setAutoRotate] = useState(true);
   const [showBeacons, setShowBeacons] = useState(true);
+  const [showISS, setShowISS] = useState(true);
+  const [showEarthquakes, setShowEarthquakes] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [appsExpanded, setAppsExpanded] = useState(false);
   const [hoveredNode, setHoveredNode] = useState<GlobeUserNode | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
+
+  // Real-time telemetry states
+  const [issData, setIssData] = useState<{
+    lat: number;
+    lng: number;
+    altitudeKm: number;
+    velocityKmh: number;
+    visibility: string;
+    timestamp: number;
+  } | null>(null);
+  const [earthquakes, setEarthquakes] = useState<Array<{
+    id: string;
+    title: string;
+    mag: number;
+    place: string;
+    lat: number;
+    lng: number;
+    depthKm: number;
+  }>>([]);
 
   // Mutable Three.js loop state
   const stateRef = useRef({
@@ -95,9 +122,13 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     orbitSystem: null as { update: (elapsed: number) => void } | null,
     connectionArcs: null as { update: (elapsed: number) => void } | null,
     beaconGroup: null as THREE.Group | null,
+    issGroup: null as THREE.Group | null,
+    earthquakeGroup: null as THREE.Group | null,
     interactiveMeshes: [] as { mesh: THREE.Object3D; data: GlobeUserNode }[],
     autoRotate: true,
     showBeacons: true,
+    showISS: true,
+    showEarthquakes: true,
     targetSphericalRotation: null as { x: number; y: number } | null,
     frameId: 0
   });
@@ -113,6 +144,114 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       stateRef.current.beaconGroup.visible = showBeacons;
     }
   }, [showBeacons]);
+
+  useEffect(() => {
+    stateRef.current.showISS = showISS;
+    if (stateRef.current.issGroup) {
+      stateRef.current.issGroup.visible = showISS;
+    }
+  }, [showISS]);
+
+  useEffect(() => {
+    stateRef.current.showEarthquakes = showEarthquakes;
+    if (stateRef.current.earthquakeGroup) {
+      stateRef.current.earthquakeGroup.visible = showEarthquakes;
+    }
+  }, [showEarthquakes]);
+
+  // Real-time telemetry fetching (ISS orbit & USGS earthquakes)
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchISS = async () => {
+      try {
+        const res = await fetch('/api/telemetry/iss');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (isMounted && data && typeof data.lat === 'number') {
+          setIssData(data);
+        }
+      } catch {
+        // network silent fallback
+      }
+    };
+
+    const fetchEarthquakes = async () => {
+      try {
+        const res = await fetch('/api/telemetry/earthquakes');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (isMounted && Array.isArray(data.features)) {
+          setEarthquakes(data.features.slice(0, 8));
+        }
+      } catch {
+        // network silent fallback
+      }
+    };
+
+    fetchISS();
+    fetchEarthquakes();
+
+    const issInterval = setInterval(fetchISS, 5000);
+    const eqInterval = setInterval(fetchEarthquakes, 60000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(issInterval);
+      clearInterval(eqInterval);
+    };
+  }, []);
+
+  // Update ISS position in 3D scene when telemetry updates
+  useEffect(() => {
+    if (!issData || !stateRef.current.issGroup) return;
+    const earthRadius = 4.5;
+    const pos = latLngToVector3(issData.lat, issData.lng, earthRadius * 1.09);
+    stateRef.current.issGroup.position.copy(pos);
+    stateRef.current.issGroup.lookAt(0, 0, 0);
+  }, [issData]);
+
+  // Update Earthquake markers in 3D scene
+  useEffect(() => {
+    const group = stateRef.current.earthquakeGroup;
+    if (!group) return;
+
+    while (group.children.length > 0) {
+      group.remove(group.children[0]);
+    }
+
+    const earthRadius = 4.5;
+    earthquakes.forEach((quake, idx) => {
+      const pos = latLngToVector3(quake.lat, quake.lng, earthRadius * 1.008);
+      const normal = pos.clone().normalize();
+      const qGroup = new THREE.Group();
+      qGroup.position.copy(pos);
+      qGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+
+      const magColor = quake.mag >= 5.5 ? 0xef4444 : quake.mag >= 4.5 ? 0xf59e0b : 0x06b6d4;
+      const ringRadius = 0.08 + Math.min(quake.mag * 0.03, 0.25);
+
+      const ringGeo = new THREE.RingGeometry(ringRadius * 0.4, ringRadius, 24);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: magColor,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.85
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = Math.PI / 2;
+      qGroup.add(ring);
+
+      const dotGeo = new THREE.SphereGeometry(0.035, 12, 12);
+      const dotMat = new THREE.MeshBasicMaterial({ color: magColor });
+      const dot = new THREE.Mesh(dotGeo, dotMat);
+      dot.position.y = 0.02;
+      qGroup.add(dot);
+
+      qGroup.userData = { pulseOffset: idx * 0.8 };
+      group.add(qGroup);
+    });
+  }, [earthquakes]);
 
   // Smoothly rotate the earth to a country or citizen coordinate.
   // Camera stays managed by OrbitControls (no zoom), so we only rotate the
@@ -353,6 +492,59 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     });
     stateRef.current.interactiveMeshes = interactiveMeshes;
 
+    // 5.5 ISS (International Space Station) 3D Model
+    const issGroup = new THREE.Group();
+    const issCoreGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.32, 12);
+    const issCoreMat = new THREE.MeshStandardMaterial({
+      color: 0xe2e8f0,
+      metalness: 0.9,
+      roughness: 0.2
+    });
+    const issCore = new THREE.Mesh(issCoreGeo, issCoreMat);
+    issCore.rotation.z = Math.PI / 2;
+    issGroup.add(issCore);
+
+    // Solar panels (deep navy + cyan sheen)
+    const panelGeo = new THREE.BoxGeometry(0.35, 0.01, 0.12);
+    const panelMat = new THREE.MeshStandardMaterial({
+      color: 0x1e3a8a,
+      emissive: 0x0284c7,
+      emissiveIntensity: 0.9,
+      metalness: 0.8,
+      roughness: 0.3
+    });
+    const panel1 = new THREE.Mesh(panelGeo, panelMat);
+    panel1.position.set(0.24, 0, 0);
+    issGroup.add(panel1);
+
+    const panel2 = new THREE.Mesh(panelGeo, panelMat);
+    panel2.position.set(-0.24, 0, 0);
+    issGroup.add(panel2);
+
+    // Glowing ISS Locator Beacon Ring
+    const beaconRingGeo = new THREE.RingGeometry(0.18, 0.22, 32);
+    const beaconRingMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.9
+    });
+    const issBeaconRing = new THREE.Mesh(beaconRingGeo, beaconRingMat);
+    issGroup.add(issBeaconRing);
+
+    // Initial position
+    const initialIssPos = latLngToVector3(0, 0, earthRadius * 1.09);
+    issGroup.position.copy(initialIssPos);
+    earthGroup.add(issGroup);
+    issGroup.visible = stateRef.current.showISS;
+    stateRef.current.issGroup = issGroup;
+
+    // 5.6 Real-Time USGS Earthquakes Layer
+    const earthquakeGroup = new THREE.Group();
+    earthGroup.add(earthquakeGroup);
+    earthquakeGroup.visible = stateRef.current.showEarthquakes;
+    stateRef.current.earthquakeGroup = earthquakeGroup;
+
     // 6. ORBIT CONTROLS — drag to rotate, no zoom, damped, limited pitch
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableZoom = false;         // disable scroll/pinch zoom
@@ -497,6 +689,24 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       // Connection arc pulses
       if (stateRef.current.connectionArcs) {
         stateRef.current.connectionArcs.update(elapsed);
+      }
+
+      // Earthquake ring pulsations
+      if (stateRef.current.earthquakeGroup && stateRef.current.earthquakeGroup.visible) {
+        stateRef.current.earthquakeGroup.children.forEach(child => {
+          const offset = (child.userData as { pulseOffset?: number })?.pulseOffset || 0;
+          const scale = 1 + 0.22 * Math.sin(elapsed * 3.5 + offset);
+          child.scale.set(scale, scale, scale);
+        });
+      }
+
+      // ISS beacon ring pulsation
+      if (stateRef.current.issGroup && stateRef.current.issGroup.visible) {
+        const ring = stateRef.current.issGroup.children[3];
+        if (ring) {
+          const s = 1 + 0.18 * Math.sin(elapsed * 3);
+          ring.scale.set(s, s, s);
+        }
       }
 
       composer.render();
@@ -689,106 +899,197 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
         <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />
 
-        {/* Bottom Cards Row: Universe Overview + Our Galaxy */}
+        {/* Bottom Telemetry HUD Deck: ISS Live Orbit + USGS Earthquakes + Geospatial Layers */}
         <div className="w-full grid grid-cols-1 gap-3 pointer-events-auto pt-6 sm:pt-10 lg:grid-cols-3 lg:gap-4">
-          {/* Bottom Left: Universe Overview Card */}
-          <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold leading-tight text-slate-300 tracking-wide mb-4">
-              <Compass className="w-4 h-4 shrink-0 text-cyan-400" />
-              <span>{t.universeOverview}</span>
+          {/* Card 1: ISS Live Orbit Telemetry */}
+          <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-xs font-semibold leading-tight text-slate-300 tracking-wide mb-3">
+                <div className="flex items-center space-x-2">
+                  <Satellite className="w-4 h-4 text-cyan-400 animate-pulse" />
+                  <span>{t.issTracker || '国际空间站实时遥测'}</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-cyan-950/80 border border-cyan-800/60 text-cyan-300">
+                  NORAD 25544
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-800/60">
+                <div className="text-center">
+                  <div className="text-[10px] text-slate-400 font-mono">LAT / LNG</div>
+                  <div className="font-mono text-xs sm:text-sm font-bold text-white mt-0.5 truncate">
+                    {issData ? `${issData.lat.toFixed(1)}°, ${issData.lng.toFixed(1)}°` : '0.0°, 0.0°'}
+                  </div>
+                </div>
+                <div className="text-center border-x border-slate-800/60">
+                  <div className="text-[10px] text-slate-400 font-mono">{t.issAltitude || '高度'}</div>
+                  <div className="font-mono text-xs sm:text-sm font-bold text-cyan-300 mt-0.5">
+                    {issData ? `${issData.altitudeKm.toFixed(0)} km` : '420 km'}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[10px] text-slate-400 font-mono">{t.issVelocity || '时速'}</div>
+                  <div className="font-mono text-xs sm:text-sm font-bold text-emerald-300 mt-0.5">
+                    {issData ? `${Math.round(issData.velocityKmh).toLocaleString()} km/h` : '27,580 km/h'}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-x-2 gap-y-3">
-              {/* Stat 1 */}
-              <div className="min-w-0 text-center">
-                <div className="whitespace-nowrap font-bold text-lg sm:text-2xl lg:text-lg xl:text-2xl text-white font-mono">
-                  8.0B+
-                </div>
-                <div className="mt-0.5 break-words text-[11px] leading-tight text-slate-400">
-                  {t.peopleOnEarth}
-                </div>
-              </div>
-
-              {/* Stat 2 */}
-              <div className="min-w-0 border-s border-slate-800 text-center">
-                <div className="whitespace-nowrap font-bold text-lg sm:text-2xl lg:text-lg xl:text-2xl text-white font-mono">
-                  8
-                </div>
-                <div className="mt-0.5 break-words text-[11px] leading-tight text-slate-400">
-                  {t.planets}
-                </div>
-              </div>
-
-              {/* Stat 3 */}
-              <div className="min-w-0 border-s border-slate-800 text-center">
-                <div className="whitespace-nowrap font-bold text-lg sm:text-2xl lg:text-lg xl:text-2xl text-white font-mono">
-                  100B+
-                </div>
-                <div className="mt-0.5 break-words text-[11px] leading-tight text-slate-400">
-                  {t.starsInGalaxy}
-                </div>
-              </div>
-
-              {/* Telemetry Waveform */}
-              <div className="col-span-3 hidden justify-center border-t border-slate-800/60 pt-2 sm:flex">
-                <svg className="w-24 h-9 overflow-visible" viewBox="0 0 100 36" aria-hidden="true">
-                  <path
-                    d="M 0,22 Q 15,22 25,10 T 50,26 T 75,6 T 100,18"
-                    fill="none"
-                    stroke="#38bdf8"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    className="drop-shadow-[0_0_8px_rgba(56,189,248,0.8)]"
-                  />
-                </svg>
-              </div>
+            <div className="mt-4 flex items-center justify-between pt-1">
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+                <span>实时轨道运行中</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (issData) {
+                    flyToCoordinates(issData.lat, issData.lng);
+                  }
+                }}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-cyan-500/15 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-xs font-medium transition-all cursor-pointer"
+              >
+                <Navigation className="w-3.5 h-3.5" />
+                <span>{t.flyToIss || '锁定空间站'}</span>
+              </button>
             </div>
           </div>
 
-          {/* Bottom Right: Our Galaxy Card */}
-          <button
-            type="button"
-            onClick={onExploreUniverse || handleToggleExplore}
-            className="w-full min-w-0 p-4 rounded-3xl bg-slate-950/70 hover:bg-slate-900/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex items-center space-x-4 cursor-pointer transition-all hover:scale-[1.02] group text-left"
-          >
-            {/* Galaxy Thumbnail */}
-            <div className="w-16 h-16 rounded-2xl overflow-hidden border border-purple-500/40 shadow-lg shadow-purple-500/20 shrink-0 relative bg-[#040817] flex items-center justify-center">
-              <Orbit className="w-9 h-9 text-purple-400 animate-spin" style={{ animationDuration: '30s' }} />
-              <div className="absolute inset-0 bg-gradient-to-tr from-purple-600/30 via-cyan-500/20 to-transparent" />
-            </div>
+          {/* Card 2: USGS Live Earthquakes Activity */}
+          <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-xs font-semibold leading-tight text-slate-300 tracking-wide mb-3">
+                <div className="flex items-center space-x-2">
+                  <Activity className="w-4 h-4 text-amber-400" />
+                  <span>{t.seismicMonitor || '全球地震带实时监测'}</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-950/80 border border-amber-800/60 text-amber-300">
+                  USGS M2.5+
+                </span>
+              </div>
 
-            <div className="flex-1 min-w-0">
-              <h4 className="font-bold text-sm sm:text-base text-white group-hover:text-cyan-300 transition-colors">
-                {t.ourGalaxy}
-              </h4>
-              <p className="text-xs text-slate-400 mt-0.5 truncate">
-                {t.vastHome}
-              </p>
-              <div className="mt-2 text-xs font-semibold text-cyan-400 flex items-center space-x-1 group-hover:translate-x-1 transition-transform">
-                <span>{t.learnMore}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+              <div className="space-y-1.5 max-h-[92px] overflow-y-auto pr-1 scrollbar-thin">
+                {earthquakes.length > 0 ? (
+                  earthquakes.slice(0, 3).map(quake => (
+                    <button
+                      key={quake.id}
+                      type="button"
+                      onClick={() => flyToCoordinates(quake.lat, quake.lng)}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 text-left transition-colors cursor-pointer group"
+                    >
+                      <div className="flex items-center space-x-2 min-w-0">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
+                          quake.mag >= 5.5
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : quake.mag >= 4.5
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                        }`}>
+                          M{quake.mag.toFixed(1)}
+                        </span>
+                        <span className="text-[11px] text-slate-300 group-hover:text-white truncate">
+                          {quake.place}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">
+                        {quake.depthKm.toFixed(0)}km
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="text-[11px] text-slate-500 py-4 text-center">
+                    正在同步全球活断层传感器数据...
+                  </div>
+                )}
               </div>
             </div>
-          </button>
 
-          <button
-            type="button"
-            onClick={onExploreCommunity || (() => onSelectTab('community'))}
-            className="w-full min-w-0 p-4 rounded-3xl bg-slate-950/70 hover:bg-slate-900/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex items-center space-x-4 cursor-pointer transition-all hover:scale-[1.02] group text-left"
-          >
-            <div className="w-16 h-16 rounded-2xl overflow-hidden border border-cyan-500/40 shadow-lg shadow-blue-500/20 shrink-0 relative bg-[#040817] flex items-center justify-center">
-              <img src="/assets/earth/earth_night_2048.jpg" alt="Earth at night" className="absolute inset-0 h-full w-full object-cover opacity-70" />
-              <Globe2 className="relative z-10 h-8 w-8 text-cyan-100 drop-shadow-[0_0_12px_rgba(56,189,248,.9)]" />
+            <div className="mt-3 flex items-center justify-between pt-1 border-t border-slate-800/60">
+              <span className="text-[10px] text-slate-400">
+                已同步 {earthquakes.length} 起实时地震震中
+              </span>
+              <span className="text-[10px] text-cyan-400 font-medium">
+                点击震源瞬移聚焦
+              </span>
             </div>
-            <div className="flex-1 min-w-0">
-              <h4 className="font-bold text-sm sm:text-base text-white group-hover:text-cyan-300 transition-colors">{t.communityTab}</h4>
-              <p className="text-xs text-slate-400 mt-0.5 truncate">{t.globalLounge}</p>
-              <div className="mt-2 text-xs font-semibold text-cyan-400 flex items-center space-x-1 group-hover:translate-x-1 transition-transform">
-                <span>{t.joinCommunity}</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+          </div>
+
+          {/* Card 3: Geospatial Layers & Spatial Controls */}
+          <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-xs font-semibold leading-tight text-slate-300 tracking-wide mb-3">
+                <div className="flex items-center space-x-2">
+                  <Layers className="w-4 h-4 text-purple-400" />
+                  <span>{t.geospatialLayers || '空间图层与遥感'}</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-purple-950/80 border border-purple-800/60 text-purple-300">
+                  WebGL 3D
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowISS(!showISS)}
+                  className={`px-3 py-2 rounded-xl text-left border text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                    showISS
+                      ? 'bg-cyan-950/40 border-cyan-500/40 text-cyan-200'
+                      : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span className="truncate">{t.layerISS || '空间站'}</span>
+                  <span className={`h-2 w-2 rounded-full ${showISS ? 'bg-cyan-400 shadow-[0_0_8px_#38bdf8]' : 'bg-slate-700'}`} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowEarthquakes(!showEarthquakes)}
+                  className={`px-3 py-2 rounded-xl text-left border text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                    showEarthquakes
+                      ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+                      : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span className="truncate">{t.layerSeismic || '地震断裂'}</span>
+                  <span className={`h-2 w-2 rounded-full ${showEarthquakes ? 'bg-amber-400 shadow-[0_0_8px_#fbbf24]' : 'bg-slate-700'}`} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowBeacons(!showBeacons)}
+                  className={`px-3 py-2 rounded-xl text-left border text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                    showBeacons
+                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                      : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span className="truncate">{t.layerBeacons || '公民信标'}</span>
+                  <span className={`h-2 w-2 rounded-full ${showBeacons ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-slate-700'}`} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAutoRotate(!autoRotate)}
+                  className={`px-3 py-2 rounded-xl text-left border text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                    autoRotate
+                      ? 'bg-blue-950/40 border-blue-500/40 text-blue-200'
+                      : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span className="truncate">{t.autoRotate}</span>
+                  <span className={`h-2 w-2 rounded-full ${autoRotate ? 'bg-blue-400 shadow-[0_0_8px_#60a5fa]' : 'bg-slate-700'}`} />
+                </button>
               </div>
             </div>
-          </button>
+
+            <div className="mt-3 flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-400">
+              <span>遥测状态</span>
+              <span className="font-mono text-emerald-400">
+                ACTIVE · 60 FPS
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Centered Footer Motto (omitted when empty to keep space clean) */}
