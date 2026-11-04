@@ -131,3 +131,10 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - Open Library edition `ebook_access=public` / `borrowable` 分别映射为 provider 公开阅读/可借阅状态，但清楚注明不是再利用许可；未知值不推断，所有 Open Library 结果仍禁止本地导入。Internet Archive 发现公版/开放许可与 “All rights reserved” / “In Copyright” 等冲突声明时归为 `UNKNOWN`，保守拒绝本地复制。
 - 更新 `PROJECT_AUDIT.md`、`DEVELOPMENT_LOG.md`、`TEST_REPORT.md` 和 `LIBRARY_CONNECTORS.md`，依据 Open Library [Search API](https://openlibrary.org/dev/docs/api/search) 记录 edition 字段解释、边界和来源链接。没有请求或使用用户密钥；没有改变既有连接器接口、正式图书/书架数据或用户配置。
 - 最终验证通过：`npm run lint`、`npm run test:library-connectors`、`npm run test:library-api`（31/31）、`npm run test:api`（85/85）、`npm run build`、`npm run test:library-connectors:live`。实时 smoke 保持限量免密钥；生产构建仍有既有 Three.js 大 chunk 提示。未运行浏览器视觉或实体移动设备回归。
+### WORLD LIBRARY Phase 7：个人书架章节自动续读（2026-11-04）
+- 先审计既有 `DigitalLibrary`、`EpubReader`、书架接口及 `DataStore`：保留章节阅读器、EPUB 阅读器、书架、进度、批注、路由及旧存储格式。本次选择一个明确缺口：已在个人书架中的文本书籍没有自动记录/恢复最近章节。
+- 在已有 `BookShelfItem` 加入可选 `lastReadChapterId`，无需数据迁移；新增 `POST /api/library/shelf/:bookId/reading-state`，校验书目与章节、按当前会话用户更新最近章节、百分比和书架状态，并沿用现有原子磁盘保存。开始阅读时从“想读”转为“正在阅读”，达到 100% 时转为“已读完”。
+- 文本阅读器章节变化后自动保存，重新打开时按稳定章节 ID 精确恢复；旧书架条目没有章节 ID 时由既有百分比估算恢复位置。书架的读取/新增/删除/续读请求携带已有登录令牌；用户切换时清空旧书架并忽略迟到响应，避免短暂显示旧账户数据。EPUB 和旧进度路由保留原样。
+- 测试只使用临时隔离数据文件、应用合成种子书目和两个 `example.invalid` 合成账号；验证账户隔离、章节校验、书架状态与文件落盘，没有触碰真实用户数据，也不需要用户密钥或设置。
+- 验证：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（37 项）、`npm run test:api`（85 项）和 `npm run build` 通过。构建仍有既有 Three.js 约 551.65 kB 的非阻断提示。未运行真实浏览器/手机交互测试，也未重跑外部连接器 live smoke（连接器未改动）。
+- 限定范围：该增量只提供书架中文本书的章节级续读；未实现 EPUB CFI/页内续读、未入书架书籍的个人阅读历史或完整 Phase 7 其他验收项。

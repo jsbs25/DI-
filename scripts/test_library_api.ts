@@ -18,13 +18,17 @@ const ALLOWED_FIXED_ENDPOINTS = new Set([
   '/api/library/search?q=&source=gutenberg',
   '/api/library/search?q=valid&source=not-a-real-source',
   '/api/library/books',
+  '/api/library/shelf',
   '/api/library/books?category=philosophy',
   '/api/library/books?category=not-a-real-category',
   '/api/library/books?search=Plato',
   '/api/library/books/not-a-real-book'
 ]);
 const ALLOWED_BOOK_DETAILS = new Set(['book_republic']);
-const ALLOWED_POST_ENDPOINTS = new Set(['/api/library/ingest']);
+const ALLOWED_POST_ENDPOINTS = new Set(['/api/library/ingest', '/api/library/shelf', '/api/auth/register']);
+function isAllowedPostEndpoint(endpoint: string): boolean {
+  return ALLOWED_POST_ENDPOINTS.has(endpoint) || /^\/api\/library\/shelf\/[A-Za-z0-9_-]+\/reading-state$/.test(endpoint);
+}
 
 async function getAvailablePort(): Promise<number> {
   const server = net.createServer();
@@ -100,7 +104,7 @@ async function main() {
     passed += 1;
   }
 
-  async function get(endpoint: string) {
+  async function get(endpoint: string, token?: string) {
     const url = new URL(endpoint, baseUrl);
     const fixedEndpoint = `${url.pathname}${url.search}`;
     const isKnownBookDetail = /^\/api\/library\/books\/[A-Za-z0-9_-]+$/.test(url.pathname) &&
@@ -112,18 +116,22 @@ async function main() {
     requested.push({ endpoint: fixedEndpoint, method: 'GET' });
     const response = await fetch(url, {
       method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       redirect: 'error',
       signal: AbortSignal.timeout(5000)
     });
     return { status: response.status, body: await response.json() as any };
   }
 
-  async function post(endpoint: string, body: unknown) {
-    assert.ok(ALLOWED_POST_ENDPOINTS.has(endpoint), `Unexpected POST endpoint blocked by test: ${endpoint}`);
+  async function post(endpoint: string, body: unknown, token?: string) {
+    assert.ok(isAllowedPostEndpoint(endpoint), `Unexpected POST endpoint blocked by test: ${endpoint}`);
     requested.push({ endpoint, method: 'POST' });
     const response = await fetch(new URL(endpoint, baseUrl), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
       body: JSON.stringify(body),
       redirect: 'error',
       signal: AbortSignal.timeout(5000)
@@ -275,6 +283,65 @@ async function main() {
       'Repeated known-book detail GET returns an identical status and JSON response'
     );
 
+    const testRunId = Date.now();
+    const accountA = await post('/api/auth/register', {
+      email: `phase7-reader-a-${testRunId}@example.invalid`,
+      password: 'phase7-test-password-a',
+      displayName: 'Synthetic Reader A'
+    });
+    const accountB = await post('/api/auth/register', {
+      email: `phase7-reader-b-${testRunId}@example.invalid`,
+      password: 'phase7-test-password-b',
+      displayName: 'Synthetic Reader B'
+    });
+    check(
+      accountA.status === 200 && accountA.body.success && accountA.body.token && accountA.body.user?.id &&
+      accountB.status === 200 && accountB.body.success && accountB.body.token && accountB.body.user?.id &&
+      accountA.body.user.id !== accountB.body.user.id,
+      'Synthetic test readers receive separate authenticated identities'
+    );
+    const chapterToResume = detail.body.book.chapters[0];
+    const addShelfA = await post('/api/library/shelf', { bookId: 'book_republic', status: 'want_to_read' }, accountA.body.token);
+    const addShelfB = await post('/api/library/shelf', { bookId: 'book_republic', status: 'want_to_read' }, accountB.body.token);
+    check(
+      addShelfA.status === 200 && addShelfA.body.success && addShelfA.body.item.userId === accountA.body.user.id &&
+      addShelfB.status === 200 && addShelfB.body.success && addShelfB.body.item.userId === accountB.body.user.id,
+      'The same book can be saved to two distinct account-scoped shelves'
+    );
+    const savedReadingState = await post('/api/library/shelf/book_republic/reading-state', {
+      chapterId: chapterToResume.id,
+      progress: 40
+    }, accountA.body.token);
+    check(
+      savedReadingState.status === 200 && savedReadingState.body.success &&
+      savedReadingState.body.item.lastReadChapterId === chapterToResume.id &&
+      savedReadingState.body.item.progress === 40 && savedReadingState.body.item.status === 'reading',
+      'Reading-state API saves a valid chapter marker and promotes a started book to Reading'
+    );
+    const invalidReadingState = await post('/api/library/shelf/book_republic/reading-state', {
+      chapterId: 'chapter-from-another-book',
+      progress: 40
+    }, accountA.body.token);
+    check(
+      invalidReadingState.status === 400 && invalidReadingState.body.success === false,
+      'Reading-state API rejects chapter identifiers that do not belong to the book'
+    );
+    const shelfA = await get('/api/library/shelf', accountA.body.token);
+    const shelfB = await get('/api/library/shelf', accountB.body.token);
+    const shelfItemA = shelfA.body.items?.find((item: any) => item.bookId === 'book_republic');
+    const shelfItemB = shelfB.body.items?.find((item: any) => item.bookId === 'book_republic');
+    check(
+      shelfA.status === 200 && shelfItemA?.lastReadChapterId === chapterToResume.id && shelfItemA?.progress === 40 &&
+      shelfB.status === 200 && shelfItemB?.lastReadChapterId === undefined && shelfItemB?.progress === 0,
+      'Reading position is visible to its owner but remains isolated from another account'
+    );
+    const persistedState = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
+    check(
+      persistedState.bookShelf?.some((item: any) => item.userId === accountA.body.user.id &&
+        item.bookId === 'book_republic' && item.lastReadChapterId === chapterToResume.id && item.progress === 40),
+      'Account-scoped chapter marker and progress are persisted in the isolated data file'
+    );
+
     const missingBook = await get('/api/library/books/not-a-real-book');
     check(
       missingBook.status === 404 && missingBook.body.success === false &&
@@ -287,7 +354,7 @@ async function main() {
         ALLOWED_FIXED_ENDPOINTS.has(request.endpoint) ||
         (/^\/api\/library\/books\/[A-Za-z0-9_-]+$/.test(request.endpoint) &&
           ALLOWED_BOOK_DETAILS.has(decodeURIComponent(request.endpoint.split('/').at(-1) || '')))
-      )) || (request.method === 'POST' && ALLOWED_POST_ENDPOINTS.has(request.endpoint))),
+      )) || (request.method === 'POST' && isAllowedPostEndpoint(request.endpoint))),
       'Test issued only allowlisted local GET requests and controlled import-rejection POST requests'
     );
 

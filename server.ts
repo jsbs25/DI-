@@ -724,6 +724,23 @@ app.post('/api/library/shelf/:bookId/progress', (req, res) => {
   res.json({ success: !!item, item });
 });
 
+app.post('/api/library/shelf/:bookId/reading-state', (req, res) => {
+  const user = getAuthUser(req);
+  const book = store.books.find(b => b.id === req.params.bookId);
+  if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
+  const { chapterId } = req.body;
+  const progress = req.body.progress;
+  if (typeof chapterId !== 'string' || !book.chapters.some(chapter => chapter.id === chapterId)) {
+    return res.status(400).json({ success: false, error: 'A chapter belonging to this book is required' });
+  }
+  if (typeof progress !== 'number' || !Number.isFinite(progress)) {
+    return res.status(400).json({ success: false, error: 'A valid reading progress percentage is required' });
+  }
+  const item = store.updateBookShelfReadingState(user.id, book.id, chapterId, progress);
+  if (!item) return res.status(404).json({ success: false, error: 'Book is not on this user’s bookshelf' });
+  res.json({ success: true, item });
+});
+
 app.get('/api/library/books', (req, res) => {
   const { category, search } = req.query;
   let books = store.books;

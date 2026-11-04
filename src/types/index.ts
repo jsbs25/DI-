@@ -285,6 +285,8 @@ export interface BookShelfItem {
   bookId: string;
   status: BookshelfStatus;
   progress: number; // 0-100
+  /** Stable chapter identifier used to resume a text book for this user. */
+  lastReadChapterId?: string;
   savedAt: string;
   updatedAt: string;
 }

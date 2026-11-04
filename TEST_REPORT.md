@@ -166,3 +166,16 @@ OpenAlex 官方说明基础 API 可免费且无需账号或 key。本次仅进�
 | `npm run test:library-connectors:live` | ✅ 限量官方来源 smoke 通过：Open Library、Internet Archive、OpenAlex、Crossref、arXiv、Europe PMC、PMC、PubMed、OpenAlex 作者/机构档案、Shamela 阿语检索及 Gutenberg 官方 OPDS 链路。未下载 EPUB/论文全文。 |
 
 版权提示仍以来源条目为准：Open Library `ebook_access` 是服务访问状态而非再利用许可；所有 Open Library 记录均不可本地导入。冲突权利声明 fail-closed；未知来源状态保持未知。测试使用 mock 或隔离临时数据，没有改动正式图书/书架数据。本轮未做浏览器视觉、实体手机或全站人工 UI 回归。
+
+
+## WORLD LIBRARY Phase 7：个人书架章节续读回归（2026-11-04）
+| 检查 | 结果 |
+|---|---|
+| `npm run lint` | ✅ TypeScript `--noEmit` 通过。 |
+| `npm run test:library-connectors` | ✅ 离线 connector 回归通过；Phase 7 未修改来源适配器。 |
+| `npm run test:library-api` | ✅ 37 项通过；临时隔离服务验证两个合成账户、同书不同书架、章节归属校验、续读章节/进度保存、账户间不可见及 JSON 文件落盘。 |
+| `npm run test:api` | ✅ 85 项通过、0 失败。 |
+| `npm run build` | ✅ Vite 生产构建成功；既有 Three.js 551.65 kB chunk >500 kB 提示不阻断。 |
+| 外部 live connector smoke | ⏸️ 本阶段未重跑：连接器代码未改动；不把此前 smoke 结果当作本阶段测试。 |
+| 浏览器视觉/交互与实体手机 | ⏸️ 未运行。 |
+本阶段仅使用临时测试 JSON、合成账号及测试服务器，未读取或修改正式用户书架或真实图书数据。旧书架记录没有章节 ID 时使用百分比估算；EPUB 页内位置和未入书架的个人阅读历史不在本次范围内。

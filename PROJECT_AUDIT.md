@@ -209,3 +209,7 @@ PubMed 只提供书目检索与官方 PubMed 记录页，固定为 `METADATA_ONL
 **权利/访问状态。** Open Library Search API 的 edition-level `ebook_access` 仅在明确值为 `public` 或 `borrowable` 时分别标为 `OPEN_ACCESS` 或 `BORROWABLE`；其他值保持 `UNKNOWN`。这仅表示 Open Library 服务上的阅读/借阅状态，不是版权许可，所有记录依然 `canImport=false`、不提供本地全文或下载。Internet Archive 若同一条权利信息中同时出现已识别的许可/公版声明与限制声明，分类回退 `UNKNOWN`；相互冲突的 Public Domain 与开放许可声明也 fail-closed。详情参见[官方 Open Library Search API 文档](https://openlibrary.org/dev/docs/api/search)。
 
 **验证与保全。** 新增离线回归涵盖 DOI URL/大小写、ISBN-10/13 对应、无效校验位、provider ID 命名空间、同一 work ID 下的版次冲突、相似标题不误合并、Open Library `public`/`borrowable`/未知状态，以及 Internet Archive 矛盾权利声明。最终通过 `npm run lint`、`npm run test:library-connectors`、`npm run test:library-api`（31/31）、`npm run test:api`（85/85）、`npm run build` 和限量 `npm run test:library-connectors:live`。构建仍显示既有 Three.js 大 chunk 非阻断警告。未要求或使用用户密钥、未做批量抓取、未下载/保存原文，没有修改正式用户书架或图书数据；未进行浏览器/移动端视觉验收。
+## WORLD LIBRARY Phase 7（限定范围）：个人书架章节续读（2026-11-04）
+复核现有代码后确认：WORLD LIBRARY 已有章节阅读器、独立 EPUB 阅读器、书架状态、服务端 JSON 持久化、章节批注和阅读进度接口。原章节阅读器的进度需手动保存，打开书籍时总是回到第一章；书架已有百分比，但没有准确章节标记；书架前端请求也没有显式携带登录令牌，服务端可能回退到进程级 guest 用户。本次只补足“已加入个人书架的文本书籍自动保存并恢复最近章节”，不替换阅读器、不迁移或清理数据、不改 EPUB 与连接器。
+新阅读状态存入既有 `BookShelfItem`（新增可选 `lastReadChapterId`，旧数据无需迁移），通过按用户身份筛选的书架 API 持久化。阅读器章节选择变化时自动保存章节标识和百分比；再次从书架或详情打开时优先恢复准确章节，旧书架记录则按旧百分比做兼容性估算。登录书架请求现携带现有 session token，切换账户时清空旧书架并忽略过期响应。服务器验证章节属于该书，未加入当前用户书架时不写入。
+验证使用临时隔离的 API 数据文件及 `.invalid` 合成账号；两账户将同一本书放入各自书架，验证一方的阅读章节/进度持久化且另一方不可见。没有读取或修改正式用户书架/真实图书数据，没有新增 API key 或用户设置。EPUB 的 CFI/页内位置续读、非书架阅读历史、浏览器视觉/实体手机测试仍未包含；因此 Phase 7 仅完成这一项增量能力，不能代表完整读者验收。

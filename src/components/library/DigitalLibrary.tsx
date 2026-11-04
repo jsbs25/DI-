@@ -83,6 +83,11 @@ function safeHttpsUrl(raw?: string): string | undefined {
   }
 }
 
+function libraryAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('earth_one_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 // ---------------------------------------------------------------------------
 // Real category taxonomy (only real books are shown — no fabricated entries)
 // ---------------------------------------------------------------------------
@@ -167,16 +172,6 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
   };
 
-  const loadShelf = async () => {
-    try {
-      const res = await fetch('/api/library/shelf');
-      const data = await res.json();
-      if (data.success && data.items) setShelf(data.items);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
   useEffect(() => {
     loadBooks();
   }, [activeCategory, searchQuery]);
@@ -199,8 +194,16 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   }, [focusBookId]);
 
   useEffect(() => {
-    loadShelf();
-  }, []);
+    let cancelled = false;
+    setShelf([]);
+    fetch('/api/library/shelf', { headers: libraryAuthHeaders() })
+      .then(res => res.json())
+      .then(data => {
+        if (!cancelled && data.success && Array.isArray(data.items)) setShelf(data.items);
+      })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [currentUser?.id]);
 
   // =========================================================================
   // Search & ingest
@@ -280,8 +283,15 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       setReadingEpub(book);
       return;
     }
+    const shelfItem = shelf.find(item => item.bookId === book.id);
+    const savedChapterIndex = shelfItem?.lastReadChapterId
+      ? book.chapters.findIndex(chapter => chapter.id === shelfItem.lastReadChapterId)
+      : -1;
+    const legacyProgressIndex = shelfItem?.progress
+      ? Math.min(book.chapters.length - 1, Math.max(0, Math.round((shelfItem.progress / 100) * book.chapters.length) - 1))
+      : 0;
     setReadingBook(book);
-    setActiveChapterIndex(0);
+    setActiveChapterIndex(savedChapterIndex >= 0 ? savedChapterIndex : legacyProgressIndex);
     setAiExplanation(null);
     setSelectedText('');
     setAnnotationNote('');
@@ -424,7 +434,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     try {
       const res = await fetch('/api/library/shelf', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
         body: JSON.stringify({ bookId: book.id, status })
       });
       const data = await res.json();
@@ -442,21 +452,49 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
   const removeFromShelf = async (bookId: string) => {
     try {
-      await fetch(`/api/library/shelf/${bookId}`, { method: 'DELETE' });
+      await fetch(`/api/library/shelf/${encodeURIComponent(bookId)}`, {
+        method: 'DELETE',
+        headers: libraryAuthHeaders()
+      });
       setShelf(prev => prev.filter(i => i.bookId !== bookId));
     } catch (e) {
       console.error(e);
     }
   };
 
+  const saveShelfReadingState = async (book: Book, chapterIndex: number, requestedProgress?: number) => {
+    const chapter = book.chapters[chapterIndex];
+    if (!chapter || !shelf.some(item => item.bookId === book.id)) return;
+    const progress = requestedProgress ?? Math.min(99, Math.round(((chapterIndex + 1) / book.chapters.length) * 100));
+    try {
+      const res = await fetch(`/api/library/shelf/${encodeURIComponent(book.id)}/reading-state`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
+        body: JSON.stringify({ chapterId: chapter.id, progress })
+      });
+      const data = await res.json();
+      if (data.success && data.item) {
+        setShelf(prev => prev.map(item => item.bookId === book.id
+          ? { ...data.item, book: item.book }
+          : item));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    if (!readingBook || !shelf.some(item => item.bookId === readingBook.id)) return;
+    void saveShelfReadingState(readingBook, activeChapterIndex);
+  }, [readingBook, activeChapterIndex, shelf.some(item => item.bookId === readingBook?.id)]);
+
   const saveProgress = async (progress: number) => {
     if (!readingBook) return;
+    const chapter = readingBook.chapters[activeChapterIndex];
     try {
-      await fetch(`/api/library/shelf/${readingBook.id}/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ progress })
-      });
+      if (chapter) {
+        await saveShelfReadingState(readingBook, activeChapterIndex, progress);
+      }
       await fetch(`/api/library/books/${readingBook.id}/progress`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

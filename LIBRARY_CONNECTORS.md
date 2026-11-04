@@ -185,3 +185,6 @@ Open Library's exact edition-level `ebook_access` value `public` maps to `OPEN_A
 
 ### Verification and limits
 Offline tests cover valid ISBN-10/13 equivalence, invalid checksums, same-provider ID duplicates, cross-provider ID collisions, same-title/different-edition records, a repeated work ID with disjoint edition ISBNs, DOI URL/case variants, Open Library public/borrowable/unknown access states, Internet Archive rights conflicts, and the no-title-fuzzy-merge rule. The final run passed `npm run lint`, `npm run test:library-connectors`, `npm run test:library-api` (31/31), `npm run test:api` (85/85), `npm run build`, and `npm run test:library-connectors:live`. The live smoke remained bounded and keyless; it did not download EPUB or article text. The existing Three.js chunk-size warning remains non-blocking. No browser/mobile visual regression was run; provider rights/access can still be incomplete or stale, so item-level official records remain authoritative.
+
+## Phase 7 阅读器续读边界（2026-11-04）
+Phase 7 的本次增量只为个人书架中的本地章节文本保存用户自己的 `lastReadChapterId` 与阅读百分比；它复用既有书架持久化，不增加、启用或修改任何外部资源连接器，也不需要 API key。读取外部来源时仍遵循各连接器的原权利与访问限制：官方站点阅读入口不会因此变成本地全文；EPUB 既有官方来源流程保持不变。本轮未执行外部连接器实时 smoke。
