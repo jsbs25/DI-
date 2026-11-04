@@ -3,9 +3,11 @@
 const TAB_ID_PATTERN = /^tab_[a-zA-Z0-9_-]{1,64}$/;
 const MAX_URL_LENGTH = 4096;
 const BARE_HTTP_HOST_PATTERN = /^(?:localhost(?::\d+)?|(?:[\w-]+\.)+[\w-]+(?::\d+)?|[\w-]+:\d+|\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?|\[[\da-f:]+\](?::\d+)?)(?:[/?#]|$)/i;
+const { randomUUID } = require('node:crypto');
 const { createDownloadManager } = require('./download-manager.cjs');
 const { createDownloadStore } = require('./download-store.cjs');
 const { sanitizeSessionUrl } = require('./session-store.cjs');
+const { normalizePopupTarget, requiresPopupConfirmation } = require('./browser-popup-security.cjs');
 
 function normalizeBrowserUrl(input) {
   if (typeof input !== 'string') throw new TypeError('请输入有效的网址。');
@@ -56,6 +58,10 @@ function createBrowserEngine({
   onFindResult = () => {},
   onDownloads = () => {},
   onPermissionContextChange = () => {},
+  onOpenTabRequest = () => {},
+  onContextMenuLink = () => {},
+  onNewTab = () => {},
+  appOrigin = null,
   downloadStorePath = null,
   getTestApprovalPath = null
 }) {
@@ -75,6 +81,12 @@ function createBrowserEngine({
 
   function validTabId(tabId) {
     return typeof tabId === 'string' && TAB_ID_PATTERN.test(tabId);
+  }
+
+  function isActiveTab(tabId) {
+    const entry = tabs.get(tabId);
+    return Boolean(browserActive && viewportBounds && activeTabId === tabId &&
+      entry && !entry.view.webContents.isDestroyed());
   }
 
   function snapshot(tabId, entry) {
@@ -124,7 +136,31 @@ function createBrowserEngine({
 
     contents.on('will-navigate', validateNavigation);
     contents.on('will-redirect', validateNavigation);
-    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    contents.setWindowOpenHandler(details => {
+      const url = normalizePopupTarget(details?.url, appOrigin);
+      if (!url || details?.postBody != null || !isActiveTab(tabId)) return { action: 'deny' };
+      try {
+        onOpenTabRequest({
+          url,
+          sourceTabId: tabId,
+          requiresConfirmation: requiresPopupConfirmation(details)
+        });
+      } catch {
+        // A failed app-side handoff must never fall back to an Electron window.
+      }
+      // Electron-created windows are always denied. EARTH ONE creates a separate,
+      // isolated WebContentsView only after its popup policy has accepted the URL.
+      return { action: 'deny' };
+    });
+    contents.on('context-menu', (_event, params) => {
+      const url = normalizePopupTarget(params?.linkURL, appOrigin);
+      if (!url || !isActiveTab(tabId)) return;
+      try {
+        onContextMenuLink({ url, sourceTabId: tabId });
+      } catch {
+        // A context-menu failure must not navigate or open an unmanaged window.
+      }
+    });
     contents.on('before-input-event', (event, input) => {
       const key = String(input.key || input.keyCode || '').toLowerCase();
       const modifiers = Array.isArray(input.modifiers) ? input.modifiers : [];
@@ -184,7 +220,7 @@ function createBrowserEngine({
         autoplayPolicy: 'user-gesture-required'
       }
     });
-    const entry = { view, lastUrl: '', lastTitle: '', findQuery: '', findRequestId: null };
+    const entry = { view, lastUrl: '', lastTitle: '', findQuery: '', findRequestId: null, initialLoadPromise: null };
     tabs.set(tabId, entry);
     window.contentView.addChildView(view);
     attachEvents(tabId, entry);
@@ -215,18 +251,69 @@ function createBrowserEngine({
         return { success: false, error: error.message || '网页无法打开。' };
       }
     } else if (!entry.view.webContents.getURL() && initialUrl) {
-      try {
-        const url = normalizeBrowserUrl(initialUrl);
-        entry.lastUrl = url;
-        await entry.view.webContents.loadURL(url);
-      } catch (error) {
-        return { success: false, error: error.message || '网页无法打开。' };
+      if (entry.initialLoadPromise) {
+        try {
+          await entry.initialLoadPromise;
+        } catch (error) {
+          return { success: false, error: error.message || '网页无法打开。' };
+        }
+      } else {
+        try {
+          const url = normalizeBrowserUrl(initialUrl);
+          entry.lastUrl = url;
+          await entry.view.webContents.loadURL(url);
+        } catch (error) {
+          return { success: false, error: error.message || '网页无法打开。' };
+        }
       }
     }
 
     applyVisibility();
+    if (browserActive && viewportBounds) entry.view.webContents.focus();
     publish(tabId, entry);
     return { success: true };
+  }
+
+  async function openNewTab(target) {
+    const url = normalizePopupTarget(target, appOrigin);
+    if (!url || disposed) return { success: false, error: '新标签页地址无效。' };
+
+    if (activeTabId) {
+      const previousEntry = tabs.get(activeTabId);
+      if (previousEntry) {
+        onPermissionContextChange(previousEntry.view.webContents);
+        stopFindForEntry(activeTabId, previousEntry);
+      }
+    }
+
+    const tabId = `tab_${randomUUID()}`;
+    const entry = createTab(tabId);
+    activeTabId = tabId;
+    entry.lastUrl = url;
+    entry.lastTitle = new URL(url).hostname;
+    applyVisibility();
+    if (browserActive && viewportBounds) entry.view.webContents.focus();
+
+    try {
+      onNewTab({ tabId, url, title: entry.lastTitle });
+    } catch {
+      // The native page still stays in the isolated Browser engine if UI sync fails.
+    }
+
+    try {
+      entry.initialLoadPromise = Promise.resolve(entry.view.webContents.loadURL(url));
+      await entry.initialLoadPromise;
+      return { success: true, tabId, url };
+    } catch (error) {
+      return { success: false, tabId, url, error: error.message || '网页无法打开。' };
+    } finally {
+      entry.initialLoadPromise = null;
+      if (!disposed && !entry.view.webContents.isDestroyed()) {
+        applyVisibility();
+        if (browserActive && viewportBounds && activeTabId === tabId) entry.view.webContents.focus();
+        publish(tabId, entry);
+      }
+    }
   }
 
   async function restoreTabs(savedTabs, requestedActiveTabId) {
@@ -271,6 +358,7 @@ function createBrowserEngine({
 
     if (disposed) return { success: false, tabs: results };
     applyVisibility();
+    if (browserActive && viewportBounds) activeCandidate?.entry.view.webContents.focus();
     for (const candidate of entries) publish(candidate.tabId, candidate.entry);
     return { success: true, activeTabId: activeTabId, tabs: results };
   }
@@ -305,13 +393,18 @@ function createBrowserEngine({
   function closeTab(tabId) {
     const entry = tabs.get(tabId);
     if (!entry) return;
+    const wasActive = activeTabId === tabId;
     stopFindForEntry(tabId, entry);
     onPermissionContextChange(entry.view.webContents);
     tabs.delete(tabId);
     window.contentView.removeChildView(entry.view);
     if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close();
-    if (activeTabId === tabId) activeTabId = null;
+    if (wasActive) activeTabId = tabs.keys().next().value || null;
     applyVisibility();
+    if (wasActive && browserActive && viewportBounds && activeTabId) {
+      const nextEntry = tabs.get(activeTabId);
+      if (nextEntry && !nextEntry.view.webContents.isDestroyed()) nextEntry.view.webContents.focus();
+    }
   }
 
   function setActive(active) {
@@ -342,6 +435,7 @@ function createBrowserEngine({
       applyVisibility();
       return;
     }
+    const wasViewportVisible = Boolean(viewportBounds);
     viewportBounds = {
       x: Math.round(x),
       y: Math.round(y),
@@ -349,6 +443,10 @@ function createBrowserEngine({
       height: Math.round(height)
     };
     applyVisibility();
+    if (!wasViewportVisible && browserActive && activeTabId) {
+      const entry = tabs.get(activeTabId);
+      if (entry && !entry.view.webContents.isDestroyed()) entry.view.webContents.focus();
+    }
   }
 
   function historyMethod(tabId, method) {
@@ -477,6 +575,7 @@ function createBrowserEngine({
     setActive,
     setBounds,
     selectTab,
+    openNewTab,
     restoreTabs,
     closeTab,
     navigate,
@@ -491,6 +590,7 @@ function createBrowserEngine({
     findInPage,
     stopFindInPage,
     isPermissionContext,
+    isActiveTab,
     getSessionSnapshot,
     dispose,
     getWebContentsForTesting,

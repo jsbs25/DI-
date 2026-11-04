@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, session, shell, dialog, Menu } = require('electron');
 const { createBrowserEngine, isAllowedNavigation } = require('./browser-engine.cjs');
 const { createBrowserSessionStore } = require('./session-store.cjs');
 const { assertTrustedAppSender: assertTrustedAppSenderForContext } = require('./browser-ipc-security.cjs');
@@ -33,6 +33,10 @@ let browserSessionRestoreStarted = false;
 let browserSessionRestoreResult = null;
 let browserSessionRestorePromise = null;
 let browserSessionPersistTimer = null;
+let browserPopupConfirmationOpen = false;
+let browserSmokeTest = false;
+let browserPopupTestDecision = null;
+let browserPopupSmokeConfirmationCount = 0;
 
 const MAX_LOCAL_BOOKMARKS = 200;
 const MAX_LOCAL_HISTORY = 500;
@@ -40,6 +44,58 @@ const MAX_LOCAL_BROWSER_DATA_BYTES = 2 * 1024 * 1024;
 
 function assertTrustedAppSender(event) {
   assertTrustedAppSenderForContext(event, mainWindow?.webContents, appOrigin);
+}
+
+function openBrowserTabFromRequest(request) {
+  if (!request || !browserEngine?.isActiveTab(request.sourceTabId)) return;
+  void browserEngine.openNewTab(request.url);
+}
+
+function requestBrowserPopupConfirmation(request) {
+  if (!request || !browserEngine?.isActiveTab(request.sourceTabId) ||
+      !mainWindow || mainWindow.isDestroyed() || browserPopupConfirmationOpen) return;
+
+  if (browserSmokeTest) {
+    browserPopupSmokeConfirmationCount += 1;
+    console.log(`BROWSER_POPUP_CONFIRMATION_REQUIRED:${new URL(request.url).origin}`);
+    const approved = browserPopupTestDecision === 'approve';
+    console.log(`BROWSER_POPUP_CONFIRMATION_RESULT:${approved ? 'approved' : 'denied'}`);
+    if (approved) openBrowserTabFromRequest(request);
+    return;
+  }
+
+  let destination;
+  try {
+    const target = new URL(request.url);
+    destination = `${target.origin}${target.pathname}`;
+  } catch {
+    return;
+  }
+  browserPopupConfirmationOpen = true;
+  void dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: '打开新标签页？',
+    message: '此网页请求打开一个新标签页。',
+    detail: destination,
+    buttons: ['在新标签页中打开', '取消'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true
+  }).then(result => {
+    if (result.response === 0) openBrowserTabFromRequest(request);
+  }).catch(() => {}).finally(() => {
+    browserPopupConfirmationOpen = false;
+  });
+}
+
+function showBrowserLinkContextMenu(request) {
+  if (!request || !browserEngine?.isActiveTab(request.sourceTabId) ||
+      !mainWindow || mainWindow.isDestroyed()) return;
+  const menu = Menu.buildFromTemplate([{
+    label: '在新标签页中打开链接',
+    click: () => openBrowserTabFromRequest(request)
+  }]);
+  menu.popup({ window: mainWindow });
 }
 
 function getSafeSmokeApprovalPath(smokeTest, fixtureUrl, downloadDir) {
@@ -322,9 +378,11 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     const maxWait = Date.now() + 15000;
     let ready = false;
     while (Date.now() < maxWait) {
-      const pageReady = await appContents.executeJavaScript(
-        `Boolean(window.earthOneBrowser && document.querySelector('[data-browser-engine-viewport]'))`
-      );
+      const pageReady = await appContents.executeJavaScript(`(() => {
+        const viewport = document.querySelector('[data-browser-engine-viewport]');
+        const rect = viewport?.getBoundingClientRect();
+        return Boolean(window.earthOneBrowser && viewport && rect.width >= 2 && rect.height >= 2);
+      })()`);
       if (pageReady && browserEngine.getWebContentsForTesting('tab_1')) {
         ready = true;
         break;
@@ -338,11 +396,12 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
         readyState: document.readyState,
         bridge: typeof window.earthOneBrowser,
         viewport: Boolean(document.querySelector('[data-browser-engine-viewport]')),
+        readerModeToggle: Boolean(document.querySelector('button[aria-label="切换纯净阅读模式"]')),
         root: (document.getElementById('root')?.innerHTML || '').slice(0, 900),
         scripts: Array.from(document.scripts).map(script => script.src),
         body: (document.body?.innerText || '').slice(0, 700)
       })`);
-      throw new Error(`EARTH ONE Browser 模块或 Chromium 视图启动超时：${JSON.stringify(diagnostic)}`);
+      throw new Error(`Electron Browser 必须在首次进入时直接挂载真实 Chromium；启动超时诊断：${JSON.stringify(diagnostic)}`);
     }
 
     const testTabId = 'tab_1';
@@ -592,6 +651,67 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     }
 
     await waitForPage('/one', 'EARTH ONE Fixture One');
+    const defaultChromiumDeadline = Date.now() + 5000;
+    let defaultChromiumReady = false;
+    while (Date.now() < defaultChromiumDeadline) {
+      const bounds = browserEngine.getViewBoundsForTesting(testTabId);
+      const viewportVisible = await appContents.executeJavaScript(`(() => {
+        const viewport = document.querySelector('[data-browser-engine-viewport]');
+        const rect = viewport?.getBoundingClientRect();
+        return Boolean(viewport && rect.width >= 2 && rect.height >= 2);
+      })()`);
+      if (viewportVisible && browserEngine.isActiveTab(testTabId) && bounds?.width >= 2 &&
+          bounds?.height >= 2 && testContents.isFocused()) {
+        defaultChromiumReady = true;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!defaultChromiumReady) throw new Error('Electron Browser 首次进入时没有默认显示并聚焦 Chromium 页面。');
+
+    const readerModeToggle = `document.querySelector('button[aria-label="切换纯净阅读模式"]')`;
+    const toggleReaderMode = async () => {
+      const clicked = await appContents.executeJavaScript(`(() => {
+        const button = ${readerModeToggle};
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`);
+      if (!clicked) throw new Error('Electron Browser 的纯净阅读模式切换按钮不存在。');
+    };
+    await toggleReaderMode();
+    const readerModeDeadline = Date.now() + 5000;
+    let readerModeHiddenEngine = false;
+    while (Date.now() < readerModeDeadline) {
+      const viewportMounted = await appContents.executeJavaScript(`Boolean(document.querySelector('[data-browser-engine-viewport]'))`);
+      if (!viewportMounted && !browserEngine.isActiveTab(testTabId)) {
+        readerModeHiddenEngine = true;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!readerModeHiddenEngine) throw new Error('切换纯净阅读模式后，Chromium viewport 仍处于显示/活动状态。');
+
+    await toggleReaderMode();
+    const restoreChromiumDeadline = Date.now() + 5000;
+    let restoredChromium = false;
+    while (Date.now() < restoreChromiumDeadline) {
+      const bounds = browserEngine.getViewBoundsForTesting(testTabId);
+      const viewportVisible = await appContents.executeJavaScript(`(() => {
+        const viewport = document.querySelector('[data-browser-engine-viewport]');
+        const rect = viewport?.getBoundingClientRect();
+        return Boolean(viewport && rect.width >= 2 && rect.height >= 2);
+      })()`);
+      if (viewportVisible && browserEngine.isActiveTab(testTabId) && bounds?.width >= 2 &&
+          bounds?.height >= 2 && testContents.isFocused()) {
+        restoredChromium = true;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!restoredChromium) throw new Error('关闭纯净阅读模式后，原 Chromium 页面未能重新显示并取得焦点。');
+    console.log('BROWSER_READER_MODE_SMOKE_PASS: Electron opens in focused Chromium, Reader Mode hides the native view, and switching back restores the same focused page.');
+    await waitForPage('/one', 'EARTH ONE Fixture One');
 
     const untrustedWindow = new BrowserWindow({
       show: false,
@@ -635,6 +755,192 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     if (remoteCapabilities.bridge !== 'undefined' || remoteCapabilities.require !== 'undefined' || remoteCapabilities.findBridge !== 'undefined') {
       throw new Error('远程合成页面不得获得 EARTH ONE preload 或 Node require。');
     }
+
+    const fixtureOrigin = new URL(testUrl).origin;
+    await submitAddress(`${fixtureOrigin}/popup-test`);
+    await waitForPage('/popup-test', 'Popup Source Fixture');
+    const clickSyntheticElement = async selector => {
+      const point = await testContents.executeJavaScript(`(() => {
+        const element = document.querySelector(${JSON.stringify(selector)});
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+      })()`);
+      if (!point) throw new Error(`Popup 合成页缺少点击目标：${selector}`);
+      testContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+      testContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+    };
+    const tabCountBeforeBlockedPopups = browserEngine.getTabIdsForTesting().length;
+    const confirmationsBeforeNoGesture = browserPopupSmokeConfirmationCount;
+    const noGesturePopupOutcome = await testContents.executeJavaScript(`(() => {
+      try {
+        const popup = window.open(${JSON.stringify(`${fixtureOrigin}/popup-target?source=no-gesture`)}, '_blank');
+        return { returnedNull: popup === null, handleClosed: popup ? popup.closed : null };
+      } catch (error) { return { threw: String(error) }; }
+    })()`);
+    const nativeWindowCountAfterNoGesture = BrowserWindow.getAllWindows().length;
+    if (browserEngine.getTabIdsForTesting().length !== tabCountBeforeBlockedPopups || nativeWindowCountAfterNoGesture !== 1 ||
+        browserPopupSmokeConfirmationCount !== confirmationsBeforeNoGesture + 1) {
+      throw new Error(`无手势 window.open 未被安全拦截：${JSON.stringify({ noGesturePopupOutcome, tabs: browserEngine.getTabIdsForTesting().length, nativeWindows: nativeWindowCountAfterNoGesture })}`);
+    }
+
+    const unsafePopupUrls = [
+      'javascript:alert(1)',
+      'file:///etc/passwd',
+      'data:text/html,<h1>blocked</h1>',
+      'ftp://example.test/file',
+      `http://user:pass@127.0.0.1:${new URL(testUrl).port}/popup-target`,
+      'http://[invalid'
+    ];
+    await testContents.executeJavaScript(`(() => {
+      ${JSON.stringify(unsafePopupUrls)}.forEach((url, index) => {
+        const button = document.createElement('button');
+        button.id = 'unsafe-popup-' + index;
+        button.textContent = 'Open unsafe synthetic target ' + index;
+        button.onclick = () => { try { window.open(url, '_blank'); } catch {} };
+        document.body.appendChild(button);
+      });
+    })()`);
+    for (let index = 0; index < unsafePopupUrls.length; index += 1) {
+      await clickSyntheticElement(`#unsafe-popup-${index}`);
+    }
+    if (browserEngine.getTabIdsForTesting().length !== tabCountBeforeBlockedPopups || BrowserWindow.getAllWindows().length !== 1) {
+      throw new Error('javascript:/file:/data:/非 HTTP(S)/凭据及无效 origin 弹窗必须全部拒绝。');
+    }
+
+    await testContents.executeJavaScript(`(() => {
+      const button = document.createElement('button');
+      button.id = 'app-route-popup';
+      button.textContent = 'Open synthetic EARTH ONE route';
+      button.onclick = () => { window.__appRoutePopupResult = window.open(${JSON.stringify(`${appOrigin}/?module=library`)}, '_blank'); };
+      document.body.appendChild(button);
+    })()`);
+    await clickSyntheticElement('#app-route-popup');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const currentAppRoute = new URL(mainWindow.webContents.getURL());
+    if (currentAppRoute.origin !== appOrigin || currentAppRoute.searchParams.get('module') !== 'browser' ||
+        browserEngine.getTabIdsForTesting().length !== tabCountBeforeBlockedPopups ||
+        BrowserWindow.getAllWindows().length !== 1 ||
+        browserFixtureRequestAudit.some(request => request.origin === appOrigin)) {
+      throw new Error('远程 popup 不得进入 EARTH ONE 自身路由，也不得改变主窗口模块。');
+    }
+
+    const confirmationsBeforeScriptPopup = browserPopupSmokeConfirmationCount;
+    browserPopupTestDecision = 'approve';
+    await clickSyntheticElement('#script-popup');
+    browserPopupTestDecision = 'deny';
+    if (browserPopupSmokeConfirmationCount !== confirmationsBeforeScriptPopup + 1) {
+      throw new Error('用户点击 window.open 必须进入应用确认分支。');
+    }
+    let scriptPopupTabId = null;
+    const scriptPopupDeadline = Date.now() + 10000;
+    while (Date.now() < scriptPopupDeadline) {
+      const snapshot = browserEngine.getSessionSnapshot();
+      const ids = browserEngine.getTabIdsForTesting();
+      if (ids.length === tabCountBeforeBlockedPopups + 1 && snapshot.activeTabId && snapshot.activeTabId !== testTabId) {
+        scriptPopupTabId = snapshot.activeTabId;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!scriptPopupTabId) throw new Error('用户实际点击触发的 window.open 在 smoke 确认通过后没有成为新活动标签。');
+    await waitForTabPath(scriptPopupTabId, '/popup-target', 'Popup Target Fixture');
+    const scriptPopupContents = browserEngine.getWebContentsForTesting(scriptPopupTabId);
+    const scriptPopupIsolation = await scriptPopupContents.executeJavaScript(`({
+      openerIsAbsent: window.opener === null || typeof window.opener === 'undefined',
+      requireType: typeof require,
+      bridgeType: typeof window.earthOneBrowser
+    })`);
+    if (!scriptPopupIsolation.openerIsAbsent || scriptPopupIsolation.requireType !== 'undefined' ||
+        scriptPopupIsolation.bridgeType !== 'undefined' || scriptPopupContents.session !== testContents.session ||
+        !scriptPopupContents.isFocused()) {
+      throw new Error('新标签必须无 opener/Node/preload，使用相同隔离 Browser session，并获得页面焦点。');
+    }
+    const selectedUiDeadline = Date.now() + 5000;
+    let selectedUiTab = '';
+    while (Date.now() < selectedUiDeadline && selectedUiTab !== '切换到Popup Target Fixture') {
+      selectedUiTab = await appContents.executeJavaScript(`(() => {
+        const selected = document.querySelector('[role="tab"][aria-selected="true"]');
+        return selected?.getAttribute('aria-label') || '';
+      })()`);
+      if (selectedUiTab !== '切换到Popup Target Fixture') await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (selectedUiTab !== '切换到Popup Target Fixture') throw new Error('popup 新标签没有同步到 EARTH ONE 标签栏并取得活动焦点。');
+
+    await appContents.executeJavaScript(`document.querySelector('button[aria-label="切换到Popup Source Fixture"]')?.click()`);
+    const sourceFocusDeadline = Date.now() + 5000;
+    let sourceReady = false;
+    while (Date.now() < sourceFocusDeadline) {
+      const bounds = browserEngine.getViewBoundsForTesting(testTabId);
+      if (browserEngine.isActiveTab(testTabId) && bounds?.width >= 2 && bounds?.height >= 2 && testContents.isFocused()) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const settledBounds = browserEngine.getViewBoundsForTesting(testTabId);
+        if (browserEngine.isActiveTab(testTabId) && settledBounds?.width >= 2 && settledBounds?.height >= 2 && testContents.isFocused()) {
+          sourceReady = true;
+          break;
+        }
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!sourceReady || browserEngine.getSessionSnapshot().activeTabId !== testTabId) {
+      throw new Error('来源标签未能恢复活动状态、视口边界和 WebContents 焦点。');
+    }
+    const confirmationsBeforeAnchor = browserPopupSmokeConfirmationCount;
+    browserPopupTestDecision = 'approve';
+    await clickSyntheticElement('#popup-link');
+    browserPopupTestDecision = 'deny';
+    if (browserPopupSmokeConfirmationCount !== confirmationsBeforeAnchor + 1) {
+      const anchorDiagnostics = await testContents.executeJavaScript(`({
+        clicked: window.__popupLinkClicks || 0,
+        clickTrusted: window.__popupLinkTrusted,
+        target: document.querySelector('#popup-link')?.target || '',
+        href: document.querySelector('#popup-link')?.href || '',
+        currentUrl: location.href
+      })`);
+      throw new Error(`用户点击 target=_blank 必须进入应用确认分支：${JSON.stringify({ anchorDiagnostics, confirmationsBeforeAnchor, confirmationsAfter: browserPopupSmokeConfirmationCount, tabs: browserEngine.getTabIdsForTesting(), activeTabId: browserEngine.getSessionSnapshot().activeTabId, sourceActive: browserEngine.isActiveTab(testTabId), sourceFocused: testContents.isFocused() })}`);
+    }
+    let anchorPopupTabId = null;
+    const anchorPopupDeadline = Date.now() + 10000;
+    while (Date.now() < anchorPopupDeadline) {
+      const snapshot = browserEngine.getSessionSnapshot();
+      const ids = browserEngine.getTabIdsForTesting();
+      if (ids.length === tabCountBeforeBlockedPopups + 2 && snapshot.activeTabId && snapshot.activeTabId !== testTabId) {
+        anchorPopupTabId = snapshot.activeTabId;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!anchorPopupTabId) throw new Error('用户点击的 target=_blank 链接未直接打开 EARTH ONE 前台标签。');
+    await waitForTabPath(anchorPopupTabId, '/popup-target', 'Popup Target Fixture');
+    const anchorContents = browserEngine.getWebContentsForTesting(anchorPopupTabId);
+    const anchorFocusDeadline = Date.now() + 3000;
+    while (Date.now() < anchorFocusDeadline && (!browserEngine.isActiveTab(anchorPopupTabId) || !anchorContents.isFocused())) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    const anchorPopupUrl = new URL(anchorContents.getURL());
+    if (anchorPopupUrl.searchParams.get('source') !== 'anchor' ||
+        !browserEngine.isActiveTab(anchorPopupTabId) || !anchorContents.isFocused()) {
+      throw new Error(`target=_blank 目标或焦点状态不正确：${JSON.stringify({ url: anchorPopupUrl.href, active: browserEngine.isActiveTab(anchorPopupTabId), focused: anchorContents.isFocused(), activeTabId: browserEngine.getSessionSnapshot().activeTabId })}`);
+    }
+
+    const popupCloseDeadline = Date.now() + 10000;
+    while (Date.now() < popupCloseDeadline && browserEngine.getTabIdsForTesting().length !== 1) {
+      await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭Popup Target Fixture标签"]')?.click()`);
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    const returnToSourceDeadline = Date.now() + 5000;
+    while (Date.now() < returnToSourceDeadline && browserEngine.getSessionSnapshot().activeTabId !== testTabId) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (browserEngine.getTabIdsForTesting().length !== 1 || browserEngine.getSessionSnapshot().activeTabId !== testTabId) {
+      const uiTabs = await appContents.executeJavaScript(`(() => ({
+        selected: document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label') || '',
+        tabs: [...document.querySelectorAll('[role="tab"]')].map(tab => ({ label: tab.getAttribute('aria-label'), selected: tab.getAttribute('aria-selected') }))
+      }))()`);
+      throw new Error(`关闭合成 popup 标签后应回到原始 Browser 标签：${JSON.stringify({ engineTabs: browserEngine.getTabIdsForTesting(), activeTabId: browserEngine.getSessionSnapshot().activeTabId, expectedTabId: testTabId, sourceFocused: testContents.isFocused(), uiTabs })}`);
+    }
+    console.log('BROWSER_POPUP_SMOKE_PASS: user-initiated window.open confirmation, no-gesture prompt-and-deny, target=_blank foreground tab, dangerous/invalid targets, app-route boundary, active-tab focus, same Browser session, no opener/Node/preload, and tab-strip sync verified.');
 
     await submitAddress(`${new URL(testUrl).origin}/find`);
     await waitForPage('/find', 'EARTH ONE Find Fixture');
@@ -941,13 +1247,14 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     const notificationRequest = () => testContents.executeJavaScript('Notification.requestPermission()');
 
     const deniedGeolocation = testContents.executeJavaScript(`new Promise(resolve => navigator.geolocation.getCurrentPosition(
-      () => resolve('position'), error => resolve(error.code), { timeout: 5000 }
+      () => resolve('position'), error => resolve(error.code), { timeout: 20000 }
     ))`);
     await waitForPermissionPrompt('geolocation', permissionOriginA);
     await clickPermissionDecision('deny');
     const deniedGeolocationResult = await deniedGeolocation;
-    if (deniedGeolocationResult !== 1 || browserPermissionManager.getState().grants.length !== 0) {
-      throw new Error('明确拒绝的定位请求应得到拒绝结果，且不得留下会话授权。');
+    const permissionStateAfterDeny = browserPermissionManager.getState();
+    if (deniedGeolocationResult !== 1 || permissionStateAfterDeny.grants.length !== 0) {
+      throw new Error(`明确拒绝的定位请求应得到拒绝结果且不得留下会话授权：${JSON.stringify({ resultCode: deniedGeolocationResult, grants: permissionStateAfterDeny.grants, pending: permissionStateAfterDeny.pending })}`);
     }
 
     const allowedNotification = notificationRequest();
@@ -1169,6 +1476,11 @@ app.whenReady().then(async () => {
   browserSessionStatus = browserSessionStore.load();
   browserSessionEnabled = browserSessionStatus.enabled && !browserSessionStatus.readOnly;
   const smokeTest = process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1';
+  browserSmokeTest = smokeTest;
+  browserPopupTestDecision = smokeTest && ['approve', 'deny'].includes(process.env.EARTH_ONE_BROWSER_TEST_POPUP_DECISION)
+    ? process.env.EARTH_ONE_BROWSER_TEST_POPUP_DECISION
+    : null;
+  browserPopupSmokeConfirmationCount = 0;
   const smokeUrl = process.env.EARTH_ONE_BROWSER_TEST_URL;
   testDownloadDir = process.env.EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR || null;
   const testApprovalPath = getSafeSmokeApprovalPath(smokeTest, smokeUrl, testDownloadDir);
@@ -1279,6 +1591,16 @@ app.whenReady().then(async () => {
     onDownloads: (downloads, storageStatus) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:downloads-state', downloads, storageStatus);
     },
+    onOpenTabRequest: request => {
+      if (!browserEngine?.isActiveTab(request.sourceTabId)) return;
+      if (request.requiresConfirmation) requestBrowserPopupConfirmation(request);
+      else openBrowserTabFromRequest(request);
+    },
+    onContextMenuLink: showBrowserLinkContextMenu,
+    onNewTab: tab => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:new-tab', tab);
+    },
+    appOrigin,
     downloadStorePath: path.join(app.getPath('userData'), 'earth-one-downloads.json'),
     getTestApprovalPath: testApprovalPath || null
   });

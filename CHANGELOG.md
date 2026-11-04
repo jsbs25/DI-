@@ -1,6 +1,6 @@
 # EARTH ONE CHANGELOG
 
-## [Unreleased] - 2026-11-04
+## [Unreleased] - 2026-11-05
 
 ### Fixed
 - Moved the Universe telemetry drawer below the desktop celestial selector (`md:top-32`) while preserving the compact small-screen position and all existing controls; visual remeasurement refined the initial offset to leave a real gap.
@@ -18,6 +18,7 @@
 - Clarified that the current integrity suite validates store/domain behavior and is not an HTTP/browser end-to-end suite.
 
 ### Improved
+- Electron desktop now enters the Browser module in the real Chromium view by default; pure Reader Mode remains a toolbar toggle, and ordinary Web fallback keeps its existing Reader Mode default. Routed `target="_blank"` and `window.open()` requests into focused EARTH ONE Browser tabs after app confirmation, and added a direct context-menu action for safe HTTP(S) links. Electron does not expose a dependable popup `userGesture` field, and Chromium disposition is not proof of a gesture, so every webpage popup requires confirmation; unsafe schemes, credential-bearing URLs, POST popups and the EARTH ONE app origin stay blocked. New pages use the dedicated Browser session with no opener, preload or Node integration.
 - Persisted up to 50 approved desktop download records locally under Electron `userData`; restarts restore history and mark in-flight items interrupted. Added corrupt-store protection, existence-checked folder reveal, and clear/remove controls that never delete downloaded files; no download history or path is sent to a server.
 - Added a default-off Electron “启动恢复” setting with a separate, bounded local tab-session store. It preserves ordinary HTTP(S) query strings, removes fragments, skips URLs with clearly sensitive query keys, never serializes cookies/forms/credentials, and shows which restored pages failed; two-process synthetic-page tests verify opt-in restore and non-persistent cookies.
 - Expanded isolated HTTP API coverage to 51 assertions across social posts, library search/details/bookshelf progress, browser bookmarks, and crawler task creation. Tests use temporary storage and do not execute external crawls.

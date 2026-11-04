@@ -252,7 +252,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       id: 'tab_1',
       title: initialPreset?.title || initialUrl,
       url: initialUrl,
-      readerMode: true,
+      readerMode: !browserEngine,
       content: initialPreset?.content || '',
       author: initialPreset?.author || '',
       readTime: initialPreset?.readTime || ''
@@ -321,7 +321,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               id: tab.id,
               title: tab.title || new URL(tab.url).host,
               url: tab.url,
-              readerMode: true
+              readerMode: !browserEngine
             }))
           : [];
 
@@ -457,6 +457,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     failedCount: number;
   } | null>(null);
   const restoredTabIdsRef = useRef<Set<string>>(new Set());
+  const engineManagedTabIdsRef = useRef<Set<string>>(new Set());
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
@@ -541,11 +542,33 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
   useEffect(() => {
     if (!browserEngine || !activeTab || !browserSessionSettingsReady || restoredTabIdsRef.current.has(activeTabId)) return;
+    if (engineManagedTabIdsRef.current.delete(activeTabId)) return;
     browserEngine.selectTab(activeTabId, activeTab.url).then(result => {
       if (!result.success) setBrowserEngineError(result.error || 'Chromium 网页无法打开。');
       else setBrowserEngineError(null);
     }).catch(error => setBrowserEngineError(error?.message || 'Chromium 引擎暂不可用。'));
   }, [browserEngine, activeTabId, browserSessionSettingsReady]);
+
+  useEffect(() => {
+    if (!browserEngine?.onNewTab) return;
+    return browserEngine.onNewTab(tab => {
+      if (!tab || typeof tab.tabId !== 'string' || !/^tab_[a-zA-Z0-9_-]{1,64}$/.test(tab.tabId) || !isHttpUrl(tab.url)) return;
+      const url = new URL(tab.url).href;
+      const title = typeof tab.title === 'string' && tab.title.trim()
+        ? tab.title.slice(0, 300)
+        : new URL(url).hostname;
+      engineManagedTabIdsRef.current.add(tab.tabId);
+      setTabs(previous => previous.some(existing => existing.id === tab.tabId)
+        ? previous.map(existing => existing.id === tab.tabId ? { ...existing, url, title } : existing)
+        : [...previous, { id: tab.tabId, title, url, readerMode: false }]);
+      setActiveTabId(tab.tabId);
+      setInputUrl(url);
+      setHistory(previous => ({ ...previous, [tab.tabId]: [url] }));
+      setHistoryIndex(previous => ({ ...previous, [tab.tabId]: 0 }));
+      setSearchResults([]);
+      setBrowserEngineError(null);
+    });
+  }, [browserEngine]);
 
   useEffect(() => {
     if (!browserEngine) return;
@@ -854,7 +877,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       id: newId,
       title: 'New Tab',
       url: 'https://en.wikipedia.org/wiki/Earth',
-      readerMode: true,
+      readerMode: !browserEngine,
       content: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].content,
       author: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].author,
       readTime: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].readTime

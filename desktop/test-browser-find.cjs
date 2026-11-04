@@ -123,9 +123,10 @@ async function main() {
   assert.equal((await engine.findInPage('synthetic phrase', 'new')).success, true);
   assert.equal(viewA.webContents.findCalls.length, callsOnAAfterSwitch, 'a stale renderer target cannot search the previous tab');
   assert.equal(viewB.webContents.findCalls.length, 1, 'find targets only the active tab');
+  assert.equal(viewB.webContents.focusCalls, 1, 'selecting a tab gives focus to its active page');
   assert.equal((await engine.stopFindInPage(true)).success, true);
   assert.equal(viewB.webContents.stopCalls.at(-1), 'clearSelection');
-  assert.equal(viewB.webContents.focusCalls, 1, 'closing find can return focus to the active page');
+  assert.equal(viewB.webContents.focusCalls, 2, 'closing find can return focus to the active page');
 
   engine.setBounds(null);
   assert.equal((await engine.findInPage('hidden', 'new')).success, false, 'hidden browser views cannot be targeted');

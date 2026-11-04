@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
   setBounds: bounds => ipcRenderer.invoke('browser:set-bounds', bounds),
   selectTab: (tabId, url) => ipcRenderer.invoke('browser:select-tab', tabId, url),
   closeTab: tabId => ipcRenderer.invoke('browser:close-tab', tabId),
+  onNewTab: listener => {
+    const wrapped = (_event, tab) => listener(tab);
+    ipcRenderer.on('browser:new-tab', wrapped);
+    return () => ipcRenderer.removeListener('browser:new-tab', wrapped);
+  },
   navigate: (tabId, url) => ipcRenderer.invoke('browser:navigate', tabId, url),
   goBack: tabId => ipcRenderer.invoke('browser:back', tabId),
   goForward: tabId => ipcRenderer.invoke('browser:forward', tabId),

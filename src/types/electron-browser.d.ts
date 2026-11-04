@@ -47,6 +47,12 @@ declare global {
     title: string;
   }
 
+  interface EarthOneBrowserNewTab {
+    tabId: string;
+    url: string;
+    title: string;
+  }
+
   interface EarthOneBrowserSessionState {
     enabled: boolean;
     activeTabId: string | null;
@@ -129,6 +135,7 @@ declare global {
     setBounds(bounds: EarthOneBrowserBounds | null): Promise<void>;
     selectTab(tabId: string, url: string): Promise<{ success: boolean; error?: string }>;
     closeTab(tabId: string): Promise<void>;
+    onNewTab(listener: (tab: EarthOneBrowserNewTab) => void): () => void;
     navigate(tabId: string, url: string): Promise<{ success: boolean; url?: string; error?: string }>;
     goBack(tabId: string): Promise<void>;
     goForward(tabId: string): Promise<void>;

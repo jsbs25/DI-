@@ -51,6 +51,16 @@ function handleFixtureRequest(request, response) {
     request.socket.destroy();
     return;
   }
+  if (pathname === '/popup-test') {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><html><head><title>Popup Source Fixture</title></head><body><h1>Popup Source Fixture</h1><a id="popup-link" target="_blank" href="/popup-target?source=anchor" onclick="window.__popupLinkClicks = (window.__popupLinkClicks || 0) + 1; window.__popupLinkTrusted = event.isTrusted">Open safe link in new tab</a><p id="popup-result"></p><button id="script-popup" type="button" onclick="window.__popupResult = window.open(\'/popup-target?source=window-open\', \'_blank\')">Call window.open</button></body></html>');
+    return;
+  }
+  if (pathname === '/popup-target') {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><html><head><title>Popup Target Fixture</title></head><body><h1>Popup Target Fixture</h1><p id="popup-context">Synthetic new-tab destination</p></body></html>');
+    return;
+  }
   if (pathname === '/one') {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end('<!doctype html><html><head><title>EARTH ONE Fixture One</title></head><body><h1>Local fixture one</h1><a href="/two">Next page</a></body></html>');
@@ -150,6 +160,7 @@ function launchSmoke(phase, options = {}) {
       EARTH_ONE_BROWSER_TEST_PHASE: phase,
       EARTH_ONE_BROWSER_TEST_URL: startUrl,
       EARTH_ONE_BROWSER_TEST_ALT_URL: options.altUrl || `${alternateFixtureOrigin}/one`,
+      EARTH_ONE_BROWSER_TEST_POPUP_DECISION: options.popupDecision || 'deny',
       EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR: downloadDir,
       EARTH_ONE_BROWSER_TEST_PROFILE_DIR: runProfileDir,
       EARTH_ONE_DATA_FILE: path.join(downloadDir, 'server_data.json'),
