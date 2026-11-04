@@ -24,6 +24,7 @@ EARTH ONE 当前是 React/Vite/Express Web 应用；普通网页无法自行捆�
 - 桌面工具栏提供“启动恢复：开/关”，默认关闭。启用后，单独保存到 Electron `userData/earth-one-browser-session.json` 的最多 12 个标签仅含标签 ID、安全展示用的主机名和 HTTP(S) URL；普通查询参数会保留以便恢复搜索/文章视图，片段会移除；若查询键明显包含 `token`、`auth`、`code`、`key`、`password`、`session`、`credential` 等敏感词，该标签 URL 整体跳过。关闭该开关会清除已保存的标签快照。损坏或超限文件会关闭恢复并保护原文件；若页面恢复失败，标签仍保留且界面显示失败数量和地址栏重试提示。此功能不保存 Cookie、凭据、表单内容、页面正文或网络请求，不向服务器/云端同步；普通 Web 版不显示该设置，行为不变。
 - 已归档文章仍是独立功能，继续使用现有 EARTH ONE 服务。桌面 Chromium 导航不会把目标 URL 发给服务器 `/api/browser/fetch-preview`；因此普通网页正文不会自动提取，AI 总结、翻译和归档只有在标签已有可用正文时才会执行。Web 回退仍保留原有预览路径。
 - 在 Chromium 网页焦点下按 `Ctrl+L` 或 `Cmd+L`，会回到 EARTH ONE 地址栏并选中完整网址。
+- 在 Chromium 网页焦点下按 `Ctrl+F` 或 `Cmd+F`，会把焦点安全转回 EARTH ONE 查找框；按 Enter/Shift+Enter 或前后按钮浏览匹配项，显示当前序号与总数。关闭或按 Esc 会调用 Chromium `stopFindInPage('clearSelection')` 清除高亮并将焦点还给页面；最长查找词为 512 个字符。普通 Web 预览不提供此原生查找接口，工具栏会明确显示不可用，EARTH ONE 不拦截浏览器自己的查找快捷键。
 - Chromium 视图由占位框的实际位置和尺寸驱动，切换到其他 EARTH ONE 模块、进入阅读模式或打开覆盖层时会隐藏；Browser 标签的界面与地址栏仍留在 EARTH ONE 内。
 - 普通 Web 版继续使用原有回退界面；用户可从工具栏识别当前是“真实 Chromium”还是“网页预览”。
 
@@ -31,6 +32,7 @@ EARTH ONE 当前是 React/Vite/Express Web 应用；普通网页无法自行捆�
 
 - 远程网页在无 Node.js 集成、启用 `contextIsolation`、启用渲染器 sandbox 和默认 Web 安全的 Chromium WebContents 中运行；远程网页没有 preload。
 - 只有 EARTH ONE 本地壳的 preload 暴露少量导航/尺寸/本机浏览数据 API；主进程校验调用方 WebContents、顶层主框架和来源 origin，并拒绝 `file:`, `javascript:`, `data:`, `ftp:` 等非 HTTP(S) 地址。拒绝网页弹出窗口。本机数据仅能通过固定的 JSON 结构读写；主进程限制字段、条数和 2 MiB 总大小，先同步临时文件再原子替换应用 `userData` 文件。检测到无法解析、版本未知、超限或含无效记录时，会以只读状态保护原文件。数据文件不加密，应按本机个人浏览数据对待。
+- 页内查找 IPC 同样经过主窗口 WebContents、顶层框架和精确应用来源校验；调用不接受标签 ID 或 WebContents ID，只允许主进程针对当前可见活动 Chromium 标签执行受限查询/清除。结果回传前核对标签与最新 Electron `requestId`，过期或非活动页面结果会丢弃。远程 `WebContentsView` 不设置 preload，且维持 Node 集成关闭。
 - 浏览器会话为应用进程内存会话（非 `persist:`），标签共享该会话，应用退出后不保留网站 cookie。上面的可选标签恢复仅保存经过限制的 URL 元数据，不序列化 Chromium session/cookie/cache；URL 使用独立版本化文件和白名单字段，普通查询参数保留、片段移除，明显敏感查询键会令该 URL 不入库。通知、定位等网页权限一律默认拒绝；没有权限设置界面。
 - 桌面下载使用 Electron 保存文件对话框；生产路径不会预设或静默写入路径。下载历史独立保存在 Electron `userData` 下、最多 50 条，原子写入并校验恢复数据；损坏文件以只读状态保护，不会静默覆盖。持久记录只包含保存对话框批准后的绝对路径和脱敏来源，不连接任何服务器 API，也不改动浏览器 cookie/session 设置。受限 IPC 只接受记录 ID；显示文件夹前由主进程重新校验路径存在且为文件，不接受 renderer 提供路径，不调用自动打开/执行 API。移除和清除只删除记录、不删除用户文件；未完成记录重启后标记为已中断。没有恶意文件扫描、大小/类型限制、暂停/续传。证书错误不做绕过。桌面 Chromium 在用户设备上直接打开用户输入的 HTTP(S) 地址（包括 localhost/内网地址），不让 EARTH ONE 服务器代访该地址；它不是通用 SSRF 隔离器。**自动化测试只连测试脚本在 127.0.0.1 上创建的合成页面/下载夹具，不探测或访问任意私网目标。**
 - 普通 Web 回退仍保留原有服务器端 `/api/browser/fetch-preview` 行为；该旧 API 未纳入本次 SSRF 硬化。若以公网可访问服务部署，需另行校验解析后的目标 IP 与每次重定向，不能把它当作通用公开 URL 代理。桌面 Chromium 不调用此端点。
@@ -53,10 +55,12 @@ bun run desktop:dev
 bun run lint
 bun run build
 bun run test:session-store
+bun run test:browser-find
+bun run test:browser-ipc-security
 bun run test:browser-engine
 ```
 
-会话存储单元测试覆盖默认关闭、普通查询保留、片段删除、敏感查询键跳过、无效 URL 删除、12 标签/128 KiB 上限和损坏/超限文件不覆盖。引擎集成测试在 Linux/Xvfb 用真实的独立 Electron 进程和本机合成页面，验证默认关闭时不恢复、用户启用后重启只恢复安全 URL、普通查询可恢复、失败页面保留并给出提示、表单/Cookie/页面凭据不写入会话文件，以及旧进程的内存 Cookie 不会在第二个进程请求中发送；随后关闭恢复并再次启动，确认旧标签不再打开。既有下载、书签/历史、地址栏和视口检查仍继续运行。所有页面夹具只绑定 `127.0.0.1`，测试配置阻止 Chromium 访问其他来源，临时服务端 JSON、Electron 用户配置、下载目录均自动清理。Xvfb 环境临时启用 Chromium SwiftShader 软件 WebGL；普通桌面启动不设置该参数。
+会话存储单元测试覆盖默认关闭、普通查询保留、片段删除、敏感查询键跳过、无效 URL 删除、12 标签/128 KiB 上限和损坏/超限文件不覆盖。`test:browser-find` 使用模拟 WebContents 检查活动标签隔离、前后方向、查询长度/类型、过期结果过滤、清除高亮调用、焦点恢复、不可见/销毁保护和快捷键路由；`test:browser-ipc-security` 验证只有精确主窗口顶层应用来源能调用 IPC。完整 Electron 集成测试还会使用独立本机窗口确认不可信 WebContents 的查找 IPC 被拒；在真实 Chromium 合成页验证三个匹配项、前后导航、关闭清除与焦点返回，并确认远程内容没有 EARTH ONE preload 或 Node `require`。会话与下载 smoke 仍继续运行：默认关闭/启用后的 URL-only 恢复、失败页提示、表单/Cookie/凭据不持久化、浏览导航/下载/本机记录等现有点保持覆盖。所有 fixture 仅绑定 `127.0.0.1`，Chromium 测试策略阻止访问其他来源，临时服务端 JSON、Electron 用户配置和下载目录均自动清理。Xvfb 临时启用 Chromium SwiftShader；普通桌面启动不设置该参数。
 
 ## 平台与维护
 

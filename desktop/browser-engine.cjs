@@ -52,6 +52,8 @@ function createBrowserEngine({
   browserSession,
   onState = () => {},
   onFocusAddressBar = () => {},
+  onFocusFind = () => {},
+  onFindResult = () => {},
   onDownloads = () => {},
   downloadStorePath = null,
   getTestApprovalPath = null
@@ -122,12 +124,32 @@ function createBrowserEngine({
     contents.on('will-redirect', validateNavigation);
     contents.setWindowOpenHandler(() => ({ action: 'deny' }));
     contents.on('before-input-event', (event, input) => {
-      const key = String(input.key || '').toLowerCase();
-      if (input.type !== 'keyDown' || key !== 'l' || !(input.control || input.meta)) return;
+      const key = String(input.key || input.keyCode || '').toLowerCase();
+      const modifiers = Array.isArray(input.modifiers) ? input.modifiers : [];
+      const commandModifier = Boolean(input.control || input.meta || modifiers.includes('control') || modifiers.includes('meta'));
+      const alt = Boolean(input.alt || modifiers.includes('alt'));
+      const shift = Boolean(input.shift || modifiers.includes('shift'));
+      if (input.type !== 'keyDown' || !commandModifier || alt || shift) return;
+      if (key !== 'l' && key !== 'f') return;
       event.preventDefault();
       if (!window.isDestroyed()) window.webContents.focus();
-      onFocusAddressBar(tabId);
+      if (key === 'l') onFocusAddressBar(tabId);
+      if (key === 'f') onFocusFind(tabId);
     });
+
+    contents.on('found-in-page', (_event, result) => {
+      if (disposed || activeTabId !== tabId || !browserActive || !viewportBounds ||
+          entry.findRequestId !== result.requestId || contents.isDestroyed()) return;
+      onFindResult({
+        tabId,
+        requestId: result.requestId,
+        activeMatchOrdinal: Number.isSafeInteger(result.activeMatchOrdinal) ? Math.max(0, result.activeMatchOrdinal) : 0,
+        matches: Number.isSafeInteger(result.matches) ? Math.max(0, result.matches) : 0,
+        finalUpdate: Boolean(result.finalUpdate)
+      });
+    });
+
+    contents.on('did-start-loading', () => stopFindForEntry(tabId, entry));
 
     for (const eventName of [
       'did-start-loading',
@@ -157,7 +179,7 @@ function createBrowserEngine({
         autoplayPolicy: 'user-gesture-required'
       }
     });
-    const entry = { view, lastUrl: '', lastTitle: '' };
+    const entry = { view, lastUrl: '', lastTitle: '', findQuery: '', findRequestId: null };
     tabs.set(tabId, entry);
     window.contentView.addChildView(view);
     attachEvents(tabId, entry);
@@ -167,6 +189,10 @@ function createBrowserEngine({
 
   async function selectTab(tabId, initialUrl) {
     if (!validTabId(tabId)) return { success: false, error: '浏览器标签 ID 无效。' };
+    if (activeTabId && activeTabId !== tabId) {
+      const previousEntry = tabs.get(activeTabId);
+      if (previousEntry) stopFindForEntry(activeTabId, previousEntry);
+    }
     let entry = tabs.get(tabId);
     const isNew = !entry;
     if (!entry) entry = createTab(tabId);
@@ -255,6 +281,7 @@ function createBrowserEngine({
       const selected = await selectTab(tabId, url);
       return selected.success ? { success: true, url } : selected;
     }
+    stopFindForEntry(tabId, entry);
     activeTabId = tabId;
     applyVisibility();
     entry.lastUrl = url;
@@ -269,6 +296,7 @@ function createBrowserEngine({
   function closeTab(tabId) {
     const entry = tabs.get(tabId);
     if (!entry) return;
+    stopFindForEntry(tabId, entry);
     tabs.delete(tabId);
     window.contentView.removeChildView(entry.view);
     if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close();
@@ -278,12 +306,20 @@ function createBrowserEngine({
 
   function setActive(active) {
     browserActive = Boolean(active);
+    if (!browserActive && activeTabId) {
+      const entry = tabs.get(activeTabId);
+      if (entry) stopFindForEntry(activeTabId, entry);
+    }
     applyVisibility();
   }
 
   function setBounds(bounds) {
     if (bounds === null) {
       viewportBounds = null;
+      if (activeTabId) {
+        const entry = tabs.get(activeTabId);
+        if (entry) stopFindForEntry(activeTabId, entry);
+      }
       applyVisibility();
       return;
     }
@@ -311,7 +347,67 @@ function createBrowserEngine({
     const history = entry.view.webContents.navigationHistory;
     if (method === 'back' && history.canGoBack()) history.goBack();
     if (method === 'forward' && history.canGoForward()) history.goForward();
-    if (method === 'reload') entry.view.webContents.reload();
+    if (method === 'reload') {
+      stopFindForEntry(tabId, entry);
+      entry.view.webContents.reload();
+    }
+  }
+
+  function stopFindForEntry(tabId, entry, focusPage = false) {
+    const contents = entry?.view?.webContents;
+    if (!contents || contents.isDestroyed()) return false;
+    const hadFind = Boolean(entry.findQuery || entry.findRequestId !== null);
+    entry.findQuery = '';
+    entry.findRequestId = null;
+    try {
+      contents.stopFindInPage('clearSelection');
+      if (focusPage && browserActive && activeTabId === tabId && viewportBounds) contents.focus();
+    } catch {
+      return false;
+    }
+    if (hadFind) onFindResult({ tabId, requestId: null, activeMatchOrdinal: 0, matches: 0, finalUpdate: true, cleared: true });
+    return true;
+  }
+
+  function getActiveEntry() {
+    if (disposed || !browserActive || !viewportBounds || !activeTabId) return null;
+    const entry = tabs.get(activeTabId);
+    if (!entry || entry.view.webContents.isDestroyed()) return null;
+    return { tabId: activeTabId, entry };
+  }
+
+  function findInPage(query, direction) {
+    if (typeof query !== 'string' || query.length > 512 || query.includes('\u0000')) {
+      return { success: false, error: '查找内容无效或超出长度限制。' };
+    }
+    if (!['new', 'next', 'previous'].includes(direction)) {
+      return { success: false, error: '查找方向无效。' };
+    }
+    if (!query.trim()) return stopFindInPage(false);
+    const active = getActiveEntry();
+    if (!active) return { success: false, error: '当前没有可用的活动 Chromium 页面。' };
+    const { entry } = active;
+    const contents = entry.view.webContents;
+    const isNewSearch = direction === 'new' || entry.findQuery !== query;
+    entry.findQuery = query;
+    try {
+      entry.findRequestId = contents.findInPage(query, {
+        forward: direction !== 'previous',
+        findNext: !isNewSearch
+      });
+      return { success: true };
+    } catch {
+      entry.findQuery = '';
+      entry.findRequestId = null;
+      return { success: false, error: '当前页面暂时无法查找。' };
+    }
+  }
+
+  function stopFindInPage(focusPage = false) {
+    const active = getActiveEntry();
+    if (!active) return { success: false, error: '当前没有可用的活动 Chromium 页面。' };
+    const success = stopFindForEntry(active.tabId, active.entry, Boolean(focusPage));
+    return success ? { success: true } : { success: false, error: '当前页面无法清除查找高亮。' };
   }
 
   function getWebContentsForTesting(tabId) {
@@ -367,6 +463,8 @@ function createBrowserEngine({
     removeDownload: id => downloadManager.remove(id),
     clearDownloadRecords: () => downloadManager.clearTerminal(),
     getDownloadStorageStatus: () => downloadManager.getStorageStatus(),
+    findInPage,
+    stopFindInPage,
     getSessionSnapshot,
     dispose,
     getWebContentsForTesting,

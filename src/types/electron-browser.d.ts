@@ -80,6 +80,17 @@ declare global {
     warning: string | null;
   }
 
+  type EarthOneBrowserFindDirection = 'new' | 'next' | 'previous';
+
+  interface EarthOneBrowserFindResult {
+    tabId: string;
+    requestId: number | null;
+    activeMatchOrdinal: number;
+    matches: number;
+    finalUpdate: boolean;
+    cleared?: boolean;
+  }
+
   interface EarthOneBrowserApi {
     getLocalData(): Promise<EarthOneLocalBrowserData>;
     saveLocalData(data: { bookmarks: EarthOneLocalBookmark[]; history: EarthOneLocalHistoryItem[] }): Promise<{ success: boolean; error?: string }>;
@@ -100,9 +111,13 @@ declare global {
     goBack(tabId: string): Promise<void>;
     goForward(tabId: string): Promise<void>;
     reload(tabId: string): Promise<void>;
+    findInPage(query: string, direction: EarthOneBrowserFindDirection): Promise<{ success: boolean; error?: string }>;
+    stopFindInPage(returnFocus?: boolean): Promise<{ success: boolean; error?: string }>;
     onState(listener: (state: EarthOneBrowserState) => void): () => void;
     onDownloads(listener: (downloads: EarthOneBrowserDownload[], status: EarthOneDownloadStorageStatus) => void): () => void;
     onFocusAddressBar(listener: (tabId: string) => void): () => void;
+    onFocusFind(listener: (tabId: string) => void): () => void;
+    onFindResult(listener: (result: EarthOneBrowserFindResult) => void): () => void;
   }
 
   interface Window {

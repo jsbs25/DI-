@@ -3,6 +3,8 @@ import {
   Globe,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
+  ArrowDown,
   RotateCw,
   Star,
   Bookmark,
@@ -94,6 +96,12 @@ interface SavedArticle {
   aiSummary: string;
   savedAt: string;
   tags: string[];
+}
+
+interface BrowserFindStatus {
+  activeMatchOrdinal: number;
+  matches: number;
+  error?: string;
 }
 
 interface WebBrowserProps {
@@ -231,6 +239,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const browserEngine = typeof window === 'undefined' ? undefined : window.earthOneBrowser;
   const nativeViewportRef = useRef<HTMLDivElement | null>(null);
   const addressBarRef = useRef<HTMLInputElement | null>(null);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
 
   // Browser-local language (defaults to global app language; user can override)
   const [browserLang, setBrowserLang] = useState<Language>(lang);
@@ -249,6 +258,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [activeTabId, setActiveTabId] = useState('tab_1');
   const [inputUrl, setInputUrl] = useState(initialUrl);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFindOpen, setIsFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [findStatus, setFindStatus] = useState<BrowserFindStatus | null>(null);
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(() =>
     readLocalList(LOCAL_BOOKMARKS_KEY, DEFAULT_BOOKMARKS, isBookmarkItem, MAX_LOCAL_BOOKMARKS)
   );
@@ -426,6 +438,49 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
+  const openFindBar = useCallback(() => {
+    if (!browserEngine) return;
+    setIsFindOpen(true);
+    window.requestAnimationFrame(() => findInputRef.current?.focus());
+  }, [browserEngine]);
+
+  const closeFindBar = useCallback((returnFocus = true) => {
+    setIsFindOpen(false);
+    setFindQuery('');
+    setFindStatus(null);
+    void browserEngine?.stopFindInPage(returnFocus).catch(() => {});
+  }, [browserEngine]);
+
+  const runBrowserFind = useCallback((query: string, direction: EarthOneBrowserFindDirection) => {
+    if (!browserEngine) return;
+    if (!query.trim()) {
+      setFindStatus(null);
+      void browserEngine.stopFindInPage(false).catch(() => {});
+      return;
+    }
+    if (direction === 'new') setFindStatus(null);
+    void browserEngine.findInPage(query, direction).then(result => {
+      if (!result.success) setFindStatus({ activeMatchOrdinal: 0, matches: 0, error: result.error || '无法查找当前页面。' });
+    }).catch(() => setFindStatus({ activeMatchOrdinal: 0, matches: 0, error: '无法查找当前页面。' }));
+  }, [browserEngine]);
+
+  useEffect(() => {
+    if (!browserEngine) return;
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.shiftKey || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') return;
+      event.preventDefault();
+      openFindBar();
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [browserEngine, openFindBar]);
+
+  useEffect(() => {
+    setIsFindOpen(false);
+    setFindQuery('');
+    setFindStatus(null);
+  }, [activeTabId]);
+
   const recordBrowserVisit = useCallback((tabId: string, url: string, title: string) => {
     if (!isHttpUrl(url)) return;
     const safeTitle = (title || new URL(url).hostname).slice(0, 300);
@@ -525,6 +580,26 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       if (tabId !== activeTabId || !addressBarRef.current) return;
       addressBarRef.current.focus();
       addressBarRef.current.select();
+    });
+  }, [browserEngine, activeTabId]);
+
+  useEffect(() => {
+    if (!browserEngine?.onFocusFind) return;
+    return browserEngine.onFocusFind(tabId => {
+      if (tabId === activeTabId) openFindBar();
+    });
+  }, [browserEngine, activeTabId, openFindBar]);
+
+  useEffect(() => {
+    if (!browserEngine?.onFindResult) return;
+    return browserEngine.onFindResult(result => {
+      if (result.tabId !== activeTabId) return;
+      if (result.cleared) {
+        setFindQuery('');
+        setFindStatus(null);
+        return;
+      }
+      setFindStatus({ activeMatchOrdinal: result.activeMatchOrdinal, matches: result.matches });
     });
   }, [browserEngine, activeTabId]);
 
@@ -1062,6 +1137,17 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
           )}
         </form>
 
+        <button
+          type="button"
+          onClick={openFindBar}
+          disabled={!browserEngine}
+          aria-label="在当前网页中查找"
+          title={browserEngine ? '在当前网页中查找（Ctrl+F / Cmd+F）' : '普通 Web 预览不支持内嵌页内查找；浏览器原有快捷键保持不变。'}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.035] text-slate-300 transition hover:bg-white/[0.08] hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Search className="h-4 w-4" />
+        </button>
+
         <div
           role="status"
           aria-label={browserEngine ? '真实 Chromium 浏览器引擎' : '网页预览模式'}
@@ -1211,6 +1297,77 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
           </button>
         </div>
       </div>
+
+      {isFindOpen && browserEngine && (
+        <div data-browser-find-bar className="flex min-w-0 flex-wrap items-center gap-2 border-b border-cyan-300/10 bg-[#101b25] px-3 py-2 sm:px-5">
+          <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-cyan-300" />
+          <input
+            ref={findInputRef}
+            data-browser-find-input
+            type="search"
+            value={findQuery}
+            maxLength={512}
+            onChange={event => {
+              const query = event.target.value;
+              setFindQuery(query);
+              runBrowserFind(query, 'new');
+            }}
+            onKeyDown={event => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeFindBar(true);
+              } else if (event.key === 'Enter') {
+                event.preventDefault();
+                runBrowserFind(findQuery, event.shiftKey ? 'previous' : 'next');
+              }
+            }}
+            aria-label="查找当前 Chromium 网页"
+            placeholder="查找网页中的文字"
+            className="min-h-9 min-w-[150px] flex-1 rounded-lg border border-white/10 bg-[#080f16] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-300/50 focus:ring-2 focus:ring-cyan-300/10"
+          />
+          <span
+            role="status"
+            aria-live="polite"
+            data-browser-find-count
+            data-active-match={findStatus?.activeMatchOrdinal ?? 0}
+            data-total-matches={findStatus?.matches ?? 0}
+            className="min-w-[58px] text-center text-xs tabular-nums text-slate-300"
+          >
+            {findStatus?.error || (findStatus ? `${findStatus.activeMatchOrdinal} / ${findStatus.matches}` : (findQuery ? '查找中…' : '输入查找词'))}
+          </span>
+          <button
+            type="button"
+            data-browser-find-previous
+            onClick={() => runBrowserFind(findQuery, 'previous')}
+            disabled={!findQuery || findStatus?.matches === 0}
+            aria-label="上一个匹配项"
+            title="上一个匹配项（Shift+Enter）"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            data-browser-find-next
+            onClick={() => runBrowserFind(findQuery, 'next')}
+            disabled={!findQuery || findStatus?.matches === 0}
+            aria-label="下一个匹配项"
+            title="下一个匹配项（Enter）"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            <ArrowDown className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => closeFindBar(true)}
+            aria-label="关闭页内查找"
+            title="关闭并清除高亮（Esc）"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.08] hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* 3. Bookmarks Bar */}
       <div className="flex items-center gap-2 overflow-x-auto border-b border-white/[0.06] bg-[#0a1118] px-4 py-2 text-[11px] [scrollbar-width:thin]">

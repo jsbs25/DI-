@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
   goBack: tabId => ipcRenderer.invoke('browser:back', tabId),
   goForward: tabId => ipcRenderer.invoke('browser:forward', tabId),
   reload: tabId => ipcRenderer.invoke('browser:reload', tabId),
+  findInPage: (query, direction) => ipcRenderer.invoke('browser:find-in-page', query, direction),
+  stopFindInPage: returnFocus => ipcRenderer.invoke('browser:stop-find-in-page', Boolean(returnFocus)),
   onState: listener => {
     const wrapped = (_event, state) => listener(state);
     ipcRenderer.on('browser:state', wrapped);
@@ -36,5 +38,15 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
     const wrapped = (_event, tabId) => listener(tabId);
     ipcRenderer.on('browser:focus-address-bar', wrapped);
     return () => ipcRenderer.removeListener('browser:focus-address-bar', wrapped);
+  },
+  onFocusFind: listener => {
+    const wrapped = (_event, tabId) => listener(tabId);
+    ipcRenderer.on('browser:focus-find', wrapped);
+    return () => ipcRenderer.removeListener('browser:focus-find', wrapped);
+  },
+  onFindResult: listener => {
+    const wrapped = (_event, result) => listener(result);
+    ipcRenderer.on('browser:find-result', wrapped);
+    return () => ipcRenderer.removeListener('browser:find-result', wrapped);
   }
 });

@@ -60,6 +60,11 @@ const fixtureServer = http.createServer((request, response) => {
     response.end('<!doctype html><html><head><title>EARTH ONE Fixture Two</title></head><body><h1>Local fixture two</h1></body></html>');
     return;
   }
+  if (pathname === '/find') {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><html><head><title>EARTH ONE Find Fixture</title></head><body><p>EARTHONE_FIND_FIXTURE alpha EARTHONE_FIND_FIXTURE beta EARTHONE_FIND_FIXTURE</p><script>window.__earthOneSawControlFind = false; document.addEventListener("keydown", event => { if (event.ctrlKey && event.key.toLowerCase() === "f") window.__earthOneSawControlFind = true; }, true);</script></body></html>');
+    return;
+  }
   if (pathname === '/download') {
     response.writeHead(200, {
       'Content-Type': 'text/plain; charset=utf-8',

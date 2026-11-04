@@ -1,13 +1,13 @@
 # EARTH ONE 回归测试清单
 
-更新时间：2026-11-04
+更新时间：2026-11-05
 
 ## 自动化检查
 
 | 命令 | 覆盖范围 | 当前结果/注意事项 |
 |---|---|---|
-| `npm run lint` | TypeScript 类型检查（`tsc --noEmit`） | 2026-11-04 通过。 |
-| `npm run build` | Vite 生产构建 | 2026-11-04 通过；13 个导航模块按需加载后，入口 chunk 为 316.71 KB（gzip 97.92 KB）；共享 Three.js chunk 仍为 551.65 KB 并触发体积警告。 |
+| `npm run lint` | TypeScript 类型检查（`tsc --noEmit`） | 2026-11-05：通过。 |
+| `npm run build` | Vite 生产构建 | 2026-11-05：通过；Vite 8.3.5 最大 chunk 1,342.07 KB（gzip 358.07 KB），触发大 chunk 警告；本次未修改依赖声明或锁文件。 |
 | `npx tsx scripts/test_earth_one.ts` | 天体常数、地理坐标、公开资料脱敏、存储层注册/登录/引导、动态/互动、消息、JSON 持久化与趋势种子检查 | 2026-11-04：44 项通过、0 失败；使用系统临时数据文件，成功或失败后清理。它不调用 Express HTTP 路由，也不测试浏览器 UI。 |
 | `npm run test:api` | 临时 Express 服务的身份/隐私核心路径，以及动态发布/互动/最新 feed 排序、图书检索/详情/类别筛选/书架、浏览器书签、爬虫任务排队、文章/视频列表、知识图谱搜索/筛选/详情、社区/游戏房间/广告列表、地球节点及位置分享/国家/统计、AI 模型/统计、爬虫任务/页面及已保存文章列表 | 最新完整执行为 83 项通过、0 失败；脚本现含 85 项断言，新增约旦国家元数据与目录/统计跨端点一致性两项。本次两项经独立临时服务 GET smoke 验证；未重跑会命中待授权会话读取路径的完整套件。使用临时 JSON，不触碰正式数据、不发起 AI、外部抓取或媒体请求。未变更私信访问控制及管理授权策略。 |
 | `npm run test:globe-api` | 隔离临时 Express 服务中 `/api/globe/nodes`、`/api/globe/countries`、`/api/globe/stats` 的 GET-only 契约；检查公开/私密位置节点、节点字段白名单、私密坐标不泄漏、国家目录及统计一致性，以及三端点重复 GET 的完整状态/JSON 一致性 | 2026-11-04：14 项通过、0 失败；仅使用合成用户与临时 JSON、随机端口；请求被限于三个白名单 GET，不访问身份/会话/消息路径、正式数据或既有服务。 |
@@ -19,9 +19,11 @@
 | `npm run test:catalog-api` | 独立临时 Express 服务中 `/api/communities`、`/api/games/rooms` 与 `/api/ads` 的 GET-only 目录契约；检查字段、唯一 ID/slug、预置样例及重复读取不改变成员/棋盘/回合/曝光/点击状态；不包含加入、游戏状态变更或广告点击 | 2026-11-04：19 项通过、0 失败；使用自动清理的临时 JSON 和随机端口；不访问会话/消息路径、外部媒体、正式数据或既有服务。 |
 | `npm run test:social-feed-api` | 独立临时 Express 服务的公开 `/api/posts` GET-only 契约；检查字段/种子、默认与最新排序、默认和最新 feed 重复 GET 的完整状态/JSON 一致性、热门评分、国家大小写、类别与国家组合筛选、`all`/`ALL` 兼容及内容搜索；只允许十种预设查询 | 2026-11-04：21 项通过、0 失败；自动清理临时 JSON 与随机端口；不触发写接口、媒体 URL、身份/会话/消息路径、外部来源、正式数据或既有服务。 |
 | `npm run test:public-users-api` | 使用临时合成用户数据，独立验证 `/api/users` 目录筛选、`/api/users/:id` 公开资料、`/api/search/global` 用户检索；检查目录/资料/搜索重复 GET 的状态与完整 JSON 一致性；仅允许白名单 GET | 2026-11-04：24 项通过、0 失败；覆盖邮箱/onboarding 脱敏、私密坐标遮蔽、筛选、结构化 404、搜索边界和三项重复 GET 一致性；自动清理临时 JSON/随机端口，未访问身份、会话/消息路径、写接口、外部来源、正式数据或既有服务。 |
-| `npm run test:browser-api` | 独立临时 Express 服务中 `/api/browser/bookmarks` 与 `/api/browser/saved-articles` 的 GET-only 兼容契约；使用合成记录检查集合字段、书签 ID 唯一性及两个列表重复读取时完整状态/JSON 一致性；请求白名单不含写操作、预览或删除 | 2026-11-04：12 项通过、0 失败；自动清理临时 JSON 和随机本地端口，仅请求两个列表 GET；未访问会话/消息路径、外部 URL、正式数据或既有服务。该旧 API 保留，但当前 Browser UI 不再调用书签端点。 |
-| `npm run test:download-manager` | 合成 DownloadItem/临时 userData：保存对话框批准前不落盘、成功/进度/完成、重启后恢复并将进行中的任务标为已中断、取消、来源 query 脱敏、最近 50 条限制、损坏存储只读保护、批准文件后来删除后的可用状态、写入失败时 remove/clear 回滚、清理保留活动传输、移除/清理不删除文件、无效 URL 与非浏览器来源拒绝 | 2026-11-04：`DOWNLOAD_MANAGER_TEST_PASS`；仅临时目录，无网络。 |
-| `npm run test:browser-engine` | Linux/Xvfb 实际 Electron/Chromium：合成页面导航与返回、浏览历史写入、收藏写入临时 Electron `userData` JSON、应用页重载恢复、历史/书签分别清空且互不影响、`Ctrl+L`、危险协议拒绝、权限默认拒绝、下载历史写入隔离 `userData`、已批准路径/文件夹按钮/仅移除记录不删文件，以及窄窗口视口布局；监测 `/api/browser/bookmarks` 请求数 | 2026-11-04：`BROWSER_SMOKE_PASS`；下载 fixture 仅访问 `127.0.0.1` 临时服务，userData 和文件均自动清理；下载列表移除后文件保留；无外网或正式数据访问。 |
+| `npm run test:browser-api` | 独立临时 Express 服务中 `/api/browser/bookmarks` 与 `/api/browser/saved-articles` 的 GET-only 兼容契约；使用合成记录检查集合字段、书签 ID 唯一性及两个列表重复读取时完整状态/JSON 一致性；请求白名单不含写操作、预览或删除 | 2026-11-05：12 项通过、0 失败；自动清理临时 JSON 和随机本地端口，仅请求两个列表 GET；未访问会话/消息路径、外部 URL、正式数据或既有服务。该旧 API 保留，但当前 Browser UI 不再调用书签端点。 |
+| `npm run test:browser-find` | 模拟 WebContents 查找控制：仅活动可见标签、`new/next/previous`、非字符串/超长查询拒绝、过期结果过滤、清除高亮/焦点恢复、隐藏/销毁保护，以及 Ctrl/Cmd+F 路由 | 2026-11-05：`BROWSER_FIND_ENGINE_TEST_PASS`；通过。 |
+| `npm run test:browser-ipc-security` | 合成 IPC 事件验证精确主窗口 WebContents、顶层 frame 和应用 origin；拒绝其他 WebContents、子框架及错误/畸形来源 | 2026-11-05：`BROWSER_IPC_SECURITY_TEST_PASS`；通过。 |
+| `npm run test:download-manager` | 合成 DownloadItem/临时 userData：保存对话框批准前不落盘、成功/进度/完成、重启后恢复并将进行中的任务标为已中断、取消、来源 query 脱敏、最近 50 条限制、损坏存储只读保护、批准文件后来删除后的可用状态、写入失败时 remove/clear 回滚、清理保留活动传输、移除/清理不删除文件、无效 URL 与非浏览器来源拒绝 | 2026-11-05：`DOWNLOAD_MANAGER_TEST_PASS`；仅临时目录，无网络。 |
+| `npm run test:browser-engine` | Linux/Xvfb 实际 Electron/Chromium：既有导航、下载、收藏/历史、启动恢复、`Ctrl+L` 与视口回归；另在本机合成页验证远程 `Ctrl+F` 聚焦 EARTH ONE 查找框、3 个已知匹配数、下一/上一个序号、关闭清除并还焦点、远程页没有 preload/Node `require`，以及不同 origin 的本地 IPC 调用被拒绝 | 2026-11-05：查找 smoke、下载跨进程恢复、会话恢复/关闭与 session opt-out 均通过；所有 URL 仅访问 `127.0.0.1` 合成 fixture。 |
 | `npm run test:i18n` | 纯本地静态检查六种支持语言的字典键集合一致且所有翻译值非空 | 2026-11-04：13 项通过、0 失败；发现每种语言均有 104 个共用键；不调用 API，不验证翻译准确度、浏览器表现或 RTL 几何。 |
 | `npm run test:globe` | React 静态渲染：六种语言的总览标题/标签、Crawler 菜单翻译键、三个原有指标值、三列网格/逻辑边框和波形独立行 | 2026-11-04：30 项通过、0 失败；不运行 effect、WebGL、浏览器输入或 API，不证明实际视觉几何、交互或 RTL 布局。 |
 | `npm run test:universe` | 地球/土星/空选择的遥测静态渲染：关闭按钮名称和类型、天体双语名称、对焦文字、条件地球入口 | 2026-11-04：9 项通过、0 失败；不测试浏览器点击、键盘、读屏或相机行为，原关闭回调未更改。 |

@@ -7,6 +7,7 @@ const path = require('node:path');
 const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require('electron');
 const { createBrowserEngine, isAllowedNavigation } = require('./browser-engine.cjs');
 const { createBrowserSessionStore } = require('./session-store.cjs');
+const { assertTrustedAppSender: assertTrustedAppSenderForContext } = require('./browser-ipc-security.cjs');
 
 app.setName('EARTH ONE');
 if (process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1' && process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR) {
@@ -35,21 +36,7 @@ const MAX_LOCAL_HISTORY = 500;
 const MAX_LOCAL_BROWSER_DATA_BYTES = 2 * 1024 * 1024;
 
 function assertTrustedAppSender(event) {
-  if (!mainWindow || event.sender !== mainWindow.webContents || !event.senderFrame) {
-    throw new Error('拒绝来自非 EARTH ONE 界面的浏览器控制请求。');
-  }
-  if (event.senderFrame.top !== event.senderFrame) {
-    throw new Error('拒绝来自嵌入式框架的浏览器控制请求。');
-  }
-  let senderOrigin;
-  try {
-    senderOrigin = new URL(event.senderFrame.url).origin;
-  } catch {
-    throw new Error('无法验证浏览器控制请求来源。');
-  }
-  if (senderOrigin !== appOrigin) {
-    throw new Error('拒绝来自非 EARTH ONE 来源的浏览器控制请求。');
-  }
+  assertTrustedAppSenderForContext(event, mainWindow?.webContents, appOrigin);
 }
 
 function getSafeSmokeApprovalPath(smokeTest, fixtureUrl, downloadDir) {
@@ -300,7 +287,9 @@ function registerBrowserIpc() {
     },
     'browser:back': (_event, tabId) => browserEngine.goBack(tabId),
     'browser:forward': (_event, tabId) => browserEngine.goForward(tabId),
-    'browser:reload': (_event, tabId) => browserEngine.reload(tabId)
+    'browser:reload': (_event, tabId) => browserEngine.reload(tabId),
+    'browser:find-in-page': (_event, query, direction) => browserEngine.findInPage(query, direction),
+    'browser:stop-find-in-page': (_event, returnFocus) => browserEngine.stopFindInPage(Boolean(returnFocus))
   };
 
   for (const [channel, handler] of Object.entries(handlers)) {
@@ -376,6 +365,22 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
       throw new Error(`等待本地标签页失败：${tabId} ${pathname}`);
+    };
+
+    const waitForFindStatus = async (activeMatch, totalMatches) => {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const status = await appContents.executeJavaScript(`(() => {
+          const element = document.querySelector('[data-browser-find-count]');
+          return element ? {
+            active: Number(element.getAttribute('data-active-match')),
+            total: Number(element.getAttribute('data-total-matches'))
+          } : null;
+        })()`);
+        if (status?.active === activeMatch && status.total === totalMatches) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error(`等待页内查找计数 ${activeMatch}/${totalMatches} 超时。`);
     };
 
     const submitAddress = targetUrl => appContents.executeJavaScript(`new Promise((resolve, reject) => {
@@ -557,6 +562,84 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       throw new Error(`未知的 Browser session smoke 阶段：${phase}`);
     }
 
+    await waitForPage('/one', 'EARTH ONE Fixture One');
+
+    const untrustedWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.cjs'),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        webSecurity: true
+      }
+    });
+    try {
+      await untrustedWindow.loadURL(`${new URL(testUrl).origin}/one`);
+      const unauthorizedResults = await untrustedWindow.webContents.executeJavaScript(`Promise.all([
+        window.earthOneBrowser.findInPage('EARTHONE_FIND_FIXTURE', 'new').then(() => false, () => true),
+        window.earthOneBrowser.stopFindInPage().then(() => false, () => true)
+      ])`);
+      if (!Array.isArray(unauthorizedResults) || unauthorizedResults.some(rejected => rejected !== true)) {
+        throw new Error('非应用 WebContents 的查找 IPC 调用必须被拒绝。');
+      }
+    } finally {
+      if (!untrustedWindow.isDestroyed()) untrustedWindow.destroy();
+    }
+
+    const remoteCapabilities = await testContents.executeJavaScript(`({
+      bridge: typeof window.earthOneBrowser,
+      require: typeof require,
+      findBridge: typeof window.earthOneBrowser?.findInPage
+    })`);
+    if (remoteCapabilities.bridge !== 'undefined' || remoteCapabilities.require !== 'undefined' || remoteCapabilities.findBridge !== 'undefined') {
+      throw new Error('远程合成页面不得获得 EARTH ONE preload 或 Node require。');
+    }
+
+    await submitAddress(`${new URL(testUrl).origin}/find`);
+    await waitForPage('/find', 'EARTH ONE Find Fixture');
+    testContents.focus();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    testContents.sendInputEvent({ type: 'keyDown', keyCode: 'F', modifiers: ['control'] });
+    testContents.sendInputEvent({ type: 'keyUp', keyCode: 'F', modifiers: ['control'] });
+    const findFocusDeadline = Date.now() + 3000;
+    let findFocused = false;
+    while (Date.now() < findFocusDeadline) {
+      findFocused = await appContents.executeJavaScript(`(() => {
+        const input = document.querySelector('[data-browser-find-input]');
+        return Boolean(input && document.activeElement === input);
+      })()`);
+      if (findFocused) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!findFocused) throw new Error('远程网页中的 Ctrl+F 未聚焦 EARTH ONE 页内查找框。');
+    const pageSawShortcut = await testContents.executeJavaScript('window.__earthOneSawControlFind');
+    if (pageSawShortcut) throw new Error('Ctrl+F 不应继续交给远程网页处理。');
+
+    await appContents.executeJavaScript(`(() => {
+      const input = document.querySelector('[data-browser-find-input]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, 'EARTHONE_FIND_FIXTURE');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await waitForFindStatus(1, 3);
+    await appContents.executeJavaScript(`document.querySelector('[data-browser-find-next]').click()`);
+    await waitForFindStatus(2, 3);
+    await appContents.executeJavaScript(`document.querySelector('[data-browser-find-previous]').click()`);
+    await waitForFindStatus(1, 3);
+    await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭页内查找"]').click()`);
+    const findCloseDeadline = Date.now() + 3000;
+    let findClosed = false;
+    while (Date.now() < findCloseDeadline) {
+      findClosed = !(await appContents.executeJavaScript(`Boolean(document.querySelector('[data-browser-find-input]'))`));
+      if (findClosed) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!findClosed || !testContents.isFocused()) throw new Error('关闭页内查找后应清除界面并将焦点返回 Chromium 页面。');
+    const selectionAfterClear = await testContents.executeJavaScript('window.getSelection()?.toString() || ""');
+    if (selectionAfterClear.includes('EARTHONE_FIND_FIXTURE')) throw new Error('关闭页内查找后不应保留文本选择高亮。');
+    console.log('BROWSER_FIND_SMOKE_PASS: remote Ctrl+F routing, three synthetic matches, next/previous navigation, clear, focus return, no remote preload, and unrelated IPC rejection verified.');
+    await submitAddress(`${new URL(testUrl).origin}/one`);
     await waitForPage('/one', 'EARTH ONE Fixture One');
 
     const defaultSessionToggle = await waitForSessionToggle();
@@ -972,6 +1055,12 @@ app.whenReady().then(async () => {
     },
     onFocusAddressBar: tabId => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:focus-address-bar', tabId);
+    },
+    onFocusFind: tabId => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:focus-find', tabId);
+    },
+    onFindResult: result => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:find-result', result);
     },
     onDownloads: (downloads, storageStatus) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:downloads-state', downloads, storageStatus);
