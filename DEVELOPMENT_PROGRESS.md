@@ -211,14 +211,21 @@
 - 从 `/workspace/DI-review` 的 `main` / `5fc72b3` 继续，保留此前已存在的本地提交；本轮只新增浏览器回归脚本、npm 测试入口和项目记录，没有改应用功能或服务端。
 - 新增 `scripts/test_motion_accessibility_browser.ts` 与 `npm run test:motion:browser`。脚本从源码读取实际 `prefers-reduced-motion` 规则，以内嵌 data URL 在 Chromium headless 下检查计算样式；不启动 EARTH ONE 服务、不访问 API，也不创建持久浏览器配置。
 - `npm run test:motion:browser`：12 项断言通过，使用 Chrome for Testing 151.0.7922.34。强制 reduce 时动画与过渡时长缩到 0.01ms、动画迭代为 1、滚动行为为 auto，静态状态文字保留；本机默认 no-preference 时，5s 动画、4s 过渡、无限迭代和 smooth 滚动保持原值。实体设备、屏幕阅读器及其他辅助技术仍未验证。
-- `npm run test:motion`：6 项静态 CSS 断言通过；`npm run lint`、package.json JSON 解析与 `git diff --check` 均通过。未运行完整 API 套件或生产构建，因为本轮仅新增测试脚本和记录。
+- `npm run test:motion`：6 项静态 CSS 断言通过；`npm run lint`、package.json JSON 解析与 `git diff --check` 均通过。该阶段未运行完整 API 套件；后续生产构建结果见下一节。
 - 全程未触及身份/会话/消息授权、正式 `server_data.json`、既有服务/配置/日志或外部 API；GitHub 同步使用既有授权连接器和普通快进方式，具体核验结果见下一条。
 - GitHub 同步已完成：使用当前已授权连接器 CLI 的命令级 `auth git-credential`，凭据仅用于本次 Git 操作，没有改账户选择或写入 Git 配置。普通快进推送将 `main` 从 `3f445ec` 更新到 `845c44c`，包含此前本地提交 `5fc72b3`；推送后 fetch 核对 `HEAD` 与 `origin/main` 均为 `845c44ca58865edf5966bc74c2cad7337834c1ad`，推送当时工作区干净；未强推。
-
-### 下一步
 
 ### 下一步
 
 - 继续按 `AUTONOMOUS_TASKS.md` 推进不涉及权限策略、正式数据或既有服务的独立任务。
 - 实体设备和辅助技术回归仍标记为待验证，直到相应环境可用并实际完成检查。
 - 后续如有新提交，先 fetch 并核对 `origin/main` 为本地提交祖先，再仅通过普通快进方式同步。
+
+
+## 2026-11-04 减少动态效果生产 CSS 产物回归
+
+- 新增 `scripts/test_motion_accessibility_build.ts` 与 `npm run test:motion:build`；命令先运行 `npm run build`，再检查 Vite 生成的 CSS 媒体查询、全局元素/伪元素选择器，以及动画时长、迭代次数、过渡时长和滚动行为四项覆盖。
+- 首次产物断言因构建器省略最后一条声明后的分号而误报；确认生成 CSS 已包含 `animation-iteration-count:1!important` 后，只放宽测试的分号要求，没有改样式实现。最终 `npm run test:motion:build` 构建通过，9 项产物断言通过，覆盖 1 个 CSS 文件。
+- Vite 构建仍报告 `three.module` chunk 为 551.65 KB，警告原样保留；输出目录 `dist` 被 `.gitignore` 忽略。本轮没有修改应用功能、运行服务、配置或业务数据，也没有请求 API。
+- 同轮重跑 `npm run test:motion`（6 项）、`npm run test:motion:browser`（12 项，Chrome for Testing 151.0.7922.34）和 `npm run lint` 均通过；辅助技术与实体设备仍待实际验证。
+- 新测试及记录将另行提交并通过已有授权连接器普通快进同步；不改账户选择、不改 Git 配置、不强推。

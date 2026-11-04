@@ -95,7 +95,7 @@
 ### P3 — 已完成：尊重系统减少动态效果偏好
 
 - 全局 CSS 仅在 `prefers-reduced-motion: reduce` 时缩短动画与过渡、关闭平滑滚动；不删除控件、内容或静态状态提示。
-- `npm run test:motion` 静态规则检查 6 项通过；`npm run test:motion:browser` 在 Chrome for Testing 151.0.7922.34 上通过 12 项计算样式断言：模拟 reduce 时缩短动画/过渡、迭代为一次并改用自动滚动；宿主默认 no-preference 时原动画/过渡/平滑滚动保持不变，静态状态文字仍在。测试使用隔离 data URL，不启动应用服务或访问 API；实体设备和屏幕阅读器仍待测。
+- `npm run test:motion` 静态规则检查 6 项通过；`npm run test:motion:browser` 在 Chrome for Testing 151.0.7922.34 上通过 12 项计算样式断言；`npm run test:motion:build` 先运行 Vite 生产构建，再通过 9 项编译 CSS 产物断言。三项测试均只覆盖样式/产物，不启动业务 API；实体设备和屏幕阅读器仍待测。生产构建现有 551.65 KB Three.js chunk 警告保留。
 
 ### P3 — 受外部基础设施约束
 

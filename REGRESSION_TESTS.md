@@ -24,6 +24,7 @@
 | `npm run test:universe` | 地球/土星/空选择的遥测静态渲染：关闭按钮名称和类型、天体双语名称、对焦文字、条件地球入口 | 2026-11-04：9 项通过、0 失败；不测试浏览器点击、键盘、读屏或相机行为，原关闭回调未更改。 |
 | `npm run test:motion` | 静态检查全局 CSS 在 `prefers-reduced-motion: reduce` 媒体查询中覆盖元素与伪元素，并缩短动画/过渡、关闭平滑滚动 | 2026-11-04：6 项通过、0 失败；只检查源码规则，不证明浏览器运行时、实体设备或辅助技术行为。 |
 | `npm run test:motion:browser` | Chromium 计算样式回归：模拟系统 reduce 偏好，并在宿主默认为 no-preference 时确认原有动画、过渡及平滑滚动未改变；同时检查静态状态文字仍存在 | 2026-11-04：12 项通过（Chrome for Testing 151.0.7922.34；宿主默认 no-preference）；只加载内嵌 data URL，不启动应用/API 服务。实体设备和辅助技术仍未覆盖；若宿主默认 reduce，不适用的 no-preference 基线项会跳过。 |
+| `npm run test:motion:build` | 运行 Vite 生产构建，再检查构建 CSS 中减少动态效果媒体查询、全局元素/伪元素选择器、动画/过渡时长、迭代次数及滚动覆盖 | 2026-11-04：构建通过；9 项产物断言通过，覆盖 1 个 CSS 文件。Three.js 551.65 KB chunk 警告仍显示；构建产物 `dist` 被忽略，不调用 API 或启动服务。 |
 
 ## 本轮生产构建桌面 smoke
 

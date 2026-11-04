@@ -23,6 +23,7 @@
     "test:i18n": "tsx scripts/test_i18n.ts",
     "test:motion": "tsx scripts/test_motion_accessibility.ts",
     "test:motion:browser": "tsx scripts/test_motion_accessibility_browser.ts",
+    "test:motion:build": "npm run build && tsx scripts/test_motion_accessibility_build.ts",
     "test:globe": "tsx scripts/test_globe_render.tsx",
     "test:universe": "tsx scripts/test_universe_render.tsx"
   },
