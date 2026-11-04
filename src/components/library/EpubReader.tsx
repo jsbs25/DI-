@@ -24,6 +24,9 @@ interface EpubReaderProps {
  */
 export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCfi, ownerId, onProgress }) => {
   const viewerRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const [bookInstance, setBookInstance] = useState<any>(null);
   const [rendition, setRendition] = useState<any>(null);
   const [toc, setToc] = useState<Array<{ href: string; label: string }>>([]);
@@ -55,6 +58,42 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
     flushProgress();
     onClose();
   };
+
+  useEffect(() => {
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeReader();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled])'));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      window.requestAnimationFrame(() => {
+        if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+      });
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,54 +194,61 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#030712] flex flex-col">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="epub-reader-title" tabIndex={-1} className="fixed inset-0 z-50 bg-[#030712] flex flex-col focus:outline-none">
       {/* Toolbar */}
-      <header className="h-14 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 bg-[#02050f]">
-        <div className="flex items-center space-x-3 min-w-0">
-          <button onClick={closeReader} className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer">
-            <X className="w-4 h-4" />
-            <span className="hidden sm:inline">返回</span>
-          </button>
-          <div className="min-w-0">
-            <h2 className="text-sm font-bold text-white line-clamp-1">{book.title}</h2>
-            <span className="text-[11px] text-slate-400">EPUB · {book.author}</span>
+      <header className="min-h-14 border-b border-slate-800 px-3 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-2 shrink-0 bg-[#02050f]">
+        <div className="flex items-center justify-between gap-2 w-full sm:w-auto min-w-0">
+          <div className="flex items-center space-x-3 min-w-0">
+            <button ref={closeButtonRef} type="button" onClick={closeReader} aria-label="关闭 EPUB 阅读器" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer shrink-0">
+              <X className="w-4 h-4" />
+              <span className="sr-only">返回</span>
+            </button>
+            <div className="min-w-0">
+              <h2 id="epub-reader-title" className="text-sm font-bold text-white line-clamp-1">{book.title}</h2>
+              <span className="text-[11px] text-slate-400">EPUB · {book.author}</span>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <button onClick={prev} className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer" title="上一页">
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <span className="text-[11px] text-slate-400 font-mono">{progress}%</span>
-          <button onClick={next} className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer" title="下一页">
-            <ChevronRight className="w-4 h-4" />
-          </button>
-          <button onClick={() => adjustFont(-10)} className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer">A-</button>
-          <button onClick={() => adjustFont(10)} className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer">A+</button>
-          <button onClick={() => setShowToc(!showToc)} className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer" title="目录">
-            <Menu className="w-4 h-4" />
-          </button>
-          <button onClick={toggleFullscreen} className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer" title="全屏">
-            <Maximize2 className="w-4 h-4" />
-          </button>
+        <div className="flex w-full sm:w-auto flex-col sm:flex-row sm:items-center gap-1.5">
+          <div className="flex items-center justify-between sm:justify-start gap-1.5">
+            <button type="button" onClick={prev} aria-label="上一页" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span aria-label={`阅读进度 ${progress}%`} className="text-[11px] text-slate-400 font-mono px-1">{progress}%</span>
+            <button type="button" onClick={next} aria-label="下一页" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex items-center justify-between sm:justify-end gap-1.5">
+            <button type="button" onClick={() => adjustFont(-10)} aria-label="缩小字体" className="min-h-11 min-w-11 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer">A-</button>
+            <button type="button" onClick={() => adjustFont(10)} aria-label="增大字体" className="min-h-11 min-w-11 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer">A+</button>
+            <button type="button" onClick={() => setShowToc(!showToc)} aria-label={showToc ? '关闭目录' : '打开目录'} aria-expanded={showToc} aria-controls="epub-reader-toc" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">
+              <Menu className="w-4 h-4" />
+            </button>
+            <button type="button" onClick={toggleFullscreen} aria-label="切换全屏" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">
+              <Maximize2 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </header>
 
-      <div role="status" className="border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-[11px] leading-relaxed text-amber-200/90">
+      <aside aria-label="EPUB 阅读说明" className="border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-[11px] leading-relaxed text-amber-200/90">
         EPUB 阅读与续读可用；AI 段落解读暂不支持。正文仅在浏览器阅读器中呈现，服务器尚不能核验选文与 CFI 章节定位，因此不会发送给 AI，也不会生成虚构页码或引用。
-      </div>
+      </aside>
 
       {/* Body */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {showToc && (
-          <aside className="w-64 border-r border-slate-800 bg-[#060c20] p-4 overflow-y-auto shrink-0">
+          <aside id="epub-reader-toc" aria-label="EPUB 目录" className="absolute inset-y-0 left-0 z-10 w-[min(80vw,16rem)] border-r border-slate-800 bg-[#060c20] p-4 overflow-y-auto shrink-0 shadow-2xl md:relative md:inset-auto md:z-auto md:w-64 md:shadow-none">
             <h3 className="text-xs font-semibold text-slate-400 mb-3">目录</h3>
             <div className="space-y-1">
               {toc.map((item, i) => (
                 <button
                   key={i}
+                  type="button"
                   onClick={() => goTo(item.href)}
-                  className="w-full text-left px-2 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer line-clamp-1"
+                  className="w-full min-h-11 text-left px-3 py-2 rounded text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer line-clamp-1"
                 >
                   {item.label}
                 </button>
@@ -213,13 +259,13 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
 
         <div className="flex-1 bg-[#f5f1e8] flex items-center justify-center relative">
           {loading && (
-            <div className="text-slate-500 text-sm flex items-center space-x-2">
+              <div role="status" aria-live="polite" className="text-slate-500 text-sm flex items-center space-x-2">
               <BookOpen className="w-5 h-5 animate-pulse" />
               <span>正在加载 EPUB...</span>
             </div>
           )}
           {error && (
-            <div className="text-red-500 text-sm p-4 text-center">
+            <div role="alert" className="text-red-500 text-sm p-4 text-center">
               {error}
             </div>
           )}

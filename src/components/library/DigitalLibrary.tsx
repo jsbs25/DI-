@@ -157,6 +157,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   // ---- Text-to-speech ----
   const [isSpeaking, setIsSpeaking] = useState(false);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const readerDialogRef = useRef<HTMLDivElement>(null);
+  const readerReturnFocusRef = useRef<HTMLElement | null>(null);
 
   // =========================================================================
   // Data loading
@@ -288,6 +290,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       setReadingEpub(book);
       return;
     }
+    readerReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const shelfItem = shelf.find(item => item.bookId === book.id);
     const savedChapterIndex = shelfItem?.lastReadChapterId
       ? book.chapters.findIndex(chapter => chapter.id === shelfItem.lastReadChapterId)
@@ -337,6 +340,42 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     stopSpeaking();
     setReadingBook(null);
     setIsAnnotationDrawerOpen(false);
+  };
+
+  useEffect(() => {
+    if (!readingBook) return;
+    const returnFocus = readerReturnFocusRef.current;
+    readerDialogRef.current?.focus();
+    return () => {
+      window.requestAnimationFrame(() => {
+        if (returnFocus?.isConnected) returnFocus.focus();
+      });
+    };
+  }, [readingBook?.id]);
+
+  const handleReaderDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeReader();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const dialog = readerDialogRef.current;
+    if (!dialog) return;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled])'));
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   };
 
   const stopSpeaking = () => {
@@ -617,7 +656,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {/* WORLD LIBRARY TOP BRAND BAR                                          */}
       {/* ===================================================================== */}
       <header className="sticky top-16 z-30 bg-[#030713]/90 backdrop-blur-xl border-b border-slate-800/70">
-        <div className="max-w-7xl mx-auto px-4 sm:px-8 py-3 flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex items-center space-x-3">
             <div className="p-2 rounded-xl bg-amber-950/80 border border-amber-500/40 text-amber-400">
               <Library className="w-5 h-5" />
@@ -631,6 +670,26 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               </p>
             </div>
           </div>
+
+          <nav className="grid grid-cols-3 gap-2 md:hidden" aria-label="WORLD LIBRARY 导航">
+            {[
+              { id: 'home', label: '首页' },
+              { id: 'shelf', label: '我的书架' },
+              { id: 'admin', label: '管理' }
+            ].map(n => (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => setView(n.id as any)}
+                aria-current={view === n.id ? 'page' : undefined}
+                className={`min-h-11 px-3 rounded-lg transition-colors cursor-pointer ${
+                  view === n.id ? 'bg-amber-600 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                {n.label}
+              </button>
+            ))}
+          </nav>
 
           <nav className="hidden md:flex items-center space-x-1 text-xs font-medium">
             {[
@@ -671,32 +730,36 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               <div className="mt-8">
                 <div className="relative">
                   <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <label htmlFor="world-library-search" className="sr-only">搜索全球馆藏</label>
                   <input
+                    id="world-library-search"
                     type="text"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleOnlineSearch()}
                     placeholder="搜索书名、作者、主题、语言..."
+                    aria-describedby="world-library-search-help"
                     className="w-full bg-slate-900/80 border border-slate-700/80 rounded-2xl pl-11 pr-4 py-3.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition-all shadow-inner"
                   />
                 </div>
                 <div className="mt-3 flex items-center space-x-3">
                   <button
+                    type="button"
                     onClick={handleOnlineSearch}
-                    disabled={isSearchingOnline}
-                    className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-semibold transition-all cursor-pointer"
+                    disabled={isSearchingOnline || !searchQuery.trim()}
+                    className="inline-flex min-h-11 items-center space-x-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-semibold transition-all cursor-pointer"
                   >
                     <Globe className="w-3.5 h-3.5" />
                     <span>{isSearchingOnline ? '正在检索全球书库...' : '搜索全球馆藏'}</span>
                   </button>
-                  <span className="text-[11px] text-slate-500">支持书名、作者、ISBN、DOI 与多语言检索；OpenAlex 作者可用 author:姓名，机构可用 institution:名称</span>
+                  <span id="world-library-search-help" className="text-[11px] text-slate-500">支持书名、作者、ISBN、DOI 与多语言检索；OpenAlex 作者可用 author:姓名，机构可用 institution:名称</span>
                 </div>
                 <div className="mt-4">
                   <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">阿拉伯语馆藏官方入口 · 仅跳转，不复制全文</p>
                   <div className="flex flex-wrap gap-2">
-                    <a href="https://waqfeya.net/books" target="_blank" rel="noopener noreferrer" title="Waqfeya 官方扫描书目录" className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Waqfeya</a>
-                    <a href="https://shamela.ws/search" target="_blank" rel="noopener noreferrer" title="Shamela 官方站内搜索" className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Shamela</a>
-                    <a href="https://www.qdl.qa/en/search/site/" target="_blank" rel="noopener noreferrer" title="Qatar Digital Library 官方档案搜索" className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Qatar Digital Library</a>
+                    <a href="https://waqfeya.net/books" target="_blank" rel="noopener noreferrer" title="Waqfeya 官方扫描书目录" className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Waqfeya</a>
+                    <a href="https://shamela.ws/search" target="_blank" rel="noopener noreferrer" title="Shamela 官方站内搜索" className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Shamela</a>
+                    <a href="https://www.qdl.qa/en/search/site/" target="_blank" rel="noopener noreferrer" title="Qatar Digital Library 官方档案搜索" className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Qatar Digital Library</a>
                   </div>
                 </div>
               </div>
@@ -704,9 +767,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
             {/* Featured real book */}
             {featuredBook && (
-              <div
+              <button
+                type="button"
                 onClick={() => openBookDetail(featuredBook)}
-                className="flex justify-center lg:justify-end cursor-pointer group"
+                aria-label={`查看《${featuredBook.title}》详情`}
+                className="flex justify-center lg:justify-end cursor-pointer group text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 rounded-2xl"
               >
                 <div className="relative">
                   <div className="w-48 sm:w-56 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl shadow-amber-900/30 border border-slate-700/50 group-hover:scale-[1.02] transition-transform duration-300">
@@ -724,14 +789,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     <p className="text-xs text-slate-400 mt-0.5">{featuredBook.author}</p>
                   </div>
                 </div>
-              </div>
+              </button>
             )}
           </section>
 
           {/* Online search results */}
           {(onlineResults.length > 0 || isSearchingOnline || ingestError) && (
-            <section className="p-5 rounded-2xl bg-slate-900/50 border border-amber-600/30">
-              <h3 className="text-sm font-semibold text-amber-300 mb-3">全球检索结果</h3>
+            <section aria-labelledby="library-online-results-title" aria-busy={isSearchingOnline} className="p-5 rounded-2xl bg-slate-900/50 border border-amber-600/30">
+              <h3 id="library-online-results-title" className="text-sm font-semibold text-amber-300 mb-3">全球检索结果</h3>
               {onlineSourceStatuses.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {onlineSourceStatuses.map(source => {
@@ -745,9 +810,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   })}
                 </div>
               )}
-              {ingestError && <div className="text-xs text-red-400 mb-3">{ingestError}</div>}
+              {ingestError && <div role="status" aria-live="polite" className="text-xs text-red-400 mb-3">{ingestError}</div>}
               {isSearchingOnline ? (
-                <div className="text-xs text-slate-400 py-4 text-center">正在查询全球图书馆与开放资源...</div>
+                <div role="status" aria-live="polite" className="text-xs text-slate-400 py-4 text-center">正在查询全球图书馆与开放资源...</div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {onlineResults.map(r => {
@@ -811,25 +876,26 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                           <div className="flex flex-wrap items-center gap-2">
                             {canImport && (
                               <button
+                                type="button"
                                 onClick={() => handleIngestBook(r)}
                                 disabled={ingestingId === r.id}
-                                className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer transition-all"
+                                className="min-h-11 inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer transition-all"
                               >
                                 {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="w-3 h-3" /><span>保存并诵读</span></>}
                               </button>
                             )}
                             {r.sourceUrl && (
-                              <a href={r.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors">
+                              <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center space-x-1 px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors">
                                 <ExternalLink className="w-3 h-3" /><span>在来源平台查看</span>
                               </a>
                             )}
                             {providerFullTextUrl && providerFullTextUrl !== r.sourceUrl && (
-                              <a href={providerFullTextUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-emerald-800/70 text-emerald-200 hover:text-white text-[11px] font-semibold transition-colors">
+                              <a href={providerFullTextUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center space-x-1 px-3 py-2 rounded-lg border border-emerald-800/70 text-emerald-200 hover:text-white text-[11px] font-semibold transition-colors">
                                 <ExternalLink className="w-3 h-3" /><span>打开官方全文</span>
                               </a>
                             )}
                             {licenseUrl && (
-                              <a href={licenseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-all">
+                              <a href={licenseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center space-x-1 px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-all">
                                 <ExternalLink className="w-3 h-3" /><span>查看许可证</span>
                               </a>
                             )}
@@ -950,8 +1016,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 ) : null}
                 <div className="grid grid-cols-2 gap-2">
                   <button
+                    type="button"
                     onClick={() => isOnShelf(selectedBook.id) ? removeFromShelf(selectedBook.id) : addToShelf(selectedBook, 'want_to_read')}
-                    className={`flex items-center justify-center space-x-1.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                    className={`min-h-11 flex items-center justify-center space-x-1.5 px-2 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
                       isOnShelf(selectedBook.id)
                         ? 'bg-amber-950/60 text-amber-300 border-amber-500/50'
                         : 'bg-slate-900 text-slate-200 border-slate-700 hover:bg-slate-800'
@@ -961,8 +1028,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     <span>{isOnShelf(selectedBook.id) ? '已加入书架' : '加入书架'}</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => addToShelf(selectedBook, 'favorite')}
-                    className="flex items-center justify-center space-x-1.5 py-2.5 rounded-xl bg-slate-900 text-slate-200 border border-slate-700 hover:bg-slate-800 text-xs font-semibold transition-all cursor-pointer"
+                    className="min-h-11 flex items-center justify-center space-x-1.5 px-2 py-2.5 rounded-xl bg-slate-900 text-slate-200 border border-slate-700 hover:bg-slate-800 text-xs font-semibold transition-all cursor-pointer"
                   >
                     <Heart className="w-3.5 h-3.5 text-red-400" />
                     <span>收藏</span>
@@ -992,7 +1060,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400">
                   {selectedBook.rightsNote && <p>来源权利说明：{selectedBook.rightsNote}</p>}
                   {safeHttpsUrl(selectedBook.licenseUrl) && (
-                    <a href={safeHttpsUrl(selectedBook.licenseUrl)} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-amber-300 hover:text-amber-200">
+                    <a href={safeHttpsUrl(selectedBook.licenseUrl)} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-11 items-center gap-1 px-2 py-2 text-amber-300 hover:text-amber-200">
                       <ExternalLink className="w-3 h-3" />查看许可证原文
                     </a>
                   )}
@@ -1024,8 +1092,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               <div className="mt-8 flex flex-wrap gap-3">
                 {selectedBook.chapters.some(chapter => chapter.content.trim().length > 0) && (
                   <button
+                    type="button"
                     onClick={() => openReader(selectedBook)}
-                    className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-all cursor-pointer"
+                    className="min-h-11 flex items-center space-x-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-all cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>AI 解读</span>
@@ -1035,8 +1104,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   <a
                     href={selectedBook.sourceUrl || selectedBook.externalReadUrl}
                     target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-200 text-xs font-semibold transition-all"
+                    rel="noopener noreferrer"
+                    className="min-h-11 flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-200 text-xs font-semibold transition-all"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                     <span>资源来源</span>
@@ -1055,7 +1124,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         <div className="max-w-7xl mx-auto w-full px-4 sm:px-8 py-8">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-serif font-bold text-white">我的书架</h2>
-            <button onClick={() => setView('home')} className="flex items-center space-x-1 text-xs text-slate-400 hover:text-white cursor-pointer">
+            <button type="button" onClick={() => setView('home')} className="min-h-11 px-3 flex items-center space-x-1 rounded-lg text-xs text-slate-400 hover:text-white cursor-pointer">
               <ChevronLeft className="w-4 h-4" />
               <span>返回首页</span>
             </button>
@@ -1067,7 +1136,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               <button
                 key={tab.id}
                 onClick={() => setShelfTab(tab.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                className={`min-h-11 px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                   shelfTab === tab.id
                     ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
                     : 'bg-slate-900/60 text-slate-300 border border-slate-800 hover:border-slate-700'
@@ -1110,27 +1179,41 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {/* READER MODAL                                                         */}
       {/* ===================================================================== */}
       {readingBook && activeChapter && (
-        <div className="fixed inset-0 z-50 bg-[#030712]/98 backdrop-blur-2xl flex flex-col animate-in fade-in duration-200">
+        <div ref={readerDialogRef} role="dialog" aria-modal="true" aria-labelledby="library-reader-title" tabIndex={-1} onKeyDown={handleReaderDialogKeyDown} className="fixed inset-0 z-50 bg-[#030712]/98 backdrop-blur-2xl flex flex-col animate-in fade-in duration-200 focus:outline-none">
           {/* Reader header */}
-          <header className="h-16 border-b border-slate-800 px-4 sm:px-6 flex items-center justify-between select-none bg-[#02050f]/80 shrink-0">
-            <div className="flex items-center space-x-3 min-w-0">
+          <header className="min-h-16 border-b border-slate-800 px-3 sm:px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2 py-2 select-none bg-[#02050f]/80 shrink-0">
+            <div className="flex w-full md:w-auto min-w-0 items-center justify-between gap-2">
+              <div className="flex items-center space-x-3 min-w-0">
               <button
+                type="button"
                 onClick={closeReader}
-                className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer shrink-0"
+                aria-label="关闭阅读器"
+                className="min-h-11 min-w-11 flex items-center justify-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer shrink-0"
               >
                 <ChevronLeft className="w-4 h-4" />
                 <span className="hidden sm:inline">返回</span>
               </button>
               <div className="min-w-0">
-                <h2 className="text-sm font-serif font-bold text-white line-clamp-1">{readingBook.title}</h2>
+                <h2 id="library-reader-title" className="text-sm font-serif font-bold text-white line-clamp-1">{readingBook.title}</h2>
                 <span className="text-[11px] text-amber-400">{readingBook.author}</span>
+              </div>
+              </div>
+              <div className="flex md:hidden items-center gap-1 shrink-0">
+                <button type="button" onClick={handleReadAloud} aria-label={isSpeaking ? '停止朗读' : '朗读本章'} title={isSpeaking ? '停止朗读' : '朗读本章'} className={`min-h-11 min-w-11 flex items-center justify-center rounded-xl text-xs font-semibold border transition-all cursor-pointer ${isSpeaking ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'}`}>
+                  {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+                </button>
+                <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? '退出全屏' : '全屏'} title={isFullscreen ? '退出全屏' : '全屏'} className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white cursor-pointer">
+                  <Maximize2 className="w-4 h-4" />
+                </button>
               </div>
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className="hidden md:flex items-center space-x-2">
               {/* Read aloud */}
               <button
+                type="button"
                 onClick={handleReadAloud}
+                aria-label={isSpeaking ? '停止朗读' : '朗读本章'}
                 className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
                   isSpeaking ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
                 }`}
@@ -1140,29 +1223,45 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               </button>
 
               {/* Font size */}
-              <div className="hidden sm:flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
-                <button onClick={() => setFontSize(Math.max(14, fontSize - 2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">A-</button>
+              <div role="group" aria-label="字体大小" className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
+                <button type="button" aria-label="缩小字体" onClick={() => setFontSize(Math.max(14, fontSize - 2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">A-</button>
                 <span className="text-[10px] font-mono text-slate-300">{fontSize}</span>
-                <button onClick={() => setFontSize(Math.min(30, fontSize + 2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">A+</button>
+                <button type="button" aria-label="增大字体" onClick={() => setFontSize(Math.min(30, fontSize + 2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">A+</button>
               </div>
 
               {/* Line height */}
-              <div className="hidden sm:flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
-                <button onClick={() => setLineHeight(Math.max(1.4, lineHeight - 0.2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">行距-</button>
-                <button onClick={() => setLineHeight(Math.min(2.6, lineHeight + 0.2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">行距+</button>
+              <div role="group" aria-label="行距" className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
+                <button type="button" aria-label="减小行距" onClick={() => setLineHeight(Math.max(1.4, lineHeight - 0.2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">行距-</button>
+                <button type="button" aria-label="增大行距" onClick={() => setLineHeight(Math.min(2.6, lineHeight + 0.2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">行距+</button>
               </div>
 
               {/* Theme */}
-              <div className="hidden sm:flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl p-1">
-                <button onClick={() => setReaderTheme('sepia')} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'sepia' ? 'bg-amber-950 text-amber-300' : 'text-slate-400'}`} title="纸张"><Sun className="w-3.5 h-3.5" /></button>
-                <button onClick={() => setReaderTheme('dark')} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'dark' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="夜间"><Moon className="w-3.5 h-3.5" /></button>
-                <button onClick={() => setReaderTheme('focus')} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'focus' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="专注"><Menu className="w-3.5 h-3.5" /></button>
+              <div role="group" aria-label="阅读主题" className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl p-1">
+                <button type="button" onClick={() => setReaderTheme('sepia')} aria-label="纸张背景" aria-pressed={readerTheme === 'sepia'} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'sepia' ? 'bg-amber-950 text-amber-300' : 'text-slate-400'}`} title="纸张"><Sun className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => setReaderTheme('dark')} aria-label="夜间背景" aria-pressed={readerTheme === 'dark'} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'dark' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="夜间"><Moon className="w-3.5 h-3.5" /></button>
+                <button type="button" onClick={() => setReaderTheme('focus')} aria-label="专注模式" aria-pressed={readerTheme === 'focus'} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'focus' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="专注"><Menu className="w-3.5 h-3.5" /></button>
               </div>
 
               {/* Fullscreen */}
-              <button onClick={toggleFullscreen} className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white cursor-pointer" title="全屏">
+              <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? '退出全屏' : '全屏'} className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white cursor-pointer" title={isFullscreen ? '退出全屏' : '全屏'}>
                 <Maximize2 className="w-3.5 h-3.5" />
               </button>
+            </div>
+            <div className="flex md:hidden w-full flex-wrap items-center gap-1.5" role="group" aria-label="阅读设置">
+              <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-1 py-1" role="group" aria-label="字体大小">
+                <button type="button" aria-label="缩小字体" onClick={() => setFontSize(Math.max(14, fontSize - 2))} className="min-h-11 min-w-11 rounded-lg text-xs text-slate-300 hover:text-white cursor-pointer">A-</button>
+                <span className="text-[10px] font-mono text-slate-300">{fontSize}</span>
+                <button type="button" aria-label="增大字体" onClick={() => setFontSize(Math.min(30, fontSize + 2))} className="min-h-11 min-w-11 rounded-lg text-xs text-slate-300 hover:text-white cursor-pointer">A+</button>
+              </div>
+              <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-1 py-1" role="group" aria-label="行距">
+                <button type="button" aria-label="减小行距" onClick={() => setLineHeight(Math.max(1.4, lineHeight - 0.2))} className="min-h-11 min-w-11 rounded-lg text-[11px] text-slate-300 hover:text-white cursor-pointer">行距-</button>
+                <button type="button" aria-label="增大行距" onClick={() => setLineHeight(Math.min(2.6, lineHeight + 0.2))} className="min-h-11 min-w-11 rounded-lg text-[11px] text-slate-300 hover:text-white cursor-pointer">行距+</button>
+              </div>
+              <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl p-1" role="group" aria-label="阅读主题">
+                <button type="button" onClick={() => setReaderTheme('sepia')} aria-label="纸张背景" aria-pressed={readerTheme === 'sepia'} className={`min-h-11 min-w-11 rounded-lg cursor-pointer ${readerTheme === 'sepia' ? 'bg-amber-950 text-amber-300' : 'text-slate-400'}`} title="纸张"><Sun className="w-4 h-4 mx-auto" /></button>
+                <button type="button" onClick={() => setReaderTheme('dark')} aria-label="夜间背景" aria-pressed={readerTheme === 'dark'} className={`min-h-11 min-w-11 rounded-lg cursor-pointer ${readerTheme === 'dark' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="夜间"><Moon className="w-4 h-4 mx-auto" /></button>
+                <button type="button" onClick={() => setReaderTheme('focus')} aria-label="专注模式" aria-pressed={readerTheme === 'focus'} className={`min-h-11 min-w-11 rounded-lg cursor-pointer ${readerTheme === 'focus' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="专注"><Menu className="w-4 h-4 mx-auto" /></button>
+              </div>
             </div>
           </header>
 
@@ -1190,7 +1289,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
             {/* Main reading canvas */}
             <main
-              onMouseUp={handleTextSelection}
+              onPointerUp={handleTextSelection}
               className={`flex-1 overflow-y-auto p-6 sm:p-12 lg:px-24 flex justify-center transition-colors ${readerBg}`}
             >
               <div className="max-w-3xl w-full">
@@ -1210,23 +1309,26 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 {/* Chapter navigation */}
                 <div className="mt-16 pt-8 border-t border-slate-700/50 flex items-center justify-between text-xs">
                   <button
+                    type="button"
                     disabled={activeChapterIndex === 0}
                     onClick={() => { setActiveChapterIndex(prev => Math.max(0, prev - 1)); }}
-                    className="flex items-center space-x-1 hover:text-white disabled:opacity-30 cursor-pointer"
+                    className="min-h-11 px-3 flex items-center space-x-1 hover:text-white disabled:opacity-30 cursor-pointer"
                   >
                     <ChevronLeft className="w-4 h-4" />
                     <span>上一章</span>
                   </button>
                   <button
+                    type="button"
                     onClick={() => saveProgress(Math.round(((activeChapterIndex + 1) / readingBook.chapters.length) * 100))}
-                    className="text-amber-400 hover:text-amber-300 cursor-pointer"
+                    className="min-h-11 px-3 text-amber-400 hover:text-amber-300 cursor-pointer"
                   >
                     保存进度
                   </button>
                   <button
+                    type="button"
                     disabled={activeChapterIndex === readingBook.chapters.length - 1}
                     onClick={() => setActiveChapterIndex(prev => Math.min(readingBook.chapters.length - 1, prev + 1))}
-                    className="flex items-center space-x-1 hover:text-white disabled:opacity-30 cursor-pointer"
+                    className="min-h-11 px-3 flex items-center space-x-1 hover:text-white disabled:opacity-30 cursor-pointer"
                   >
                     <span>下一章</span>
                     <ChevronRight className="w-4 h-4" />
@@ -1237,17 +1339,15 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
             {/* Selection AI sidebar */}
             {(selectedText || isAnnotationDrawerOpen) && readerTheme !== 'focus' && (
-              <aside className="w-80 sm:w-96 border-l border-slate-800 bg-[#060c22] flex flex-col p-4 overflow-y-auto shrink-0">
+              <aside aria-label={selectedText ? 'AI 智能阅读与批注' : '批注'} className="fixed inset-x-0 top-[35vh] bottom-0 z-[60] border-t border-slate-800 bg-[#060c22] flex flex-col p-4 overflow-y-auto rounded-t-2xl shadow-2xl md:relative md:inset-auto md:z-auto md:top-auto md:right-auto md:bottom-auto md:left-auto md:w-80 lg:w-96 md:rounded-none md:shadow-none md:border-t-0 md:border-l shrink-0">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
                   <div className="flex items-center space-x-2">
                     <Sparkles className="w-4 h-4 text-amber-400" />
                     <span className="font-semibold text-xs text-white">{selectedText ? 'AI 智能阅读' : '批注'}</span>
                   </div>
-                  {selectedText && (
-                    <button onClick={() => { setSelectedText(''); setAiExplanation(null); setAiCitation(null); setAiReadingNotice(null); setAiAnswerReady(false); setAiNoteSaved(false); setAiSaveMessage(null); }} className="text-slate-400 hover:text-white text-xs cursor-pointer">
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
+                  <button type="button" aria-label="关闭批注面板" onClick={() => { setSelectedText(''); setIsAnnotationDrawerOpen(false); setAiExplanation(null); setAiCitation(null); setAiReadingNotice(null); setAiAnswerReady(false); setAiNoteSaved(false); setAiSaveMessage(null); window.requestAnimationFrame(() => readerDialogRef.current?.focus()); }} className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-slate-400 hover:text-white cursor-pointer">
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
 
                 {selectedText && (
@@ -1351,14 +1451,16 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 // ===========================================================================
 function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
-      className="group cursor-pointer flex flex-col"
+      aria-label={`打开《${book.title}》详情`}
+      className="group cursor-pointer flex flex-col w-full text-left rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-slate-900 border border-slate-800/60 shadow-lg group-hover:shadow-xl group-hover:shadow-amber-900/20 group-hover:border-amber-500/40 transition-all duration-300">
         <img
           src={book.coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80'}
-          alt={book.title}
+          alt=""
           loading="lazy"
           className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500"
         />
@@ -1368,7 +1470,7 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
         {book.title}
       </h3>
       <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">{book.author}</p>
-    </div>
+    </button>
   );
 }
 

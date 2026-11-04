@@ -204,3 +204,12 @@ Phase 7 的本次增量只为个人书架中的本地章节文本保存用户自
 
 ### Phase 8 follow-up：EPUB AI 正文定位明确不支持（2026-11-04）
 EPUB-only 导入仍保留既有官方书目、权利信息和阅读 URL，不新增 connector 能力。现有 `/api/library/epub-proxy` 只流式转发到浏览器；epub.js 在客户端解析正文/目录，服务器没有章节正文副本或章节内容哈希。个人书架上的 CFI/百分比用于恢复位置，并未被服务端解析核验为章节锚点，百分比也不是页码。因此 `EPUB_TEXT_UNAVAILABLE`（409）拒绝 EPUB AI 解读，阅读器显示这一限制；不生成虚构页码/引用，不发模型请求。服务器已保存且带来源/版本 provenance 的文本书 AI 解读仍保持可用。本阶段未访问真实 EPUB、未读取用户书架、未新增外部请求、连接器、API key 或其他配置；合成回归及检查结果见 `TEST_REPORT.md`。
+
+
+## Phase 9 mobile/browser regression (2026-11-04)
+
+Phase 9 did not change connector registration, provider requests, caching, rights mapping, imports, or credentials. A local headless Chromium run exercised the current WORLD LIBRARY UI at 320, 360, 375, and 390 CSS-pixel widths using synthetic API responses only. The unauthenticated `/api/auth/me` stub returned signed-out state, external network requests were blocked, and the EPUB proxy returned a local synthetic EPUB fixture. No real shelf, reading history, annotation, provider record, external EPUB, or AI model was accessed.
+
+The regression covered disabled-source reporting, empty/no-result plus provider-error reporting, successful synthetic results, and unknown/restricted/provider-declared public-domain rights. Unknown/restricted results never exposed a local-import action; only the explicitly importable synthetic record did. It also measured search/source actions, Arabic-catalog shortcuts, shelf filters/back navigation, text reader controls, annotation drawer controls, EPUB toolbar and table-of-contents entries. All tested touch targets were at least 44px and the page had no horizontal document overflow at tested widths. Keyboard Escape, Tab/Shift+Tab focus cycling and return focus were exercised for text and EPUB readers; the browser reported no page errors.
+
+These are front-end mock/viewport results, not live connector availability or physical-device/real-account validation. Rights and access remain source-record-specific; Phase 8's EPUB AI restriction is unchanged: the server still lacks verified EPUB chapter text/provenance, so reading/resume remain available but EPUB excerpts are not sent to AI and no CFI is presented as a verified page citation. See the Phase 9 rows in `TEST_REPORT.md` for the test matrix and limits.

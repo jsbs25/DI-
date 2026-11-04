@@ -160,3 +160,11 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - 只读检查 `EpubReader`、Gutenberg 导入、EPUB 代理、AI 阅读 API 和 CFI 续读字段。结论：服务端只按允许主机流式代理 EPUB 到浏览器，epub.js 在浏览器解析；服务器没有抽取/持久化章节正文或核验 CFI 对应的版本。EPUB-only 记录为 `metadata_only` 且无 chapters；因此没有安全依据将 EPUB 选文送入 AI。
 - 在 `resolveReadingEvidence` 中为 EPUB-only 记录增加 `EPUB_TEXT_UNAVAILABLE`（409）明确拒绝；即便错误携带全文标记/章节，也不会绕过 EPUB 格式保护。EpubReader 显示清楚说明：保留阅读和续读，AI 解读暂不支持，CFI/百分比不等于可引用章节/页码。现有已验证服务器文本的 AI 解读、来源引用、账户私有笔记、阅读器其余功能均保留。
 - 测试仅用合成 EPUB 元数据和合成正文，不读取实际用户 EPUB/书架，不请求外部书源，不调用模型；未新增依赖、连接器、付费模型、API key 或配置。完整检查见 `TEST_REPORT.md`。
+
+
+### WORLD LIBRARY Phase 9：安全移动适配与浏览器回归（2026-11-04）
+- 从远端已同步的 `main`（`145d822`）继续，仅改图书馆页面与阅读器响应式/无障碍交互；没有改 API/连接器能力、存储模型、认证配置或任何真实用户书架数据。
+- 补上手机端图书馆首页/书架/管理导航、堆叠品牌栏与搜索标签/状态播报；精选书和书卡可用键盘操作。空查询按钮禁用且处理器已有防空查询保护；搜索结果的来源状态、零结果、未知/受限/公版示例使用不同合成响应验证。导入、来源、全文与许可链接扩为至少 44px，外链新窗口使用 `noopener noreferrer`；书架筛选、返回、详情动作及官方馆藏快捷链接也扩大触控区。
+- 文本阅读器窄屏工具栏换行；正文的触屏选区以 `pointerup` 保留现有 AI/批注流程。阅读器补模态语义、Escape 关闭、Tab 首尾循环、焦点返回、可命名控件；手机 AI/批注区域成为可关闭底部抽屉。EPUB 阅读工具栏适配手机，目录改窄屏覆盖抽屉，章节入口至少 44px，并保留 EPUB AI 当前明确拒绝的权利/正文定位说明。
+- 使用 headless Chromium + 临时脚本 `/tmp/world_library_phase9_browser.py`，页面服务于本机 Vite；API 全部路由到合成桩，认证桩为未登录，外网拦截，EPUB 由本地合成文件代理。320/360/375/390px 的首页/搜索状态无横向溢出；书架筛选/返回与搜索结果交互目标均为 44px；320px 文本/EPUB 阅读、触屏批注抽屉、目录、Escape/Tab 焦点循环与返回通过；`PAGE_ERRORS=[]`。测试没有访问/写入真实书架、外部源、模型或真实 EPUB。
+- 验证：`npm run lint`、`npm run build`、隔离 `npm run test:library-api`（45/45）、合成 `npm run test:library-reading-ai`（19/19）、`npm run test:library-connectors`、`npm run test:api`（85/85）通过。既有 Three.js 551.65 kB 构建提示仍为非阻断。真机/真实登录或账户、实时连接器和真实 EPUB 仍未覆盖。
