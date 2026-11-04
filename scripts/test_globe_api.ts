@@ -7,7 +7,47 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const ALLOWED_ENDPOINTS = new Set(['/api/globe/countries', '/api/globe/stats']);
+const ALLOWED_ENDPOINTS = new Set(['/api/globe/nodes', '/api/globe/countries', '/api/globe/stats']);
+
+const publicNodeUser = {
+  id: 'user_globe_node_public_probe',
+  username: 'public_node_probe',
+  displayName: 'Public Node Probe',
+  email: 'public-node-private-field@example.test',
+  avatar: 'https://example.test/public-node.png',
+  bio: 'Synthetic public globe node for isolated regression.',
+  location: {
+    countryCode: 'JO',
+    countryName: 'Jordan',
+    cityName: 'Amman',
+    lat: 31.9454,
+    lng: 35.9284,
+    isPublic: true
+  },
+  interests: [],
+  followersCount: 0,
+  followingCount: 0,
+  tipsReceived: 0,
+  isOnline: false,
+  verified: false,
+  joinedAt: '2026-01-01',
+  hasCompletedOnboarding: true
+};
+
+const privateNodeUser = {
+  ...publicNodeUser,
+  id: 'user_globe_node_private_probe',
+  username: 'private_node_probe',
+  displayName: 'Private Node Probe',
+  email: 'private-node-probe@example.test',
+  location: {
+    ...publicNodeUser.location,
+    cityName: 'Private Synthetic City',
+    lat: 47.123456,
+    lng: -98.123456,
+    isPublic: false
+  }
+};
 
 async function getAvailablePort(): Promise<number> {
   const server = net.createServer();
@@ -24,6 +64,10 @@ async function getAvailablePort(): Promise<number> {
 async function main() {
   const testDir = fs.mkdtempSync(path.join(tmpdir(), 'earth-one-globe-api-test-'));
   const dataFile = path.join(testDir, 'server_data.json');
+  fs.writeFileSync(dataFile, JSON.stringify({
+    users: [publicNodeUser, privateNodeUser],
+    currentUser: publicNodeUser
+  }, null, 2), 'utf8');
   let childOutput = '';
   const port = await getAvailablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -73,6 +117,43 @@ async function main() {
   }
 
   try {
+    let globeNodes: Awaited<ReturnType<typeof get>> | undefined;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (child.exitCode !== null) throw new Error(`Isolated API server exited early.\n${childOutput}`);
+      try {
+        globeNodes = await get('/api/globe/nodes');
+        if (globeNodes.status === 200) break;
+      } catch {
+        await sleep(250);
+      }
+    }
+    const nodes = globeNodes?.body.nodes;
+    check(
+      globeNodes?.status === 200 && globeNodes.body.success === true && Array.isArray(nodes),
+      'Globe node API returns a successful node collection from isolated synthetic data'
+    );
+    check(
+      nodes.length === 1 && nodes[0]?.userId === publicNodeUser.id &&
+      !nodes.some((node: any) => node.userId === privateNodeUser.id),
+      'Globe node collection includes the public profile and excludes the private-location profile'
+    );
+    const publicNode = Array.isArray(nodes) ? nodes[0] : undefined;
+    check(
+      publicNode?.id === `node_${publicNodeUser.id}` && publicNode.displayName === publicNodeUser.displayName &&
+      publicNode.countryCode === 'JO' && publicNode.cityName === 'Amman' &&
+      publicNode.lat === publicNodeUser.location.lat && publicNode.lng === publicNodeUser.location.lng,
+      'Public globe node preserves its expected identity and shared location coordinates'
+    );
+    check(
+      !!publicNode && Object.keys(publicNode).sort().join(',') === [
+        'avatar', 'cityName', 'countryCode', 'countryName', 'displayName', 'id', 'isOnline',
+        'lat', 'latestThought', 'lng', 'userId'
+      ].sort().join(',') &&
+      !JSON.stringify(globeNodes?.body).includes(String(privateNodeUser.location.lat)) &&
+      !JSON.stringify(globeNodes?.body).includes(String(privateNodeUser.location.lng)),
+      'Globe node response contains only the established public fields and no private coordinate sentinels'
+    );
+
     let countries: Awaited<ReturnType<typeof get>> | undefined;
     for (let attempt = 0; attempt < 80; attempt += 1) {
       if (child.exitCode !== null) throw new Error(`Isolated API server exited early.\n${childOutput}`);
@@ -116,6 +197,7 @@ async function main() {
       'Globe statistics match the catalog length and include Jordan'
     );
     check(
+      requestedEndpoints.includes('/api/globe/nodes') &&
       requestedEndpoints.includes('/api/globe/countries') &&
       requestedEndpoints.includes('/api/globe/stats') &&
       requestedEndpoints.every(endpoint => ALLOWED_ENDPOINTS.has(endpoint)),
