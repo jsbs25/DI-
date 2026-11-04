@@ -1,145 +1,98 @@
 /**
- * EARTH ONE - AUTOMATED BOOK HARVESTER
- * Periodically fetches classic, high-quality public-domain books from the
- * Open Library API and ingests them into the Digital Library store.
+ * EARTH ONE - AUTOMATED BOOK HARVESTER (Chinese public-domain classics)
  *
- * Runs entirely in the backend on a timer — there is intentionally no
- * frontend "crawler" entry point. The library grows itself.
+ * Periodically ingests real, full-text Chinese public-domain classics from
+ * zh.wikisource.org into the Digital Library. It does NOT create metadata-only
+ * "preview" entries — every harvested book carries real chapter content.
+ *
+ * Only titles in the explicit allow-list below are harvested, and each points
+ * at a verified single-page wikisource edition (so full text is actually
+ * present rather than a table-of-contents or a redirect page).
  */
 
 import { Book } from '../src/types/index.ts';
 import { store } from './store.ts';
+import { fetchWikisourceFullText } from './webFetcher.ts';
 
-const USER_AGENT = 'EARTH-ONE-BookHarvester/1.0 (contact: earthone@example.com)';
+interface ClassicEntry {
+  /** Exact zh.wikisource.org page title that hosts the full text. */
+  pageTitle: string;
+  /** Friendly display title. */
+  title: string;
+  category: Book['category'];
+}
 
-// Rotating subject list — each cycle picks a different category to keep the
-// library diverse across literature, philosophy, science, and history.
-const SUBJECTS: { subject: string; category: Book['category']; language: string }[] = [
-  { subject: 'love', category: 'literature', language: 'en' },
-  { subject: 'science', category: 'science', language: 'en' },
-  { subject: 'philosophy', category: 'philosophy', language: 'en' },
-  { subject: 'history', category: 'history', language: 'en' },
-  { subject: 'geography', category: 'geography', language: 'en' },
-  { subject: 'economics', category: 'economics', language: 'en' }
+// Verified Chinese public-domain classics whose full text lives on a single
+// wikisource page (not a redirect or a table-of-contents page).
+const CHINESE_CLASSICS: ClassicEntry[] = [
+  { pageTitle: '孫子兵法', title: '孙子兵法', category: 'philosophy' },
+  { pageTitle: '唐詩三百首', title: '唐诗三百首', category: 'literature' },
+  { pageTitle: '弟子規', title: '弟子规', category: 'education' },
+  { pageTitle: '三字經', title: '三字经', category: 'education' },
+  { pageTitle: '千字文', title: '千字文', category: 'education' },
+  { pageTitle: '百家姓', title: '百家姓', category: 'education' },
+  { pageTitle: '朱子家訓', title: '朱子治家格言', category: 'education' }
 ];
 
-interface OpenLibraryWork {
-  key: string;
-  title: string;
-  authors?: { name: string }[];
-  first_publish_year?: number;
-  cover_id?: number;
-  description?: string | { value: string };
-  subject?: string[];
-}
+async function harvestClassic(entry: ClassicEntry): Promise<Book | null> {
+  const fullText = await fetchWikisourceFullText(entry.pageTitle);
+  if (!fullText) return null;
 
-function flattenDescription(desc: string | { value: string } | undefined): string {
-  if (!desc) return '';
-  if (typeof desc === 'string') return desc;
-  if (desc && typeof desc.value === 'string') return desc.value;
-  return '';
-}
+  // Drop empty/skeleton chapters (TOC pages produce headings with no body).
+  const chapters = fullText.chapters
+    .map((ch, i) => ({ id: `ch${i + 1}`, title: ch.title, content: ch.content.trim() }))
+    .filter(ch => ch.content.length >= 20);
 
-function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+  if (chapters.length === 0) return null;
 
-function coverUrl(coverId: number | undefined): string | undefined {
-  if (!coverId) return undefined;
-  return `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
-}
+  const book: Book = {
+    id: `wikisource_classic_${entry.title.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '')}`,
+    title: entry.title,
+    author: fullText.author || '佚名',
+    category: entry.category,
+    language: 'zh',
+    source: 'Open Access',
+    description: `中国公版经典《${entry.title}》全文，源自中文维基文库。`,
+    readProgress: 0,
+    chapters,
+    copyrightStatus: 'public_domain',
+    formatType: 'text',
+    textAvailability: 'full_text',
+    sourceUrl: `https://zh.wikisource.org/wiki/${encodeURIComponent(entry.pageTitle)}`
+  };
 
-async function fetchJson(url: string, timeoutMs = 8000): Promise<any> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Fetch a batch of books for one subject. Returns fully-formed Book objects
- * with a short metadata preview as the first chapter (the harvester doesn't
- * download full texts — it archives metadata + a preview, keeping storage light).
- */
-async function harvestSubject(subject: string, category: Book['category'], language: string): Promise<Book[]> {
-  const data = await fetchJson(
-    `https://openlibrary.org/subjects/${encodeURIComponent(subject)}.json?limit=6`
-  );
-
-  const works: OpenLibraryWork[] = data?.works || [];
-  const books: Book[] = [];
-
-  for (const w of works) {
-    if (!w.title) continue;
-    const author = w.authors?.[0]?.name || 'Unknown Author';
-    const description = stripHtml(flattenDescription(w.description)) ||
-      `A notable work in ${subject}, curated automatically by the EARTH ONE Digital Library harvester.`;
-
-    books.push({
-      id: `harvest_${w.key.replace(/[^a-zA-Z0-9]/g, '_')}`,
-      title: w.title,
-      author,
-      category,
-      language,
-      year: w.first_publish_year ? String(w.first_publish_year) : undefined,
-      source: 'Open Library',
-      coverImage: coverUrl(w.cover_id),
-      description: description.slice(0, 280),
-      readProgress: 0,
-      textAvailability: 'metadata_only',
-      chapters: [
-        {
-          id: 'ch1',
-          title: 'Preview',
-          content: `${w.title} by ${author}.\n\n${description.slice(0, 1200)}\n\n[Automated archive entry — full text available via Open Library.]`
-        }
-      ]
-    });
-  }
-
-  return books;
+  return book;
 }
 
 let cycleIndex = 0;
 
 /**
- * Run one harvest cycle. Picks the next subject in rotation, fetches books,
- * and merges them into the store (de-duplicated by id).
- *
- * Returns a short log string for server-side logging.
+ * Run one harvest cycle. Picks the next Chinese classic in rotation, fetches
+ * its full text, and merges it into the store (de-duplicated by stable id).
  */
 export async function runBookHarvest(): Promise<string> {
-  const slot = SUBJECTS[cycleIndex % SUBJECTS.length];
+  const entry = CHINESE_CLASSICS[cycleIndex % CHINESE_CLASSICS.length];
   cycleIndex += 1;
 
   try {
-    const books = await harvestSubject(slot.subject, slot.category, slot.language);
-    if (books.length === 0) {
-      return `[BookHarvest] No books returned for "${slot.subject}"`;
+    const book = await harvestClassic(entry);
+    if (!book) {
+      return `[BookHarvest] ${entry.title}: no readable full text found`;
     }
 
-    // De-duplicate against existing library
-    const existingIds = new Set(store.books.map(b => b.id));
-    const fresh = books.filter(b => !existingIds.has(b.id));
-
-    if (fresh.length > 0) {
-      store.books.unshift(...fresh);
+    const existing = store.books.find(b => b.id === book.id);
+    if (existing) {
+      existing.chapters = book.chapters;
+      existing.description = book.description;
+      existing.textAvailability = 'full_text';
+      existing.sourceUrl = book.sourceUrl;
       store.saveToDisk();
+      return `[BookHarvest] ${entry.title}: refreshed ${book.chapters.length} chapters`;
     }
 
-    return `[BookHarvest] ${slot.subject}: fetched ${books.length}, added ${fresh.length} new books`;
+    store.addBook(book);
+    return `[BookHarvest] ${entry.title}: ingested ${book.chapters.length} chapters`;
   } catch (err: any) {
-    return `[BookHarvest] "${slot.subject}" failed: ${err?.message || err}`;
+    return `[BookHarvest] ${entry.title} failed: ${err?.message || err}`;
   }
 }
