@@ -246,6 +246,10 @@ export async function searchWeb(
     return searchWikipedia(q, limit, lang);
   }
 
+  // auto: 优先 Serper.dev（真实 Google 搜索结果），未配置 key 时回退 Bing/DDG/Wikipedia
+  const google = await searchGoogle(q, limit);
+  if (google.length > 0) return google;
+
   // auto: prefer broad search providers for normal queries. Wikipedia is a
   // fallback for knowledge lookups, not the default result set for every query.
   const bing = await searchBing(q, limit);
@@ -255,6 +259,40 @@ export async function searchWeb(
   if (ddg.length > 0) return ddg.map(result => ({ ...result, source: 'web' as const }));
 
   return (await searchWikipedia(q, limit, lang)).map(result => ({ ...result, source: 'web' as const }));
+}
+
+/** Google 搜索（Serper.dev）。配置 SERPER_API_KEY 后返回真实 Google 搜索结果，与 Google 首页一致。 */
+export async function searchGoogle(query: string, limit = 10): Promise<SearchResult[]> {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return [];
+  const q = query.trim();
+  if (!q) return [];
+
+  try {
+    const res = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': key,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ q, num: Math.min(limit, 20), hl: 'zh-cn', gl: 'cn' })
+    });
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    const organic = data?.organic;
+    if (!Array.isArray(organic)) return [];
+
+    return organic.slice(0, limit).map((r: any) => ({
+      title: r.title || r.link || 'Untitled',
+      url: r.link || '',
+      snippet: r.snippet || '',
+      source: 'web' as const
+    })).filter(r => r.url);
+  } catch {
+    return [];
+  }
 }
 
 /** Search GitHub's public repository index. Results are discovery metadata only;
