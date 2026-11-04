@@ -125,6 +125,12 @@ async function main() {
       communityIds.has('comm_1') && communityIds.has('comm_4'),
       'Existing seeded community catalog entries remain present'
     );
+    const repeatedCommunitiesResponse = await get('/api/communities');
+    check(
+      repeatedCommunitiesResponse.status === 200 &&
+      JSON.stringify(repeatedCommunitiesResponse.body) === JSON.stringify(communitiesResponse?.body),
+      'Repeated community-list GETs do not change membership or catalog state'
+    );
 
     const roomsResponse = await get('/api/games/rooms');
     check(
@@ -154,6 +160,12 @@ async function main() {
       roomIds.has('game_1') && roomIds.has('game_2'),
       'Existing seeded chess and Gomoku rooms remain present without joining or changing them'
     );
+    const repeatedRoomsResponse = await get('/api/games/rooms');
+    check(
+      repeatedRoomsResponse.status === 200 &&
+      JSON.stringify(repeatedRoomsResponse.body) === JSON.stringify(roomsResponse.body),
+      'Repeated game-room listing GETs do not change room, board, or turn state'
+    );
 
     const adsResponse = await get('/api/ads');
     check(
@@ -182,6 +194,12 @@ async function main() {
     check(
       adIds.has('ad_1') && adIds.has('ad_2'),
       'Existing seeded advertisement entries remain present without recording a click'
+    );
+    const repeatedAdsResponse = await get('/api/ads');
+    check(
+      repeatedAdsResponse.status === 200 &&
+      JSON.stringify(repeatedAdsResponse.body) === JSON.stringify(adsResponse.body),
+      'Repeated advertisement-list GETs do not change impression or click counters'
     );
     check(
       [...ALLOWED_ENDPOINTS].every(endpoint => requested.some(request => request.endpoint === endpoint)) &&

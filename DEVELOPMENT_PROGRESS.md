@@ -2,7 +2,7 @@
 
 更新时间：2026-11-04
 仓库：`https://github.com/jsbs25/DI-`
-分支：`main` / `origin/main`；本次续作基线 `11f36c2`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
+分支：`main` / `origin/main`；本次续作基线 `97e6234`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
 
 ## 本轮已完成
 
@@ -134,3 +134,11 @@
 - `npm run test:globe-api` 复跑 11 项通过；`npm run lint` 与 `git diff --check` 通过。两项专项测试均使用自动清理的临时 JSON 与随机本地端口；未运行包含待批准会话读取路径的完整 `npm run test:api`、构建或浏览器回归。
 - 未请求身份、会话/消息接口或写接口；未访问外部来源、正式 `server_data.json` 或既有服务，也未检查现有服务日志/配置。
 - GitHub 同步：提交 `88eb83f4b2760ffb79b60f6314ff88ff509bc2df` 从父提交 `11f36c2` 正常快进推送至 `main`；推送后再次 fetch，`HEAD` 与 `origin/main` 均为该提交，工作区干净。使用当前已授权的连接入口，未强推或更改账户/全局 Git 配置。
+
+
+## 2026-11-04 社区、游戏房间与广告目录重复 GET 幂等性续测
+
+- 从干净的 `main` / `97e6234` 继续；仅扩展 `scripts/test_catalogs_api.ts`，未修改服务端路由或业务数据。
+- 为 `/api/communities`、`/api/games/rooms`、`/api/ads` 各增加一次重复 GET 比对，确保读取目录不会改变社区加入状态、游戏棋盘/回合或广告曝光/点击计数。
+- `npm run test:catalog-api`：19 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。服务运行于随机本地端口，使用自动清理的临时 JSON，端点白名单仅包含三个目录 GET。
+- 未运行完整 `npm run test:api`（该套件含等待批准的会话读取路径）、构建或浏览器测试；未访问会话/消息接口、写接口、外部服务、正式 `server_data.json` 或既有服务，也未检查既有服务配置/日志。
