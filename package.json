@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit",
     "test:api": "tsx scripts/test_api.ts",
     "test:globe-api": "tsx scripts/test_globe_api.ts",
+    "test:ai-api": "tsx scripts/test_ai_api.ts",
     "test:globe": "tsx scripts/test_globe_render.tsx",
     "test:universe": "tsx scripts/test_universe_render.tsx"
   },

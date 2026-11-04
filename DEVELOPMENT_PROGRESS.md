@@ -2,7 +2,7 @@
 
 更新时间：2026-11-04
 仓库：`https://github.com/jsbs25/DI-`
-分支：`main` / `origin/main`；本次续作基线 `eece3c5`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
+分支：`main` / `origin/main`；本次续作基线 `84cd502`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
 
 ## 本轮已完成
 
@@ -44,6 +44,7 @@
 36. 增加社交列表 GET 排序契约：刚创建的测试动态应排在 `/api/posts?feed=latest` 首位。当前 API 回归为 83 项通过、0 失败；本次完整复核 `npm run lint`、`npm run test:globe`（30 项）、`npm run test:universe`（9 项）、`npx tsx scripts/test_earth_one.ts`（44 项）及 `npm run build` 均通过。生产构建保留既有 551.65 KB Three.js chunk 警告，未为规避警告改变地球/宇宙行为；所有 API 测试用临时数据。
 37. 为地球国家目录增加两项只读 HTTP 回归：验证约旦英文/本地化名称与坐标字段，以及 `/api/globe/stats` 国家总数与 `/api/globe/countries` 目录长度一致。`npm run lint` 通过；仅在临时 JSON 服务上定向请求这两个 GET，结果通过（12 个国家、约旦元数据存在、统计数量一致）。完整 `test:api` 未重跑，因为现有全量脚本包含待用户批准的会话读取测试；未请求会话/消息端点。
 38. 将上一轮手动定向 smoke 固化为 `npm run test:globe-api` 独立脚本：国家目录非空、国家代码唯一且格式合理、名称/坐标字段与边界有效、约旦本地化元数据正确、统计结构和目录数量一致；脚本白名单只含 `/api/globe/countries`、`/api/globe/stats` 两个 GET 接口，使用独立临时 JSON 并关闭后台书籍采集。本轮 7 项通过，`npm run lint` 通过；没有运行完整 API 套件。
+39. 新增 `npm run test:ai-api`，为 `/api/ai/models` 与 `/api/ai/stats` 建立独立 GET-only 回归；使用临时 JSON、在测试子进程清空模型密钥并关闭后台采集，检查元数据结构、模型 ID 唯一性、未配置掩码和统计汇总。9 项通过；`npm run lint` 与 `npm run test:globe-api`（7 项）通过。未调用模型或会话/消息路由，未运行包含待批准读取路径的完整 `test:api`。
 
 ## 验证结果
 
