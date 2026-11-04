@@ -39,8 +39,9 @@
 31. 单次隔离生产 Chromium Resource Timing 观测到首屏 7 个 JS 资源 encoded body 共 253,077 B、decoded 942,755 B，CSS 共 16,324/112,399 B；Three.js 单块为 136,323/551,656 B。其余 12 个页面块在首次导航后才下载，CrawlerDashboard 为 4,849/17,678 B。该值是模拟器单次本地资源快照，不计响应头，也不是网络带宽或实机性能测试。
 32. 没有继续延迟 Three.js：当前首页默认显示交互式 3D 地球，先占位或要求点击会改变行为；未经明确产品取舍，不改默认首屏或场景生命周期。
 33. 范围更正：浏览器会话的 App 启动自动 GET `/api/conversations`；切换到 Messenger 后，合成 `conv_global` 会使组件 GET `/api/conversations/conv_global/messages`。图书馆和网页浏览器挂载也 GET 了临时服务的书架、书签与保存文章列表。它们只访问临时 DataStore 的合成种子/空集合，没有正式用户数据或既有服务；这些读取并未作为权限测试或断言。
-34. 延续普通 API 回归覆盖：为本地 `/api/library/books` 增加哲学类别筛选与无匹配类别空集合两项契约断言。`npm run test:api` 曾为 80 项通过、0 失败，`npm run lint` 通过；测试使用脚本创建并清理的临时 JSON，不访问外部服务、私信读取路径或正式数据。随后位置隐私回归增至 82 项（见第 35 项）。两笔变更已通过现有授权连接器快进推送，远端 `main` 已核对到 `e715f97`，未修改账户设置。
+34. 延续普通 API 回归覆盖：为本地 `/api/library/books` 增加哲学类别筛选与无匹配类别空集合两项契约断言。`npm run test:api` 曾为 80 项通过、0 失败，`npm run lint` 通过；测试使用脚本创建并清理的临时 JSON，不访问外部服务、私信读取路径或正式数据。随后位置隐私回归增至 82 项（见第 35 项）。相关变更已通过现有授权连接器快进推送，fetch 核验本地与远端一致，未修改账户设置。
 35. 再补两项位置分享回归：有效会话打开位置分享后，`GET /api/globe/nodes` 会返回该用户及数值坐标；关闭分享后节点消失。当前 `npm run test:api` 为 82 项通过、0 失败，`npm run lint` 通过；仅使用隔离临时存储和本地请求，不调整权限策略或生产路由。
+36. 增加社交列表 GET 排序契约：刚创建的测试动态应排在 `/api/posts?feed=latest` 首位。当前 API 回归为 83 项通过、0 失败；本次完整复核 `npm run lint`、`npm run test:globe`（30 项）、`npm run test:universe`（9 项）、`npx tsx scripts/test_earth_one.ts`（44 项）及 `npm run build` 均通过。生产构建保留既有 551.65 KB Three.js chunk 警告，未为规避警告改变地球/宇宙行为；所有 API 测试用临时数据。
 
 ## 验证结果
 

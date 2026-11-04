@@ -180,6 +180,8 @@ async function main() {
     check(createdPost.status === 200 && createdPost.body.post.userId === userId, 'A valid session can publish a post under its own identity');
     check(createdPost.body.post.category === 'study', 'Post category is preserved in the response');
     const postId = createdPost.body.post.id as string;
+    const latestPosts = await request('/api/posts?feed=latest');
+    check(latestPosts.status === 200 && latestPosts.body.success === true && latestPosts.body.posts[0]?.id === postId, 'Latest feed orders the newest post first');
     const filteredPosts = await request(`/api/posts?search=${encodeURIComponent(marker)}&country=JO&category=study`);
     check(filteredPosts.body.posts.some((post: any) => post.id === postId), 'Post search, country, and category filters return the matching post');
     const liked = await request(`/api/posts/${postId}/like`, 'POST', {});
