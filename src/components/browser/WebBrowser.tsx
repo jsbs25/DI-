@@ -14,7 +14,11 @@ import {
   CheckCircle,
   ChevronRight,
   Database,
-  Search
+  Search,
+  BookmarkPlus,
+  GitFork,
+  Code2,
+  Check
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { BrowserFrame } from './BrowserFrame.tsx';
@@ -159,7 +163,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
 
   // Live search state
-  const [searchResults, setSearchResults] = useState<{ title: string; url: string; snippet: string }[]>([]);
+  const [searchResults, setSearchResults] = useState<Array<{ title: string; url: string; snippet: string; source?: 'web' | 'github'; repository?: string; stars?: number; forks?: number; language?: string; license?: string; updatedAt?: string; openIssues?: number }>>([]);
   const [lastSearchQuery, setLastSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
 
@@ -168,7 +172,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [historyIndex, setHistoryIndex] = useState<Record<string, number>>({ tab_1: 0 });
 
   // Search engine selection
-  const [searchEngine, setSearchEngine] = useState<'auto' | 'bing' | 'duckduckgo' | 'wikipedia'>('auto');
+  const [searchEngine, setSearchEngine] = useState<'auto' | 'bing' | 'duckduckgo' | 'wikipedia' | 'github'>('auto');
+  const [workspaceRepos, setWorkspaceRepos] = useState<string[]>([]);
 
   // Sync browser language when the global app language changes
   useEffect(() => {
@@ -430,6 +435,27 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     }
   };
 
+  const handleAddGitHubToWorkspace = async (result: typeof searchResults[number]) => {
+    if (!result.repository || workspaceRepos.includes(result.repository)) return;
+    try {
+      const res = await fetch('/api/browser/bookmarks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: result.repository, url: result.url, category: 'GitHub / 待审核接入' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setWorkspaceRepos(prev => [...prev, result.repository as string]);
+        setBookmarks(prev => [data.bookmark, ...prev.filter(item => item.url !== result.url)]);
+        setSaveSuccessMessage('已加入工作区候选。请先检查许可证、依赖和安全性，再决定是否接入。');
+        setTimeout(() => setSaveSuccessMessage(null), 4500);
+      }
+    } catch {
+      setSaveSuccessMessage('加入工作区失败，请稍后重试。');
+      setTimeout(() => setSaveSuccessMessage(null), 3500);
+    }
+  };
+
   const targetLanguageName: Record<Language, string> = {
     zh: '中文',
     en: 'English',
@@ -629,6 +655,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
               <option value="bing">Bing</option>
               <option value="duckduckgo">DuckDuckGo</option>
               <option value="wikipedia">Wikipedia</option>
+              <option value="github">GitHub 开源项目</option>
             </select>
           </div>
 
@@ -714,11 +741,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
           {searchResults.length > 0 || isSearching ? (
             <div className="max-w-3xl mx-auto">
               <div className="mb-6">
-                <div className="flex items-center space-x-2 text-xs text-slate-400 mb-2">
-                  <span className="rounded-full border border-cyan-200/15 bg-cyan-200/[0.06] px-2.5 py-1 font-medium text-cyan-100">
-                    全网搜索
+                <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  <span className={`rounded-full border px-2.5 py-1 font-medium ${searchEngine === 'github' ? 'border-slate-600 bg-slate-900 text-white' : 'border-cyan-200/15 bg-cyan-200/[0.06] text-cyan-100'}`}>
+                    {searchEngine === 'github' ? 'GitHub 开源项目' : '高质量网页搜索'}
                   </span>
                   {!isSearching && <span>约 {searchResults.length} 条结果</span>}
+                  {searchEngine === 'github' && <span className="text-emerald-300/80">按 Stars 排序 · 官方 API · 仅展示公开元数据</span>}
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-snug">
                   “{lastSearchQuery}”
@@ -737,24 +765,32 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {searchResults.map((result, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => handleNavigate(result.url)}
-                      className="group w-full cursor-pointer rounded-2xl border border-white/[0.07] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6"
-                    >
-                      <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-emerald-300/80">
-                        <Globe className="w-3 h-3 shrink-0" />
-                        <span className="truncate">{result.url}</span>
+                  {searchResults.map((result, idx) => result.source === 'github' ? (
+                    <div key={idx} className="group w-full rounded-2xl border border-white/[0.08] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6">
+                      <div className="flex items-start justify-between gap-4">
+                        <button onClick={() => handleNavigate(result.url)} className="min-w-0 text-left">
+                          <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-cyan-300/80"><Code2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">github.com/{result.repository}</span></div>
+                          <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-cyan-100 sm:text-lg">{result.title}</h2>
+                        </button>
+                        <button onClick={() => handleAddGitHubToWorkspace(result)} disabled={!result.repository || workspaceRepos.includes(result.repository)} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-cyan-300 px-3 py-2 text-[11px] font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:bg-emerald-900/60 disabled:text-emerald-200">
+                          {workspaceRepos.includes(result.repository || '') ? <Check className="h-3.5 w-3.5" /> : <BookmarkPlus className="h-3.5 w-3.5" />}
+                          <span className="hidden sm:inline">{workspaceRepos.includes(result.repository || '') ? '已加入' : '加入工作区'}</span>
+                        </button>
                       </div>
-                      <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-cyan-100 sm:text-lg">
-                        {result.title}
-                      </h2>
-                      {result.snippet && (
-                        <p className="mt-1 text-xs sm:text-sm text-slate-400 leading-relaxed line-clamp-2">
-                          {result.snippet}
-                        </p>
-                      )}
+                      {result.snippet && <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-slate-400 sm:text-sm">{result.snippet}</p>}
+                      <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/10 px-2.5 py-1 text-amber-300"><Star className="h-3 w-3" /> {(result.stars || 0).toLocaleString()}</span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-2.5 py-1"><span className="sr-only">Forks </span><GitFork className="h-3 w-3" /> {(result.forks || 0).toLocaleString()}</span>
+                        <span className="rounded-full bg-white/[0.05] px-2.5 py-1">{result.language}</span>
+                        <span className="rounded-full bg-white/[0.05] px-2.5 py-1">{result.license}</span>
+                        <span className="text-slate-500">更新于 {result.updatedAt ? new Date(result.updatedAt).toLocaleDateString() : '未知'}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <button key={idx} onClick={() => handleNavigate(result.url)} className="group w-full cursor-pointer rounded-2xl border border-white/[0.07] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6">
+                      <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-emerald-300/80"><Globe className="h-3 w-3 shrink-0" /><span className="truncate">{result.url}</span></div>
+                      <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-cyan-100 sm:text-lg">{result.title}</h2>
+                      {result.snippet && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-400 sm:text-sm">{result.snippet}</p>}
                     </button>
                   ))}
                 </div>
