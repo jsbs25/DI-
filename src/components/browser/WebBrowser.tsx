@@ -112,6 +112,7 @@ const LOCAL_BOOKMARKS_KEY = 'earth-one.browser.bookmarks.v1';
 const LOCAL_HISTORY_KEY = 'earth-one.browser.history.v1';
 const MAX_LOCAL_BOOKMARKS = 200;
 const MAX_LOCAL_HISTORY = 500;
+const MAX_RESTORED_SESSION_TABS = 12;
 
 function isHttpUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 4096) return false;
@@ -286,6 +287,68 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   }, [lang]);
 
   useEffect(() => {
+    if (!browserEngine?.getSessionState || !browserEngine.restoreSession) return;
+    let cancelled = false;
+    const loadSessionState = async () => {
+      try {
+        const state = await browserEngine.getSessionState();
+        if (cancelled) return;
+        setBrowserSessionEnabled(Boolean(state.enabled));
+        setBrowserSessionReadOnly(Boolean(state.readOnly));
+        setBrowserSessionWarning(state.warning || null);
+
+        const restoredTabs = state.enabled && Array.isArray(state.tabs)
+          ? state.tabs.filter(tab => tab && typeof tab.id === 'string' && isHttpUrl(tab.url))
+            .slice(0, MAX_RESTORED_SESSION_TABS)
+            .map(tab => ({
+              id: tab.id,
+              title: tab.title || new URL(tab.url).host,
+              url: tab.url,
+              readerMode: false
+            }))
+          : [];
+
+        if (restoredTabs.length > 0) {
+          const activeId = state.activeTabId && restoredTabs.some(tab => tab.id === state.activeTabId)
+            ? state.activeTabId
+            : restoredTabs[0].id;
+          restoredTabIdsRef.current = new Set(restoredTabs.map(tab => tab.id));
+          setTabs(restoredTabs);
+          setActiveTabId(activeId);
+          setInputUrl(restoredTabs.find(tab => tab.id === activeId)?.url || restoredTabs[0].url);
+          setHistory(Object.fromEntries(restoredTabs.map(tab => [tab.id, [tab.url]])));
+          setHistoryIndex(Object.fromEntries(restoredTabs.map(tab => [tab.id, 0])));
+          setSessionRestoreNotice({ kind: 'restoring', restoredCount: restoredTabs.length, failedCount: 0 });
+          const restorePromise = browserEngine.restoreSession();
+          setBrowserSessionSettingsReady(true);
+          void restorePromise.then(result => {
+            if (cancelled) return;
+            const failedCount = result.tabs.filter(tab => !tab.success).length;
+            setSessionRestoreNotice({
+              kind: failedCount > 0 ? 'failed' : 'restored',
+              restoredCount: restoredTabs.length,
+              failedCount
+            });
+          }).catch(() => {
+            if (!cancelled) setSessionRestoreNotice({ kind: 'failed', restoredCount: restoredTabs.length, failedCount: restoredTabs.length });
+          });
+          return;
+        }
+
+        restoredTabIdsRef.current.clear();
+        setSessionRestoreNotice(null);
+      } catch {
+        if (cancelled) return;
+        setBrowserSessionReadOnly(true);
+        setBrowserSessionWarning('无法读取本机标签恢复设置；为避免覆盖原文件，当前不会写入或清除它。');
+      }
+      if (!cancelled) setBrowserSessionSettingsReady(true);
+    };
+    void loadSessionState();
+    return () => { cancelled = true; };
+  }, [browserEngine]);
+
+  useEffect(() => {
     if (!browserEngine?.getLocalData) {
       setBrowserStorageReady(true);
       return;
@@ -349,6 +412,17 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [isTranslating, setIsTranslating] = useState(false);
   const [browserEngineState, setBrowserEngineState] = useState<EarthOneBrowserState | null>(null);
   const [browserEngineError, setBrowserEngineError] = useState<string | null>(null);
+  const [browserSessionSettingsReady, setBrowserSessionSettingsReady] = useState(!browserEngine?.getSessionState);
+  const [browserSessionEnabled, setBrowserSessionEnabled] = useState(false);
+  const [browserSessionReadOnly, setBrowserSessionReadOnly] = useState(false);
+  const [browserSessionWarning, setBrowserSessionWarning] = useState<string | null>(null);
+  const [browserSessionTogglePending, setBrowserSessionTogglePending] = useState(false);
+  const [sessionRestoreNotice, setSessionRestoreNotice] = useState<{
+    kind: 'restoring' | 'restored' | 'failed';
+    restoredCount: number;
+    failedCount: number;
+  } | null>(null);
+  const restoredTabIdsRef = useRef<Set<string>>(new Set());
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
@@ -389,12 +463,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   }, [browserEngine]);
 
   useEffect(() => {
-    if (!browserEngine || !activeTab) return;
+    if (!browserEngine || !activeTab || !browserSessionSettingsReady || restoredTabIdsRef.current.has(activeTabId)) return;
     browserEngine.selectTab(activeTabId, activeTab.url).then(result => {
       if (!result.success) setBrowserEngineError(result.error || 'Chromium 网页无法打开。');
       else setBrowserEngineError(null);
     }).catch(error => setBrowserEngineError(error?.message || 'Chromium 引擎暂不可用。'));
-  }, [browserEngine, activeTabId]);
+  }, [browserEngine, activeTabId, browserSessionSettingsReady]);
 
   useEffect(() => {
     if (!browserEngine) return;
@@ -733,6 +807,25 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     }
   };
 
+  const handleToggleSessionRestore = async () => {
+    if (!browserEngine?.setSessionEnabled || browserSessionReadOnly || browserSessionTogglePending) return;
+    setBrowserSessionTogglePending(true);
+    try {
+      const result = await browserEngine.setSessionEnabled(!browserSessionEnabled);
+      if (!result.success) {
+        setBrowserSessionWarning(result.error || '无法更新本机标签恢复设置。');
+        return;
+      }
+      setBrowserSessionEnabled(result.enabled);
+      setBrowserSessionWarning(null);
+      if (!result.enabled) setSessionRestoreNotice(null);
+    } catch {
+      setBrowserSessionWarning('无法更新本机标签恢复设置。');
+    } finally {
+      setBrowserSessionTogglePending(false);
+    }
+  };
+
   const handleAddBookmark = () => {
     if (!browserStorageReady || browserStorageReadOnly || !activeTab || !isHttpUrl(activeTab.url)) return;
     if (bookmarks.some(bookmark => bookmark.url === activeTab.url)) {
@@ -985,6 +1078,22 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
         </div>
 
         <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 sm:w-auto">
+          {browserEngine && browserSessionSettingsReady && (
+            <button
+              type="button"
+              onClick={() => void handleToggleSessionRestore()}
+              disabled={browserSessionReadOnly || browserSessionTogglePending}
+              aria-label="启动时恢复上次打开的标签"
+              aria-pressed={browserSessionEnabled}
+              title="默认关闭。开启后仅在此设备保存最多 12 个 HTTP(S) 标签地址；普通查询参数保留，片段移除；含 token、auth、code、key、password、session、credential 等敏感查询键的网址不会保存。不保存 Cookie 或表单内容。关闭时会清除标签快照。"
+              data-browser-session-toggle
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${browserSessionEnabled ? 'border-cyan-300/25 bg-cyan-300/[0.08] text-cyan-100' : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'}`}
+            >
+              <Clock3 className="h-3.5 w-3.5" />
+              <span>启动恢复：{browserSessionEnabled ? '开' : '关'}</span>
+            </button>
+          )}
+
           {/* Language selector (controls search result language) */}
           <div className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3">
             <Globe className="h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -1122,6 +1231,26 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       {browserEngineError && (
         <div role="alert" className="border-b border-rose-300/15 bg-rose-950/40 px-4 py-2 text-xs text-rose-200">
           {browserEngineError}
+        </div>
+      )}
+
+      {browserSessionWarning && (
+        <div role="alert" data-browser-session-warning className="border-b border-amber-300/15 bg-amber-950/40 px-4 py-2 text-xs text-amber-100">
+          {browserSessionWarning}
+        </div>
+      )}
+
+      {sessionRestoreNotice && (
+        <div
+          role={sessionRestoreNotice.kind === 'failed' ? 'alert' : 'status'}
+          data-browser-session-restore-notice={sessionRestoreNotice.kind}
+          className={`border-b px-4 py-2 text-xs ${sessionRestoreNotice.kind === 'failed' ? 'border-rose-300/15 bg-rose-950/40 text-rose-100' : 'border-cyan-300/15 bg-cyan-950/30 text-cyan-100'}`}
+        >
+          {sessionRestoreNotice.kind === 'restoring'
+            ? `正在恢复上次打开的 ${sessionRestoreNotice.restoredCount} 个标签…`
+            : sessionRestoreNotice.kind === 'failed'
+              ? `已恢复 ${sessionRestoreNotice.restoredCount} 个上次标签，其中 ${sessionRestoreNotice.failedCount} 个页面未能加载；标签仍保留，可在地址栏重试。`
+              : `已恢复上次打开的 ${sessionRestoreNotice.restoredCount} 个标签。`}
         </div>
       )}
 

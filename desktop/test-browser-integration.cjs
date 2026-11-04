@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const assert = require('node:assert/strict');
+const { MAX_SESSION_STORE_BYTES, MAX_SESSION_TABS } = require('./session-store.cjs');
 const { isAllowedNavigation, normalizeBrowserUrl } = require('./browser-engine.cjs');
 
 const root = path.resolve(__dirname, '..');
@@ -28,8 +29,27 @@ let activeRun = null;
 let finished = false;
 const activeFixtureResponses = new Set();
 const activeFixtureSockets = new Set();
+const sessionRequestAudit = [];
+let sessionOneRequestCount = 0;
 const fixtureServer = http.createServer((request, response) => {
   const pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname;
+  if (pathname.startsWith('/session-')) {
+    sessionRequestAudit.push({ pathname, cookie: request.headers.cookie || '' });
+  }
+  if (pathname === '/session-one' || pathname === '/session-two') {
+    const shouldSetSessionCookie = pathname === '/session-one' && sessionOneRequestCount === 0;
+    if (pathname === '/session-one') sessionOneRequestCount += 1;
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      ...(shouldSetSessionCookie ? { 'Set-Cookie': 'earth-one-ephemeral=synthetic-cookie-secret; Path=/; HttpOnly; SameSite=Lax' } : {})
+    });
+    response.end(`<!doctype html><html><head><title>${pathname === '/session-one' ? 'Session Fixture One' : 'Session Fixture Two'}</title></head><body><h1>${pathname}</h1><form><input id="session-email" type="email"><input id="session-password" type="password"></form></body></html>`);
+    return;
+  }
+  if (pathname === '/session-fail') {
+    request.socket.destroy();
+    return;
+  }
   if (pathname === '/one') {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end('<!doctype html><html><head><title>EARTH ONE Fixture One</title></head><body><h1>Local fixture one</h1><a href="/two">Next page</a></body></html>');
@@ -85,18 +105,21 @@ fixtureServer.on('connection', socket => {
   socket.once('close', () => activeFixtureSockets.delete(socket));
 });
 
-function launchSmoke(phase) {
+function launchSmoke(phase, options = {}) {
   let output = '';
+  const runProfileDir = options.profileDir || profileDir;
+  const startUrl = options.startUrl || `http://127.0.0.1:${fixtureServer.address().port}/one`;
   const child = spawn(process.execPath, [path.join(root, 'desktop', 'launcher.cjs')], {
     cwd: root,
     detached: process.platform !== 'win32',
     env: {
       ...process.env,
       EARTH_ONE_BROWSER_SMOKE_TEST: '1',
+      EARTH_ONE_BROWSER_SESSION_SMOKE_TEST: options.sessionSmoke ? '1' : '0',
       EARTH_ONE_BROWSER_TEST_PHASE: phase,
-      EARTH_ONE_BROWSER_TEST_URL: `http://127.0.0.1:${fixtureServer.address().port}/one`,
+      EARTH_ONE_BROWSER_TEST_URL: startUrl,
       EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR: downloadDir,
-      EARTH_ONE_BROWSER_TEST_PROFILE_DIR: profileDir,
+      EARTH_ONE_BROWSER_TEST_PROFILE_DIR: runProfileDir,
       EARTH_ONE_DATA_FILE: path.join(downloadDir, 'server_data.json'),
       EARTH_ONE_SKIP_BOOK_HARVEST: 'true'
     },
@@ -210,6 +233,8 @@ async function main() {
   activeRun = firstRun;
   const restartMarker = await firstRun.waitForMarker(/BROWSER_SMOKE_RESTART_READY:(\d+)/, 80000);
   console.log('BROWSER_TEST_DRIVER_FIRST_PROCESS_READY');
+  const defaultSessionPath = path.join(profileDir, 'earth-one-browser-session.json');
+  assert.equal(fs.existsSync(defaultSessionPath), false, 'default-off profile must not persist a tab snapshot');
   const electronPid = Number(restartMarker[1]);
   const storePath = path.join(profileDir, 'earth-one-downloads.json');
   const persisted = JSON.parse(fs.readFileSync(storePath, 'utf8'));
@@ -244,6 +269,77 @@ async function main() {
   ]);
   assert.equal(secondClose.code, 0, `restarted Electron launcher failed: ${secondRun.getOutput()}`);
   console.log('BROWSER_TEST_DRIVER_LAUNCHER_EXITED_CLEANLY');
+  activeRun = null;
+
+  const sessionProfileDir = path.join(downloadDir, 'electron-session-profile');
+  fs.mkdirSync(sessionProfileDir, { recursive: true });
+  const sessionStorePath = path.join(sessionProfileDir, 'earth-one-browser-session.json');
+  const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`;
+  const cookieAuditBeforeSave = sessionRequestAudit.length;
+  const sessionSaveRun = launchSmoke('session-save', {
+    profileDir: sessionProfileDir,
+    startUrl: `${fixtureOrigin}/session-one`,
+    sessionSmoke: true
+  });
+  activeRun = sessionSaveRun;
+  const sessionSaveMarker = await sessionSaveRun.waitForMarker(/BROWSER_SESSION_SAVE_READY:(\d+)/, 80000);
+  const sessionPid = Number(sessionSaveMarker[1]);
+  const savedSessionText = fs.readFileSync(sessionStorePath, 'utf8');
+  const savedSession = JSON.parse(savedSessionText);
+  assert.ok(Buffer.byteLength(savedSessionText, 'utf8') <= MAX_SESSION_STORE_BYTES, 'session file stays within its byte bound');
+  assert.equal(savedSession.tabs.length, MAX_SESSION_TABS > 3 ? 3 : MAX_SESSION_TABS);
+  const firstProcessRequests = sessionRequestAudit.slice(cookieAuditBeforeSave);
+  assert.ok(firstProcessRequests.some(request => request.pathname === '/session-two' && request.cookie.includes('earth-one-ephemeral=synthetic-cookie-secret')),
+    'first Electron process uses its in-memory fixture cookie across tabs');
+
+  killElectronProcess(sessionPid);
+  const sessionSaveClose = await Promise.race([
+    sessionSaveRun.closed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('first session Electron launcher did not exit after its main process was terminated')), 12000))
+  ]);
+  assert.notEqual(sessionSaveClose.code, 0, 'the session-save process is deliberately hard-stopped to model a crash/restart');
+  activeRun = null;
+
+  const cookieAuditBeforeRestore = sessionRequestAudit.length;
+  const initialPageRequestsBeforeRestore = sessionRequestAudit.filter(request => request.pathname === '/one').length;
+  const sessionRestoreRun = launchSmoke('session-restore', {
+    profileDir: sessionProfileDir,
+    startUrl: `${fixtureOrigin}/one`,
+    sessionSmoke: true
+  });
+  activeRun = sessionRestoreRun;
+  await sessionRestoreRun.waitForMarker(/BROWSER_SESSION_RESTORE_PASS:/, 80000);
+  const sessionRestoreClose = await Promise.race([
+    sessionRestoreRun.closed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('session restore Electron launcher did not exit cleanly')), 12000))
+  ]);
+  assert.equal(sessionRestoreClose.code, 0, `second session Electron process failed: ${sessionRestoreRun.getOutput()}`);
+  const optedOutStore = JSON.parse(fs.readFileSync(sessionStorePath, 'utf8'));
+  assert.equal(optedOutStore.enabled, false, 'turning the setting off clears the saved session');
+  assert.deepEqual(optedOutStore.tabs, []);
+  const requestsAfterRestart = sessionRequestAudit.slice(cookieAuditBeforeRestore);
+  assert.ok(requestsAfterRestart.some(request => request.pathname === '/session-one'));
+  assert.ok(requestsAfterRestart.some(request => request.pathname === '/session-two'));
+  assert.ok(requestsAfterRestart.every(request => !request.cookie.includes('earth-one-ephemeral=synthetic-cookie-secret')),
+    'the in-memory fixture cookie must not be sent by the second Electron process');
+  assert.equal(sessionRequestAudit.filter(request => request.pathname === '/one').length, initialPageRequestsBeforeRestore,
+    'an enabled session must not load the default browserUrl in the background');
+  console.log('BROWSER_TEST_DRIVER_SESSION_RESTART_PASSED');
+  activeRun = null;
+
+  const sessionOptOutRun = launchSmoke('session-optout', {
+    profileDir: sessionProfileDir,
+    startUrl: `${fixtureOrigin}/one`,
+    sessionSmoke: true
+  });
+  activeRun = sessionOptOutRun;
+  await sessionOptOutRun.waitForMarker(/BROWSER_SESSION_OPTOUT_PASS:/, 80000);
+  const sessionOptOutClose = await Promise.race([
+    sessionOptOutRun.closed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('session opt-out Electron launcher did not exit cleanly')), 12000))
+  ]);
+  assert.equal(sessionOptOutClose.code, 0, `session opt-out Electron process failed: ${sessionOptOutRun.getOutput()}`);
+  console.log('BROWSER_TEST_DRIVER_SESSION_OPTOUT_PASSED');
   activeRun = null;
 }
 

@@ -41,6 +41,27 @@ declare global {
     warning?: string;
   }
 
+  interface EarthOneBrowserSessionTab {
+    id: string;
+    url: string;
+    title: string;
+  }
+
+  interface EarthOneBrowserSessionState {
+    enabled: boolean;
+    activeTabId: string | null;
+    tabs: EarthOneBrowserSessionTab[];
+    readOnly: boolean;
+    warning?: string | null;
+  }
+
+  interface EarthOneBrowserSessionRestoreResult {
+    success: boolean;
+    activeTabId?: string | null;
+    tabs: Array<{ tabId: string; success: boolean; error?: string }>;
+    error?: string;
+  }
+
   interface EarthOneBrowserDownload {
     id: string;
     filename: string;
@@ -62,6 +83,9 @@ declare global {
   interface EarthOneBrowserApi {
     getLocalData(): Promise<EarthOneLocalBrowserData>;
     saveLocalData(data: { bookmarks: EarthOneLocalBookmark[]; history: EarthOneLocalHistoryItem[] }): Promise<{ success: boolean; error?: string }>;
+    getSessionState(): Promise<EarthOneBrowserSessionState>;
+    setSessionEnabled(enabled: boolean): Promise<{ success: boolean; enabled: boolean; error?: string }>;
+    restoreSession(): Promise<EarthOneBrowserSessionRestoreResult>;
     getDownloads(): Promise<EarthOneBrowserDownload[]>;
     cancelDownload(id: string): Promise<{ success: boolean }>;
     removeDownload(id: string): Promise<{ success: boolean; error?: string }>;

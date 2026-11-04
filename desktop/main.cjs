@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require('electron');
 const { createBrowserEngine, isAllowedNavigation } = require('./browser-engine.cjs');
+const { createBrowserSessionStore } = require('./session-store.cjs');
 
 app.setName('EARTH ONE');
 if (process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1' && process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR) {
@@ -21,6 +22,13 @@ let testDownloadDir = null;
 let browserBookmarkApiRequests = 0;
 let localBrowserDataReadOnly = false;
 let localBrowserDataWriteQueue = Promise.resolve();
+let browserSessionStore = null;
+let browserSessionStatus = { enabled: false, activeTabId: null, tabs: [], readOnly: false, warning: null };
+let browserSessionEnabled = false;
+let browserSessionRestoreStarted = false;
+let browserSessionRestoreResult = null;
+let browserSessionRestorePromise = null;
+let browserSessionPersistTimer = null;
 
 const MAX_LOCAL_BOOKMARKS = 200;
 const MAX_LOCAL_HISTORY = 500;
@@ -78,6 +86,60 @@ function getSafeSmokeApprovalPath(smokeTest, fixtureUrl, downloadDir) {
 
 function getLocalBrowserDataPath() {
   return path.join(app.getPath('userData'), 'earth-one-browser-data.json');
+}
+
+function getBrowserSessionStorePath() {
+  return path.join(app.getPath('userData'), 'earth-one-browser-session.json');
+}
+
+function persistBrowserSessionNow() {
+  if (!browserSessionStore || !browserSessionEnabled) return { success: true, enabled: false, tabs: [] };
+  const snapshot = browserEngine?.getSessionSnapshot?.() || { tabs: [], activeTabId: null };
+  const result = browserSessionStore.save({
+    enabled: true,
+    tabs: snapshot.tabs,
+    activeTabId: snapshot.activeTabId
+  });
+  if (result.success) {
+    browserSessionStatus = { ...result, readOnly: false, warning: null };
+  } else {
+    browserSessionStatus = { ...browserSessionStatus, readOnly: true, warning: result.error };
+    browserSessionEnabled = false;
+  }
+  return result;
+}
+
+function scheduleBrowserSessionPersist() {
+  if (!browserSessionEnabled || !browserSessionStore) return;
+  if (browserSessionPersistTimer) clearTimeout(browserSessionPersistTimer);
+  browserSessionPersistTimer = setTimeout(() => {
+    browserSessionPersistTimer = null;
+    persistBrowserSessionNow();
+  }, 150);
+  browserSessionPersistTimer.unref?.();
+}
+
+function setBrowserSessionEnabled(enabled) {
+  if (!browserSessionStore || browserSessionStatus.readOnly) {
+    return { success: false, enabled: browserSessionEnabled, error: browserSessionStatus.warning || '本机会话恢复数据只读。' };
+  }
+  const snapshot = enabled
+    ? (browserEngine?.getSessionSnapshot?.() || { tabs: [], activeTabId: null })
+    : { tabs: [], activeTabId: null };
+  const result = browserSessionStore.save({
+    enabled: Boolean(enabled),
+    tabs: snapshot.tabs,
+    activeTabId: snapshot.activeTabId
+  });
+  if (!result.success) return { ...result, enabled: browserSessionEnabled };
+
+  browserSessionEnabled = Boolean(enabled);
+  browserSessionStatus = { ...result, readOnly: false, warning: null };
+  if (!browserSessionEnabled && browserSessionPersistTimer) {
+    clearTimeout(browserSessionPersistTimer);
+    browserSessionPersistTimer = null;
+  }
+  return { success: true, enabled: browserSessionEnabled };
 }
 
 function sanitizeLocalBookmark(value) {
@@ -185,6 +247,21 @@ function registerBrowserIpc() {
   const handlers = {
     'browser:get-local-data': () => readLocalBrowserData(),
     'browser:save-local-data': (_event, data) => writeLocalBrowserData(data),
+    'browser:get-session-state': () => ({ ...browserSessionStatus, tabs: browserSessionStatus.tabs.map(tab => ({ ...tab })) }),
+    'browser:set-session-enabled': (_event, enabled) => setBrowserSessionEnabled(Boolean(enabled)),
+    'browser:restore-session': async () => {
+      if (browserSessionRestoreStarted) return browserSessionRestorePromise || browserSessionRestoreResult || { success: true, tabs: [] };
+      browserSessionRestoreStarted = true;
+      browserSessionRestorePromise = (async () => {
+        if (!browserSessionEnabled || browserSessionStatus.readOnly) {
+          browserSessionRestoreResult = { success: true, activeTabId: null, tabs: [] };
+          return browserSessionRestoreResult;
+        }
+        browserSessionRestoreResult = await browserEngine.restoreTabs(browserSessionStatus.tabs, browserSessionStatus.activeTabId);
+        return browserSessionRestoreResult;
+      })();
+      return browserSessionRestorePromise;
+    },
     'browser:get-downloads': () => browserEngine.getDownloads(),
     'browser:cancel-download': (_event, id) => browserEngine.cancelDownload(id),
     'browser:remove-download': (_event, id) => browserEngine.removeDownload(id),
@@ -207,9 +284,20 @@ function registerBrowserIpc() {
     },
     'browser:set-active': (_event, active) => browserEngine.setActive(Boolean(active)),
     'browser:set-bounds': (_event, bounds) => browserEngine.setBounds(bounds),
-    'browser:select-tab': (_event, tabId, url) => browserEngine.selectTab(tabId, url),
-    'browser:close-tab': (_event, tabId) => browserEngine.closeTab(tabId),
-    'browser:navigate': (_event, tabId, url) => browserEngine.navigate(tabId, url),
+    'browser:select-tab': (_event, tabId, url) => {
+      const result = browserEngine.selectTab(tabId, url);
+      scheduleBrowserSessionPersist();
+      return result;
+    },
+    'browser:close-tab': (_event, tabId) => {
+      browserEngine.closeTab(tabId);
+      scheduleBrowserSessionPersist();
+    },
+    'browser:navigate': (_event, tabId, url) => {
+      const result = browserEngine.navigate(tabId, url);
+      scheduleBrowserSessionPersist();
+      return result;
+    },
     'browser:back': (_event, tabId) => browserEngine.goBack(tabId),
     'browser:forward': (_event, tabId) => browserEngine.goForward(tabId),
     'browser:reload': (_event, tabId) => browserEngine.reload(tabId)
@@ -272,7 +360,210 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       throw new Error(`等待本地测试页超时：${pathname}`);
     };
 
+    const waitForTabPath = async (tabId, pathname, expectedTitle = null) => {
+      const deadline = Date.now() + 20000;
+      while (Date.now() < deadline) {
+        const contents = browserEngine.getWebContentsForTesting(tabId);
+        if (contents && !contents.isDestroyed()) {
+          try {
+            const currentUrl = new URL(contents.getURL());
+            const title = await contents.executeJavaScript('document.title');
+            if (currentUrl.pathname === pathname && (!expectedTitle || title === expectedTitle) && !contents.isLoading()) return;
+          } catch {
+            // The renderer can be between documents or on Chromium's load-error page.
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      throw new Error(`等待本地标签页失败：${tabId} ${pathname}`);
+    };
+
+    const submitAddress = targetUrl => appContents.executeJavaScript(`new Promise((resolve, reject) => {
+      const input = document.querySelector('input[aria-label="输入网址或搜索词"]');
+      if (!input) return reject(new Error('Browser 地址栏不存在。'));
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(targetUrl)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(() => {
+        try { input.closest('form').requestSubmit(); resolve(true); }
+        catch (error) { reject(error); }
+      }, 0);
+    })`);
+
+    const waitForSessionToggle = async () => {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const value = await appContents.executeJavaScript(
+          `document.querySelector('[data-browser-session-toggle]')?.getAttribute('aria-pressed') || ''`
+        );
+        if (value === 'true' || value === 'false') return value;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error('等待本机标签恢复设置初始化超时。');
+    };
+
+    if (process.env.EARTH_ONE_BROWSER_SESSION_SMOKE_TEST === '1') {
+      const phase = process.env.EARTH_ONE_BROWSER_TEST_PHASE;
+      const sessionPath = getBrowserSessionStorePath();
+      if (phase === 'session-save') {
+        await waitForTabPath(testTabId, '/session-one', 'Session Fixture One');
+        const defaultToggle = await waitForSessionToggle();
+        const defaultState = await appContents.executeJavaScript('window.earthOneBrowser.getSessionState()');
+        if (defaultState.enabled || defaultState.tabs.length !== 0 || defaultToggle !== 'false' || fs.existsSync(sessionPath)) {
+          throw new Error('启动时恢复必须默认关闭，并且不能在用户启用前写入标签快照。');
+        }
+
+        await testContents.executeJavaScript(`(() => {
+          document.querySelector('#session-email').value = 'synthetic-private@example.test';
+          document.querySelector('#session-password').value = 'SYNTHETIC_FORM_PASSWORD_DO_NOT_PERSIST';
+        })()`);
+        await appContents.executeJavaScript(`document.querySelector('[data-browser-session-toggle]').click()`);
+        const enabledDeadline = Date.now() + 3000;
+        let enabledState = null;
+        while (Date.now() < enabledDeadline) {
+          enabledState = await appContents.executeJavaScript('window.earthOneBrowser.getSessionState()');
+          if (enabledState.enabled) break;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        if (!enabledState?.enabled) throw new Error('启用恢复设置后没有写入本机偏好。');
+
+        const firstUrl = `${new URL(testUrl).origin}/session-one?q=stars&lang=en#synthetic-fragment`;
+        const firstNavigation = await browserEngine.navigate(testTabId, firstUrl);
+        if (!firstNavigation.success) throw new Error('第一个合成本机标签页未能导航。');
+        await waitForTabPath(testTabId, '/session-one', 'Session Fixture One');
+
+        const createSyntheticTab = async (url, expectedPath, expectedTitle = null) => {
+          const currentIds = new Set(browserEngine.getTabIdsForTesting());
+          await appContents.executeJavaScript(`document.querySelector('button[aria-label="新建标签"]').click()`);
+          const tabDeadline = Date.now() + 5000;
+          let tabId = null;
+          while (Date.now() < tabDeadline) {
+            tabId = browserEngine.getTabIdsForTesting().find(id => !currentIds.has(id)) || null;
+            if (tabId) break;
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+          if (!tabId) throw new Error('未能创建合成测试标签。');
+          const navigation = await browserEngine.navigate(tabId, url);
+          if (expectedPath !== '/session-fail' && !navigation.success) throw new Error(`合成页面导航失败：${expectedPath}`);
+          if (expectedPath === '/session-fail' && navigation.success) throw new Error('失败夹具本应无法加载。');
+          if (expectedPath !== '/session-fail') await waitForTabPath(tabId, expectedPath, expectedTitle);
+          return tabId;
+        };
+
+        const secondTabId = await createSyntheticTab(
+          `${new URL(testUrl).origin}/session-two?view=article&page=2`, '/session-two', 'Session Fixture Two'
+        );
+        const failedTabId = await createSyntheticTab(
+          `${new URL(testUrl).origin}/session-fail?attempt=1`, '/session-fail'
+        );
+        const expectedProfileRoot = `${path.resolve(process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR || '')}${path.sep}`;
+        const sessionDeadline = Date.now() + 5000;
+        let saved = null;
+        while (Date.now() < sessionDeadline) {
+          if (fs.existsSync(sessionPath)) {
+            saved = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+            if (saved.tabs?.length === 3 && saved.tabs.some(tab => tab.id === failedTabId)) break;
+          }
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        if (!sessionPath.startsWith(expectedProfileRoot) || !saved || saved.version !== 1 || !saved.enabled ||
+            saved.tabs.length !== 3 || saved.activeTabId !== failedTabId) {
+          throw new Error('启用后没有在独立 Electron userData 中保存有界的活动标签快照。');
+        }
+        const firstSaved = saved.tabs.find(tab => tab.id === testTabId);
+        const secondSaved = saved.tabs.find(tab => tab.id === secondTabId);
+        const failedSaved = saved.tabs.find(tab => tab.id === failedTabId);
+        if (!firstSaved || firstSaved.url !== `${new URL(testUrl).origin}/session-one?q=stars&lang=en` ||
+            !secondSaved || secondSaved.url !== `${new URL(testUrl).origin}/session-two?view=article&page=2` ||
+            !failedSaved || failedSaved.url !== `${new URL(testUrl).origin}/session-fail?attempt=1` ||
+            saved.tabs.some(tab => !['http:', 'https:'].includes(new URL(tab.url).protocol) || tab.title !== new URL(tab.url).host)) {
+          throw new Error('会话快照未保留普通查询，或包含非 HTTP(S)/非安全展示元数据。');
+        }
+        const sessionText = fs.readFileSync(sessionPath, 'utf8');
+        for (const forbidden of ['synthetic-fragment', 'SYNTHETIC_FORM_PASSWORD_DO_NOT_PERSIST', 'synthetic-private@example.test', 'synthetic-cookie-secret', 'cookies', 'headers', 'formContents', 'networkLog']) {
+          if (sessionText.includes(forbidden)) throw new Error(`会话存储不应包含 ${forbidden}。`);
+        }
+        if (browserBookmarkApiRequests !== 0) throw new Error('会话保存请求了服务端书签 API。');
+        console.log(`BROWSER_SESSION_SAVE_READY:${process.pid}`);
+        await new Promise(() => {});
+      }
+
+      if (phase === 'session-restore') {
+        const sessionState = await appContents.executeJavaScript('window.earthOneBrowser.getSessionState()');
+        if (!sessionState.enabled || sessionState.readOnly || sessionState.tabs.length !== 3) {
+          throw new Error('第二个 Electron 进程没有安全读取三个本机会话标签。');
+        }
+        const firstSaved = sessionState.tabs.find(tab => new URL(tab.url).pathname === '/session-one');
+        const secondSaved = sessionState.tabs.find(tab => new URL(tab.url).pathname === '/session-two');
+        const failedSaved = sessionState.tabs.find(tab => new URL(tab.url).pathname === '/session-fail');
+        if (!firstSaved || !secondSaved || !failedSaved) throw new Error('恢复集合未保留有效本机标签 URL。');
+        await waitForTabPath(firstSaved.id, '/session-one', 'Session Fixture One');
+        await waitForTabPath(secondSaved.id, '/session-two', 'Session Fixture Two');
+        const restoreResult = await appContents.executeJavaScript('window.earthOneBrowser.restoreSession()');
+        const failedCount = restoreResult.tabs.filter(tab => !tab.success).length;
+        const restoreNoticeDeadline = Date.now() + 3000;
+        let notice = '';
+        while (Date.now() < restoreNoticeDeadline) {
+          notice = await appContents.executeJavaScript(
+            `document.querySelector('[data-browser-session-restore-notice]')?.innerText || ''`
+          );
+          if (notice.includes('1 个页面未能加载')) break;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        if (!restoreResult.success || restoreResult.tabs.length !== 3 || failedCount !== 1 ||
+            browserEngine.getTabIdsForTesting().length !== 3 ||
+            browserEngine.getSessionSnapshot().activeTabId !== sessionState.activeTabId ||
+            !notice.includes('1 个页面未能加载') || !notice.includes('地址栏重试')) {
+          throw new Error('恢复后的页面失败未被保留并明确提示，或恢复的标签/活动标签不正确。');
+        }
+        const sessionText = fs.readFileSync(sessionPath, 'utf8');
+        for (const forbidden of ['SYNTHETIC_FORM_PASSWORD_DO_NOT_PERSIST', 'synthetic-private@example.test', 'synthetic-cookie-secret', 'cookies', 'headers', 'formContents', 'networkLog']) {
+          if (sessionText.includes(forbidden)) throw new Error(`重启恢复后的会话存储不应包含 ${forbidden}。`);
+        }
+        if (browserBookmarkApiRequests !== 0) throw new Error('会话恢复请求了服务端书签 API。');
+
+        await appContents.executeJavaScript(`document.querySelector('[data-browser-session-toggle]').click()`);
+        const optOutDeadline = Date.now() + 3000;
+        let disabledState = null;
+        while (Date.now() < optOutDeadline) {
+          disabledState = await appContents.executeJavaScript('window.earthOneBrowser.getSessionState()');
+          if (!disabledState.enabled) break;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        const clearedSession = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+        if (disabledState?.enabled || disabledState?.tabs.length || clearedSession.enabled || clearedSession.tabs.length) {
+          throw new Error('关闭恢复设置后应立即清除已保存标签快照。');
+        }
+        console.log('BROWSER_SESSION_RESTORE_PASS: opt-in local URL-only restore, safe query retention/redaction, ephemeral cookies, and failed-page notice verified.');
+        console.log('BROWSER_SESSION_OPTOUT_READY');
+        app.quit();
+        return;
+      }
+
+      if (phase === 'session-optout') {
+        await waitForTabPath(testTabId, '/one', 'EARTH ONE Fixture One');
+        const disabledState = await appContents.executeJavaScript('window.earthOneBrowser.getSessionState()');
+        const toggle = await waitForSessionToggle();
+        const tabIds = browserEngine.getTabIdsForTesting();
+        const persistedState = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+        if (disabledState.enabled || disabledState.tabs.length !== 0 || toggle !== 'false' ||
+            tabIds.length !== 1 || tabIds[0] !== testTabId || persistedState.enabled || persistedState.tabs.length !== 0) {
+          throw new Error('关闭恢复设置后的第二次启动不应打开旧标签。');
+        }
+        console.log('BROWSER_SESSION_OPTOUT_PASS: disabled restore clears prior tabs and starts with one default tab.');
+        app.quit();
+        return;
+      }
+      throw new Error(`未知的 Browser session smoke 阶段：${phase}`);
+    }
+
     await waitForPage('/one', 'EARTH ONE Fixture One');
+
+    const defaultSessionToggle = await waitForSessionToggle();
+    const defaultSessionState = await appContents.executeJavaScript('window.earthOneBrowser.getSessionState()');
+    if (defaultSessionState.enabled || defaultSessionState.tabs.length !== 0 || defaultSessionToggle !== 'false') {
+      throw new Error('未启用设置时应维持单个默认浏览器标签，不恢复任何旧标签。');
+    }
 
     if (process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'restart') {
       const restoredDownloads = browserEngine.getDownloads();
@@ -597,6 +888,9 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
 
 app.whenReady().then(async () => {
   const baseUrl = process.env.EARTH_ONE_DESKTOP_URL || 'http://127.0.0.1:3000';
+  browserSessionStore = createBrowserSessionStore(getBrowserSessionStorePath());
+  browserSessionStatus = browserSessionStore.load();
+  browserSessionEnabled = browserSessionStatus.enabled && !browserSessionStatus.readOnly;
   const smokeTest = process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1';
   const smokeUrl = process.env.EARTH_ONE_BROWSER_TEST_URL;
   testDownloadDir = process.env.EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR || null;
@@ -623,6 +917,14 @@ app.whenReady().then(async () => {
   const browserSession = session.fromPartition('earth-one-browser');
   browserSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   browserSession.setPermissionCheckHandler(() => false);
+  if (smokeTest && smokeUrl) {
+    const fixtureOrigin = new URL(smokeUrl).origin;
+    browserSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details, callback) => {
+      let requestedOrigin = '';
+      try { requestedOrigin = new URL(details.url).origin; } catch {}
+      callback({ cancel: requestedOrigin !== fixtureOrigin });
+    });
+  }
 
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -666,6 +968,7 @@ app.whenReady().then(async () => {
     browserSession,
     onState: state => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('browser:state', state);
+      scheduleBrowserSessionPersist();
     },
     onFocusAddressBar: tabId => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:focus-address-bar', tabId);
@@ -701,5 +1004,12 @@ app.whenReady().then(async () => {
   }
 });
 
-app.on('before-quit', () => browserEngine?.dispose());
+app.on('before-quit', () => {
+  if (browserSessionPersistTimer) {
+    clearTimeout(browserSessionPersistTimer);
+    browserSessionPersistTimer = null;
+  }
+  persistBrowserSessionNow();
+  browserEngine?.dispose();
+});
 app.on('window-all-closed', () => app.quit());

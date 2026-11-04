@@ -5,6 +5,7 @@ const MAX_URL_LENGTH = 4096;
 const BARE_HTTP_HOST_PATTERN = /^(?:localhost(?::\d+)?|(?:[\w-]+\.)+[\w-]+(?::\d+)?|[\w-]+:\d+|\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?|\[[\da-f:]+\](?::\d+)?)(?:[/?#]|$)/i;
 const { createDownloadManager } = require('./download-manager.cjs');
 const { createDownloadStore } = require('./download-store.cjs');
+const { sanitizeSessionUrl } = require('./session-store.cjs');
 
 function normalizeBrowserUrl(input) {
   if (typeof input !== 'string') throw new TypeError('请输入有效的网址。');
@@ -39,6 +40,10 @@ function isAllowedNavigation(input) {
   } catch {
     return false;
   }
+}
+
+function sanitizeRestoredUrl(input) {
+  return sanitizeSessionUrl(input);
 }
 
 function createBrowserEngine({
@@ -81,7 +86,7 @@ function createBrowserEngine({
     }
     return {
       tabId,
-      url: contents.getURL() || entry.lastUrl || '',
+      url: isAllowedNavigation(contents.getURL()) ? contents.getURL() : entry.lastUrl || '',
       title: contents.getTitle() || entry.lastTitle || '',
       loading: contents.isLoading(),
       navigated: false,
@@ -190,6 +195,52 @@ function createBrowserEngine({
     return { success: true };
   }
 
+  async function restoreTabs(savedTabs, requestedActiveTabId) {
+    if (disposed || !Array.isArray(savedTabs)) return { success: false, tabs: [] };
+    const candidates = [];
+    const seen = new Set();
+    for (const saved of savedTabs) {
+      if (candidates.length >= 12) break;
+      if (!saved || typeof saved !== 'object' || !validTabId(saved.id) || seen.has(saved.id)) continue;
+      const url = sanitizeRestoredUrl(saved.url);
+      if (!url) continue;
+      seen.add(saved.id);
+      candidates.push({ tabId: saved.id, url });
+    }
+
+    const entries = candidates.map(candidate => {
+      const entry = createTab(candidate.tabId);
+      entry.lastUrl = candidate.url;
+      entry.lastTitle = new URL(candidate.url).host;
+      return { ...candidate, entry };
+    });
+    const activeCandidate = entries.find(candidate => candidate.tabId === requestedActiveTabId) || entries[0];
+    activeTabId = activeCandidate?.tabId || null;
+    applyVisibility();
+
+    const results = await Promise.all(entries.map(async candidate => {
+      let timeout;
+      try {
+        await Promise.race([
+          candidate.entry.view.webContents.loadURL(candidate.url),
+          new Promise((_, reject) => {
+            timeout = setTimeout(() => reject(new Error('restore-timeout')), 15000);
+          })
+        ]);
+        return { tabId: candidate.tabId, success: true };
+      } catch {
+        return { tabId: candidate.tabId, success: false, error: '页面未能加载。' };
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    }));
+
+    if (disposed) return { success: false, tabs: results };
+    applyVisibility();
+    for (const candidate of entries) publish(candidate.tabId, candidate.entry);
+    return { success: true, activeTabId: activeTabId, tabs: results };
+  }
+
   async function navigate(tabId, target) {
     if (!validTabId(tabId)) return { success: false, error: '浏览器标签 ID 无效。' };
     let url;
@@ -267,6 +318,22 @@ function createBrowserEngine({
     return tabs.get(tabId)?.view.webContents ?? null;
   }
 
+  function getSessionSnapshot() {
+    const savedTabs = [];
+    for (const [tabId, entry] of tabs) {
+      if (entry.view.webContents.isDestroyed()) continue;
+      const currentUrl = entry.view.webContents.getURL();
+      const url = sanitizeRestoredUrl(isAllowedNavigation(currentUrl) ? currentUrl : entry.lastUrl);
+      if (!url) continue;
+      savedTabs.push({ id: tabId, url });
+    }
+    return { tabs: savedTabs, activeTabId: activeTabId && savedTabs.some(tab => tab.id === activeTabId) ? activeTabId : null };
+  }
+
+  function getTabIdsForTesting() {
+    return [...tabs.keys()];
+  }
+
   function getViewBoundsForTesting(tabId) {
     const view = tabs.get(tabId)?.view;
     return view ? view.getBounds() : null;
@@ -289,6 +356,7 @@ function createBrowserEngine({
     setActive,
     setBounds,
     selectTab,
+    restoreTabs,
     closeTab,
     navigate,
     goBack: tabId => historyMethod(tabId, 'back'),
@@ -299,8 +367,10 @@ function createBrowserEngine({
     removeDownload: id => downloadManager.remove(id),
     clearDownloadRecords: () => downloadManager.clearTerminal(),
     getDownloadStorageStatus: () => downloadManager.getStorageStatus(),
+    getSessionSnapshot,
     dispose,
     getWebContentsForTesting,
+    getTabIdsForTesting,
     getViewBoundsForTesting
   };
 }

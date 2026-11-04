@@ -19,6 +19,7 @@
 
 ### Improved
 - Persisted up to 50 approved desktop download records locally under Electron `userData`; restarts restore history and mark in-flight items interrupted. Added corrupt-store protection, existence-checked folder reveal, and clear/remove controls that never delete downloaded files; no download history or path is sent to a server.
+- Added a default-off Electron “启动恢复” setting with a separate, bounded local tab-session store. It preserves ordinary HTTP(S) query strings, removes fragments, skips URLs with clearly sensitive query keys, never serializes cookies/forms/credentials, and shows which restored pages failed; two-process synthetic-page tests verify opt-in restore and non-persistent cookies.
 - Expanded isolated HTTP API coverage to 51 assertions across social posts, library search/details/bookshelf progress, browser bookmarks, and crawler task creation. Tests use temporary storage and do not execute external crawls.
 - Extended HTTP API coverage to 64 assertions with article/video list contracts and knowledge-graph search, filters, details, and 404 handling; no article content write, external media request, crawl, admin route, or private-message access was exercised.
 - Added read-only community, game-room, and advertisement list checks; the isolated HTTP suite now has 67 passing assertions, with no join/create/click writes.
