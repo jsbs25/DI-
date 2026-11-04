@@ -130,3 +130,11 @@
 - `npm run test:creator-api` 现为 13 项通过、0 失败。分别重复读取 `/api/articles` 与 `/api/videos`，验证 HTTP 200 和完整 JSON 响应与首次读取一致。
 - 固定端点白名单仅含上述两个 GET；服务运行于随机本地端口，使用自动清理的临时 JSON。没有写入文章、请求媒体、触及正式数据或既有服务。
 - `npm run lint` 与 `git diff --check` 通过。完整 `npm run test:api` 因含待批准会话读取路径未运行；本次也未运行构建或浏览器测试，未访问身份或会话/消息路径。
+
+
+## 2026-11-04 六语言窄屏移动模块矩阵回归
+
+- 环境：`npm run build` 生成的隔离静态生产构建；Vite preview 仅服务构建文件，系统 Chromium 151 / SwiftShader；视口 390×844 CSS px。真实点击语言菜单切换中文、英语、阿拉伯语 RTL、西班牙语、法语、俄语。
+- 逐语言访问移动导航的 12 个入口：地球、动态、宇宙、社区、Messenger、AI HUB、图书馆、知识、网页浏览器、创作者、视频、游戏；共 72 个语言/模块样本。所有样本的文档 `lang`/`dir` 正确，`documentElement.scrollWidth` 与 `body.scrollWidth` 均等于 390px；无页面级横向溢出和 JavaScript page error。
+- 应用发出的 48 个 API GET 全部由浏览器侧 Playwright 路由在送达网络前截获，返回合成空 fixture；没有启动 Express/API 后端。包含的身份、会话目录、书架/书签/保存文章等 GET 仅收到本地合成响应；没有测试认证/授权或私信行为，未请求消息详情接口。非 GET 请求数为 0；外网请求数为 1 且被阻断；唯一控制台错误是阻断资源对应的 `net::ERR_FAILED` 提示。
+- 未读取或写入正式 `server_data.json`，未触及既有服务、配置或日志。结论限于模拟器中的语言方向和页面级宽度；不代表实体设备、真实 GPU、完整页面业务功能、翻译准确性或真实 API 的通过。
