@@ -69,8 +69,8 @@ async function fetchJson(url: string, timeoutMs = 8000): Promise<any> {
 
 /**
  * Fetch a batch of books for one subject. Returns fully-formed Book objects
- * with a short excerpt as the first chapter (the harvester doesn't download
- * full texts — it archives metadata + a preview, keeping storage light).
+ * with a short metadata preview as the first chapter (the harvester doesn't
+ * download full texts — it archives metadata + a preview, keeping storage light).
  */
 async function harvestSubject(subject: string, category: Book['category'], language: string): Promise<Book[]> {
   const data = await fetchJson(
@@ -97,6 +97,7 @@ async function harvestSubject(subject: string, category: Book['category'], langu
       coverImage: coverUrl(w.cover_id),
       description: description.slice(0, 280),
       readProgress: 0,
+      textAvailability: 'metadata_only',
       chapters: [
         {
           id: 'ch1',

@@ -275,6 +275,8 @@ export interface Book {
   licenseUrl?: string;
   rightsClassification?: string;
   rightsNote?: string;
+  /** Explicitly distinguishes imported full text from excerpts and metadata-only records. */
+  textAvailability?: 'full_text' | 'excerpt' | 'metadata_only' | 'unknown';
 }
 
 export type BookshelfStatus = 'reading' | 'finished' | 'want_to_read' | 'favorite';
@@ -296,10 +298,19 @@ export interface BookShelfItem {
 export interface BookAnnotation {
   id: string;
   bookId: string;
+  /** Set only for user-private AI reading notes; legacy notes remain shared as before. */
+  userId?: string;
   chapterId: string;
   selectedText: string;
   note: string;
   aiExplanation?: string;
+  citation?: {
+    title: string;
+    author: string;
+    version: string;
+    location: string;
+    sourceUrl: string;
+  };
   createdAt: string;
 }
 

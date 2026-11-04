@@ -146,6 +146,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [selectedText, setSelectedText] = useState('');
   const [isAiExplaining, setIsAiExplaining] = useState(false);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
+  const [aiCitation, setAiCitation] = useState<BookAnnotation['citation'] | null>(null);
+  const [aiReadingNotice, setAiReadingNotice] = useState<string | null>(null);
+  const [aiAnswerReady, setAiAnswerReady] = useState(false);
+  const [aiNoteSaved, setAiNoteSaved] = useState(false);
+  const [aiSaveMessage, setAiSaveMessage] = useState<string | null>(null);
   const [annotationNote, setAnnotationNote] = useState('');
   const [isAnnotationDrawerOpen, setIsAnnotationDrawerOpen] = useState(false);
 
@@ -293,6 +298,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     setReadingBook(book);
     setActiveChapterIndex(savedChapterIndex >= 0 ? savedChapterIndex : legacyProgressIndex);
     setAiExplanation(null);
+    setAiCitation(null);
+    setAiReadingNotice(null);
+    setAiAnswerReady(false);
+    setAiNoteSaved(false);
+    setAiSaveMessage(null);
     setSelectedText('');
     setAnnotationNote('');
   };
@@ -303,7 +313,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     try {
       const res = await fetch(`/api/library/books/${bookId}`);
       const data = await res.json();
-      return data.success && data.book ? (data.book as Book) : null;
+      if (!data.success || !data.book) return null;
+      setAnnotations(Array.isArray(data.annotations) ? data.annotations : []);
+      return data.book as Book;
     } catch {
       return null;
     }
@@ -377,23 +389,41 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     const selection = window.getSelection();
     if (selection && selection.toString().trim().length > 3) {
       setSelectedText(selection.toString().trim());
+      setAiExplanation(null);
+      setAiCitation(null);
+      setAiReadingNotice(null);
+      setAiAnswerReady(false);
+      setAiNoteSaved(false);
+      setAiSaveMessage(null);
     }
   };
 
   const handleExplainSelection = async () => {
     if (!selectedText || !readingBook) return;
+    const chapter = readingBook.chapters[activeChapterIndex];
+    if (!chapter) return;
     setIsAiExplaining(true);
     setAiExplanation(null);
-    const prompt = `你是一位博学的学者与语言专家。请针对《${readingBook.title}》（作者：${readingBook.author}，语言：${readingBook.language}）中的以下文字，给出：\n1. 翻译（如果是中文则译为英文，如果是阿拉伯语/英文等则译为中文）\n2. 生词/难点词汇解释\n3. 语法与句子结构分析\n4. 段落含义与背景知识\n\n原文：\n"${selectedText}"`;
+    setAiCitation(null);
+    setAiReadingNotice(null);
+    setAiAnswerReady(false);
+    setAiNoteSaved(false);
+    setAiSaveMessage(null);
     try {
-      const res = await fetch('/api/ai/chat', {
+      const res = await fetch(`/api/library/books/${encodeURIComponent(readingBook.id)}/ai-reading`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({ chapterId: chapter.id, selectedText, replyLanguage: lang })
       });
       const data = await res.json();
-      if (data.success && data.message) setAiExplanation(data.message.content);
-      else setAiExplanation(data.error || 'AI 服务尚未配置，请在服务端配置模型密钥。');
+      setAiCitation(data.citation || null);
+      setAiReadingNotice(data.notice || null);
+      if (data.success && data.message) {
+        setAiExplanation(data.message.content);
+        setAiAnswerReady(true);
+      } else {
+        setAiExplanation(data.error || '无法核验当前正文，未生成 AI 解读。');
+      }
     } catch (err: any) {
       setAiExplanation(`请求出错: ${err.message}`);
     } finally {
@@ -404,10 +434,18 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const handleSaveAnnotation = async () => {
     if (!readingBook || !selectedText) return;
     const currentChapter = readingBook.chapters[activeChapterIndex];
+    const saveAiKnowledgeNote = !!(aiCitation && aiExplanation && aiAnswerReady && !aiNoteSaved);
+    const token = localStorage.getItem('earth_one_token');
+    if (saveAiKnowledgeNote && !token) {
+      setAiSaveMessage('登录后才能将带来源的 AI 解读保存为仅自己可见的知识笔记；当前解读尚未保存。');
+      return;
+    }
     try {
-      const res = await fetch(`/api/library/books/${readingBook.id}/annotations`, {
+      const res = await fetch(saveAiKnowledgeNote
+        ? `/api/library/books/${readingBook.id}/knowledge-notes`
+        : `/api/library/books/${readingBook.id}/annotations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(saveAiKnowledgeNote ? libraryAuthHeaders() : {}) },
         body: JSON.stringify({
           chapterId: currentChapter?.id || 'ch1',
           selectedText,
@@ -419,11 +457,21 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       if (data.success && data.annotation) {
         setAnnotations(prev => [data.annotation, ...prev]);
         setAnnotationNote('');
-        setSelectedText('');
-        setAiExplanation(null);
+        if (!saveAiKnowledgeNote) {
+          setSelectedText('');
+          setAiExplanation(null);
+          setAiCitation(null);
+          setAiReadingNotice(null);
+          setAiAnswerReady(false);
+          setAiNoteSaved(false);
+        }
+        if (saveAiKnowledgeNote) setAiNoteSaved(true);
+        setAiSaveMessage(saveAiKnowledgeNote ? '已保存为仅自己可见、带来源引用的知识笔记。' : null);
+      } else {
+        setAiSaveMessage(data.error || '保存笔记失败。');
       }
     } catch (e) {
-      console.error(e);
+      setAiSaveMessage(`保存笔记失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
@@ -1128,7 +1176,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   {readingBook.chapters.map((ch, idx) => (
                     <button
                       key={ch.id}
-                      onClick={() => { setActiveChapterIndex(idx); setSelectedText(''); setAiExplanation(null); }}
+                      onClick={() => { setActiveChapterIndex(idx); setSelectedText(''); setAiExplanation(null); setAiCitation(null); setAiReadingNotice(null); setAiAnswerReady(false); setAiNoteSaved(false); setAiSaveMessage(null); }}
                       className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition-all ${
                         activeChapterIndex === idx ? 'bg-amber-950/80 text-amber-300 border border-amber-600/50' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
                       }`}
@@ -1196,7 +1244,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     <span className="font-semibold text-xs text-white">{selectedText ? 'AI 智能阅读' : '批注'}</span>
                   </div>
                   {selectedText && (
-                    <button onClick={() => { setSelectedText(''); setAiExplanation(null); }} className="text-slate-400 hover:text-white text-xs cursor-pointer">
+                    <button onClick={() => { setSelectedText(''); setAiExplanation(null); setAiCitation(null); setAiReadingNotice(null); setAiAnswerReady(false); setAiNoteSaved(false); setAiSaveMessage(null); }} className="text-slate-400 hover:text-white text-xs cursor-pointer">
                       <X className="w-4 h-4" />
                     </button>
                   )}
@@ -1226,6 +1274,19 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       </div>
                     )}
 
+                    {aiCitation && (
+                      <div className="bg-slate-950/70 border border-amber-700/40 p-3 rounded-xl text-[11px] leading-relaxed text-slate-300">
+                        <div className="font-semibold text-amber-300 mb-1">可核查引用</div>
+                        <div>《{aiCitation.title}》— {aiCitation.author}</div>
+                        <div>版本：{aiCitation.version}</div>
+                        <div>定位：{aiCitation.location}</div>
+                        <a href={safeHttpsUrl(aiCitation.sourceUrl)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-1 text-cyan-300 hover:text-cyan-200">
+                          核查原始来源 <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
+                    {aiReadingNotice && <p className="text-[10px] leading-relaxed text-slate-400">{aiReadingNotice}</p>}
+
                     <div>
                       <label className="block text-[11px] text-slate-400 mb-1">笔记:</label>
                       <textarea
@@ -1235,9 +1296,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                         placeholder="记录你的思考..."
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
                       />
-                      <button onClick={handleSaveAnnotation} className="mt-2 w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium cursor-pointer">
-                        保存批注
+                      <button onClick={handleSaveAnnotation} disabled={aiNoteSaved} className="mt-2 w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-xs font-medium cursor-pointer">
+                        {aiNoteSaved ? '已保存为私有知识笔记' : aiCitation && aiAnswerReady ? '保存为私有知识笔记' : '保存批注'}
                       </button>
+                      {aiSaveMessage && <p className="mt-2 text-[10px] text-amber-300">{aiSaveMessage}</p>}
                     </div>
                   </div>
                 )}
@@ -1252,6 +1314,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                         <p className="text-xs italic text-amber-300 font-serif">"{a.selectedText}"</p>
                         {a.note && <p className="text-xs text-slate-200">笔记: {a.note}</p>}
                         {a.aiExplanation && <p className="text-[11px] text-slate-400 bg-slate-950/50 p-2 rounded-lg line-clamp-3">AI: {a.aiExplanation}</p>}
+                        {a.citation && (
+                          <a href={safeHttpsUrl(a.citation.sourceUrl)} target="_blank" rel="noreferrer" className="block text-[10px] text-cyan-300 hover:text-cyan-200">
+                            《{a.citation.title}》· {a.citation.version} · {a.citation.location} <ExternalLink className="inline w-3 h-3" />
+                          </a>
+                        )}
                       </div>
                     ))
                   )}

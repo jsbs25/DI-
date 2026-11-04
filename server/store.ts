@@ -1376,8 +1376,33 @@ class DataStore {
     return ann;
   }
 
-  getAnnotations(bookId: string): BookAnnotation[] {
-    return this.bookAnnotations.filter(a => a.bookId === bookId);
+  addUserAnnotation(
+    userId: string,
+    bookId: string,
+    chapterId: string,
+    selectedText: string,
+    note: string,
+    aiExplanation: string,
+    citation: NonNullable<BookAnnotation['citation']>
+  ): BookAnnotation {
+    const annotation: BookAnnotation = {
+      id: `ann_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      userId,
+      bookId,
+      chapterId,
+      selectedText,
+      note,
+      aiExplanation,
+      citation,
+      createdAt: new Date().toISOString()
+    };
+    this.bookAnnotations.push(annotation);
+    this.saveToDisk();
+    return annotation;
+  }
+
+  getAnnotations(bookId: string, userId?: string): BookAnnotation[] {
+    return this.bookAnnotations.filter(a => a.bookId === bookId && (!a.userId || a.userId === userId));
   }
 
   // Web Crawler Methods

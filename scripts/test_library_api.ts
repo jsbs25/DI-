@@ -27,7 +27,9 @@ const ALLOWED_FIXED_ENDPOINTS = new Set([
 const ALLOWED_BOOK_DETAILS = new Set(['book_republic']);
 const ALLOWED_POST_ENDPOINTS = new Set(['/api/library/ingest', '/api/library/shelf', '/api/auth/register']);
 function isAllowedPostEndpoint(endpoint: string): boolean {
-  return ALLOWED_POST_ENDPOINTS.has(endpoint) || /^\/api\/library\/shelf\/[A-Za-z0-9_-]+\/(?:reading-state|epub-reading-state)$/.test(endpoint);
+  return ALLOWED_POST_ENDPOINTS.has(endpoint) ||
+    /^\/api\/library\/shelf\/[A-Za-z0-9_-]+\/(?:reading-state|epub-reading-state)$/.test(endpoint) ||
+    /^\/api\/library\/books\/[A-Za-z0-9_-]+\/(?:ai-reading|knowledge-notes)$/.test(endpoint);
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -208,6 +210,28 @@ async function main() {
     check(shamelaImport.status === 403 && shamelaImport.body.success === false, 'Shamela MCP discovery cannot be used to import or copy full text');
     const disabledImport = await post('/api/library/ingest', { source: 'gutenberg', externalId: '11' });
     check(disabledImport.status === 503 && disabledImport.body.success === false, 'Disabled sources cannot be used for full-text import');
+    const unverifiedSeedReading = await post('/api/library/books/book_republic/ai-reading', {
+      chapterId: 'ch1', selectedText: 'I went down yesterday to the Piraeus'
+    });
+    check(
+      unverifiedSeedReading.status === 409 && unverifiedSeedReading.body.code === 'CITATION_UNVERIFIABLE',
+      'AI reading refuses seed excerpts without a verifiable source edition before any model call'
+    );
+    const forgedPassageReading = await post('/api/library/books/book_republic/ai-reading', {
+      chapterId: 'ch1', selectedText: 'A quotation invented only in the browser.'
+    });
+    check(
+      forgedPassageReading.status === 422 && forgedPassageReading.body.code === 'SELECTION_NOT_IN_SOURCE',
+      'AI reading rejects client-selected text that is absent from the server-stored chapter'
+    );
+    const missingBookReading = await post('/api/library/books/no-such-book/ai-reading', {
+      chapterId: 'ch1', selectedText: 'anything'
+    });
+    check(missingBookReading.status === 404 && missingBookReading.body.success === false, 'AI reading does not use client-supplied book metadata for unknown books');
+    const unauthenticatedKnowledgeNote = await post('/api/library/books/book_republic/knowledge-notes', {
+      chapterId: 'ch1', selectedText: 'I went down yesterday to the Piraeus', aiExplanation: 'not saved'
+    });
+    check(unauthenticatedKnowledgeNote.status === 401 && unauthenticatedKnowledgeNote.body.success === false, 'Private AI reading notes require an authenticated account');
 
     const books = catalog?.body.books;
     check(Array.isArray(books) && books.length > 0, 'Library catalog returns a non-empty local collection');
@@ -396,7 +420,7 @@ async function main() {
         (/^\/api\/library\/books\/[A-Za-z0-9_-]+$/.test(request.endpoint) &&
           ALLOWED_BOOK_DETAILS.has(decodeURIComponent(request.endpoint.split('/').at(-1) || '')))
       )) || (request.method === 'POST' && isAllowedPostEndpoint(request.endpoint))),
-      'Test issued only allowlisted local GET requests and controlled import-rejection POST requests'
+      'Test issued only allowlisted local GET requests and controlled import, evidence-validation, and auth-rejection POST requests'
     );
 
     console.log(`Library API regression: ${passed} passed, 0 failed (allowlisted local routes; isolated temporary storage).`);

@@ -6,6 +6,7 @@ import { GoogleGenAI } from '@google/genai';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
+import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { fetchAndExtract, searchWeb } from './server/webFetcher.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
@@ -616,6 +617,7 @@ app.post('/api/library/ingest', async (req, res) => {
       licenseUrl: record.licenseUrl,
       rightsClassification: record.rights,
       rightsNote: record.rightsNote,
+      textAvailability: fullText.chapters.length > 0 ? 'full_text' : 'metadata_only',
       formatType: record.epubUrl && fullText.chapters.length === 0 ? 'epub' : 'text',
       copyrightStatus: record.rights === RightsCategory.PUBLIC_DOMAIN ? 'public_domain' : record.rights === RightsCategory.OPEN_LICENSE ? 'licensed' : 'copyrighted'
     };
@@ -778,8 +780,68 @@ app.get('/api/library/books', (req, res) => {
 app.get('/api/library/books/:id', (req, res) => {
   const book = store.books.find(b => b.id === req.params.id);
   if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
-  const annotations = store.getAnnotations(book.id);
+  const annotations = store.getAnnotations(book.id, getSessionUser(req)?.id);
   res.json({ success: true, book, annotations });
+});
+
+// Grounded reading uses only server-stored, source-verified text. Client-supplied
+// book metadata is never used to construct the citation or the AI evidence.
+app.post('/api/library/books/:id/ai-reading', async (req, res) => {
+  const book = store.books.find(item => item.id === req.params.id);
+  if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
+  const evidenceResult = resolveReadingEvidence(book, req.body.chapterId, req.body.selectedText);
+  if (!evidenceResult.ok) {
+    return res.status(evidenceResult.status).json({ success: false, code: evidenceResult.code, error: evidenceResult.error });
+  }
+
+  const evidence = evidenceResult.evidence;
+  const { prompt, systemInstruction } = buildReadingPrompt(evidence, req.body.replyLanguage);
+  const result = await aiGateway.generateContent('', prompt, systemInstruction);
+  if (!result.success || !result.content.trim()) {
+    return res.status(503).json({
+      success: false,
+      error: result.errorMessage || '当前没有可用的 AI 模型；正文和引用已核验，但未生成回答。',
+      citation: evidence.citation,
+      coverage: evidence.coverage,
+      notice: evidence.notice
+    });
+  }
+
+  res.json({
+    success: true,
+    message: { content: result.content },
+    citation: evidence.citation,
+    coverage: evidence.coverage,
+    notice: evidence.notice
+  });
+});
+
+// AI reading notes are private to the authenticated account and cite a source
+// freshly revalidated from the stored book, not citation fields from the client.
+app.post('/api/library/books/:id/knowledge-notes', (req, res) => {
+  const user = getSessionUser(req);
+  if (!user) return res.status(401).json({ success: false, error: 'Login is required to save a private reading note.' });
+  const book = store.books.find(item => item.id === req.params.id);
+  if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
+  const evidenceResult = resolveReadingEvidence(book, req.body.chapterId, req.body.selectedText);
+  if (!evidenceResult.ok) {
+    return res.status(evidenceResult.status).json({ success: false, code: evidenceResult.code, error: evidenceResult.error });
+  }
+  const note = typeof req.body.note === 'string' ? req.body.note.trim() : '';
+  const aiExplanation = typeof req.body.aiExplanation === 'string' ? req.body.aiExplanation.trim() : '';
+  if (!aiExplanation || aiExplanation.length > 20000 || note.length > 4000) {
+    return res.status(400).json({ success: false, error: 'A reading answer (maximum 20,000 characters) and an optional note (maximum 4,000 characters) are required.' });
+  }
+  const annotation = store.addUserAnnotation(
+    user.id,
+    book.id,
+    evidenceResult.evidence.chapter.id,
+    evidenceResult.evidence.selectedPassage,
+    note,
+    aiExplanation,
+    evidenceResult.evidence.citation
+  );
+  res.json({ success: true, annotation });
 });
 
 app.post('/api/library/books/:id/progress', (req, res) => {

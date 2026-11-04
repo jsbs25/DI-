@@ -12,6 +12,7 @@ export const SEED_BOOKS: Book[] = [
     coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80',
     description: 'Socratic dialogue concerning justice, the order and character of the just city-state, and the just human being.',
     readProgress: 12,
+    textAvailability: 'excerpt',
     chapters: [
       {
         id: 'ch1',
@@ -44,6 +45,7 @@ The prisoners see only their own shadows, or the shadows of one another, which t
     coverImage: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&auto=format&fit=crop&q=80',
     description: 'The seminal work on the heliocentric theory that placed the Sun at the rest center of the universe.',
     readProgress: 5,
+    textAvailability: 'excerpt',
     chapters: [
       {
         id: 'ch1',
@@ -67,6 +69,7 @@ In the center of all rests the Sun. For who would place this lamp of a very beau
     coverImage: 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=600&auto=format&fit=crop&q=80',
     description: 'A classic romantic novel examining character, class, marriage, and human morality in 19th-century England.',
     readProgress: 24,
+    textAvailability: 'excerpt',
     chapters: [
       {
         id: 'ch1',
@@ -90,6 +93,7 @@ However little known the feelings or views of such a man may be on his first ent
     coverImage: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&auto=format&fit=crop&q=80',
     description: 'Ancient Chinese classic text on the Way and Virtue, foundational to philosophical Taoism.',
     readProgress: 45,
+    textAvailability: 'excerpt',
     chapters: [
       {
         id: 'ch1',
