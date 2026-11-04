@@ -120,6 +120,12 @@ async function main() {
       ),
       'AI credentials remain disabled and masked in the isolated test process'
     );
+    const repeatedModels = await get('/api/ai/models');
+    check(
+      repeatedModels.status === modelResponse?.status &&
+      JSON.stringify(repeatedModels.body) === JSON.stringify(modelResponse?.body),
+      'Repeated AI model catalog GET returns an identical response'
+    );
 
     const stats = await get('/api/ai/stats');
     check(
@@ -128,6 +134,12 @@ async function main() {
       Number.isFinite(stats.body.totalTokens) && stats.body.totalTokens >= 0 &&
       Array.isArray(stats.body.models),
       'AI statistics expose numeric usage totals and model metadata'
+    );
+    const repeatedStats = await get('/api/ai/stats');
+    check(
+      repeatedStats.status === stats.status &&
+      JSON.stringify(repeatedStats.body) === JSON.stringify(stats.body),
+      'Repeated AI statistics GET returns an identical response'
     );
     check(
       Array.isArray(models) && Array.isArray(stats.body.models) &&
