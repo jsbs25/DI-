@@ -232,3 +232,12 @@ PubMed 只提供书目检索与官方 PubMed 记录页，固定为 `METADATA_ONL
 知识库连接采用安全的最小增量：`POST /api/library/books/:id/knowledge-notes` 重新核验同一正文/引用后，将成功 AI 解读及用户笔记存入现有批注持久层，但记录带当前登录用户 ID，仅该账户在书籍详情中可见；旧批注保持旧有读取兼容。EPUB 仍走原阅读器，因当前尚无其可核实的服务器正文提取路径，不接入此 AI 入口，也不假称已读过 EPUB 全文。
 
 本轮只完成 Phase 8 的可验证纵向增量，不代表完整 AI 阅读阶段完成。仍未实现 EPUB 文本选择/解读、整本或整章总结、跨版本比较、研究论文检索、对全局知识图谱的自动关系写入；带来源笔记也尚未完成真实设备/账户端到端验证。测试和最新验收结果见 `TEST_REPORT.md`。
+
+
+### WORLD LIBRARY Phase 8 follow-up：EPUB 正文 provenance 与明确拒绝（2026-11-04）
+
+**结论：当前没有可供 AI 安全核验的 EPUB 服务器正文路径，因此不接入 EPUB 段落解读。** 受权利复核的 EPUB-only 导入会保存书目和官方 EPUB URL，但章节数组为空、`textAvailability` 为 `metadata_only`、`formatType` 为 `epub`。`EpubReader` 将官方文件经 `/api/library/epub-proxy` 流式转给浏览器，由 epub.js 在浏览器内解析目录与正文；服务端没有解包 EPUB、保存章文本、建立内容哈希或把 CFI 校验到具体版本。用户书籍仅保存续读 CFI/百分比，不是正文或引用定位；不能把百分比称为页码。审计期间未打开或读取真实用户书籍。
+
+新增证据解析器的 EPUB-only 专用 `409 EPUB_TEXT_UNAVAILABLE` fail-closed 分支，即使记录错误标记为全文或带未核验章节，也不调用模型；EPUB 阅读器同时显示限制说明。现有服务器正文文本书籍的 AI 解读、引用和私有笔记流程不变，EPUB 阅读与书架续读保留。未新增连接器、依赖、付费服务、密钥或配置；若要日后支持 EPUB AI，需先实现有权利依据的服务器端解析与版本绑定的章节/内容 provenance，不能用 CFI 或猜测页码代替。
+
+合成 EPUB 回归与 Phase 8 全套检查结果见 `TEST_REPORT.md`。无真实 EPUB 网络读取、模型调用、用户书架访问、浏览器视觉/手机或实际账户验收；本轮不宣称 EPUB AI 已完成。

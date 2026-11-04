@@ -75,6 +75,16 @@ function editionLabel(book: Book): string | undefined {
 }
 
 export function resolveReadingEvidence(book: Book, chapterId: unknown, selectedText: unknown): ReadingEvidenceResult {
+  const isEpubOnly = book.formatType === 'epub' ||
+    (!!book.epubUrl && (!Array.isArray(book.chapters) || book.chapters.length === 0));
+  if (isEpubOnly) {
+    return {
+      ok: false,
+      status: 409,
+      code: 'EPUB_TEXT_UNAVAILABLE',
+      error: '当前 EPUB 正文仅由浏览器阅读器呈现；服务器没有解析并保存可核验的章节文本或 EPUB CFI 定位。EPUB AI 解读暂不支持，未向 AI 发送请求。'
+    };
+  }
   if (typeof chapterId !== 'string' || !chapterId.trim()) {
     return { ok: false, status: 400, code: 'CHAPTER_REQUIRED', error: '请选择一个有明确章节定位的正文段落。' };
   }

@@ -188,6 +188,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
         </div>
       </header>
 
+      <div role="status" className="border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-[11px] leading-relaxed text-amber-200/90">
+        EPUB 阅读与续读可用；AI 段落解读暂不支持。正文仅在浏览器阅读器中呈现，服务器尚不能核验选文与 CFI 章节定位，因此不会发送给 AI，也不会生成虚构页码或引用。
+      </div>
+
       {/* Body */}
       <div className="flex-1 flex overflow-hidden">
         {showToc && (

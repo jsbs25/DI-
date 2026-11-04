@@ -211,3 +211,20 @@ OpenAlex 官方说明基础 API 可免费且无需账号或 key。本次仅进�
 **测试边界。** 隔离 API 测试禁用了所有 AI 服务凭证，不向任何模型发送请求；因此确认了正文和引用拒绝逻辑，但没有验证实际模型生成的质量或运行时供应商可用性。端点仅复用项目既有 AI 网关；没有请求用户提供 API key，也没有新增付费模型/服务。测试不访问或修改正式图书、书架及用户笔记数据。
 
 **仍待验证。** EPUB 在浏览器内的内容目前未通过服务端证据入口，且未接入 AI 选文；没有进行视觉浏览器、实体手机、真实登录账户/两账户私有笔记或实际 AI 供应商端到端测试。Phase 8 的其他目标（整本总结、跨版本比较、论文检索和全局知识图谱自动连接）没有宣称完成。
+
+
+## WORLD LIBRARY Phase 8 follow-up：EPUB AI 明确拒绝与 provenance 检查（2026-11-04）
+
+**结果：限定范围通过。** 当前 EPUB 由服务端代理流式交给浏览器中的 epub.js；EPUB-only 书目在服务器没有已解析章节正文。`lastReadEpubCfi` 只用于续读，不是服务器核验过的章节/页码引用。故 AI 阅读端点现在对 EPUB-only 明确返回 `409 EPUB_TEXT_UNAVAILABLE`；即使 EPUB 记录被标注全文并带未验证章节，也 fail-closed。阅读器提示仍可阅读/续读，但 EPUB AI 解读暂不支持，且不会发送模型请求；服务器正文文本书的既有 AI 路径未改变。
+
+| 检查 | 结果 |
+|---|---|
+| `npm run lint` | ✅ 全项目 TypeScript 检查通过。 |
+| `npm run test:library-reading-ai` | ✅ 19 项通过；合成 fixture 覆盖 EPUB-only 显式拒绝、伪造全文/章节标记不能绕过、无网络/无模型。 |
+| `npm run test:library-api` | ✅ 45 项通过；隔离临时存储。 |
+| `npm run test:library-connectors` | ✅ 离线连接器回归通过；无连接器改动。 |
+| `npm run test:api` | ✅ 85 项通过。 |
+| `npm run test:ai-api` | ✅ 11 项通过；只读、无模型生成调用。 |
+| `npm run build` | ✅ 生产构建通过；原有 Three.js 551.65 kB chunk 警告仍存在且非阻断。 |
+
+**测试边界。** 使用合成 EPUB 地址/正文 fixture；未下载或打开真实 EPUB，未读取真实用户书籍、书架或笔记，未向模型发送请求，也未新增密钥/配置。未运行浏览器视觉、实体手机、真实账户或实际 EPUB 供应商端到端测试。此项只完成诚实拒绝与 UI 说明；EPUB 正文解析、章节/版本哈希 provenance、EPUB AI 解读以及 Phase 8 其他全书总结/跨版本/研究搜索功能仍未完成。

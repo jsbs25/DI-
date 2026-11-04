@@ -154,3 +154,9 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - `DigitalLibrary` 使用专用 `/api/library/books/:id/ai-reading`，显示结构化来源引用与范围披露。全文记录也说明模型仅收到一段上下文、并未分析全书；摘录明确显示不是全书。成功生成且有引用的回答可用新接口保存为用户私有知识笔记；服务端要求有效登录、重新核验证据并按账户过滤返回。没有在此实现中添加新的模型提供商、付费 API、密钥或用户配置步骤；没有可用 AI 配置时诚实返回错误，不伪造生成结果。
 - 回归新增 `scripts/test_library_reading_ai.ts` 和 `npm run test:library-reading-ai`，使用纯合成公开文本 fixture，不请求网络、不读写真实用户书架。隔离 API 测试增加正文不匹配/不可核引文/未知图书/未登录笔记拒绝用例。具体通过项与限制见 `TEST_REPORT.md`。
 - 未改连接器实现或用户书架数据，未运行实时模型调用；EPUB 全文解析、真实浏览器/手机、真实账户间私有笔记展示及完整 Phase 8 仍需后续工作。
+
+
+### WORLD LIBRARY Phase 8 follow-up：EPUB 正文证据路径审计（2026-11-04）
+- 只读检查 `EpubReader`、Gutenberg 导入、EPUB 代理、AI 阅读 API 和 CFI 续读字段。结论：服务端只按允许主机流式代理 EPUB 到浏览器，epub.js 在浏览器解析；服务器没有抽取/持久化章节正文或核验 CFI 对应的版本。EPUB-only 记录为 `metadata_only` 且无 chapters；因此没有安全依据将 EPUB 选文送入 AI。
+- 在 `resolveReadingEvidence` 中为 EPUB-only 记录增加 `EPUB_TEXT_UNAVAILABLE`（409）明确拒绝；即便错误携带全文标记/章节，也不会绕过 EPUB 格式保护。EpubReader 显示清楚说明：保留阅读和续读，AI 解读暂不支持，CFI/百分比不等于可引用章节/页码。现有已验证服务器文本的 AI 解读、来源引用、账户私有笔记、阅读器其余功能均保留。
+- 测试仅用合成 EPUB 元数据和合成正文，不读取实际用户 EPUB/书架，不请求外部书源，不调用模型；未新增依赖、连接器、付费模型、API key 或配置。完整检查见 `TEST_REPORT.md`。

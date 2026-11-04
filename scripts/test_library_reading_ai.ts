@@ -60,6 +60,27 @@ check(!oldUnmarkedRecord.ok && oldUnmarkedRecord.code === 'BOOK_TEXT_UNVERIFIED'
 const excerpt = resolveReadingEvidence({ ...fixture, textAvailability: 'excerpt' }, 'chapter-1', 'The river carried a silver leaf past the old bridge.');
 check(excerpt.ok && excerpt.evidence.coverage === 'excerpt' && /不是全书全文/.test(excerpt.evidence.notice), 'Excerpt-only sources are labeled as excerpts and cannot be framed as whole-book reading');
 
+const syntheticEpub: Book = {
+  ...fixture,
+  id: 'synthetic-epub-only',
+  formatType: 'epub',
+  epubUrl: 'https://www.gutenberg.org/files/99999/99999-0.epub',
+  textAvailability: 'metadata_only',
+  chapters: []
+};
+const epubAttempt = resolveReadingEvidence(syntheticEpub, 'chapter-1', 'A synthetic passage from a test EPUB.');
+check(!epubAttempt.ok && epubAttempt.status === 409 && epubAttempt.code === 'EPUB_TEXT_UNAVAILABLE', 'EPUB-only content is explicitly refused because the server has no parsed source text or verified CFI locator');
+if (!epubAttempt.ok) {
+  check(/EPUB AI 解读暂不支持/.test(epubAttempt.error) && /未向 AI 发送请求/.test(epubAttempt.error), 'EPUB refusal explains the unsupported behavior and confirms no model request');
+}
+
+const unverifiedEpubChapter = resolveReadingEvidence({
+  ...syntheticEpub,
+  textAvailability: 'full_text',
+  chapters: [{ id: 'chapter-1', title: 'Synthetic chapter', content: 'The river carried a silver leaf past the old bridge.' }]
+}, 'chapter-1', 'The river carried a silver leaf past the old bridge.');
+check(!unverifiedEpubChapter.ok && unverifiedEpubChapter.code === 'EPUB_TEXT_UNAVAILABLE', 'An EPUB record cannot bypass the refusal by claiming full text or supplying an unverified chapter/locator');
+
 const unverifiableEdition = resolveReadingEvidence({ ...fixture, externalId: undefined, sourceUrl: undefined, publisher: undefined }, 'chapter-1', 'The river carried a silver leaf past the old bridge.');
 check(!unverifiableEdition.ok && unverifiableEdition.code === 'CITATION_UNVERIFIABLE', 'Missing version/source identifiers prevent fabricated citations');
 
