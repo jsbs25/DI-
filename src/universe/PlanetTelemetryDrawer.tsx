@@ -44,7 +44,7 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
   }[planet.humanityRole.status];
 
   return (
-    <div className="fixed top-18 right-4 bottom-6 w-96 max-w-[calc(100vw-2rem)] bg-slate-950/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-40 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
+    <div className="fixed top-18 md:top-28 right-4 bottom-6 w-96 max-w-[calc(100vw-2rem)] bg-slate-950/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-40 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
       {/* Drawer Header */}
       <div className="relative p-5 border-b border-white/10 bg-gradient-to-r from-slate-900/80 to-transparent">
         <div className="flex items-start justify-between">

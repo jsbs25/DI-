@@ -8,7 +8,7 @@
 | 首页与全局导航 | `src/App.tsx`、`src/components/layout/Navbar.tsx` | 13 个导航模块已按需加载；1274×649 桌面生产构建的地球/动态/图书馆/宇宙切换 smoke 通过，其他模块与移动端/RTL 仍待测。 |
 | EARTH ID、注册/登录、引导、资料 | `src/components/auth/`、`src/components/profile/`、`server.ts`、`server/store.ts` | 注册、登录、资料和会话相关代码存在；公开用户接口已使用白名单脱敏；身份查询无有效令牌时返回空用户；引导、资料更新、位置隐私开关要求有效会话；其他 HTTP 权限仍需回归。 |
 | 3D 地球与全球节点 | `src/components/globe/`、`/api/globe/*` | Three.js 地球、节点和空间数据路径存在；视觉改版不得替换地球交互或隐私设置。 |
-| 宇宙/太阳系探索 | `src/universe/` | 桌面 smoke 已验证场景、地球遥测选择与返回地球；遥测抽屉遮挡部分天体栏已排队，保留所有切换与参数展示能力。 |
+| 宇宙/太阳系探索 | `src/universe/` | 桌面 smoke 已验证场景、地球遥测选择与返回地球；抽屉桌面上沿已下移避开天体栏，构建规则通过，浏览器视觉复测待做；保留所有切换与参数展示能力。 |
 | 社交动态与趋势 | `src/components/social/`、`/api/posts*` | 动态发布/筛选/点赞/评论 HTTP 契约通过，桌面列表加载通过；完整 UI、真实鉴权及数据隔离仍待后续验证/批准。 |
 | 消息与 AI 翻译 | `src/components/chat/`、`/api/conversations/*` | 消息持久化与翻译路径存在；翻译依赖模型配置，回退内容不能冒充真实翻译。 |
 | AI HUB | `src/components/ai/`、`server/aiGateway.ts`、`/api/ai/*` | 多模式及模型网关代码存在；真实模型调用需服务端凭据和服务可用，不提交或暴露密钥。 |

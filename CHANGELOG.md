@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-11-04
 
 ### Fixed
+- Moved the Universe telemetry drawer below the desktop celestial selector (`md:top-28`) while preserving the compact small-screen position and all existing controls.
 - Integrity tests now use an isolated temporary JSON store and clean it up on success or failure, preventing test users, posts, and messages from being written into persistent project data.
 - The store data path can be overridden with `EARTH_ONE_DATA_FILE`; the existing `server_data.json` default remains unchanged.
 - Public user lists, profile responses, and global search now use a field allowlist that excludes email/internal onboarding state and masks coordinates when location sharing is disabled.
@@ -17,8 +18,9 @@
 - No authentication, authorization, administrator-permission, or private-message access-control policy was changed.
 
 ### Verification
+- `npm run lint`, `npm run build`, `npm run test:api` (51 assertions), and `npx tsx scripts/test_earth_one.ts` (44 assertions) passed after the drawer layout change; the production CSS contains the responsive desktop offset. Browser visual remeasurement remains pending.
 - A bounded desktop production-build smoke check passed for globe → feed → library detail → universe → Earth telemetry → globe, using isolated temporary API data and no external AI/crawling.
-- Logged existing follow-ups for the telemetry drawer overlapping planet controls at 1274×649 and a missing favicon. Other modules, mobile/RTL, and real first-load resource measurements remain unverified.
+- The desktop drawer overlap was corrected after the smoke check; browser visual remeasurement and the missing favicon remain follow-ups. Other modules, mobile/RTL, and real first-load resource measurements remain unverified.
 
 ## [v1.1.0] - Secure Authentication & Citizen Onboarding Wizard - 2026-11-03
 
