@@ -16,7 +16,7 @@
 | 视频中心 | `src/components/video/`、`/api/videos` | 视频目录列表响应已有 HTTP 回归，不发起媒体请求；播放实测及 HLS 转码/托管仍待基础设施验证，不得宣称已完成。 |
 | 游戏中心 | `src/components/games/`、`/api/games/*` | 房间只读列表 API 已有 HTTP 回归；五子棋/问答交互与房间加入/创建仍待验证；多人权威 WebSocket 对战需后续实现。 |
 | 社区 | `src/components/community/`、`/api/communities*` | 社区只读列表 API 已有 HTTP 回归；加入路径、用户隔离及成员数持久化仍待验证。 |
-| 数字图书馆、阅读器、书架 | `src/components/library/`、`server/bookHarvester.ts`、`/api/library/*` | 图书检索/详情/书架进度 HTTP 契约通过，桌面目录到详情 smoke 通过；阅读器、外部来源、版权和管理权限仍需持续验证。 |
+| 数字图书馆、阅读器、书架 | `src/components/library/`、`server/bookHarvester.ts`、`/api/library/*` | 本地图书目录/详情新增独立 GET-only 回归（12 项，含字段/唯一性、哲学筛选、本地搜索、章节结构与结构化 404）；既有综合套件中的书架进度契约与桌面目录到详情 smoke 仍在记录中。阅读器、外部来源、版权和管理权限仍需持续验证。 |
 | 网页浏览与收藏 | `src/components/browser/`、`/api/browser/*` | 搜索、预览、书签/保存路径存在；修复地址栏工具栏与分栏面板 flex 收缩，390×844 阿语 RTL/中文及 1274×649 阿语桌面无页面级横向溢出；窄屏工具栏保留自身横向滚动。未触发搜索/抓取；外部地址须继续审查 SSRF、来源限制与隐私。 |
 | 爬虫与内容收集 | `src/components/crawler/`、`server/webFetcher.ts`、`/api/crawler/*` | 地球侧栏可打开桌面仪表盘；隔离测试仅加载任务/页面 GET 并检查布局，未创建、运行、批准或拒绝任务/页面。任务与审核流程仍需权限、目标域约束及 SSRF 安全测试。 |
 | 知识图谱/知识宇宙 | `src/components/knowledge/`、`server/knowledgeGraph.ts`、`/api/knowledge/*` | HTTP 回归覆盖搜索、类别/国家筛选、关联节点、详情与不存在节点 404；不得将种子/示例内容描述为实时全球知识数据。 |

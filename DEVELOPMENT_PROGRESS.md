@@ -47,6 +47,7 @@
 39. 新增 `npm run test:ai-api`，为 `/api/ai/models` 与 `/api/ai/stats` 建立独立 GET-only 回归；使用临时 JSON、在测试子进程清空模型密钥并关闭后台采集，检查元数据结构、模型 ID 唯一性、未配置掩码和统计汇总。9 项通过；`npm run lint` 与 `npm run test:globe-api`（7 项）通过。未调用模型或会话/消息路由，未运行包含待批准读取路径的完整 `test:api`。
 40. 静态巡检确认六种支持语言各有 104 个非空翻译值；新增 `npm run test:i18n`，检查支持语言集合、字典键一致性与非空值，共 13 项通过。`npm run lint` 与 `npm run test:globe`（30 项）通过。此测试不证明翻译质量、RTL 几何或浏览器交互。
 41. 新增 `npm run test:knowledge-api` 独立 GET-only 回归：11 项通过，逐一验证 33 个知识节点详情的边与关联书籍一致，并检查节点唯一性/完整性、Avicenna 别名搜索、类别与国家筛选及未知节点结构化 404。服务器使用自动清理的临时 JSON，禁用模型密钥和后台采集，请求严格限制于 `/api/knowledge/nodes`、目录节点详情与两种本地搜索契约；未触及会话/消息路径、外部服务、正式数据或既有服务。与该套件同时复核的 `npm run test:globe-api`（7 项）、`test:ai-api`（9 项）、`test:i18n`（13 项）及 `npm run lint` 均通过；没有运行完整 `test:api` 或前端构建。GitHub 内置连接器已启用，但当前运行时没有其 CLI/credential helper，系统 `gh` 未登录；本次本地提交，待现有授权入口可用后再快进同步，未使用仓库内强制推送脚本。
+42. 新增 `npm run test:library-api`，以随机本地端口和自动清理的临时 JSON 只读验证本地图书目录、核心字段/ID 唯一性、哲学类别过滤、未知类别空集合、Plato 标题/作者搜索、`book_republic` 详情章节结构及未知图书结构化 404；12 项通过，`npm run lint` 通过。请求严格限制为图书目录和单本详情 GET；未调用外部图书搜索、书架、写操作、会话/消息路由，未访问正式数据或既有服务。未运行完整 `test:api`、生产构建或浏览器测试；GitHub 同步仍受当前运行时缺少已授权 CLI/credential helper 阻塞。
 
 ## 验证结果
 
