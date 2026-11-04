@@ -829,12 +829,8 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       {/* 2. WORLD-CLASS USER HERO OVERLAY                               */}
       {/* ============================================================== */}
       <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-[220px] lg:pl-[220px] flex flex-col justify-start md:justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
-        {/* Left Hero Title & CTA */}
+        {/* Hero CTA */}
         <div className="max-w-xl pointer-events-auto">
-          <h1 className="font-extrabold text-3xl sm:text-6xl md:text-7xl tracking-tight text-white font-sans drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]">
-            {lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}
-          </h1>
-
           {showFirstUseHint && (
             <div className="mt-3 flex max-w-md items-start gap-2 rounded-xl border border-cyan-900/70 bg-slate-950/75 px-3 py-2 text-xs leading-relaxed text-cyan-100/90 shadow-lg backdrop-blur-md">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
