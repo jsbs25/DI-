@@ -182,6 +182,12 @@ async function main() {
       listedUser.location.isPublic === false && listedUser.location.lat === 0 && listedUser.location.lng === 0,
       'Public directory keeps the privacy choice while masking private coordinates'
     );
+    const repeatedDirectory = await get('/api/users');
+    check(
+      repeatedDirectory.status === directory?.status &&
+      JSON.stringify(repeatedDirectory.body) === JSON.stringify(directory?.body),
+      'Repeated public directory GET returns an identical response'
+    );
 
     const jordanUpper = await get('/api/users?country=JO');
     const jordanLower = await get('/api/users?country=jo');
@@ -231,6 +237,12 @@ async function main() {
       profile.body.posts[0].id === 'post_public_profile_probe',
       'Public profile keeps its associated public post list'
     );
+    const repeatedProfile = await get(`/api/users/${TEST_USER_ID}`);
+    check(
+      repeatedProfile.status === profile.status &&
+      JSON.stringify(repeatedProfile.body) === JSON.stringify(profile.body),
+      'Repeated public profile GET returns an identical response'
+    );
 
     const missingProfile = await get('/api/users/user_missing_profile_probe');
     check(
@@ -253,6 +265,12 @@ async function main() {
     check(
       globalUser.location.isPublic === false && globalUser.location.lat === 0 && globalUser.location.lng === 0,
       'Global search masks coordinates for a profile with private location sharing'
+    );
+    const repeatedGlobalSearch = await get('/api/search/global?q=Jordan');
+    check(
+      repeatedGlobalSearch.status === globalSearch.status &&
+      JSON.stringify(repeatedGlobalSearch.body) === JSON.stringify(globalSearch.body),
+      'Repeated global search GET returns an identical response'
     );
     const trimmedGlobalSearch = await get('/api/search/global?q=%20Jordan%20');
     check(

@@ -2,7 +2,7 @@
 
 更新时间：2026-11-04
 仓库：`https://github.com/jsbs25/DI-`
-分支：`main` / `origin/main`；本轮续作基线 `78a8605`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
+分支：`main` / `origin/main`；本轮续作基线 `6e348f8`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
 
 ## 本轮已完成
 
@@ -161,3 +161,11 @@
 - `npm run test:creator-api`：13 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。服务使用随机本地端口和脚本自动清理的临时 JSON，仅发送 GET。
 - 未写入文章、获取外部媒体、访问身份或会话/消息接口、读取正式 `server_data.json`，也未检查或更改既有服务、配置或日志。完整 `npm run test:api` 因包含待批准的会话读取路径未运行；本次未运行构建或浏览器测试。
 - GitHub 同步：提交 `e9414282ea378edf4ccf654c184a38634da5837d` 已使用已授权 connector 进行普通快进推送；推送后的 fetch 与 connector API 均确认远端 `main`、`origin/main` 和本地 `HEAD` 一致。未强推或修改全局 Git 配置。
+
+
+## 2026-11-04 公开用户目录、资料与搜索重复 GET 续测
+
+- 从干净的 `main` / `6e348f8` 继续；仅扩展 `scripts/test_public_users_api.ts` 与项目记录，没有修改服务端路由、隐私/权限策略或业务数据。
+- 对公开目录 `/api/users`、合成公开资料 `/api/users/:id` 和 `/api/search/global?q=Jordan` 各增加一次重复 GET 比较，要求 HTTP 状态和完整 JSON 响应均与首次读取一致。
+- `npm run test:public-users-api`：24 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。脚本使用随机本地端口、自动清理的临时 JSON，端点白名单仍只允许公开 GET。
+- 未访问身份/会话/消息路径、写接口、外部来源、正式 `server_data.json`；未检查、停止或修改既有服务、配置或日志。完整 `npm run test:api` 因包含待批准的会话读取路径未运行；本次未运行构建或浏览器测试。

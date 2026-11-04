@@ -1,7 +1,7 @@
 # EARTH ONE 自主研发任务队列
 
 更新时间：2026-11-04
-基线：本轮从 `main` / `78a8605` 继续；更早阶段以 Git 提交历史为准，当前实现和验证范围见下。继续保护所有既有路由、模块和用户数据。
+基线：本轮从 `main` / `6e348f8` 继续；更早阶段以 Git 提交历史为准，当前实现和验证范围见下。继续保护所有既有路由、模块和用户数据。
 
 ## 当前队列
 
@@ -41,6 +41,7 @@
 - 新增 `npm run test:public-users-api` 独立 GET-only 回归：仅请求公开用户目录、公开资料及全局搜索白名单，使用临时合成用户数据；21 项通过，覆盖国家/文本筛选、资料 404、公开字段、私密邮箱和 onboarding 字段脱敏、私密坐标遮蔽及全局搜索空查询处理。未访问身份、会话/消息路由、正式数据或既有服务；`npm run lint` 通过。完整 `test:api` 仍未运行。
 - 本轮社交 feed 代码与回归文档提交 `72f7f96` 已通过现有授权 GitHub connector 快进推送；推送后 `git fetch`、connector API 回读均核对为同一提交，且当时 `main`、`origin/main` 与本地 `HEAD` 一致、工作区干净。未强推或修改账户设置。
 - 上述测试与项目记录已通过现有 GitHub connector wrapper 快进推送；提交 `e4403a8` 后 fetch 确认本地 `main` 与 `origin/main` 一致。只使用该授权 wrapper；没有强推或修改账户设置。
+- `npm run test:public-users-api` 现为 24 项通过：在原有隐私、筛选与搜索契约上，新增 `/api/users`、合成用户资料及 `/api/search/global?q=Jordan` 重复 GET 的状态与完整 JSON 一致性检查。使用自动清理的临时 JSON 和随机本地端口；仅公开 GET，不触及身份/会话/消息路径、写接口、正式数据、外部来源或既有服务；`npm run lint` 与 `git diff --check` 通过。
 
 ### P2 — 进行中：降低首屏 JavaScript 体积
 - 已将 13 个导航模块改为按需加载，入口 chunk 从基线约 1,160.76 KB（gzip 306.07 KB）降至 316.71 KB（gzip 97.92 KB）；原有页面、导航和组件 props 保持不变。
