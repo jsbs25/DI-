@@ -2,7 +2,7 @@
 
 更新时间：2026-11-04
 仓库：`https://github.com/jsbs25/DI-`
-分支：`main` / `origin/main`；本次续作基线 `84cd502`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
+分支：`main` / `origin/main`；本次续作基线 `4c76bf9`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
 
 ## 本轮已完成
 
@@ -46,6 +46,7 @@
 38. 将上一轮手动定向 smoke 固化为 `npm run test:globe-api` 独立脚本：国家目录非空、国家代码唯一且格式合理、名称/坐标字段与边界有效、约旦本地化元数据正确、统计结构和目录数量一致；脚本白名单只含 `/api/globe/countries`、`/api/globe/stats` 两个 GET 接口，使用独立临时 JSON 并关闭后台书籍采集。本轮 7 项通过，`npm run lint` 通过；没有运行完整 API 套件。
 39. 新增 `npm run test:ai-api`，为 `/api/ai/models` 与 `/api/ai/stats` 建立独立 GET-only 回归；使用临时 JSON、在测试子进程清空模型密钥并关闭后台采集，检查元数据结构、模型 ID 唯一性、未配置掩码和统计汇总。9 项通过；`npm run lint` 与 `npm run test:globe-api`（7 项）通过。未调用模型或会话/消息路由，未运行包含待批准读取路径的完整 `test:api`。
 40. 静态巡检确认六种支持语言各有 104 个非空翻译值；新增 `npm run test:i18n`，检查支持语言集合、字典键一致性与非空值，共 13 项通过。`npm run lint` 与 `npm run test:globe`（30 项）通过。此测试不证明翻译质量、RTL 几何或浏览器交互。
+41. 新增 `npm run test:knowledge-api` 独立 GET-only 回归：11 项通过，逐一验证 33 个知识节点详情的边与关联书籍一致，并检查节点唯一性/完整性、Avicenna 别名搜索、类别与国家筛选及未知节点结构化 404。服务器使用自动清理的临时 JSON，禁用模型密钥和后台采集，请求严格限制于 `/api/knowledge/nodes`、目录节点详情与两种本地搜索契约；未触及会话/消息路径、外部服务、正式数据或既有服务。与该套件同时复核的 `npm run test:globe-api`（7 项）、`test:ai-api`（9 项）、`test:i18n`（13 项）及 `npm run lint` 均通过；没有运行完整 `test:api` 或前端构建。GitHub 内置连接器已启用，但当前运行时没有其 CLI/credential helper，系统 `gh` 未登录；本次本地提交，待现有授权入口可用后再快进同步，未使用仓库内强制推送脚本。
 
 ## 验证结果
 
