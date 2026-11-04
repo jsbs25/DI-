@@ -228,4 +228,11 @@
 - 首次产物断言因构建器省略最后一条声明后的分号而误报；确认生成 CSS 已包含 `animation-iteration-count:1!important` 后，只放宽测试的分号要求，没有改样式实现。最终 `npm run test:motion:build` 构建通过，9 项产物断言通过，覆盖 1 个 CSS 文件。
 - Vite 构建仍报告 `three.module` chunk 为 551.65 KB，警告原样保留；输出目录 `dist` 被 `.gitignore` 忽略。本轮没有修改应用功能、运行服务、配置或业务数据，也没有请求 API。
 - 同轮重跑 `npm run test:motion`（6 项）、`npm run test:motion:browser`（12 项，Chrome for Testing 151.0.7922.34）和 `npm run lint` 均通过；辅助技术与实体设备仍待实际验证。
-- 新测试及记录将另行提交并通过已有授权连接器普通快进同步；不改账户选择、不改 Git 配置、不强推。
+- GitHub 同步已完成：提交 `590df23` 将远端 `main` 从 `08a07c8` 普通快进到 `590df23`；推送后 fetch 核对本地 `HEAD` 与 `origin/main` 均为 `590df23716a57f498b2c4b2df729a7fc7d259e6a`，工作区干净。凭据仅通过命令级连接器助手用于本次 Git 操作；未改账户选择或 Git 配置，未强推。
+
+
+### 后续注意事项
+
+若后续升级 Vite 或 CSS 压缩器，应重跑 `npm run test:motion:build` 并确认压缩后的规则仍符合断言。
+
+实体设备、屏幕阅读器及其他辅助技术验证仍未完成；需在相应环境可用后单独实测。
