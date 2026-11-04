@@ -20,6 +20,7 @@
     "test:catalog-api": "tsx scripts/test_catalogs_api.ts",
     "test:social-feed-api": "tsx scripts/test_social_feed_api.ts",
     "test:public-users-api": "tsx scripts/test_public_users_api.ts",
+    "test:browser-api": "tsx scripts/test_browser_api.ts",
     "test:i18n": "tsx scripts/test_i18n.ts",
     "test:motion": "tsx scripts/test_motion_accessibility.ts",
     "test:motion:browser": "tsx scripts/test_motion_accessibility_browser.ts",

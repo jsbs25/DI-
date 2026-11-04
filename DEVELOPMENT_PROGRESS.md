@@ -236,3 +236,12 @@
 若后续升级 Vite 或 CSS 压缩器，应重跑 `npm run test:motion:build` 并确认压缩后的规则仍符合断言。
 
 实体设备、屏幕阅读器及其他辅助技术验证仍未完成；需在相应环境可用后单独实测。
+
+
+## 2026-11-04 浏览器工作区只读 API 回归
+
+- 从已同步 `main` / `0243dc3` 继续；新增 `scripts/test_browser_api.ts` 与 `npm run test:browser-api`，仅验证 `/api/browser/bookmarks` 和 `/api/browser/saved-articles` 两个 GET 列表接口。
+- 测试使用 `/tmp` 下自动创建并清理的合成 JSON 与随机本地端口；合成书签和文章均使用 `example.test` 地址。验证响应字段、书签 ID 唯一性、合成条目保留，以及每个列表重复 GET 的 HTTP 状态和完整 JSON 一致性；12 项通过、0 失败。
+- `npm run lint`、`git diff --check` 与 `package.json` JSON 解析均通过。未运行完整 `npm run test:api`（其中包含仍待批准的会话读取路径）、构建或浏览器 UI 测试。
+- 没有修改业务路由或访问策略；未请求写入、身份、会话/消息、外部 URL、正式 `server_data.json`，未读取/改动/停止既有服务配置或日志。项目数据保护和其他现有功能保持不变。
+- 下一步：继续队列中另一个独立、可回滚且不涉及待审批区域的事项；如需同步，先确认远端是本地提交祖先，再仅经当前已授权 GitHub connector 普通快进推送并 fetch 核验。

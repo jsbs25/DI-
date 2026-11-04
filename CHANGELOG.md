@@ -57,6 +57,7 @@
 - A one-run production Chromium resource-timing capture found 253,077 encoded / 942,755 decoded JavaScript body bytes on the default 3D home, plus 16,324 / 112,399 CSS bytes. The 12 non-initial page chunks loaded only on first navigation; no Three.js deferral was made because it would change the default interactive-globe experience without a product decision.
 - Navigation modules now load on demand behind an accessible loading state. The entry chunk decreased from about 1,160.76 KB (gzip 306.07 KB) to 316.71 KB (gzip 97.92 KB); the shared Three.js chunk remains about 551.65 KB and still triggers the build warning.
 - No authentication, authorization, administrator-permission, or private-message access-control policy was changed.
+- Added `npm run test:browser-api`, a 12-assertion isolated GET-only regression for synthetic bookmark and saved-article fixtures. It checks response fields, unique bookmark IDs, and identical repeated list responses using only the two allowlisted endpoints; temporary storage is auto-cleaned, with no write, identity/conversation/message route, external URL, production data, or existing-service access.
 
 ### Verification
 - `npm run lint`, `npm run build`, `npm run test:api` (67 assertions), and `npx tsx scripts/test_earth_one.ts` (44 assertions) passed; the production CSS contains the responsive desktop drawer offset.

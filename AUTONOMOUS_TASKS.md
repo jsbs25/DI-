@@ -44,6 +44,7 @@
 - `npm run test:public-users-api` 现为 24 项通过：在原有隐私、筛选与搜索契约上，新增 `/api/users`、合成用户资料及 `/api/search/global?q=Jordan` 重复 GET 的状态与完整 JSON 一致性检查。使用自动清理的临时 JSON 和随机本地端口；仅公开 GET，不触及身份/会话/消息路径、写接口、正式数据、外部来源或既有服务；`npm run lint` 与 `git diff --check` 通过。
 - `npm run test:ai-api` 现为 11 项通过：为 `/api/ai/models` 与 `/api/ai/stats` 新增重复 GET 的完整状态/JSON 一致性检查。隔离子进程中所有模型凭据置空，使用自动清理的临时 JSON 和随机端口；未调用模型、触及会话/消息路径、正式数据或既有服务；`npm run lint` 与 `git diff --check` 通过。
 - `npm run test:social-feed-api` 现为 21 项通过：新增公开默认 feed 与 `feed=latest` 的重复 GET 检查，验证 HTTP 状态和完整 JSON 响应一致。只请求固定 `/api/posts` GET 白名单，使用随机本地端口及自动清理的临时 JSON；`npm run lint` 与 `git diff --check` 通过。未触及身份/会话/消息路径、写接口、外部来源、正式数据或既有服务；完整 `test:api` 未运行，因为其中包含待批准读取路径。代码与回归记录提交 `7bb3a147a576e55cda06b93c9cbb5d6e62e40394` 已从 `9722da5` 普通快进推送到 `main`；推送后 fetch 和授权连接器 API 均核实提交一致，未强推或修改全局配置。
+- 新增 `npm run test:browser-api` 独立 GET-only 回归：12 项通过，使用自动清理的临时 JSON 和合成书签/已保存文章，只访问两个白名单列表 GET；检查字段、书签 ID 唯一性和重复 GET 完整响应一致性。未调用写接口、会话/消息路径、外部 URL、正式数据或既有服务；`npm run lint` 与 `git diff --check` 通过。完整 `test:api` 未运行。
 
 ### P2 — 进行中：降低首屏 JavaScript 体积
 - 已将 13 个导航模块改为按需加载，入口 chunk 从基线约 1,160.76 KB（gzip 306.07 KB）降至 316.71 KB（gzip 97.92 KB）；原有页面、导航和组件 props 保持不变。
