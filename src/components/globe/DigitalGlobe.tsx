@@ -590,7 +590,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                 { id: 'chat', label: t.globalMessenger },
                 { id: 'aihub', label: t.aiHubTab },
                 { id: 'browser', label: t.webBrowser },
-                { id: 'crawler', label: 'Crawler' },
+                { id: 'crawler', label: t.crawlerCenter },
                 { id: 'creator', label: t.creatorArticles },
                 { id: 'video', label: t.worldVideoCenter },
                 { id: 'game', label: t.globalGameCenter }

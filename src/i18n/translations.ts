@@ -90,6 +90,7 @@ export interface TranslationDictionary {
   webBrowser: string;
   creatorArticles: string;
   worldVideoCenter: string;
+  crawlerCenter: string;
   globalGameCenter: string;
   editGlobeBeacon: string;
   logOut: string;
@@ -198,6 +199,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     webBrowser: '网页浏览器',
     creatorArticles: '创作者文章',
     worldVideoCenter: '全球视频中心',
+    crawlerCenter: '网页采集中心',
     globalGameCenter: '全球游戏中心',
     editGlobeBeacon: '编辑地球信标',
     logOut: '退出登录',
@@ -303,6 +305,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     webBrowser: 'Web Browser',
     creatorArticles: 'Creator Articles',
     worldVideoCenter: 'World Video Center',
+    crawlerCenter: 'Crawler Center',
     globalGameCenter: 'Global Game Center',
     editGlobeBeacon: 'Edit Globe Beacon',
     logOut: 'Log Out',
@@ -408,6 +411,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     webBrowser: 'متصفح الويب',
     creatorArticles: 'مقالات المبدعين',
     worldVideoCenter: 'مركز الفيديو العالمي',
+    crawlerCenter: 'مركز جمع المحتوى',
     globalGameCenter: 'مركز الألعاب العالمي',
     editGlobeBeacon: 'تعديل منارة الأرض',
     logOut: 'تسجيل الخروج',
@@ -513,6 +517,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     webBrowser: 'Navegador Web',
     creatorArticles: 'Artículos de Creadores',
     worldVideoCenter: 'Centro Mundial de Vídeo',
+    crawlerCenter: 'Centro de rastreo web',
     globalGameCenter: 'Centro de Juegos Global',
     editGlobeBeacon: 'Editar Baliza del Globo',
     logOut: 'Cerrar Sesión',
@@ -618,6 +623,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     webBrowser: 'Navigateur Web',
     creatorArticles: 'Articles des Créateurs',
     worldVideoCenter: 'Centre Vidéo Mondial',
+    crawlerCenter: 'Centre de collecte web',
     globalGameCenter: 'Centre de Jeux Mondial',
     editGlobeBeacon: 'Modifier la Balise du Globe',
     logOut: 'Se Déconnecter',
@@ -723,6 +729,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     webBrowser: 'Веб-браузер',
     creatorArticles: 'Статьи авторов',
     worldVideoCenter: 'Мировой видеоцентр',
+    crawlerCenter: 'Центр веб-сканирования',
     globalGameCenter: 'Глобальный игровой центр',
     editGlobeBeacon: 'Изменить маяк на глобусе',
     logOut: 'Выйти',

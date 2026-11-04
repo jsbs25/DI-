@@ -35,6 +35,7 @@
 27. 修复 AI HUB 模型选择状态栏与网页浏览器 flex 面板的窄屏内在最小宽度问题；所有原控件、内容与导航保留。视觉回归仅检查导航和展示，不调用真实 AI、外部搜索或表单写入。
 28. `scripts/test_api.ts` 新增五项无副作用 GET 契约：地球节点列表集合、图书详情标注集合、未知图书的结构化 404、Crawler 任务列表集合、未知公开资料的结构化 404；HTTP 回归现为 78 项，未访问私信边界或外部搜索/代理。
 29. Crawler 仅从地球侧栏打开桌面仪表盘；挂载时的任务/页面 GET 通过隔离临时 API 响应。未点击新建、运行、通过/拒绝等写操作；抓取执行与内容审核仍未验证。
+30. 将地球侧栏现有 Crawler 标签加入六语言字典，并以阿拉伯语 RTL 实际打开该菜单项；六语言静态回归增加六项非空标签检查，现为 30 项通过，未新增入口或采集操作。
 
 ## 验证结果
 
@@ -43,7 +44,7 @@
 - `npm run test:api` 上次续作结果：73 项 HTTP 断言通过，0 项失败；后续新增五项只读契约后，本轮最新结果为 78 项通过、0 失败。
 - 临时 Express 实例 HTTP smoke：用户列表、用户资料、全局搜索均未返回邮箱/内部 onboarding 字段；私密位置的纬经度为屏蔽值。
 - 正式 `server_data.json` 在 04:55 校验仍与本轮测试前一致；04:57 再查发现其于 04:56:30 变化。该时间早于静态渲染测试、晚于本轮服务停止；已有默认路径的 3000 服务且每小时采集开启，时间相符但未直接证明归属。未覆盖、回滚或提交该文件，不再笼统宣称整轮哈希不变。
-- `npm run test:globe`：六语言共 24 项通过；只验证静态内容与网格/逻辑边框/波形行的结构契约。
+- `npm run test:globe`：六语言共 30 项通过；只验证静态内容、Crawler 菜单标签翻译键及网格/逻辑边框/波形行的结构契约。
 - `npm run test:universe`：9 项静态断言通过；关闭名称/类型和原有天体条件操作文字保留，类型检查与生产构建通过。
 - `npm run lint`：通过。
 - `npm run build`：通过；入口 chunk 从既有约 1,160.76 KB（gzip 306.07 KB）降至 316.71 KB（gzip 97.92 KB）。仍有 `three.module` 共享 chunk 551.65 KB 的体积警告。
@@ -51,8 +52,8 @@
 - 生产预览静态请求验证：`/favicon.ico` → `200 image/x-icon`，`/favicon.svg` → `200 image/svg+xml`；HTML 返回两个显式图标链接。
 - 1274×649 桌面生产预览已确认抽屉净距和地球选择/返回流程；favicon 已修复，所测路径控制台无错误。其余模块、首屏实际资源统计、窄屏交互与 RTL 仍未验证。
 - 隔离 Chromium 生产构建实测：首页 1274×649 的中文指标卡 x=220、宽 328px，三个单元各宽 90px且互不重叠；阿拉伯语 RTL 卡片 x=908，列顺序按 RTL 反转，宽度仍无溢出。390×844 中文指标卡宽 350px、三列各 100px，页面可纵向滚动且横向宽度为 390px。地球→宇宙→地球交互通过；API 响应为空的内存模拟，任何非 GET 均被拒绝。
-- 本轮 `npm run lint`、`npm run test:globe`（24 项）、`npm run test:universe`（9 项）以及独立目录生产构建均通过；构建警告仍提示 Three.js 551.65 KB。
-- 本轮 `npm run test:api`（78 项）、`npx tsx scripts/test_earth_one.ts`（44 项）、`npm run lint`、`npm run test:globe`（24 项）、`npm run test:universe`（9 项）及独立目录生产构建均通过。18 个隔离 Chromium 视口/模块样本均无页面宽度溢出，page errors=0，非 GET=0；44 个外部资源请求被测试路由阻断，因此出现的网络失败提示是预期边界。
+- 本轮 `npm run lint`、`npm run test:globe`（30 项）、`npm run test:universe`（9 项）以及独立目录生产构建均通过；构建警告仍提示 Three.js 551.65 KB。
+- 本轮 `npm run test:api`（78 项）、`npx tsx scripts/test_earth_one.ts`（44 项）、`npm run lint`、`npm run test:globe`（30 项）、`npm run test:universe`（9 项）及独立目录生产构建均通过。18 个隔离 Chromium 视口/模块样本均无页面宽度溢出，page errors=0，非 GET=0；本次运行阻断 43 个外部资源请求，因此出现的网络失败提示是预期边界。
 
 ## 当前未解决/阻塞
 

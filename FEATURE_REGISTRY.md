@@ -5,7 +5,7 @@
 
 | 模块 | 现有入口/实现 | 当前记录与保护要求 |
 |---|---|---|
-| 首页与全局导航 | `src/App.tsx`、`src/components/layout/Navbar.tsx` | 13 个导航模块已按需加载；隔离 Chromium 实测桌面地球→宇宙→返回，及 390×844 阿拉伯语 RTL 下移动导航可达的 12 个模块；本轮 18 个视口/模块样本（含桌面 Crawler 仪表盘）均无页面级横向溢出。总览卡三列指标无重叠，六语言静态渲染 24 项通过；其他设备和真实用户数据路径仍待测。 |
+| 首页与全局导航 | `src/App.tsx`、`src/components/layout/Navbar.tsx`、`src/components/globe/DigitalGlobe.tsx`、`src/i18n/translations.ts` | 13 个导航模块已按需加载；隔离 Chromium 实测桌面地球→宇宙→返回，及 390×844 阿拉伯语 RTL 下移动导航可达的 12 个模块；本轮 18 个视口/模块样本（含桌面 Crawler 仪表盘）均无页面级横向溢出。Crawler 菜单标签已加入六语言字典；总览三列无重叠，六语言静态渲染 30 项通过；其他设备和真实用户数据路径仍待测。 |
 | EARTH ID、注册/登录、引导、资料 | `src/components/auth/`、`src/components/profile/`、`server.ts`、`server/store.ts` | 注册、登录、资料和会话相关代码存在；公开用户接口已使用白名单脱敏；身份查询无有效令牌时返回空用户；引导、资料更新、位置隐私开关要求有效会话；其他 HTTP 权限仍需回归。 |
 | 3D 地球与全球节点 | `src/components/globe/`、`/api/globe/*` | Three.js 地球与节点路径存在；独立 Chromium 确认 canvas 挂载和地球页面返回路径；API 统计/国家只读契约已有 HTTP 回归。视觉改版不得替换地球交互或隐私设置；实机 GPU 性能未验证。 |
 | 宇宙/太阳系探索 | `src/universe/` | 桌面抽屉与天体栏实测净距 9px，隔离 Chromium 地球→宇宙→返回通过。关闭按钮已有双语可访问名称，9 项静态渲染通过；窄屏宇宙、键盘和读屏仍待验证，保留所有切换与参数展示能力。 |

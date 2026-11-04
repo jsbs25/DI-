@@ -22,6 +22,7 @@ function escaped(text: string) {
 
 for (const lang of languages) {
   const t = translations[lang];
+  check(t.crawlerCenter.trim().length > 0, `${lang}: crawler menu label is localized`);
   const html = renderToStaticMarkup(
     <DigitalGlobe
       nodes={[]}
