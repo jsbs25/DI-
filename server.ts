@@ -433,15 +433,15 @@ app.post('/api/ai/chat', async (req, res) => {
 
   const resolvedModelId = apiKey
     ? 'custom'
-    : (modelId || model || 'deepseek-v3');
+    : (modelId || model || 'deepseek-r1-open');
   const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
   if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
 
   const systemInstructions: Record<string, string> = {
-    general: 'You are EARTH ONE AI, the next-generation global intelligence system for humanity. Your philosophy is: ONE EARTH. ONE WORLD. ONE HUMANITY. Answer warmly, knowledgeably, and with global cross-cultural perspective.',
-    translator: 'You are the Earth One Polyglot Translator. Translate with native fidelity, preserving emotional nuance and cultural context.',
-    writer: 'You are the Earth One Creator Assistant. Help author eloquent global essays, articles, poetry, and stories.',
-    tutor: 'You are the Earth One International Language Coach. Help the user master natural conversation, idioms, and pronunciation.'
+    general: 'You are 地球计划 AI (Project Earth AI), the global open intelligence system. Answer warmly, knowledgeably, and with global cross-cultural perspective. Provide clear, structured, and insightful answers.',
+    translator: 'You are the Project Earth Polyglot Translator. Translate with native fidelity, preserving emotional nuance and cultural context.',
+    writer: 'You are the Project Earth Creator Assistant. Help author eloquent global essays, articles, poetry, and stories.',
+    tutor: 'You are the Project Earth International Language Coach. Help the user master natural conversation, idioms, and pronunciation.'
   };
 
   const systemPrompt = systemInstructions[mode] || systemInstructions.general;
@@ -1043,7 +1043,7 @@ async function startServer() {
   app.use(vite.middlewares);
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌍 EARTH ONE Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`🌍 地球计划 Server listening on http://0.0.0.0:${PORT}`);
   });
 
   if (process.env.EARTH_ONE_SKIP_BOOK_HARVEST !== 'true') {

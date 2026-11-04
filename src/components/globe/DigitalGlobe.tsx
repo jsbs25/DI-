@@ -546,7 +546,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             <Globe2 className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <div className="text-[11px] font-bold tracking-[.12em] text-white">EARTH ONE</div>
+            <div className="text-[11px] font-bold tracking-[.12em] text-white">地球计划</div>
             <div className="text-[9px] text-slate-400">One Universe. One World.</div>
           </div>
         </div>
@@ -622,14 +622,8 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         {/* Left Hero Title & CTA */}
         <div className="max-w-xl pointer-events-auto">
           <h1 className="font-extrabold text-3xl sm:text-6xl md:text-7xl tracking-tight text-white font-sans drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]">
-            EARTH ONE
+            {lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}
           </h1>
-          <h2 className="font-bold text-lg sm:text-4xl md:text-5xl text-slate-100 tracking-tight mt-1 sm:mt-2 font-sans drop-shadow-[0_4px_12px_rgba(0,0,0,0.7)]">
-            {t.heroSubtitle}
-          </h2>
-          <p className="text-xs sm:text-lg text-slate-300 mt-2 sm:mt-5 font-normal leading-relaxed drop-shadow-md">
-            {t.heroDescription}
-          </p>
 
           {showFirstUseHint && (
             <div className="mt-3 flex max-w-md items-start gap-2 rounded-xl border border-cyan-900/70 bg-slate-950/75 px-3 py-2 text-xs leading-relaxed text-cyan-100/90 shadow-lg backdrop-blur-md">
@@ -797,10 +791,12 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           </button>
         </div>
 
-        {/* Centered Footer Motto */}
-        <div className="w-full text-center mt-6 pt-4 border-t border-slate-900/80 text-[11px] text-slate-500 font-mono tracking-wider">
-          {t.footerMotto}
-        </div>
+        {/* Centered Footer Motto (omitted when empty to keep space clean) */}
+        {t.footerMotto ? (
+          <div className="w-full text-center mt-6 pt-4 border-t border-slate-900/80 text-[11px] text-slate-500 font-mono tracking-wider">
+            {t.footerMotto}
+          </div>
+        ) : null}
       </div>
 
       <aside className="absolute right-[76px] top-[28%] z-20 hidden w-60 rounded-3xl border border-blue-400/30 bg-[#071020]/80 p-4 shadow-2xl shadow-blue-950/40 backdrop-blur-2xl xl:block">
@@ -816,7 +812,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             <Globe2 className="h-7 w-7" />
           </span>
           <div>
-            <div className="text-xs font-semibold text-slate-100">EARTH ONE</div>
+            <div className="text-xs font-semibold text-slate-100">{lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}</div>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-400">{t.motto}</p>
           </div>
         </div>

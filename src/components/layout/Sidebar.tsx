@@ -66,7 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, lang,
         {!collapsed && (
           <div className="flex items-center space-x-2">
             <Globe2 className="w-5 h-5 text-cyan-400" />
-            <span className="font-bold tracking-wider text-white text-sm">EARTH ONE</span>
+            <span className="font-bold tracking-wider text-white text-sm">{lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}</span>
           </div>
         )}
         {collapsed && <Globe2 className="w-5 h-5 text-cyan-400" />}

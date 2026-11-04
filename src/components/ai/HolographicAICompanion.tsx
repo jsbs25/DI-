@@ -18,13 +18,15 @@ import {
   Lightbulb,
   Zap,
   Maximize2,
-  Minimize2
+  Minimize2,
+  ExternalLink
 } from 'lucide-react';
 
 interface HolographicAICompanionProps {
   lang: Language;
   onFlyTo?: (lat: number, lng: number) => void;
   onExploreUniverse?: () => void;
+  onOpenAIHub?: () => void;
 }
 
 interface MessageItem {
@@ -38,7 +40,8 @@ interface MessageItem {
 export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   lang,
   onFlyTo,
-  onExploreUniverse
+  onExploreUniverse,
+  onOpenAIHub
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -49,8 +52,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const [useSearch, setUseSearch] = useState(true);
 
   const initialGreeting = lang === 'zh'
-    ? '你好！我是地球一号（EARTH ONE）3D 人工智能伙伴。你无需复杂指令，在这里直接向我提问即可：无论是探讨哲学科技、跨语言创作、全球资讯还是代码学术，我都随时与你对话。今天想聊些什么？'
-    : 'Greetings! I am the Earth One 3D AI companion. You can chat directly with me on science, philosophy, creative writing, world cultures, or research. What would you like to explore today?';
+    ? '你好！我是地球计划 3D 人工智能伙伴。本系统已接入 DeepSeek-R1 免费开源深度推理模型，你无需复杂指令，在这里直接向我提问即可：探讨哲学科学、编写代码、跨语言翻译或创意写作，我都随时与你对话。今天想聊些什么？'
+    : 'Greetings! I am the Project Earth 3D AI companion. Connected to DeepSeek-R1 open reasoning engine. You can chat directly with me on science, philosophy, code, world cultures, or research. What would you like to explore today?';
 
   const [messages, setMessages] = useState<MessageItem[]>([
     {
@@ -241,6 +244,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: text,
+          modelId: 'deepseek-r1-open',
           mode: 'general',
           useSearchGrounding: useSearch,
           history: messages.slice(-6).map(m => ({
@@ -254,8 +258,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       const replyText = data.success && data.reply
         ? data.reply
         : (data.error || (lang === 'zh'
-          ? '地球一号 AI 思考完成。随时为你解答更多问题。'
-          : 'Earth One intelligence active. Ready for your next query.'));
+          ? '地球计划 AI 思考完成。随时为你解答更多问题。'
+          : 'Project Earth intelligence active. Ready for your next query.'));
 
       setMessages(prev => [
         ...prev,
@@ -299,12 +303,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   };
 
   const quickStarters = lang === 'zh' ? [
-    '💡 聊聊地球一号的未来愿景',
-    '✍️ 帮我构想一篇双语科技随笔',
-    '🔬 简述量子纠缠与空间虫洞',
-    '🌍 介绍全球多元文化与和平对话'
+    '💡 聊聊地球计划的愿景与开放生态',
+    '✍️ 帮我构想一篇双语科技哲学随笔',
+    '🔬 简述量子纠缠与空间虫洞的物理本质',
+    '🌍 探讨从太空凝视地球的总观效应'
   ] : [
-    '💡 What is the future vision of Earth One?',
+    '💡 Vision and open roadmap of Project Earth',
     '✍️ Draft an inspiring essay on planetary unity',
     '🔬 Explain quantum entanglement & spacetime',
     '🌍 How does cross-cultural dialogue build peace?'
@@ -317,7 +321,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         <button
           onClick={() => setIsOpen(true)}
           className="group relative flex items-center space-x-3 px-4 py-3 rounded-full bg-slate-950/90 hover:bg-slate-900 border border-cyan-500/60 hover:border-cyan-400 backdrop-blur-2xl shadow-2xl shadow-cyan-500/25 cursor-pointer transition-all hover:scale-105 active:scale-95"
-          title="点击直接与地球一号 AI 对话"
+          title="点击直接与地球计划 AI 对话"
         >
           {/* Canvas for 3D Holographic Sphere */}
           <div className="relative w-10 h-10 rounded-full overflow-hidden flex items-center justify-center bg-cyan-950/80 border border-cyan-400/40">
@@ -327,7 +331,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
           <div className="text-left">
             <div className="flex items-center space-x-1.5">
-              <span className="text-xs font-bold font-mono tracking-wider text-cyan-300">EARTH ONE AI</span>
+              <span className="text-xs font-bold font-mono tracking-wider text-cyan-300">
+                {lang === 'zh' ? '地球计划 AI' : 'PROJECT EARTH AI'}
+              </span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             </div>
             <div className="text-[11px] text-slate-300 font-medium">点击直接对话 →</div>
@@ -353,17 +359,32 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               <div>
                 <div className="flex items-center space-x-2">
                   <h3 className="text-xs font-bold font-mono tracking-wider text-cyan-300">
-                    EARTH ONE AI
+                    {lang === 'zh' ? '地球计划 3D 智能助理' : 'Project Earth 3D AI'}
                   </h3>
                   <span className="px-1.5 py-0.2 rounded bg-cyan-950 border border-cyan-500/40 text-[9px] text-cyan-300 font-mono">
-                    ONLINE
+                    DeepSeek-R1
                   </span>
                 </div>
-                <p className="text-[10px] text-slate-400">直接对话 · 跨语言 · 全球知识</p>
+                <p className="text-[10px] text-slate-400">开源直连 · 深度思考 · 全球知识</p>
               </div>
             </div>
 
             <div className="flex items-center space-x-1 sm:space-x-1.5">
+              {/* Go to full AI Hub */}
+              {onOpenAIHub && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    onOpenAIHub();
+                  }}
+                  className="p-1.5 rounded-lg bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 cursor-pointer transition-colors"
+                  title="打开全屏 AI 智能对话工作台"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+              )}
+
               {/* Search Grounding Toggle */}
               <button
                 onClick={() => setUseSearch(v => !v)}
@@ -443,7 +464,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                 >
                   <div className="flex items-center space-x-1.5 mb-1 px-1">
                     <span className="text-[10px] font-mono text-slate-500">
-                      {isUser ? 'YOU' : 'EARTH ONE AI'}
+                      {isUser ? 'YOU' : (lang === 'zh' ? '地球计划 AI' : 'Project Earth AI')}
                     </span>
                     <span className="text-[9px] text-slate-600">· {m.time}</span>
                   </div>
@@ -460,7 +481,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                     {/* Copy and speech action for AI messages */}
                     {!isUser && (
                       <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
-                        <span className="text-slate-500 font-mono">Gemini Intelligence</span>
+                        <span className="text-slate-500 font-mono">DeepSeek-R1 / Qwen 2.5</span>
                         <div className="flex items-center space-x-2">
                           <button
                             onClick={() => speak(m.text)}
@@ -489,7 +510,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               <div className="flex flex-col items-start">
                 <div className="text-[10px] font-mono text-cyan-400 mb-1 px-1 flex items-center space-x-1">
                   <Sparkles className="w-3 h-3 animate-spin" />
-                  <span>EARTH ONE AI 正在思考...</span>
+                  <span>{lang === 'zh' ? '地球计划 AI 正在深度思考...' : 'Project Earth AI is thinking...'}</span>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-cyan-500/30 text-slate-300 rounded-tl-sm flex items-center space-x-2 text-xs">
                   <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />

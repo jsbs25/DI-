@@ -3,6 +3,25 @@
 
 ---
 
+### [2026-11-04] Commit feat(ai): 地球计划命名规范确立、界面多余标语清理与免费开源AI深度对话引擎上线
+* **用户指令响应与品牌规范**:
+  - 确立品牌与平台名称为 **「地球计划」**（英文：PROJECT EARTH），全面替换 `index.html`、`Navbar.tsx`、`Sidebar.tsx`、`DigitalGlobe.tsx`、`App.tsx` 与多语种字典（`translations.ts`）。
+  - 彻底去除 3D 数字地球中心遮挡的陈冗标语（「连接世界 · 探索宇宙」、「探索宇宙，发现无限可能」、「EARTH ONE · 探索宇宙 · 建设更美好的明天」），让三维地球与开普勒宇宙引擎呼吸通透，空间感与科技感全面提升。
+* **AI 核心智能与直接对话革命**:
+  - 全面聚焦 AI 核心功能，接入开源社区免费直连大模型（**DeepSeek-R1 开源深度推理**、**通义千问 Qwen 2.5 72B**、**Meta Llama 3.3 70B** 及本地 Ollama/vLLM 兼容接口）。
+  - 实现零门槛、零鉴权、免配置的即开即问即答机制，彻底杜绝无 Key 时的 503 报错与使用障碍。
+  - 重构 `AIHub.tsx` 为全屏专业对话工作台：
+    - 支持 DeepSeek-R1 `<think>...</think>` 深度思考过程折叠/展开视图。
+    - 集成 Web Speech API 实时语音录入（麦克风）与语音朗读（TTS Speaker）。
+    - 结构化代码高亮渲染与一键代码复制能力。
+    - 支持本地运行 `ollama serve`（localhost:11434）一键免密离线调用。
+  - 升级 3D 全息 AI 伴侣（`HolographicAICompanion.tsx`）：直连 DeepSeek-R1 免费开源模型，支持直接对话，并在顶部设置一键进入「全屏 AI 工作台」入口。
+* **构建与测试验证**:
+  - `tsc --noEmit` 0 报错；`vite build` 编译成功。
+  - 自动化脚本同步推送至 GitHub 远程仓库 `https://github.com/jsbs25/DI-`。
+
+---
+
 ### [2026-11-04] Commit bbba093 - 生产环境 React 依赖解耦与全息智能伴侣发布
 * **工程问题排查**:
   - 用户在访问应用时触发 `Invalid hook call: null is not an object (evaluating 'resolveDispatcher().useState')`。

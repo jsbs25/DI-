@@ -1,429 +1,658 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import {
-  Cpu,
   Sparkles,
-  Languages,
-  BookOpen,
-  GraduationCap,
   Send,
-  Zap,
-  Shield,
-  Layers,
   RotateCcw,
-  CheckCircle2,
   Copy,
-  ChevronDown
+  Check,
+  Volume2,
+  VolumeX,
+  Mic,
+  MicOff,
+  Cpu,
+  ShieldCheck,
+  ChevronDown,
+  ChevronRight,
+  Settings2,
+  Terminal,
+  ExternalLink,
+  Bot,
+  User as UserIcon,
+  Zap,
+  Globe2
 } from 'lucide-react';
 
 interface AIHubProps {
   lang: Language;
 }
 
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  model?: string;
+  timestamp: string;
+  tokens?: number;
+}
+
 export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const t = translations[lang];
 
-  const [activeMode, setActiveMode] = useState<'general' | 'translator' | 'writer' | 'tutor'>('general');
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  // Models state
+  const [selectedModel, setSelectedModel] = useState<string>('deepseek-r1-open');
   const [availableModels, setAvailableModels] = useState<
-    Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string }>
+    Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string; isFree?: boolean }>
   >([]);
-  const [useSearchGrounding, setUseSearchGrounding] = useState(true);
   const [promptInput, setPromptInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [voiceOutput, setVoiceOutput] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Custom AI provider settings (any OpenAI-compatible service)
-  const [showCustomConfig, setShowCustomConfig] = useState(false);
+  // Custom provider modal / toggle
+  const [showConfigDrawer, setShowConfigDrawer] = useState(false);
   const [customApiKey, setCustomApiKey] = useState('');
-  const [customBaseUrl, setCustomBaseUrl] = useState('https://api.openai.com/v1');
-  const [customModel, setCustomModel] = useState('gpt-3.5-turbo');
-  const [useCustomProvider, setUseCustomProvider] = useState(false);
-  const [chatLog, setChatLog] = useState<Array<{
-    role: 'user' | 'ai';
-    text: string;
-    model?: string;
-    groundingChunks?: Array<{ web?: { uri: string; title: string } }>;
-  }>>([
+  const [customBaseUrl, setCustomBaseUrl] = useState('http://localhost:11434/v1');
+  const [customModel, setCustomModel] = useState('llama3');
+
+  // Expanded thoughts state map
+  const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
+
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
+
+  // Chat message history
+  const [messages, setMessages] = useState<Message[]>([
     {
-      role: 'ai',
-      text: t.aiAssistantGreeting,
-      model: 'DeepSeek'
+      id: 'msg_welcome',
+      role: 'assistant',
+      model: 'DeepSeek-R1 (开源深度推理)',
+      timestamp: '刚刚',
+      content: lang === 'zh'
+        ? `你好！我是**地球计划（Project Earth）**开放智能助理。
+
+本系统现已直连 **DeepSeek-R1 开源深度推理大模型** 及 **通义千问 Qwen 2.5 / Meta Llama 3.3** 等开源模型，**完全免费直连，无需复杂配置**。
+
+在这里您可以直接和我自由对话：
+- 🔍 **跨学科深度探究**：宇宙演化、地球科学、文明史与宏观哲学
+- 💻 **全栈软件工程**：架构设计、TypeScript/Python 代码编写与调试
+- 🌐 **高保真多语种翻译**：跨越八十亿人类的文化语境与思想沟通
+- ✍️ **深度内容创作**：学术长文、演讲稿、现代散文与诗歌
+
+随时在此输入您的提问，或点击下方话题开始交谈。`
+        : `Greetings! I am the **Project Earth** AI Assistant.
+
+Connected directly to **DeepSeek-R1 Open Reasoning Engine**, **Qwen 2.5**, and **Llama 3.3** open-source models with zero barriers and zero paywalls.
+
+Feel free to chat with me directly:
+- 🌌 **Cosmology & Planetary Science**: Orbital mechanics, Earth ecology, overview effect
+- 💻 **Software Engineering**: System architecture, TypeScript, algorithms, and debugging
+- 🌐 **Polyglot Communication**: High-fidelity cultural translations
+- ✍️ **Deep Writing**: Essays, scientific discourse, and creative composition
+
+Ask me anything below to begin!`
     }
   ]);
 
-  // Load available models from the backend gateway
+  // Load models on mount
   useEffect(() => {
     fetch('/api/ai/models')
       .then(r => r.json())
       .then(d => {
         if (d.success && Array.isArray(d.models)) {
-          const models = d.models as Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string }>;
-          setAvailableModels(models);
-          const defaultModel = models.find(m => m.isDefault) || models.find(m => m.status === 'active') || models[0];
-          if (defaultModel && !selectedModel) {
-            setSelectedModel(defaultModel.id);
+          setAvailableModels(d.models);
+          const activeDefault = d.models.find((m: any) => m.id === 'deepseek-r1-open') ||
+            d.models.find((m: any) => m.isDefault) ||
+            d.models[0];
+          if (activeDefault && !selectedModel) {
+            setSelectedModel(activeDefault.id);
           }
         }
       })
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const modes = [
-    { id: 'general', label: 'Global Assistant (全球智慧)', icon: Sparkles, desc: 'Omniscient knowledge on geography, civilizations, and science.' },
-    { id: 'translator', label: 'Polyglot Translator (跨文化翻译)', icon: Languages, desc: 'High-fidelity translations preserving regional idioms and warmth.' },
-    { id: 'writer', label: 'Creator Co-Author (创作者助手)', icon: BookOpen, desc: 'Draft articles, polish essays, and write bilingual poetry.' },
-    { id: 'tutor', label: 'Language Coach (语言导师)', icon: GraduationCap, desc: 'Interactive conversation practice in 6 world languages.' }
-  ];
+  // Auto-scroll on new message
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
-  const quickPrompts: Record<string, string[]> = {
-    general: [
-      'What are the latest renewable energy breakthroughs across deserts in 2026?',
-      'Explain the Overview Effect experienced by astronauts looking at Earth.',
-      'How does international cultural exchange promote global peace?'
-    ],
-    translator: [
-      'Translate: "A journey of a thousand miles begins with a single step" into Arabic and French.',
-      'How do you politely express gratitude in Jordanian Arabic?',
-      'Translate this Spanish architectural phrase into Chinese and English.'
-    ],
-    writer: [
-      'Outline an article about how digital earth twins transform education.',
-      'Write an inspiring opening paragraph on "One Earth. One Humanity."',
-      'Polish a travel journal about desert nights under the stars in Wadi Rum.'
-    ],
-    tutor: [
-      'Teach me 5 essential conversational phrases in Mandarin Chinese.',
-      'How do I introduce myself warmly in Russian with phonetic tips?',
-      'Let us practice a restaurant ordering dialogue in Spanish.'
-    ]
-  };
+  // Focus input
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
-  const handleSend = async (customPrompt?: string) => {
-    const textToSend = customPrompt || promptInput;
-    if (!textToSend.trim() || isLoading) return;
+  // Speech Recognition (Mic)
+  const toggleSpeechRecognition = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
 
-    const userEntry = { role: 'user' as const, text: textToSend.trim() };
-    setChatLog(prev => [...prev, userEntry]);
-    if (!customPrompt) setPromptInput('');
-    setIsLoading(true);
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) {
+      alert(lang === 'zh' ? '当前浏览器不支持语音输入，请使用键盘输入。' : 'Voice input not supported in this browser.');
+      return;
+    }
 
     try {
-      const res = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          useCustomProvider && customApiKey.trim()
-            ? {
-                prompt: textToSend.trim(),
-                mode: activeMode,
-                apiKey: customApiKey.trim(),
-                baseUrl: customBaseUrl.trim(),
-                customModel: customModel.trim()
-              }
-            : {
-                prompt: textToSend.trim(),
-                model: selectedModel,
-                mode: activeMode,
-                useSearchGrounding
-              }
-        )
-      });
-      const data = await res.json();
-      if (data.success && data.reply) {
-        setChatLog(prev => [
-          ...prev,
-          {
-            role: 'ai',
-            text: data.reply,
-            model: data.model || selectedModel,
-            groundingChunks: data.groundingChunks || []
-          }
-        ]);
-      } else {
-        setChatLog(prev => [
-          ...prev,
-          { role: 'ai', text: data.error || 'AI gateway is currently synchronizing with global nodes.' }
-        ]);
-      }
-    } catch (err) {
-      setChatLog(prev => [
-        ...prev,
-        { role: 'ai', text: 'Connection to Earth One AI gateway interrupted. Please try again.' }
-      ]);
-    } finally {
-      setIsLoading(false);
+      const rec = new SpeechRec();
+      rec.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
+      rec.continuous = false;
+      rec.interimResults = false;
+
+      rec.onstart = () => setIsListening(true);
+      rec.onresult = (e: any) => {
+        const transcript = e.results[0][0].transcript;
+        if (transcript) {
+          setPromptInput(prev => (prev ? `${prev} ${transcript}` : transcript));
+        }
+      };
+      rec.onerror = () => setIsListening(false);
+      rec.onend = () => setIsListening(false);
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch {
+      setIsListening(false);
     }
   };
 
-  return (
-    <div className="w-full min-w-0 max-w-5xl mx-auto px-4 py-8 space-y-6">
-      {/* Header Banner */}
-      <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-cyan-950/40 to-slate-900 border border-slate-800 shadow-2xl relative overflow-hidden">
-        <div className="relative z-10 space-y-2">
-          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-mono">
-            <Zap className="w-3.5 h-3.5" />
-            <span>UNIFIED AI GATEWAY · MULTI-MODEL</span>
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-100">
-            {t.aiHubTab}
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-300 max-w-2xl">
-            A planetary AI intelligence hub uniting multimodal language translation, cross-border research, creative writing, and polyglot learning.
-          </p>
-        </div>
-      </div>
+  // TTS Speech read aloud
+  const speakText = (text: string) => {
+    if (!('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      // Strip think tags
+      const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
+      utterance.rate = 1.05;
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      // ignore
+    }
+  };
 
-      {/* Modes & Model Switcher */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        {modes.map(m => {
-          const Icon = m.icon;
-          const isActive = activeMode === m.id;
-          return (
-            <button
-              key={m.id}
-              onClick={() => setActiveMode(m.id as any)}
-              className={`p-4 rounded-2xl border text-left cursor-pointer transition-all ${
-                isActive
-                  ? 'bg-slate-900 border-cyan-500/50 shadow-lg ring-1 ring-cyan-500/30'
-                  : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-400'
-              }`}
-            >
-              <div className="flex items-center space-x-2 mb-1.5">
-                <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
-                <span className={`font-semibold text-xs ${isActive ? 'text-cyan-300' : 'text-slate-200'}`}>
-                  {m.label}
+  // Copy text helper
+  const handleCopy = (id: string, text: string) => {
+    try {
+      const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      navigator.clipboard.writeText(clean);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {}
+  };
+
+  // Send message
+  const handleSend = async (overrideText?: string) => {
+    const textToSend = (overrideText || promptInput).trim();
+    if (!textToSend || isLoading) return;
+
+    if (!overrideText) setPromptInput('');
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const userMsg: Message = {
+      id: `user_${Date.now()}`,
+      role: 'user',
+      content: textToSend,
+      timestamp: nowTime
+    };
+
+    setMessages(prev => [...prev, userMsg]);
+    setIsLoading(true);
+
+    try {
+      const payload: any = {
+        prompt: textToSend,
+        modelId: selectedModel,
+        mode: 'general'
+      };
+
+      if (selectedModel === 'custom' || customApiKey.trim()) {
+        payload.apiKey = customApiKey.trim();
+        payload.baseUrl = customBaseUrl.trim();
+        payload.customModel = customModel.trim();
+      }
+
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      const replyContent = data.success && data.reply
+        ? data.reply
+        : (data.error || '地球计划 AI 服务已完成思考与响应。');
+
+      const aiMsg: Message = {
+        id: `ai_${Date.now()}`,
+        role: 'assistant',
+        content: replyContent,
+        model: data.model || selectedModel,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        tokens: data.tokens
+      };
+
+      setMessages(prev => [...prev, aiMsg]);
+
+      if (voiceOutput) {
+        speakText(replyContent);
+      }
+    } catch {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `ai_err_${Date.now()}`,
+          role: 'assistant',
+          content: '与地球计划智能节点的网络连接受阻，请检查网络后重试。',
+          model: selectedModel,
+          timestamp: nowTime
+        }
+      ]);
+    } finally {
+      setIsLoading(false);
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  };
+
+  // Clear chat
+  const handleClearChat = () => {
+    if (window.confirm(lang === 'zh' ? '确定清空当前对话历史吗？' : 'Clear conversation history?')) {
+      setMessages([
+        {
+          id: `msg_init_${Date.now()}`,
+          role: 'assistant',
+          model: 'DeepSeek-R1',
+          timestamp: '刚刚',
+          content: lang === 'zh' ? '对话已重置。请问您想探索或探讨什么主题？' : 'Chat reset. What would you like to explore?'
+        }
+      ]);
+    }
+  };
+
+  // Quick starter chips
+  const starterChips = lang === 'zh' ? [
+    '🌌 解释从太空凝视地球时的“总观效应”（Overview Effect）',
+    '💻 用 TypeScript 实现一个带重试和熔断机制的弹性请求池',
+    '🌍 地球八十亿人口如何实现跨文化理解与共同繁荣？',
+    '🚀 详细介绍开普勒行星运动三大定律在天体计算中的应用',
+    '🌐 请将“海内存知己，天涯若比邻”翻译为地道唯美的英文与法语'
+  ] : [
+    '🌌 Explain the Overview Effect experienced by astronauts looking back at Earth',
+    '💻 Write a robust TypeScript rate-limited concurrent executor with backoff',
+    '🌍 How can international digital collaboration strengthen global peace?',
+    '🚀 How Kepler’s three laws govern modern planetary navigation'
+  ];
+
+  // Helper to parse <think> block
+  const parseThoughtAndAnswer = (content: string) => {
+    const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+    if (thinkMatch) {
+      const thought = thinkMatch[1].trim();
+      const answer = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+      return { thought, answer };
+    }
+    return { thought: null, answer: content };
+  };
+
+  return (
+    <div className="flex-1 flex flex-col h-[calc(100vh-4rem)] bg-[#030712] text-slate-100 select-none overflow-hidden relative">
+      {/* 1. TOP HEADER TOOLBAR */}
+      <header className="h-14 border-b border-slate-800/80 bg-[#070d1e]/90 backdrop-blur-xl px-4 sm:px-6 flex items-center justify-between shrink-0 z-20">
+        <div className="flex items-center space-x-3 min-w-0">
+          <div className="flex items-center space-x-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 text-white shadow-lg shadow-cyan-500/20">
+              <Bot className="w-4 h-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center space-x-2">
+                <span className="font-bold text-sm tracking-wide text-white truncate">
+                  {lang === 'zh' ? '地球计划 AI 智能对话' : 'Project Earth AI Dialogue'}
+                </span>
+                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse" />
+                  开源直连 · 免配置
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 leading-snug">{m.desc}</p>
-            </button>
-          );
-        })}
-      </div>
+            </div>
+          </div>
+        </div>
 
-      {/* Model Selection Bar */}
-      <div className="min-w-0 p-3 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs flex-wrap gap-2">
-        <div className="min-w-0 flex items-center space-x-3 flex-wrap">
-          <div className="min-w-0 flex items-center space-x-2">
-            <Shield className="w-4 h-4 text-emerald-400" />
-            <span className="text-slate-300 font-medium">Model:</span>
+        {/* Model Switcher & Tools */}
+        <div className="flex items-center space-x-2">
+          {/* Model Selector */}
+          <div className="relative">
             <select
               value={selectedModel}
               onChange={e => setSelectedModel(e.target.value)}
-              className="min-w-0 max-w-full bg-slate-800 border border-slate-700 rounded-xl px-2.5 py-1 text-slate-200 text-xs focus:outline-none"
+              className="bg-slate-900 border border-slate-700/80 hover:border-cyan-500/60 text-cyan-200 text-xs rounded-xl px-3 py-1.5 pr-8 font-medium focus:outline-none focus:ring-1 focus:ring-cyan-500 appearance-none cursor-pointer max-w-[240px] truncate"
             >
               {availableModels.length === 0 ? (
-                <option value="">Loading models...</option>
+                <option value="deepseek-r1-open">DeepSeek-R1 (开源免费直连)</option>
               ) : (
                 availableModels.map(m => (
                   <option key={m.id} value={m.id}>
-                    {m.name} {m.status === 'active' ? '· Active' : '· Unconfigured'}
+                    {m.isFree ? '⚡ ' : ''}{m.name}
                   </option>
                 ))
               )}
             </select>
+            <ChevronDown className="w-3.5 h-3.5 text-cyan-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
-          {/* Google Search Grounding Toggle */}
+          {/* Voice Read Aloud Toggle */}
           <button
             type="button"
-            onClick={() => setUseSearchGrounding(!useSearchGrounding)}
-            className={`flex items-center space-x-1.5 px-3 py-1 rounded-xl border text-xs font-semibold cursor-pointer transition-all ${
-              useSearchGrounding
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
-                : 'bg-slate-800 text-slate-400 border-slate-700'
+            onClick={() => setVoiceOutput(!voiceOutput)}
+            className={`p-2 rounded-xl border text-xs cursor-pointer transition-colors ${
+              voiceOutput
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-sm'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
             }`}
+            title={voiceOutput ? '已开启语音朗读' : '开启语音朗读'}
           >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Google Search Grounding: {useSearchGrounding ? 'ON' : 'OFF'}</span>
+            {voiceOutput ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
           </button>
-        </div>
 
-        <div className="min-w-0 flex items-center space-x-3 text-[11px] text-slate-400 font-mono">
-          <span>Server-Side Proxy: Protected</span>
-          <span>·</span>
-          <span>Zero Client Leak</span>
-        </div>
-      </div>
-
-      {/* Custom AI Provider (any OpenAI-compatible service) */}
-      <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-        <div className="flex items-center justify-between">
+          {/* Custom API / Ollama Drawer button */}
           <button
             type="button"
-            onClick={() => setShowCustomConfig(!showCustomConfig)}
-            className="flex items-center space-x-2 text-xs font-semibold text-slate-300 hover:text-white"
+            onClick={() => setShowConfigDrawer(!showConfigDrawer)}
+            className={`p-2 rounded-xl border text-xs cursor-pointer transition-colors ${
+              showConfigDrawer
+                ? 'bg-purple-500/20 text-purple-300 border-purple-500/50'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+            }`}
+            title="配置本地 Ollama 或自定义模型"
           >
-            <Cpu className="w-4 h-4 text-purple-400" />
-            <span>接入自定义 AI（任意 OpenAI 兼容服务）</span>
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showCustomConfig ? 'rotate-180' : ''}`} />
+            <Settings2 className="w-4 h-4" />
           </button>
-          <label className="flex items-center space-x-2 text-xs text-slate-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useCustomProvider}
-              onChange={e => {
-                setUseCustomProvider(e.target.checked);
-                if (e.target.checked) setShowCustomConfig(true);
-              }}
-              className="accent-purple-500"
-            />
-            <span>使用自定义 AI</span>
-          </label>
-        </div>
 
-        {showCustomConfig && (
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1 font-medium">API Key</label>
-              <input
-                type="password"
-                value={customApiKey}
-                onChange={e => setCustomApiKey(e.target.value)}
-                placeholder="sk-..."
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500"
-              />
+          {/* Clear Chat */}
+          <button
+            type="button"
+            onClick={handleClearChat}
+            className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-900/50 cursor-pointer transition-colors"
+            title="清空对话"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {/* 2. CUSTOM PROVIDER / OLLAMA CONFIG DRAWER */}
+      {showConfigDrawer && (
+        <div className="bg-slate-950/95 border-b border-purple-900/40 px-6 py-4 z-20 animate-in slide-in-from-top-2 text-xs">
+          <div className="max-w-4xl mx-auto space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-purple-300 font-semibold">
+                <Cpu className="w-4 h-4" />
+                <span>接入本地模型或自定义 OpenAI 兼容接口（如 Ollama / vLLM / DeepSeek）</span>
+              </div>
+              <button
+                onClick={() => setShowConfigDrawer(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
             </div>
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1 font-medium">Base URL</label>
-              <input
-                type="text"
-                value={customBaseUrl}
-                onChange={e => setCustomBaseUrl(e.target.value)}
-                placeholder="https://api.openai.com/v1"
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500 font-mono"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1 font-mono">Base URL</label>
+                <input
+                  type="text"
+                  value={customBaseUrl}
+                  onChange={e => setCustomBaseUrl(e.target.value)}
+                  placeholder="http://localhost:11434/v1"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-purple-400"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1 font-mono">模型名称</label>
+                <input
+                  type="text"
+                  value={customModel}
+                  onChange={e => setCustomModel(e.target.value)}
+                  placeholder="llama3 / deepseek-r1 / mistral"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-purple-400"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1 font-mono">API Key（本地 Ollama 可留空）</label>
+                <input
+                  type="password"
+                  value={customApiKey}
+                  onChange={e => setCustomApiKey(e.target.value)}
+                  placeholder="sk-... (选填)"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-purple-400"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1 font-medium">模型名</label>
-              <input
-                type="text"
-                value={customModel}
-                onChange={e => setCustomModel(e.target.value)}
-                placeholder="gpt-3.5-turbo / deepseek-chat / moonshot-v1-8k / glm-4"
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500 font-mono"
-              />
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>💡 本地运行 <code className="text-purple-300">ollama serve</code> 后选择「本地 / 自定义接口」即可完全离线运行。</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedModel('custom');
+                  setShowConfigDrawer(false);
+                }}
+                className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold cursor-pointer"
+              >
+                立即切换为自定义模型
+              </button>
             </div>
-            <p className="md:col-span-3 text-[11px] text-slate-500">
-              支持任何 OpenAI 兼容接口的服务：OpenAI、DeepSeek、Moonshot、智谱 GLM、通义千问、Ollama 本地模型等。Base URL 填服务的 API 地址（如 <span className="font-mono text-slate-400">https://api.deepseek.com/v1</span>）。密钥仅保存在当前会话，不会写入磁盘。
-            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 3. MAIN CHAT SCROLL STREAM */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-6 select-text max-w-4xl mx-auto w-full">
+        {messages.map(msg => {
+          const isUser = msg.role === 'user';
+          const { thought, answer } = parseThoughtAndAnswer(msg.content);
+          const isThoughtOpen = expandedThoughts[msg.id] ?? false;
+
+          return (
+            <div
+              key={msg.id}
+              className={`flex items-start gap-3.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+            >
+              {/* Avatar */}
+              <div
+                className={`w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 shadow-lg text-xs font-bold ${
+                  isUser
+                    ? 'bg-cyan-500 text-slate-950 font-bold'
+                    : 'bg-gradient-to-tr from-cyan-900/90 to-blue-800/90 text-cyan-200 border border-cyan-400/40 shadow-cyan-950/40'
+                }`}
+              >
+                {isUser ? <UserIcon className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+              </div>
+
+              {/* Message Body */}
+              <div className={`flex flex-col min-w-0 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
+                {/* Header Tag */}
+                <div className="flex items-center space-x-2 text-[10px] text-slate-400 mb-1 px-1">
+                  <span>{isUser ? '您' : (msg.model || '地球计划 AI')}</span>
+                  <span>·</span>
+                  <span>{msg.timestamp}</span>
+                </div>
+
+                {/* Content Box */}
+                <div
+                  className={`p-4 sm:p-5 rounded-3xl text-xs sm:text-sm leading-relaxed shadow-xl ${
+                    isUser
+                      ? 'bg-cyan-500 text-slate-950 font-medium rounded-tr-none shadow-cyan-950/30'
+                      : 'bg-[#0b1329]/95 text-slate-200 border border-slate-800/90 rounded-tl-none shadow-black/40'
+                  }`}
+                >
+                  {/* Thought accordion for DeepSeek-R1 models */}
+                  {!isUser && thought && (
+                    <div className="mb-3 rounded-2xl border border-cyan-800/50 bg-cyan-950/30 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedThoughts(prev => ({ ...prev, [msg.id]: !isThoughtOpen }))
+                        }
+                        className="w-full px-3 py-2 flex items-center justify-between text-left text-[11px] font-mono text-cyan-300 hover:bg-cyan-900/20 cursor-pointer transition-colors"
+                      >
+                        <div className="flex items-center space-x-1.5">
+                          <Sparkles className="w-3 h-3 text-cyan-400" />
+                          <span>深度思考过程（Chain-of-Thought）</span>
+                        </div>
+                        {isThoughtOpen ? (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      {isThoughtOpen && (
+                        <div className="p-3 text-[11px] text-cyan-200/80 font-mono bg-black/30 border-t border-cyan-900/40 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+                          {thought}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Main Answer with pristine Markdown structure */}
+                  <div className="whitespace-pre-wrap break-words leading-relaxed">
+                    {answer}
+                  </div>
+
+                  {/* Action Bar */}
+                  {!isUser && (
+                    <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                      <div className="flex items-center space-x-3">
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(msg.id, msg.content)}
+                          className="hover:text-cyan-300 flex items-center space-x-1 cursor-pointer transition-colors"
+                        >
+                          {copiedId === msg.id ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span className="text-emerald-400">已复制</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>复制</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => speakText(msg.content)}
+                          className="hover:text-cyan-300 flex items-center space-x-1 cursor-pointer transition-colors"
+                        >
+                          <Volume2 className="w-3 h-3" />
+                          <span>朗读</span>
+                        </button>
+                      </div>
+                      {msg.tokens && (
+                        <span className="font-mono text-[10px] text-slate-500">
+                          {msg.tokens} tokens
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Loading Indicator */}
+        {isLoading && (
+          <div className="flex items-start gap-3.5 animate-in fade-in">
+            <div className="w-9 h-9 rounded-2xl flex items-center justify-center bg-cyan-950 border border-cyan-500/40 text-cyan-400">
+              <Bot className="w-4 h-4 animate-spin" />
+            </div>
+            <div className="p-4 rounded-3xl rounded-tl-none bg-[#0b1329] border border-cyan-500/30 text-cyan-300 text-xs flex items-center space-x-2">
+              <Sparkles className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
+              <span>地球计划 AI 正在进行深度语义推理与知识合成...</span>
+            </div>
           </div>
         )}
+
+        <div ref={chatEndRef} />
       </div>
 
-      {/* Chat & Interaction Stream */}
-      <div className="rounded-3xl bg-slate-900/70 border border-slate-800 overflow-hidden shadow-2xl flex flex-col h-[460px]">
-        {/* Messages list */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {chatLog.map((entry, idx) => (
-            <div
-              key={idx}
-              className={`flex min-w-0 items-start space-x-3 ${entry.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}
-            >
-              <div
-                className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-xs font-bold ${
-                  entry.role === 'user'
-                    ? 'bg-cyan-600 text-slate-950'
-                    : 'bg-slate-800 border border-cyan-500/30 text-cyan-400'
-                }`}
+      {/* 4. BOTTOM COMPOSER & STARTER CHIPS */}
+      <footer className="border-t border-slate-800/80 bg-[#070d1e]/95 backdrop-blur-xl p-3 sm:p-4 shrink-0 z-20">
+        <div className="max-w-4xl mx-auto space-y-2.5">
+          {/* Quick starter chips */}
+          <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none pb-1">
+            <span className="text-[10px] text-slate-400 font-mono shrink-0 uppercase tracking-wider">
+              推荐话题:
+            </span>
+            {starterChips.map((chip, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleSend(chip)}
+                className="px-2.5 py-1 rounded-full bg-slate-900/90 hover:bg-slate-800 border border-slate-700/70 hover:border-cyan-500/40 text-[11px] text-slate-300 hover:text-white shrink-0 cursor-pointer transition-all"
               >
-                {entry.role === 'user' ? 'ME' : <Cpu className="w-4 h-4" />}
-              </div>
+                {chip}
+              </button>
+            ))}
+          </div>
 
-              <div
-                className={`min-w-0 p-4 rounded-2xl text-xs sm:text-sm leading-relaxed max-w-xl whitespace-pre-line break-words shadow-md ${
-                  entry.role === 'user'
-                    ? 'bg-cyan-500 text-slate-950 font-medium rounded-tr-none'
-                    : 'bg-slate-950/80 text-slate-200 border border-slate-800 rounded-tl-none'
+          {/* Input Box */}
+          <div className="relative flex items-end bg-slate-900/90 border border-slate-700/80 focus-within:border-cyan-500/80 rounded-2xl p-2 shadow-2xl transition-all">
+            <textarea
+              ref={inputRef}
+              rows={1}
+              value={promptInput}
+              onChange={e => setPromptInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={
+                lang === 'zh'
+                  ? '输入任何问题直接对话（支持科学探究、代码编程、跨语言翻译与文章创作，Enter 发送，Shift+Enter 换行）...'
+                  : 'Ask anything to begin dialogue (Enter to send, Shift+Enter for new line)...'
+              }
+              className="flex-1 bg-transparent px-3 py-2 text-xs sm:text-sm text-slate-100 placeholder-slate-500 outline-none resize-none max-h-36 min-h-[40px] leading-relaxed"
+            />
+
+            <div className="flex items-center space-x-1.5 pb-1 pr-1 shrink-0">
+              {/* Mic Speech Button */}
+              <button
+                type="button"
+                onClick={toggleSpeechRecognition}
+                className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                  isListening
+                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
+                    : 'text-slate-400 hover:text-cyan-300 hover:bg-slate-800'
                 }`}
+                title={isListening ? '点击停止语音录入' : '语音输入'}
               >
-                {entry.text}
+                {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              </button>
 
-                {/* Grounding web sources */}
-                {entry.groundingChunks && entry.groundingChunks.length > 0 && (
-                  <div className="mt-2.5 pt-2 border-t border-slate-800/80 space-y-1">
-                    <span className="text-[10px] text-slate-400 font-mono block">
-                      Search Grounding Sources:
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {entry.groundingChunks.map((chunk, cIdx) => (
-                        chunk.web ? (
-                          <a
-                            key={cIdx}
-                            href={chunk.web.uri}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-cyan-300 truncate max-w-xs block border border-slate-700"
-                          >
-                            🔗 {chunk.web.title || chunk.web.uri}
-                          </a>
-                        ) : null
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {entry.model && (
-                  <div className="mt-2 text-[10px] text-slate-500 font-mono flex items-center justify-between border-t border-slate-800/80 pt-1">
-                    <span>Engine: {entry.model}</span>
-                    <button
-                      onClick={() => navigator.clipboard.writeText(entry.text)}
-                      className="hover:text-slate-300 cursor-pointer flex items-center space-x-1"
-                      title="Copy response"
-                    >
-                      <Copy className="w-3 h-3" />
-                      <span>Copy</span>
-                    </button>
-                  </div>
-                )}
-              </div>
+              {/* Send Button */}
+              <button
+                type="button"
+                onClick={() => handleSend()}
+                disabled={!promptInput.trim() || isLoading}
+                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-30 disabled:cursor-not-allowed text-slate-950 font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-cyan-500/20 cursor-pointer transition-all"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">发送</span>
+              </button>
             </div>
-          ))}
-          {isLoading && (
-            <div className="flex items-center space-x-2 text-xs text-cyan-400 animate-pulse pl-12">
-              <Sparkles className="w-4 h-4" />
-              <span>EARTH ONE AI is formulating response across global knowledge nodes...</span>
-            </div>
-          )}
+          </div>
         </div>
-
-        {/* Quick prompt suggestions */}
-        <div className="px-4 py-2 border-t border-slate-800/60 bg-slate-950/40 flex items-center space-x-2 overflow-x-auto scrollbar-none">
-          <span className="text-[10px] text-slate-500 uppercase tracking-wider font-mono shrink-0">
-            Ideas:
-          </span>
-          {quickPrompts[activeMode]?.map((p, i) => (
-            <button
-              key={i}
-              onClick={() => handleSend(p)}
-              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] text-slate-300 whitespace-nowrap cursor-pointer transition-colors"
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-
-        {/* Input Composer */}
-        <div className="min-w-0 p-3 bg-slate-950/90 border-t border-slate-800 flex items-center space-x-2">
-          <input
-            type="text"
-            value={promptInput}
-            onChange={e => setPromptInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSend()}
-            placeholder="Ask anything or request translation, article summary, language tips..."
-            className="min-w-0 flex-1 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-          />
-          <button
-            onClick={() => handleSend()}
-            disabled={!promptInput.trim() || isLoading}
-            className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center space-x-1.5 shadow-md cursor-pointer transition-all"
-          >
-            <Send className="w-3.5 h-3.5" />
-            <span>Consult AI</span>
-          </button>
-        </div>
-      </div>
+      </footer>
     </div>
   );
 };

@@ -558,6 +558,7 @@ export default function App() {
           setCurrentTab('globe');
         }}
         onExploreUniverse={() => setCurrentTab('universe')}
+        onOpenAIHub={() => setCurrentTab('aihub')}
       />
 
       {/* 8. Minimalist Earth One Global Footer */}
@@ -565,7 +566,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center space-x-2">
             <Globe2 className="w-4 h-4 text-cyan-500" />
-            <span className="font-serif font-bold text-slate-300">EARTH ONE</span>
+            <span className="font-serif font-bold text-slate-300">{lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}</span>
             <span>—</span>
             <span className="text-slate-400">{t.motto}</span>
           </div>

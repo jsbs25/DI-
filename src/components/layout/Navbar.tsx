@@ -168,14 +168,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden border border-cyan-400/50 shadow-lg shadow-cyan-500/25 group-hover:scale-105 transition-transform">
               <img
                 src="/assets/aistudio/88edd78a66e82722354887034fb38db6_26f71533.jpg"
-                alt="EARTH ONE"
+                alt={lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}
                 className="w-full h-full object-cover scale-150"
               />
               <div className="absolute inset-0 bg-blue-500/20 mix-blend-overlay" />
             </div>
             <div className="min-w-0">
               <span className="block font-bold text-base sm:text-lg tracking-wider text-white font-sans">
-                EARTH ONE
+                {lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}
               </span>
               <span className="hidden sm:block text-[11px] text-slate-400 font-sans tracking-tight">
                 {t.brandTagline}
