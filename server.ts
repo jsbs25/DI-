@@ -8,7 +8,7 @@ import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, getAuthorizedEpubSource, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
-import { fetchAndExtract, searchGitHubRepositories, searchWeb } from './server/webFetcher.ts';
+import { fetchAndExtract, fetchRawHtml, searchGitHubRepositories, searchWeb } from './server/webFetcher.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 import {
@@ -1004,6 +1004,18 @@ app.post('/api/browser/save-article', (req, res) => {
 app.delete('/api/browser/saved-articles/:id', (req, res) => {
   const deleted = store.deleteSavedArticle(req.params.id);
   res.json({ success: deleted });
+});
+
+app.get('/api/browser/raw-html', async (req, res) => {
+  const { url } = req.query;
+  if (!url || typeof url !== 'string') return res.status(400).json({ success: false, error: 'URL required' });
+  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ success: false, error: 'Only HTTP(S) URLs supported' });
+  try {
+    const html = await fetchRawHtml(url);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8').send(html);
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err?.message || 'Failed to fetch raw HTML' });
+  }
 });
 
 app.post('/api/browser/fetch-preview', async (req, res) => {

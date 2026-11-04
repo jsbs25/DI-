@@ -208,6 +208,15 @@ export async function fetchAndExtract(url: string): Promise<ExtractedPage> {
 }
 
 // ---------------------------------------------------------------------------
+// Raw HTML (for in-page preview via srcdoc)
+// ---------------------------------------------------------------------------
+
+/** Fetch the raw HTML of a page (server-side, no CORS/iframe restrictions). */
+export async function fetchRawHtml(url: string): Promise<string> {
+  return fetchText(url, 12000);
+}
+
+// ---------------------------------------------------------------------------
 // Search (multi-provider with graceful fallback)
 // ---------------------------------------------------------------------------
 

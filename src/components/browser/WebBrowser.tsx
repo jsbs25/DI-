@@ -108,6 +108,7 @@ interface BrowserFindStatus {
 
 interface WebBrowserProps {
   lang: Language;
+  initialQuery?: string;
 }
 
 const DEFAULT_BOOKMARKS: BookmarkItem[] = [
@@ -235,7 +236,7 @@ function getInitialBrowserUrl(): string {
   return fallback;
 }
 
-export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
+export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) => {
   const [initialUrl] = useState(getInitialBrowserUrl);
   const initialPreset = PRESET_PAGES[initialUrl];
   const browserEngine = typeof window === 'undefined' ? undefined : window.earthOneBrowser;
@@ -251,7 +252,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       id: 'tab_1',
       title: initialPreset?.title || initialUrl,
       url: initialUrl,
-      readerMode: false,
+      readerMode: true,
       content: initialPreset?.content || '',
       author: initialPreset?.author || '',
       readTime: initialPreset?.readTime || ''
@@ -284,6 +285,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [searchResults, setSearchResults] = useState<Array<{ title: string; url: string; snippet: string; source?: 'web' | 'github'; repository?: string; stars?: number; forks?: number; language?: string; license?: string; updatedAt?: string; openIssues?: number }>>([]);
   const [lastSearchQuery, setLastSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
   // Navigation history per tab (real back/forward)
   const [history, setHistory] = useState<Record<string, string[]>>({ tab_1: [initialUrl] });
@@ -318,7 +321,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
               id: tab.id,
               title: tab.title || new URL(tab.url).host,
               url: tab.url,
-              readerMode: false
+              readerMode: true
             }))
           : [];
 
@@ -851,7 +854,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       id: newId,
       title: 'New Tab',
       url: 'https://en.wikipedia.org/wiki/Earth',
-      readerMode: false,
+      readerMode: true,
       content: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].content,
       author: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].author,
       readTime: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].readTime
@@ -888,6 +891,39 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     const target = stack[idx + 1];
     setHistoryIndex(prev => ({ ...prev, [activeTabId]: idx + 1 }));
     handleNavigate(target);
+  };
+
+  // 星图联动：从宇宙引擎点击行星进入浏览器时，自动以行星名触发搜索
+  useEffect(() => {
+    if (initialQuery && initialQuery.trim()) {
+      void handleNavigate(initialQuery.trim());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery]);
+
+  // 网页预览：通过后端代理抓取原始 HTML，注入 base href 后写入 iframe srcdoc
+  const loadPreviewHtml = async (url: string) => {
+    setIsPreviewLoading(true);
+    setPreviewHtml(null);
+    try {
+      const res = await fetch(`/api/browser/raw-html?url=${encodeURIComponent(url)}`);
+      if (res.ok) {
+        let html = await res.text();
+        try {
+          const origin = new URL(url).origin;
+          html = html.replace(/<head([^>]*)>/i, `<head$1><base href="${origin}/">`);
+        } catch {
+          /* keep raw html */
+        }
+        setPreviewHtml(html);
+      } else {
+        setPreviewHtml(null);
+      }
+    } catch {
+      setPreviewHtml(null);
+    } finally {
+      setIsPreviewLoading(false);
+    }
   };
 
   const handleCloseTab = (id: string, e: React.MouseEvent) => {
@@ -1323,9 +1359,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
           <button
             onClick={() => {
+              const willPreview = activeTab?.readerMode;
               setTabs(prev =>
                 prev.map(t => (t.id === activeTabId ? { ...t, readerMode: !t.readerMode } : t))
               );
+              if (willPreview && activeTab?.url) void loadPreviewHtml(activeTab.url);
             }}
             aria-label="切换纯净阅读模式"
             title="切换纯净阅读模式"
@@ -1667,12 +1705,25 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
                       正在启动 Chromium 网页视图…
                     </div>
                   ) : (
-                    <iframe
-                      src={toEmbedUrl(activeTab.url)}
-                      title={activeTab.title}
-                      className="w-full flex-1 border-0 bg-white"
-                      sandbox="allow-scripts allow-same-origin allow-popups"
-                    />
+                    isPreviewLoading ? (
+                      <div className="flex h-full w-full items-center justify-center bg-white text-sm text-slate-500">
+                        正在加载网页预览…
+                      </div>
+                    ) : previewHtml ? (
+                      <iframe
+                        srcDoc={previewHtml}
+                        title={activeTab.title}
+                        className="w-full flex-1 border-0 bg-white"
+                        sandbox="allow-scripts allow-same-origin allow-popups"
+                      />
+                    ) : (
+                      <iframe
+                        src={toEmbedUrl(activeTab.url)}
+                        title={activeTab.title}
+                        className="w-full flex-1 border-0 bg-white"
+                        sandbox="allow-scripts allow-same-origin allow-popups"
+                      />
+                    )
                   )}
                 </div>
               </div>

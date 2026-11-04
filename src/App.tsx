@@ -43,6 +43,7 @@ export default function App() {
     new URLSearchParams(window.location.search).get('module') === 'browser' ? 'browser' : 'globe'
   );
   const [searchQuery, setSearchQuery] = useState('');
+  const [browserInitialQuery, setBrowserInitialQuery] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showGlobeTools, setShowGlobeTools] = useState(true);
 
@@ -383,6 +384,7 @@ export default function App() {
     const eco = getPlanetEcosystem(planetId);
     if (!eco || !eco.available) return;
     setCurrentTab(eco.tab);
+    setBrowserInitialQuery(planetId === 'jupiter' ? `${eco.titleZh} ${eco.titleEn}` : null);
   };
 
   return (
@@ -526,7 +528,7 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'browser' && <WebBrowser lang={lang} />}
+        {currentTab === 'browser' && <WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} />}
 
         {currentTab === 'crawler' && <CrawlerDashboard lang={lang} />}
 
