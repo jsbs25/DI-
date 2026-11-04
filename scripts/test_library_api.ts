@@ -48,44 +48,48 @@ async function main() {
   const testDir = fs.mkdtempSync(path.join(tmpdir(), 'earth-one-library-api-test-'));
   const dataFile = path.join(testDir, 'server_data.json');
   let childOutput = '';
-  const port = await getAvailablePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-  const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      PORT: String(port),
-      EARTH_ONE_DATA_FILE: dataFile,
-      EARTH_ONE_SKIP_BOOK_HARVEST: 'true',
-      EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED: 'true',
-      EARTH_ONE_LIBRARY_ARCHIVE_ENABLED: 'false',
-      EARTH_ONE_LIBRARY_GUTENBERG_ENABLED: 'false',
-      EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED: 'false',
-      EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED: 'false',
-      EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED: 'true',
-      EARTH_ONE_LIBRARY_EUROPEANA_ENABLED: 'true',
-      EARTH_ONE_LIBRARY_OPENALEX_ENABLED: 'true',
-      EARTH_ONE_LIBRARY_CROSSREF_ENABLED: 'true',
-      EARTH_ONE_LIBRARY_ARXIV_ENABLED: 'true',
-      EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED: 'true',
-      EARTH_ONE_LIBRARY_PMC_ENABLED: 'true',
-      EARTH_ONE_LIBRARY_PUBMED_ENABLED: 'true',
-      EARTH_ONE_LIBRARY_SHAMELA_ENABLED: 'true',
-      GOOGLE_BOOKS_API_KEY: 'api-test-key-not-a-real-secret',
-      EUROPEANA_API_KEY: '',
-      GEMINI_API_KEY: '',
-      OPENAI_API_KEY: '',
-      ANTHROPIC_API_KEY: '',
-      DEEPSEEK_API_KEY: '',
-      CUSTOM_API_KEY: ''
-    },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  child.on('error', error => { childOutput = `${childOutput}\n${error.message}`.slice(-12000); });
-  child.stdout?.on('data', chunk => { childOutput = (childOutput + chunk.toString()).slice(-12000); });
-  child.stderr?.on('data', chunk => { childOutput = (childOutput + chunk.toString()).slice(-12000); });
+  let port = await getAvailablePort();
+  let baseUrl = `http://127.0.0.1:${port}`;
+  function spawnIsolatedServer(serverPort: number) {
+    const server = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PORT: String(serverPort),
+        EARTH_ONE_DATA_FILE: dataFile,
+        EARTH_ONE_SKIP_BOOK_HARVEST: 'true',
+        EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED: 'true',
+        EARTH_ONE_LIBRARY_ARCHIVE_ENABLED: 'false',
+        EARTH_ONE_LIBRARY_GUTENBERG_ENABLED: 'false',
+        EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED: 'false',
+        EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED: 'false',
+        EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED: 'true',
+        EARTH_ONE_LIBRARY_EUROPEANA_ENABLED: 'true',
+        EARTH_ONE_LIBRARY_OPENALEX_ENABLED: 'true',
+        EARTH_ONE_LIBRARY_CROSSREF_ENABLED: 'true',
+        EARTH_ONE_LIBRARY_ARXIV_ENABLED: 'true',
+        EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED: 'true',
+        EARTH_ONE_LIBRARY_PMC_ENABLED: 'true',
+        EARTH_ONE_LIBRARY_PUBMED_ENABLED: 'true',
+        EARTH_ONE_LIBRARY_SHAMELA_ENABLED: 'true',
+        GOOGLE_BOOKS_API_KEY: 'api-test-key-not-a-real-secret',
+        EUROPEANA_API_KEY: '',
+        GEMINI_API_KEY: '',
+        OPENAI_API_KEY: '',
+        ANTHROPIC_API_KEY: '',
+        DEEPSEEK_API_KEY: '',
+        CUSTOM_API_KEY: ''
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    server.on('error', error => { childOutput = `${childOutput}\n${error.message}`.slice(-12000); });
+    server.stdout?.on('data', chunk => { childOutput = (childOutput + chunk.toString()).slice(-12000); });
+    server.stderr?.on('data', chunk => { childOutput = (childOutput + chunk.toString()).slice(-12000); });
+    return server;
+  }
+  let child = spawnIsolatedServer(port);
 
-  async function stopServer() {
+  async function stopCurrentServer() {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, 'exit');
       child.kill('SIGTERM');
@@ -96,6 +100,18 @@ async function main() {
         await forcedExit;
       }
     }
+  }
+
+  async function restartServer() {
+    await stopCurrentServer();
+    childOutput = '';
+    port = await getAvailablePort();
+    baseUrl = `http://127.0.0.1:${port}`;
+    child = spawnIsolatedServer(port);
+  }
+
+  async function stopServer() {
+    await stopCurrentServer();
     fs.rmSync(testDir, { recursive: true, force: true });
   }
 
@@ -432,6 +448,35 @@ async function main() {
         item.bookId === 'book_republic' && item.lastReadChapterId === chapterToResume.id &&
         item.lastReadEpubCfi === savedEpubCfi && item.progress === 63),
       'Account-scoped chapter and EPUB CFI positions persist in the isolated data file'
+    );
+
+    await restartServer();
+    let restartedShelfA: Awaited<ReturnType<typeof get>> | undefined;
+    let restartedShelfB: Awaited<ReturnType<typeof get>> | undefined;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (child.exitCode !== null) throw new Error(`Isolated API server exited after restart.\n${childOutput}`);
+      try {
+        const [shelfAAfterRestart, shelfBAfterRestart] = await Promise.all([
+          get('/api/library/shelf', accountA.body.token),
+          get('/api/library/shelf', accountB.body.token)
+        ]);
+        if (shelfAAfterRestart.status === 200 && shelfBAfterRestart.status === 200) {
+          restartedShelfA = shelfAAfterRestart;
+          restartedShelfB = shelfBAfterRestart;
+          break;
+        }
+      } catch {
+        await sleep(250);
+      }
+    }
+    const shelfItemAAfterRestart = restartedShelfA?.body.items?.find((item: any) => item.bookId === 'book_republic');
+    const shelfItemBAfterRestart = restartedShelfB?.body.items?.find((item: any) => item.bookId === 'book_republic');
+    check(
+      restartedShelfA?.status === 200 && shelfItemAAfterRestart?.lastReadChapterId === chapterToResume.id &&
+      shelfItemAAfterRestart?.lastReadEpubCfi === savedEpubCfi && shelfItemAAfterRestart?.progress === 63 &&
+      restartedShelfB?.status === 200 && shelfItemBAfterRestart?.lastReadChapterId === undefined &&
+      shelfItemBAfterRestart?.lastReadEpubCfi === undefined && shelfItemBAfterRestart?.progress === 0,
+      'Fresh authenticated clients after a server restart restore both resume positions only for the owning account'
     );
 
     const missingBook = await get('/api/library/books/not-a-real-book');

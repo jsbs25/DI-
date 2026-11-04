@@ -178,3 +178,9 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - 续读 API 复用 epub.js CFI parser 校验语法结构、数字偏移和 2048 字符上限；进度范围限制为 0–100%。这是续读输入校验，不是与书籍版次的定位核验；现有会话、用户 ID 和书架归属校验保留。
 - 新增本地合成 EPUB `scripts/fixtures/synthetic-world-library.epub`、离线安全回归 `scripts/test_library_epub_security.ts` 和 `test:library-epub-security` 命令。没有添加 npm 依赖、密钥或用户设置。
 - 更新 `PROJECT_AUDIT.md`、`TEST_REPORT.md`、`LIBRARY_CONNECTORS.md`。未下载真实 EPUB、访问用户书架/笔记或调用模型；未来服务端解析仍需在版本哈希、解压安全、HTML/XHTML 内容与真实 CFI-to-spine 映射完成后再单独评估。
+
+### WORLD LIBRARY Phase 7/9 follow-up：跨进程重启续读回归（2026-11-04）
+- 扩展 `scripts/test_library_api.ts`：测试服务可在相同隔离 `EARTH_ONE_DATA_FILE` 上停止并重新启动，重启时使用新的随机本机端口；临时目录仍由 `finally` 清理。
+- 使用两个 `example.invalid` 合成账户及同一本合成书目验证账户隔离。账户 A 保存 `lastReadChapterId`、`lastReadEpubCfi` 和 63% 进度后，服务进程重启；新的 HTTP 请求使用原账户令牌分别读取两份书架，A 恢复完整续读状态，B 仍无章节/CFI 且进度为 0。没有改 API、数据结构或实际存储实现。
+- `npm run test:library-api`：49/49 通过；`npm run lint`：通过。未运行全站 API/构建/外部连接器 smoke；本次不访问外部资源、模型或真实用户书架/笔记，不下载 EPUB，也不改配置。
+- 此测试覆盖服务端 JSON 跨进程持久化和账户级隔离，不等于实体设备、真实账户或跨部署同步验收。CFI 仅经语法和范围校验，EPUB AI 仍 fail-closed。
