@@ -1,7 +1,9 @@
 /**
- * EARTH ONE - AUTOMATED FULL-STACK VERIFICATION & INTEGRITY TEST
+ * EARTH ONE - AUTOMATED DATA-STORE INTEGRITY TEST
  * 
- * Tests the entire vertical system chain:
+ * Exercises store/domain methods and verifies isolated JSON persistence.
+ * This suite does not exercise Express routes or the browser UI.
+ * Covered areas:
  * 1. Auth Registration (SHA-256 + Salt hashing, account creation)
  * 2. Auth Login & Error Handling (Invalid credentials rejection, session token generation)
  * 3. Profile Onboarding & Geographic Coordinate Resolution (PostGIS/Geo lookup)
@@ -15,13 +17,33 @@
 
 import fs from 'fs';
 import path from 'path';
-import { store } from '../server/store.ts';
+import { tmpdir } from 'node:os';
 import { CELESTIAL_BODIES, getCelestialBodyById } from '../src/universe/celestialBodies.ts';
 import { resolveCoordinates } from '../src/utils/geoData.ts';
+import { toPublicUser } from '../server/privacy.ts';
+
+let testDataDir: string | undefined;
+let originalDataFile: string | undefined;
+
+function cleanupTestData() {
+  if (originalDataFile === undefined) {
+    delete process.env.EARTH_ONE_DATA_FILE;
+  } else {
+    process.env.EARTH_ONE_DATA_FILE = originalDataFile;
+  }
+  if (testDataDir) {
+    fs.rmSync(testDataDir, { recursive: true, force: true });
+  }
+}
 
 async function runTestSuite() {
+  originalDataFile = process.env.EARTH_ONE_DATA_FILE;
+  testDataDir = fs.mkdtempSync(path.join(tmpdir(), 'earth-one-test-'));
+  process.env.EARTH_ONE_DATA_FILE = path.join(testDataDir, 'server_data.json');
+  const { store } = await import('../server/store.ts');
+
   console.log('====================================================');
-  console.log('🚀 EARTH ONE FULL-STACK INTEGRITY TEST SUITE');
+  console.log('🚀 EARTH ONE DATA-STORE INTEGRITY TEST SUITE');
   console.log('====================================================\n');
 
   let passed = 0;
@@ -68,7 +90,23 @@ async function runTestSuite() {
   // ----------------------------------------------------
   // TEST 3: User Registration & Password Hashing
   // ----------------------------------------------------
-  console.log('\n🔐 STEP 3: Verifying EARTH ID Auth System...');
+  console.log('\n🔐 STEP 3: Verifying Public Profile Privacy & EARTH ID Auth System...');
+  const privateProfileSource = {
+    ...store.users[0],
+    email: 'private@example.test',
+    hasCompletedOnboarding: false,
+    location: { ...store.users[0].location, isPublic: false, lat: 12.34, lng: 56.78 }
+  };
+  const privatePublicProfile = toPublicUser(privateProfileSource);
+  assert(!('email' in privatePublicProfile), 'Public profile omits account email');
+  assert(!('hasCompletedOnboarding' in privatePublicProfile), 'Public profile omits internal onboarding state');
+  assert(privatePublicProfile.location.lat === 0 && privatePublicProfile.location.lng === 0, 'Private location coordinates are masked');
+  const visiblePublicProfile = toPublicUser({
+    ...privateProfileSource,
+    location: { ...privateProfileSource.location, isPublic: true }
+  });
+  assert(visiblePublicProfile.location.lat === 12.34 && visiblePublicProfile.location.lng === 56.78, 'Consented public city coordinates remain available');
+
   const testEmail = `tester_${Date.now()}@earthone.test`;
   const testPassword = 'SecureCosmicPassword2026!';
   const testUsername = `tester_${Date.now()}`;
@@ -177,7 +215,7 @@ async function runTestSuite() {
   // TEST 8: File System Persistence Check
   // ----------------------------------------------------
   console.log('\n💾 STEP 8: Verifying File System Data Persistence...');
-  const dataFilePath = path.resolve(process.cwd(), 'server_data.json');
+  const dataFilePath = process.env.EARTH_ONE_DATA_FILE!;
   assert(fs.existsSync(dataFilePath), 'server_data.json exists on disk');
 
   const fileRaw = fs.readFileSync(dataFilePath, 'utf-8');
@@ -210,13 +248,13 @@ async function runTestSuite() {
   console.log('====================================================\n');
 
   if (failed > 0) {
-    process.exit(1);
+    throw new Error(`${failed} integrity test(s) failed.`);
   } else {
-    console.log('✨ ALL 17 FULL-STACK SYSTEM TESTS COMPLETED WITH 100% SUCCESS.\n');
+    console.log('✨ ALL DATA-STORE INTEGRITY TESTS COMPLETED WITH 100% SUCCESS.\n');
   }
 }
 
 runTestSuite().catch(err => {
   console.error('Test suite failed with unexpected exception:', err);
-  process.exit(1);
-});
+  process.exitCode = 1;
+}).finally(cleanupTestData);

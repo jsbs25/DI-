@@ -37,7 +37,12 @@ npm run build
 
 # 4. Run automated integrity test suite
 npx tsx scripts/test_earth_one.ts
+
+# 5. Run isolated HTTP API privacy and authorization regression tests
+npm run test:api
 ```
+
+Both test suites use temporary, isolated JSON data files and remove them after completion; they do not modify the persistent `server_data.json`. The integrity suite verifies store/domain behavior; the API suite starts a temporary Express server and checks key identity/privacy routes. Neither suite tests browser end-to-end behavior.
 
 ---
 
@@ -47,4 +52,3 @@ npx tsx scripts/test_earth_one.ts
 - **Backend**: Express, TypeScript, tsx, REST API, JSON database with schema validation
 - **AI Intelligence**: `@google/genai` (Gemini 2.5 Flash / Pro)
 - **3D Engine**: Three.js with custom procedural textures, Raycasting, and spherical kinematics
-

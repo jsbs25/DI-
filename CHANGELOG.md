@@ -1,5 +1,16 @@
 # EARTH ONE CHANGELOG
 
+## [Unreleased] - 2026-11-04
+
+### Fixed
+- Integrity tests now use an isolated temporary JSON store and clean it up on success or failure, preventing test users, posts, and messages from being written into persistent project data.
+- The store data path can be overridden with `EARTH_ONE_DATA_FILE`; the existing `server_data.json` default remains unchanged.
+- Public user lists, profile responses, and global search now use a field allowlist that excludes email/internal onboarding state and masks coordinates when location sharing is disabled.
+- `/api/auth/me` and `/api/auth/current` now return only the account associated with a valid bearer-token session, or `user: null` when no valid session is present.
+- Onboarding, profile updates, and location-visibility changes now require a valid session; location-visibility changes are persisted to disk.
+- Added `npm run test:api`, an isolated HTTP regression suite for identity/privacy routes. It skips background book harvesting only in the test process.
+- Clarified that the current integrity suite validates store/domain behavior and is not an HTTP/browser end-to-end suite.
+
 ## [v1.1.0] - Secure Authentication & Citizen Onboarding Wizard - 2026-11-03
 
 ### Added

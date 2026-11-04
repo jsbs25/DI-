@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { store } from './server/store.ts';
+import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { fetchAndExtract, searchWeb, searchBooks, searchWikisource, fetchBookFullText, fetchWikisourceFullText, searchArabicWikisource, fetchArabicWikisourceFullText, searchInternetArchive, fetchInternetArchiveFullText } from './server/webFetcher.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
@@ -38,15 +39,20 @@ if (process.env.GEMINI_API_KEY) {
   }
 }
 
-// Helper to extract session token from header
-function getAuthUser(req: express.Request) {
+// Resolve only an explicitly valid session. Keep the legacy guest fallback
+// separate so identity endpoints never expose another visitor's active user.
+function getSessionUser(req: express.Request) {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
     const user = store.getUserByToken(token);
     if (user) return user;
   }
-  return store.currentUser;
+  return undefined;
+}
+
+function getAuthUser(req: express.Request) {
+  return getSessionUser(req) || store.currentUser;
 }
 
 // -------------------------------------------------------------
@@ -82,17 +88,17 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.get('/api/auth/me', (req, res) => {
-  const user = getAuthUser(req);
-  res.json({ success: true, user });
+  const user = getSessionUser(req);
+  res.json({ success: true, user: user || null });
 });
 
 app.get('/api/auth/current', (req, res) => {
-  const user = getAuthUser(req);
-  res.json({ success: true, user });
+  const user = getSessionUser(req);
+  res.json({ success: true, user: user || null });
 });
 
 app.post('/api/auth/onboarding', (req, res) => {
-  const user = getAuthUser(req);
+  const user = getSessionUser(req);
   if (!user) {
     return res.status(401).json({ success: false, error: 'Unauthorized.' });
   }
@@ -114,9 +120,12 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 app.post('/api/auth/update-profile', (req, res) => {
+  const authUser = getSessionUser(req);
+  if (!authUser) {
+    return res.status(401).json({ success: false, error: 'Unauthorized.' });
+  }
   try {
-    const authUser = getAuthUser(req);
-    const updated = store.updateProfile(req.body, authUser?.id);
+    const updated = store.updateProfile(req.body, authUser.id);
     res.json({ success: true, user: updated });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
@@ -124,8 +133,12 @@ app.post('/api/auth/update-profile', (req, res) => {
 });
 
 app.post('/api/auth/toggle-location', (req, res) => {
-  const user = getAuthUser(req);
+  const user = getSessionUser(req);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Unauthorized.' });
+  }
   user.location.isPublic = !user.location.isPublic;
+  store.saveToDisk();
   res.json({
     success: true,
     isPublic: user.location.isPublic,
@@ -149,7 +162,7 @@ app.get('/api/users', (req, res) => {
       u.location.cityName.toLowerCase().includes(q)
     );
   }
-  res.json({ success: true, users: list });
+  res.json({ success: true, users: list.map(toPublicUser) });
 });
 
 app.get('/api/users/:id', (req, res) => {
@@ -158,7 +171,7 @@ app.get('/api/users/:id', (req, res) => {
     return res.status(404).json({ success: false, error: 'User not found' });
   }
   const userPosts = store.posts.filter(p => p.userId === req.params.id);
-  res.json({ success: true, user, posts: userPosts });
+  res.json({ success: true, user: toPublicUser(user), posts: userPosts });
 });
 
 app.post('/api/users/:id/follow', (req, res) => {
@@ -830,7 +843,7 @@ app.get('/api/search/global', (req, res) => {
   res.json({
     success: true,
     query: q,
-    results: { users, posts, books, communities, knowledge }
+    results: { users: users.map(toPublicUser), posts, books, communities, knowledge }
   });
 });
 
@@ -849,18 +862,20 @@ async function startServer() {
     console.log(`🌍 EARTH ONE Server listening on http://0.0.0.0:${PORT}`);
   });
 
-  // --- Automated Book Harvester (backend-only, no UI entry) ---
-  // Runs immediately on boot, then once every hour. Books are merged into
-  // the Digital Library store, de-duplicated by id.
-  const runHarvest = async () => {
-    const log = await runBookHarvest();
-    console.log(log);
-  };
+  if (process.env.EARTH_ONE_SKIP_BOOK_HARVEST !== 'true') {
+    // --- Automated Book Harvester (backend-only, no UI entry) ---
+    // Runs immediately on boot, then once every hour. Books are merged into
+    // the Digital Library store, de-duplicated by id.
+    const runHarvest = async () => {
+      const log = await runBookHarvest();
+      console.log(log);
+    };
 
-  runHarvest();
-  const harvestInterval = setInterval(runHarvest, 60 * 60 * 1000);
-  // Prevent the interval from keeping the process alive in tests/edge cases
-  harvestInterval.unref?.();
+    runHarvest();
+    const harvestInterval = setInterval(runHarvest, 60 * 60 * 1000);
+    // Prevent the interval from keeping the process alive in tests/edge cases
+    harvestInterval.unref?.();
+  }
 }
 
 startServer().catch(err => {

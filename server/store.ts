@@ -26,7 +26,9 @@ import { resolveCoordinates } from '../src/utils/geoData.ts';
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
 import { crawlWebsite } from './webFetcher.ts';
 
-const DATA_FILE = path.resolve(process.cwd(), 'server_data.json');
+// Keep the existing default location, while allowing tests and isolated runs to
+// use a dedicated file without ever mutating the user's persistent data.
+const DATA_FILE = path.resolve(process.env.EARTH_ONE_DATA_FILE || path.resolve(process.cwd(), 'server_data.json'));
 
 export interface AuthAccount {
   userId: string;
