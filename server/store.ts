@@ -26,9 +26,11 @@ import { resolveCoordinates } from '../src/utils/geoData.ts';
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
 import { crawlWebsite } from './webFetcher.ts';
 
-// Keep the existing default location, while allowing tests and isolated runs to
-// use a dedicated file without ever mutating the user's persistent data.
 const DATA_FILE = path.resolve(process.env.EARTH_ONE_DATA_FILE || path.resolve(process.cwd(), 'server_data.json'));
+// Full-text book content is stored here (one JSON file per book) instead of
+// bloating server_data.json with every chapter's body. This keeps the main
+// store small and makes the atomic whole-file rewrite cheap.
+const BOOKS_DIR = path.resolve(process.cwd(), 'server_data', 'books');
 
 export interface AuthAccount {
   userId: string;
@@ -493,6 +495,18 @@ export const SEED_ADS: Advertisement[] = [
 ];
 
 // Persistent state holder
+/**
+ * Return a copy of a book with chapter bodies removed. Used by list/shelf
+ * endpoints so they never ship megabytes of full text when only metadata is
+ * needed. The reader fetches a single book by id to get full content.
+ */
+export function stripBookContent(book: Book): Book {
+  return {
+    ...book,
+    chapters: (book.chapters || []).map(c => ({ id: c.id, title: c.title, content: '' }))
+  };
+}
+
 class DataStore {
   users: User[] = [];
   posts: Post[] = [];
@@ -524,6 +538,44 @@ class DataStore {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Book full-text content store (one JSON file per book)
+  // -------------------------------------------------------------------------
+  private bookContentFile(bookId: string): string {
+    return path.join(BOOKS_DIR, `${bookId}.json`);
+  }
+
+  private writeBookContent(book: Book): void {
+    const chapters = book.chapters || [];
+    if (chapters.length === 0) return;
+    try {
+      fs.mkdirSync(BOOKS_DIR, { recursive: true });
+      fs.writeFileSync(this.bookContentFile(book.id), JSON.stringify({ chapters }, null, 2), 'utf-8');
+    } catch (err) {
+      console.error(`Failed to write book content for ${book.id}:`, err);
+    }
+  }
+
+  private loadBookContent(book: Book): Book {
+    try {
+      const p = this.bookContentFile(book.id);
+      if (!fs.existsSync(p)) return book;
+      const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      if (data && Array.isArray(data.chapters)) book.chapters = data.chapters;
+    } catch {
+      // leave the in-memory book as-is on any read error
+    }
+    return book;
+  }
+
+  /**
+   * Detect whether a book still carries inline chapter text (old format) so
+   * it can be migrated into a content file.
+   */
+  private hasInlineContent(book: Book): boolean {
+    return (book.chapters || []).some(c => (c.content || '').trim().length > 0);
+  }
+
   saveToDisk(): void {
     try {
       const serializableAccounts: Record<string, AuthAccount> = {};
@@ -536,6 +588,18 @@ class DataStore {
         serializableSessions[token] = userId;
       });
 
+      // Ensure any book that still carries inline full text (seed data or a
+      // legacy server_data.json) is persisted to its own content file before
+      // we strip it from the main store.
+      for (const book of this.books) {
+        if (this.hasInlineContent(book) && !fs.existsSync(this.bookContentFile(book.id))) {
+          this.writeBookContent(book);
+        }
+      }
+
+      // Serialize books as metadata only — chapter bodies live in per-book files.
+      const booksMeta = this.books.map(stripBookContent);
+
       const payload = {
         users: this.users,
         posts: this.posts,
@@ -547,7 +611,7 @@ class DataStore {
         gameRooms: this.gameRooms,
         ads: this.ads,
         countries: this.countries,
-        books: this.books,
+        books: booksMeta,
         bookAnnotations: this.bookAnnotations,
         bookShelf: this.bookShelf,
         crawlerTasks: this.crawlerTasks,
@@ -588,11 +652,29 @@ class DataStore {
       this.books = data.books && data.books.length > 0 ? data.books : [...SEED_BOOKS];
       this.bookAnnotations = data.bookAnnotations || [];
       this.bookShelf = data.bookShelf || [];
+
+      // Rehydrate full text from per-book content files. Books that still
+      // carry inline content (legacy format) are migrated into files so the
+      // next save can strip them from the main store.
+      let migrated = false;
+      this.books = this.books.map(book => {
+        if (this.hasInlineContent(book)) {
+          this.writeBookContent(book);
+          migrated = true;
+          return book;
+        }
+        return this.loadBookContent(book);
+      });
+
       this.crawlerTasks = data.crawlerTasks && data.crawlerTasks.length > 0 ? data.crawlerTasks : [...SEED_CRAWLER_TASKS];
       this.crawledPages = data.crawledPages && data.crawledPages.length > 0 ? data.crawledPages : [...SEED_CRAWLED_PAGES];
       this.browserBookmarks = data.browserBookmarks || [];
       this.savedArticles = data.savedArticles || [];
       this.currentUser = data.currentUser || this.users[0];
+
+      // Persist the now-stripped (metadata-only) main store once after migrating
+      // legacy inline content, so server_data.json stops carrying full text.
+      if (migrated) this.saveToDisk();
 
       this.accounts.clear();
       if (data.accounts) {
@@ -1133,12 +1215,14 @@ class DataStore {
 
   // Digital Library Methods
   addBook(book: Book): Book {
+    this.writeBookContent(book);
     const existing = this.books.find(b => b.id === book.id);
     if (existing) {
       // Refresh content but keep reading progress
       existing.chapters = book.chapters;
       existing.description = book.description;
       existing.coverImage = book.coverImage || existing.coverImage;
+      this.writeBookContent(existing);
       this.saveToDisk();
       return existing;
     }
@@ -1151,6 +1235,7 @@ class DataStore {
     const book = this.books.find(b => b.id === bookId);
     if (!book) return null;
     Object.assign(book, updates);
+    if (updates.chapters) this.writeBookContent(book);
     this.saveToDisk();
     return book;
   }
@@ -1160,6 +1245,8 @@ class DataStore {
     this.books = this.books.filter(b => b.id !== bookId);
     this.bookShelf = this.bookShelf.filter(s => s.bookId !== bookId);
     this.bookAnnotations = this.bookAnnotations.filter(a => a.bookId !== bookId);
+    // Remove the extracted content file (best-effort)
+    try { fs.unlinkSync(this.bookContentFile(bookId)); } catch { /* ignore */ }
     if (this.books.length !== initial) {
       this.saveToDisk();
       return true;

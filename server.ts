@@ -2,7 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import { store } from './server/store.ts';
+import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { fetchAndExtract, searchWeb, searchBooks, searchWikisource, fetchBookFullText, fetchWikisourceFullText, searchArabicWikisource, fetchArabicWikisourceFullText, searchInternetArchive, fetchInternetArchiveFullText } from './server/webFetcher.ts';
@@ -612,7 +612,7 @@ app.get('/api/library/shelf', (req, res) => {
   const books = items
     .map(item => {
       const book = store.books.find(b => b.id === item.bookId);
-      return book ? { ...item, book } : null;
+      return book ? { ...item, book: stripBookContent(book) } : null;
     })
     .filter(Boolean);
   res.json({ success: true, items: books });
@@ -649,7 +649,8 @@ app.get('/api/library/books', (req, res) => {
     const q = search.toLowerCase();
     books = books.filter(b => b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q));
   }
-  res.json({ success: true, books });
+  // List endpoints return metadata only; full text is fetched per-book.
+  res.json({ success: true, books: books.map(stripBookContent) });
 });
 
 app.get('/api/library/books/:id', (req, res) => {

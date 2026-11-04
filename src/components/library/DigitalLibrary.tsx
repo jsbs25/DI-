@@ -237,6 +237,30 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     setAnnotationNote('');
   };
 
+  // List/shelf endpoints return metadata only, so fetch the full book
+  // (with chapter bodies) before showing the detail view or opening the reader.
+  const loadFullBook = async (bookId: string): Promise<Book | null> => {
+    try {
+      const res = await fetch(`/api/library/books/${bookId}`);
+      const data = await res.json();
+      return data.success && data.book ? (data.book as Book) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const openBookDetail = async (book: Book) => {
+    setSelectedBook(book);
+    setView('detail');
+    const full = await loadFullBook(book.id);
+    if (full) setSelectedBook(full);
+  };
+
+  const openShelfBook = async (book: Book) => {
+    const full = await loadFullBook(book.id);
+    openReader(full || book);
+  };
+
   const closeReader = () => {
     stopSpeaking();
     setReadingBook(null);
@@ -518,7 +542,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             {/* Featured real book */}
             {featuredBook && (
               <div
-                onClick={() => { setSelectedBook(featuredBook); setView('detail'); }}
+                onClick={() => openBookDetail(featuredBook)}
                 className="flex justify-center lg:justify-end cursor-pointer group"
               >
                 <div className="relative">
@@ -597,7 +621,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
                   {catBooks.slice(0, 6).map(book => (
-                    <BookCard key={book.id} book={book} onClick={() => { setSelectedBook(book); setView('detail'); }} />
+                    <BookCard key={book.id} book={book} onClick={() => openBookDetail(book)} />
                   ))}
                 </div>
               </section>
@@ -640,7 +664,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
             {books.map(book => (
-              <BookCard key={book.id} book={book} onClick={() => { setSelectedBook(book); setView('detail'); }} />
+              <BookCard key={book.id} book={book} onClick={() => openBookDetail(book)} />
             ))}
           </div>
           {books.length === 0 && <div className="text-center text-slate-500 py-16">该分类暂无书籍。</div>}
@@ -802,7 +826,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
               {shelfBooks.map(item => (
                 <div key={item.id} className="relative">
-                  <BookCard book={item.book} onClick={() => openReader(item.book)} />
+                  <BookCard book={item.book} onClick={() => openShelfBook(item.book)} />
                   {item.progress > 0 && (
                     <div className="absolute bottom-2 left-2 right-2 h-1 bg-slate-800 rounded-full overflow-hidden">
                       <div className="h-full bg-amber-500" style={{ width: `${item.progress}%` }} />
