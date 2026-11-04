@@ -142,3 +142,4 @@
 - 为 `/api/communities`、`/api/games/rooms`、`/api/ads` 各增加一次重复 GET 比对，确保读取目录不会改变社区加入状态、游戏棋盘/回合或广告曝光/点击计数。
 - `npm run test:catalog-api`：19 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。服务运行于随机本地端口，使用自动清理的临时 JSON，端点白名单仅包含三个目录 GET。
 - 未运行完整 `npm run test:api`（该套件含等待批准的会话读取路径）、构建或浏览器测试；未访问会话/消息接口、写接口、外部服务、正式 `server_data.json` 或既有服务，也未检查既有服务配置/日志。
+- GitHub 同步：提交 `386fcf6c32a7cf1da12b903fc8e18666ea5103fe` 从 `97e6234` 经现有授权连接器普通快进推送至 `main`；推送后 fetch 与 connector API 回读均确认 `HEAD`、`origin/main` 和远端一致，工作区干净。未强推或修改账户/全局 Git 配置。

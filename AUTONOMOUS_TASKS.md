@@ -36,6 +36,7 @@
 - 新增 `npm run test:crawler-api` 独立 GET-only 回归：临时 JSON、随机本地端口和 `/api/crawler/tasks`、`/api/crawler/pages` 两端点白名单；检查字段/ID 唯一性、页面任务关联及待审核样例，共 12 项通过，`npm run lint` 通过。未创建任务、执行抓取、批准/拒绝页面、访问外部网站或修改数据；完整 `test:api` 未运行。
 - 新增 `npm run test:creator-api` 独立 GET-only 回归：使用自动清理的临时 JSON 与随机本地端口，仅请求 `/api/articles`、`/api/videos`；11 项通过，验证文章/视频字段、唯一 ID 和既有目录条目。未写入文章、获取媒体或访问私信/正式数据/既有服务；`npm run lint` 通过，完整 `test:api` 未运行。
 - `npm run test:catalog-api` 独立 GET-only 回归现为 19 项通过：除原有社区、房间和广告目录字段/ID/样例检查外，重复 GET 还验证成员状态、棋盘/回合及广告曝光/点击计数不变。仅用自动清理的临时 JSON 与随机端口；未执行加入、游戏变更、广告点击、媒体请求或访问会话/消息、正式数据及既有服务；`npm run lint` 通过。
+- 本轮代码与回归记录提交 `386fcf6c32a7cf1da12b903fc8e18666ea5103fe` 已经现有授权 GitHub connector 普通快进推送；推送后 fetch 与 connector API 均核验远端 `main` 与本地一致，工作区干净。未强推或更改账户/全局 Git 配置。
 - 新增 `npm run test:social-feed-api` 独立 GET-only 回归：随机本地端口、自动清理的临时 JSON，且只允许 `/api/posts` 的预设公开查询；19 项通过，覆盖 feed 字段/种子保留、最新与热门排序、国家大小写兼容、类别/国家组合筛选及文本搜索。未调用写接口、媒体 URL、会话/消息路径、正式数据或既有服务；`npm run lint` 通过，未运行含待授权读取路径的完整 `test:api`。
 - 新增 `npm run test:public-users-api` 独立 GET-only 回归：仅请求公开用户目录、公开资料及全局搜索白名单，使用临时合成用户数据；21 项通过，覆盖国家/文本筛选、资料 404、公开字段、私密邮箱和 onboarding 字段脱敏、私密坐标遮蔽及全局搜索空查询处理。未访问身份、会话/消息路由、正式数据或既有服务；`npm run lint` 通过。完整 `test:api` 仍未运行。
 - 本轮社交 feed 代码与回归文档提交 `72f7f96` 已通过现有授权 GitHub connector 快进推送；推送后 `git fetch`、connector API 回读均核对为同一提交，且当时 `main`、`origin/main` 与本地 `HEAD` 一致、工作区干净。未强推或修改账户设置。
