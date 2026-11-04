@@ -16,6 +16,10 @@
 - Navigation modules now load on demand behind an accessible loading state. The entry chunk decreased from about 1,160.76 KB (gzip 306.07 KB) to 316.71 KB (gzip 97.92 KB); the shared Three.js chunk remains about 551.65 KB and still triggers the build warning.
 - No authentication, authorization, administrator-permission, or private-message access-control policy was changed.
 
+### Verification
+- A bounded desktop production-build smoke check passed for globe → feed → library detail → universe → Earth telemetry → globe, using isolated temporary API data and no external AI/crawling.
+- Logged existing follow-ups for the telemetry drawer overlapping planet controls at 1274×649 and a missing favicon. Other modules, mobile/RTL, and real first-load resource measurements remain unverified.
+
 ## [v1.1.0] - Secure Authentication & Citizen Onboarding Wizard - 2026-11-03
 
 ### Added
