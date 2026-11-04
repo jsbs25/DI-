@@ -499,7 +499,8 @@ app.get('/api/games/rooms', (req, res) => {
 // -------------------------------------------------------------
 // 7. EARTH ONE UNIFIED AI GATEWAY & MULTI-MODEL DISPATCH
 // -------------------------------------------------------------
-app.get('/api/ai/models', (req, res) => {
+app.get('/api/ai/models', async (req, res) => {
+  await aiGateway.detectLocalOllama();
   res.json({ success: true, models: aiGateway.getModels() });
 });
 

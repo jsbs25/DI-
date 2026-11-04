@@ -37,6 +37,7 @@ class AIGateway {
   private customKey: string = '';
   private customBaseUrl: string = process.env.CUSTOM_BASE_URL || 'http://localhost:11434/v1';
   private customModel: string = process.env.CUSTOM_MODEL || 'llama3';
+  private localOllamaModels: string[] = [];
 
   constructor() {
     this.initProviders();
@@ -189,6 +190,45 @@ class AIGateway {
   }
 
   /**
+   * 自动探测本地 Ollama (localhost:11434) 正在运行的模型，并注册为可选模型。
+   * 无需 API Key，探测失败（Ollama 未启动）时静默忽略。
+   */
+  public async detectLocalOllama(): Promise<void> {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch('http://localhost:11434/api/tags', { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) return;
+      const data = await res.json();
+      const tags: any[] = Array.isArray(data?.models) ? data.models : [];
+      const names = tags.map((m: any) => m?.name).filter((n: any): n is string => typeof n === 'string' && n.length > 0);
+      this.localOllamaModels = names;
+
+      for (const name of names) {
+        const id = `ollama:${name}`;
+        if (!this.models.some(m => m.id === id)) {
+          this.models.push({
+            id,
+            name: `本地 Ollama · ${name}`,
+            provider: 'Custom',
+            category: 'text',
+            status: 'active',
+            isDefault: false,
+            totalCalls: 0,
+            totalTokens: 0,
+            averageLatencyMs: 0,
+            apiKeyMasked: '本地模型 · 免密直连',
+            isFree: true
+          });
+        }
+      }
+    } catch {
+      // Ollama 未运行或不可达，静默忽略
+    }
+  }
+
+  /**
    * Main entry point for generating content.
    */
   public async generateContent(
@@ -224,7 +264,19 @@ class AIGateway {
       }
     }
 
-    // 2. Custom OpenAI-compatible or Ollama providers
+    // 2. 本地 Ollama 模型（自动检测到 localhost:11434 的模型）
+    if (targetModel.id.startsWith('ollama:')) {
+      const modelName = targetModel.id.slice('ollama:'.length);
+      return this.callOpenAICompatible({
+        baseUrl: this.customBaseUrl || 'http://localhost:11434/v1',
+        apiKey: this.customKey,
+        model: modelName,
+        prompt,
+        systemInstruction
+      });
+    }
+
+    // 3. Custom OpenAI-compatible or Ollama providers
     if (targetModel.provider === 'Custom' && targetModel.id === 'custom') {
       return this.callOpenAICompatible({
         baseUrl: this.customBaseUrl || 'http://localhost:11434/v1',
