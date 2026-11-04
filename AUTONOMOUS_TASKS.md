@@ -34,7 +34,9 @@
 - 新增 `npm run test:knowledge-api` 独立 GET-only 回归：临时 JSON、关闭后台采集和模型密钥；检查 33 个知识节点详情、节点/边唯一性与完整性、关联书籍、别名搜索、类别/国家筛选及结构化 404，共 11 项通过。请求只到知识图谱目录/搜索/详情白名单；未访问会话/消息路径、生产数据或既有服务。
 - 新增 `npm run test:library-api` 独立 GET-only 回归：使用自动清理的临时 JSON，覆盖本地目录字段/ID 唯一性、哲学类别筛选、无匹配类别空集合、Plato 本地目录搜索、已知图书章节结构及未知图书结构化 404，共 12 项通过；只请求本地目录/详情白名单，没有调用外部搜索、书架或写接口。`npm run lint` 通过；完整 `test:api` 因包含待批准会话读取路径未运行。
 - 新增 `npm run test:crawler-api` 独立 GET-only 回归：临时 JSON、随机本地端口和 `/api/crawler/tasks`、`/api/crawler/pages` 两端点白名单；检查字段/ID 唯一性、页面任务关联及待审核样例，共 12 项通过，`npm run lint` 通过。未创建任务、执行抓取、批准/拒绝页面、访问外部网站或修改数据；完整 `test:api` 未运行。
-- GitHub 内置连接器已启用，但本运行时没有 connector 提供的 CLI/credential helper，系统 `gh` 也未登录；旧同步脚本含强制推送，不使用。代码仅提交到本地分支，待该既有授权入口可用后再快进同步。
+- 新增 `npm run test:creator-api` 独立 GET-only 回归：使用自动清理的临时 JSON 与随机本地端口，仅请求 `/api/articles`、`/api/videos`；11 项通过，验证文章/视频字段、唯一 ID 和既有目录条目。未写入文章、获取媒体或访问私信/正式数据/既有服务；`npm run lint` 通过，完整 `test:api` 未运行。
+- 新增 `npm run test:catalog-api` 独立 GET-only 回归：临时 JSON、随机端口及 `/api/communities`、`/api/games/rooms`、`/api/ads` 白名单；16 项通过，检查字段、唯一标识和现有社区/房间/广告样例。未加入社区、修改游戏房间或广告点击状态、获取媒体或访问会话/消息、正式数据及既有服务；`npm run lint` 通过。
+- 已确认现有 GitHub connector wrapper 可用，认证账户 `jsbs25` 可读取目标仓库；系统默认 `gh` 仍未登录，因此 GitHub 操作只走该授权 wrapper。提交后核验远端分支，再仅在可快进时同步；不使用含强制推送的旧脚本、不强推、不修改账户设置。
 
 ### P2 — 进行中：降低首屏 JavaScript 体积
 
