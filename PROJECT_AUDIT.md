@@ -178,3 +178,16 @@ DOAB 的官方元数据说明确认其书目元数据为 CC0，并提供 OAI-PMH
 PubMed 只提供书目检索与官方 PubMed 记录页，固定为 `METADATA_ONLY`；即使记录含有关联 PMCID，也不声称该 PubMed 结果已验证全文可用。全文、下载和本地导入明确不支持，API 对导入独立返回 403。结果权利提示也指出摘要可能含受版权保护内容，并链接 NCBI/NLM 官方免责声明。PMC 的 `UNKNOWN` 版权状态和其官方文章页流程保持不变。新增了搜索卡片来源标签、环境示例、离线接口/权限/去重测试及实时烟测用例。
 
 验证：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（29 项）、`npm run test:api`（85 项）、`npm run build` 和 `npm run test:library-connectors:live` 均通过；实时 PubMed 查询返回真实记录。生产构建仍有既有 Three.js 大 chunk 警告。测试使用 mock 或临时隔离存储，未修改正式用户书架或本地图书数据；未进行浏览器视觉或移动设备回归。
+
+
+## WORLD LIBRARY Phase 5：官方阿拉伯语资源（2026-11-04）
+
+**本阶段基线与保全。** 从干净、已同步的 `main` 提交 `32db81455171108c3671d020ac39514ed6894107` 增量推进。保留原有 13 个连接器、图书目录、登录、书架、阅读记录、批注和阅读器；未修改正式用户数据。
+
+**Shamela：真实接入。** [Shamela 官方 MCP 指南](https://shamela.ws/mcp-guide/)公开只读服务 `https://mcp.shamela.ws`，明确说明免费且无需 API key 或 Shamela 账号。新增第 14 个正式连接器，默认启用、可用 `EARTH_ONE_LIBRARY_SHAMELA_ENABLED=false` 关闭；采用官方 `shamela_find` 工具，不使用未经说明的接口。只在查询包含阿拉伯文时发出请求；非阿语时返回 `unsupported`，不擅自翻译或制造假匹配。结果仅保留书名、作者、页码和 Shamela 官方页面链接。响应正文不返回、不写入本地书目、不进入缓存；权利状态始终为 `UNKNOWN`，`canImport=false`，全文、下载及入库接口明确拒绝。每源串行、最短 2 秒间隔。
+
+**Waqfeya 与 Qatar Digital Library：官方跳转。** [Waqfeya 官方图书目录](https://waqfeya.net/books)和 [QDL 官方检索页](https://www.qdl.qa/en/search/site/)已核实并加入首页入口。当前没有找到 Waqfeya 可公开核验的正式机器检索 API，也没有找到 QDL 官方发布的机器检索 API 文档，因此没有抓取、批量索引或复制全文；两者只跳转到官网。QDL 官网声明资源免费使用与复用，但每件数字资源仍须遵循其具体权利信息；EARTH ONE 不据此批量复制媒体或全文。
+
+**验证。** 离线连接器 mock、隔离图书馆 API（31 项）、通用 API（85 项）、TypeScript 检查、生产构建及限量在线 connector smoke 均通过；真实 Shamela 阿语搜索有返回记录，结果仅含书目字段和官方页链接。生产构建仍有既有 Three.js 大 chunk 非阻断提示。没有做浏览器视觉或手机设备验收。GitHub 远端同步未执行：本执行环境当前无已授权 GitHub 登录或可用连接器，故没有改用未授权写入路径。
+
+**仍未完成。** Waqfeya/QDL 的机器接口接入、将中文/英文查询可靠映射为阿拉伯语、更多阿语馆藏、馆藏筛选、个人书架跨设备验证、移动端实测和基于具体许可的全文阅读仍待后续阶段。

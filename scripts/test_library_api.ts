@@ -14,6 +14,7 @@ const ALLOWED_FIXED_ENDPOINTS = new Set([
   '/api/library/search?q=valid&source=openalex,not-a-real-source',
   '/api/library/search?q=valid&source=pmc,not-a-real-source',
   '/api/library/search?q=valid&source=pubmed,not-a-real-source',
+  '/api/library/search?q=valid&source=shamela,not-a-real-source',
   '/api/library/search?q=&source=gutenberg',
   '/api/library/search?q=valid&source=not-a-real-source',
   '/api/library/books',
@@ -63,6 +64,7 @@ async function main() {
       EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED: 'true',
       EARTH_ONE_LIBRARY_PMC_ENABLED: 'true',
       EARTH_ONE_LIBRARY_PUBMED_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_SHAMELA_ENABLED: 'true',
       GOOGLE_BOOKS_API_KEY: 'api-test-key-not-a-real-secret',
       EUROPEANA_API_KEY: '',
       GEMINI_API_KEY: '',
@@ -145,13 +147,13 @@ async function main() {
     const connectors = await get('/api/library/connectors');
     check(
       connectors.status === 200 && connectors.body.success === true && Array.isArray(connectors.body.sources) &&
-      connectors.body.sources.length === 13 && connectors.body.sources.filter((source: any) => source.enabled).length === 8 &&
+      connectors.body.sources.length === 14 && connectors.body.sources.filter((source: any) => source.enabled).length === 9 &&
       connectors.body.sources.find((source: any) => source.name === 'Open Library')?.enabled === true &&
       connectors.body.sources.find((source: any) => source.name === 'Google Books')?.authentication === 'api-key' &&
       connectors.body.sources.find((source: any) => source.name === 'Google Books')?.enabled === true &&
       connectors.body.sources.find((source: any) => source.name === 'Europeana')?.authentication === 'api-key' &&
       connectors.body.sources.find((source: any) => source.name === 'Europeana')?.enabled === false &&
-      ['OpenAlex', 'Crossref', 'arXiv', 'Europe PMC', 'PubMed Central', 'PubMed'].every(name => {
+      ['OpenAlex', 'Crossref', 'arXiv', 'Europe PMC', 'PubMed Central', 'PubMed', 'Shamela'].every(name => {
         const source = connectors.body.sources.find((item: any) => item.name === name);
         return source?.authentication === 'none' && source?.enabled === true;
       }),
@@ -180,6 +182,8 @@ async function main() {
     check(pmcSourceValidation.status === 400 && pmcSourceValidation.body.success === false, 'PMC is accepted by the source allowlist while unknown IDs are rejected');
     const pubmedSourceValidation = await get('/api/library/search?q=valid&source=pubmed,not-a-real-source');
     check(pubmedSourceValidation.status === 400 && pubmedSourceValidation.body.success === false, 'PubMed is accepted by the source allowlist while unknown IDs are rejected');
+    const shamelaSourceValidation = await get('/api/library/search?q=valid&source=shamela,not-a-real-source');
+    check(shamelaSourceValidation.status === 400 && shamelaSourceValidation.body.success === false, 'Shamela is accepted by the source allowlist while unknown IDs are rejected');
     const metadataOnlyImport = await post('/api/library/ingest', { source: 'openlibrary', externalId: '/works/OL1W' });
     check(metadataOnlyImport.status === 403 && metadataOnlyImport.body.success === false, 'Metadata-only Open Library records cannot be imported as full text');
     const googleBooksImport = await post('/api/library/ingest', { source: 'googlebooks', externalId: 'sample-volume' });
@@ -192,6 +196,8 @@ async function main() {
     check(pmcImport.status === 403 && pmcImport.body.success === false, 'PMC reading access does not bypass the individual article reuse-license check');
     const pubmedImport = await post('/api/library/ingest', { source: 'pubmed', externalId: '98765432' });
     check(pubmedImport.status === 403 && pubmedImport.body.success === false, 'PubMed metadata cannot be imported as article full text');
+    const shamelaImport = await post('/api/library/ingest', { source: 'shamela', externalId: '123/45' });
+    check(shamelaImport.status === 403 && shamelaImport.body.success === false, 'Shamela MCP discovery cannot be used to import or copy full text');
     const disabledImport = await post('/api/library/ingest', { source: 'gutenberg', externalId: '11' });
     check(disabledImport.status === 503 && disabledImport.body.success === false, 'Disabled sources cannot be used for full-text import');
 

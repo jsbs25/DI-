@@ -19,7 +19,7 @@ export enum RightsCategory {
   UNKNOWN = 'UNKNOWN'
 }
 
-export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'googlebooks' | 'europeana' | 'wikisource' | 'ar_wikisource' | 'openalex' | 'crossref' | 'arxiv' | 'europepmc' | 'pmc' | 'pubmed';
+export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'googlebooks' | 'europeana' | 'wikisource' | 'ar_wikisource' | 'openalex' | 'crossref' | 'arxiv' | 'europepmc' | 'pmc' | 'pubmed' | 'shamela';
 export type ConnectorStatus = 'ok' | 'error' | 'unsupported';
 export interface ExternalLibraryRecord {
   id: string;
@@ -125,7 +125,8 @@ const SOURCE_NAMES: Record<LibrarySource, string> = {
   arxiv: 'arXiv',
   europepmc: 'Europe PMC',
   pmc: 'PubMed Central',
-  pubmed: 'PubMed'
+  pubmed: 'PubMed',
+  shamela: 'Shamela'
 };
 const SOURCE_CONFIG: Record<LibrarySource, { env: string; website: string; api: string }> = {
   openlibrary: { env: 'EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED', website: 'https://openlibrary.org', api: 'https://openlibrary.org/search.json' },
@@ -140,11 +141,12 @@ const SOURCE_CONFIG: Record<LibrarySource, { env: string; website: string; api: 
   arxiv: { env: 'EARTH_ONE_LIBRARY_ARXIV_ENABLED', website: 'https://arxiv.org', api: 'https://export.arxiv.org/api/query' },
   europepmc: { env: 'EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED', website: 'https://europepmc.org', api: 'https://www.ebi.ac.uk/europepmc/webservices/rest/search' },
   pmc: { env: 'EARTH_ONE_LIBRARY_PMC_ENABLED', website: 'https://pmc.ncbi.nlm.nih.gov', api: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' },
-  pubmed: { env: 'EARTH_ONE_LIBRARY_PUBMED_ENABLED', website: 'https://pubmed.ncbi.nlm.nih.gov', api: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' }
+  pubmed: { env: 'EARTH_ONE_LIBRARY_PUBMED_ENABLED', website: 'https://pubmed.ncbi.nlm.nih.gov', api: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' },
+  shamela: { env: 'EARTH_ONE_LIBRARY_SHAMELA_ENABLED', website: 'https://shamela.ws', api: 'https://mcp.shamela.ws' }
 };
 const CACHE_TTL_MS = 60_000;
 const MIN_REQUEST_INTERVAL_MS = 1_000;
-const SOURCE_MIN_REQUEST_INTERVAL_MS: Partial<Record<LibrarySource, number>> = { arxiv: 3_000 };
+const SOURCE_MIN_REQUEST_INTERVAL_MS: Partial<Record<LibrarySource, number>> = { arxiv: 3_000, shamela: 2_000 };
 const cache = new Map<string, { expiresAt: number; value: string }>();
 const lastRequestBySource = new Map<string, number>();
 const requestQueueBySource = new Map<string, Promise<void>>();
@@ -236,6 +238,71 @@ async function requestText(source: LibrarySource, url: string, timeoutMs = 10_00
     releaseQueue();
     if (requestQueueBySource.get(queueKey) === queued) requestQueueBySource.delete(queueKey);
   }
+}
+
+let nextMcpRequestId = 1;
+
+/**
+ * Call Shamela's documented, public, read-only MCP search without caching its
+ * response: search payloads may contain book text, which this connector must
+ * never retain or return to the client.
+ */
+async function callShamelaSearch(query: string): Promise<Record<string, any>> {
+  const queueKey = 'shamela';
+  const previous = requestQueueBySource.get(queueKey) || Promise.resolve();
+  let releaseQueue!: () => void;
+  const queueTurn = new Promise<void>(resolve => { releaseQueue = resolve; });
+  const queued = previous.catch(() => undefined).then(() => queueTurn);
+  requestQueueBySource.set(queueKey, queued);
+  await previous.catch(() => undefined);
+  try {
+    const lastRequest = lastRequestBySource.get(queueKey) || 0;
+    const delay = Math.max(0, (SOURCE_MIN_REQUEST_INTERVAL_MS.shamela || MIN_REQUEST_INTERVAL_MS) - (Date.now() - lastRequest));
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    try {
+      lastRequestBySource.set(queueKey, Date.now());
+      const response = await fetch(SOURCE_CONFIG.shamela.api, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json', 'User-Agent': userAgent() },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: nextMcpRequestId++,
+          method: 'tools/call',
+          params: { name: 'shamela_find', arguments: { keywords: [query], difficulty: 'easy' } }
+        })
+      });
+      if (!response.ok) throw new Error(`Shamela returned HTTP ${response.status}`);
+      const raw = await response.text();
+      const eventData = raw.split(/\r?\n/).filter(line => line.startsWith('data: ')).at(-1)?.slice(6);
+      let envelope: any;
+      try { envelope = JSON.parse(eventData || raw); }
+      catch { throw new Error('Shamela MCP returned an unreadable search response.'); }
+      if (envelope?.error || envelope?.result?.isError) throw new Error('Shamela MCP search request failed.');
+      const result = envelope?.result;
+      if (result?.structuredContent && typeof result.structuredContent === 'object') return result.structuredContent;
+      const text = Array.isArray(result?.content) ? result.content.find((item: any) => item?.type === 'text')?.text : undefined;
+      if (typeof text === 'string') {
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === 'object') return parsed;
+        } catch { /* Discard provider text; never expose it to the client. */ }
+      }
+      throw new Error('Shamela MCP returned an unsupported search response.');
+    } finally {
+      clearTimeout(timer);
+    }
+  } finally {
+    releaseQueue();
+    if (requestQueueBySource.get(queueKey) === queued) requestQueueBySource.delete(queueKey);
+  }
+}
+
+function containsArabicScript(value: string): boolean {
+  return /[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]/u.test(value);
 }
 
 function baseRecord(source: LibrarySource, record: Partial<ExternalLibraryRecord> & Pick<ExternalLibraryRecord, 'id' | 'externalId' | 'title' | 'sourceUrl' | 'rights'>): ExternalLibraryRecord {
@@ -1834,6 +1901,102 @@ export class ArabicWikisourceConnector extends WikisourceConnector {
   }
 }
 
+export class ShamelaConnector implements LibraryConnector {
+  readonly source = 'shamela' as const;
+
+  async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return ok([]);
+    if (!containsArabicScript(normalizedQuery)) {
+      return unsupported('Shamela search expects an Arabic query; this source was not queried for a non-Arabic search to avoid misleading matches.');
+    }
+    try {
+      const payload = await callShamelaSearch(normalizedQuery);
+      const hits = Array.isArray(payload.layers)
+        ? payload.layers.flatMap((layer: any) => Array.isArray(layer?.results) ? layer.results : [])
+        : [];
+      const seenBooks = new Set<string>();
+      const records: ExternalLibraryRecord[] = [];
+      for (const hit of hits) {
+        const bookId = Number(hit?.book_id);
+        const pageId = Number(hit?.page_id);
+        if (!Number.isSafeInteger(bookId) || bookId < 1 || !Number.isSafeInteger(pageId) || pageId < 1) continue;
+        if (typeof hit?.title !== 'string' || !hit.title.trim() || seenBooks.has(String(bookId))) continue;
+        seenBooks.add(String(bookId));
+        const externalId = `${bookId}/${pageId}`;
+        records.push(baseRecord(this.source, {
+          id: `shamela:${bookId}:${pageId}`,
+          externalId,
+          identifier: externalId,
+          title: hit.title.trim(),
+          author: typeof hit.author === 'string' && hit.author.trim() && hit.author.trim() !== '-' ? hit.author.trim() : 'Unknown Author',
+          language: 'ar',
+          description: '',
+          sourceUrl: `https://shamela.ws/book/${bookId}/${pageId}`,
+          rights: RightsCategory.UNKNOWN,
+          rightsNote: 'The official read-only MCP supports discovery, but this edition’s reuse rights are not verified. Read on the official page and check item-level terms before copying.',
+          availability: 'official-source-only',
+          canImport: false,
+          metadata: { resourceType: 'book-page', bookId, pageId }
+        }));
+        if (records.length >= cap(limit)) break;
+      }
+      return ok(records);
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  async getBook(locator: BookLocator) { return this.getMetadata(locator); }
+
+  async getMetadata(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
+    const existing = locator.record?.source === this.source ? locator.record : undefined;
+    const rawId = existing?.externalId || locator.identifier || locator.id || '';
+    const match = /^(?:shamela:)?(\d+)[:/](\d+)$/.exec(rawId);
+    if (!match) return failed(new Error('Shamela requires a numeric book/page identifier from an official search result.'));
+    const bookId = Number(match[1]);
+    const pageId = Number(match[2]);
+    if (!Number.isSafeInteger(bookId) || bookId < 1 || !Number.isSafeInteger(pageId) || pageId < 1) {
+      return failed(new Error('Invalid Shamela book/page identifier.'));
+    }
+    const externalId = `${bookId}/${pageId}`;
+    return ok(baseRecord(this.source, {
+      id: existing?.id || `shamela:${bookId}:${pageId}`,
+      externalId,
+      identifier: externalId,
+      title: existing?.title || 'Shamela book page',
+      author: existing?.author || 'Unknown Author',
+      language: 'ar',
+      sourceUrl: `https://shamela.ws/book/${bookId}/${pageId}`,
+      rights: RightsCategory.UNKNOWN,
+      rightsNote: 'Metadata comes from an official search citation; reuse rights have not been verified.',
+      availability: 'official-source-only',
+      canImport: false,
+      metadata: { resourceType: 'book-page', bookId, pageId }
+    }));
+  }
+
+  async getAvailability(_locator: BookLocator) {
+    return unsupported('The Shamela MCP guide does not document a borrowability or availability lookup.');
+  }
+
+  async getFullText(_locator: BookLocator) {
+    return unsupported('In-app full-text retrieval and copying are not enabled; use the official Shamela page. Search responses are not retained.');
+  }
+
+  async getDownloadLinks(_locator: BookLocator) {
+    return unsupported('Shamela download links are not exposed by this connector; use the official site and check its terms.');
+  }
+
+  getSourceInformation() {
+    return enabledSourceInformation(this.source, [
+      'Uses the official Shamela read-only MCP endpoint documented at https://shamela.ws/mcp-guide/.',
+      'The official guide describes free read-only access without an API key or a Shamela account.',
+      'Only book/author/page metadata and official citation URLs are returned; response bodies are not cached, retained, or imported, and item-level rights remain UNKNOWN.'
+    ]);
+  }
+}
+
 function mapWikisourceResult(result: BookSearchResult, source: LibrarySource): ExternalLibraryRecord {
   const host = source === 'ar_wikisource' ? 'ar.wikisource.org' : 'zh.wikisource.org';
   const pageTitle = result.pageTitle || result.title;
@@ -1870,7 +2033,8 @@ export function createLibraryConnectors(): Record<LibrarySource, LibraryConnecto
     arxiv: new ArxivConnector(),
     europepmc: new EuropePmcConnector(),
     pmc: new PmcConnector(),
-    pubmed: new PubmedConnector()
+    pubmed: new PubmedConnector(),
+    shamela: new ShamelaConnector()
   };
 }
 
@@ -1906,7 +2070,7 @@ function dedupeByExactIdentifier(records: ExternalLibraryRecord[]): ExternalLibr
 }
 
 export async function searchLibrary(query: string, options: LibrarySearchOptions = {}): Promise<{ results: ExternalLibraryRecord[]; sources: SourceSearchStatus[] }> {
-  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc', 'pubmed', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'];
+  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc', 'pubmed', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource', 'shamela'];
   const limit = cap(options.limit || 10);
   const selected = selectedIds.map(id => getLibraryConnector(id)).filter((connector): connector is LibraryConnector => !!connector);
   const enabled = selected.filter(connector => isLibraryConnectorEnabled(connector.source));

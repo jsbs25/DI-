@@ -104,3 +104,12 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - PubMed 与 PMC 共用 NCBI 的串行请求限速队列，避免两个连接器并行时超出同一服务的速率策略。PubMed 固定为 `METADATA_ONLY`，即使元数据带 PMCID 也不表示全文已确认；全文、下载和本地导入明确 unsupported / 403。用户可见权利提示还链接 NCBI/NLM 官方免责声明，并提醒摘要可能含受版权保护内容。跨库只按精确 DOI 去重。
 - PubMed 加入来源注册、统一搜索、服务端白名单和导入拒绝、搜索卡片来源名称、`.env.example` 的 `EARTH_ONE_LIBRARY_PUBMED_ENABLED` 开关、离线 mock 与真实限量烟测。更新 `PROJECT_AUDIT.md`、`TEST_REPORT.md` 和 `LIBRARY_CONNECTORS.md`；13 个来源保持此前全部功能与本地数据不变。
 - 验证：`npm run lint` 与 `npm run test:library-connectors` 通过；隔离图书馆 API 29/29、通用 API 85/85、生产构建通过；限量在线烟测中的 PubMed、PMC、OpenAlex、Crossref、arXiv、Europe PMC 和既有书目来源均返回结果。生产构建仍报告既有 Three.js 大 chunk 提示。未下载论文或改动正式书架数据；未运行浏览器/移动端视觉回归。
+
+
+### WORLD LIBRARY Phase 5：免密钥阿拉伯语馆藏（2026-11-04）
+- 从干净并与远端同步的基线 `32db81455171108c3671d020ac39514ed6894107` 开始，保留所有现有连接器、图书、书架/阅读状态、批注与阅读器数据。
+- 新增 Shamela 连接器，使用其[官方 MCP 指南](https://shamela.ws/mcp-guide/)发布的 `https://mcp.shamela.ws` 只读工具 `shamela_find`。无需 API key、Shamela 账号或用户设置，默认参与统一搜索且提供 `EARTH_ONE_LIBRARY_SHAMELA_ENABLED` 开关。为避免误匹配，仅对阿拉伯文查询请求该源；非阿语查询明确返回 `unsupported`，不做无依据的转译。
+- MCP 返回可能含有原文的内容，但连接器只规范化书名、作者、书页编号和官方书页链接；响应不缓存、不持久化、不显示正文。权限状态保持 `UNKNOWN`，禁止本地全文导入/下载；连接器全文方法返回 `unsupported`，服务端 `/api/library/ingest` 独立返回 403。未使用 Shamela 的其他 MCP 工具。
+- 在首页增加已核实的 [Waqfeya 图书目录](https://waqfeya.net/books)、[Shamela 搜索页](https://shamela.ws/search)和 [QDL 检索页](https://www.qdl.qa/en/search/site/)官方跳转。Waqfeya 与 QDL 未发现可核验的正式机器检索接口；不抓取或批量复制，仅提供官网入口。QDL 官网的“免费使用和复用”声明不替代具体条目权利核验。
+- 验证通过：`npm run lint`、`npm run test:library-connectors`、`npm run test:library-api`（31/31）、`npm run test:api`（85/85）、`npm run build`、`npm run test:library-connectors:live`。真实在线测试通过 Shamela 阿语搜索并验证官方 URL、`UNKNOWN` 权利及不能导入。构建保留既有 Three.js 大 chunk 警告；未做浏览器视觉/手机回归，未下载或保存原文。
+- GitHub 推送未执行：当前环境 `gh auth status` 显示未登录，且无可用的已授权 GitHub connector。未更换凭证、未修改认证配置、未推送。

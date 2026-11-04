@@ -12,6 +12,7 @@ import {
   EuropePmcConnector,
   PmcConnector,
   PubmedConnector,
+  ShamelaConnector,
   isLibraryConnectorEnabled,
   OpenLibraryConnector,
   RightsCategory,
@@ -20,6 +21,7 @@ import {
 
 const originalFetch = globalThis.fetch;
 const requests: string[] = [];
+const shamelaCalls: Array<Record<string, any>> = [];
 const sameIsbn = '9781234567890';
 const gutenbergFeed = (title = 'Alice Fixture', withFiles = true, useUrnId = false) => `<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/"><entry><title>${title}</title><author><name>Lewis Carroll</name></author><dc:language>en</dc:language><id>${useUrnId ? 'urn:gutenberg:11:2' : 'https://www.gutenberg.org/ebooks/11'}</id>${withFiles ? '<link href="https://www.gutenberg.org/files/11/11-0.txt" type="text/plain"/><link href="https://www.gutenberg.org/ebooks/11.epub.images" type="application/epub+zip"/>' : ''}</entry></feed>`;
 const gutenbergText = `Title: Alice Fixture\nAuthor: Lewis Carroll\n\n*** START OF THE PROJECT GUTENBERG EBOOK ALICE FIXTURE ***\n\nCHAPTER I\n\nAlice was beginning to get very tired of sitting by her sister on the bank.\n\n*** END OF THE PROJECT GUTENBERG EBOOK ALICE FIXTURE ***`;
@@ -457,9 +459,23 @@ function archiveDoc(query: string) {
   return [{ identifier: 'item-unknown', title: 'Unknown Rights', rights: '', restricted: false, format: ['DjVuTXT'] }];
 }
 
-globalThis.fetch = (async (input: RequestInfo | URL) => {
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
   requests.push(url.toString());
+
+  if (url.hostname === 'mcp.shamela.ws') {
+    const body = JSON.parse(String(init?.body || '{}'));
+    shamelaCalls.push(body);
+    const results = {
+      layers: [{ key: 'main', results: [
+        { book_id: 123, page_id: 45, title: 'مقدمة ابن خلدون', author: 'ابن خلدون', preview: 'PRIVATE PREVIEW TEXT' },
+        { book_id: 123, page_id: 46, title: 'مقدمة ابن خلدون', author: 'ابن خلدون' },
+        { book_id: 456, page_id: 78, title: 'كتاب تاريخي', author: 'مؤلف آخر' }
+      ] }],
+      evidence: { sources: [{ book_id: 123, page_id: 45, text: 'PRIVATE FULL TEXT MUST NOT LEAK' }] }
+    };
+    return json({ jsonrpc: '2.0', id: body.id, result: { content: [{ type: 'text', text: JSON.stringify(results) }] } });
+  }
 
   if (url.hostname === 'openlibrary.org' && url.pathname === '/search.json') {
     const q = url.searchParams.get('q') || '';
@@ -576,6 +592,37 @@ async function main() {
   await testEuropeana();
   await testFreeAcademicConnectors();
 
+  const shamela = new ShamelaConnector();
+  const shamelaCallCount = shamelaCalls.length;
+  assertUnsupported(await shamela.search('Ibn Khaldun'));
+  assert.equal(shamelaCalls.length, shamelaCallCount, 'non-Arabic queries are not sent to the Arabic-only connector');
+  const unsupportedAggregate = await searchLibrary('Ibn Khaldun', { sources: ['shamela'] });
+  assert.equal(unsupportedAggregate.sources[0].status, 'unsupported', 'unmatched language is reported as unsupported, not as an empty successful search');
+  assert.equal(unsupportedAggregate.results.length, 0);
+  const shamelaResults = await shamela.search('ابن خلدون', 5);
+  assert.equal(shamelaResults.status, 'ok');
+  assert.equal(shamelaResults.data?.length, 2, 'multiple citation pages in one book collapse to one book result');
+  assert.equal(shamelaResults.data?.[0].title, 'مقدمة ابن خلدون');
+  assert.equal(shamelaResults.data?.[0].author, 'ابن خلدون');
+  assert.equal(shamelaResults.data?.[0].sourceUrl, 'https://shamela.ws/book/123/45');
+  assert.equal(shamelaResults.data?.[0].rights, RightsCategory.UNKNOWN);
+  assert.equal(shamelaResults.data?.[0].canImport, false);
+  assert.equal(shamelaResults.data?.[0].description, '', 'search preview text is discarded');
+  assert.equal(shamelaResults.data?.[0].providerFullTextUrl, undefined);
+  assert.equal(JSON.stringify(shamelaResults.data).includes('PRIVATE FULL TEXT'), false, 'book text from MCP is never returned');
+  assert.equal(shamelaCalls[0].method, 'tools/call');
+  assert.equal(shamelaCalls[0].params.name, 'shamela_find');
+  assert.deepEqual(shamelaCalls[0].params.arguments.keywords, ['ابن خلدون']);
+  const shamelaMetadata = await shamela.getBook({ id: shamelaResults.data?.[0].id });
+  assert.equal(shamelaMetadata.data?.sourceUrl, 'https://shamela.ws/book/123/45');
+  assertUnsupported(await shamela.getAvailability({ id: '123/45' }));
+  assertUnsupported(await shamela.getFullText({ id: '123/45' }));
+  assertUnsupported(await shamela.getDownloadLinks({ id: '123/45' }));
+  assert.equal((await shamela.getBook({ id: '../unsafe' })).status, 'error');
+  const shamelaInfo = shamela.getSourceInformation();
+  assert.equal(shamelaInfo.data?.authentication, 'none');
+  assert.equal(shamelaInfo.data?.apiUrl, 'https://mcp.shamela.ws');
+
   const gutenberg = new GutenbergConnector();
     const gutenbergResults = await gutenberg.search('alice');
     assert.equal(gutenbergResults.status, 'ok');
@@ -636,7 +683,7 @@ async function main() {
   if (oldToggle === undefined) delete process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED;
   else process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED = oldToggle;
 
-  for (const id of ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc', 'pubmed'] as const) {
+  for (const id of ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc', 'pubmed', 'shamela'] as const) {
     assert.ok(getLibraryConnector(id));
   }
   console.log('library connector offline tests: PASS');

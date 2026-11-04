@@ -43,6 +43,7 @@ async function main() {
       EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED: 'true',
       EARTH_ONE_LIBRARY_PMC_ENABLED: 'true',
       EARTH_ONE_LIBRARY_PUBMED_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_SHAMELA_ENABLED: 'true',
       GEMINI_API_KEY: '',
       OPENAI_API_KEY: '',
       ANTHROPIC_API_KEY: '',
@@ -159,6 +160,22 @@ async function main() {
       return source;
     }));
 
+    const shamelaUrl = new URL('/api/library/search', baseUrl);
+    shamelaUrl.searchParams.set('q', 'ابن خلدون');
+    shamelaUrl.searchParams.set('source', 'shamela');
+    shamelaUrl.searchParams.set('limit', '2');
+    const shamelaResponse = await fetch(shamelaUrl, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
+    assert.equal(shamelaResponse.status, 200);
+    const shamelaBody = await shamelaResponse.json() as any;
+    const shamelaStatus = shamelaBody.sources?.find((item: any) => item.source === 'shamela');
+    const shamelaRecord = shamelaBody.results?.find((item: any) => item.source === 'shamela');
+    assert.ok(shamelaStatus?.status === 'ok' && shamelaStatus.count > 0, `Live Shamela Arabic search returned no records: ${JSON.stringify(shamelaBody.sources)}`);
+    assert.match(shamelaRecord?.sourceUrl || '', /^https:\/\/shamela\.ws\/book\/\d+\/\d+$/);
+    assert.equal(shamelaRecord.rightsClassification, 'UNKNOWN');
+    assert.equal(shamelaRecord.canImport, false);
+    assert.equal(shamelaRecord.textUrl, undefined);
+    assert.equal(shamelaRecord.providerFullTextUrl, undefined);
+
     const importResponse = await request('/api/library/ingest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -183,7 +200,7 @@ async function main() {
     const detailBody = await detailResponse.json() as any;
     assert.equal(detailBody.book?.id, book.id);
     assert.equal(detailBody.book?.rightsClassification, 'PUBLIC_DOMAIN');
-    console.log(`Library connector live smoke: PASS (live Open Library + Internet Archive, ${academicChecks.join(', ')}; official Gutenberg search → per-book OPDS → isolated EPUB book record → local detail read; EPUB not downloaded).`);
+    console.log(`Library connector live smoke: PASS (live Open Library + Internet Archive, ${academicChecks.join(', ')}, Shamela Arabic search; official-source-only rights preserved; official Gutenberg search → per-book OPDS → isolated EPUB book record → local detail read; EPUB not downloaded).`);
   } catch (error) {
     console.error('Library connector live smoke failed:', error);
     if (childOutput) console.error('Temporary server output:\n' + childOutput);

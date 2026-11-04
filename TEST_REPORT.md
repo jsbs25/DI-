@@ -123,3 +123,17 @@ PMC 的当前实时搜索不依赖 NCBI 文档里一个在本环境返回 0 条�
 | `npm run test:library-connectors:live` | ✅ 限量真实烟测通过；PubMed 返回真实记录，并用该记录的 DOI 回查到同一篇文章；既有 Open Library、Internet Archive、Project Gutenberg、OpenAlex、Crossref、arXiv、Europe PMC、PMC 检查也通过。 |
 
 PubMed 与 PMC 使用同一串行 NCBI 请求队列。在线烟测只证明本次受限查询可从官方端点返回书目记录，不代表 PubMed 记录拥有全文或复用许可。没有下载或复制论文，也没有触碰正式书架/图书数据；本轮未做浏览器视觉或移动设备回归。
+
+
+## WORLD LIBRARY Phase 5：阿拉伯语连接器与入口回归（2026-11-04）
+
+| 检查 | 结果 |
+|---|---|
+| `npm run lint` | ✅ TypeScript `--noEmit` 通过。 |
+| `npm run test:library-connectors` | ✅ 离线测试通过；Shamela 测试覆盖 MCP `tools/call`、阿语查询、非阿语不发请求、同书多页归并、正文/预览不泄漏、`UNKNOWN` 权利、官方页 URL、无全文/下载及来源认证为 none。 |
+| `npm run test:library-api` | ✅ 31 项通过；隔离存储核验 14 个来源、9 个启用来源、Shamela allowlist 和全文导入 403。 |
+| `npm run test:api` | ✅ 85 项通过。 |
+| `npm run build` | ✅ Vite 生产构建成功；保留既有 Three.js >500 kB chunk 非阻断提示。 |
+| `npm run test:library-connectors:live` | ✅ 限量实时 smoke 通过；Shamela 官方 MCP 的阿语搜索返回记录，官方页域名与路径有效，权利仍为 `UNKNOWN` 且不能导入；既有 Open Library、Internet Archive、Gutenberg、OpenAlex、Crossref、arXiv、Europe PMC、PMC 与 PubMed 检查也通过。 |
+
+Waqfeya 与 Qatar Digital Library 只验证官网和官方检索/目录页面，不自动查询、抓取或复制馆藏。自动化 API 测试使用临时隔离数据；在线 Shamela 请求只处理短暂搜索响应并仅向 API 输出书目与官方链接，没有保存或显示全文。未运行浏览器视觉、移动设备或全站人工 UI 回归。当前执行环境未提供已授权 GitHub 写入认证，因此本次改动尚未推送。

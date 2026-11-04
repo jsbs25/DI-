@@ -68,7 +68,7 @@ interface OnlineLibraryResult {
 interface OnlineSourceStatus {
   source: string;
   name: string;
-  status: 'ok' | 'error' | 'disabled';
+  status: 'ok' | 'error' | 'disabled' | 'unsupported';
   count: number;
   reason?: string;
 }
@@ -586,6 +586,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   </button>
                   <span className="text-[11px] text-slate-500">支持书名、作者、ISBN、DOI 与多语言检索</span>
                 </div>
+                <div className="mt-4">
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">阿拉伯语馆藏官方入口 · 仅跳转，不复制全文</p>
+                  <div className="flex flex-wrap gap-2">
+                    <a href="https://waqfeya.net/books" target="_blank" rel="noopener noreferrer" title="Waqfeya 官方扫描书目录" className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Waqfeya</a>
+                    <a href="https://shamela.ws/search" target="_blank" rel="noopener noreferrer" title="Shamela 官方站内搜索" className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Shamela</a>
+                    <a href="https://www.qdl.qa/en/search/site/" target="_blank" rel="noopener noreferrer" title="Qatar Digital Library 官方档案搜索" className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Qatar Digital Library</a>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -622,8 +630,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               {onlineSourceStatuses.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {onlineSourceStatuses.map(source => {
-                    const statusLabel = source.status === 'ok' ? `可用 ${source.count}` : source.status === 'disabled' ? '未启用' : '查询失败';
-                    const statusTone = source.status === 'ok' ? 'text-emerald-300 border-emerald-800/70' : source.status === 'disabled' ? 'text-amber-200 border-amber-800/70' : 'text-red-300 border-red-800/70';
+                    const statusLabel = source.status === 'ok' ? `可用 ${source.count}` : source.status === 'disabled' ? '未启用' : source.status === 'unsupported' ? '此查询语言暂不适用' : '查询失败';
+                    const statusTone = source.status === 'ok' ? 'text-emerald-300 border-emerald-800/70' : source.status === 'disabled' ? 'text-amber-200 border-amber-800/70' : source.status === 'unsupported' ? 'text-slate-300 border-slate-700' : 'text-red-300 border-red-800/70';
                     return (
                       <span key={source.source} title={source.reason} className={`max-w-full break-words rounded-md border px-2 py-1 text-[10px] ${statusTone}`}>
                         {source.name}: {statusLabel}{source.reason && source.status !== 'ok' ? ` · ${source.reason}` : ''}
@@ -652,7 +660,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       arxiv: 'arXiv',
                       europepmc: 'Europe PMC',
                       pmc: 'PubMed Central',
-                      pubmed: 'PubMed'
+                      pubmed: 'PubMed',
+                      shamela: 'Shamela'
                     } as Record<string, string>)[r.source] || r.source;
                     const resourceType = typeof r.metadata?.resourceType === 'string' ? r.metadata.resourceType : undefined;
                     const identifierLabel = r.doi ? `DOI ${r.doi}` : r.isbn?.length ? `ISBN ${r.isbn[0]}` : r.identifier ? `ID ${r.identifier}` : undefined;
