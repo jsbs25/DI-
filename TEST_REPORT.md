@@ -299,3 +299,16 @@ OpenAlex 官方说明基础 API 可免费且无需账号或 key。本次仅进�
 | `git diff --check` | ✅ 无空白/补丁格式错误。 |
 
 筛选 UI 使用服务端已经返回的来源和权利字段，不把搜索可见性解释成阅读/下载/再利用许可。来源状态（包含 disabled、unsupported、error）在结果筛选之外仍照常显示。合成筛选测试不联网、不访问账户数据；本轮未做浏览器视觉、真机或实时 provider smoke，故不声称这些场景已验收。
+
+## WORLD LIBRARY Phase 6 follow-up：语言与年份筛选（2026-11-04）
+| 检查 | 结果 |
+|---|---|
+| `npm run test:library-search-filters` | ✅ 合成记录测试通过：来源/权利/语言/年份筛选组合；`und` 与缺失/unknown 语言、缺失/空/`und` 年份进入未知分组；按现有语言字段和原始年份字符串匹配；动态选项计数及不修改记录。 |
+| `npm run test:library-connector-isolation` | ✅ 通过；所有来源响应均由离线 mock 提供。 |
+| `npm run test:library-connectors` | ✅ 离线连接器回归通过。 |
+| `npm run test:library-api` | ✅ 49/49 通过。 |
+| `npm run test:api` | ✅ 85/85 通过。 |
+| `npm run lint` | ✅ `tsc --noEmit` 通过。 |
+| `npm run build` | ✅ 生产构建成功；既有 Three.js 551.65 kB 大 chunk 警告非阻断。 |
+
+**边界说明。** 新筛选只读取已归一化的搜索结果 `language` 与 `year` 字段，不从其他字段补值；语言大小写折叠仅用于语言标签比较，年份使用 trim 后的原始值精确匹配。合成测试和离线连接器/API 回归未发起实时 provider 请求，不读取或写入用户书架/馆藏；本轮未做浏览器视觉或实体设备回归，亦不据此声称外部数据源当前可用。

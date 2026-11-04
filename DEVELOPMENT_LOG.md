@@ -197,3 +197,9 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - 筛选仅对精确 `source`、`rightsClassification` 字段匹配，不调用额外 API、不猜测全文可读性或再利用许可。缺少或未识别的权利值保守归为“权利状态未知”；现有访问/版权文字和 `canImport` 规则不变。来源状态徽标独立显示，disabled/unsupported/error 不会因筛选被隐藏或改写。
 - 新增纯函数 `searchFilters.ts` 与 `npm run test:library-search-filters`，合成回归覆盖来源、权利分类、显式/缺失/未识别 UNKNOWN、组合筛选、选项计数及不修改记录。
 - 验证：筛选测试、连接器故障隔离、离线连接器测试、图书馆 API 49/49、全站 API 85/85、`npm run lint` 与 `npm run build` 全部通过。构建仅有既有 Three.js 大 chunk 警告。未发起实时网络请求、未修改馆藏/书架数据、未新增密钥/配置；本次未做浏览器/实体手机验收。
+
+### WORLD LIBRARY Phase 6 follow-up：语言与年份筛选（2026-11-04）
+- `DigitalLibrary` 新增动态语言和年份下拉筛选，与既有来源、权利状态筛选以 AND 条件组合；每次发起新查询会重置全部筛选。选项及数量从该次返回的结果字段产生，来源状态徽标独立显示。
+- 仅消费归一化 `language` 与可选 `year`。`und`/空/`unknown` 语言及缺失/空/`und`/`unknown` 年份归入明确未知项；语言标签仅做大小写不敏感比较；其他年份保留提供方的原始字符串（只 trim 后精确匹配），不从其他字段猜测或补造。Rights、可读/下载权限与 `canImport` 逻辑未变。
+- 合成筛选测试覆盖真实值、缺失/未知值、精确年份字符串、组合条件、动态计数及不修改结果记录；没有网络请求、用户数据读写、密钥或额外配置。
+- 验证通过：`npm run test:library-search-filters`；`npm run test:library-connector-isolation`；`npm run test:library-connectors`；`npm run test:library-api`（49/49）；`npm run test:api`（85/85）；`npm run lint`；`npm run build`。构建仍报告既有 Three.js 551.65 kB 非阻断 chunk 提示。未做本轮浏览器视觉/实体手机回归。

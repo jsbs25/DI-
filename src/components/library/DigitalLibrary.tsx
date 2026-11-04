@@ -127,13 +127,15 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [onlineSourceStatuses, setOnlineSourceStatuses] = useState<OnlineSourceStatus[]>([]);
   const [onlineSourceFilter, setOnlineSourceFilter] = useState('all');
   const [onlineRightsFilter, setOnlineRightsFilter] = useState('all');
+  const [onlineLanguageFilter, setOnlineLanguageFilter] = useState('all');
+  const [onlineYearFilter, setOnlineYearFilter] = useState('all');
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
   const onlineFilterOptions = useMemo(() => getLibrarySearchFilterOptions(onlineResults), [onlineResults]);
   const visibleOnlineResults = useMemo(
-    () => filterLibrarySearchResults(onlineResults, onlineSourceFilter, onlineRightsFilter),
-    [onlineResults, onlineSourceFilter, onlineRightsFilter]
+    () => filterLibrarySearchResults(onlineResults, onlineSourceFilter, onlineRightsFilter, onlineLanguageFilter, onlineYearFilter),
+    [onlineResults, onlineSourceFilter, onlineRightsFilter, onlineLanguageFilter, onlineYearFilter]
   );
 
   // ---- Bookshelf ----
@@ -229,6 +231,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     setIngestError(null);
     setOnlineSourceFilter('all');
     setOnlineRightsFilter('all');
+    setOnlineLanguageFilter('all');
+    setOnlineYearFilter('all');
     setOnlineResults([]);
     setOnlineSourceStatuses([]);
     try {
@@ -822,7 +826,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               )}
               {ingestError && <div role="status" aria-live="polite" className="text-xs text-red-400 mb-3">{ingestError}</div>}
               {!isSearchingOnline && onlineResults.length > 0 && (
-                <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:items-end">
+                <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:items-end">
                   <label className="block text-[11px] text-slate-400">
                     <span className="mb-1 block">按来源筛选</span>
                     <select
@@ -834,6 +838,34 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       <option value="all">全部来源（{onlineResults.length}）</option>
                       {onlineFilterOptions.sources.map(option => (
                         <option key={option.source} value={option.source}>{option.name}（{option.count}）</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-slate-400">
+                    <span className="mb-1 block">按语言筛选</span>
+                    <select
+                      aria-label="按语言筛选全球检索结果"
+                      value={onlineLanguageFilter}
+                      onChange={event => setOnlineLanguageFilter(event.target.value)}
+                      className="min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="all">全部语言（{onlineResults.length}）</option>
+                      {onlineFilterOptions.languages.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}（{option.count}）</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-slate-400">
+                    <span className="mb-1 block">按年份筛选</span>
+                    <select
+                      aria-label="按年份筛选全球检索结果"
+                      value={onlineYearFilter}
+                      onChange={event => setOnlineYearFilter(event.target.value)}
+                      className="min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="all">全部年份（{onlineResults.length}）</option>
+                      {onlineFilterOptions.years.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}（{option.count}）</option>
                       ))}
                     </select>
                   </label>
@@ -851,14 +883,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       ))}
                     </select>
                   </label>
-                  <p role="status" aria-live="polite" className="text-[10px] text-slate-500 sm:col-span-2">
-                    显示 {visibleOnlineResults.length} / {onlineResults.length} 条；仅按返回记录的来源和权利分类筛选，未知状态仍保留为未知。
+                  <p role="status" aria-live="polite" className="text-[10px] text-slate-500 sm:col-span-2 xl:col-span-4">
+                    显示 {visibleOnlineResults.length} / {onlineResults.length} 条；仅按返回记录的来源、语言、年份和权利分类筛选，未标注的语言/年份及未知权利仍保留为未知。
                   </p>
                 </div>
               )}
               {!isSearchingOnline && onlineResults.length > 0 && visibleOnlineResults.length === 0 && (
                 <div role="status" className="rounded-lg border border-slate-800 px-4 py-6 text-center text-xs text-slate-400">
-                  没有符合当前筛选条件的结果，请尝试其他来源或权利状态。
+                  没有符合当前筛选条件的结果，请尝试其他来源、语言、年份或权利状态。
                 </div>
               )}
               {isSearchingOnline ? (
