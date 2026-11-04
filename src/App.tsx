@@ -26,6 +26,7 @@ import { LuxuryAdBanner } from './components/commercial/LuxuryAdBanner.tsx';
 import { AuthModal } from './components/auth/AuthModal.tsx';
 import { OnboardingModal } from './components/auth/OnboardingModal.tsx';
 import { DigitalLibrary } from './components/library/DigitalLibrary.tsx';
+import { ArabicLearningHub } from './components/learning/ArabicLearningHub.tsx';
 import { WebBrowser } from './components/browser/WebBrowser.tsx';
 import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
 import { KnowledgeUniverse } from './components/knowledge/KnowledgeUniverse.tsx';
@@ -36,9 +37,10 @@ import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 export default function App() {
   const [lang, setLang] = useState<Language>('zh');
   const t = translations[lang] || translations.zh;
-  const [currentTab, setCurrentTab] = useState<string>(() =>
-    new URLSearchParams(window.location.search).get('module') === 'browser' ? 'browser' : 'globe'
-  );
+  const [currentTab, setCurrentTab] = useState<string>(() => {
+    const requestedModule = new URLSearchParams(window.location.search).get('module');
+    return requestedModule === 'browser' || requestedModule === 'arabic-learning' ? requestedModule : 'globe';
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showGlobeTools, setShowGlobeTools] = useState(true);
@@ -481,6 +483,8 @@ export default function App() {
         {currentTab === 'aihub' && <AIHub lang={lang} />}
 
         {currentTab === 'library' && <DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} />}
+
+        {currentTab === 'arabic-learning' && <ArabicLearningHub lang={lang} onOpenLibrary={() => setCurrentTab('library')} />}
 
         {currentTab === 'knowledge' && (
           <KnowledgeUniverse

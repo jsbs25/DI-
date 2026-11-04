@@ -13,6 +13,7 @@ EARTH ONE is a unified, global digital ecosystem that integrates geographic visu
 - 👥 **Global Social Network**: Authentic posts across 5 feeds (Global, Following, Trending, Latest, By Country), media sharing, like/clap reactions, nested comments, and follow relationships.
 - 💬 **Global Instant Messaging**: 1-on-1 direct messaging, public global channels, country rooms, and **real-time AI translation** (e.g. Chinese ⇄ English ⇄ Arabic ⇄ Spanish ⇄ French ⇄ Russian) with toggleable original text.
 - 🌐 **Deep Multilingual & RTL Support**: Full native support for English, Chinese (中文), Arabic (العربية with complete Right-To-Left layout and typography), Spanish (Español), French (Français), and Russian (Русский).
+- 🎓 **Arabic Learning Workspace**: A separate 28-letter alphabet and spaced-review module with browser-local progress, optional device speech, and a handoff to the existing rights-aware library. Broader courses and licensed corpora remain future phases.
 - ✍️ **Creator Hub & Voluntary Tipping**: Long-form publishing, markdown editor, reader appreciation tips, and creative portfolio display.
 - 🎥 **Video Stream Center**: Curated short and long-form video stories from global creators.
 - ♟️ **Global Game Center**: Interactive online Chess, Gomoku (Five-in-a-Row), and Global Trivia Challenge.
@@ -40,9 +41,12 @@ npx tsx scripts/test_earth_one.ts
 
 # 5. Run isolated HTTP API privacy and authorization regression tests
 npm run test:api
+
+# 6. Run Arabic-learning content and spaced-review logic tests
+npm run test:arabic-learning
 ```
 
-Both test suites use temporary, isolated JSON data files and remove them after completion; they do not modify the persistent `server_data.json`. The integrity suite verifies store/domain behavior; the API suite starts a temporary Express server and checks key identity/privacy routes. Neither suite tests browser end-to-end behavior.
+The integrity and API suites use temporary, isolated JSON data files and remove them after completion; they do not modify the persistent `server_data.json`. The Arabic-learning test checks the authored letter data, local spaced-review queue, schedule and streak logic without API calls. The integrity suite verifies store/domain behavior; the API suite starts a temporary Express server and checks key identity/privacy routes. None of these suites tests browser end-to-end behavior.
 
 ---
 
