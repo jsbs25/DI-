@@ -133,3 +133,4 @@
 - `npm run test:knowledge-api` 的固定 GET 白名单为 `/api/knowledge/nodes`、`/api/knowledge/nodes?country=sa`、`/api/knowledge/search?q=Avicenna`、`/api/knowledge/search?q=Islamic&category=civilization`、`/api/knowledge/search?q=no-such-earth-one-node-9f31` 与 `/api/knowledge/nodes/not-a-real-node`；另对目录返回的 33 个 ID 各请求一次 `/api/knowledge/nodes/:id`。测试内端点/方法白名单检查仍启用。
 - `npm run test:globe-api` 复跑 11 项通过；`npm run lint` 与 `git diff --check` 通过。两项专项测试均使用自动清理的临时 JSON 与随机本地端口；未运行包含待批准会话读取路径的完整 `npm run test:api`、构建或浏览器回归。
 - 未请求身份、会话/消息接口或写接口；未访问外部来源、正式 `server_data.json` 或既有服务，也未检查现有服务日志/配置。
+- GitHub 同步：提交 `88eb83f4b2760ffb79b60f6314ff88ff509bc2df` 从父提交 `11f36c2` 正常快进推送至 `main`；推送后再次 fetch，`HEAD` 与 `origin/main` 均为该提交，工作区干净。使用当前已授权的连接入口，未强推或更改账户/全局 Git 配置。
