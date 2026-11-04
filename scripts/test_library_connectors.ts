@@ -22,7 +22,7 @@ import {
 const originalFetch = globalThis.fetch;
 const requests: string[] = [];
 const shamelaCalls: Array<Record<string, any>> = [];
-const sameIsbn = '9781234567890';
+const sameIsbn = '9780306406157';
 const gutenbergFeed = (title = 'Alice Fixture', withFiles = true, useUrnId = false) => `<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/"><entry><title>${title}</title><author><name>Lewis Carroll</name></author><dc:language>en</dc:language><id>${useUrnId ? 'urn:gutenberg:11:2' : 'https://www.gutenberg.org/ebooks/11'}</id>${withFiles ? '<link href="https://www.gutenberg.org/files/11/11-0.txt" type="text/plain"/><link href="https://www.gutenberg.org/ebooks/11.epub.images" type="application/epub+zip"/>' : ''}</entry></feed>`;
 const gutenbergText = `Title: Alice Fixture\nAuthor: Lewis Carroll\n\n*** START OF THE PROJECT GUTENBERG EBOOK ALICE FIXTURE ***\n\nCHAPTER I\n\nAlice was beginning to get very tired of sitting by her sister on the bank.\n\n*** END OF THE PROJECT GUTENBERG EBOOK ALICE FIXTURE ***`;
 
@@ -109,7 +109,7 @@ const openAlexInstitutions = [{
   works_count: 38111, cited_by_count: 1136506, homepage_url: 'http://ju.edu.jo/home.aspx', ror: 'https://ror.org/05k89ew48'
 }];
 const crossrefWork = {
-  DOI: sharedAcademicDoi, title: ['Crossref Scholarly Fixture'], author: [{ given: 'B.', family: 'Scholar' }],
+  DOI: 'HTTPS://DX.DOI.ORG/10.5555/SHARED-PAPER', title: ['Crossref Scholarly Fixture'], author: [{ given: 'B.', family: 'Scholar' }],
   publisher: 'Fixture Publisher', type: 'journal-article', language: 'en',
   'published-print': { 'date-parts': [[2023, 4, 1]] }, 'container-title': ['Fixture Journal'],
   abstract: '<jats:p>Crossref abstract fixture.</jats:p>', license: [{ URL: 'https://publisher.example.org/license', 'content-version': 'vor', start: { 'date-parts': [[2023, 4, 1]] } }]
@@ -369,6 +369,7 @@ async function testFreeAcademicConnectors() {
   const crossrefRecord = crossrefResponse.data?.[0];
   assert.equal(crossrefRecord?.title, 'Crossref Scholarly Fixture');
   assert.equal(crossrefRecord?.author, 'B. Scholar');
+  assert.equal(crossrefRecord?.doi, sharedAcademicDoi, 'DOI URLs and case variants normalize to the same exact DOI');
   assert.equal(crossrefRecord?.year, '2023');
   assert.equal(crossrefRecord?.rights, RightsCategory.METADATA_ONLY);
   assert.equal(crossrefRecord?.canImport, false);
@@ -491,7 +492,11 @@ async function testFreeAcademicConnectors() {
 }
 
 function archiveDoc(query: string) {
-  if (query.includes('same')) return [{ identifier: 'item-same', title: 'Same Book — Archive Edition', isbn: [sameIsbn], rights: '', restricted: false, format: ['DjVuTXT'] }];
+  if (query.includes('same')) return [{ identifier: 'item-same', title: 'Same Book — Archive Edition', isbn: ['0306406152'], rights: '', restricted: false, format: ['DjVuTXT'] }];
+  if (query.includes('rights-conflict-pd')) return [{ identifier: 'item-rights-conflict-pd', title: 'Conflicting public-domain statement', rights: 'Public Domain; All rights reserved', restricted: false, format: ['DjVuTXT'] }];
+  if (query.includes('rights-conflict-license')) return [{ identifier: 'item-rights-conflict-license', title: 'Conflicting open-license statement', rights: 'CC BY 4.0; In Copyright', restricted: false, format: ['DjVuTXT'] }];
+  if (query.includes('invalidisbn')) return [{ identifier: '9781234567890', title: 'Invalid ISBN duplicate', isbn: ['9781234567890'], rights: '', restricted: false, format: ['DjVuTXT'] }];
+  if (query.includes('source-id-collision')) return [{ identifier: '11', title: 'Provider-scoped source ID fixture', rights: '', restricted: false, format: ['DjVuTXT'] }];
   if (query.includes('open')) return [{ identifier: 'item-open', title: 'Open Rights', rights: 'CC BY 4.0', restricted: false, format: ['DjVuTXT'] }];
   return [{ identifier: 'item-unknown', title: 'Unknown Rights', rights: '', restricted: false, format: ['DjVuTXT'] }];
 }
@@ -518,6 +523,34 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const q = url.searchParams.get('q') || '';
     if (q === 'same') {
       return json({ docs: [{ key: '/works/OL3W', title: 'Same Book', author_name: ['A. Author'], isbn: [sameIsbn], language: ['eng'] }] });
+    }
+    if (q === 'borrowable' || q === 'public-access') {
+      const access = q === 'borrowable' ? 'borrowable' : 'public';
+      return json({ docs: [{ key: '/works/OL4W', title: 'Open Library Access Fixture', author_name: ['A. Author'], editions: { docs: [{ key: '/books/OL4M', ebook_access: access }] } }] });
+    }
+    if (q === 'same-source-id') {
+      return json({ docs: [
+        { key: '/works/OL5W', title: 'Repeated Provider Record', author_name: ['A. Author'] },
+        { key: '/works/OL5W', title: 'Repeated Provider Record', author_name: ['A. Author'] }
+      ] });
+    }
+    if (q === 'different-editions') {
+      return json({ docs: [
+        { key: '/works/OL6W', title: 'Same Work, Separate Edition', isbn: ['9780306406157'] },
+        { key: '/works/OL7W', title: 'Same Work, Separate Edition', isbn: ['9780131103627'] }
+      ] });
+    }
+    if (q === 'same-work-different-edition-id') {
+      return json({ docs: [
+        { key: '/works/OL10W', title: 'One Work, Two Edition Records', isbn: ['9780306406157'] },
+        { key: '/works/OL10W', title: 'One Work, Two Edition Records', isbn: ['9780131103627'] }
+      ] });
+    }
+    if (q === 'invalidisbn') {
+      return json({ docs: [{ key: '/works/OL8W', title: 'Invalid ISBN duplicate', isbn: ['9781234567890'] }] });
+    }
+    if (q === 'source-id-collision') {
+      return json({ docs: [{ key: '/works/OL9W', title: 'Provider-scoped source ID fixture' }] });
     }
     return json({ docs: [
       { key: '/works/OL1W', title: 'Example Book', author_name: ['A. Author'], first_publish_year: 1900, cover_i: 42, language: ['eng'], isbn: ['1111111111'], editions: { docs: [{ publisher: ['Example Press'], ebook_access: 'public' }] } },
@@ -600,7 +633,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
 
   if (url.hostname === 'www.gutenberg.org' && url.pathname === '/ebooks/search.opds/') {
-    assert.equal(url.searchParams.get('query'), 'alice');
+    assert.ok(['alice', 'source-id-collision'].includes(url.searchParams.get('query') || ''));
     assert.equal(url.searchParams.has('search_term'), false);
     return new Response(gutenbergFeed('Alice Fixture', false), { status: 200, headers: { 'Content-Type': 'application/atom+xml' } });
   }
@@ -624,10 +657,20 @@ async function main() {
   const olResults = await openLibrary.search('example');
   assert.equal(olResults.status, 'ok');
   assert.equal(olResults.data?.length, 2, 'similar titles with distinct identifiers remain separate');
-  assert.equal(olResults.data?.[0].rightsClassification, RightsCategory.UNKNOWN);
+  assert.equal(olResults.data?.[0].rightsClassification, RightsCategory.OPEN_ACCESS, 'Open Library public access is not treated as a reuse license');
   assert.equal(olResults.data?.[0].canImport, false);
+  assert.equal(olResults.data?.[0].availability, 'provider-full-view');
+  assert.equal(olResults.data?.[1].rights, RightsCategory.UNKNOWN);
   assert.equal(olResults.data?.[0].sourceUrl, 'https://openlibrary.org/works/OL1W');
   assert.match(requests.find(url => url.includes('openlibrary.org/search.json')) || '', /fields=/, 'explicit Open Library schema fields are requested');
+  const borrowableEdition = await openLibrary.search('borrowable', 1);
+  assert.equal(borrowableEdition.data?.[0].rights, RightsCategory.BORROWABLE);
+  assert.equal(borrowableEdition.data?.[0].availability, 'provider-borrowable');
+  assert.equal(borrowableEdition.data?.[0].canImport, false, 'borrowability never enables local copying');
+  assert.match(borrowableEdition.data?.[0].rightsNote || '', /not a reuse license/i);
+  const publicEdition = await openLibrary.search('public-access', 1);
+  assert.equal(publicEdition.data?.[0].rights, RightsCategory.OPEN_ACCESS);
+  assert.equal(publicEdition.data?.[0].canImport, false);
   assertUnsupported(await openLibrary.getAvailability({}));
   assertUnsupported(await openLibrary.getFullText({ id: '/works/OL1W' }));
   assertUnsupported(await openLibrary.getDownloadLinks({}));
@@ -699,7 +742,13 @@ async function main() {
     assert.equal(restricted.data?.canImport, false, `${identifier} cannot be imported`);
     assertUnsupported(await archive.getFullText({ identifier }));
   }
+  for (const query of ['rights-conflict-pd', 'rights-conflict-license']) {
+    const conflict = await archive.search(query, 1);
+    assert.equal(conflict.data?.[0].rights, RightsCategory.UNKNOWN, `${query} contradictory rights fail closed`);
+    assert.equal(conflict.data?.[0].canImport, false, `${query} cannot enable local import`);
+  }
   const openRecord = await archive.getBook({ identifier: 'item-open' });
+  assert.equal(openRecord.data?.rights, RightsCategory.OPEN_LICENSE);
   assert.equal(openRecord.data?.licenseUrl, 'https://creativecommons.org/licenses/by/4.0/');
   const openText = await archive.getFullText({ identifier: 'item-open' });
   assert.equal(openText.status, 'ok');
@@ -710,9 +759,23 @@ async function main() {
   assert.equal((await archive.getFullText({ identifier: '../item-open' })).status, 'error');
 
   const exactDuplicate = await searchLibrary('same', { sources: ['openlibrary', 'archive'], limit: 10 });
-  assert.equal(exactDuplicate.results.length, 1, 'exact ISBN duplicates are merged');
+  assert.equal(exactDuplicate.results.length, 1, 'equivalent, checksum-valid ISBN-10/13 identifiers are merged');
   assert.equal(exactDuplicate.results[0].alternateSources?.[0].source, 'archive');
-  const archiveSearchUrl = new URL(requests.find(url => url.includes('archive.org/advancedsearch.php'))!);
+  assert.deepEqual(exactDuplicate.results[0].isbn, [sameIsbn, '0306406152'], 'both provider ISBN forms are retained');
+  const duplicateSourceId = await searchLibrary('same-source-id', { sources: ['openlibrary'], limit: 10 });
+  assert.equal(duplicateSourceId.results.length, 1, 'exact duplicate IDs within one source are merged');
+  const invalidIsbn = await searchLibrary('invalidisbn', { sources: ['openlibrary', 'archive'], limit: 10 });
+  assert.equal(invalidIsbn.results.length, 2, 'invalid ISBN checksums cannot trigger a merge');
+  const sourceIdCollision = await searchLibrary('source-id-collision', { sources: ['archive', 'gutenberg'], limit: 10 });
+  assert.equal(sourceIdCollision.results.length, 2, 'source IDs are namespaced and never merge across providers by themselves');
+  const separateEditions = await searchLibrary('different-editions', { sources: ['openlibrary'], limit: 10 });
+  assert.equal(separateEditions.results.length, 2, 'distinct ISBN editions with identical titles remain separate');
+  assert.equal(separateEditions.results[0].title, separateEditions.results[1].title);
+  const sameWorkDifferentEditions = await searchLibrary('same-work-different-edition-id', { sources: ['openlibrary'], limit: 10 });
+  assert.equal(sameWorkDifferentEditions.results.length, 2, 'same source work ID cannot collapse edition records with disjoint valid ISBNs');
+  const academicDuplicates = await searchLibrary('same', { sources: ['openalex', 'crossref', 'pubmed'], limit: 3 });
+  assert.equal(academicDuplicates.results.length, 1, 'DOI URL, case, and bare DOI forms deduplicate exactly');
+  const archiveSearchUrl = new URL(requests.find(url => url.includes('archive.org/advancedsearch.php') && new URL(url).searchParams.get('q')?.includes('title:"same"'))!);
   assert.equal(archiveSearchUrl.searchParams.get('q'), '(title:"same" OR creator:"same" OR identifier:"same") AND mediatype:texts');
   const similar = await searchLibrary('example', { sources: ['openlibrary'], limit: 10 });
   assert.equal(similar.results.length, 2, 'similar titles are not fuzzy-merged');

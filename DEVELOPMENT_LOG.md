@@ -123,3 +123,11 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - 作者档案映射 ORCID、计数和最近机构名称；机构档案映射类型、国家代码、作品/引用计数、官网及 ROR 标识。前端搜索提示标明前缀。作者和机构都固定为 `METADATA_ONLY`、`canImport=false`，没有全文下载或本地复制路径。
 - 官方文档确认基础 HTTP API 可免费且无需账号或 key。限定实时请求对 `author:Carl Sagan` 和 `institution:University of Jordan` 返回官方档案；未使用任何用户密钥或进行批量查询。
 - 离线回归覆盖端点与字段、官方档案链接、detail ID、空凭证和权限；`npm run lint`、`npm run test:library-connectors`、`npm run test:library-api`（31/31）、`npm run test:api`（85/85）、`npm run build` 与 `npm run test:library-connectors:live` 均通过。构建仍有既有 Three.js chunk 大小提示；未运行浏览器视觉/手机回归，未修改正式用户书架或图书数据。
+
+
+### WORLD LIBRARY Phase 6：统一搜索、去重与版权识别（2026-11-04）
+- DOI 规范化统一支持 DOI 标签、`doi.org`/`dx.doi.org` URL 和大小写变体；ISBN 只接受校验有效的 10/13 位编号，并将有效 ISBN-10 规范为对应的 978 ISBN-13。精确 provider ID 以来源命名空间隔离，不因不同数据库恰好使用相同 ID 而合并。
+- 去重保留 edition 边界：相同 DOI/source ID 但两边有效 ISBN 集合无交集时拒绝合并；相似题名从不作为去重键。合并时保留原 ISBN 变体和备用官方来源链接。新建版次、错误校验位、来源 ID 碰撞及 DOI URL/大小写 fixture 并通过离线测试。
+- Open Library edition `ebook_access=public` / `borrowable` 分别映射为 provider 公开阅读/可借阅状态，但清楚注明不是再利用许可；未知值不推断，所有 Open Library 结果仍禁止本地导入。Internet Archive 发现公版/开放许可与 “All rights reserved” / “In Copyright” 等冲突声明时归为 `UNKNOWN`，保守拒绝本地复制。
+- 更新 `PROJECT_AUDIT.md`、`DEVELOPMENT_LOG.md`、`TEST_REPORT.md` 和 `LIBRARY_CONNECTORS.md`，依据 Open Library [Search API](https://openlibrary.org/dev/docs/api/search) 记录 edition 字段解释、边界和来源链接。没有请求或使用用户密钥；没有改变既有连接器接口、正式图书/书架数据或用户配置。
+- 最终验证通过：`npm run lint`、`npm run test:library-connectors`、`npm run test:library-api`（31/31）、`npm run test:api`（85/85）、`npm run build`、`npm run test:library-connectors:live`。实时 smoke 保持限量免密钥；生产构建仍有既有 Three.js 大 chunk 提示。未运行浏览器视觉或实体移动设备回归。

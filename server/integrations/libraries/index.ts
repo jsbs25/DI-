@@ -435,10 +435,16 @@ function iaRights(record: Record<string, unknown>): RightsCategory {
   const licenseUrl = String(record.licenseurl || '').toLowerCase();
   const rightsText = String(record.rights || '').toLowerCase();
   const statement = `${licenseUrl} ${rightsText}`;
-  if (/publicdomain\/(?:mark|zero)|public domain|no known copyright restrictions/.test(statement)) return RightsCategory.PUBLIC_DOMAIN;
-  if (/creativecommons\.org\/licenses\/(?:by|by-sa|by-nc|by-nd)|\bcc\s*(?:by|zero)(?:-sa|-nc|-nd)?\s*\d|\bmit license\b|\bgpl(?:-\d)?\b/.test(statement)) return RightsCategory.OPEN_LICENSE;
-  if (/open access/.test(statement)) return RightsCategory.OPEN_ACCESS;
-  if (/all rights reserved|in copyright|copyrighted/.test(statement)) return RightsCategory.COPYRIGHT_RESTRICTED;
+  const hasPublicDomain = /publicdomain\/(?:mark|zero)|public domain|no known copyright restrictions|\bcc0\b/.test(statement);
+  const hasOpenLicense = /creativecommons\.org\/licenses\/(?:by|by-sa|by-nc|by-nd)|\bcc\s*by(?:-sa|-nc|-nd)?\s*\d|\bmit license\b|\bgpl(?:-\d)?\b/.test(statement);
+  const hasOpenAccess = /\bopen access\b/.test(statement);
+  const hasRestriction = /all rights reserved|in copyright|copyrighted|rightsstatements\.org\/vocab\/(?:inc|noc)/.test(statement);
+  if (hasRestriction && (hasPublicDomain || hasOpenLicense || hasOpenAccess)) return RightsCategory.UNKNOWN;
+  if (hasPublicDomain && hasOpenLicense) return RightsCategory.UNKNOWN;
+  if (hasPublicDomain) return RightsCategory.PUBLIC_DOMAIN;
+  if (hasOpenLicense) return RightsCategory.OPEN_LICENSE;
+  if (hasOpenAccess) return RightsCategory.OPEN_ACCESS;
+  if (hasRestriction) return RightsCategory.COPYRIGHT_RESTRICTED;
   return RightsCategory.UNKNOWN;
 }
 
@@ -452,6 +458,13 @@ function rightsPermitLocalCopy(rights: RightsCategory): boolean {
   return rights === RightsCategory.PUBLIC_DOMAIN || rights === RightsCategory.OPEN_LICENSE;
 }
 
+function openLibraryEditionAccess(access: unknown): RightsCategory {
+  const value = typeof access === 'string' ? access.trim().toLowerCase() : '';
+  if (value === 'public') return RightsCategory.OPEN_ACCESS;
+  if (value === 'borrowable') return RightsCategory.BORROWABLE;
+  return RightsCategory.UNKNOWN;
+}
+
 export class OpenLibraryConnector implements LibraryConnector {
   readonly source = 'openlibrary' as const;
 
@@ -463,6 +476,7 @@ export class OpenLibraryConnector implements LibraryConnector {
       const response = JSON.parse(await requestText(this.source, `https://openlibrary.org/search.json?${params.toString()}`));
       return ok((response.docs || []).slice(0, cap(limit)).filter((doc: any) => typeof doc.key === 'string' && /^\/works\/OL\d+W$/.test(doc.key)).map((doc: any) => {
         const edition = doc.editions?.docs?.[0] || {};
+        const rights = openLibraryEditionAccess(edition.ebook_access);
         return baseRecord(this.source, {
           id: `openlibrary:${doc.key}`,
           externalId: doc.key,
@@ -476,9 +490,14 @@ export class OpenLibraryConnector implements LibraryConnector {
           coverImage: doc.cover_i ? `https://covers.openlibrary.org/b/id/${encodeURIComponent(String(doc.cover_i))}-M.jpg` : undefined,
           sourceUrl: `https://openlibrary.org${doc.key}`,
           description: 'Open Library bibliographic record. Reading or borrowing availability and reuse rights must be checked on the provider page.',
-          rights: RightsCategory.UNKNOWN,
-          rightsNote: 'Open Library record or ebook_access does not establish public-domain status or redistribution rights.',
-          availability: 'official-source-only',
+          rights,
+          rightsNote: rights === RightsCategory.BORROWABLE
+            ? 'Open Library reports this edition as borrowable on its service. Borrowing is subject to provider eligibility and limits; this is not a reuse license and no local copy is enabled.'
+            : rights === RightsCategory.OPEN_ACCESS
+              ? 'Open Library reports this edition as publicly readable on its service. This access signal is not a reuse license; no local copy is enabled.'
+              : 'Open Library record or ebook_access does not establish public-domain status or redistribution rights.',
+          availability: rights === RightsCategory.BORROWABLE ? 'provider-borrowable'
+            : rights === RightsCategory.OPEN_ACCESS ? 'provider-full-view' : 'official-source-only',
           canImport: false,
           metadata: { edition_key: doc.edition_key, edition_title: edition.title, publisher: edition.publisher, publish_date: edition.publish_date, ebook_access: edition.ebook_access }
         });
@@ -966,7 +985,8 @@ function normalizeAcademicDoi(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined;
   let value = raw.trim().replace(/^doi:\s*/i, '');
   value = value.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
-  return /^10\.\d{4,9}\/[^\s?#]+$/i.test(value) ? value : undefined;
+  if (!/^10\.\d{4,9}\//i.test(value) || /[\s?#]/.test(value)) return undefined;
+  return value.toLowerCase();
 }
 
 function academicHttpsUrl(raw: unknown): string | undefined {
@@ -2141,26 +2161,93 @@ export function getLibraryConnector(id: LibrarySource): LibraryConnector | undef
   return libraryConnectors.find(connector => connector.source === id);
 }
 
+function normalizeIsbnIdentity(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const value = raw.replace(/[^0-9Xx]/g, '').toUpperCase();
+  if (/^\d{13}$/.test(value)) {
+    const checksum = [...value].reduce((sum, digit, index) => sum + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
+    return checksum % 10 === 0 ? value : undefined;
+  }
+  if (!/^\d{9}[\dX]$/.test(value)) return undefined;
+  const checksum = [...value.slice(0, 9)].reduce((sum, digit, index) => sum + Number(digit) * (10 - index), 0) + (value[9] === 'X' ? 10 : Number(value[9]));
+  if (checksum % 11 !== 0) return undefined;
+  const isbn13Prefix = `978${value.slice(0, 9)}`;
+  const checksum13 = [...isbn13Prefix].reduce((sum, digit, index) => sum + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
+  return `${isbn13Prefix}${(10 - checksum13 % 10) % 10}`;
+}
+
+function recordSourceIdentity(record: ExternalLibraryRecord): string | undefined {
+  const id = record.externalId?.trim() || record.id?.trim();
+  return id ? `${record.source}:${id}` : undefined;
+}
+
 function dedupeByExactIdentifier(records: ExternalLibraryRecord[]): ExternalLibraryRecord[] {
   const output: ExternalLibraryRecord[] = [];
-  const byKey = new Map<string, ExternalLibraryRecord>();
+  const groups: Array<{
+    primary: ExternalLibraryRecord;
+    records: ExternalLibraryRecord[];
+    dois: Set<string>;
+    isbns: Set<string>;
+    sourceIds: Set<string>;
+  }> = [];
   for (const record of records) {
-    const doi = record.doi?.trim().toLowerCase().replace(/^https?:\/\/(?:dx\.)?doi\.org\//, '').replace(/^doi:\s*/, '');
-    const isbn = (record.isbn || []).map(value => value.replace(/[^0-9Xx]/g, '').toUpperCase()).find(value => value.length === 10 || value.length === 13);
-    const key = doi ? `doi:${doi}` : isbn ? `isbn:${isbn}` : undefined;
-    if (!key) {
+    const doi = normalizeAcademicDoi(record.doi);
+    const isbns = new Set((record.isbn || []).map(normalizeIsbnIdentity).filter((value): value is string => !!value));
+    const sourceId = recordSourceIdentity(record);
+    const exactDoiGroup = doi ? groups.find(group => group.dois.has(doi) && (!isbns.size || !group.isbns.size || [...isbns].some(isbn => group.isbns.has(isbn)))) : undefined;
+    let match = exactDoiGroup;
+
+    if (!match && sourceId) {
+      const sourceMatches = groups.filter(group => group.sourceIds.has(sourceId)
+        && (!doi || [...group.dois].every(existingDoi => existingDoi === doi))
+        && (!isbns.size || !group.isbns.size || [...isbns].some(isbn => group.isbns.has(isbn))));
+      if (sourceMatches.length === 1) match = sourceMatches[0];
+    }
+
+    if (!match && isbns.size) {
+      const isbnMatches = groups.filter(group => {
+        const doiConflict = doi !== undefined && [...group.dois].some(existingDoi => existingDoi !== doi);
+        return !doiConflict && [...isbns].some(isbn => group.isbns.has(isbn));
+      });
+      if (isbnMatches.length === 1) match = isbnMatches[0];
+      else if (isbnMatches.length > 1) {
+        const candidateDois = new Set(isbnMatches.flatMap(group => [...group.dois]));
+        if (doi) candidateDois.add(doi);
+        if (candidateDois.size <= 1) match = isbnMatches[0];
+      }
+    }
+
+    if (!match) {
       output.push(record);
+      groups.push({
+        primary: record,
+        records: [record],
+        dois: new Set(doi ? [doi] : []),
+        isbns,
+        sourceIds: new Set(sourceId ? [sourceId] : [])
+      });
       continue;
     }
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, record);
-      output.push(record);
-      continue;
-    }
+
+    match.records.push(record);
+    if (doi) match.dois.add(doi);
+    for (const isbn of isbns) match.isbns.add(isbn);
+    if (sourceId) match.sourceIds.add(sourceId);
+
+    const existing = match.primary;
+    existing.isbn = [...new Set([...(existing.isbn || []), ...(record.isbn || [])])];
+    if (!existing.doi && doi) existing.doi = doi;
+    if (!existing.identifier && record.identifier) existing.identifier = record.identifier;
+    const alternateLinks = [
+      ...(record.alternateSources || []),
+      { source: record.source, name: record.sourceName, url: record.sourceUrl }
+    ];
     existing.alternateSources ||= [];
-    if (!existing.alternateSources.some(source => source.source === record.source && source.url === record.sourceUrl)) {
-      existing.alternateSources.push({ source: record.source, name: record.sourceName, url: record.sourceUrl });
+    for (const alternate of alternateLinks) {
+      if (alternate.source === existing.source && alternate.url === existing.sourceUrl) continue;
+      if (!existing.alternateSources.some(source => source.source === alternate.source && source.url === alternate.url)) {
+        existing.alternateSources.push(alternate);
+      }
     }
   }
   return output;

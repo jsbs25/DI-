@@ -151,3 +151,18 @@ Waqfeya 与 Qatar Digital Library 只验证官网和官方检索/目录页面，
 | `npm run test:library-connectors:live` | ✅ 限量真实 smoke 通过；OpenAlex `author:Carl Sagan` 与 `institution:University of Jordan` 均返回官方资料页，权限仍是仅元数据且不能导入；既有书目/学术连接器和 Shamela 检查也通过。 |
 
 OpenAlex 官方说明基础 API 可免费且无需账号或 key。本次仅进行有界查询，没有复制全文或触碰正式图书/书架数据。未做浏览器视觉、移动设备或全站人工 UI 回归。
+
+
+## WORLD LIBRARY Phase 6：统一搜索、去重与版权识别（2026-11-04）
+
+| 检查 | 结果 |
+|---|---|
+| `npm run lint` | ✅ TypeScript `--noEmit` 通过。 |
+| `npm run test:library-connectors` | ✅ 离线回归通过：Open Library `public` / `borrowable` / unknown 状态、`canImport=false`、Internet Archive 公版/许可与限制语句冲突回退 `UNKNOWN`。 |
+| 精确身份去重回归 | ✅ 覆盖 DOI URL/大小写规范化、ISBN-10→等价 ISBN-13、无效 ISBN 校验位、同一 source ID 重复、跨来源相同 raw ID、相同题名不同 ISBN、相同 work ID 但 ISBN 不相交的独立版次；标题相似不触发合并。 |
+| `npm run test:library-api` | ✅ 31 项通过、0 失败。 |
+| `npm run test:api` | ✅ 85 项通过、0 失败。 |
+| `npm run build` | ✅ Vite 生产构建成功；原有 Three.js 大 chunk（约 551.65 kB）提示仍为非阻断警告。 |
+| `npm run test:library-connectors:live` | ✅ 限量官方来源 smoke 通过：Open Library、Internet Archive、OpenAlex、Crossref、arXiv、Europe PMC、PMC、PubMed、OpenAlex 作者/机构档案、Shamela 阿语检索及 Gutenberg 官方 OPDS 链路。未下载 EPUB/论文全文。 |
+
+版权提示仍以来源条目为准：Open Library `ebook_access` 是服务访问状态而非再利用许可；所有 Open Library 记录均不可本地导入。冲突权利声明 fail-closed；未知来源状态保持未知。测试使用 mock 或隔离临时数据，没有改动正式图书/书架数据。本轮未做浏览器视觉、实体手机或全站人工 UI 回归。

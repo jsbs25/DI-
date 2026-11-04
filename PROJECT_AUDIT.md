@@ -200,3 +200,12 @@ PubMed 只提供书目检索与官方 PubMed 记录页，固定为 `METADATA_ONL
 **官方接口与边界。** 依据 [OpenAlex API 概览](https://help.openalex.org/api/)、[作者搜索文档](https://github.com/ourresearch/openalex-docs/blob/main/api-entities/authors/search-authors.md)及[机构搜索文档](https://github.com/ourresearch/openalex-docs/blob/main/api-entities/institutions/search-institutions.md)，使用官方 `/authors?search=` 与 `/institutions?search=`，仅请求所需字段、限制每次最多 25 项。OpenAlex 基础 API 可免账号及 API key 使用。档案仅标为 `METADATA_ONLY`；没有全文、下载或本地导入入口，OpenAlex 对元数据的 CC0 声明不被当成研究文章全文的许可。
 
 **验证与限制。** 离线 mock 覆盖两类搜索端点、选取字段、官方 URL、A/I 详情 ID、免密钥、元数据权限及拒绝导入；限量在线 smoke 对 `author:Carl Sagan` 和 `institution:University of Jordan` 均实际返回官方档案。TypeScript 检查、连接器离线测试、图书馆 API（31 项）、全站 API（85 项）、生产构建与连接器实时 smoke 全部通过。构建仍有既有 Three.js 大 chunk 提示。未进行浏览器视觉/移动设备回归。当前只在用户明确输入前缀时搜索作者或机构，未建立完整作者—作品关系浏览、年份/学科筛选或研究机构地图。
+
+
+## WORLD LIBRARY Phase 6：统一搜索、去重与版权识别（2026-11-04）
+
+**实现改进。** 统一结果现在只根据经规范化的精确身份匹配：DOI、校验有效的 ISBN，或带来源命名空间的精确 provider ID；从不按相似标题合并。DOI 统一移除 `doi:` / `doi.org` / `dx.doi.org` 前缀并转小写。ISBN-10 校验通过后转为等价的 978 ISBN-13，ISBN-13 校验位错误及其他无效值不参与去重。同一 source ID 只在同一连接器内有效；当两条记录具有互不重叠的有效 ISBN 时，即使 work ID 或 DOI 相同，也保留为不同版次。合并记录会保留两端 ISBN 写法及备用官方来源链接。
+
+**权利/访问状态。** Open Library Search API 的 edition-level `ebook_access` 仅在明确值为 `public` 或 `borrowable` 时分别标为 `OPEN_ACCESS` 或 `BORROWABLE`；其他值保持 `UNKNOWN`。这仅表示 Open Library 服务上的阅读/借阅状态，不是版权许可，所有记录依然 `canImport=false`、不提供本地全文或下载。Internet Archive 若同一条权利信息中同时出现已识别的许可/公版声明与限制声明，分类回退 `UNKNOWN`；相互冲突的 Public Domain 与开放许可声明也 fail-closed。详情参见[官方 Open Library Search API 文档](https://openlibrary.org/dev/docs/api/search)。
+
+**验证与保全。** 新增离线回归涵盖 DOI URL/大小写、ISBN-10/13 对应、无效校验位、provider ID 命名空间、同一 work ID 下的版次冲突、相似标题不误合并、Open Library `public`/`borrowable`/未知状态，以及 Internet Archive 矛盾权利声明。最终通过 `npm run lint`、`npm run test:library-connectors`、`npm run test:library-api`（31/31）、`npm run test:api`（85/85）、`npm run build` 和限量 `npm run test:library-connectors:live`。构建仍显示既有 Three.js 大 chunk 非阻断警告。未要求或使用用户密钥、未做批量抓取、未下载/保存原文，没有修改正式用户书架或图书数据；未进行浏览器/移动端视觉验收。
