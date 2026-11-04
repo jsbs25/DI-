@@ -256,6 +256,19 @@ async function main() {
     const ads = await request('/api/ads');
     check(ads.status === 200 && ads.body.success === true && ads.body.ads.some((ad: any) => ad.id === 'ad_1' && typeof ad.clicks === 'number'), 'Advertisement listing returns the seeded catalog without recording a click');
 
+    const countries = await request('/api/globe/countries');
+    check(countries.status === 200 && countries.body.success === true && Array.isArray(countries.body.countries), 'Globe country listing returns its collection contract');
+    const globeStats = await request('/api/globe/stats');
+    check(globeStats.status === 200 && globeStats.body.success === true && Number.isFinite(globeStats.body.stats?.countriesCount) && Array.isArray(globeStats.body.stats?.countries), 'Globe statistics include numeric totals and country metadata');
+    const aiModels = await request('/api/ai/models');
+    check(aiModels.status === 200 && aiModels.body.success === true && Array.isArray(aiModels.body.models), 'AI model listing returns metadata without making a model call');
+    const aiStats = await request('/api/ai/stats');
+    check(aiStats.status === 200 && aiStats.body.success === true && Number.isFinite(aiStats.body.totalCalls) && Number.isFinite(aiStats.body.totalTokens) && Array.isArray(aiStats.body.models), 'AI statistics return usage totals and model metadata without external requests');
+    const crawlerPages = await request('/api/crawler/pages');
+    check(crawlerPages.status === 200 && crawlerPages.body.success === true && Array.isArray(crawlerPages.body.pages), 'Crawler page listing returns its collection contract without starting a crawl');
+    const savedArticles = await request('/api/browser/saved-articles');
+    check(savedArticles.status === 200 && savedArticles.body.success === true && Array.isArray(savedArticles.body.articles), 'Saved browser articles return their collection contract without fetching external pages');
+
     console.log(`HTTP API regression: ${passed} passed, 0 failed.`);
   } catch (error) {
     console.error('HTTP API regression failed:', error);
