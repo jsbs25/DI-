@@ -109,6 +109,38 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
           )}
         </div>
 
+        {/* Saturn Cinema: embed the requested streaming page directly in the
+            Saturn viewport. If the site refuses iframe embedding it renders
+            blank — the "新窗口打开" link always works. */}
+        {planet.id === 'saturn' && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-cyan-300 uppercase tracking-wider">
+                土星观影站 (Saturn Cinema)
+              </h3>
+              <a
+                href="https://souju6.ai/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] font-semibold text-cyan-400 hover:text-white"
+              >
+                新窗口打开 ↗
+              </a>
+            </div>
+            <div className="h-[420px] overflow-hidden rounded-xl border border-white/10 bg-black">
+              <iframe
+                src="https://souju6.ai/"
+                title="土星观影站"
+                className="h-full w-full border-0"
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+              />
+            </div>
+            <p className="text-[10px] leading-relaxed text-white/40">
+              若站点禁止内嵌，将显示空白，请点右上角「新窗口打开」直接观看。
+            </p>
+          </div>
+        )}
+
         {/* Physical Astrophysical Metrics Grid */}
         <div>
           <h3 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">
