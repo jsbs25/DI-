@@ -699,49 +699,45 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         <div className="w-full grid grid-cols-1 gap-3 pointer-events-auto pt-6 sm:pt-10 lg:grid-cols-3 lg:gap-4">
           {/* Bottom Left: Universe Overview Card */}
           <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl">
-            <div className="flex items-center space-x-2 text-xs font-semibold text-slate-300 tracking-wide mb-4">
-              <Compass className="w-4 h-4 text-cyan-400" />
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold leading-tight text-slate-300 tracking-wide mb-4">
+              <Compass className="w-4 h-4 shrink-0 text-cyan-400" />
               <span>{t.universeOverview}</span>
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className="grid grid-cols-3 gap-x-2 gap-y-3">
               {/* Stat 1 */}
-              <div>
-                <div className="font-bold text-2xl sm:text-3xl text-white font-mono">
+              <div className="min-w-0 text-center">
+                <div className="whitespace-nowrap font-bold text-lg sm:text-2xl lg:text-lg xl:text-2xl text-white font-mono">
                   8.0B+
                 </div>
-                <div className="text-[11px] text-slate-400 mt-0.5">
+                <div className="mt-0.5 break-words text-[11px] leading-tight text-slate-400">
                   {t.peopleOnEarth}
                 </div>
               </div>
 
-              <div className="h-9 w-[1px] bg-slate-800" />
-
               {/* Stat 2 */}
-              <div>
-                <div className="font-bold text-2xl sm:text-3xl text-white font-mono">
+              <div className="min-w-0 border-s border-slate-800 text-center">
+                <div className="whitespace-nowrap font-bold text-lg sm:text-2xl lg:text-lg xl:text-2xl text-white font-mono">
                   8
                 </div>
-                <div className="text-[11px] text-slate-400 mt-0.5">
+                <div className="mt-0.5 break-words text-[11px] leading-tight text-slate-400">
                   {t.planets}
                 </div>
               </div>
 
-              <div className="h-9 w-[1px] bg-slate-800" />
-
               {/* Stat 3 */}
-              <div>
-                <div className="font-bold text-2xl sm:text-3xl text-white font-mono">
+              <div className="min-w-0 border-s border-slate-800 text-center">
+                <div className="whitespace-nowrap font-bold text-lg sm:text-2xl lg:text-lg xl:text-2xl text-white font-mono">
                   100B+
                 </div>
-                <div className="text-[11px] text-slate-400 mt-0.5">
+                <div className="mt-0.5 break-words text-[11px] leading-tight text-slate-400">
                   {t.starsInGalaxy}
                 </div>
               </div>
 
               {/* Telemetry Waveform */}
-              <div className="hidden sm:block pl-2">
-                <svg className="w-24 h-9 overflow-visible" viewBox="0 0 100 36">
+              <div className="col-span-3 hidden justify-center border-t border-slate-800/60 pt-2 sm:flex">
+                <svg className="w-24 h-9 overflow-visible" viewBox="0 0 100 36" aria-hidden="true">
                   <path
                     d="M 0,22 Q 15,22 25,10 T 50,26 T 75,6 T 100,18"
                     fill="none"
