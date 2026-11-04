@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const { randomUUID } = require('node:crypto');
+const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, WebContentsView, ipcMain, session } = require('electron');
 const { createBrowserEngine, isAllowedNavigation } = require('./browser-engine.cjs');
@@ -40,6 +41,22 @@ function assertTrustedAppSender(event) {
   }
   if (senderOrigin !== appOrigin) {
     throw new Error('拒绝来自非 EARTH ONE 来源的浏览器控制请求。');
+  }
+}
+
+function getSafeSmokeApprovalPath(smokeTest, fixtureUrl, downloadDir) {
+  if (!smokeTest || typeof fixtureUrl !== 'string' || typeof downloadDir !== 'string') return null;
+  try {
+    const url = new URL(fixtureUrl);
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1') return null;
+    const tempRoot = fs.realpathSync(os.tmpdir());
+    const realDownloadDir = fs.realpathSync(downloadDir);
+    const tempPrefix = tempRoot.endsWith(path.sep) ? tempRoot : `${tempRoot}${path.sep}`;
+    if (!realDownloadDir.startsWith(tempPrefix) ||
+        !path.basename(realDownloadDir).startsWith('earth-one-browser-smoke-')) return null;
+    return path.join(realDownloadDir, 'earth-one-fixture.txt');
+  } catch {
+    return null;
   }
 }
 
@@ -152,6 +169,9 @@ function registerBrowserIpc() {
   const handlers = {
     'browser:get-local-data': () => readLocalBrowserData(),
     'browser:save-local-data': (_event, data) => writeLocalBrowserData(data),
+    'browser:get-downloads': () => browserEngine.getDownloads(),
+    'browser:cancel-download': (_event, id) => browserEngine.cancelDownload(id),
+    'browser:remove-download': (_event, id) => browserEngine.removeDownload(id),
     'browser:set-active': (_event, active) => browserEngine.setActive(Boolean(active)),
     'browser:set-bounds': (_event, bounds) => browserEngine.setBounds(bounds),
     'browser:select-tab': (_event, tabId, url) => browserEngine.selectTab(tabId, url),
@@ -399,7 +419,7 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     }
 
     const testContentsForDownload = browserEngine.getWebContentsForTesting(testTabId);
-    const downloadUrl = new URL('/download', testUrl).href;
+    const downloadUrl = new URL('/download?token=synthetic-only', testUrl).href;
     testContentsForDownload.downloadURL(downloadUrl);
     const expectedDownload = path.join(testDownloadDir, 'earth-one-fixture.txt');
     const downloadDeadline = Date.now() + 12000;
@@ -418,7 +438,43 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     }
     if (!downloadComplete) throw new Error('本地合成下载未通过保存流程。');
 
-    console.log('BROWSER_SMOKE_PASS: Chromium navigation, local-only bookmark/history persistence and clear controls, zero bookmark API requests, Ctrl+L address focus, URL guards, default-deny permissions, downloads, and responsive bounds verified.');
+    const downloadStateDeadline = Date.now() + 5000;
+    let completedDownload = null;
+    while (Date.now() < downloadStateDeadline) {
+      const records = await appContents.executeJavaScript('window.earthOneBrowser.getDownloads()');
+      completedDownload = records.find(record => record.filename === 'earth-one-fixture.txt');
+      if (completedDownload?.state === 'completed') break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!completedDownload || completedDownload.state !== 'completed' ||
+        completedDownload.source !== new URL('/download', testUrl).href ||
+        completedDownload.savePath !== expectedDownload) {
+      throw new Error('下载管理器未显示合成下载的安全来源、完成状态或已批准的临时保存位置。');
+    }
+    await appContents.executeJavaScript(`document.querySelector('button[aria-label^="打开下载管理器"]').click()`);
+    const downloadPanelText = await appContents.executeJavaScript(
+      `document.querySelector('[data-browser-download-manager]')?.innerText || ''`
+    );
+    if (!downloadPanelText.includes('earth-one-fixture.txt') ||
+        !downloadPanelText.includes('已完成') || !downloadPanelText.includes('保存位置：') ||
+        downloadPanelText.includes('synthetic-only')) {
+      throw new Error('下载管理器列表未展示记录，或来源查询参数未被隐藏。');
+    }
+    await appContents.executeJavaScript(`document.querySelector('button[aria-label="从列表移除下载 earth-one-fixture.txt"]').click()`);
+    const removalDeadline = Date.now() + 3000;
+    let downloadRemoved = false;
+    while (Date.now() < removalDeadline) {
+      const records = await appContents.executeJavaScript('window.earthOneBrowser.getDownloads()');
+      downloadRemoved = !records.some(record => record.id === completedDownload.id);
+      if (downloadRemoved) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!downloadRemoved || !fs.existsSync(expectedDownload)) {
+      throw new Error('从列表移除已完成记录应保留下载文件本身。');
+    }
+    await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭下载管理器"]').click()`);
+
+    console.log('BROWSER_SMOKE_PASS: Chromium navigation, local-only bookmark/history persistence and clear controls, zero bookmark API requests, Ctrl+L address focus, URL guards, default-deny permissions, visible download progress/completion and list-only removal, and responsive bounds verified.');
     app.quit();
   } catch (error) {
     console.error('BROWSER_SMOKE_FAIL:', error && error.stack ? error.stack : error);
@@ -431,6 +487,10 @@ app.whenReady().then(async () => {
   const smokeTest = process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1';
   const smokeUrl = process.env.EARTH_ONE_BROWSER_TEST_URL;
   testDownloadDir = process.env.EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR || null;
+  const testApprovalPath = getSafeSmokeApprovalPath(smokeTest, smokeUrl, testDownloadDir);
+  if (smokeTest && !testApprovalPath) {
+    throw new Error('smoke 下载批准仅支持 127.0.0.1 夹具和系统临时目录。');
+  }
   const targetUrl = new URL(baseUrl);
   appOrigin = targetUrl.origin;
   if (smokeTest) {
@@ -497,10 +557,10 @@ app.whenReady().then(async () => {
     onFocusAddressBar: tabId => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:focus-address-bar', tabId);
     },
-    onDownload: item => {
-      if (smokeTest && testDownloadDir) return path.join(testDownloadDir, 'earth-one-fixture.txt');
-      return null;
-    }
+    onDownloads: downloads => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:downloads-state', downloads);
+    },
+    getTestApprovalPath: testApprovalPath ? () => testApprovalPath : null
   });
 
   registerBrowserIpc();

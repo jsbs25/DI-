@@ -3,6 +3,7 @@
 const TAB_ID_PATTERN = /^tab_[a-zA-Z0-9_-]{1,64}$/;
 const MAX_URL_LENGTH = 4096;
 const BARE_HTTP_HOST_PATTERN = /^(?:localhost(?::\d+)?|(?:[\w-]+\.)+[\w-]+(?::\d+)?|[\w-]+:\d+|\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?|\[[\da-f:]+\](?::\d+)?)(?:[/?#]|$)/i;
+const { createDownloadManager } = require('./download-manager.cjs');
 
 function normalizeBrowserUrl(input) {
   if (typeof input !== 'string') throw new TypeError('请输入有效的网址。');
@@ -45,14 +46,20 @@ function createBrowserEngine({
   browserSession,
   onState = () => {},
   onFocusAddressBar = () => {},
-  onDownload = null,
-  onDownloadComplete = () => {}
+  onDownloads = () => {},
+  getTestApprovalPath = null
 }) {
   const tabs = new Map();
   let activeTabId = null;
   let browserActive = false;
   let viewportBounds = null;
   let disposed = false;
+  const downloadManager = createDownloadManager({
+    browserSession,
+    isOwnedContents: contents => [...tabs.values()].some(entry => entry.view.webContents === contents),
+    onChange: onDownloads,
+    getTestApprovalPath
+  });
 
   function validTabId(tabId) {
     return typeof tabId === 'string' && TAB_ID_PATTERN.test(tabId);
@@ -252,35 +259,6 @@ function createBrowserEngine({
     if (method === 'reload') entry.view.webContents.reload();
   }
 
-  browserSession.on('will-download', (event, item, contents) => {
-    const entry = [...tabs.entries()].find(([, value]) => value.view.webContents === contents);
-    if (!entry) {
-      item.cancel();
-      return;
-    }
-    const [tabId] = entry;
-    item.once('done', (_event, state) => {
-      onDownloadComplete({ tabId, state, path: item.getSavePath(), url: item.getURL() });
-    });
-    try {
-      const savePath = onDownload ? onDownload(item, contents, tabId) : null;
-      if (savePath && typeof savePath.then === 'function') {
-        item.cancel();
-        return;
-      }
-      if (typeof savePath === 'string' && savePath) {
-        item.setSavePath(savePath);
-      } else {
-        item.setSaveDialogOptions({
-          title: '保存网页下载',
-          defaultPath: item.getFilename()
-        });
-      }
-    } catch {
-      item.cancel();
-    }
-  });
-
   function getWebContentsForTesting(tabId) {
     return tabs.get(tabId)?.view.webContents ?? null;
   }
@@ -293,6 +271,7 @@ function createBrowserEngine({
   function dispose() {
     if (disposed) return;
     disposed = true;
+    downloadManager.dispose();
     for (const [tabId, entry] of tabs) {
       window.contentView.removeChildView(entry.view);
       if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close();
@@ -311,6 +290,9 @@ function createBrowserEngine({
     goBack: tabId => historyMethod(tabId, 'back'),
     goForward: tabId => historyMethod(tabId, 'forward'),
     reload: tabId => historyMethod(tabId, 'reload'),
+    getDownloads: () => downloadManager.list(),
+    cancelDownload: id => downloadManager.cancel(id),
+    removeDownload: id => downloadManager.remove(id),
     dispose,
     getWebContentsForTesting,
     getViewBoundsForTesting

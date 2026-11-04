@@ -5,6 +5,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('earthOneBrowser', {
   getLocalData: () => ipcRenderer.invoke('browser:get-local-data'),
   saveLocalData: data => ipcRenderer.invoke('browser:save-local-data', data),
+  getDownloads: () => ipcRenderer.invoke('browser:get-downloads'),
+  cancelDownload: id => ipcRenderer.invoke('browser:cancel-download', id),
+  removeDownload: id => ipcRenderer.invoke('browser:remove-download', id),
   setActive: active => ipcRenderer.invoke('browser:set-active', Boolean(active)),
   setBounds: bounds => ipcRenderer.invoke('browser:set-bounds', bounds),
   selectTab: (tabId, url) => ipcRenderer.invoke('browser:select-tab', tabId, url),
@@ -17,6 +20,11 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
     const wrapped = (_event, state) => listener(state);
     ipcRenderer.on('browser:state', wrapped);
     return () => ipcRenderer.removeListener('browser:state', wrapped);
+  },
+  onDownloads: listener => {
+    const wrapped = (_event, downloads) => listener(downloads);
+    ipcRenderer.on('browser:downloads-state', wrapped);
+    return () => ipcRenderer.removeListener('browser:downloads-state', wrapped);
   },
   onFocusAddressBar: listener => {
     const wrapped = (_event, tabId) => listener(tabId);

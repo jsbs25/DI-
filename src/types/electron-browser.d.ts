@@ -41,9 +41,24 @@ declare global {
     warning?: string;
   }
 
+  interface EarthOneBrowserDownload {
+    id: string;
+    filename: string;
+    source: string;
+    state: 'awaiting-save' | 'progressing' | 'cancelling' | 'completed' | 'cancelled' | 'interrupted';
+    receivedBytes: number;
+    totalBytes: number;
+    progress: number | null;
+    savePath: string | null;
+    startedAt: string;
+  }
+
   interface EarthOneBrowserApi {
     getLocalData(): Promise<EarthOneLocalBrowserData>;
     saveLocalData(data: { bookmarks: EarthOneLocalBookmark[]; history: EarthOneLocalHistoryItem[] }): Promise<{ success: boolean; error?: string }>;
+    getDownloads(): Promise<EarthOneBrowserDownload[]>;
+    cancelDownload(id: string): Promise<{ success: boolean }>;
+    removeDownload(id: string): Promise<{ success: boolean }>;
     setActive(active: boolean): Promise<void>;
     setBounds(bounds: EarthOneBrowserBounds | null): Promise<void>;
     selectTab(tabId: string, url: string): Promise<{ success: boolean; error?: string }>;
@@ -53,6 +68,7 @@ declare global {
     goForward(tabId: string): Promise<void>;
     reload(tabId: string): Promise<void>;
     onState(listener: (state: EarthOneBrowserState) => void): () => void;
+    onDownloads(listener: (downloads: EarthOneBrowserDownload[]) => void): () => void;
     onFocusAddressBar(listener: (tabId: string) => void): () => void;
   }
 

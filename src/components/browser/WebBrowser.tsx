@@ -20,7 +20,8 @@ import {
   Code2,
   Check,
   Clock3,
-  Trash2
+  Trash2,
+  Download
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { BrowserFrame } from './BrowserFrame.tsx';
@@ -120,6 +121,19 @@ function isHttpUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function formatDownloadBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  if (value < 1024) return `${Math.round(value)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = value / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(size < 10 ? 1 : 0)} ${units[unitIndex]}`;
 }
 
 function readLocalList<T>(key: string, fallback: T[], validate: (value: unknown) => value is T, limit: number): T[] {
@@ -241,6 +255,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     readLocalList(LOCAL_HISTORY_KEY, [], isBrowserHistoryItem, MAX_LOCAL_HISTORY)
   );
   const [isBrowserDataOpen, setIsBrowserDataOpen] = useState(false);
+  const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
+  const [downloads, setDownloads] = useState<EarthOneBrowserDownload[]>([]);
   const [browserStorageWarning, setBrowserStorageWarning] = useState<string | null>(null);
   const [browserStorageReady, setBrowserStorageReady] = useState(!browserEngine?.getLocalData);
   const [browserStorageReadOnly, setBrowserStorageReadOnly] = useState(false);
@@ -396,6 +412,28 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   }, [browserEngine, activeTabId, recordBrowserVisit, updateRecentVisitTitle]);
 
   useEffect(() => {
+    if (!browserEngine?.getDownloads || !browserEngine.onDownloads) {
+      setDownloads([]);
+      return;
+    }
+    let cancelled = false;
+    let receivedPush = false;
+    const unsubscribe = browserEngine.onDownloads(records => {
+      receivedPush = true;
+      setDownloads(Array.isArray(records) ? records : []);
+    });
+    browserEngine.getDownloads().then(records => {
+      if (!cancelled && !receivedPush) setDownloads(Array.isArray(records) ? records : []);
+    }).catch(() => {
+      if (!cancelled) setDownloads([]);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [browserEngine]);
+
+  useEffect(() => {
     if (!browserEngine && activeTab) recordBrowserVisit(activeTab.id, activeTab.url, activeTab.title);
   }, [browserEngine, activeTab?.id, activeTab?.url, activeTab?.title, recordBrowserVisit]);
 
@@ -413,7 +451,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     const syncViewport = () => {
       const element = nativeViewportRef.current;
       const mobileAiOverlay = isAiPanelOpen && window.innerWidth < 768;
-      if (!element || !activeTab || activeTab.readerMode || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || mobileAiOverlay) {
+      if (!element || !activeTab || activeTab.readerMode || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || isDownloadsOpen || mobileAiOverlay) {
         void browserEngine.setBounds(null);
         return;
       }
@@ -436,7 +474,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       document.removeEventListener('scroll', scheduleSync, true);
       void browserEngine.setBounds(null);
     };
-  }, [browserEngine, activeTabId, activeTab?.readerMode, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isAiPanelOpen]);
+  }, [browserEngine, activeTabId, activeTab?.readerMode, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isAiPanelOpen]);
 
   const pushHistory = (tabId: string, url: string) => {
     setHistory(prev => {
@@ -987,7 +1025,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
           </button>
 
           <button
-            onClick={() => setIsBrowserDataOpen(true)}
+            onClick={() => { setIsDownloadsOpen(false); setIsBrowserDataOpen(true); }}
             disabled={!browserStorageReady}
             aria-label="打开本地浏览数据"
             title="本机书签与浏览历史"
@@ -996,6 +1034,18 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
             <Clock3 className="h-3.5 w-3.5 text-cyan-300" />
             <span>本地记录 ({browserHistory.length})</span>
           </button>
+
+          {browserEngine && (
+            <button
+              onClick={() => { setIsBrowserDataOpen(false); setIsDownloadsOpen(true); }}
+              aria-label={`打开下载管理器，共 ${downloads.length} 项`}
+              title="下载管理器"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
+            >
+              <Download className="h-3.5 w-3.5 text-cyan-300" />
+              <span>下载 ({downloads.length})</span>
+            </button>
+          )}
 
           <button
             onClick={() => {
@@ -1439,6 +1489,80 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
               </section>
             </div>
           </div>
+        </div>
+      )}
+
+      {isDownloadsOpen && browserEngine && (
+        <div className="fixed inset-0 z-[60] flex justify-end bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="下载管理器" data-browser-download-manager>
+          <button type="button" aria-label="关闭下载管理器背景" onClick={() => setIsDownloadsOpen(false)} className="absolute inset-0 cursor-default" />
+          <section className="relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[#08111a] p-5 shadow-2xl sm:p-6">
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
+              <div>
+                <div className="flex items-center gap-2 text-cyan-200">
+                  <Download className="h-5 w-5" />
+                  <h2 className="text-lg font-semibold text-white">下载管理器</h2>
+                </div>
+                <p className="mt-2 max-w-lg text-xs leading-relaxed text-slate-400">
+                  每次下载都需在系统保存对话框中选择位置；完成后不会自动打开文件。列表只保存在当前会话，不同步到服务器，也不提供恶意文件扫描。
+                </p>
+              </div>
+              <button onClick={() => setIsDownloadsOpen(false)} aria-label="关闭下载管理器" className="shrink-0 rounded-lg p-2 text-slate-400 hover:bg-white/[0.06] hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto py-5">
+              {downloads.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-white/10 px-4 py-10 text-center text-xs text-slate-500">当前会话没有下载记录。</p>
+              ) : downloads.map(download => {
+                const canCancel = download.state === 'awaiting-save' || download.state === 'progressing';
+                const canRemove = download.state === 'completed' || download.state === 'cancelled' || download.state === 'interrupted';
+                const statusLabel = download.state === 'awaiting-save' ? '等待保存位置'
+                  : download.state === 'progressing' ? '正在下载'
+                  : download.state === 'cancelling' ? '正在取消'
+                  : download.state === 'completed' ? '已完成'
+                  : download.state === 'cancelled' ? '已取消'
+                  : '已中断';
+                return (
+                  <article key={download.id} className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-4" data-download-id={download.id}>
+                    <div className="flex items-start gap-3">
+                      <Download className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />
+                      <div className="min-w-0 flex-1">
+                        <h3 className="break-all text-sm font-medium text-slate-100">{download.filename}</h3>
+                        <p className="mt-1 break-all text-[11px] text-slate-500">来源：{download.source}</p>
+                        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+                          <span className={download.state === 'completed' ? 'text-emerald-300' : download.state === 'interrupted' ? 'text-rose-300' : 'text-cyan-200'}>{statusLabel}</span>
+                          {download.state === 'progressing' && (
+                            <span className="text-slate-400">
+                              {download.progress === null
+                                ? `已接收 ${formatDownloadBytes(download.receivedBytes)} · 总大小未知`
+                                : `${download.progress}% · ${formatDownloadBytes(download.receivedBytes)} / ${formatDownloadBytes(download.totalBytes)}`}
+                            </span>
+                          )}
+                        </div>
+                        {download.state === 'progressing' && download.progress !== null && (
+                          <div role="progressbar" aria-label={`${download.filename} 下载进度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={download.progress} className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                            <div className="h-full rounded-full bg-cyan-300 transition-[width]" style={{ width: `${download.progress}%` }} />
+                          </div>
+                        )}
+                        {download.savePath && <p className="mt-2 break-all text-[11px] text-slate-500">保存位置：{download.savePath}</p>}
+                      </div>
+                      {canCancel && (
+                        <button type="button" onClick={() => { void browserEngine.cancelDownload(download.id); }} aria-label={`取消下载 ${download.filename}`} title="取消下载" className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-rose-300/[0.08] hover:text-rose-200">
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                      {canRemove && (
+                        <button type="button" onClick={() => { void browserEngine.removeDownload(download.id); }} aria-label={`从列表移除下载 ${download.filename}`} title="仅从列表移除，不删除文件" className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-white/[0.08] hover:text-slate-200">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
         </div>
       )}
 
