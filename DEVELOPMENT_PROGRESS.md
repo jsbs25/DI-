@@ -204,3 +204,12 @@
 - 本地 Chromium 计算样式对照尝试在工具等待限时内未返回结果，不计为浏览器运行时通过；检查后确认没有该临时配置对应的 Chromium 进程，并清除了本轮专用临时 HTML 和浏览器配置目录。实体设备、屏幕阅读器和辅助技术行为仍未实测。
 - 本轮未访问或修改身份/会话/消息授权、正式 `server_data.json` 或既有服务/配置/日志；没有发起 API 请求。
 - GitHub 同步状态：当前搜索结果将 GitHub 连接器列为已启用且列出授权账号，但 `activeAccountUid` 为空；本运行环境没有 `$MANUS_CONFIG_HOME/connectors/github/gh`，普通 `gh auth status` 显示未登录。`git ls-remote` 仅能读取公开 `main` 基线。由于当前没有可用的授权写入口，未推送、未尝试绕过连接器；待授权入口恢复后应先 fetch，再仅以普通快进方式同步。
+
+
+## 2026-11-04 减少动态效果 Chromium 运行时回归续作
+
+- 从 `/workspace/DI-review` 的 `main` / `5fc72b3` 继续，保留此前已存在的本地提交；本轮只新增浏览器回归脚本、npm 测试入口和项目记录，没有改应用功能或服务端。
+- 新增 `scripts/test_motion_accessibility_browser.ts` 与 `npm run test:motion:browser`。脚本从源码读取实际 `prefers-reduced-motion` 规则，以内嵌 data URL 在 Chromium headless 下检查计算样式；不启动 EARTH ONE 服务、不访问 API，也不创建持久浏览器配置。
+- `npm run test:motion:browser`：12 项断言通过，使用 Chrome for Testing 151.0.7922.34。强制 reduce 时动画与过渡时长缩到 0.01ms、动画迭代为 1、滚动行为为 auto，静态状态文字保留；本机默认 no-preference 时，5s 动画、4s 过渡、无限迭代和 smooth 滚动保持原值。实体设备、屏幕阅读器及其他辅助技术仍未验证。
+- `npm run test:motion`：6 项静态 CSS 断言通过；`npm run lint`、package.json JSON 解析与 `git diff --check` 均通过。未运行完整 API 套件或生产构建，因为本轮仅新增测试脚本和记录。
+- 全程未触及身份/会话/消息授权、正式 `server_data.json`、既有服务/配置/日志或外部 API。GitHub 同步将在确认本地提交后，仅通过已有授权路径检查远端并尝试普通快进；不改账户选择、不绕过认证或强推，结果另行记录。

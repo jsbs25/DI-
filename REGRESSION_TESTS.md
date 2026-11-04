@@ -23,6 +23,7 @@
 | `npm run test:globe` | React 静态渲染：六种语言的总览标题/标签、Crawler 菜单翻译键、三个原有指标值、三列网格/逻辑边框和波形独立行 | 2026-11-04：30 项通过、0 失败；不运行 effect、WebGL、浏览器输入或 API，不证明实际视觉几何、交互或 RTL 布局。 |
 | `npm run test:universe` | 地球/土星/空选择的遥测静态渲染：关闭按钮名称和类型、天体双语名称、对焦文字、条件地球入口 | 2026-11-04：9 项通过、0 失败；不测试浏览器点击、键盘、读屏或相机行为，原关闭回调未更改。 |
 | `npm run test:motion` | 静态检查全局 CSS 在 `prefers-reduced-motion: reduce` 媒体查询中覆盖元素与伪元素，并缩短动画/过渡、关闭平滑滚动 | 2026-11-04：6 项通过、0 失败；只检查源码规则，不证明浏览器运行时、实体设备或辅助技术行为。 |
+| `npm run test:motion:browser` | Chromium 计算样式回归：模拟系统 reduce 偏好，并在宿主默认为 no-preference 时确认原有动画、过渡及平滑滚动未改变；同时检查静态状态文字仍存在 | 2026-11-04：12 项通过（Chrome for Testing 151.0.7922.34；宿主默认 no-preference）；只加载内嵌 data URL，不启动应用/API 服务。实体设备和辅助技术仍未覆盖；若宿主默认 reduce，不适用的 no-preference 基线项会跳过。 |
 
 ## 本轮生产构建桌面 smoke
 
