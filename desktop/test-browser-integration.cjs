@@ -23,10 +23,11 @@ for (const unsafe of ['javascript:alert(1)', 'file:///etc/passwd', 'data:text/ht
   assert.throws(() => normalizeBrowserUrl(unsafe), `unsafe URL should be rejected: ${unsafe}`);
 }
 assert.equal(isAllowedNavigation('javascript:alert(1)'), false);
-let output = '';
-let launcher = null;
-let finished = false;
 
+let activeRun = null;
+let finished = false;
+const activeFixtureResponses = new Set();
+const activeFixtureSockets = new Set();
 const fixtureServer = http.createServer((request, response) => {
   const pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname;
   if (pathname === '/one') {
@@ -47,38 +48,53 @@ const fixtureServer = http.createServer((request, response) => {
     response.end('EARTH ONE local download fixture\n');
     return;
   }
+  if (pathname === '/slow-download') {
+    const totalBytes = 2 * 1024 * 1024;
+    const chunk = Buffer.alloc(64 * 1024, 0x45);
+    let sentBytes = 0;
+    let timer = null;
+    response.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': 'attachment; filename="earth-one-interrupted.txt"',
+      'Content-Length': String(totalBytes)
+    });
+    activeFixtureResponses.add(response);
+    response.on('close', () => {
+      if (timer) clearInterval(timer);
+      activeFixtureResponses.delete(response);
+    });
+    timer = setInterval(() => {
+      if (response.destroyed) {
+        clearInterval(timer);
+        return;
+      }
+      response.write(chunk);
+      sentBytes += chunk.length;
+      if (sentBytes >= totalBytes) {
+        clearInterval(timer);
+        response.end();
+      }
+    }, 250);
+    return;
+  }
   response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
   response.end('Not found');
 });
+fixtureServer.on('connection', socket => {
+  activeFixtureSockets.add(socket);
+  socket.once('close', () => activeFixtureSockets.delete(socket));
+});
 
-function cleanup() {
-  if (launcher && launcher.exitCode === null) launcher.kill('SIGTERM');
-  try { fs.rmSync(downloadDir, { recursive: true, force: true }); } catch {}
-  try { fixtureServer.close(); } catch {}
-}
-
-function finish(code, reason) {
-  if (finished) return;
-  finished = true;
-  clearTimeout(timeout);
-  cleanup();
-  if (reason) console.error(reason);
-  process.exitCode = code;
-}
-
-const timeout = setTimeout(() => {
-  finish(1, `Browser 引擎集成测试超时。输出：\n${output}`);
-}, 45000);
-
-fixtureServer.listen(0, '127.0.0.1', () => {
-  const address = fixtureServer.address();
-  const fixtureUrl = `http://127.0.0.1:${address.port}/one`;
-  launcher = spawn(process.execPath, [path.join(root, 'desktop', 'launcher.cjs')], {
+function launchSmoke(phase) {
+  let output = '';
+  const child = spawn(process.execPath, [path.join(root, 'desktop', 'launcher.cjs')], {
     cwd: root,
+    detached: process.platform !== 'win32',
     env: {
       ...process.env,
       EARTH_ONE_BROWSER_SMOKE_TEST: '1',
-      EARTH_ONE_BROWSER_TEST_URL: fixtureUrl,
+      EARTH_ONE_BROWSER_TEST_PHASE: phase,
+      EARTH_ONE_BROWSER_TEST_URL: `http://127.0.0.1:${fixtureServer.address().port}/one`,
       EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR: downloadDir,
       EARTH_ONE_BROWSER_TEST_PROFILE_DIR: profileDir,
       EARTH_ONE_DATA_FILE: path.join(downloadDir, 'server_data.json'),
@@ -86,22 +102,156 @@ fixtureServer.listen(0, '127.0.0.1', () => {
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
-
-  const consume = stream => stream.on('data', chunk => {
+  child.stdout.on('data', chunk => {
     const text = chunk.toString();
     output += text;
     process.stdout.write(text);
   });
-  consume(launcher.stdout);
-  consume(launcher.stderr);
-
-  launcher.once('error', error => finish(1, `无法启动 Electron 测试：${error.message}`));
-  launcher.once('close', code => {
-    if (finished) return;
-    const passed = code === 0 && output.includes('BROWSER_SMOKE_PASS:');
-    finish(passed ? 0 : 1, passed ? '' : `Browser 引擎集成测试失败 (exit=${code})。输出：\n${output}`);
+  child.stderr.on('data', chunk => {
+    const text = chunk.toString();
+    output += text;
+    process.stderr.write(text);
   });
-});
+  const closed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
+  return {
+    child,
+    closed,
+    getOutput: () => output,
+    async waitForMarker(pattern, timeoutMs) {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const match = output.match(pattern);
+        if (match) return match;
+        const result = await Promise.race([
+          closed.then(close => ({ close })),
+          new Promise(resolve => setTimeout(() => resolve(null), 50))
+        ]);
+        if (result?.close) throw new Error(`Electron smoke 在标记出现前退出 (${JSON.stringify(result.close)}):\n${output}`);
+      }
+      throw new Error(`等待 Electron smoke 标记超时：${pattern}\n${output}`);
+    }
+  };
+}
 
-process.on('SIGINT', () => finish(130, '测试已中止。'));
-process.on('SIGTERM', () => finish(143, '测试已终止。'));
+function signalChildTree(child, signal) {
+  if (!child || child.exitCode !== null) return;
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Fall back to the launcher process if its group is unavailable.
+    }
+  }
+  try { child.kill(signal); } catch {}
+}
+
+function killElectronProcess(pid) {
+  assert.ok(Number.isSafeInteger(pid) && pid > 1 && pid !== process.pid, 'smoke emitted an invalid Electron PID');
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    if (error.code !== 'ESRCH') throw error;
+  }
+}
+
+async function stopRun(run) {
+  if (!run) return;
+  signalChildTree(run.child, 'SIGTERM');
+  const result = await Promise.race([
+    run.closed,
+    new Promise(resolve => setTimeout(() => resolve(null), 8000))
+  ]);
+  if (!result) {
+    signalChildTree(run.child, 'SIGKILL');
+    await Promise.race([run.closed, new Promise(resolve => setTimeout(resolve, 3000))]);
+  }
+}
+
+async function cleanup() {
+  if (activeRun) await stopRun(activeRun);
+  for (const response of activeFixtureResponses) response.destroy();
+  if (fixtureServer.listening) {
+    const closed = new Promise(resolve => fixtureServer.close(() => resolve()));
+    for (const response of activeFixtureResponses) response.destroy();
+    for (const socket of activeFixtureSockets) socket.destroy();
+    if (typeof fixtureServer.closeAllConnections === 'function') fixtureServer.closeAllConnections();
+    await closed;
+  }
+  try { fs.rmSync(downloadDir, { recursive: true, force: true }); } catch {}
+}
+
+async function finish(code, reason) {
+  if (finished) return;
+  finished = true;
+  clearTimeout(timeout);
+  if (reason) console.error(reason);
+  try {
+    await cleanup();
+  } catch (error) {
+    console.error(`清理临时 Electron smoke 资源失败：${error.stack || error}`);
+    code = 1;
+  }
+  if (code === 0) console.log('BROWSER_TEST_DRIVER_CLEANUP_DONE');
+  process.exitCode = code;
+}
+
+const timeout = setTimeout(() => {
+  void finish(1, `Browser 引擎跨进程集成测试超时。`);
+}, 180000);
+
+async function main() {
+  await new Promise((resolve, reject) => {
+    fixtureServer.once('error', reject);
+    fixtureServer.listen(0, '127.0.0.1', resolve);
+  });
+
+  const firstRun = launchSmoke('initial');
+  activeRun = firstRun;
+  const restartMarker = await firstRun.waitForMarker(/BROWSER_SMOKE_RESTART_READY:(\d+)/, 80000);
+  console.log('BROWSER_TEST_DRIVER_FIRST_PROCESS_READY');
+  const electronPid = Number(restartMarker[1]);
+  const storePath = path.join(profileDir, 'earth-one-downloads.json');
+  const persisted = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+  const completedBeforeRestart = persisted.records.find(record => record.filename === 'earth-one-fixture.txt');
+  const interruptedBeforeRestart = persisted.records.find(record => record.filename === 'earth-one-interrupted.txt');
+  assert.ok(completedBeforeRestart, 'first Electron process must persist the completed synthetic download');
+  assert.equal(completedBeforeRestart.state, 'completed');
+  assert.equal(completedBeforeRestart.savePath, path.join(downloadDir, 'earth-one-fixture.txt'));
+  assert.equal(fs.readFileSync(completedBeforeRestart.savePath, 'utf8'), 'EARTH ONE local download fixture\n');
+  assert.ok(interruptedBeforeRestart, 'first Electron process must persist an active synthetic download');
+  assert.equal(interruptedBeforeRestart.state, 'progressing');
+  assert.ok(interruptedBeforeRestart.receivedBytes > 0, 'the interrupted fixture must have real partial progress');
+  assert.equal(interruptedBeforeRestart.savePath, path.join(downloadDir, 'earth-one-interrupted.txt'));
+
+  // Deliberately hard-stop the first Electron main process so the active record is not finalized by dispose().
+  killElectronProcess(electronPid);
+  const firstClose = await Promise.race([
+    firstRun.closed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('first Electron launcher did not exit after its main process was terminated')), 12000))
+  ]);
+  assert.notEqual(firstClose.code, 0, 'the first launcher should report the intentionally terminated Electron process');
+  console.log('BROWSER_TEST_DRIVER_FIRST_PROCESS_EXITED');
+  activeRun = null;
+
+  const secondRun = launchSmoke('restart');
+  activeRun = secondRun;
+  await secondRun.waitForMarker(/BROWSER_SMOKE_PASS:/, 80000);
+  console.log('BROWSER_TEST_DRIVER_RESTART_PHASE_PASSED');
+  const secondClose = await Promise.race([
+    secondRun.closed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('restarted Electron smoke did not exit cleanly')), 12000))
+  ]);
+  assert.equal(secondClose.code, 0, `restarted Electron launcher failed: ${secondRun.getOutput()}`);
+  console.log('BROWSER_TEST_DRIVER_LAUNCHER_EXITED_CLEANLY');
+  activeRun = null;
+}
+
+process.on('SIGINT', () => { void finish(130, '测试已中止。'); });
+process.on('SIGTERM', () => { void finish(143, '测试已终止。'); });
+
+main().then(() => {
+  void finish(0, '');
+}).catch(error => {
+  void finish(1, error && error.stack ? error.stack : String(error));
+});

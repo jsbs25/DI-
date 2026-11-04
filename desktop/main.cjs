@@ -54,7 +54,23 @@ function getSafeSmokeApprovalPath(smokeTest, fixtureUrl, downloadDir) {
     const tempPrefix = tempRoot.endsWith(path.sep) ? tempRoot : `${tempRoot}${path.sep}`;
     if (!realDownloadDir.startsWith(tempPrefix) ||
         !path.basename(realDownloadDir).startsWith('earth-one-browser-smoke-')) return null;
-    return path.join(realDownloadDir, 'earth-one-fixture.txt');
+    const allowedFixtures = new Map([
+      ['earth-one-fixture.txt', '/download'],
+      ['earth-one-interrupted.txt', '/slow-download']
+    ]);
+    return ({ filename, source }) => {
+      const expectedPath = allowedFixtures.get(filename);
+      if (!expectedPath || typeof source !== 'string') return null;
+      try {
+        const sourceUrl = new URL(source);
+        if (sourceUrl.protocol !== 'http:' || sourceUrl.origin !== url.origin || sourceUrl.pathname !== expectedPath) {
+          return null;
+        }
+        return path.join(realDownloadDir, filename);
+      } catch {
+        return null;
+      }
+    };
   } catch {
     return null;
   }
@@ -257,6 +273,63 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     };
 
     await waitForPage('/one', 'EARTH ONE Fixture One');
+
+    if (process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'restart') {
+      const restoredDownloads = browserEngine.getDownloads();
+      const restoredCompleted = restoredDownloads.find(record => record.filename === 'earth-one-fixture.txt');
+      const restoredInterrupted = restoredDownloads.find(record => record.filename === 'earth-one-interrupted.txt');
+      const expectedDownload = path.join(testDownloadDir, 'earth-one-fixture.txt');
+      const expectedInterruptedDownload = path.join(testDownloadDir, 'earth-one-interrupted.txt');
+      if (!restoredCompleted || restoredCompleted.state !== 'completed' || !restoredCompleted.fileAvailable ||
+          restoredCompleted.savePath !== expectedDownload || restoredCompleted.source !== new URL('/download', testUrl).href) {
+        throw new Error('第二个 Electron 进程未恢复完成记录，或没有按真实文件存在状态重新验证文件。');
+      }
+      if (!restoredInterrupted || restoredInterrupted.state !== 'interrupted' ||
+          restoredInterrupted.savePath !== expectedInterruptedDownload ||
+          restoredInterrupted.source !== new URL('/slow-download', testUrl).href) {
+        throw new Error('第二个 Electron 进程未将重启前进行中的下载恢复为“已中断”。');
+      }
+
+      await appContents.executeJavaScript(`document.querySelector('button[aria-label^="打开下载管理器"]').click()`);
+      const panelDeadline = Date.now() + 5000;
+      let panelText = '';
+      while (Date.now() < panelDeadline) {
+        panelText = await appContents.executeJavaScript(
+          `document.querySelector('[data-browser-download-manager]')?.innerText || ''`
+        );
+        if (panelText.includes('earth-one-fixture.txt') && panelText.includes('earth-one-interrupted.txt') &&
+            panelText.includes('已完成') && panelText.includes('已中断')) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      const folderControlVisible = await appContents.executeJavaScript(
+        `Boolean(document.querySelector('button[aria-label="在文件夹中显示 earth-one-fixture.txt"]'))`
+      );
+      if (!panelText.includes('earth-one-fixture.txt') || !panelText.includes('earth-one-interrupted.txt') ||
+          !panelText.includes('已完成') || !panelText.includes('已中断') || !folderControlVisible) {
+        throw new Error('重启后的下载管理器未显示恢复的完成/中断状态，或可用文件控制缺失。');
+      }
+
+      await appContents.executeJavaScript(
+        `document.querySelector('button[aria-label="从列表移除下载 earth-one-fixture.txt"]').click()`
+      );
+      const removalDeadline = Date.now() + 3000;
+      let completedRemoved = false;
+      while (Date.now() < removalDeadline) {
+        completedRemoved = !browserEngine.getDownloads().some(record => record.id === restoredCompleted.id);
+        if (completedRemoved) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      const afterRemoveStore = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'earth-one-downloads.json'), 'utf8'));
+      if (!completedRemoved || afterRemoveStore.records.some(record => record.id === restoredCompleted.id) ||
+          !fs.existsSync(expectedDownload) || fs.readFileSync(expectedDownload, 'utf8') !== 'EARTH ONE local download fixture\n' ||
+          !afterRemoveStore.records.some(record => record.id === restoredInterrupted.id && record.state === 'interrupted')) {
+        throw new Error('跨进程恢复后移除下载记录必须保留文件，并继续保留已中断记录。');
+      }
+      await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭下载管理器"]').click()`);
+      console.log('BROWSER_SMOKE_PASS: completed download recovery across Electron processes, file-presence revalidation, list-only removal preserving the file, and interrupted-download recovery verified.');
+      app.quit();
+      return;
+    }
 
     const invalidNavigation = await appContents.executeJavaScript(
       `window.earthOneBrowser.navigate(${JSON.stringify(testTabId)}, 'javascript:alert(1)')`
@@ -487,24 +560,35 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
         downloadPanelText.includes('synthetic-only') || !folderControlVisible) {
       throw new Error('下载管理器列表未展示记录，或来源查询参数未被隐藏。');
     }
-    await appContents.executeJavaScript(`document.querySelector('button[aria-label="从列表移除下载 earth-one-fixture.txt"]').click()`);
-    const removalDeadline = Date.now() + 3000;
-    let downloadRemoved = false;
-    while (Date.now() < removalDeadline) {
+    const interruptedUrl = new URL('/slow-download?token=synthetic-only', testUrl).href;
+    testContentsForDownload.downloadURL(interruptedUrl);
+    const expectedInterruptedDownload = path.join(testDownloadDir, 'earth-one-interrupted.txt');
+    const interruptedDeadline = Date.now() + 12000;
+    let progressingDownload = null;
+    while (Date.now() < interruptedDeadline) {
       const records = await appContents.executeJavaScript('window.earthOneBrowser.getDownloads()');
-      downloadRemoved = !records.some(record => record.id === completedDownload.id);
-      if (downloadRemoved) break;
+      progressingDownload = records.find(record => record.filename === 'earth-one-interrupted.txt');
+      if (progressingDownload?.state === 'progressing' && progressingDownload.receivedBytes > 0 &&
+          progressingDownload.savePath === expectedInterruptedDownload) break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    const afterRemoveStore = JSON.parse(fs.readFileSync(downloadStorePath, 'utf8'));
-    if (!downloadRemoved || !fs.existsSync(expectedDownload) ||
-        afterRemoveStore.records.some(record => record.id === completedDownload.id)) {
-      throw new Error('从列表移除已完成记录应保留下载文件本身。');
+    if (!progressingDownload || progressingDownload.state !== 'progressing' || progressingDownload.receivedBytes <= 0 ||
+        progressingDownload.savePath !== expectedInterruptedDownload) {
+      throw new Error('未能启动具有实际字节进度的本地合成下载以验证重启中断状态。');
     }
-    await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭下载管理器"]').click()`);
+    const persistedProgressDeadline = Date.now() + 5000;
+    let persistedProgress = false;
+    while (Date.now() < persistedProgressDeadline) {
+      const stored = JSON.parse(fs.readFileSync(downloadStorePath, 'utf8'));
+      persistedProgress = stored.records.some(record => record.id === progressingDownload.id &&
+        record.state === 'progressing' && record.receivedBytes > 0 && record.savePath === expectedInterruptedDownload);
+      if (persistedProgress) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!persistedProgress) throw new Error('进行中的合成下载没有在重启前写入临时 userData 目录。');
 
-    console.log('BROWSER_SMOKE_PASS: Chromium navigation, local-only bookmark/history persistence and clear controls, zero bookmark API requests, Ctrl+L address focus, URL guards, default-deny permissions, visible download progress/completion and list-only removal, and responsive bounds verified.');
-    app.quit();
+    console.log(`BROWSER_SMOKE_RESTART_READY:${process.pid}`);
+    await new Promise(() => {});
   } catch (error) {
     console.error('BROWSER_SMOKE_FAIL:', error && error.stack ? error.stack : error);
     app.exit(1);
@@ -590,7 +674,7 @@ app.whenReady().then(async () => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:downloads-state', downloads, storageStatus);
     },
     downloadStorePath: path.join(app.getPath('userData'), 'earth-one-downloads.json'),
-    getTestApprovalPath: testApprovalPath ? () => testApprovalPath : null
+    getTestApprovalPath: testApprovalPath || null
   });
 
   registerBrowserIpc();
