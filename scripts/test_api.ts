@@ -277,8 +277,11 @@ async function main() {
 
     const countries = await request('/api/globe/countries');
     check(countries.status === 200 && countries.body.success === true && Array.isArray(countries.body.countries), 'Globe country listing returns its collection contract');
+    const jordan = countries.body.countries.find((country: any) => country.code === 'JO');
+    check(jordan?.name === 'Jordan' && typeof jordan.nativeName === 'string' && Number.isFinite(jordan.lat) && Number.isFinite(jordan.lng), 'Globe country catalog preserves Jordan localization and coordinate metadata');
     const globeStats = await request('/api/globe/stats');
     check(globeStats.status === 200 && globeStats.body.success === true && Number.isFinite(globeStats.body.stats?.countriesCount) && Array.isArray(globeStats.body.stats?.countries), 'Globe statistics include numeric totals and country metadata');
+    check(globeStats.body.stats.countriesCount === countries.body.countries.length && globeStats.body.stats.countries.some((country: any) => country.code === 'JO'), 'Globe statistics stay consistent with the country catalog');
     const aiModels = await request('/api/ai/models');
     check(aiModels.status === 200 && aiModels.body.success === true && Array.isArray(aiModels.body.models), 'AI model listing returns metadata without making a model call');
     const aiStats = await request('/api/ai/stats');
