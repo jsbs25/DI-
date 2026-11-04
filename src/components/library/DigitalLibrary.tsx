@@ -52,11 +52,24 @@ interface OnlineLibraryResult {
   sourceName?: string;
   sourceUrl?: string;
   pageTitle?: string;
-  identifier?: string;
   rightsClassification?: string;
   rightsNote?: string;
   licenseUrl?: string;
+  availability?: string;
+  downloadLinks?: string[];
+  identifier?: string;
+  isbn?: string[];
+  doi?: string;
+  metadata?: Record<string, unknown>;
   canImport?: boolean;
+}
+
+interface OnlineSourceStatus {
+  source: string;
+  name: string;
+  status: 'ok' | 'error' | 'disabled';
+  count: number;
+  reason?: string;
 }
 
 function safeHttpsUrl(raw?: string): string | undefined {
@@ -104,6 +117,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
   // ---- Online search ----
   const [onlineResults, setOnlineResults] = useState<OnlineLibraryResult[]>([]);
+  const [onlineSourceStatuses, setOnlineSourceStatuses] = useState<OnlineSourceStatus[]>([]);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
@@ -195,11 +209,13 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     setIsSearchingOnline(true);
     setIngestError(null);
     setOnlineResults([]);
+    setOnlineSourceStatuses([]);
     try {
       const res = await fetch(`/api/library/search?q=${encodeURIComponent(searchQuery.trim())}`);
       const data = await res.json();
       if (data.success && data.results) {
         setOnlineResults(data.results);
+        setOnlineSourceStatuses(Array.isArray(data.sources) ? data.sources : []);
         if (data.results.length === 0) {
           setIngestError('未找到匹配的全球馆藏，请尝试其他书名、作者、ISBN 或 DOI。');
         }
@@ -602,6 +618,19 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           {(onlineResults.length > 0 || isSearchingOnline || ingestError) && (
             <section className="p-5 rounded-2xl bg-slate-900/50 border border-amber-600/30">
               <h3 className="text-sm font-semibold text-amber-300 mb-3">全球检索结果</h3>
+              {onlineSourceStatuses.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {onlineSourceStatuses.map(source => {
+                    const statusLabel = source.status === 'ok' ? `可用 ${source.count}` : source.status === 'disabled' ? '未启用' : '查询失败';
+                    const statusTone = source.status === 'ok' ? 'text-emerald-300 border-emerald-800/70' : source.status === 'disabled' ? 'text-amber-200 border-amber-800/70' : 'text-red-300 border-red-800/70';
+                    return (
+                      <span key={source.source} title={source.reason} className={`max-w-full break-words rounded-md border px-2 py-1 text-[10px] ${statusTone}`}>
+                        {source.name}: {statusLabel}{source.reason && source.status !== 'ok' ? ` · ${source.reason}` : ''}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
               {ingestError && <div className="text-xs text-red-400 mb-3">{ingestError}</div>}
               {isSearchingOnline ? (
                 <div className="text-xs text-slate-400 py-4 text-center">正在查询全球图书馆与开放资源...</div>
@@ -613,10 +642,24 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       openlibrary: 'Open Library',
                       gutenberg: 'Project Gutenberg',
                       googlebooks: 'Google Books',
+                      europeana: 'Europeana',
                       archive: 'Internet Archive',
                       wikisource: 'Wikisource',
                       ar_wikisource: '阿拉伯语维基文库'
                     } as Record<string, string>)[r.source] || r.source;
+                    const resourceType = typeof r.metadata?.resourceType === 'string' ? r.metadata.resourceType : undefined;
+                    const identifierLabel = r.doi ? `DOI ${r.doi}` : r.isbn?.length ? `ISBN ${r.isbn[0]}` : r.identifier ? `ID ${r.identifier}` : undefined;
+                    const availabilityLabel = ({
+                      'official-source-only': '仅官方来源页面',
+                      'licensed-thumbnail-and-official-source': '官方页面；许可缩略图',
+                      'provider-preview': '提供方预览',
+                      'provider-full-view': '提供方页面阅读',
+                      'provider-download': '提供方访问入口',
+                      'metadata-only': '仅元数据',
+                      'access-unknown': '访问状态未知',
+                      'verify-official-opds': '需官方目录核验'
+                    } as Record<string, string>)[r.availability || ''] || '官方来源访问';
+                    const downloadLabel = (r.downloadLinks?.length || 0) > 0 ? `来源链接 ${r.downloadLinks!.length} 个（遵循许可）` : '无已核验下载入口';
                     const rightsLabel = ({
                       PUBLIC_DOMAIN: '公共领域（依来源声明）',
                       OPEN_LICENSE: '开放许可',
@@ -639,6 +682,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                             {r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}
                           </p>
                           <p className="text-[11px] text-slate-400 line-clamp-2 mb-1">{r.description}</p>
+                          {(resourceType || identifierLabel) && <p className="text-[10px] text-slate-500 mb-1">{resourceType ? `类型：${resourceType}` : ''}{resourceType && identifierLabel ? ' · ' : ''}{identifierLabel || ''}</p>}
+                          <p className="text-[10px] text-slate-500 mb-1">访问：{availabilityLabel} · 下载：{downloadLabel}</p>
                           <p className="text-[10px] text-slate-500 mb-2">权利状态：{rightsLabel}{r.rightsNote ? ` · ${r.rightsNote}` : ''}</p>
                           <div className="flex flex-wrap items-center gap-2">
                             {canImport && (

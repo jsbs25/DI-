@@ -19,7 +19,7 @@ export enum RightsCategory {
   UNKNOWN = 'UNKNOWN'
 }
 
-export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'googlebooks' | 'wikisource' | 'ar_wikisource';
+export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'googlebooks' | 'europeana' | 'wikisource' | 'ar_wikisource';
 export type ConnectorStatus = 'ok' | 'error' | 'unsupported';
 
 export interface ExternalLibraryRecord {
@@ -116,6 +116,7 @@ const SOURCE_NAMES: Record<LibrarySource, string> = {
   archive: 'Internet Archive',
   gutenberg: 'Project Gutenberg',
   googlebooks: 'Google Books',
+  europeana: 'Europeana',
   wikisource: 'Wikisource',
   ar_wikisource: 'Arabic Wikisource'
 };
@@ -124,6 +125,7 @@ const SOURCE_CONFIG: Record<LibrarySource, { env: string; website: string; api: 
   archive: { env: 'EARTH_ONE_LIBRARY_ARCHIVE_ENABLED', website: 'https://archive.org', api: 'https://archive.org/advancedsearch.php' },
   gutenberg: { env: 'EARTH_ONE_LIBRARY_GUTENBERG_ENABLED', website: 'https://www.gutenberg.org', api: 'https://www.gutenberg.org/ebooks/search.opds/' },
   googlebooks: { env: 'EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED', website: 'https://books.google.com', api: 'https://www.googleapis.com/books/v1/volumes' },
+  europeana: { env: 'EARTH_ONE_LIBRARY_EUROPEANA_ENABLED', website: 'https://www.europeana.eu', api: 'https://api.europeana.eu/record/v2/search.json' },
   wikisource: { env: 'EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED', website: 'https://zh.wikisource.org', api: 'https://zh.wikisource.org/w/api.php' },
   ar_wikisource: { env: 'EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED', website: 'https://ar.wikisource.org', api: 'https://ar.wikisource.org/w/api.php' }
 };
@@ -148,12 +150,16 @@ function cap(value = 10): number {
 export function isLibraryConnectorEnabled(source: LibrarySource): boolean {
   const configured = process.env[SOURCE_CONFIG[source].env];
   if (source === 'googlebooks' && !process.env.GOOGLE_BOOKS_API_KEY?.trim()) return false;
+  if (source === 'europeana' && !process.env.EUROPEANA_API_KEY?.trim()) return false;
   return !configured || !['false', '0', 'off', 'no', 'disabled'].includes(configured.trim().toLowerCase());
 }
 
 function disabledSourceReason(source: LibrarySource): string {
   if (source === 'googlebooks' && !process.env.GOOGLE_BOOKS_API_KEY?.trim()) {
     return 'Requires a server-side GOOGLE_BOOKS_API_KEY; the connector stays disabled until configured.';
+  }
+  if (source === 'europeana' && !process.env.EUROPEANA_API_KEY?.trim()) {
+    return 'Requires a server-side EUROPEANA_API_KEY; the connector stays disabled until configured.';
   }
   return 'Disabled by environment configuration.';
 }
@@ -193,8 +199,20 @@ async function requestText(source: LibrarySource, url: string, timeoutMs = 10_00
       });
       if (!response.ok) throw new Error(`${SOURCE_NAMES[source]} returned HTTP ${response.status}`);
       const value = await response.text();
-      cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, value });
-      return value;
+      let cacheSafeValue = value;
+      // Europeana may echo the wskey in its JSON response's `apikey` field.
+      // Never retain or return that credential in the shared response cache.
+      if (source === 'europeana') {
+        try {
+          const payload = JSON.parse(value);
+          if (payload && typeof payload === 'object') delete payload.apikey;
+          cacheSafeValue = JSON.stringify(payload);
+        } catch {
+          cacheSafeValue = value.replace(/("apikey"\s*:\s*")[^"]*(")/gi, '$1[redacted]$2');
+        }
+      }
+      cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, value: cacheSafeValue });
+      return cacheSafeValue;
     } finally {
       clearTimeout(timer);
     }
@@ -609,6 +627,258 @@ export class GoogleBooksConnector implements LibraryConnector {
   }
 }
 
+function europeanaTextList(value: unknown, depth = 0): string[] {
+  if (depth > 5 || value == null) return [];
+  if (typeof value === 'string') return value.trim() ? [value.trim()] : [];
+  if (Array.isArray(value)) return value.flatMap(item => europeanaTextList(item, depth + 1));
+  if (typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    const preferred = ['def', 'en', 'value', '@value'].filter(key => key in object);
+    return (preferred.length ? preferred : Object.keys(object)).flatMap(key => europeanaTextList(object[key], depth + 1));
+  }
+  return [];
+}
+
+function europeanaFieldValues(item: any, ...fields: string[]): string[] {
+  const containers = [
+    item,
+    ...(Array.isArray(item?.aggregations) ? item.aggregations : []),
+    ...(Array.isArray(item?.proxies) ? item.proxies : [])
+  ];
+  return [...new Set(containers.flatMap(container => fields.flatMap(field => europeanaTextList(container?.[field]))))];
+}
+
+function normalizeEuropeanaRightsUri(raw: string): string | undefined {
+  try {
+    const url = new URL(raw.trim());
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return undefined;
+    return `${url.hostname.toLowerCase()}${url.pathname.toLowerCase().replace(/\/+$/, '')}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function classifyEuropeanaRights(statements: string[]): RightsCategory {
+  const unique = [...new Set(statements.map(normalizeEuropeanaRightsUri).filter((uri): uri is string => !!uri))];
+  if (unique.length !== 1) return RightsCategory.UNKNOWN;
+  const statement = unique[0];
+  if (/creativecommons\.org\/publicdomain\/(?:mark|zero)\/1\.0$/.test(statement)) return RightsCategory.PUBLIC_DOMAIN;
+  if (/creativecommons\.org\/licenses\/(?:by|by-sa|by-nd|by-nc|by-nc-sa|by-nc-nd)\/\d+(?:\.\d+)?(?:\/[a-z-]+)?$/.test(statement)) {
+    return RightsCategory.OPEN_LICENSE;
+  }
+  if (/rightsstatements\.org\/vocab\/(?:noc-nc|noc-oklr|inc|inc-edu|inc-ow-eu)\/1\.0$/.test(statement)) {
+    return RightsCategory.COPYRIGHT_RESTRICTED;
+  }
+  return RightsCategory.UNKNOWN;
+}
+
+function trustedEuropeanaRightsUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return undefined;
+    const host = url.hostname.toLowerCase();
+    if (host !== 'creativecommons.org' && host !== 'rightsstatements.org') return undefined;
+    url.protocol = 'https:';
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function europeanaAllowsThumbnail(statements: string[]): boolean {
+  const normalized = statements.map(normalizeEuropeanaRightsUri).filter((uri): uri is string => !!uri);
+  if (normalized.length !== 1) return false;
+  return /creativecommons\.org\/publicdomain\/(?:mark|zero)\/1\.0$/.test(normalized[0]) ||
+    /creativecommons\.org\/licenses\/by(?:-sa)?\/\d+(?:\.\d+)?(?:\/[a-z-]+)?$/.test(normalized[0]);
+}
+
+function trustedEuropeanaThumbnail(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' || url.username || url.password) return undefined;
+    if (url.hostname !== 'europeana.eu' && !url.hostname.endsWith('.europeana.eu')) return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function validEuropeanaRecordId(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let candidate = raw.trim().replace(/^europeana:/i, '');
+  if (/^https?:\/\/data\.europeana\.eu\/item\//i.test(candidate)) {
+    try { candidate = new URL(candidate).pathname.replace(/^\/item/, ''); } catch { return undefined; }
+  }
+  const match = candidate.match(/^\/([A-Za-z0-9._~-]{1,80})\/([A-Za-z0-9._~:+@%-]{1,240})$/);
+  if (!match || match[1] === '.' || match[1] === '..' || match[2] === '.' || match[2] === '..' || /%(?:2f|5c)/i.test(match[2])) return undefined;
+  return `/${match[1]}/${match[2]}`;
+}
+
+function europeanaApiPathSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(/%25([0-9a-f]{2})/gi, '%$1');
+}
+
+function mapEuropeanaItem(item: any): ExternalLibraryRecord | undefined {
+  const recordId = validEuropeanaRecordId(typeof item?.id === 'string' ? item.id : typeof item?.about === 'string' ? item.about : undefined);
+  if (!recordId) return undefined;
+
+  const rightsStatements = europeanaFieldValues(item, 'edmRights', 'rights');
+  const rights = classifyEuropeanaRights(rightsStatements);
+  const title = europeanaFieldValues(item, 'title', 'dcTitle')[0] || 'Untitled cultural heritage item';
+  const authors = europeanaFieldValues(item, 'dcCreator', 'creator', 'dcContributor');
+  const description = europeanaFieldValues(item, 'dcDescription', 'description')[0] || '';
+  const rawYear = europeanaFieldValues(item, 'year', 'dcDate')[0] || '';
+  const year = rawYear.match(/(?:^|[^\d])(\d{4})(?:[^\d]|$)/)?.[1];
+  const rawLanguage = europeanaFieldValues(item, 'language', 'dcLanguage')[0] || 'und';
+  const rawPreview = europeanaFieldValues(item, 'edmPreview')[0];
+  const coverImage = europeanaAllowsThumbnail(rightsStatements) ? trustedEuropeanaThumbnail(rawPreview) : undefined;
+  const sourceUrl = `https://www.europeana.eu/item${recordId}`;
+  const statement = rightsStatements[0];
+  const licenseUrl = trustedEuropeanaRightsUrl(statement);
+  const rightsNote = rights === RightsCategory.PUBLIC_DOMAIN
+    ? 'Europeana marks this digital object as public domain. The statement applies to the provider’s object, not only its metadata; verify the source page and local law. Local import and downloads remain disabled.'
+    : rights === RightsCategory.OPEN_LICENSE
+      ? `Europeana reports an item-level open license${statement ? ` (${statement})` : ''}; attribution, non-commercial, share-alike or no-derivatives conditions may apply. Local import and downloads remain disabled.`
+      : rights === RightsCategory.COPYRIGHT_RESTRICTED
+        ? `Europeana reports a rights statement with reuse restrictions${statement ? ` (${statement})` : ''}. Follow the contributing institution’s terms; only the official record link is provided.`
+        : 'No single recognized item-level reuse statement was confirmed. Europeana metadata is CC0, but that does not license this digital object; use the official record and provider page.';
+  const identifiers = europeanaFieldValues(item, 'identifier', 'dcIdentifier');
+  const isbn = europeanaTextList(item?.isbn).map(value => value.replace(/[^0-9Xx]/g, '').toUpperCase()).filter(value => value.length === 10 || value.length === 13);
+  const doi = europeanaTextList(item?.doi).find(value => /^10\.\d{4,9}\//i.test(value));
+  const providerUrl = europeanaFieldValues(item, 'edmIsShownAt')[0];
+  const normalizedProviderUrl = (() => {
+    if (!providerUrl) return undefined;
+    try {
+      const url = new URL(providerUrl);
+      return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : undefined;
+    } catch { return undefined; }
+  })();
+  const providers = europeanaFieldValues(item, 'dataProvider', 'provider');
+  const resourceType = europeanaFieldValues(item, 'type')[0] || 'Cultural heritage';
+
+  return baseRecord('europeana', {
+    id: `europeana:${recordId}`,
+    externalId: recordId,
+    title,
+    author: authors[0] || 'Unknown Creator',
+    authors,
+    language: rawLanguage,
+    year,
+    isbn: [...new Set(isbn)],
+    doi,
+    identifier: identifiers[0],
+    description: description.slice(0, 3000),
+    coverImage,
+    sourceUrl,
+    rights,
+    rightsStatement: statement,
+    licenseUrl,
+    rightsNote,
+    availability: coverImage ? 'licensed-thumbnail-and-official-source' : 'official-source-only',
+    canImport: false,
+    downloadLinks: [],
+    metadata: {
+      resourceType,
+      provider: providers[0],
+      providerUrl: normalizedProviderUrl,
+      rightsStatements: rightsStatements.slice(0, 5),
+      thumbnailAvailable: !!coverImage,
+      fullText: 'unsupported',
+      downloads: 'unsupported'
+    }
+  });
+}
+
+export class EuropeanaConnector implements LibraryConnector {
+  readonly source = 'europeana' as const;
+
+  private apiKey(): string | undefined {
+    return process.env.EUROPEANA_API_KEY?.trim() || undefined;
+  }
+
+  private async requestJson(url: URL): Promise<any> {
+    const key = this.apiKey();
+    if (!key) throw new Error('Europeana requires a server-side EUROPEANA_API_KEY.');
+    url.searchParams.set('wskey', key);
+    const cacheUrl = new URL(url);
+    cacheUrl.searchParams.delete('wskey');
+    const response = JSON.parse(await requestText(this.source, url.toString(), 10_000, cacheUrl.toString()));
+    if (!response || response.success !== true) throw new Error('Europeana API did not confirm a successful request.');
+    return response;
+  }
+
+  async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
+    if (!query.trim()) return ok([]);
+    if (!this.apiKey()) return failed(new Error('Europeana requires a server-side EUROPEANA_API_KEY.'));
+    try {
+      const url = new URL(SOURCE_CONFIG[this.source].api);
+      const authorSearch = query.trim().match(/^author\s*:\s*(.+)$/i);
+      const searchTerm = authorSearch
+        ? `proxy_dc_creator:"${authorSearch[1].replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+        : query.trim();
+      url.searchParams.set('query', searchTerm);
+      url.searchParams.set('rows', String(cap(limit)));
+      const response = await this.requestJson(url);
+      if (!Array.isArray(response.items)) throw new Error('Europeana search response did not contain an items array.');
+      return ok(response.items.slice(0, cap(limit))
+        .map(mapEuropeanaItem)
+        .filter((record: ExternalLibraryRecord | undefined): record is ExternalLibraryRecord => !!record));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  async getBook(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
+    if (!this.apiKey()) return failed(new Error('Europeana requires a server-side EUROPEANA_API_KEY.'));
+    const recordId = validEuropeanaRecordId(locator.record?.externalId || locator.identifier || locator.id);
+    if (!recordId) return failed(new Error('Europeana requires a valid dataset/local record ID.'));
+    try {
+      const [dataset, localId] = recordId.slice(1).split('/');
+      const endpoint = SOURCE_CONFIG[this.source].api.replace(/\/search\.json$/, '');
+      const url = new URL(`${endpoint}/${europeanaApiPathSegment(dataset)}/${europeanaApiPathSegment(localId)}.json`);
+      const response = await this.requestJson(url);
+      const record = mapEuropeanaItem({ ...response.object, id: recordId });
+      return record ? ok(record) : failed(new Error('Europeana record response did not contain a valid item.'));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  getMetadata(locator: BookLocator) { return this.getBook(locator); }
+
+  async getAvailability(locator: BookLocator): Promise<ConnectorResponse<unknown>> {
+    const record = await this.getBook(locator);
+    if (record.status !== 'ok' || !record.data) return propagateFailure<unknown>(record, 'Could not verify the Europeana record.');
+    return ok({
+      rights: record.data.rights,
+      officialUrl: record.data.sourceUrl,
+      thumbnailAvailable: !!record.data.coverImage,
+      reading: 'official-provider-page-only',
+      fullText: 'unsupported',
+      downloads: 'unsupported'
+    });
+  }
+
+  async getFullText(_locator: BookLocator) {
+    return unsupported<FullText>('Europeana discovery does not establish lawful full-text access; open the official record and provider page.');
+  }
+
+  async getDownloadLinks(_locator: BookLocator) {
+    return unsupported<string[]>('Europeana may expose media links with item-specific terms; direct downloads are not enabled by this connector.');
+  }
+
+  getSourceInformation() {
+    return enabledSourceInformation(this.source, [
+      'Uses the official Europeana Search and Record APIs for cultural heritage metadata.',
+      'Requires EUROPEANA_API_KEY on the server; the wskey is removed from the cache key and never returned to clients.',
+      'Europeana metadata CC0 does not license the underlying digital object; rights are mapped from the item-level edm:rights statement.',
+      'Only HTTPS Europeana thumbnails under CC0/Public Domain Mark or CC BY/CC BY-SA are displayed; full-text import and downloads stay disabled.'
+    ], 'api-key');
+  }
+}
+
 export class GutenbergConnector implements LibraryConnector {
   readonly source = 'gutenberg' as const;
 
@@ -906,6 +1176,7 @@ export function createLibraryConnectors(): Record<LibrarySource, LibraryConnecto
     archive: new InternetArchiveConnector(),
     gutenberg: new GutenbergConnector(),
     googlebooks: new GoogleBooksConnector(),
+    europeana: new EuropeanaConnector(),
     wikisource: new WikisourceConnector(),
     ar_wikisource: new ArabicWikisourceConnector()
   };
@@ -943,7 +1214,7 @@ function dedupeByExactIdentifier(records: ExternalLibraryRecord[]): ExternalLibr
 }
 
 export async function searchLibrary(query: string, options: LibrarySearchOptions = {}): Promise<{ results: ExternalLibraryRecord[]; sources: SourceSearchStatus[] }> {
-  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'wikisource', 'ar_wikisource'];
+  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'];
   const limit = cap(options.limit || 10);
   const selected = selectedIds.map(id => getLibraryConnector(id)).filter((connector): connector is LibraryConnector => !!connector);
   const enabled = selected.filter(connector => isLibraryConnectorEnabled(connector.source));

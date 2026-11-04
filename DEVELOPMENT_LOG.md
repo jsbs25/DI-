@@ -67,3 +67,14 @@
 - 权利限制保持 fail-closed：预览/仅元数据/未知状态不会得到下载入口；只在 API 报告当地 public-domain、下载未受限、EPUB/PDF 可用且官方下载 URL 在 Google 主机白名单时返回提供方链接。Google Books 全文复制与本地导入一律不支持，API 入库路由有独立拒绝分支；来源说明区分服务内可见性与再利用许可。
 - 更新 `PROJECT_AUDIT.md`、`TEST_REPORT.md`、`LIBRARY_CONNECTORS.md`，记下官方 API/schema 链接和本阶段验证边界。
 - 验证：`npm run lint`、`npm run test:library-connectors` 通过；隔离 `npm run test:library-api` 为 21/21；`npm run build` 成功。Google Books API key 未配置，未对 Google Books 执行真实网络请求；其他连接器保持既有实现和数据不变。
+
+
+### WORLD LIBRARY Phase 3：Europeana（2026-11-04）
+
+- 基于最新同步的 `main`（`e027c4c`）在原有连接器接口中新增 Europeana；现有来源目录增至七个。`/api/library/search` 默认聚合 Europeana，服务端 source allowlist、前端来源名称和 `.env.example` 同步更新；既有本地目录、书架、阅读器和其他来源未删改。
+- 使用官方 Search API（`/record/v2/search.json`）与 Record API；支持关键词、`author:`→`proxy_dc_creator` 查询、记录详情及书目字段标准化。继续采用每来源节流/缓存和精确 ISBN/DOI 去重，不做模糊标题合并。
+- 新增 `edm:rights` URI 映射：CC0/Public Domain Mark → `PUBLIC_DOMAIN`，已识别 CC 许可 → `OPEN_LICENSE`，已知 InC/NoC 限制声明 → `COPYRIGHT_RESTRICTED`，冲突/未知/CNE → `UNKNOWN`。元数据 CC0 不外推为数字对象许可。只有 PDM/CC0 或 CC BY/CC BY-SA 并且缩略图来自 HTTPS Europeana 域名时返回缩略图；所有结果禁止本地全文导入，不提供直接下载或全文接口。
+- `EUROPEANA_API_KEY` 必须由服务器配置，独立开关为 `EARTH_ONE_LIBRARY_EUROPEANA_ENABLED`。密钥缺失时连接器 fail-closed、注册表显示 disabled、搜索不发请求；官方响应可能回显 `apikey`，实现已在共享缓存前去除该字段，同时从缓存键剔除 `wskey`。服务端 `/api/library/ingest` 显式拒绝 Europeana 导入。
+- 更新 `PROJECT_AUDIT.md`、`TEST_REPORT.md`、`LIBRARY_CONNECTORS.md`，记录官方 API/rights 文档、密钥申请方式与测试限制。无真实 Europeana API key，本轮未执行在线请求；离线 mock 不是在线可用性证明。
+- 验证：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（23/23）、`npm run test:api`（85/85）及 `npm run build` 均通过。生产构建保留既有 Three.js 大 chunk 提示；未运行全站浏览器视觉回归或移动设备测试。
+- 统一搜索卡片同步呈现来源的可用/禁用/失败状态与原因，并展示可用的资源类型、DOI/ISBN、访问和下载状态，避免缺 key 时误呈现为“无搜索结果”；本轮只做类型检查与构建验证，未执行浏览器视觉测试。

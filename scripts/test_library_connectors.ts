@@ -5,6 +5,7 @@ import {
   GutenbergConnector,
   InternetArchiveConnector,
   GoogleBooksConnector,
+  EuropeanaConnector,
   isLibraryConnectorEnabled,
   OpenLibraryConnector,
   RightsCategory,
@@ -59,6 +60,29 @@ const googleUnknownDownload = {
   volumeInfo: { title: 'Unknown download fixture' },
   accessInfo: { country: 'US', viewability: 'ALL_PAGES', accessViewStatus: 'FULL_PUBLIC_DOMAIN', publicDomain: true, epub: { isAvailable: true, downloadLink: 'https://books.google.com/books/download?id=unknown-download-volume&format=epub' } }
 };
+const europeanaItems = [
+  {
+    id: '/12345/pdm-item', title: ['Illuminated Manuscript'], dcCreator: ['A. Scribe'], dcDescription: ['A manuscript fixture.'],
+    year: ['1450'], language: ['eng'], type: 'TEXT', dataProvider: ['Fixture Museum'], isbn: ['9781234567890'],
+    edmPreview: ['https://api.europeana.eu/thumbnail/v2/12345/pdm-item.jpg'], edmIsShownAt: ['https://museum.example.org/item/1'],
+    edmRights: ['http://creativecommons.org/publicdomain/mark/1.0/']
+  },
+  {
+    id: '/12345/cc-by', title: ['Open Print'], dcCreator: ['B. Artist'], year: ['1901'], language: ['fre'], type: 'IMAGE',
+    edmPreview: ['https://api.europeana.eu/thumbnail/v2/12345/cc-by.jpg'], edmRights: ['https://creativecommons.org/licenses/by/4.0/']
+  },
+  {
+    id: '/12345/cc-by-nc', title: ['Non-commercial Photograph'], year: ['1975'],
+    edmPreview: ['https://api.europeana.eu/thumbnail/v2/12345/cc-by-nc.jpg'], edmRights: ['https://creativecommons.org/licenses/by-nc/4.0/']
+  },
+  {
+    id: '/12345/inc', title: ['Protected Archive'], type: 'TEXT',
+    edmPreview: ['https://api.europeana.eu/thumbnail/v2/12345/inc.jpg'], edmRights: ['http://rightsstatements.org/vocab/InC/1.0/']
+  },
+  {
+    id: '/12345/unknown', title: ['Unknown Rights Object'], edmPreview: ['https://images.example.invalid/private.jpg']
+  }
+];
 
 async function testGoogleBooks() {
   const oldGoogleKey = process.env.GOOGLE_BOOKS_API_KEY;
@@ -126,6 +150,113 @@ async function testGoogleBooks() {
   }
 }
 
+async function testEuropeana() {
+  const oldKey = process.env.EUROPEANA_API_KEY;
+  const oldEnabled = process.env.EARTH_ONE_LIBRARY_EUROPEANA_ENABLED;
+  const testKey = 'connector-test-key-not-a-real-secret';
+  process.env.EUROPEANA_API_KEY = testKey;
+  process.env.EARTH_ONE_LIBRARY_EUROPEANA_ENABLED = 'true';
+  clearLibraryConnectorCache();
+  try {
+    const europeana = new EuropeanaConnector();
+    const response = await europeana.search('manuscript', 10);
+    assert.equal(response.status, 'ok');
+    assert.equal(response.data?.length, 5);
+
+    const pdm = response.data?.[0];
+    assert.equal(pdm?.title, 'Illuminated Manuscript');
+    assert.equal(pdm?.author, 'A. Scribe');
+    assert.equal(pdm?.language, 'eng');
+    assert.equal(pdm?.year, '1450');
+    assert.deepEqual(pdm?.isbn, ['9781234567890']);
+    assert.equal(pdm?.rights, RightsCategory.PUBLIC_DOMAIN);
+    assert.equal(pdm?.rightsStatement, 'http://creativecommons.org/publicdomain/mark/1.0/');
+    assert.equal(pdm?.licenseUrl, 'https://creativecommons.org/publicdomain/mark/1.0/');
+    assert.equal(pdm?.sourceUrl, 'https://www.europeana.eu/item/12345/pdm-item');
+    assert.equal(pdm?.sourceName, 'Europeana');
+    assert.equal(pdm?.canImport, false, 'Europeana records are never locally imported');
+    assert.deepEqual(pdm?.downloadLinks, [], 'media downloads are withheld even for public-domain records');
+    assert.equal(pdm?.coverImage, 'https://api.europeana.eu/thumbnail/v2/12345/pdm-item.jpg');
+    assert.equal((pdm?.metadata as any)?.resourceType, 'TEXT');
+    assert.equal((pdm?.metadata as any)?.provider, 'Fixture Museum');
+
+    const ccBy = response.data?.[1];
+    assert.equal(ccBy?.rights, RightsCategory.OPEN_LICENSE);
+    assert.ok(ccBy?.coverImage, 'CC BY thumbnail is allowed from a trusted Europeana host');
+    assert.equal(ccBy?.licenseUrl, 'https://creativecommons.org/licenses/by/4.0/');
+    const nonCommercial = response.data?.[2];
+    assert.equal(nonCommercial?.rights, RightsCategory.OPEN_LICENSE);
+    assert.equal(nonCommercial?.coverImage, undefined, 'non-commercial license is not assumed safe for display');
+    const restricted = response.data?.[3];
+    assert.equal(restricted?.rights, RightsCategory.COPYRIGHT_RESTRICTED);
+    assert.equal(restricted?.coverImage, undefined);
+    const unknown = response.data?.[4];
+    assert.equal(unknown?.rights, RightsCategory.UNKNOWN);
+    assert.equal(unknown?.coverImage, undefined, 'unknown rights and untrusted image URLs fail closed');
+    assert.ok(response.data?.every(record => record.canImport === false && (record.downloadLinks || []).length === 0));
+    assert.equal(JSON.stringify(response.data).includes(testKey), false, 'API key is not returned in normalized search records');
+
+    const searchUrl = new URL(requests.find(url => url.includes('api.europeana.eu/record/v2/search.json'))!);
+    assert.equal(searchUrl.searchParams.get('query'), 'manuscript');
+    assert.equal(searchUrl.searchParams.get('rows'), '10');
+    assert.equal(searchUrl.searchParams.get('wskey'), testKey, 'the key is sent only with the server-side API request');
+
+    assert.equal((await europeana.search('author:Mary Shelley', 3)).status, 'ok');
+    const authorUrl = new URL(requests.filter(url => url.includes('api.europeana.eu/record/v2/search.json')).at(-1)!);
+    assert.equal(authorUrl.searchParams.get('query'), 'proxy_dc_creator:"Mary Shelley"');
+    assert.equal(authorUrl.searchParams.get('rows'), '3');
+
+    const detail = await europeana.getBook({ id: 'europeana:/12345/pdm-item' });
+    assert.equal(detail.status, 'ok');
+    assert.equal(detail.data?.title, 'Record API Manuscript');
+    assert.equal(detail.data?.author, 'Record Detail Scribe');
+    assert.equal(detail.data?.rights, RightsCategory.PUBLIC_DOMAIN, 'Record API aggregation rights are used');
+    assert.equal((await europeana.getMetadata({ identifier: '/12345/pdm-item' })).status, 'ok');
+    const availability = await europeana.getAvailability({ identifier: '/12345/pdm-item' });
+    assert.equal(availability.status, 'ok');
+    assert.equal((availability.data as any)?.fullText, 'unsupported');
+    assertUnsupported(await europeana.getFullText({ identifier: '/12345/pdm-item' }));
+    assertUnsupported(await europeana.getDownloadLinks({ identifier: '/12345/pdm-item' }));
+    assert.equal((await europeana.getBook({ id: '/../unsafe' })).status, 'error', 'invalid record IDs are rejected before requests');
+
+    const duplicate = await searchLibrary('same', { sources: ['openlibrary', 'europeana'], limit: 5 });
+    assert.equal(duplicate.results.length, 1, 'exact ISBN matches are deduplicated across Europeana and existing sources');
+    assert.equal(duplicate.results[0].alternateSources?.[0].source, 'europeana');
+    const europeanaOnly = await searchLibrary('same', { sources: ['europeana'], limit: 5 });
+    assert.equal(europeanaOnly.sources[0].status, 'ok');
+    assert.equal(europeana.getSourceInformation().data?.authentication, 'api-key');
+    assert.equal(JSON.stringify(europeana.getSourceInformation()).includes(testKey), false);
+
+    process.env.EARTH_ONE_LIBRARY_EUROPEANA_ENABLED = 'false';
+    assert.equal(isLibraryConnectorEnabled('europeana'), false, 'Europeana has an independent environment switch');
+  } finally {
+    if (oldKey === undefined) delete process.env.EUROPEANA_API_KEY;
+    else process.env.EUROPEANA_API_KEY = oldKey;
+    if (oldEnabled === undefined) delete process.env.EARTH_ONE_LIBRARY_EUROPEANA_ENABLED;
+    else process.env.EARTH_ONE_LIBRARY_EUROPEANA_ENABLED = oldEnabled;
+  }
+
+  delete process.env.EUROPEANA_API_KEY;
+  process.env.EARTH_ONE_LIBRARY_EUROPEANA_ENABLED = 'true';
+  clearLibraryConnectorCache();
+  try {
+    assert.equal(isLibraryConnectorEnabled('europeana'), false, 'Europeana remains disabled without a server key');
+    const before = requests.length;
+    assert.equal((await new EuropeanaConnector().search('no key', 1)).status, 'error');
+    const disabled = await searchLibrary('no key', { sources: ['europeana'] });
+    assert.equal(disabled.results.length, 0);
+    assert.equal(disabled.sources[0].status, 'disabled');
+    assert.match(disabled.sources[0].reason || '', /EUROPEANA_API_KEY/);
+    assert.equal(requests.length, before, 'no-key searches do not call Europeana');
+  } finally {
+    if (oldKey === undefined) delete process.env.EUROPEANA_API_KEY;
+    else process.env.EUROPEANA_API_KEY = oldKey;
+    if (oldEnabled === undefined) delete process.env.EARTH_ONE_LIBRARY_EUROPEANA_ENABLED;
+    else process.env.EARTH_ONE_LIBRARY_EUROPEANA_ENABLED = oldEnabled;
+    clearLibraryConnectorCache();
+  }
+}
+
 function archiveDoc(query: string) {
   if (query.includes('same')) return [{ identifier: 'item-same', title: 'Same Book — Archive Edition', isbn: [sameIsbn], rights: '', restricted: false, format: ['DjVuTXT'] }];
   if (query.includes('open')) return [{ identifier: 'item-open', title: 'Open Rights', rights: 'CC BY 4.0', restricted: false, format: ['DjVuTXT'] }];
@@ -155,6 +286,25 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
     const q = url.searchParams.get('q') || '';
     const items = q.startsWith('isbn:') ? [googlePublicDomain] : [googlePublicDomain, googlePreview, googleNoPages];
     return json({ totalItems: items.length, items });
+  }
+  if (url.hostname === 'api.europeana.eu' && url.pathname === '/record/v2/search.json') {
+    const query = url.searchParams.get('query') || '';
+    const sameBook = {
+      id: '/12345/same-isbn', title: ['Same Book in Europeana'], isbn: [sameIsbn],
+      edmRights: ['http://creativecommons.org/publicdomain/zero/1.0/']
+    };
+    return json({ success: true, apikey: 'fixture-key-echo-must-not-leak', items: query === 'same' ? [sameBook] : europeanaItems });
+  }
+  if (url.hostname === 'api.europeana.eu' && url.pathname === '/record/v2/12345/pdm-item.json') {
+    return json({
+      success: true,
+      apikey: 'fixture-key-echo-must-not-leak',
+      object: {
+        about: '/12345/pdm-item', title: ['Record API Manuscript'], language: ['eng'], year: ['1450'], type: 'TEXT',
+        proxies: [{ dcCreator: ['Record Detail Scribe'] }],
+        aggregations: [{ edmRights: ['http://creativecommons.org/publicdomain/mark/1.0/'], edmPreview: ['https://api.europeana.eu/thumbnail/v2/12345/pdm-item.jpg'] }]
+      }
+    });
   }
 
   if (url.hostname === 'archive.org' && url.pathname === '/advancedsearch.php') {
@@ -209,6 +359,7 @@ async function main() {
   assertUnsupported(await openLibrary.getFullText({ id: '/works/OL1W' }));
   assertUnsupported(await openLibrary.getDownloadLinks({}));
   await testGoogleBooks();
+  await testEuropeana();
 
   const gutenberg = new GutenbergConnector();
     const gutenbergResults = await gutenberg.search('alice');
@@ -270,7 +421,7 @@ async function main() {
   if (oldToggle === undefined) delete process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED;
   else process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED = oldToggle;
 
-  for (const id of ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'wikisource', 'ar_wikisource'] as const) {
+  for (const id of ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'] as const) {
     assert.ok(getLibraryConnector(id));
   }
   console.log('library connector offline tests: PASS');

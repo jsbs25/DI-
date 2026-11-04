@@ -50,10 +50,10 @@
 
 ### 本轮未覆盖
 
-此前 Phase 1/2 未验证 Google Books；该连接器已在下方 Phase 3 完成离线/API 回归，但仍因缺少密钥而未做在线 smoke。全项目全量 API/浏览器/实体移动设备回归、Open Library 借阅可用性（适配器明确返回 unsupported）、Europeana/学术数据库/阿拉伯语专项数字馆藏与跨设备真实用户书架尚未覆盖；也未通过 IA 借阅接口尝试借阅或下载受限制内容。限量实时检查仅证明当时对应官方搜索端点可返回记录，不保证外部服务长期可用。
+此前 Phase 1/2 未验证 Google Books；该连接器已在下方 Phase 3 完成离线/API 回归，但仍因缺少密钥而未做在线 smoke。Europeana 本阶段已通过离线/API 回归，但因未配置密钥没有在线 smoke。全项目全量浏览器/实体移动设备回归、Open Library 借阅可用性（适配器明确返回 unsupported）、学术数据库/阿拉伯语专项数字馆藏与跨设备真实用户书架尚未覆盖；也未通过 IA 借阅接口尝试借阅或下载受限制内容。限量实时检查仅证明当时对应官方搜索端点可返回记录，不保证外部服务长期可用。
 
 
-UI 补充：搜索结果/详情显示来源权利说明，并仅对有效 HTTPS 许可地址提供链接；导入动作仅在 `canImport === true` 时出现，服务端另行复核。`npm run lint` 与 `npm run build` 覆盖编译；本轮没有新增浏览器视觉/交互断言，故不将该 UI 标记为浏览器验收通过。
+UI 补充：搜索结果显示逐源状态/禁用原因、资源类型、DOI/ISBN、阅读/下载状态和 rights note；仅对有效 HTTPS 许可地址提供链接，导入动作仅在 `canImport === true` 时出现，服务端另行复核。`npm run lint` 与 `npm run build` 覆盖编译；本轮没有新增浏览器视觉/交互断言，故不将该 UI 标记为浏览器验收通过。
 
 
 ## WORLD LIBRARY Phase 3：Google Books 回归（2026-11-04）
@@ -67,3 +67,16 @@ UI 补充：搜索结果/详情显示来源权利说明，并仅对有效 HTTPS 
 | Google Books 在线 API | ⏸️ 未执行：本环境未配置 `GOOGLE_BOOKS_API_KEY`。不把 mock 回归描述成真实 API 连通性证明。 |
 
 配置完成后可另行运行带密钥的限量只读 smoke。当前无实时请求、无正式用户数据写入；Google Books 文本仍留在官方阅读器，测试没有下载任何书籍正文。旧测试报告中的 20 项为此前阶段的基线，本阶段新增隔离 API 回归计数为 21 项。
+
+## WORLD LIBRARY Phase 3：Europeana 回归（2026-11-04）
+
+| 测试 | 结果 |
+|---|---|
+| `npm run lint` | ✅ TypeScript 全项目检查通过。 |
+| `npm run test:library-connectors` | ✅ 离线 mock 通过；覆盖搜索与 `author:` 字段、Search/Record API 字段映射、PDM/CC0、CC BY、CC BY-NC、InC、未知/冲突 rights、缩略图域名与许可门控、详情、明确 unsupported 的全文/下载、ISBN 去重、无 key 不发请求；外部请求全部被拦截。 |
+| `npm run test:library-api` | ✅ 23 项通过、0 失败；临时存储下验证七源目录、Europeana 缺 key 时 disabled、搜索不发外部请求和导入返回 503。 |
+| `npm run test:api` | ✅ 85 项通过、0 失败。 |
+| `npm run build` | ✅ Vite 生产构建成功；既有 Three.js 大 chunk 提示仍存在。 |
+| Europeana 在线 API | ⏸️ 未执行：没有配置 `EUROPEANA_API_KEY`。官方接口资料与离线 fixtures 已核验，但不把 mock 结果描述为在线连通证明。 |
+
+Europeana 当前仅可在服务器配置真实 API key 后启用；本地无密钥时 fail-closed。未进行新增浏览器视觉/交互或移动端测试；未修改正式用户数据，也未下载或复制任何 Europeana 图片/全文。

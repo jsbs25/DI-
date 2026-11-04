@@ -119,7 +119,7 @@
 
 ### 实际范围与明确边界
 
-此前阶段完成实现简报的 Phase 1、Phase 2 核心（Open Library、Internet Archive、Project Gutenberg）及 Phase 6 初步统一搜索；本轮新增独立交付 Phase 3 Google Books 连接器。此进度仍**不代表**整个 WORLD LIBRARY 简报或最终验收已完成。Europeana、OpenAlex、Crossref、arXiv、PubMed Central、DOAB、Waqfeya/Shamela/Qatar Digital Library 等尚未接入；作者/ISBN/DOI 专用搜索、语言/年份/分类筛选、完整借阅可用性、资源管理后台、跨设备书架、移动端实测和完整 AI 阅读引用仍未完成。
+此前阶段完成实现简报的 Phase 1、Phase 2 核心（Open Library、Internet Archive、Project Gutenberg）及 Phase 6 初步统一搜索，并完成 Phase 3 的 Google Books 与 Europeana 连接器。此进度仍**不代表**整个 WORLD LIBRARY 简报或最终验收已完成。OpenAlex、Crossref、arXiv、PubMed Central、DOAB、Waqfeya/Shamela/Qatar Digital Library 等尚未接入；作者/ISBN/DOI 专用筛选、语言/年份/分类筛选、完整借阅可用性、资源管理后台、跨设备书架、移动端实测和完整 AI 阅读引用仍未完成。
 
 Internet Archive 只在记录具备被识别为公共领域/开放许可的权利依据且存在 OCR 文本文件时允许本地文本导入；借阅状态并未被推断，也不绕过 DRM、借阅或登录限制。Project Gutenberg 的公共领域状态按其美国来源声明展示，并提示阅读地区适用法律可能不同。Open Library 与 Wikisource 的权利状态不被猜测为“公版”。
 
@@ -138,4 +138,12 @@ Internet Archive 只在记录具备被识别为公共领域/开放许可的权�
 
 Google Books 搜索将 ISBN 查询映射为 `isbn:`，将 `author:` 映射为官方 `inauthor:`；标准化结果保留书目、官方链接及访问状态。`accessInfo.publicDomain` 仅用于描述 Google 按返回访问地区报告的状态，并附地区差异/再利用许可提醒；`PARTIAL` 映射为预览、`NO_PAGES` 映射为仅元数据，其他未明状态保持未知。只有明确报告公共领域、API 明确报告下载 `restricted=false`、格式可用且官方下载链接主机符合 Google 白名单时才提供外部 EPUB/PDF 链接。Google Books 全文、本地导入始终不支持，服务端入库端点再次硬拒绝。
 
-验证：`npm run lint`（TypeScript）通过；`npm run test:library-connectors` 通过（mock 离线覆盖书目、ISBN/作者搜索、地区状态、下载链接、无密钥不发请求）；`npm run test:library-api` 为 21 项通过、0 失败（临时存储）并覆盖 Google Books 导入拒绝；`npm run build` 成功（既有 Three.js 大 chunk 提示仍在）。本轮未配置 Google Books API key，因此未对 Google 在线 API 发起实时搜索；此前阶段对另外三个实际连通源的限量 live smoke 结果不等同于本轮 Google Books 在线验证。实施仍不是完整 WORLD LIBRARY 验收，Europeana、学术库、阿拉伯语专项馆藏、筛选、后台与全设备 UI 验收仍待后续阶段。
+Google Books 阶段当时的验证记录：`npm run lint`、连接器 mock、隔离图书馆 API 21 项和 `npm run build` 通过；当时未配置 Google API key，故未做在线请求。Europeana 已在下方独立阶段接入；更晚的测试数量、密钥状态和验收缺口以其阶段记录为准。学术库、阿拉伯语专项馆藏、筛选、后台与全设备 UI 验收仍待后续阶段。
+
+## WORLD LIBRARY 阶段更新：Europeana（Phase 3，2026-11-04）
+
+在干净且与 `origin/main` 同步的 `e027c4c` 工作树上增量实现，没有清理、覆盖或迁移任何既有图书、书架、阅读进度、批注或阅读器数据。现有连接器注册数增至七个；Europeana 接入原有 `/api/library/connectors` 与 `/api/library/search` 聚合，不替换现有来源。支持多语言关键词和 `author:` 查询；记录详情使用官方 Record API；结果继续按精确 ISBN/DOI 去重，不对相似标题做合并。
+
+版权映射取自 Europeana 每个数字对象的 `edm:rights`，不把 Europeana 元数据的 CC0 误当作对象授权：CC0/Public Domain Mark 映射为 `PUBLIC_DOMAIN`，可识别的 CC 许可映射为 `OPEN_LICENSE`，已知 InC/NoC 限制语句映射为 `COPYRIGHT_RESTRICTED`，冲突、CNE 或未识别语句保持 `UNKNOWN`。只在 PDM/CC0 或 CC BY/CC BY-SA 且缩略图 HTTPS 主机属于 Europeana 时显示缩略图；所有 Europeana 结果 `canImport=false`，全文和直接下载明确 `unsupported`，服务端入库路由另行硬拒绝。
+
+Europeana 需要服务器环境变量 `EUROPEANA_API_KEY`（请求以 `wskey` 发送）；未配置时即使启用开关也报告 `disabled`，无外部请求。API 响应可能回显 `apikey`，已在缓存前移除；密钥不进入响应或缓存键。当前未提供真实密钥，因此没有进行 Europeana 在线 smoke，离线 mock 通过不代表已验证服务端实际连通性。统一搜索卡片增加逐源状态/禁用原因、资源类型、DOI/ISBN、访问与下载状态；本阶段未进行浏览器视觉验收。验证通过：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（23/23）、`npm run test:api`（85/85）与 `npm run build`；生产构建仍显示原有 Three.js 大 chunk 提示。全球学术库、移动端/浏览器 UI、个人书架跨设备同步和最终 WORLD LIBRARY 验收仍未完成。

@@ -10,6 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const ALLOWED_FIXED_ENDPOINTS = new Set([
   '/api/library/connectors',
   '/api/library/search?q=valid&source=gutenberg',
+  '/api/library/search?q=valid&source=europeana',
   '/api/library/search?q=&source=gutenberg',
   '/api/library/search?q=valid&source=not-a-real-source',
   '/api/library/books',
@@ -52,7 +53,9 @@ async function main() {
       EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED: 'false',
       EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED: 'false',
       EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_EUROPEANA_ENABLED: 'true',
       GOOGLE_BOOKS_API_KEY: 'api-test-key-not-a-real-secret',
+      EUROPEANA_API_KEY: '',
       GEMINI_API_KEY: '',
       OPENAI_API_KEY: '',
       ANTHROPIC_API_KEY: '',
@@ -133,10 +136,12 @@ async function main() {
     const connectors = await get('/api/library/connectors');
     check(
       connectors.status === 200 && connectors.body.success === true && Array.isArray(connectors.body.sources) &&
-      connectors.body.sources.length === 6 && connectors.body.sources.filter((source: any) => source.enabled).length === 2 &&
+      connectors.body.sources.length === 7 && connectors.body.sources.filter((source: any) => source.enabled).length === 2 &&
       connectors.body.sources.find((source: any) => source.name === 'Open Library')?.enabled === true &&
       connectors.body.sources.find((source: any) => source.name === 'Google Books')?.authentication === 'api-key' &&
-      connectors.body.sources.find((source: any) => source.name === 'Google Books')?.enabled === true,
+      connectors.body.sources.find((source: any) => source.name === 'Google Books')?.enabled === true &&
+      connectors.body.sources.find((source: any) => source.name === 'Europeana')?.authentication === 'api-key' &&
+      connectors.body.sources.find((source: any) => source.name === 'Europeana')?.enabled === false,
       'Connector registry reports all sources and honors per-source environment flags'
     );
     const disabledSearch = await get('/api/library/search?q=valid&source=gutenberg');
@@ -144,6 +149,13 @@ async function main() {
       disabledSearch.status === 200 && disabledSearch.body.success === true && disabledSearch.body.results.length === 0 &&
       disabledSearch.body.sources.length === 1 && disabledSearch.body.sources[0].status === 'disabled',
       'Unified search returns a clear disabled status without calling external services'
+    );
+    const europeanaSearch = await get('/api/library/search?q=valid&source=europeana');
+    check(
+      europeanaSearch.status === 200 && europeanaSearch.body.success === true && europeanaSearch.body.results.length === 0 &&
+      europeanaSearch.body.sources.length === 1 && europeanaSearch.body.sources[0].status === 'disabled' &&
+      /EUROPEANA_API_KEY/.test(europeanaSearch.body.sources[0].reason || ''),
+      'Europeana stays fail-closed with a clear missing-key status and no provider request'
     );
     const blankSearch = await get('/api/library/search?q=&source=gutenberg');
     check(blankSearch.status === 400 && blankSearch.body.success === false, 'Blank global search is rejected');
@@ -153,6 +165,8 @@ async function main() {
     check(metadataOnlyImport.status === 403 && metadataOnlyImport.body.success === false, 'Metadata-only Open Library records cannot be imported as full text');
     const googleBooksImport = await post('/api/library/ingest', { source: 'googlebooks', externalId: 'sample-volume' });
     check(googleBooksImport.status === 403 && googleBooksImport.body.success === false, 'Google Books previews and protected text cannot be imported locally');
+    const europeanaImport = await post('/api/library/ingest', { source: 'europeana', externalId: '/12345/record' });
+    check(europeanaImport.status === 503 && europeanaImport.body.success === false, 'Europeana import is disabled when its server API key is missing');
     const disabledImport = await post('/api/library/ingest', { source: 'gutenberg', externalId: '11' });
     check(disabledImport.status === 503 && disabledImport.body.success === false, 'Disabled sources cannot be used for full-text import');
 
