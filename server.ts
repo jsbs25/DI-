@@ -7,7 +7,7 @@ import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
-import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
+import { EpubArchiveError, fetchAllowedEpubResponse, getAuthorizedEpubSource, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
 import { fetchAndExtract, searchGitHubRepositories, searchWeb } from './server/webFetcher.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
@@ -716,21 +716,22 @@ app.post('/api/library/ingest', async (req, res) => {
   }
 });
 
-// EPUB proxy: download an EPUB from a legal source and stream it back
-// (same-origin) so the browser epub.js reader is not blocked by CORS.
+// EPUB proxy: only serve a URL stored on a locally ingested, explicitly reusable
+// book record. The client identifies the book; it never authorizes a raw URL.
 app.get('/api/library/epub-proxy', async (req, res) => {
-  const { url } = req.query;
-  if (!url || typeof url !== 'string') {
-    return res.status(400).json({ success: false, error: 'url required' });
+  const { bookId } = req.query;
+  if (!bookId || typeof bookId !== 'string' || bookId.length > 160) {
+    return res.status(400).json({ success: false, code: 'EPUB_BOOK_REQUIRED', error: 'A stored bookId is required' });
   }
-  // Restrict transport to known library hosts; item-level rights are a separate check.
-  let parsedUrl: URL;
-  try { parsedUrl = new URL(url); } catch { return res.status(400).json({ success: false, error: 'Invalid URL' }); }
-  if (parsedUrl.protocol !== 'https:' || parsedUrl.username || parsedUrl.password) {
-    return res.status(403).json({ success: false, error: 'Only credential-free HTTPS EPUB sources are allowed' });
+  const book = store.books.find(item => item.id === bookId);
+  if (!book) return res.status(404).json({ success: false, code: 'EPUB_BOOK_NOT_FOUND', error: 'Book not found' });
+  const parsedUrl = getAuthorizedEpubSource(book);
+  if (!parsedUrl) {
+    return res.status(403).json({ success: false, code: 'EPUB_RIGHTS_UNVERIFIED', error: 'This book has no EPUB that is bound to a supported source and explicitly reusable rights record.' });
   }
   try {
-    const upstream = await fetchAllowedEpubResponse(parsedUrl);
+    const providerHosts = book.connectorId === 'gutenberg' ? ['gutenberg.org'] : ['archive.org'];
+    const upstream = await fetchAllowedEpubResponse(parsedUrl, fetch, 5, providerHosts);
     if (!upstream.ok || !upstream.body) {
       return res.status(502).json({ success: false, error: `Upstream ${upstream.status}` });
     }

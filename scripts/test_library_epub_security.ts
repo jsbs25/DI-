@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, MAX_EPUB_PROXY_BYTES, readBoundedEpubArchive } from '../server/libraryEpubSecurity.ts';
+import { EpubArchiveError, fetchAllowedEpubResponse, getAuthorizedEpubSource, isSyntacticallyValidEpubCfi, MAX_EPUB_PROXY_BYTES, readBoundedEpubArchive } from '../server/libraryEpubSecurity.ts';
 
 const fixturePath = new URL('./fixtures/synthetic-world-library.epub', import.meta.url);
 const syntheticEpub = fs.readFileSync(fixturePath);
@@ -66,10 +66,23 @@ const trustedRedirectCalls: string[] = [];
 const redirectedResponse = await fetchAllowedEpubResponse(new URL('https://www.gutenberg.org/fixture.epub'), async (input, init) => {
   assert.equal(init?.redirect, 'manual');
   trustedRedirectCalls.push(String(input));
-  if (trustedRedirectCalls.length === 1) return new Response(null, { status: 302, headers: { location: 'https://ia800.archive.org/fixture.epub' } });
+  if (trustedRedirectCalls.length === 1) return new Response(null, { status: 302, headers: { location: 'https://mirror.gutenberg.org/fixture.epub' } });
   return new Response(Uint8Array.from(syntheticEpub));
-});
-check(redirectedResponse.ok && trustedRedirectCalls.length === 2, 'A bounded HTTPS redirect between approved public-library hosts remains supported');
+}, 5, ['gutenberg.org']);
+check(redirectedResponse.ok && trustedRedirectCalls.length === 2, 'A bounded HTTPS redirect within the authorized provider domain remains supported');
+
+let crossProviderRedirectCalls = 0;
+try {
+  await fetchAllowedEpubResponse(new URL('https://www.gutenberg.org/fixture.epub'), async () => {
+    crossProviderRedirectCalls += 1;
+    return new Response(null, { status: 302, headers: { location: 'https://ia800.archive.org/other-book.epub' } });
+  }, 5, ['gutenberg.org']);
+  assert.fail('Expected a redirect outside the recorded provider domain to be blocked');
+} catch (error) {
+  assert.ok(error instanceof EpubArchiveError);
+  assert.equal(error.code, 'EPUB_REDIRECT_BLOCKED');
+}
+check(crossProviderRedirectCalls === 1, 'A verified book cannot redirect its proxy to a different approved provider');
 
 check(isSyntacticallyValidEpubCfi('epubcfi(/6/4[chapter01]!/4/2/18:5)'), 'A CFI emitted by the existing EPUB reader remains valid');
 check(isSyntacticallyValidEpubCfi('epubcfi(/6/4[chapter:part]!/4/2/18:5)'), 'A colon inside a CFI ID assertion is not mistaken for an invalid character offset');
@@ -78,5 +91,39 @@ check(!isSyntacticallyValidEpubCfi('epubcfi(malformed)'), 'A wrapped but unparsa
 check(!isSyntacticallyValidEpubCfi('epubcfi(/6/4!/4/2:NaN)'), 'A non-numeric CFI character offset is rejected');
 check(!isSyntacticallyValidEpubCfi(`epubcfi(/6/4!${'/2'.repeat(1100)})`), 'Oversized CFI input is rejected');
 check(isSyntacticallyValidEpubCfi('epubcfi(/6/999[foreign-edition]!/4/2/18:5)'), 'A foreign-edition CFI can be syntactically valid; the validator intentionally does not claim to bind it to a book');
+
+const approvedGutenbergBook = {
+  id: 'gutenberg_11',
+  source: 'Project Gutenberg',
+  connectorId: 'gutenberg',
+  externalId: '11',
+  epubUrl: 'https://www.gutenberg.org/ebooks/11.epub.images',
+  rightsClassification: 'PUBLIC_DOMAIN',
+  rightsNote: 'Project Gutenberg reports public-domain status in its U.S. source jurisdiction.'
+};
+check(
+  getAuthorizedEpubSource(approvedGutenbergBook)?.href === approvedGutenbergBook.epubUrl,
+  'A stored Gutenberg EPUB URL is available only with an explicit reusable-rights classification and source evidence'
+);
+check(
+  getAuthorizedEpubSource({ ...approvedGutenbergBook, rightsClassification: 'UNKNOWN' }) === null,
+  'A book with unknown rights cannot authorize EPUB proxy access'
+);
+check(
+  getAuthorizedEpubSource({ ...approvedGutenbergBook, rightsClassification: undefined, copyrightStatus: 'public_domain' } as any) === null,
+  'An editable legacy copyright label alone cannot authorize EPUB proxy access'
+);
+check(
+  getAuthorizedEpubSource({ ...approvedGutenbergBook, connectorId: 'archive', source: 'Internet Archive' }) === null,
+  'An EPUB URL from a different provider host cannot be borrowed by an Archive record'
+);
+check(
+  getAuthorizedEpubSource({ ...approvedGutenbergBook, epubUrl: 'https://openlibrary.org/private.epub' }) === null,
+  'A stored EPUB URL must match the approved host for its recorded connector'
+);
+check(
+  getAuthorizedEpubSource({ ...approvedGutenbergBook, rightsNote: '' }) === null,
+  'Missing item-level rights evidence fails closed'
+);
 
 console.log(`Library EPUB security regression: ${passed} assertions passed (synthetic fixture only; no network, real EPUB, or user data).`);

@@ -17,12 +17,22 @@ interface EpubReaderProps {
   onProgress?: (progress: number, cfi: string, bookId: string, ownerId?: string) => void;
 }
 
+function getSafeSourceUrl(value?: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' && !url.username && !url.password) return url.href;
+  } catch { /* Show no source link when the stored URL is malformed. */ }
+  return null;
+}
+
 /**
  * EPUB reader built on epub.js. Loads the EPUB through the backend proxy
  * (same-origin) to avoid CORS, renders into a viewport with page turn,
  * table-of-contents, and fullscreen support.
  */
 export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCfi, ownerId, onProgress }) => {
+  const officialSourceUrl = getSafeSourceUrl(book.externalReadUrl) || getSafeSourceUrl(book.sourceUrl);
   const viewerRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -105,12 +115,21 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
         setLoading(false);
         return;
       }
+      const supportedProvider =
+        (book.connectorId === 'gutenberg' && book.source === 'Project Gutenberg') ||
+        (book.connectorId === 'archive' && book.source === 'Internet Archive');
+      const reusableRightsVerified = ['PUBLIC_DOMAIN', 'OPEN_LICENSE'].includes(book.rightsClassification || '') && !!book.rightsNote?.trim();
+      if (!supportedProvider || !reusableRightsVerified) {
+        setError('此 EPUB 的来源或可复用权利尚未核验，已禁止通过本地代理阅读。请改用官方来源页面。');
+        setLoading(false);
+        return;
+      }
 
       try {
         // Dynamically import epub.js (ESM)
         const ePub = (await import('epubjs')).default;
 
-        const proxyUrl = `/api/library/epub-proxy?url=${encodeURIComponent(book.epubUrl)}`;
+        const proxyUrl = `/api/library/epub-proxy?bookId=${encodeURIComponent(book.id)}`;
         const bookObj = ePub(proxyUrl);
         const rend = bookObj.renderTo(viewerRef.current!, {
           width: '100%',
@@ -268,6 +287,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
           {error && (
             <div role="alert" className="text-red-500 text-sm p-4 text-center">
               {error}
+              {officialSourceUrl && (
+                <a href={officialSourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-10 items-center justify-center rounded-lg border border-red-300/20 px-4 text-red-300 underline underline-offset-4">
+                  前往官方来源页面
+                </a>
+              )}
             </div>
           )}
           <div

@@ -14,24 +14,56 @@ export class EpubArchiveError extends Error {
 const ALLOWED_EPUB_HOSTS = ['gutenberg.org', 'archive.org', 'openlibrary.org'];
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-function validateEpubSource(value: URL): URL {
+export interface EpubBookSource {
+  id: string;
+  source: string;
+  connectorId?: string;
+  externalId?: string;
+  epubUrl?: string;
+  rightsClassification?: string;
+  rightsNote?: string;
+}
+
+function validateEpubSource(value: URL, allowedHosts: string[] = ALLOWED_EPUB_HOSTS): URL {
   const host = value.hostname.toLowerCase();
   const allowed = value.protocol === 'https:' && (!value.port || value.port === '443') && !value.username && !value.password &&
-    ALLOWED_EPUB_HOSTS.some(domain => host === domain || host.endsWith(`.${domain}`));
+    allowedHosts.some(domain => host === domain || host.endsWith(`.${domain}`));
   if (!allowed) throw new EpubArchiveError('EPUB_SOURCE_NOT_ALLOWED', 'Only credential-free HTTPS URLs on approved library hosts are allowed');
   return value;
+}
+
+/** Return only a stored EPUB URL backed by an explicitly reusable connector record. */
+export function getAuthorizedEpubSource(book: EpubBookSource | undefined): URL | null {
+  if (!book || !book.id || !book.externalId?.trim() || !book.epubUrl || !book.rightsNote?.trim()) return null;
+  if (!['PUBLIC_DOMAIN', 'OPEN_LICENSE'].includes(book.rightsClassification || '')) return null;
+
+  const supportedProvider =
+    (book.connectorId === 'gutenberg' && book.source === 'Project Gutenberg') ||
+    (book.connectorId === 'archive' && book.source === 'Internet Archive');
+  if (!supportedProvider) return null;
+
+  try {
+    const url = validateEpubSource(new URL(book.epubUrl));
+    const host = url.hostname.toLowerCase();
+    const hostMatchesProvider = book.connectorId === 'gutenberg'
+      ? host === 'gutenberg.org' || host.endsWith('.gutenberg.org')
+      : host === 'archive.org' || host.endsWith('.archive.org');
+    return hostMatchesProvider ? url : null;
+  }
+  catch { return null; }
 }
 
 /** Fetch only from approved library hosts and validate every redirect hop. */
 export async function fetchAllowedEpubResponse(
   source: URL,
   fetcher: typeof fetch = fetch,
-  maxRedirects = 5
+  maxRedirects = 5,
+  allowedHosts: string[] = ALLOWED_EPUB_HOSTS
 ): Promise<Response> {
   if (!Number.isSafeInteger(maxRedirects) || maxRedirects < 0 || maxRedirects > 10) {
     throw new RangeError('EPUB redirect limit must be an integer between 0 and 10');
   }
-  let current = validateEpubSource(source);
+  let current = validateEpubSource(source, allowedHosts);
   const visited = new Set<string>();
   for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
     if (visited.has(current.href)) throw new EpubArchiveError('EPUB_REDIRECT_BLOCKED', 'EPUB source returned a redirect loop');
@@ -49,7 +81,7 @@ export async function fetchAllowedEpubResponse(
     let next: URL;
     try { next = new URL(location, current); }
     catch { throw new EpubArchiveError('EPUB_REDIRECT_BLOCKED', 'EPUB source returned an invalid redirect target'); }
-    try { current = validateEpubSource(next); }
+    try { current = validateEpubSource(next, allowedHosts); }
     catch { throw new EpubArchiveError('EPUB_REDIRECT_BLOCKED', 'EPUB source redirected to a non-approved URL'); }
   }
   throw new EpubArchiveError('EPUB_REDIRECT_BLOCKED', 'EPUB source exceeded the safe redirect limit');

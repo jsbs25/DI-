@@ -22,7 +22,9 @@ const ALLOWED_FIXED_ENDPOINTS = new Set([
   '/api/library/books?category=philosophy',
   '/api/library/books?category=not-a-real-category',
   '/api/library/books?search=Plato',
-  '/api/library/books/not-a-real-book'
+  '/api/library/books/not-a-real-book',
+  '/api/library/epub-proxy?url=https%3A%2F%2Fwww.gutenberg.org%2Febooks%2F11.epub.images',
+  '/api/library/epub-proxy?bookId=not-a-real-book'
 ]);
 const ALLOWED_BOOK_DETAILS = new Set(['book_republic']);
 const ALLOWED_POST_ENDPOINTS = new Set(['/api/library/ingest', '/api/library/shelf', '/api/auth/register']);
@@ -321,6 +323,16 @@ async function main() {
       repeatedDetailResponse.status === detail.status &&
       JSON.stringify(repeatedDetailResponse.body) === JSON.stringify(detail.body),
       'Repeated known-book detail GET returns an identical status and JSON response'
+    );
+    const rawEpubUrlRequest = await get('/api/library/epub-proxy?url=https%3A%2F%2Fwww.gutenberg.org%2Febooks%2F11.epub.images');
+    check(
+      rawEpubUrlRequest.status === 400 && rawEpubUrlRequest.body.code === 'EPUB_BOOK_REQUIRED',
+      'The legacy raw-URL EPUB proxy request no longer authorizes arbitrary downloads'
+    );
+    const unknownEpubBookRequest = await get('/api/library/epub-proxy?bookId=not-a-real-book');
+    check(
+      unknownEpubBookRequest.status === 404 && unknownEpubBookRequest.body.code === 'EPUB_BOOK_NOT_FOUND',
+      'An unknown book ID is rejected before any upstream EPUB request'
     );
 
     const testRunId = Date.now();
