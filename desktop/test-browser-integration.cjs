@@ -10,6 +10,8 @@ const { isAllowedNavigation, normalizeBrowserUrl } = require('./browser-engine.c
 
 const root = path.resolve(__dirname, '..');
 const downloadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'earth-one-browser-smoke-'));
+const profileDir = path.join(downloadDir, 'electron-profile');
+fs.mkdirSync(profileDir, { recursive: true });
 assert.equal(normalizeBrowserUrl('example.com'), 'https://example.com/');
 assert.equal(normalizeBrowserUrl('localhost:3000'), 'https://localhost:3000/');
 assert.equal(normalizeBrowserUrl('devbox:3000'), 'https://devbox:3000/');
@@ -78,6 +80,8 @@ fixtureServer.listen(0, '127.0.0.1', () => {
       EARTH_ONE_BROWSER_SMOKE_TEST: '1',
       EARTH_ONE_BROWSER_TEST_URL: fixtureUrl,
       EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR: downloadDir,
+      EARTH_ONE_BROWSER_TEST_PROFILE_DIR: profileDir,
+      EARTH_ONE_DATA_FILE: path.join(downloadDir, 'server_data.json'),
       EARTH_ONE_SKIP_BOOK_HARVEST: 'true'
     },
     stdio: ['ignore', 'pipe', 'pipe']

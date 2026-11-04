@@ -44,6 +44,7 @@ function createBrowserEngine({
   WebContentsView,
   browserSession,
   onState = () => {},
+  onFocusAddressBar = () => {},
   onDownload = null,
   onDownloadComplete = () => {}
 }) {
@@ -72,14 +73,16 @@ function createBrowserEngine({
       url: contents.getURL() || entry.lastUrl || '',
       title: contents.getTitle() || entry.lastTitle || '',
       loading: contents.isLoading(),
+      navigated: false,
       canGoBack,
       canGoForward
     };
   }
 
-  function publish(tabId, entry) {
+  function publish(tabId, entry, navigated = false) {
     if (disposed || entry.view.webContents.isDestroyed()) return;
     const state = snapshot(tabId, entry);
+    state.navigated = navigated;
     if (state.url) entry.lastUrl = state.url;
     if (state.title) entry.lastTitle = state.title;
     onState(state);
@@ -102,18 +105,25 @@ function createBrowserEngine({
     contents.on('will-navigate', validateNavigation);
     contents.on('will-redirect', validateNavigation);
     contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    contents.on('before-input-event', (event, input) => {
+      const key = String(input.key || '').toLowerCase();
+      if (input.type !== 'keyDown' || key !== 'l' || !(input.control || input.meta)) return;
+      event.preventDefault();
+      if (!window.isDestroyed()) window.webContents.focus();
+      onFocusAddressBar(tabId);
+    });
 
     for (const eventName of [
       'did-start-loading',
       'did-stop-loading',
-      'did-navigate',
-      'did-navigate-in-page',
       'page-title-updated',
       'did-fail-load',
       'render-process-gone'
     ]) {
       contents.on(eventName, () => publish(tabId, entry));
     }
+    contents.on('did-navigate', () => publish(tabId, entry, true));
+    contents.on('did-navigate-in-page', () => publish(tabId, entry, true));
   }
 
   function createTab(tabId) {

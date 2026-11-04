@@ -1,19 +1,36 @@
 'use strict';
 
+const fs = require('node:fs');
+const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 const { app, BrowserWindow, WebContentsView, ipcMain, session } = require('electron');
-const { createBrowserEngine } = require('./browser-engine.cjs');
+const { createBrowserEngine, isAllowedNavigation } = require('./browser-engine.cjs');
 
 app.setName('EARTH ONE');
+if (process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1' && process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR) {
+  const profileDir = process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR;
+  app.setPath('userData', profileDir);
+  app.setPath('sessionData', path.join(profileDir, 'session-data'));
+}
 
 let mainWindow = null;
 let browserEngine = null;
 let appOrigin = null;
 let testDownloadDir = null;
+let browserBookmarkApiRequests = 0;
+let localBrowserDataReadOnly = false;
+let localBrowserDataWriteQueue = Promise.resolve();
+
+const MAX_LOCAL_BOOKMARKS = 200;
+const MAX_LOCAL_HISTORY = 500;
+const MAX_LOCAL_BROWSER_DATA_BYTES = 2 * 1024 * 1024;
 
 function assertTrustedAppSender(event) {
   if (!mainWindow || event.sender !== mainWindow.webContents || !event.senderFrame) {
     throw new Error('拒绝来自非 EARTH ONE 界面的浏览器控制请求。');
+  }
+  if (event.senderFrame.top !== event.senderFrame) {
+    throw new Error('拒绝来自嵌入式框架的浏览器控制请求。');
   }
   let senderOrigin;
   try {
@@ -26,8 +43,115 @@ function assertTrustedAppSender(event) {
   }
 }
 
+function getLocalBrowserDataPath() {
+  return path.join(app.getPath('userData'), 'earth-one-browser-data.json');
+}
+
+function sanitizeLocalBookmark(value) {
+  if (!value || typeof value !== 'object') return null;
+  const { id, title, url, category } = value;
+  if (typeof id !== 'string' || id.length > 128 || typeof title !== 'string' || title.length > 300 ||
+      typeof category !== 'string' || category.length > 100 || !isAllowedNavigation(url)) return null;
+  return { id, title, url, category };
+}
+
+function sanitizeLocalHistoryItem(value) {
+  if (!value || typeof value !== 'object') return null;
+  const { id, tabId, title, url, visitedAt } = value;
+  if (typeof id !== 'string' || id.length > 160 || typeof tabId !== 'string' || tabId.length > 80 ||
+      typeof title !== 'string' || title.length > 300 || typeof visitedAt !== 'string' ||
+      !Number.isFinite(Date.parse(visitedAt)) || !isAllowedNavigation(url)) return null;
+  return { id, tabId, title, url, visitedAt };
+}
+
+function normalizeLocalBrowserData(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.bookmarks) || !Array.isArray(value.history)) {
+    throw new TypeError('本机浏览数据格式无效。');
+  }
+  if (value.bookmarks.length > MAX_LOCAL_BOOKMARKS || value.history.length > MAX_LOCAL_HISTORY) {
+    throw new TypeError('本机浏览数据条数超出限制。');
+  }
+  const bookmarks = value.bookmarks.map(sanitizeLocalBookmark);
+  const history = value.history.map(sanitizeLocalHistoryItem);
+  if (bookmarks.some(bookmark => !bookmark) || history.some(item => !item)) {
+    throw new TypeError('本机浏览数据包含无法验证的记录。');
+  }
+  const data = {
+    bookmarks,
+    history
+  };
+  if (Buffer.byteLength(JSON.stringify(data), 'utf8') > MAX_LOCAL_BROWSER_DATA_BYTES) {
+    throw new TypeError('本机浏览数据超出大小限制。');
+  }
+  return data;
+}
+
+async function readLocalBrowserData() {
+  const filePath = getLocalBrowserDataPath();
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (stat.size > MAX_LOCAL_BROWSER_DATA_BYTES) throw new Error('本机浏览数据文件超出大小限制。');
+    const stored = JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
+    if (stored.version !== 1) throw new Error('本机浏览数据版本无法识别。');
+    const data = normalizeLocalBrowserData(stored);
+    localBrowserDataReadOnly = false;
+    return { initialized: true, readOnly: false, ...data };
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      localBrowserDataReadOnly = false;
+      return { initialized: false, readOnly: false, bookmarks: [], history: [] };
+    }
+    localBrowserDataReadOnly = true;
+    return {
+      initialized: true,
+      readOnly: true,
+      bookmarks: [],
+      history: [],
+      warning: '本机浏览数据无法读取；为避免覆盖原文件，当前会话不会写入或清空它。'
+    };
+  }
+}
+
+async function writeLocalBrowserData(value) {
+  if (localBrowserDataReadOnly) return { success: false, error: '本机浏览数据只读，拒绝覆盖。' };
+  let data;
+  try {
+    data = normalizeLocalBrowserData(value);
+  } catch (error) {
+    return { success: false, error: error.message || '本机浏览数据无效。' };
+  }
+  const filePath = getLocalBrowserDataPath();
+  const serialized = JSON.stringify({ version: 1, ...data });
+  const write = localBrowserDataWriteQueue.then(async () => {
+    await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+    const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    let handle;
+    try {
+      handle = await fs.promises.open(temporaryPath, 'wx', 0o600);
+      await handle.writeFile(serialized, 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await fs.promises.rename(temporaryPath, filePath);
+    } catch (error) {
+      if (handle) await handle.close().catch(() => {});
+      await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
+  });
+  localBrowserDataWriteQueue = write.catch(() => {});
+  try {
+    await write;
+    return { success: true };
+  } catch {
+    return { success: false, error: '无法将浏览数据保存到此设备。' };
+  }
+}
+
 function registerBrowserIpc() {
   const handlers = {
+    'browser:get-local-data': () => readLocalBrowserData(),
+    'browser:save-local-data': (_event, data) => writeLocalBrowserData(data),
     'browser:set-active': (_event, active) => browserEngine.setActive(Boolean(active)),
     'browser:set-bounds': (_event, bounds) => browserEngine.setBounds(bounds),
     'browser:select-tab': (_event, tabId, url) => browserEngine.selectTab(tabId, url),
@@ -136,6 +260,120 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     );
     await waitForPage('/one', 'EARTH ONE Fixture One');
 
+    await testContents.executeJavaScript(`document.querySelector('a')?.click()`);
+    await waitForPage('/two', 'EARTH ONE Fixture Two');
+    const readLocalBrowserData = () => appContents.executeJavaScript('window.earthOneBrowser.getLocalData()');
+    const historyDeadline = Date.now() + 5000;
+    let beforeReloadData = null;
+    while (Date.now() < historyDeadline) {
+      beforeReloadData = await readLocalBrowserData();
+      const paths = new Set((beforeReloadData.history || []).map(item => new URL(item.url).pathname));
+      if (paths.has('/one') && paths.has('/two')) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!beforeReloadData?.history?.some(item => new URL(item.url).pathname === '/one') ||
+        !beforeReloadData.history.some(item => new URL(item.url).pathname === '/two')) {
+      throw new Error('本地浏览历史未记录合成页面导航。');
+    }
+    if (browserBookmarkApiRequests !== 0) throw new Error('浏览器启动期间请求了服务端书签 API。');
+
+    await appContents.executeJavaScript(`document.querySelector('button[aria-label="收藏当前页面"]').click()`);
+    const expectedBookmarkUrl = new URL('/two', testUrl).href;
+    const bookmarkDeadline = Date.now() + 3000;
+    let bookmarkSaved = false;
+    while (Date.now() < bookmarkDeadline) {
+      const data = await readLocalBrowserData();
+      bookmarkSaved = Boolean(data.bookmarks?.some(item => item.url === expectedBookmarkUrl));
+      if (bookmarkSaved) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!bookmarkSaved) throw new Error('收藏操作没有写入本机书签。');
+    if (browserBookmarkApiRequests !== 0) throw new Error('收藏操作请求了服务端书签 API。');
+    const expectedProfileRoot = `${path.resolve(process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR || '')}${path.sep}`;
+    const localDataPath = getLocalBrowserDataPath();
+    if (!localDataPath.startsWith(expectedProfileRoot) || !fs.existsSync(localDataPath)) {
+      throw new Error('本机浏览数据没有写入隔离的 Electron 用户数据目录。');
+    }
+    const diskData = JSON.parse(fs.readFileSync(localDataPath, 'utf8'));
+    if (diskData.version !== 1 || !diskData.bookmarks?.some(item => item.url === new URL('/two', testUrl).href)) {
+      throw new Error('本机浏览数据文件没有持久化本次收藏。');
+    }
+
+    testContents.focus();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    testContents.sendInputEvent({ type: 'keyDown', keyCode: 'L', modifiers: ['control'] });
+    testContents.sendInputEvent({ type: 'keyUp', keyCode: 'L', modifiers: ['control'] });
+    const addressBarDeadline = Date.now() + 3000;
+    let addressBarFocused = false;
+    while (Date.now() < addressBarDeadline) {
+      const focusState = await appContents.executeJavaScript(`(() => {
+        const input = document.querySelector('input[aria-label="输入网址或搜索词"]');
+        return input ? {
+          focused: document.activeElement === input,
+          selected: input.selectionStart === 0 && input.selectionEnd === input.value.length,
+          value: input.value
+        } : null;
+      })()`);
+      if (focusState?.focused && focusState.selected && focusState.value === testContents.getURL()) {
+        addressBarFocused = true;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!addressBarFocused) throw new Error('Ctrl+L 未能聚焦 EARTH ONE 地址栏并选中完整网址。');
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('EARTH ONE 页面重载超时。')), 15000);
+      appContents.once('did-finish-load', () => { clearTimeout(timeout); resolve(); });
+      appContents.reload();
+    });
+    const persistenceDeadline = Date.now() + 5000;
+    let persistedData = null;
+    while (Date.now() < persistenceDeadline) {
+      persistedData = await readLocalBrowserData();
+      if (persistedData.bookmarks?.some(item => item.url === new URL('/two', testUrl).href) &&
+          persistedData.history?.some(item => new URL(item.url).pathname === '/one') &&
+          persistedData.history?.some(item => new URL(item.url).pathname === '/two')) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!persistedData?.bookmarks?.some(item => item.url === new URL('/two', testUrl).href) ||
+        !persistedData.history?.some(item => new URL(item.url).pathname === '/one') ||
+        !persistedData.history.some(item => new URL(item.url).pathname === '/two')) {
+      throw new Error('应用页面重载后，本机书签或浏览历史没有保留。');
+    }
+
+    await appContents.executeJavaScript(`window.confirm = () => true;
+      document.querySelector('button[aria-label="打开本地浏览数据"]').click();`);
+    const localDataDialog = await appContents.executeJavaScript(`document.querySelector('[role="dialog"][aria-label="本地浏览数据"]')?.innerText || ''`);
+    if (!localDataDialog.includes('只保存在此设备') || !localDataDialog.includes('清空书签') || !localDataDialog.includes('清空历史')) {
+      throw new Error('本地浏览数据面板缺少隐私说明或可见清除控件。');
+    }
+    await appContents.executeJavaScript(`document.querySelector('button[aria-label="清空本地浏览历史"]').click()`);
+    const historyClearDeadline = Date.now() + 3000;
+    let clearedHistory = null;
+    while (Date.now() < historyClearDeadline) {
+      clearedHistory = await readLocalBrowserData();
+      if (Array.isArray(clearedHistory.history) && clearedHistory.history.length === 0) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!Array.isArray(clearedHistory?.history) || clearedHistory.history.length !== 0 || !clearedHistory.bookmarks?.length) {
+      throw new Error('清空浏览历史未生效，或错误影响了本机书签。');
+    }
+    await appContents.executeJavaScript(`document.querySelector('button[aria-label="清空本地书签"]').click()`);
+    const bookmarksClearDeadline = Date.now() + 3000;
+    let clearedBookmarks = null;
+    while (Date.now() < bookmarksClearDeadline) {
+      clearedBookmarks = await readLocalBrowserData();
+      if (Array.isArray(clearedBookmarks.bookmarks) && clearedBookmarks.bookmarks.length === 0) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (!Array.isArray(clearedBookmarks?.bookmarks) || clearedBookmarks.bookmarks.length !== 0 ||
+        !Array.isArray(clearedBookmarks.history) || clearedBookmarks.history.length !== 0) {
+      throw new Error('清空本机书签未生效，或错误影响了浏览历史。');
+    }
+    if (browserBookmarkApiRequests !== 0) throw new Error('本地记录操作请求了服务端书签 API。');
+    await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭本地浏览数据"]').click()`);
+
     const deniedPermission = await testContents.executeJavaScript(
       `new Promise(resolve => Notification.requestPermission().then(resolve))`
     );
@@ -180,7 +418,7 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     }
     if (!downloadComplete) throw new Error('本地合成下载未通过保存流程。');
 
-    console.log('BROWSER_SMOKE_PASS: Chromium view, address-bar navigation without server preview fetch, back history, URL guards, default-deny permissions, downloads, and responsive bounds verified.');
+    console.log('BROWSER_SMOKE_PASS: Chromium navigation, local-only bookmark/history persistence and clear controls, zero bookmark API requests, Ctrl+L address focus, URL guards, default-deny permissions, downloads, and responsive bounds verified.');
     app.quit();
   } catch (error) {
     console.error('BROWSER_SMOKE_FAIL:', error && error.stack ? error.stack : error);
@@ -195,6 +433,15 @@ app.whenReady().then(async () => {
   testDownloadDir = process.env.EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR || null;
   const targetUrl = new URL(baseUrl);
   appOrigin = targetUrl.origin;
+  if (smokeTest) {
+    session.defaultSession.webRequest.onBeforeRequest(
+      { urls: [`${appOrigin}/api/browser/bookmarks*`] },
+      (_details, callback) => {
+        browserBookmarkApiRequests += 1;
+        callback({});
+      }
+    );
+  }
   if (smokeTest && smokeUrl) {
     targetUrl.searchParams.set('module', 'browser');
     targetUrl.searchParams.set('browserUrl', smokeUrl);
@@ -246,6 +493,9 @@ app.whenReady().then(async () => {
     browserSession,
     onState: state => {
       if (!mainWindow.isDestroyed()) mainWindow.webContents.send('browser:state', state);
+    },
+    onFocusAddressBar: tabId => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:focus-address-bar', tabId);
     },
     onDownload: item => {
       if (smokeTest && testDownloadDir) return path.join(testDownloadDir, 'earth-one-fixture.txt');

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Globe,
   ArrowLeft,
@@ -18,7 +18,9 @@ import {
   BookmarkPlus,
   GitFork,
   Code2,
-  Check
+  Check,
+  Clock3,
+  Trash2
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { BrowserFrame } from './BrowserFrame.tsx';
@@ -74,6 +76,14 @@ interface BookmarkItem {
   category: string;
 }
 
+interface BrowserHistoryItem {
+  id: string;
+  tabId: string;
+  title: string;
+  url: string;
+  visitedAt: string;
+}
+
 interface SavedArticle {
   id: string;
   url: string;
@@ -96,6 +106,50 @@ const DEFAULT_BOOKMARKS: BookmarkItem[] = [
   { id: 'bm_wiki', title: 'Wikipedia Knowledge', url: 'https://en.wikipedia.org/wiki/Earth', category: 'Encyclopedia' },
   { id: 'bm_souju', title: '在线电视剧（souju6）', url: 'https://souju6.ai/', category: '视频娱乐' }
 ];
+
+const LOCAL_BOOKMARKS_KEY = 'earth-one.browser.bookmarks.v1';
+const LOCAL_HISTORY_KEY = 'earth-one.browser.history.v1';
+const MAX_LOCAL_BOOKMARKS = 200;
+const MAX_LOCAL_HISTORY = 500;
+
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 4096) return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function readLocalList<T>(key: string, fallback: T[], validate: (value: unknown) => value is T, limit: number): T[] {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const saved = window.localStorage.getItem(key);
+    if (saved === null) return fallback;
+    const parsed: unknown = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed.filter(validate).slice(0, limit) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function isBookmarkItem(value: unknown): value is BookmarkItem {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<BookmarkItem>;
+  return typeof item.id === 'string' && item.id.length <= 128 &&
+    typeof item.title === 'string' && item.title.length <= 300 &&
+    typeof item.category === 'string' && item.category.length <= 100 && isHttpUrl(item.url);
+}
+
+function isBrowserHistoryItem(value: unknown): value is BrowserHistoryItem {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<BrowserHistoryItem>;
+  return typeof item.id === 'string' && item.id.length <= 160 &&
+    typeof item.tabId === 'string' && item.tabId.length <= 80 &&
+    typeof item.title === 'string' && item.title.length <= 300 &&
+    typeof item.visitedAt === 'string' && Number.isFinite(Date.parse(item.visitedAt)) && isHttpUrl(item.url);
+}
 
 const PRESET_PAGES: Record<string, { title: string; author: string; content: string; readTime: string }> = {
   'https://earthobservatory.nasa.gov': {
@@ -161,6 +215,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const initialPreset = PRESET_PAGES[initialUrl];
   const browserEngine = typeof window === 'undefined' ? undefined : window.earthOneBrowser;
   const nativeViewportRef = useRef<HTMLDivElement | null>(null);
+  const addressBarRef = useRef<HTMLInputElement | null>(null);
 
   // Browser-local language (defaults to global app language; user can override)
   const [browserLang, setBrowserLang] = useState<Language>(lang);
@@ -179,7 +234,16 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [activeTabId, setActiveTabId] = useState('tab_1');
   const [inputUrl, setInputUrl] = useState(initialUrl);
   const [isLoading, setIsLoading] = useState(false);
-  const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(DEFAULT_BOOKMARKS);
+  const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(() =>
+    readLocalList(LOCAL_BOOKMARKS_KEY, DEFAULT_BOOKMARKS, isBookmarkItem, MAX_LOCAL_BOOKMARKS)
+  );
+  const [browserHistory, setBrowserHistory] = useState<BrowserHistoryItem[]>(() =>
+    readLocalList(LOCAL_HISTORY_KEY, [], isBrowserHistoryItem, MAX_LOCAL_HISTORY)
+  );
+  const [isBrowserDataOpen, setIsBrowserDataOpen] = useState(false);
+  const [browserStorageWarning, setBrowserStorageWarning] = useState<string | null>(null);
+  const [browserStorageReady, setBrowserStorageReady] = useState(!browserEngine?.getLocalData);
+  const [browserStorageReadOnly, setBrowserStorageReadOnly] = useState(false);
   const [isSavedDrawerOpen, setIsSavedDrawerOpen] = useState(false);
   const [savedArticles, setSavedArticles] = useState<SavedArticle[]>([]);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
@@ -195,12 +259,65 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
   // Search engine selection
   const [searchEngine, setSearchEngine] = useState<'auto' | 'bing' | 'duckduckgo' | 'wikipedia' | 'github'>('auto');
-  const [workspaceRepos, setWorkspaceRepos] = useState<string[]>([]);
+  const [workspaceRepos, setWorkspaceRepos] = useState<string[]>(() =>
+    bookmarks.filter(bookmark => bookmark.category === 'GitHub / 待审核接入').map(bookmark => bookmark.title)
+  );
 
   // Sync browser language when the global app language changes
   useEffect(() => {
     setBrowserLang(lang);
   }, [lang]);
+
+  useEffect(() => {
+    if (!browserEngine?.getLocalData) {
+      setBrowserStorageReady(true);
+      return;
+    }
+    let cancelled = false;
+    browserEngine.getLocalData().then(data => {
+      if (cancelled) return;
+      const loadedBookmarks = Array.isArray(data.bookmarks) ? data.bookmarks.filter(isBookmarkItem).slice(0, MAX_LOCAL_BOOKMARKS) : [];
+      const loadedHistory = Array.isArray(data.history) ? data.history.filter(isBrowserHistoryItem).slice(0, MAX_LOCAL_HISTORY) : [];
+      setBookmarks(data.initialized ? loadedBookmarks : DEFAULT_BOOKMARKS);
+      setBrowserHistory(previous => {
+        const byId = new Map<string, BrowserHistoryItem>();
+        [...loadedHistory, ...previous].forEach(item => byId.set(item.id, item));
+        return [...byId.values()].sort((a, b) => Date.parse(b.visitedAt) - Date.parse(a.visitedAt)).slice(0, MAX_LOCAL_HISTORY);
+      });
+      setWorkspaceRepos(loadedBookmarks.filter(bookmark => bookmark.category === 'GitHub / 待审核接入').map(bookmark => bookmark.title));
+      setBrowserStorageReadOnly(Boolean(data.readOnly));
+      setBrowserStorageWarning(data.warning || null);
+      setBrowserStorageReady(true);
+    }).catch(() => {
+      if (cancelled) return;
+      setBrowserStorageReadOnly(true);
+      setBrowserStorageWarning('无法读取此设备上的本机浏览数据；为避免误覆盖，当前会话不会写入或清空它。');
+      setBrowserStorageReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [browserEngine]);
+
+  useEffect(() => {
+    if (!browserStorageReady || browserStorageReadOnly) return;
+    if (browserEngine?.saveLocalData) {
+      browserEngine.saveLocalData({ bookmarks, history: browserHistory }).then(result => {
+        if (!result.success) {
+          setBrowserStorageReadOnly(true);
+          setBrowserStorageWarning(result.error || '本机浏览数据无法保存到此设备。');
+        }
+      }).catch(() => {
+        setBrowserStorageReadOnly(true);
+        setBrowserStorageWarning('本机浏览数据无法保存到此设备。');
+      });
+      return;
+    }
+    try {
+      window.localStorage.setItem(LOCAL_BOOKMARKS_KEY, JSON.stringify(bookmarks));
+      window.localStorage.setItem(LOCAL_HISTORY_KEY, JSON.stringify(browserHistory));
+    } catch {
+      setBrowserStorageWarning('本地存储不可用；书签和历史不会同步到服务器，关闭页面后可能无法保留。');
+    }
+  }, [browserEngine, browserStorageReady, browserStorageReadOnly, bookmarks, browserHistory]);
 
   // AI Web Companion State
   const [isAiPanelOpen, setIsAiPanelOpen] = useState(false);
@@ -217,6 +334,33 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   const [browserEngineError, setBrowserEngineError] = useState<string | null>(null);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+
+  const recordBrowserVisit = useCallback((tabId: string, url: string, title: string) => {
+    if (!isHttpUrl(url)) return;
+    const safeTitle = (title || new URL(url).hostname).slice(0, 300);
+    setBrowserHistory(previous => {
+      const latest = previous[0];
+      if (latest?.tabId === tabId && latest.url === url) {
+        return latest.title === safeTitle ? previous : [{ ...latest, title: safeTitle }, ...previous.slice(1)];
+      }
+      return [{
+        id: `visit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        tabId,
+        title: safeTitle,
+        url,
+        visitedAt: new Date().toISOString()
+      }, ...previous].slice(0, MAX_LOCAL_HISTORY);
+    });
+  }, []);
+
+  const updateRecentVisitTitle = useCallback((tabId: string, url: string, title: string) => {
+    if (!title) return;
+    setBrowserHistory(previous => {
+      const latest = previous[0];
+      if (!latest || latest.tabId !== tabId || latest.url !== url || latest.title === title) return previous;
+      return [{ ...latest, title: title.slice(0, 300) }, ...previous.slice(1)];
+    });
+  }, []);
 
   useEffect(() => {
     if (!browserEngine) return;
@@ -240,12 +384,27 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     return browserEngine.onState(state => {
       setBrowserEngineState(state);
       setIsLoading(state.loading);
+      if (state.navigated && state.url) recordBrowserVisit(state.tabId, state.url, state.title);
+      else if (state.url && state.title) updateRecentVisitTitle(state.tabId, state.url, state.title);
       if (state.url) {
         setTabs(previous => previous.map(tab => tab.id === state.tabId
           ? { ...tab, url: state.url, title: state.title || tab.title }
           : tab));
         if (state.tabId === activeTabId) setInputUrl(state.url);
       }
+    });
+  }, [browserEngine, activeTabId, recordBrowserVisit, updateRecentVisitTitle]);
+
+  useEffect(() => {
+    if (!browserEngine && activeTab) recordBrowserVisit(activeTab.id, activeTab.url, activeTab.title);
+  }, [browserEngine, activeTab?.id, activeTab?.url, activeTab?.title, recordBrowserVisit]);
+
+  useEffect(() => {
+    if (!browserEngine) return;
+    return browserEngine.onFocusAddressBar(tabId => {
+      if (tabId !== activeTabId || !addressBarRef.current) return;
+      addressBarRef.current.focus();
+      addressBarRef.current.select();
     });
   }, [browserEngine, activeTabId]);
 
@@ -254,7 +413,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     const syncViewport = () => {
       const element = nativeViewportRef.current;
       const mobileAiOverlay = isAiPanelOpen && window.innerWidth < 768;
-      if (!element || !activeTab || activeTab.readerMode || searchResults.length > 0 || isSearching || isSavedDrawerOpen || mobileAiOverlay) {
+      if (!element || !activeTab || activeTab.readerMode || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || mobileAiOverlay) {
         void browserEngine.setBounds(null);
         return;
       }
@@ -277,7 +436,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       document.removeEventListener('scroll', scheduleSync, true);
       void browserEngine.setBounds(null);
     };
-  }, [browserEngine, activeTabId, activeTab?.readerMode, searchResults.length, isSearching, isSavedDrawerOpen, isAiPanelOpen]);
+  }, [browserEngine, activeTabId, activeTab?.readerMode, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isAiPanelOpen]);
 
   const pushHistory = (tabId: string, url: string) => {
     setHistory(prev => {
@@ -305,15 +464,6 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
   }, [activeTabId]);
 
   useEffect(() => {
-    fetch('/api/browser/bookmarks')
-      .then(r => r.json())
-      .then(d => {
-        if (d.success && d.bookmarks && d.bookmarks.length > 0) {
-          setBookmarks(d.bookmarks);
-        }
-      })
-      .catch(() => {});
-
     fetch('/api/browser/saved-articles')
       .then(r => r.json())
       .then(d => {
@@ -373,6 +523,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     setInputUrl(cleanUrl);
     setSearchResults([]);
     pushHistory(activeTabId, cleanUrl);
+    recordBrowserVisit(activeTabId, cleanUrl, new URL(cleanUrl).hostname);
 
     // Immediately show a loading placeholder in the article view so the user
     // sees clear feedback instead of the previous page's content.
@@ -496,6 +647,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     setHistory(prev => ({ ...prev, [newId]: [newTab.url] }));
     setHistoryIndex(prev => ({ ...prev, [newId]: 0 }));
     setSearchResults([]);
+    recordBrowserVisit(newId, newTab.url, newTab.title);
   };
 
   const goBack = () => {
@@ -535,46 +687,60 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
     }
   };
 
-  const handleAddBookmark = async () => {
-    if (!activeTab) return;
-    try {
-      const res = await fetch('/api/browser/bookmarks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: activeTab.title,
-          url: activeTab.url,
-          category: 'User Bookmarks'
-        })
-      });
-      const data = await res.json();
-      if (data.success && data.bookmark) {
-        setBookmarks(prev => [data.bookmark, ...prev]);
-      }
-    } catch (e) {
-      console.error(e);
+  const handleAddBookmark = () => {
+    if (!browserStorageReady || browserStorageReadOnly || !activeTab || !isHttpUrl(activeTab.url)) return;
+    if (bookmarks.some(bookmark => bookmark.url === activeTab.url)) {
+      setSaveSuccessMessage('此页面已在本机书签中。');
+      window.setTimeout(() => setSaveSuccessMessage(null), 3000);
+      return;
+    }
+    const bookmark: BookmarkItem = {
+      id: `bm_local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      title: activeTab.title || new URL(activeTab.url).hostname,
+      url: activeTab.url,
+      category: '本机书签'
+    };
+    setBookmarks(previous => [bookmark, ...previous].slice(0, MAX_LOCAL_BOOKMARKS));
+    setSaveSuccessMessage('已保存到此设备的本机书签；不会同步到服务器。');
+    window.setTimeout(() => setSaveSuccessMessage(null), 3500);
+  };
+
+  const handleRemoveBookmark = (bookmarkId: string) => {
+    if (!browserStorageReady || browserStorageReadOnly) return;
+    const removed = bookmarks.find(bookmark => bookmark.id === bookmarkId);
+    setBookmarks(previous => previous.filter(bookmark => bookmark.id !== bookmarkId));
+    if (removed?.category === 'GitHub / 待审核接入') {
+      setWorkspaceRepos(previous => previous.filter(repository => repository !== removed.title));
     }
   };
 
-  const handleAddGitHubToWorkspace = async (result: typeof searchResults[number]) => {
-    if (!result.repository || workspaceRepos.includes(result.repository)) return;
-    try {
-      const res = await fetch('/api/browser/bookmarks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: result.repository, url: result.url, category: 'GitHub / 待审核接入' })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setWorkspaceRepos(prev => [...prev, result.repository as string]);
-        setBookmarks(prev => [data.bookmark, ...prev.filter(item => item.url !== result.url)]);
-        setSaveSuccessMessage('已加入工作区候选。请先检查许可证、依赖和安全性，再决定是否接入。');
-        setTimeout(() => setSaveSuccessMessage(null), 4500);
-      }
-    } catch {
-      setSaveSuccessMessage('加入工作区失败，请稍后重试。');
-      setTimeout(() => setSaveSuccessMessage(null), 3500);
-    }
+  const handleClearLocalBookmarks = () => {
+    if (!browserStorageReady || browserStorageReadOnly || !bookmarks.length || !window.confirm('确定清空此设备上的全部浏览器书签吗？此操作不可撤销。')) return;
+    setBookmarks([]);
+    setWorkspaceRepos([]);
+    setSaveSuccessMessage('本机书签已清空；浏览历史未受影响。');
+    window.setTimeout(() => setSaveSuccessMessage(null), 3500);
+  };
+
+  const handleClearLocalHistory = () => {
+    if (!browserStorageReady || browserStorageReadOnly || !browserHistory.length || !window.confirm('确定清空此设备上的全部浏览历史吗？此操作不可撤销。')) return;
+    setBrowserHistory([]);
+    setSaveSuccessMessage('本机浏览历史已清空；书签未受影响。');
+    window.setTimeout(() => setSaveSuccessMessage(null), 3500);
+  };
+
+  const handleAddGitHubToWorkspace = (result: typeof searchResults[number]) => {
+    if (!browserStorageReady || browserStorageReadOnly || !result.repository || !isHttpUrl(result.url) || workspaceRepos.includes(result.repository)) return;
+    const bookmark: BookmarkItem = {
+      id: `bm_local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      title: result.repository,
+      url: result.url,
+      category: 'GitHub / 待审核接入'
+    };
+    setWorkspaceRepos(previous => [...previous, result.repository as string]);
+    setBookmarks(previous => [bookmark, ...previous.filter(item => item.url !== result.url)].slice(0, MAX_LOCAL_BOOKMARKS));
+    setSaveSuccessMessage('已保存为本机工作区候选书签。请检查许可证、依赖和安全性后再决定是否接入。');
+    setTimeout(() => setSaveSuccessMessage(null), 4500);
   };
 
   const targetLanguageName: Record<Language, string> = {
@@ -736,6 +902,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
         >
           <Shield className="w-3.5 h-3.5 text-emerald-400 mr-2 shrink-0" />
           <input
+            ref={addressBarRef}
             type="text"
             value={inputUrl}
             onChange={e => setInputUrl(e.target.value)}
@@ -811,11 +978,23 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
 
           <button
             onClick={handleAddBookmark}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.035] text-amber-300 transition hover:bg-white/[0.08]"
+            disabled={!browserStorageReady || browserStorageReadOnly}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.035] text-amber-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="收藏当前页面"
             title="Bookmark this page"
           >
             <Star className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={() => setIsBrowserDataOpen(true)}
+            disabled={!browserStorageReady}
+            aria-label="打开本地浏览数据"
+            title="本机书签与浏览历史"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
+          >
+            <Clock3 className="h-3.5 w-3.5 text-cyan-300" />
+            <span>本地记录 ({browserHistory.length})</span>
           </button>
 
           <button
@@ -888,6 +1067,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
         <div role="status" className="flex items-center gap-2 border-b border-emerald-300/15 bg-emerald-950/50 px-4 py-2 text-xs text-emerald-100">
           <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{saveSuccessMessage}</span>
+        </div>
+      )}
+
+      {browserStorageWarning && (
+        <div role="alert" className="border-b border-amber-300/15 bg-amber-950/40 px-4 py-2 text-xs text-amber-100">
+          {browserStorageWarning}
         </div>
       )}
 
@@ -1184,6 +1369,78 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       </div>
 
       </BrowserFrame>
+
+      {isBrowserDataOpen && (
+        <div className="fixed inset-0 z-[60] flex justify-end bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="本地浏览数据">
+          <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[#08111a] p-5 shadow-2xl sm:p-6">
+            <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
+              <div>
+                <div className="flex items-center gap-2 text-cyan-200">
+                  <Clock3 className="h-5 w-5" />
+                  <h2 className="text-lg font-semibold text-white">本地书签与浏览历史</h2>
+                </div>
+                <p className="mt-2 max-w-lg text-xs leading-relaxed text-slate-400">
+                  书签与历史只保存在此设备的浏览器本地存储，不会向服务器同步。清除后无法恢复；已归档文章是独立功能，仍使用现有归档服务。
+                </p>
+              </div>
+              <button onClick={() => setIsBrowserDataOpen(false)} aria-label="关闭本地浏览数据" className="shrink-0 rounded-lg p-2 text-slate-400 hover:bg-white/[0.06] hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto py-5">
+              <section aria-labelledby="local-bookmarks-heading">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 id="local-bookmarks-heading" className="text-sm font-semibold text-slate-100">书签 ({bookmarks.length})</h3>
+                  <button onClick={handleClearLocalBookmarks} disabled={!browserStorageReady || browserStorageReadOnly || !bookmarks.length} aria-label="清空本地书签" className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/15 px-3 py-2 text-xs text-rose-200 transition hover:bg-rose-300/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
+                    <Trash2 className="h-3.5 w-3.5" />清空书签
+                  </button>
+                </div>
+                {bookmarks.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-xs text-slate-500">暂无本地书签。浏览网页时点击星形按钮即可保存。</p>
+                ) : (
+                  <div className="space-y-2">
+                    {bookmarks.map(bookmark => (
+                      <div key={bookmark.id} className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3">
+                        <button onClick={() => { setIsBrowserDataOpen(false); handleNavigate(bookmark.url); }} className="min-w-0 flex-1 text-left">
+                          <span className="block truncate text-sm font-medium text-slate-100">{bookmark.title}</span>
+                          <span className="mt-1 block truncate text-[11px] text-slate-500">{bookmark.url}</span>
+                          <span className="mt-1 block text-[10px] text-cyan-300/70">{bookmark.category}</span>
+                        </button>
+                        <button onClick={() => handleRemoveBookmark(bookmark.id)} disabled={!browserStorageReady || browserStorageReadOnly} aria-label={`删除书签 ${bookmark.title}`} title="删除此书签" className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-rose-300/[0.08] hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section aria-labelledby="local-history-heading">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 id="local-history-heading" className="text-sm font-semibold text-slate-100">浏览历史 ({browserHistory.length})</h3>
+                  <button onClick={handleClearLocalHistory} disabled={!browserStorageReady || browserStorageReadOnly || !browserHistory.length} aria-label="清空本地浏览历史" className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300/15 px-3 py-2 text-xs text-rose-200 transition hover:bg-rose-300/[0.08] disabled:cursor-not-allowed disabled:opacity-40">
+                    <Trash2 className="h-3.5 w-3.5" />清空历史
+                  </button>
+                </div>
+                {browserHistory.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-xs text-slate-500">暂无本地浏览历史。打开网页后会自动记录。</p>
+                ) : (
+                  <div className="space-y-2">
+                    {browserHistory.map(item => (
+                      <button key={item.id} onClick={() => { setIsBrowserDataOpen(false); handleNavigate(item.url); }} className="block w-full rounded-xl border border-white/[0.07] bg-white/[0.025] p-3 text-left transition hover:border-cyan-200/20 hover:bg-white/[0.04]">
+                        <span className="block truncate text-sm font-medium text-slate-100">{item.title}</span>
+                        <span className="mt-1 block truncate text-[11px] text-slate-500">{item.url}</span>
+                        <span className="mt-1 block text-[10px] text-slate-600">{new Date(item.visitedAt).toLocaleString()}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isSavedDrawerOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end">

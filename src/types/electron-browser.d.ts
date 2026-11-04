@@ -6,6 +6,7 @@ declare global {
     url: string;
     title: string;
     loading: boolean;
+    navigated: boolean;
     canGoBack: boolean;
     canGoForward: boolean;
   }
@@ -17,7 +18,32 @@ declare global {
     height: number;
   }
 
+  interface EarthOneLocalBookmark {
+    id: string;
+    title: string;
+    url: string;
+    category: string;
+  }
+
+  interface EarthOneLocalHistoryItem {
+    id: string;
+    tabId: string;
+    title: string;
+    url: string;
+    visitedAt: string;
+  }
+
+  interface EarthOneLocalBrowserData {
+    initialized: boolean;
+    readOnly: boolean;
+    bookmarks: EarthOneLocalBookmark[];
+    history: EarthOneLocalHistoryItem[];
+    warning?: string;
+  }
+
   interface EarthOneBrowserApi {
+    getLocalData(): Promise<EarthOneLocalBrowserData>;
+    saveLocalData(data: { bookmarks: EarthOneLocalBookmark[]; history: EarthOneLocalHistoryItem[] }): Promise<{ success: boolean; error?: string }>;
     setActive(active: boolean): Promise<void>;
     setBounds(bounds: EarthOneBrowserBounds | null): Promise<void>;
     selectTab(tabId: string, url: string): Promise<{ success: boolean; error?: string }>;
@@ -27,6 +53,7 @@ declare global {
     goForward(tabId: string): Promise<void>;
     reload(tabId: string): Promise<void>;
     onState(listener: (state: EarthOneBrowserState) => void): () => void;
+    onFocusAddressBar(listener: (tabId: string) => void): () => void;
   }
 
   interface Window {

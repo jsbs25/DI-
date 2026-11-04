@@ -3,6 +3,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('earthOneBrowser', {
+  getLocalData: () => ipcRenderer.invoke('browser:get-local-data'),
+  saveLocalData: data => ipcRenderer.invoke('browser:save-local-data', data),
   setActive: active => ipcRenderer.invoke('browser:set-active', Boolean(active)),
   setBounds: bounds => ipcRenderer.invoke('browser:set-bounds', bounds),
   selectTab: (tabId, url) => ipcRenderer.invoke('browser:select-tab', tabId, url),
@@ -15,5 +17,10 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
     const wrapped = (_event, state) => listener(state);
     ipcRenderer.on('browser:state', wrapped);
     return () => ipcRenderer.removeListener('browser:state', wrapped);
+  },
+  onFocusAddressBar: listener => {
+    const wrapped = (_event, tabId) => listener(tabId);
+    ipcRenderer.on('browser:focus-address-bar', wrapped);
+    return () => ipcRenderer.removeListener('browser:focus-address-bar', wrapped);
   }
 });
