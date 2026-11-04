@@ -850,27 +850,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             </div>
           )}
 
-          {/* Start Exploring Action Button */}
-          <div className="mt-4 sm:mt-6 flex flex-wrap items-center gap-2 sm:gap-3">
-            <button
-              onClick={onExploreUniverse}
-              className="inline-flex items-center space-x-2 sm:space-x-3 px-4 sm:px-8 py-2.5 sm:py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-xs sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
-            >
-              <span>{t.startExploring}</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
-            </button>
-
-            {onExploreCommunity && (
-              <button
-                onClick={onExploreCommunity}
-                className="inline-flex items-center space-x-2 px-3 sm:px-5 py-2.5 sm:py-3.5 rounded-full bg-slate-900/80 hover:bg-slate-800/90 border border-slate-700/80 text-slate-200 text-xs sm:text-sm font-medium backdrop-blur-md cursor-pointer transition-all hover:text-white"
-              >
-                <Users2 className="w-4 h-4 text-emerald-300" />
-                <span>{t.communityTab}</span>
-              </button>
-            )}
-          </div>
-
           {/* Mobile controls stay in document flow instead of covering the stats. */}
           <div className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden" aria-label={t.globeControls}>
             <button onClick={handleToggleExplore} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={isZoomedIn ? t.zoomOut : t.inspectEarth} title={isZoomedIn ? t.zoomOut : t.inspectEarth}>
