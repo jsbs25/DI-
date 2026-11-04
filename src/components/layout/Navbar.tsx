@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { User, Language } from '../../types/index.ts';
+import React, { useEffect, useState } from 'react';
+import { User, Language, KnowledgeNode, Book, Community, Post } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import {
   Globe,
@@ -25,7 +25,9 @@ import {
   LogOut,
   Layers,
   BookOpen,
-  Search
+  Search,
+  Network,
+  X
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -41,6 +43,42 @@ interface NavbarProps {
   onToggleLocationPrivacy: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  onOpenBook?: (bookId: string) => void;
+  onOpenKnowledge?: (nodeId: string) => void;
+}
+
+function Group({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="px-2 py-1">
+      <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider font-semibold text-slate-500">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function ResultRow({
+  icon,
+  title,
+  subtitle,
+  onClick
+}: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center space-x-2.5 px-2.5 py-2 rounded-xl text-left hover:bg-slate-800/70 transition-colors cursor-pointer"
+    >
+      <span className="shrink-0">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-xs text-slate-200 truncate">{title}</span>
+        {subtitle && <span className="block text-[11px] text-slate-500 truncate">{subtitle}</span>}
+      </span>
+    </button>
+  );
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -53,13 +91,60 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAuth,
   onLogout,
   onOpenOnboarding,
-  onToggleLocationPrivacy
+  onToggleLocationPrivacy,
+  searchQuery,
+  onSearchChange,
+  onOpenBook,
+  onOpenKnowledge
 }) => {
   const t = translations[lang] || translations.zh;
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [ecosystemMenuOpen, setEcosystemMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
+
+  // Global unified search across all modules
+  const [globalResults, setGlobalResults] = useState<{
+    users: User[];
+    posts: Post[];
+    books: Book[];
+    communities: Community[];
+    knowledge: KnowledgeNode[];
+  } | null>(null);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearching, setGlobalSearching] = useState(false);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
+      setGlobalResults(null);
+      setGlobalSearchOpen(false);
+      return;
+    }
+    setGlobalSearchOpen(true);
+    setGlobalSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search/global?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        if (data.success) setGlobalResults(data.results);
+      } catch {
+        setGlobalResults(null);
+      } finally {
+        setGlobalSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const totalResultCount = globalResults
+    ? globalResults.users.length + globalResults.posts.length + globalResults.books.length + globalResults.communities.length + globalResults.knowledge.length
+    : 0;
+
+  const closeGlobalSearch = () => {
+    setGlobalSearchOpen(false);
+    onSearchChange('');
+  };
 
   const languages: { code: Language; label: string; flag: string }[] = [
     { code: 'zh', label: '中文 (CN)', flag: '🇨🇳' },
@@ -95,6 +180,106 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {t.brandTagline}
               </span>
             </div>
+          </div>
+
+          {/* 1.5 Global Unified Search */}
+          <div className="hidden md:block relative flex-1 max-w-sm">
+            <div className="flex items-center bg-slate-900/70 border border-slate-700/60 rounded-full px-3.5 py-1.5 focus-within:border-amber-500/60 transition-colors">
+              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <input
+                value={searchQuery}
+                onChange={e => onSearchChange(e.target.value)}
+                onFocus={() => searchQuery.trim() && setGlobalSearchOpen(true)}
+                placeholder={t.globalSearch}
+                className="flex-1 bg-transparent outline-none text-xs text-slate-100 placeholder:text-slate-500 ml-2"
+              />
+              {searchQuery && (
+                <button onClick={closeGlobalSearch} className="text-slate-500 hover:text-slate-300 cursor-pointer">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Dropdown */}
+            {globalSearchOpen && (
+              <div className="absolute left-0 right-0 mt-2 rounded-2xl bg-slate-950/98 border border-slate-800 shadow-2xl py-2 z-50 backdrop-blur-xl animate-in fade-in max-h-[70vh] overflow-y-auto">
+                {globalSearching && (
+                  <div className="px-4 py-3 text-xs text-slate-500">正在全局搜索...</div>
+                )}
+                {!globalSearching && globalResults && totalResultCount === 0 && (
+                  <div className="px-4 py-3 text-xs text-slate-500">{t.noResults}</div>
+                )}
+                {!globalSearching && globalResults && totalResultCount > 0 && (
+                  <>
+                    {globalResults.knowledge.length > 0 && (
+                      <Group label={t.knowledgeTab}>
+                        {globalResults.knowledge.map(n => (
+                          <ResultRow
+                            key={n.id}
+                            icon={<Network className="w-3.5 h-3.5 text-amber-400" />}
+                            title={n.title}
+                            subtitle={n.titleEn}
+                            onClick={() => { onOpenKnowledge?.(n.id); closeGlobalSearch(); }}
+                          />
+                        ))}
+                      </Group>
+                    )}
+                    {globalResults.books.length > 0 && (
+                      <Group label={t.digitalLibrary}>
+                        {globalResults.books.map(b => (
+                          <ResultRow
+                            key={b.id}
+                            icon={<BookOpen className="w-3.5 h-3.5 text-amber-400" />}
+                            title={b.title}
+                            subtitle={b.author}
+                            onClick={() => { onOpenBook?.(b.id); closeGlobalSearch(); }}
+                          />
+                        ))}
+                      </Group>
+                    )}
+                    {globalResults.users.length > 0 && (
+                      <Group label={t.globalMessenger}>
+                        {globalResults.users.map(u => (
+                          <ResultRow
+                            key={u.id}
+                            icon={<UserIcon className="w-3.5 h-3.5 text-cyan-400" />}
+                            title={u.displayName}
+                            subtitle={u.location?.countryName}
+                            onClick={() => { onSelectTab('feed'); closeGlobalSearch(); }}
+                          />
+                        ))}
+                      </Group>
+                    )}
+                    {globalResults.communities.length > 0 && (
+                      <Group label={t.communityTab}>
+                        {globalResults.communities.map(c => (
+                          <ResultRow
+                            key={c.id}
+                            icon={<Users2 className="w-3.5 h-3.5 text-emerald-400" />}
+                            title={c.name}
+                            subtitle={c.description}
+                            onClick={() => { onSelectTab('community'); closeGlobalSearch(); }}
+                          />
+                        ))}
+                      </Group>
+                    )}
+                    {globalResults.posts.length > 0 && (
+                      <Group label={t.feedTab}>
+                        {globalResults.posts.map(p => (
+                          <ResultRow
+                            key={p.id}
+                            icon={<Compass className="w-3.5 h-3.5 text-blue-400" />}
+                            title={p.content.slice(0, 60)}
+                            subtitle={p.author?.displayName}
+                            onClick={() => { onSelectTab('feed'); closeGlobalSearch(); }}
+                          />
+                        ))}
+                      </Group>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 2. Center Navigation Capsule (Identical to User Reference Design) */}
@@ -195,6 +380,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                   >
                     <BookOpen className="w-3.5 h-3.5 text-amber-400" />
                     <span>{t.digitalLibrary}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      onSelectTab('knowledge');
+                      setEcosystemMenuOpen(false);
+                    }}
+                    className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800/70"
+                  >
+                    <Network className="w-3.5 h-3.5 text-amber-300" />
+                    <span>{t.knowledgeTab}</span>
                   </button>
                   <button
                     onClick={() => {

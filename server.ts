@@ -6,6 +6,13 @@ import { store } from './server/store.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { fetchAndExtract, searchWeb, searchBooks, searchWikisource, fetchBookFullText, fetchWikisourceFullText } from './server/webFetcher.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
+import {
+  searchKnowledge,
+  getAllKnowledgeNodes,
+  getKnowledgeNode,
+  getRelatedNodes,
+  getKnowledgeNodeByCountry
+} from './server/knowledgeGraph.ts';
 
 dotenv.config();
 
@@ -740,6 +747,79 @@ app.post('/api/ads/:id/click', (req, res) => {
   const ad = store.ads.find(a => a.id === req.params.id);
   if (ad) ad.clicks += 1;
   res.json({ success: true });
+});
+
+// -------------------------------------------------------------
+// 8b. KNOWLEDGE UNIVERSE (knowledge graph)
+// -------------------------------------------------------------
+app.get('/api/knowledge/search', (req, res) => {
+  const { q, category } = req.query;
+  let nodes = searchKnowledge(typeof q === 'string' ? q : '', 20);
+  if (category && typeof category === 'string' && category !== 'all') {
+    nodes = nodes.filter(n => n.type === category);
+  }
+  res.json({ success: true, query: q || '', nodes });
+});
+
+app.get('/api/knowledge/nodes', (req, res) => {
+  const { category, country } = req.query;
+  let nodes = getAllKnowledgeNodes();
+  if (category && typeof category === 'string' && category !== 'all') {
+    nodes = nodes.filter(n => n.type === category);
+  }
+  if (country && typeof country === 'string') {
+    nodes = nodes.filter(n => n.countryCode?.toUpperCase() === country.toUpperCase());
+  }
+  res.json({ success: true, nodes });
+});
+
+app.get('/api/knowledge/nodes/:id', (req, res) => {
+  const node = getKnowledgeNode(req.params.id);
+  if (!node) return res.status(404).json({ success: false, error: 'Knowledge node not found' });
+
+  const related = getRelatedNodes(node.id);
+  const relatedBooks = (node.bookIds || [])
+    .map(bookId => store.books.find(b => b.id === bookId))
+    .filter((b): b is import('./src/types/index.ts').Book => Boolean(b));
+
+  res.json({ success: true, node, related, relatedBooks });
+});
+
+// -------------------------------------------------------------
+// 8c. GLOBAL UNIFIED SEARCH (across all modules)
+// -------------------------------------------------------------
+app.get('/api/search/global', (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
+  const lower = q.toLowerCase();
+
+  const users = store.users
+    .filter(u =>
+      u.displayName.toLowerCase().includes(lower) ||
+      u.username.toLowerCase().includes(lower) ||
+      (u.location?.countryName || '').toLowerCase().includes(lower)
+    )
+    .slice(0, 5);
+
+  const posts = store.posts
+    .filter(p => p.content.toLowerCase().includes(lower))
+    .slice(0, 5);
+
+  const books = store.books
+    .filter(b => b.title.toLowerCase().includes(lower) || b.author.toLowerCase().includes(lower))
+    .slice(0, 5);
+
+  const communities = store.communities
+    .filter(c => c.name.toLowerCase().includes(lower) || c.description.toLowerCase().includes(lower))
+    .slice(0, 5);
+
+  const knowledge = searchKnowledge(q, 5);
+
+  res.json({
+    success: true,
+    query: q,
+    results: { users, posts, books, communities, knowledge }
+  });
 });
 
 // -------------------------------------------------------------

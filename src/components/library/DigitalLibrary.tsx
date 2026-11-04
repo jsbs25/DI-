@@ -33,6 +33,8 @@ import { AdminLibrary } from './AdminLibrary.tsx';
 interface DigitalLibraryProps {
   lang: Language;
   currentUser?: { id: string } | null;
+  /** When set, opens the detail view for a specific book (cross-module navigation). */
+  focusBookId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,7 +59,7 @@ const SHELF_TABS: { id: BookshelfStatus | 'all'; label: string }[] = [
   { id: 'favorite', label: '收藏' }
 ];
 
-export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUser }) => {
+export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUser, focusBookId }) => {
   // ---- View routing ----
   const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf' | 'admin'>('home');
   const [activeCategory, setActiveCategory] = useState<string>('all');
@@ -133,6 +135,23 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   useEffect(() => {
     loadBooks();
   }, [activeCategory, searchQuery]);
+
+  // Cross-module navigation: when a book id is provided from another module
+  // (e.g. Knowledge Universe), load that book and open its detail view.
+  useEffect(() => {
+    if (!focusBookId) return;
+    let cancelled = false;
+    fetch(`/api/library/books/${focusBookId}`)
+      .then(r => r.json())
+      .then(d => {
+        if (!cancelled && d.success && d.book) {
+          setSelectedBook(d.book);
+          setView('detail');
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [focusBookId]);
 
   useEffect(() => {
     loadShelf();

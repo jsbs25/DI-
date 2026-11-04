@@ -95,6 +95,15 @@ export interface TranslationDictionary {
   logOut: string;
   signIn: string;
   brandTagline: string;
+  // Knowledge Universe & Global Search
+  knowledgeTab: string;
+  globalSearch: string;
+  searchAllPlaceholder: string;
+  knowledgeSearchPlaceholder: string;
+  relatedConnections: string;
+  relatedBooks: string;
+  viewInLibrary: string;
+  noResults: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -190,7 +199,15 @@ export const translations: Record<Language, TranslationDictionary> = {
     editGlobeBeacon: '编辑地球信标',
     logOut: '退出登录',
     signIn: '登录',
-    brandTagline: '探索 · 连接 · 建设'
+    brandTagline: '探索 · 连接 · 建设',
+    knowledgeTab: '知识宇宙',
+    globalSearch: '全局搜索',
+    searchAllPlaceholder: '搜索知识、书籍、用户、社区与动态...',
+    knowledgeSearchPlaceholder: '搜索文明、人物、地点、语言、思想与科学概念...',
+    relatedConnections: '相关连接',
+    relatedBooks: '相关书籍',
+    viewInLibrary: '在图书馆查看',
+    noResults: '暂无搜索结果'
   },
   en: {
     appName: 'EARTH ONE',
@@ -284,7 +301,15 @@ export const translations: Record<Language, TranslationDictionary> = {
     editGlobeBeacon: 'Edit Globe Beacon',
     logOut: 'Log Out',
     signIn: 'Sign In',
-    brandTagline: 'Explore · Connect · Build'
+    brandTagline: 'Explore · Connect · Build',
+    knowledgeTab: 'Knowledge Universe',
+    globalSearch: 'Global Search',
+    searchAllPlaceholder: 'Search knowledge, books, citizens, communities & posts...',
+    knowledgeSearchPlaceholder: 'Search civilizations, people, places, languages, ideas & concepts...',
+    relatedConnections: 'Related Connections',
+    relatedBooks: 'Related Books',
+    viewInLibrary: 'View in Library',
+    noResults: 'No results found'
   },
   ar: {
     appName: 'EARTH ONE',
@@ -378,7 +403,15 @@ export const translations: Record<Language, TranslationDictionary> = {
     editGlobeBeacon: 'تعديل منارة الأرض',
     logOut: 'تسجيل الخروج',
     signIn: 'تسجيل الدخول',
-    brandTagline: 'استكشف · تواصل · ابنِ'
+    brandTagline: 'استكشف · تواصل · ابنِ',
+    knowledgeTab: 'كون المعرفة',
+    globalSearch: 'بحث شامل',
+    searchAllPlaceholder: 'ابحث في المعرفة والكتب والمواطنين والمجتمعات والمنشورات...',
+    knowledgeSearchPlaceholder: 'ابحث عن حضارات وشخصيات وأماكن ولغات وأفكار ومفاهيم...',
+    relatedConnections: 'روابط ذات صلة',
+    relatedBooks: 'كتب ذات صلة',
+    viewInLibrary: 'عرض في المكتبة',
+    noResults: 'لا توجد نتائج'
   },
   es: {
     appName: 'EARTH ONE',
@@ -472,7 +505,15 @@ export const translations: Record<Language, TranslationDictionary> = {
     editGlobeBeacon: 'Editar Baliza del Globo',
     logOut: 'Cerrar Sesión',
     signIn: 'Iniciar Sesión',
-    brandTagline: 'Explora · Conecta · Construye'
+    brandTagline: 'Explora · Conecta · Construye',
+    knowledgeTab: 'Universo del Conocimiento',
+    globalSearch: 'Búsqueda Global',
+    searchAllPlaceholder: 'Buscar conocimiento, libros, ciudadanos, comunidades y publicaciones...',
+    knowledgeSearchPlaceholder: 'Buscar civilizaciones, personas, lugares, idiomas, ideas y conceptos...',
+    relatedConnections: 'Conexiones Relacionadas',
+    relatedBooks: 'Libros Relacionados',
+    viewInLibrary: 'Ver en la Biblioteca',
+    noResults: 'Sin resultados'
   },
   fr: {
     appName: 'EARTH ONE',
@@ -566,7 +607,15 @@ export const translations: Record<Language, TranslationDictionary> = {
     editGlobeBeacon: 'Modifier la Balise du Globe',
     logOut: 'Se Déconnecter',
     signIn: 'Se Connecter',
-    brandTagline: 'Explorez · Connectez · Construisez'
+    brandTagline: 'Explorez · Connectez · Construisez',
+    knowledgeTab: 'Univers de la Connaissance',
+    globalSearch: 'Recherche Globale',
+    searchAllPlaceholder: 'Rechercher connaissances, livres, citoyens, communautés et publications...',
+    knowledgeSearchPlaceholder: 'Rechercher civilisations, personnes, lieux, langues, idées et concepts...',
+    relatedConnections: 'Connexions Liées',
+    relatedBooks: 'Livres Liés',
+    viewInLibrary: 'Voir dans la Bibliothèque',
+    noResults: 'Aucun résultat'
   },
   ru: {
     appName: 'EARTH ONE',
@@ -660,6 +709,14 @@ export const translations: Record<Language, TranslationDictionary> = {
     editGlobeBeacon: 'Изменить маяк на глобусе',
     logOut: 'Выйти',
     signIn: 'Войти',
-    brandTagline: 'Исследуй · Общайся · Создавай'
+    brandTagline: 'Исследуй · Общайся · Создавай',
+    knowledgeTab: 'Вселенная знаний',
+    globalSearch: 'Глобальный поиск',
+    searchAllPlaceholder: 'Поиск знаний, книг, граждан, сообществ и публикаций...',
+    knowledgeSearchPlaceholder: 'Поиск цивилизаций, людей, мест, языков, идей и концепций...',
+    relatedConnections: 'Связанные узлы',
+    relatedBooks: 'Связанные книги',
+    viewInLibrary: 'Открыть в библиотеке',
+    noResults: 'Ничего не найдено'
   }
 };

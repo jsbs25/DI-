@@ -331,3 +331,33 @@ export interface SavedArticle {
   tags: string[];
   userId: string;
 }
+
+export type KnowledgeNodeType =
+  | 'civilization'
+  | 'historical_period'
+  | 'person'
+  | 'place'
+  | 'language'
+  | 'book'
+  | 'scientific_concept'
+  | 'thought'
+  | 'artwork'
+  | 'historical_event';
+
+export interface KnowledgeNode {
+  id: string;
+  type: KnowledgeNodeType;
+  /** Primary display title (Chinese by default). */
+  title: string;
+  /** English/romanized title used for cross-language search matching. */
+  titleEn?: string;
+  description: string;
+  aliases?: string[];
+  tags?: string[];
+  /** Graph edges to other knowledge nodes. */
+  relatedIds: string[];
+  /** Optional link to a globe country code (cross-module: EARTH). */
+  countryCode?: string;
+  /** Optional links to library books by store id (cross-module: LIBRARY). */
+  bookIds?: string[];
+}

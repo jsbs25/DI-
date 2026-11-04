@@ -27,6 +27,7 @@ import { OnboardingModal } from './components/auth/OnboardingModal.tsx';
 import { DigitalLibrary } from './components/library/DigitalLibrary.tsx';
 import { WebBrowser } from './components/browser/WebBrowser.tsx';
 import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
+import { KnowledgeUniverse } from './components/knowledge/KnowledgeUniverse.tsx';
 import { UniverseEngine } from './universe/UniverseEngine.tsx';
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 
@@ -55,6 +56,8 @@ export default function App() {
   const [activeConversationId, setActiveConversationId] = useState<string>('conv_global');
   const [focusCoordinates, setFocusCoordinates] = useState<{ lat: number; lng: number; timestamp?: number } | null>(null);
   const [welcomeToast, setWelcomeToast] = useState<string | null>(null);
+  const [libraryFocusBookId, setLibraryFocusBookId] = useState<string | null>(null);
+  const [knowledgeFocusNodeId, setKnowledgeFocusNodeId] = useState<string | null>(null);
 
   // Handle RTL layout adaptation for Arabic
   useEffect(() => {
@@ -391,6 +394,14 @@ export default function App() {
         onToggleLocationPrivacy={handleToggleLocationPrivacy}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        onOpenBook={bookId => {
+          setLibraryFocusBookId(bookId);
+          setCurrentTab('library');
+        }}
+        onOpenKnowledge={nodeId => {
+          setKnowledgeFocusNodeId(nodeId);
+          setCurrentTab('knowledge');
+        }}
       />
 
       {/* 2. Main View Content Switcher */}
@@ -449,7 +460,19 @@ export default function App() {
 
         {currentTab === 'aihub' && <AIHub lang={lang} />}
 
-        {currentTab === 'library' && <DigitalLibrary lang={lang} currentUser={currentUser} />}
+        {currentTab === 'library' && <DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} />}
+
+        {currentTab === 'knowledge' && (
+          <KnowledgeUniverse
+            lang={lang}
+            focusNodeId={knowledgeFocusNodeId}
+            onOpenLibrary={() => setCurrentTab('library')}
+            onOpenBook={bookId => {
+              setLibraryFocusBookId(bookId);
+              setCurrentTab('library');
+            }}
+          />
+        )}
 
         {currentTab === 'browser' && <WebBrowser lang={lang} />}
 
