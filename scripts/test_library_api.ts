@@ -11,6 +11,8 @@ const ALLOWED_FIXED_ENDPOINTS = new Set([
   '/api/library/connectors',
   '/api/library/search?q=valid&source=gutenberg',
   '/api/library/search?q=valid&source=europeana',
+  '/api/library/search?q=valid&source=openalex,not-a-real-source',
+  '/api/library/search?q=valid&source=pmc,not-a-real-source',
   '/api/library/search?q=&source=gutenberg',
   '/api/library/search?q=valid&source=not-a-real-source',
   '/api/library/books',
@@ -54,6 +56,11 @@ async function main() {
       EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED: 'false',
       EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED: 'true',
       EARTH_ONE_LIBRARY_EUROPEANA_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_OPENALEX_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_CROSSREF_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_ARXIV_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_PMC_ENABLED: 'true',
       GOOGLE_BOOKS_API_KEY: 'api-test-key-not-a-real-secret',
       EUROPEANA_API_KEY: '',
       GEMINI_API_KEY: '',
@@ -136,12 +143,16 @@ async function main() {
     const connectors = await get('/api/library/connectors');
     check(
       connectors.status === 200 && connectors.body.success === true && Array.isArray(connectors.body.sources) &&
-      connectors.body.sources.length === 7 && connectors.body.sources.filter((source: any) => source.enabled).length === 2 &&
+      connectors.body.sources.length === 12 && connectors.body.sources.filter((source: any) => source.enabled).length === 7 &&
       connectors.body.sources.find((source: any) => source.name === 'Open Library')?.enabled === true &&
       connectors.body.sources.find((source: any) => source.name === 'Google Books')?.authentication === 'api-key' &&
       connectors.body.sources.find((source: any) => source.name === 'Google Books')?.enabled === true &&
       connectors.body.sources.find((source: any) => source.name === 'Europeana')?.authentication === 'api-key' &&
-      connectors.body.sources.find((source: any) => source.name === 'Europeana')?.enabled === false,
+      connectors.body.sources.find((source: any) => source.name === 'Europeana')?.enabled === false &&
+      ['OpenAlex', 'Crossref', 'arXiv', 'Europe PMC', 'PubMed Central'].every(name => {
+        const source = connectors.body.sources.find((item: any) => item.name === name);
+        return source?.authentication === 'none' && source?.enabled === true;
+      }),
       'Connector registry reports all sources and honors per-source environment flags'
     );
     const disabledSearch = await get('/api/library/search?q=valid&source=gutenberg');
@@ -161,12 +172,20 @@ async function main() {
     check(blankSearch.status === 400 && blankSearch.body.success === false, 'Blank global search is rejected');
     const invalidSource = await get('/api/library/search?q=valid&source=not-a-real-source');
     check(invalidSource.status === 400 && invalidSource.body.success === false, 'Unknown connector names are rejected');
+    const academicSourceValidation = await get('/api/library/search?q=valid&source=openalex,not-a-real-source');
+    check(academicSourceValidation.status === 400 && academicSourceValidation.body.success === false, 'New academic source IDs are accepted by the allowlist while unknown IDs are rejected');
+    const pmcSourceValidation = await get('/api/library/search?q=valid&source=pmc,not-a-real-source');
+    check(pmcSourceValidation.status === 400 && pmcSourceValidation.body.success === false, 'PMC is accepted by the source allowlist while unknown IDs are rejected');
     const metadataOnlyImport = await post('/api/library/ingest', { source: 'openlibrary', externalId: '/works/OL1W' });
     check(metadataOnlyImport.status === 403 && metadataOnlyImport.body.success === false, 'Metadata-only Open Library records cannot be imported as full text');
     const googleBooksImport = await post('/api/library/ingest', { source: 'googlebooks', externalId: 'sample-volume' });
     check(googleBooksImport.status === 403 && googleBooksImport.body.success === false, 'Google Books previews and protected text cannot be imported locally');
     const europeanaImport = await post('/api/library/ingest', { source: 'europeana', externalId: '/12345/record' });
     check(europeanaImport.status === 503 && europeanaImport.body.success === false, 'Europeana import is disabled when its server API key is missing');
+    const academicImport = await post('/api/library/ingest', { source: 'arxiv', externalId: '2401.12345v1' });
+    check(academicImport.status === 403 && academicImport.body.success === false, 'Academic open-access records cannot bypass the no-local-copy rule');
+    const pmcImport = await post('/api/library/ingest', { source: 'pmc', externalId: '2468' });
+    check(pmcImport.status === 403 && pmcImport.body.success === false, 'PMC reading access does not bypass the individual article reuse-license check');
     const disabledImport = await post('/api/library/ingest', { source: 'gutenberg', externalId: '11' });
     check(disabledImport.status === 503 && disabledImport.body.success === false, 'Disabled sources cannot be used for full-text import');
 
@@ -257,7 +276,7 @@ async function main() {
         (/^\/api\/library\/books\/[A-Za-z0-9_-]+$/.test(request.endpoint) &&
           ALLOWED_BOOK_DETAILS.has(decodeURIComponent(request.endpoint.split('/').at(-1) || '')))
       )) || (request.method === 'POST' && ALLOWED_POST_ENDPOINTS.has(request.endpoint))),
-      'Test issued only allowlisted local GET requests and the two controlled import-rejection POSTs'
+      'Test issued only allowlisted local GET requests and controlled import-rejection POST requests'
     );
 
     console.log(`Library API regression: ${passed} passed, 0 failed (allowlisted local routes; isolated temporary storage).`);

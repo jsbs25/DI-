@@ -147,3 +147,25 @@ Google Books 阶段当时的验证记录：`npm run lint`、连接器 mock、隔
 版权映射取自 Europeana 每个数字对象的 `edm:rights`，不把 Europeana 元数据的 CC0 误当作对象授权：CC0/Public Domain Mark 映射为 `PUBLIC_DOMAIN`，可识别的 CC 许可映射为 `OPEN_LICENSE`，已知 InC/NoC 限制语句映射为 `COPYRIGHT_RESTRICTED`，冲突、CNE 或未识别语句保持 `UNKNOWN`。只在 PDM/CC0 或 CC BY/CC BY-SA 且缩略图 HTTPS 主机属于 Europeana 时显示缩略图；所有 Europeana 结果 `canImport=false`，全文和直接下载明确 `unsupported`，服务端入库路由另行硬拒绝。
 
 Europeana 需要服务器环境变量 `EUROPEANA_API_KEY`（请求以 `wskey` 发送）；未配置时即使启用开关也报告 `disabled`，无外部请求。API 响应可能回显 `apikey`，已在缓存前移除；密钥不进入响应或缓存键。当前未提供真实密钥，因此没有进行 Europeana 在线 smoke，离线 mock 通过不代表已验证服务端实际连通性。统一搜索卡片增加逐源状态/禁用原因、资源类型、DOI/ISBN、访问与下载状态；本阶段未进行浏览器视觉验收。验证通过：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（23/23）、`npm run test:api`（85/85）与 `npm run build`；生产构建仍显示原有 Three.js 大 chunk 提示。全球学术库、移动端/浏览器 UI、个人书架跨设备同步和最终 WORLD LIBRARY 验收仍未完成。
+
+
+## WORLD LIBRARY Phase 4：免密钥学术发现（2026-11-04）
+
+**基线与保全。** 本阶段从已同步 main 提交 `f160fa1825cbf2ac1f534bfec83767ef34110e4c` 开始，起始工作树干净；没有迁移、改写或清理正式图书数据。
+
+**实现。** 新增 OpenAlex、Crossref、arXiv、Europe PMC 四个官方免密钥发现源，接入来源注册表、统一搜索默认值、服务端搜索/入库白名单、环境开关、搜索卡片和实时烟测脚本。四源查询免费且无需用户设置，但受各提供方条款、配额和可用性限制。Google Books 和 Europeana 仍需服务端密钥，缺少时保持 fail-closed。
+
+**版权边界。** 检索元数据、开放获取标记、官方阅读入口与再利用许可分开处理。新源记录一律 `canImport: false`，不返回本地下载链接，connector 侧全文/下载操作为 `unsupported`；服务器另以 403 拒绝学术源全文入库。只在安全 HTTPS 官方链接可确认时提供外链。arXiv 请求至少间隔 3 秒；沿用精确 DOI/ISBN 去重与共享缓存。
+
+**验证。** 全项目 TypeScript 检查、离线连接器 mock、隔离图书馆 API（25 项）、全站 API（85 项）、生产构建及实时连接器烟测均通过。四个新来源的真实搜索各返回至少一条记录。构建保留非阻断的现有 Three.js 大 chunk 提示。官方 API 文档链接、具体映射、配置及剩余范围见 `LIBRARY_CONNECTORS.md`。
+
+**未包含。** 本阶段不接入 PubMed Central 独立全文 API、DOAB 或其他阿拉伯语/文化遗产馆藏，也不实现更丰富的跨源过滤、定时刷新或管理后台；没有要求用户提供密钥或进行额外设置。
+
+
+## WORLD LIBRARY Phase 4 当前状态复核：PMC 与 DOAB（2026-11-04）
+
+此前 Phase 4 审计段记录的是 OpenAlex、Crossref、arXiv、Europe PMC 四源的初始实现。后续已加入 PubMed Central，统一连接器注册表现有 12 个来源。PMC 使用 NCBI 官方 E-utilities 无密钥搜索和书目详情接口，结果仅链接 PMC 官方文章页；因检索元数据本身不包含可复核的单篇许可，权利标记为 `UNKNOWN`，全文/下载 unsupported，服务端独立拒绝本地导入。NCBI 的请求队列按来源串行并至少间隔一秒。旧文档所示 `free fulltext[filter]` 在当前在线端点实测返回 0 条，故实现不依赖该筛选，也不把结果描述为已验证开放许可。
+
+DOAB 的官方元数据说明确认其书目元数据为 CC0，并提供 OAI-PMH 与若干导出/PRISM 服务；但 OAI-PMH 为分页收割接口，并非按用户关键词检索。当前环境对目录候选 REST 路径返回 HTTP 403/429，尚无可复核的稳定、限量关键词搜索接口，因此没有接入未验证路由或做整库抓取。DOAB 仍列为未完成项，不需要用户配置密钥。
+
+回归结果：TypeScript 检查、离线连接器 mock、隔离图书馆 API（27 项）、通用 API（85 项）、生产构建和限量实时来源烟测均通过；PMC 实时查询成功。构建保留原有 Three.js 大 chunk 提示。学术全文的许可复核、DOAB 搜索、阿拉伯语专项馆藏、管理后台、跨设备书架及移动端/浏览器验收仍不代表完成。

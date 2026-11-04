@@ -80,3 +80,32 @@ UI 补充：搜索结果显示逐源状态/禁用原因、资源类型、DOI/ISB
 | Europeana 在线 API | ⏸️ 未执行：没有配置 `EUROPEANA_API_KEY`。官方接口资料与离线 fixtures 已核验，但不把 mock 结果描述为在线连通证明。 |
 
 Europeana 当前仅可在服务器配置真实 API key 后启用；本地无密钥时 fail-closed。未进行新增浏览器视觉/交互或移动端测试；未修改正式用户数据，也未下载或复制任何 Europeana 图片/全文。
+
+
+## WORLD LIBRARY Phase 4：免密钥学术连接器回归（2026-11-04）
+
+| 检查 | 结果 |
+|---|---|
+| `npm run lint` | ✅ TypeScript `--noEmit` 通过。 |
+| `npm run test:library-connectors` | ✅ 离线 mock 通过，覆盖 OpenAlex、Crossref、arXiv、Europe PMC 字段、官方链接、权利状态、无密钥查询、unsupported 全文/下载和 DOI 精确去重。 |
+| `npm run test:library-api` | ✅ 25 项通过；临时隔离存储验证 11 个来源注册、新来源白名单、无密钥启用状态和学术论文入库 403 拒绝。 |
+| `npm run test:api` | ✅ 85 项通过。 |
+| `npm run build` | ✅ Vite 生产构建成功；保留既有非阻断 Three.js chunk >500 kB 提示。 |
+| `npm run test:library-connectors:live` | ✅ 实时限量烟测通过；OpenAlex、Crossref、arXiv、Europe PMC 均返回记录，同时既有 Open Library、Internet Archive 和 Gutenberg 检查通过。 |
+
+真实查询仅证明烟测当时各搜索端点可返回结果，不代表目录完整或每篇文章均有全文入口。Europe PMC 只有具体记录同时满足开放获取和有效 PMCID 条件时才提供官方全文页；示例查询可能仅返回元数据。未下载 EPUB，也未复制受限全文或改动正式图书数据。
+
+
+## WORLD LIBRARY Phase 4 follow-up：PMC / DOAB（2026-11-04）
+
+| 检查 | 结果 |
+|---|---|
+| `npm run lint` | ✅ TypeScript `--noEmit` 通过。 |
+| `npm run test:library-connectors` | ✅ 离线 mock 通过；覆盖 PMC ESearch/ESummary 映射、无密钥请求、官方文章页链接、`UNKNOWN` 权利分类及禁止本地复制。 |
+| `npm run test:library-api` | ✅ 27 项通过、0 失败；临时隔离存储验证 12 个注册来源、7 个启用来源、PMC 白名单及全文入库 403。 |
+| `npm run test:api` | ✅ 85 项通过、0 失败。 |
+| `npm run build` | ✅ Vite 生产构建成功；既有 Three.js >500 kB chunk 提示仍存在且不阻断。 |
+| `npm run test:library-connectors:live` | ✅ 限量实时烟测通过；OpenAlex、Crossref、arXiv、Europe PMC、PMC 均返回真实记录，旧 Open Library、Internet Archive 和 Gutenberg 检查也通过。PMC 未使用 API key。 |
+| DOAB 关键词搜索 | ⚠️ 未接入：官方资料确认元数据开放且提供 OAI-PMH，但其分页收割不等同关键词搜索；当前环境候选目录 REST 路径返回 HTTP 403/429，未改用批量抓取或未验证接口。 |
+
+PMC 的当前实时搜索不依赖 NCBI 文档里一个在本环境返回 0 条的旧 `free fulltext[filter]` 查询示例；适配器因此将 PMC 项目权利保守标为 `UNKNOWN`，只提供官方文章页，并禁止全文下载/本地导入。实时结果不代表每篇文章均有相同阅读权限或再利用许可。所有自动化测试使用 mock 或临时隔离存储，未修改正式图书数据，也未下载或复制论文全文。

@@ -19,9 +19,8 @@ export enum RightsCategory {
   UNKNOWN = 'UNKNOWN'
 }
 
-export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'googlebooks' | 'europeana' | 'wikisource' | 'ar_wikisource';
+export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'googlebooks' | 'europeana' | 'wikisource' | 'ar_wikisource' | 'openalex' | 'crossref' | 'arxiv' | 'europepmc' | 'pmc';
 export type ConnectorStatus = 'ok' | 'error' | 'unsupported';
-
 export interface ExternalLibraryRecord {
   id: string;
   externalId: string;
@@ -39,6 +38,8 @@ export interface ExternalLibraryRecord {
   doi?: string;
   description: string;
   coverImage?: string;
+  /** Official provider-hosted full-text/reader URL; never treated as a local import or reuse license. */
+  providerFullTextUrl?: string;
   textUrl?: string;
   epubUrl?: string;
   identifier?: string;
@@ -118,7 +119,12 @@ const SOURCE_NAMES: Record<LibrarySource, string> = {
   googlebooks: 'Google Books',
   europeana: 'Europeana',
   wikisource: 'Wikisource',
-  ar_wikisource: 'Arabic Wikisource'
+  ar_wikisource: 'Arabic Wikisource',
+  openalex: 'OpenAlex',
+  crossref: 'Crossref',
+  arxiv: 'arXiv',
+  europepmc: 'Europe PMC',
+  pmc: 'PubMed Central'
 };
 const SOURCE_CONFIG: Record<LibrarySource, { env: string; website: string; api: string }> = {
   openlibrary: { env: 'EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED', website: 'https://openlibrary.org', api: 'https://openlibrary.org/search.json' },
@@ -127,10 +133,16 @@ const SOURCE_CONFIG: Record<LibrarySource, { env: string; website: string; api: 
   googlebooks: { env: 'EARTH_ONE_LIBRARY_GOOGLEBOOKS_ENABLED', website: 'https://books.google.com', api: 'https://www.googleapis.com/books/v1/volumes' },
   europeana: { env: 'EARTH_ONE_LIBRARY_EUROPEANA_ENABLED', website: 'https://www.europeana.eu', api: 'https://api.europeana.eu/record/v2/search.json' },
   wikisource: { env: 'EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED', website: 'https://zh.wikisource.org', api: 'https://zh.wikisource.org/w/api.php' },
-  ar_wikisource: { env: 'EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED', website: 'https://ar.wikisource.org', api: 'https://ar.wikisource.org/w/api.php' }
+  ar_wikisource: { env: 'EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED', website: 'https://ar.wikisource.org', api: 'https://ar.wikisource.org/w/api.php' },
+  openalex: { env: 'EARTH_ONE_LIBRARY_OPENALEX_ENABLED', website: 'https://openalex.org', api: 'https://api.openalex.org/works' },
+  crossref: { env: 'EARTH_ONE_LIBRARY_CROSSREF_ENABLED', website: 'https://www.crossref.org', api: 'https://api.crossref.org/works' },
+  arxiv: { env: 'EARTH_ONE_LIBRARY_ARXIV_ENABLED', website: 'https://arxiv.org', api: 'https://export.arxiv.org/api/query' },
+  europepmc: { env: 'EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED', website: 'https://europepmc.org', api: 'https://www.ebi.ac.uk/europepmc/webservices/rest/search' },
+  pmc: { env: 'EARTH_ONE_LIBRARY_PMC_ENABLED', website: 'https://pmc.ncbi.nlm.nih.gov', api: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' }
 };
 const CACHE_TTL_MS = 60_000;
 const MIN_REQUEST_INTERVAL_MS = 1_000;
+const SOURCE_MIN_REQUEST_INTERVAL_MS: Partial<Record<LibrarySource, number>> = { arxiv: 3_000 };
 const cache = new Map<string, { expiresAt: number; value: string }>();
 const lastRequestBySource = new Map<string, number>();
 const requestQueueBySource = new Map<string, Promise<void>>();
@@ -183,7 +195,8 @@ async function requestText(source: LibrarySource, url: string, timeoutMs = 10_00
     const freshCache = cache.get(cacheKey);
     if (freshCache && freshCache.expiresAt > Date.now()) return freshCache.value;
     const lastRequest = lastRequestBySource.get(source) || 0;
-    const delay = Math.max(0, MIN_REQUEST_INTERVAL_MS - (Date.now() - lastRequest));
+    const minInterval = SOURCE_MIN_REQUEST_INTERVAL_MS[source] || MIN_REQUEST_INTERVAL_MS;
+    const delay = Math.max(0, minInterval - (Date.now() - lastRequest));
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
 
     const controller = new AbortController();
@@ -879,6 +892,556 @@ export class EuropeanaConnector implements LibraryConnector {
   }
 }
 
+function normalizeAcademicDoi(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  let value = raw.trim().replace(/^doi:\s*/i, '');
+  value = value.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
+  return /^10\.\d{4,9}\/[^\s?#]+$/i.test(value) ? value : undefined;
+}
+
+function academicHttpsUrl(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' || url.username || url.password) return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function mapOpenAlexWork(work: any): ExternalLibraryRecord | undefined {
+  const rawId = typeof work?.id === 'string' ? work.id : '';
+  const workId = rawId.match(/(?:^|\/)(W\d+)$/i)?.[1]?.toUpperCase();
+  if (!workId) return undefined;
+  const title = typeof work.title === 'string' && work.title.trim() ? work.title.trim() : 'Untitled academic work';
+  const authors = Array.isArray(work.authorships)
+    ? work.authorships.map((entry: any) => entry?.author?.display_name).filter((name: unknown): name is string => typeof name === 'string' && !!name.trim())
+    : [];
+  const doi = normalizeAcademicDoi(work.doi || work.ids?.doi);
+  const isOpenAccess = work.open_access?.is_oa === true;
+  const location = work.best_oa_location || work.primary_location || {};
+  const providerFullTextUrl = isOpenAccess
+    ? academicHttpsUrl(location.landing_page_url || location.pdf_url || work.open_access?.oa_url)
+    : undefined;
+  const journal = work.primary_location?.source?.display_name || work.best_oa_location?.source?.display_name;
+  return baseRecord('openalex', {
+    id: `openalex:${workId}`,
+    externalId: workId,
+    title,
+    author: authors[0] || 'Unknown Author',
+    authors,
+    language: typeof work.language === 'string' && work.language ? work.language : 'und',
+    year: work.publication_year ? String(work.publication_year) : undefined,
+    doi,
+    description: '',
+    sourceUrl: `https://openalex.org/${workId}`,
+    providerFullTextUrl,
+    rights: isOpenAccess ? RightsCategory.OPEN_ACCESS : RightsCategory.METADATA_ONLY,
+    rightsNote: isOpenAccess
+      ? 'OpenAlex reports an open-access location; this does not itself grant reuse or redistribution rights. Check the article version and license at the provider.'
+      : 'OpenAlex provides discovery metadata only for this result; article access and reuse rights must be checked at the official record.',
+    availability: providerFullTextUrl ? 'provider-full-view' : isOpenAccess ? 'official-source-only' : 'metadata-only',
+    canImport: false,
+    downloadLinks: [],
+    metadata: { workType: work.type, journal, openAccess: isOpenAccess, oaStatus: work.open_access?.oa_status, license: location.license }
+  });
+}
+
+function validOpenAlexWorkId(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const value = raw.trim();
+  const urlMatch = value.match(/^https?:\/\/(?:www\.)?openalex\.org\/(W\d+)$/i);
+  const id = urlMatch?.[1] || value;
+  return /^W\d+$/i.test(id) ? id.toUpperCase() : undefined;
+}
+
+export class OpenAlexConnector implements LibraryConnector {
+  readonly source = 'openalex' as const;
+
+  async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
+    if (!query.trim()) return ok([]);
+    try {
+      const url = new URL(SOURCE_CONFIG[this.source].api);
+      const doi = normalizeAcademicDoi(query);
+      if (doi) url.searchParams.set('filter', `doi:https://doi.org/${doi}`);
+      else url.searchParams.set('search', query.trim());
+      url.searchParams.set('per_page', String(cap(limit)));
+      url.searchParams.set('select', 'id,doi,title,publication_year,language,authorships,primary_location,best_oa_location,open_access,type,ids');
+      const response = JSON.parse(await requestText(this.source, url.toString()));
+      if (!Array.isArray(response.results)) throw new Error('OpenAlex response did not contain a results array.');
+      return ok(response.results.slice(0, cap(limit))
+        .map(mapOpenAlexWork)
+        .filter((record: ExternalLibraryRecord | undefined): record is ExternalLibraryRecord => !!record));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  async getBook(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
+    const id = validOpenAlexWorkId(locator.record?.externalId || locator.identifier || locator.id);
+    if (!id) return failed(new Error('OpenAlex requires a valid work ID such as W2741809807.'));
+    try {
+      const response = JSON.parse(await requestText(this.source, `${SOURCE_CONFIG[this.source].api}/${id}`));
+      const record = mapOpenAlexWork(response);
+      return record ? ok(record) : failed(new Error('OpenAlex did not return a valid work record.'));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  getMetadata(locator: BookLocator) { return this.getBook(locator); }
+  async getAvailability(locator: BookLocator): Promise<ConnectorResponse<unknown>> {
+    const result = await this.getBook(locator);
+    if (result.status !== 'ok' || !result.data) return propagateFailure<unknown>(result, 'Could not verify the OpenAlex work.');
+    return ok({ rights: result.data.rights, providerFullTextUrl: result.data.providerFullTextUrl, reuse: 'verify-provider-license', canImport: false });
+  }
+  async getFullText(_locator: BookLocator) { return unsupported<FullText>('OpenAlex does not provide an article-copy endpoint in this connector; use the verified provider link when available.'); }
+  async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('OpenAlex metadata does not authorize downloads or local copies; use the article provider link.'); }
+  getSourceInformation() {
+    return enabledSourceInformation(this.source, [
+      'Uses the official OpenAlex Works API; basic searches are free and do not require an account or API key.',
+      'OpenAlex metadata is CC0, but article access and reuse rights are assessed separately; this connector never imports article text.'
+    ]);
+  }
+}
+
+function crossrefDoiFromLocator(locator: BookLocator): string | undefined {
+  return normalizeAcademicDoi(locator.record?.doi || locator.doi || locator.record?.externalId || locator.identifier || locator.id);
+}
+
+function mapCrossrefWork(work: any): ExternalLibraryRecord | undefined {
+  const doi = normalizeAcademicDoi(work?.DOI);
+  if (!doi) return undefined;
+  const title = Array.isArray(work.title) && typeof work.title[0] === 'string' ? work.title[0] : 'Untitled scholarly work';
+  const authors = Array.isArray(work.author)
+    ? work.author.map((author: any) => [author?.given, author?.family].filter((part: unknown): part is string => typeof part === 'string' && !!part).join(' ') || author?.name)
+      .filter((name: unknown): name is string => typeof name === 'string' && !!name.trim())
+    : [];
+  const date = work['published-print']?.['date-parts']?.[0] || work['published-online']?.['date-parts']?.[0] || work.issued?.['date-parts']?.[0];
+  const year = Array.isArray(date) && date[0] ? String(date[0]) : undefined;
+  const isbn = Array.isArray(work.ISBN)
+    ? work.ISBN.map((value: unknown) => String(value).replace(/[^0-9Xx]/g, '').toUpperCase()).filter((value: string) => value.length === 10 || value.length === 13)
+    : [];
+  const abstract = typeof work.abstract === 'string' ? decodeXml(work.abstract.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 3000) : '';
+  const licenses = Array.isArray(work.license) ? work.license.map((item: any) => ({ url: item?.URL, contentVersion: item?.['content-version'], start: item?.start })) : [];
+  return baseRecord('crossref', {
+    id: `crossref:${doi.toLowerCase()}`,
+    externalId: doi,
+    title,
+    author: authors[0] || 'Unknown Author',
+    authors,
+    language: typeof work.language === 'string' && work.language ? work.language : 'und',
+    year,
+    publisher: typeof work.publisher === 'string' ? work.publisher : undefined,
+    isbn,
+    doi,
+    description: abstract,
+    sourceUrl: `https://doi.org/${doi}`,
+    rights: RightsCategory.METADATA_ONLY,
+    rightsNote: 'Crossref metadata is freely available for discovery; the article, publisher-hosted files, and reported license terms require item-level verification. No local import is allowed.',
+    availability: 'metadata-only',
+    canImport: false,
+    downloadLinks: [],
+    metadata: { workType: work.type, containerTitle: work['container-title']?.[0], licenses, publisher: work.publisher }
+  });
+}
+
+export class CrossrefConnector implements LibraryConnector {
+  readonly source = 'crossref' as const;
+
+  private async requestJson(url: URL): Promise<any> {
+    const email = process.env.EARTH_ONE_LIBRARY_CONTACT_EMAIL?.trim();
+    if (email) url.searchParams.set('mailto', email);
+    const response = JSON.parse(await requestText(this.source, url.toString()));
+    if (!response?.message) throw new Error('Crossref response did not contain a message.');
+    return response.message;
+  }
+
+  async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
+    if (!query.trim()) return ok([]);
+    try {
+      const doi = normalizeAcademicDoi(query);
+      if (doi) {
+        const result = await this.getBook({ doi });
+        return result.status === 'ok' && result.data ? ok([result.data]) : result.status === 'error' && /HTTP 404/.test(result.reason || '') ? ok([]) : propagateFailure<ExternalLibraryRecord[]>(result, 'Crossref DOI lookup failed.');
+      }
+      const url = new URL(SOURCE_CONFIG[this.source].api);
+      const author = query.trim().match(/^author\s*:\s*(.+)$/i)?.[1];
+      const title = query.trim().match(/^title\s*:\s*(.+)$/i)?.[1];
+      url.searchParams.set(author ? 'query.author' : title ? 'query.title' : 'query.bibliographic', (author || title || query).trim());
+      url.searchParams.set('rows', String(cap(limit)));
+      const message = await this.requestJson(url);
+      if (!Array.isArray(message.items)) throw new Error('Crossref response did not contain an items array.');
+      return ok(message.items.slice(0, cap(limit))
+        .map(mapCrossrefWork)
+        .filter((record: ExternalLibraryRecord | undefined): record is ExternalLibraryRecord => !!record));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  async getBook(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
+    const doi = crossrefDoiFromLocator(locator);
+    if (!doi) return failed(new Error('Crossref requires a valid DOI.'));
+    try {
+      const url = new URL(`${SOURCE_CONFIG[this.source].api}/${doi}`);
+      const message = await this.requestJson(url);
+      const record = mapCrossrefWork(message);
+      return record ? ok(record) : failed(new Error('Crossref DOI record did not contain a valid DOI.'));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  getMetadata(locator: BookLocator) { return this.getBook(locator); }
+  async getAvailability(locator: BookLocator): Promise<ConnectorResponse<unknown>> {
+    const result = await this.getBook(locator);
+    if (result.status !== 'ok' || !result.data) return propagateFailure<unknown>(result, 'Could not verify the Crossref record.');
+    return ok({ rights: result.data.rights, fullText: 'not-verified', reuse: 'verify-publisher-license', canImport: false });
+  }
+  async getFullText(_locator: BookLocator) { return unsupported<FullText>('Crossref provides discovery metadata, not article full text through this connector.'); }
+  async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('Crossref publisher links and license metadata are not treated as download permission.'); }
+  getSourceInformation() {
+    return enabledSourceInformation(this.source, [
+      'Uses the public Crossref REST API; no sign-up or API key is required. An optional configured contact email is sent as mailto for the polite pool.',
+      'The connector exposes bibliographic metadata only; article or publisher links are never treated as reuse permission.'
+    ]);
+  }
+}
+
+function validArxivId(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let value = raw.trim();
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      if (!['arxiv.org', 'www.arxiv.org', 'export.arxiv.org'].includes(url.hostname.toLowerCase())) return undefined;
+      value = url.pathname.replace(/^\/(?:abs|pdf)\//, '').replace(/\.pdf$/i, '');
+    } catch { return undefined; }
+  }
+  return /^(?:[a-z][a-z0-9.-]*(?:\.[a-z0-9.-]+)?\/)?(?:\d{7}|\d{4}\.\d{4,5})(?:v\d+)?$/i.test(value) ? value : undefined;
+}
+
+function trustedArxivUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return undefined;
+    if (!['arxiv.org', 'www.arxiv.org', 'export.arxiv.org'].includes(url.hostname.toLowerCase())) return undefined;
+    url.protocol = 'https:';
+    return url.toString();
+  } catch { return undefined; }
+}
+
+function parseArxivEntries(feed: string): ExternalLibraryRecord[] {
+  return [...feed.matchAll(/<entry(?:\s[^>]*)?>[\s\S]*?<\/entry>/gi)].flatMap(match => {
+    const entry = match[0];
+    const id = validArxivId(xmlTextByLocalName(entry, 'id'));
+    if (!id) return [];
+    const authors = [...entry.matchAll(/<(?:[\w.-]+:)?author(?:\s[^>]*)?>([\s\S]*?)<\/(?:[\w.-]+:)?author>/gi)]
+      .map(author => xmlTextByLocalName(author[1], 'name'))
+      .filter((author): author is string => !!author);
+    const links = [...entry.matchAll(/<link\b[^>]*>/gi)].map(matchLink => ({
+      href: attr(matchLink[0], 'href'),
+      title: (attr(matchLink[0], 'title') || '').toLowerCase(),
+      type: (attr(matchLink[0], 'type') || '').toLowerCase()
+    }));
+    const pdf = links.find(link => link.title === 'pdf' || link.type === 'application/pdf' || /\/pdf\//i.test(link.href || ''));
+    const providerFullTextUrl = trustedArxivUrl(pdf?.href);
+    const absUrl = `https://arxiv.org/abs/${id}`;
+    const published = xmlTextByLocalName(entry, 'published');
+    const doi = normalizeAcademicDoi(xmlTextByLocalName(entry, 'doi'));
+    const categories = [...entry.matchAll(/<(?:[\w.-]+:)?(?:primary_category|category)\b[^>]*>/gi)]
+      .map(category => attr(category[0], 'term')).filter((category): category is string => !!category);
+    const abstract = xmlTextByLocalName(entry, 'summary') || '';
+    const title = (xmlTextByLocalName(entry, 'title') || 'Untitled arXiv paper').replace(/\s+/g, ' ').trim();
+    return [baseRecord('arxiv', {
+      id: `arxiv:${id}`,
+      externalId: id,
+      title,
+      author: authors[0] || 'Unknown Author',
+      authors,
+      language: 'und',
+      year: published?.match(/^\d{4}/)?.[0],
+      doi,
+      description: abstract.replace(/\s+/g, ' ').trim().slice(0, 3000),
+      sourceUrl: absUrl,
+      providerFullTextUrl,
+      rights: providerFullTextUrl ? RightsCategory.OPEN_ACCESS : RightsCategory.METADATA_ONLY,
+      rightsNote: 'arXiv provides free access to this preprint; the item-specific license controls reuse. Public PDF access is not permission to copy or redistribute.',
+      availability: providerFullTextUrl ? 'provider-full-view' : 'metadata-only',
+      canImport: false,
+      downloadLinks: [],
+      metadata: { categories: [...new Set(categories)], journalReference: xmlTextByLocalName(entry, 'journal_ref'), updated: xmlTextByLocalName(entry, 'updated'), fullText: providerFullTextUrl ? 'official-provider-link' : 'unsupported' }
+    })];
+  });
+}
+
+export class ArxivConnector implements LibraryConnector {
+  readonly source = 'arxiv' as const;
+
+  async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
+    if (!query.trim()) return ok([]);
+    try {
+      const url = new URL(SOURCE_CONFIG[this.source].api);
+      const fieldMatch = query.trim().match(/^(author|title|abstract)\s*:\s*(.+)$/i);
+      const prefix = fieldMatch?.[1].toLowerCase() === 'author' ? 'au' : fieldMatch?.[1].toLowerCase() === 'title' ? 'ti' : fieldMatch?.[1].toLowerCase() === 'abstract' ? 'abs' : 'all';
+      const term = (fieldMatch?.[2] || query.trim()).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      url.searchParams.set('search_query', `${prefix}:${/\s/.test(term) ? `"${term}"` : term}`);
+      url.searchParams.set('start', '0');
+      url.searchParams.set('max_results', String(cap(limit)));
+      return ok(parseArxivEntries(await requestText(this.source, url.toString())));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  async getBook(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
+    const id = validArxivId(locator.record?.externalId || locator.identifier || locator.id);
+    if (!id) return failed(new Error('arXiv requires a valid arXiv identifier.'));
+    try {
+      const url = new URL(SOURCE_CONFIG[this.source].api);
+      url.searchParams.set('id_list', id);
+      url.searchParams.set('max_results', '1');
+      const record = parseArxivEntries(await requestText(this.source, url.toString()))[0];
+      return record ? ok(record) : failed(new Error('arXiv record was not found.'));
+    } catch (error) {
+      return failed(error);
+    }
+  }
+
+  getMetadata(locator: BookLocator) { return this.getBook(locator); }
+  async getAvailability(locator: BookLocator): Promise<ConnectorResponse<unknown>> {
+    const result = await this.getBook(locator);
+    if (result.status !== 'ok' || !result.data) return propagateFailure<unknown>(result, 'Could not verify the arXiv record.');
+    return ok({ rights: result.data.rights, providerFullTextUrl: result.data.providerFullTextUrl, reuse: 'verify-item-license', canImport: false });
+  }
+  async getFullText(_locator: BookLocator) { return unsupported<FullText>('arXiv PDF reading remains on the official arXiv page; local text import is disabled.'); }
+  async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('arXiv PDFs are linked only as official provider reading access, not as local download permission.'); }
+  getSourceInformation() {
+    return enabledSourceInformation(this.source, [
+      'Uses the official arXiv Atom API without an account or API key; requests are separated by at least three seconds as recommended by arXiv.',
+      'Public preprint access does not establish a reuse license; PDF links stay on arxiv.org and local import is disabled.'
+    ]);
+  }
+}
+
+function mapEuropePmcResult(result: any): ExternalLibraryRecord | undefined {
+  const source = typeof result?.source === 'string' ? result.source : '';
+  const id = typeof result?.id === 'string' ? result.id : '';
+  if (!/^[A-Za-z0-9_-]{1,30}$/.test(source) || !/^[A-Za-z0-9._-]{1,80}$/.test(id)) return undefined;
+  const pmcid = typeof result.pmcid === 'string' && /^PMC\d+$/i.test(result.pmcid) ? result.pmcid.toUpperCase() : undefined;
+  const pmid = typeof result.pmid === 'string' && /^\d+$/.test(result.pmid) ? result.pmid : undefined;
+  const isOpenAccess = String(result.isOpenAccess || '').toUpperCase() === 'Y';
+  const providerFullTextUrl = isOpenAccess && pmcid ? `https://europepmc.org/articles/${pmcid}` : undefined;
+  const authors = Array.isArray(result.authorList?.author)
+    ? result.authorList.author.map((author: any) => author?.fullName || [author?.firstName, author?.lastName].filter(Boolean).join(' '))
+      .filter((name: unknown): name is string => typeof name === 'string' && !!name.trim())
+    : typeof result.authorString === 'string' && result.authorString ? [result.authorString] : [];
+  const doi = normalizeAcademicDoi(result.doi);
+  const sourceUrl = pmcid
+    ? `https://europepmc.org/articles/${pmcid}`
+    : `https://europepmc.org/article/${encodeURIComponent(source)}/${encodeURIComponent(id)}`;
+  return baseRecord('europepmc', {
+    id: `europepmc:${source}:${id}`,
+    externalId: `${source}:${id}`,
+    identifier: pmid ? `PMID:${pmid}` : pmcid,
+    title: typeof result.title === 'string' && result.title.trim() ? result.title.trim() : 'Untitled biomedical article',
+    author: authors[0] || 'Unknown Author',
+    authors,
+    language: 'und',
+    year: typeof result.pubYear === 'string' ? result.pubYear : undefined,
+    publisher: typeof result.journalTitle === 'string' ? result.journalTitle : undefined,
+    doi,
+    description: typeof result.abstractText === 'string' ? result.abstractText.replace(/\s+/g, ' ').trim().slice(0, 3000) : '',
+    sourceUrl,
+    providerFullTextUrl,
+    rights: isOpenAccess ? RightsCategory.OPEN_ACCESS : RightsCategory.METADATA_ONLY,
+    rightsNote: isOpenAccess
+      ? 'Europe PMC marks this article as open access; full-text access does not by itself grant reuse rights. Check the article-level license before copying or redistributing.'
+      : 'Europe PMC provides bibliographic metadata only for this result; full-text and reuse rights are not confirmed.',
+    availability: providerFullTextUrl ? 'provider-full-view' : isOpenAccess ? 'official-source-only' : 'metadata-only',
+    canImport: false,
+    downloadLinks: [],
+    metadata: { pmid, pmcid, source, isOpenAccess, journalTitle: result.journalTitle, publicationType: result.pubTypeList?.pubType, fullText: providerFullTextUrl ? 'official-provider-link' : 'not-confirmed' }
+  });
+}
+
+export class EuropePmcConnector implements LibraryConnector {
+  readonly source = 'europepmc' as const;
+
+  private async searchRecords(query: string, limit: number): Promise<ExternalLibraryRecord[]> {
+    const url = new URL(SOURCE_CONFIG[this.source].api);
+    url.searchParams.set('query', query);
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('resultType', 'core');
+    url.searchParams.set('pageSize', String(cap(limit)));
+    const response = JSON.parse(await requestText(this.source, url.toString()));
+    if (!Array.isArray(response?.resultList?.result)) throw new Error('Europe PMC response did not contain a result list.');
+    return response.resultList.result.slice(0, cap(limit))
+      .map(mapEuropePmcResult)
+      .filter((record: ExternalLibraryRecord | undefined): record is ExternalLibraryRecord => !!record);
+  }
+
+  async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
+    if (!query.trim()) return ok([]);
+    try { return ok(await this.searchRecords(query.trim(), limit)); }
+    catch (error) { return failed(error); }
+  }
+
+  async getBook(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
+    const raw = locator.record?.externalId || locator.doi || locator.identifier || locator.id || '';
+    const doi = normalizeAcademicDoi(locator.record?.doi || locator.doi || raw);
+    const id = raw.replace(/^(?:PMC|PMID|MED|PPR):/i, '');
+    const query = doi ? `DOI:${doi}` : /^PMC\d+$/i.test(id) || /^\d+$/.test(id) ? `EXT_ID:${id}` : undefined;
+    if (!query) return failed(new Error('Europe PMC requires a DOI, PMID, or PMCID.'));
+    try {
+      const record = (await this.searchRecords(query, 1))[0];
+      return record ? ok(record) : failed(new Error('Europe PMC record was not found.'));
+    } catch (error) { return failed(error); }
+  }
+
+  getMetadata(locator: BookLocator) { return this.getBook(locator); }
+  async getAvailability(locator: BookLocator): Promise<ConnectorResponse<unknown>> {
+    const result = await this.getBook(locator);
+    if (result.status !== 'ok' || !result.data) return propagateFailure<unknown>(result, 'Could not verify the Europe PMC record.');
+    return ok({ rights: result.data.rights, providerFullTextUrl: result.data.providerFullTextUrl, reuse: 'verify-article-license', canImport: false });
+  }
+  async getFullText(_locator: BookLocator) { return unsupported<FullText>('Europe PMC open full text remains on the official article page; this connector does not copy article text locally.'); }
+  async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('Europe PMC access status does not by itself authorize downloads or reuse; use the official article page.'); }
+  getSourceInformation() {
+    return enabledSourceInformation(this.source, [
+      'Uses the official Europe PMC REST API without an account or API key for biomedical literature search.',
+      'The OA flag is an access signal only; this connector links eligible PMC open-access articles to Europe PMC and never imports full text.'
+    ]);
+  }
+}
+
+function mapPmcSummary(summary: any): ExternalLibraryRecord | undefined {
+  const uid = typeof summary?.uid === 'string' || typeof summary?.uid === 'number' ? String(summary.uid) : '';
+  if (!/^\d+$/.test(uid)) return undefined;
+  const articleIds = Array.isArray(summary.articleids) ? summary.articleids : [];
+  const idValue = (type: string): string | undefined => {
+    const item = articleIds.find((entry: any) => String(entry?.idtype || '').toLowerCase() === type);
+    return typeof item?.value === 'string' ? item.value : undefined;
+  };
+  const pmcidRaw = idValue('pmcid') || `PMC${uid}`;
+  const pmcid = /^PMC\d+$/i.test(pmcidRaw) ? pmcidRaw.toUpperCase() : undefined;
+  const pmid = idValue('pmid');
+  const doi = normalizeAcademicDoi(idValue('doi'));
+  const providerFullTextUrl = pmcid ? `https://pmc.ncbi.nlm.nih.gov/articles/${pmcid}/` : undefined;
+  const authors = Array.isArray(summary.authors)
+    ? summary.authors.map((author: any) => author?.name).filter((name: unknown): name is string => typeof name === 'string' && !!name.trim())
+    : [];
+  const publicationDate = [summary.pubdate, summary.epubdate, summary.printpubdate].find((value: unknown) => typeof value === 'string') || '';
+  return baseRecord('pmc', {
+    id: `pmc:${uid}`,
+    externalId: uid,
+    identifier: pmcid ? `PMCID:${pmcid}` : undefined,
+    title: typeof summary.title === 'string' && summary.title.trim() ? summary.title.trim() : 'Untitled PMC article',
+    author: authors[0] || 'Unknown Author',
+    authors,
+    language: 'und',
+    year: publicationDate.match(/\b(?:19|20)\d{2}\b/)?.[0],
+    publisher: typeof summary.fulljournalname === 'string' ? summary.fulljournalname : typeof summary.source === 'string' ? summary.source : undefined,
+    doi,
+    description: '',
+    sourceUrl: providerFullTextUrl || `https://pmc.ncbi.nlm.nih.gov/articles/PMC${uid}/`,
+    providerFullTextUrl,
+    rights: RightsCategory.UNKNOWN,
+    rightsNote: 'This PMC record links to the official article page, where reading availability and the item-level license must be checked. Inclusion in PMC does not itself grant reuse or redistribution rights.',
+    availability: providerFullTextUrl ? 'provider-full-view' : 'official-source-only',
+    canImport: false,
+    downloadLinks: [],
+    metadata: { pmcid, pmid, uid, journal: summary.fulljournalname || summary.source, volume: summary.volume, issue: summary.issue, pages: summary.pages, publicationDate, articleIds }
+  });
+}
+
+export class PmcConnector implements LibraryConnector {
+  readonly source = 'pmc' as const;
+
+  private entrezTerm(query: string): string {
+    const raw = query.trim();
+    const doi = normalizeAcademicDoi(raw);
+    const pmcid = raw.match(/^(?:pmcid\s*:\s*)?(PMC\d+)$/i)?.[1];
+    const pmid = raw.match(/^pmid\s*:\s*(\d+)$/i)?.[1];
+    const uid = raw.match(/^uid\s*:\s*(\d+)$/i)?.[1];
+    const author = raw.match(/^author\s*:\s*(.+)$/i)?.[1];
+    const title = raw.match(/^title\s*:\s*(.+)$/i)?.[1];
+    const phrase = (value: string) => `"${value.replace(/"/g, '').trim()}"`;
+    const expression = doi ? `${doi}[DOI]`
+      : pmcid ? `${pmcid}[PMCID]`
+        : pmid ? `${pmid}[PMID]`
+          : uid ? `${uid}[UID]`
+            : author ? `${phrase(author)}[Author]`
+              : title ? `${phrase(title)}[Title]`
+                : raw;
+    return expression;
+  }
+
+  private async searchRecords(query: string, limit: number): Promise<ExternalLibraryRecord[]> {
+    const searchUrl = new URL(SOURCE_CONFIG[this.source].api);
+    searchUrl.searchParams.set('db', 'pmc');
+    searchUrl.searchParams.set('term', this.entrezTerm(query));
+    searchUrl.searchParams.set('retmode', 'json');
+    searchUrl.searchParams.set('retmax', String(cap(limit)));
+    searchUrl.searchParams.set('tool', 'earth_one_world_library');
+    const searchResponse = JSON.parse(await requestText(this.source, searchUrl.toString()));
+    const ids = searchResponse?.esearchresult?.idlist;
+    if (!Array.isArray(ids)) throw new Error('NCBI ESearch response did not contain an ID list.');
+    if (!ids.length) return [];
+
+    const summaryUrl = new URL('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi');
+    summaryUrl.searchParams.set('db', 'pmc');
+    summaryUrl.searchParams.set('id', ids.filter((id: unknown) => /^\d+$/.test(String(id))).join(','));
+    summaryUrl.searchParams.set('retmode', 'json');
+    summaryUrl.searchParams.set('tool', 'earth_one_world_library');
+    const summaryResponse = JSON.parse(await requestText(this.source, summaryUrl.toString()));
+    const result = summaryResponse?.result;
+    if (!Array.isArray(result?.uids)) throw new Error('NCBI ESummary response did not contain a UID list.');
+    return result.uids.slice(0, cap(limit))
+      .map((uid: string) => mapPmcSummary(result[uid]))
+      .filter((record: ExternalLibraryRecord | undefined): record is ExternalLibraryRecord => !!record);
+  }
+
+  async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
+    if (!query.trim()) return ok([]);
+    try { return ok(await this.searchRecords(query, limit)); }
+    catch (error) { return failed(error); }
+  }
+
+  async getBook(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
+    const raw = String(locator.record?.externalId || locator.record?.identifier || locator.identifier || locator.id || '');
+    const doi = normalizeAcademicDoi(locator.record?.doi || locator.doi || raw);
+    const pmcid = raw.match(/PMC\d+/i)?.[0];
+    const pmid = raw.match(/PMID\s*:?\s*(\d+)/i)?.[1] || (locator.record?.metadata?.pmid ? String(locator.record.metadata.pmid) : undefined);
+    const uid = raw.match(/^(?:pmc:)?(\d+)$/i)?.[1];
+    const query = doi ? `doi:${doi}` : pmcid || (uid ? `uid:${uid}` : undefined) || (pmid ? `pmid:${pmid}` : undefined);
+    if (!query) return failed(new Error('PubMed Central requires a DOI, PMID, PMCID, or PMC UID.'));
+    try {
+      const record = (await this.searchRecords(query, 1))[0];
+      return record ? ok(record) : failed(new Error('No free-full-text PMC record was found for this identifier.'));
+    } catch (error) { return failed(error); }
+  }
+
+  getMetadata(locator: BookLocator) { return this.getBook(locator); }
+  async getAvailability(locator: BookLocator): Promise<ConnectorResponse<unknown>> {
+    const result = await this.getBook(locator);
+    if (result.status !== 'ok' || !result.data) return propagateFailure<unknown>(result, 'Could not verify the PMC record.');
+    return ok({ rights: result.data.rights, providerFullTextUrl: result.data.providerFullTextUrl, reuse: 'verify-article-license', canImport: false });
+  }
+  async getFullText(_locator: BookLocator) { return unsupported<FullText>('PMC articles remain on the official PMC page; this connector does not retrieve or copy full text locally.'); }
+  async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('PMC reading access does not grant local download or redistribution rights; use the official article page.'); }
+  getSourceInformation() {
+    return enabledSourceInformation(this.source, [
+      'Uses official NCBI E-utilities ESearch and ESummary without an API key for bounded PMC bibliographic search and metadata lookup.',
+      'NCBI recommends no more than three requests per second; the shared per-source serialized queue stays below that rate.',
+      'Free reading access is not treated as a reuse license. Article text is not copied locally, and the individual PMC license remains authoritative.'
+    ]);
+  }
+}
+
 export class GutenbergConnector implements LibraryConnector {
   readonly source = 'gutenberg' as const;
 
@@ -1178,7 +1741,12 @@ export function createLibraryConnectors(): Record<LibrarySource, LibraryConnecto
     googlebooks: new GoogleBooksConnector(),
     europeana: new EuropeanaConnector(),
     wikisource: new WikisourceConnector(),
-    ar_wikisource: new ArabicWikisourceConnector()
+    ar_wikisource: new ArabicWikisourceConnector(),
+    openalex: new OpenAlexConnector(),
+    crossref: new CrossrefConnector(),
+    arxiv: new ArxivConnector(),
+    europepmc: new EuropePmcConnector(),
+    pmc: new PmcConnector()
   };
 }
 
@@ -1214,7 +1782,7 @@ function dedupeByExactIdentifier(records: ExternalLibraryRecord[]): ExternalLibr
 }
 
 export async function searchLibrary(query: string, options: LibrarySearchOptions = {}): Promise<{ results: ExternalLibraryRecord[]; sources: SourceSearchStatus[] }> {
-  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'];
+  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'];
   const limit = cap(options.limit || 10);
   const selected = selectedIds.map(id => getLibraryConnector(id)).filter((connector): connector is LibraryConnector => !!connector);
   const enabled = selected.filter(connector => isLibraryConnectorEnabled(connector.source));

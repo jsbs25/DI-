@@ -497,7 +497,7 @@ app.get('/api/library/search', async (req, res) => {
   }
   if (q.trim().length > 200) return res.status(400).json({ success: false, error: 'Search query must be 200 characters or fewer' });
   try {
-    const knownSources: LibrarySource[] = ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'];
+    const knownSources: LibrarySource[] = ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc'];
     let selectedSources: LibrarySource[] | undefined;
     const sourceParam = req.query.sources ?? req.query.source;
     if (typeof sourceParam === 'string' && sourceParam.trim()) {
@@ -520,7 +520,7 @@ app.get('/api/library/search', async (req, res) => {
 // Import only after server-side provider metadata and reuse rights are revalidated.
 app.post('/api/library/ingest', async (req, res) => {
   const { textUrl, pageTitle, epubUrl, source: rawSource, title, author, coverImage, description, language, identifier, externalId } = req.body;
-  const knownSources: LibrarySource[] = ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'];
+  const knownSources: LibrarySource[] = ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc'];
   if (typeof rawSource !== 'string' || !knownSources.includes(rawSource as LibrarySource)) {
     return res.status(400).json({ success: false, error: 'A supported source is required' });
   }
@@ -529,6 +529,9 @@ app.post('/api/library/ingest', async (req, res) => {
   if (source === 'openlibrary') return res.status(403).json({ success: false, error: 'Open Library provides discovery metadata; open the official record for reading or borrowing options.' });
   if (source === 'googlebooks') return res.status(403).json({ success: false, error: 'Google Books discovery and previews remain on the official service; local full-text import is not supported.' });
   if (source === 'europeana') return res.status(403).json({ success: false, error: 'Europeana search provides cultural-heritage metadata and an official source link; item media and full-text import are not enabled.' });
+  if (source === 'openalex' || source === 'crossref' || source === 'arxiv' || source === 'europepmc' || source === 'pmc') {
+    return res.status(403).json({ success: false, error: 'Academic discovery records and provider-hosted full text are not copied into EARTH ONE; use the official source and verify its article-level license.' });
+  }
 
   let recordLocator: { id?: string; identifier?: string; pageTitle?: string };
   if (source === 'archive') {

@@ -78,3 +78,21 @@
 - 更新 `PROJECT_AUDIT.md`、`TEST_REPORT.md`、`LIBRARY_CONNECTORS.md`，记录官方 API/rights 文档、密钥申请方式与测试限制。无真实 Europeana API key，本轮未执行在线请求；离线 mock 不是在线可用性证明。
 - 验证：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（23/23）、`npm run test:api`（85/85）及 `npm run build` 均通过。生产构建保留既有 Three.js 大 chunk 提示；未运行全站浏览器视觉回归或移动设备测试。
 - 统一搜索卡片同步呈现来源的可用/禁用/失败状态与原因，并展示可用的资源类型、DOI/ISBN、访问和下载状态，避免缺 key 时误呈现为“无搜索结果”；本轮只做类型检查与构建验证，未执行浏览器视觉测试。
+
+
+### WORLD LIBRARY Phase 4：免密钥学术发现（2026-11-04）
+
+- 从已同步主线基线 `f160fa1825cbf2ac1f534bfec83767ef34110e4c` 开始，起始工作树干净；没有请求 API key，也没有修改用户书架或正式数据。新增 OpenAlex、Crossref、arXiv、Europe PMC 四个无需账号/密钥的官方查询适配器；Google Books 与 Europeana 继续缺 key 即 fail-closed。
+- 四源加入注册表、默认统一搜索、服务端白名单和 `.env.example` 独立开关。搜索结果显示来源与官方记录页；在提供方明确返回可访问入口时，UI 另行展示经过 HTTPS 校验的官方全文入口。精确 DOI 去重继续复用。
+- 权利安全：四个学术连接器均固定 `canImport: false`、不提供本地下载链接；全文复制/下载 connector 方法明确 `unsupported`；服务端 `/api/library/ingest` 独立拒绝四源导入（403）。开放获取只代表访问，不自动表示可再利用。arXiv 串行请求间隔至少 3 秒。
+- 官方接口文档已在 `LIBRARY_CONNECTORS.md` 链接记录。新增离线 fixtures，并将四源加入可重复实时烟测脚本。
+- 验证：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（25 项）、`npm run test:api`（85 项）、`npm run build`、`npm run test:library-connectors:live` 全部通过；实时搜索四源均返回记录。生产构建仍有非阻断的 Three.js 大 chunk 提示；未下载 EPUB 或复制受限全文。
+
+
+### WORLD LIBRARY Phase 4 follow-up：PMC 与 DOAB（2026-11-04）
+
+本段更新前面的 Phase 4 四源初始快照：新增 PubMed Central 独立来源，当前连接器总数为 12。PMC 使用官方 NCBI E-utilities `ESearch`/`ESummary`，无需 API key；搜索结果链接到 PMC 官方文章页，权利一律保守标记 `UNKNOWN`，全文/下载操作明确 unsupported，服务端入库继续返回 403。每个来源的请求队列串行且间隔至少一秒。尝试使用 NCBI 文档中的旧 `free fulltext[filter]` 示例时，当前在线端点返回 0 条，因此实现改用 PMC 书目检索，不再误称结果已通过该筛选；不会复制全文或推断单篇许可。
+
+DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据文件及 PRISM 接口；但 OAI-PMH 是分页记录收割，不是关键词搜索，当前目录 REST 候选接口返回 HTTP 403/429，故没有用未验证路由或批量抓取来冒充实时搜索。没有要求用户提供密钥或进行设置。详细官方来源与边界记录在 `LIBRARY_CONNECTORS.md`。
+
+最终验证：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（27/27）、`npm run test:api`（85/85）、`npm run build` 和 `npm run test:library-connectors:live` 全部通过；真实限量烟测包含 PMC 且无需密钥。构建仍有既有 Three.js 大 chunk 非阻断提示；测试使用隔离临时数据，没有修改正式用户书架或图书数据。

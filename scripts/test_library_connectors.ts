@@ -6,6 +6,11 @@ import {
   InternetArchiveConnector,
   GoogleBooksConnector,
   EuropeanaConnector,
+  OpenAlexConnector,
+  CrossrefConnector,
+  ArxivConnector,
+  EuropePmcConnector,
+  PmcConnector,
   isLibraryConnectorEnabled,
   OpenLibraryConnector,
   RightsCategory,
@@ -83,6 +88,36 @@ const europeanaItems = [
     id: '/12345/unknown', title: ['Unknown Rights Object'], edmPreview: ['https://images.example.invalid/private.jpg']
   }
 ];
+const sharedAcademicDoi = '10.5555/shared-paper';
+const openAlexWorks = [{
+  id: 'https://openalex.org/W1234567890', doi: `https://doi.org/${sharedAcademicDoi}`,
+  title: 'Open Research Fixture', publication_year: 2024, language: 'en', type: 'article',
+  authorships: [{ author: { display_name: 'A. Researcher' } }],
+  primary_location: { source: { display_name: 'Fixture Journal' } },
+  open_access: { is_oa: true, oa_status: 'gold' },
+  best_oa_location: { landing_page_url: 'https://publisher.example.org/open-paper', license: 'cc-by' }
+}];
+const crossrefWork = {
+  DOI: sharedAcademicDoi, title: ['Crossref Scholarly Fixture'], author: [{ given: 'B.', family: 'Scholar' }],
+  publisher: 'Fixture Publisher', type: 'journal-article', language: 'en',
+  'published-print': { 'date-parts': [[2023, 4, 1]] }, 'container-title': ['Fixture Journal'],
+  abstract: '<jats:p>Crossref abstract fixture.</jats:p>', license: [{ URL: 'https://publisher.example.org/license', 'content-version': 'vor', start: { 'date-parts': [[2023, 4, 1]] } }]
+};
+const arxivFeed = `<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom"><entry><id>http://arxiv.org/abs/2401.12345v2</id><title> A Fixture Paper on Open Systems </title><summary>A public abstract fixture.</summary><published>2024-01-05T00:00:00Z</published><updated>2024-02-01T00:00:00Z</updated><author><name>Jane Doe</name></author><author><name>Ali Example</name></author><arxiv:doi>10.5555/shared-paper</arxiv:doi><arxiv:journal_ref>Fixture Proceedings</arxiv:journal_ref><arxiv:primary_category term="cs.AI"/><category term="cs.LG"/><link href="http://arxiv.org/pdf/2401.12345v2" title="pdf" type="application/pdf"/></entry></feed>`;
+const europePmcResults = [
+  { id: '9876543', source: 'MED', pmid: '9876543', pmcid: 'PMC9876543', doi: '10.5555/biomed', title: 'Europe PMC Open Article', authorString: 'M. Biologist', journalTitle: 'Open Biology Fixture', pubYear: '2022', isOpenAccess: 'Y', abstractText: 'A biomedical abstract fixture.' },
+  { id: '12345678', source: 'MED', pmid: '12345678', title: 'Metadata Only Article', isOpenAccess: 'N' }
+];
+const pmcSummary = {
+  uid: '2468', pubdate: '2021', epubdate: '2021 Sep 3', source: 'Fixture Biology',
+  fulljournalname: 'Journal of Fixture Biology', title: 'A PMC Open Article Fixture',
+  authors: [{ name: 'T. Scientist', authtype: 'Author' }],
+  articleids: [
+    { idtype: 'pmcid', value: 'PMC2468' },
+    { idtype: 'pmid', value: '12345678' },
+    { idtype: 'doi', value: '10.5555/pmc-article' }
+  ]
+};
 
 async function testGoogleBooks() {
   const oldGoogleKey = process.env.GOOGLE_BOOKS_API_KEY;
@@ -257,6 +292,120 @@ async function testEuropeana() {
   }
 }
 
+async function testFreeAcademicConnectors() {
+  clearLibraryConnectorCache();
+  const openAlex = new OpenAlexConnector();
+  const openAlexResponse = await openAlex.search('artificial intelligence', 2);
+  assert.equal(openAlexResponse.status, 'ok', 'OpenAlex basic search works without an API key');
+  const openAlexRecord = openAlexResponse.data?.[0];
+  assert.equal(openAlexRecord?.title, 'Open Research Fixture');
+  assert.equal(openAlexRecord?.author, 'A. Researcher');
+  assert.equal(openAlexRecord?.rights, RightsCategory.OPEN_ACCESS);
+  assert.equal(openAlexRecord?.canImport, false, 'OpenAlex access signals never authorize local import');
+  assert.equal(openAlexRecord?.providerFullTextUrl, 'https://publisher.example.org/open-paper');
+  assert.equal(openAlex.getSourceInformation().data?.authentication, 'none');
+  const openAlexSearchUrl = new URL(requests.filter(url => url.includes('api.openalex.org/works?')).at(-1)!);
+  assert.equal(openAlexSearchUrl.searchParams.get('search'), 'artificial intelligence');
+  assert.equal(openAlexSearchUrl.searchParams.has('api_key'), false);
+  const openAlexDetail = await openAlex.getBook({ id: 'W1234567890' });
+  assert.equal(openAlexDetail.status, 'ok');
+  assert.equal((await openAlex.getAvailability({ id: 'W1234567890' })).status, 'ok');
+  assertUnsupported(await openAlex.getFullText({ id: 'W1234567890' }));
+  assertUnsupported(await openAlex.getDownloadLinks({ id: 'W1234567890' }));
+  assert.equal((await openAlex.getBook({ id: '../unsafe' })).status, 'error');
+
+  const crossref = new CrossrefConnector();
+  const crossrefResponse = await crossref.search('author:Fixture Scholar', 3);
+  assert.equal(crossrefResponse.status, 'ok', 'Crossref public REST API works without credentials');
+  const crossrefRecord = crossrefResponse.data?.[0];
+  assert.equal(crossrefRecord?.title, 'Crossref Scholarly Fixture');
+  assert.equal(crossrefRecord?.author, 'B. Scholar');
+  assert.equal(crossrefRecord?.year, '2023');
+  assert.equal(crossrefRecord?.rights, RightsCategory.METADATA_ONLY);
+  assert.equal(crossrefRecord?.canImport, false);
+  assert.equal(crossrefRecord?.licenseUrl, undefined, 'reported publisher license metadata is not silently asserted as reuse permission');
+  assert.equal((crossrefRecord?.metadata as any)?.licenses?.[0]?.contentVersion, 'vor');
+  assert.equal(crossref.getSourceInformation().data?.authentication, 'none');
+  const crossrefSearchUrl = new URL(requests.filter(url => url.includes('api.crossref.org/works?')).at(-1)!);
+  assert.equal(crossrefSearchUrl.searchParams.get('query.author'), 'Fixture Scholar');
+  const crossrefDetail = await crossref.getBook({ doi: sharedAcademicDoi });
+  assert.equal(crossrefDetail.status, 'ok');
+  assert.equal(crossrefDetail.data?.sourceUrl, `https://doi.org/${sharedAcademicDoi}`);
+  assert.equal((await crossref.getAvailability({ doi: sharedAcademicDoi })).status, 'ok');
+  assertUnsupported(await crossref.getFullText({ doi: sharedAcademicDoi }));
+  assertUnsupported(await crossref.getDownloadLinks({ doi: sharedAcademicDoi }));
+
+  const arxiv = new ArxivConnector();
+  const arxivResponse = await arxiv.search('author:Jane Doe', 4);
+  assert.equal(arxivResponse.status, 'ok', 'arXiv Atom API is queried without credentials');
+  const arxivRecord = arxivResponse.data?.[0];
+  assert.equal(arxivRecord?.title, 'A Fixture Paper on Open Systems');
+  assert.deepEqual(arxivRecord?.authors, ['Jane Doe', 'Ali Example']);
+  assert.equal(arxivRecord?.year, '2024');
+  assert.equal(arxivRecord?.doi, sharedAcademicDoi);
+  assert.equal(arxivRecord?.sourceUrl, 'https://arxiv.org/abs/2401.12345v2');
+  assert.equal(arxivRecord?.providerFullTextUrl, 'https://arxiv.org/pdf/2401.12345v2');
+  assert.equal(arxivRecord?.rights, RightsCategory.OPEN_ACCESS);
+  assert.equal(arxivRecord?.canImport, false);
+  assert.deepEqual((arxivRecord?.metadata as any)?.categories, ['cs.AI', 'cs.LG']);
+  assert.equal(arxiv.getSourceInformation().data?.authentication, 'none');
+  const arxivSearchUrl = new URL(requests.filter(url => url.includes('export.arxiv.org/api/query')).at(-1)!);
+  assert.equal(arxivSearchUrl.searchParams.get('search_query'), 'au:"Jane Doe"');
+  assertUnsupported(await arxiv.getFullText({ id: '2401.12345v2' }));
+  assertUnsupported(await arxiv.getDownloadLinks({ id: '2401.12345v2' }));
+  assert.equal((await arxiv.getBook({ id: '../unsafe' })).status, 'error');
+
+  const europePmc = new EuropePmcConnector();
+  const europePmcResponse = await europePmc.search('cancer', 5);
+  assert.equal(europePmcResponse.status, 'ok', 'Europe PMC search requires no API key');
+  const openArticle = europePmcResponse.data?.[0];
+  assert.equal(openArticle?.title, 'Europe PMC Open Article');
+  assert.equal(openArticle?.rights, RightsCategory.OPEN_ACCESS);
+  assert.equal(openArticle?.sourceUrl, 'https://europepmc.org/articles/PMC9876543');
+  assert.equal(openArticle?.providerFullTextUrl, 'https://europepmc.org/articles/PMC9876543');
+  assert.equal(openArticle?.canImport, false);
+  assert.equal(europePmcResponse.data?.[1].rights, RightsCategory.METADATA_ONLY);
+  assert.equal(europePmc.getSourceInformation().data?.authentication, 'none');
+  const europePmcUrl = new URL(requests.filter(url => url.includes('europepmc/webservices/rest/search?')).at(-1)!);
+  assert.equal(europePmcUrl.searchParams.get('query'), 'cancer');
+  assertUnsupported(await europePmc.getFullText({ identifier: 'PMCID:PMC9876543' }));
+  assertUnsupported(await europePmc.getDownloadLinks({ identifier: 'PMCID:PMC9876543' }));
+  assert.equal((await europePmc.getBook({ id: '../unsafe' })).status, 'error');
+
+  const pmc = new PmcConnector();
+  const pmcResponse = await pmc.search('author:T. Scientist', 2);
+  assert.equal(pmcResponse.status, 'ok', 'PubMed Central E-utilities search needs no API key');
+  const pmcRecord = pmcResponse.data?.[0];
+  assert.equal(pmcRecord?.title, 'A PMC Open Article Fixture');
+  assert.equal(pmcRecord?.author, 'T. Scientist');
+  assert.equal(pmcRecord?.year, '2021');
+  assert.equal(pmcRecord?.doi, '10.5555/pmc-article');
+  assert.equal(pmcRecord?.identifier, 'PMCID:PMC2468');
+  assert.equal(pmcRecord?.rights, RightsCategory.UNKNOWN);
+  assert.equal(pmcRecord?.canImport, false, 'free reading access never authorizes a local copy');
+  assert.equal(pmcRecord?.sourceUrl, 'https://pmc.ncbi.nlm.nih.gov/articles/PMC2468/');
+  assert.equal(pmcRecord?.providerFullTextUrl, 'https://pmc.ncbi.nlm.nih.gov/articles/PMC2468/');
+  assert.match(pmcRecord?.rightsNote || '', /item-level license must be checked/i);
+  assert.equal(pmc.getSourceInformation().data?.authentication, 'none');
+  const pmcSearchUrl = new URL(requests.filter(url => url.includes('eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi')).at(-1)!);
+  assert.equal(pmcSearchUrl.searchParams.get('db'), 'pmc');
+  assert.match(pmcSearchUrl.searchParams.get('term') || '', /\[Author\]/);
+  assert.doesNotMatch(pmcSearchUrl.searchParams.get('term') || '', /free fulltext\[filter\]/i);
+  assert.equal(pmcSearchUrl.searchParams.has('api_key'), false);
+  const pmcSummaryUrl = new URL(requests.filter(url => url.includes('eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi')).at(-1)!);
+  assert.equal(pmcSummaryUrl.searchParams.get('id'), '2468');
+  assert.equal(pmcSummaryUrl.searchParams.has('api_key'), false);
+  const pmcDetail = await pmc.getBook({ id: 'pmc:2468' });
+  assert.equal(pmcDetail.status, 'ok', 'PMC UID lookup returns a provider-backed record');
+  assertUnsupported(await pmc.getFullText({ identifier: 'PMCID:PMC2468' }));
+  assertUnsupported(await pmc.getDownloadLinks({ identifier: 'PMCID:PMC2468' }));
+
+  clearLibraryConnectorCache();
+  const duplicate = await searchLibrary('same', { sources: ['openalex', 'crossref'], limit: 3 });
+  assert.equal(duplicate.results.length, 1, 'academic records merge only on an exact DOI');
+  assert.equal(duplicate.results[0].alternateSources?.[0].source, 'crossref');
+}
+
 function archiveDoc(query: string) {
   if (query.includes('same')) return [{ identifier: 'item-same', title: 'Same Book — Archive Edition', isbn: [sameIsbn], rights: '', restricted: false, format: ['DjVuTXT'] }];
   if (query.includes('open')) return [{ identifier: 'item-open', title: 'Open Rights', rights: 'CC BY 4.0', restricted: false, format: ['DjVuTXT'] }];
@@ -305,6 +454,24 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
         aggregations: [{ edmRights: ['http://creativecommons.org/publicdomain/mark/1.0/'], edmPreview: ['https://api.europeana.eu/thumbnail/v2/12345/pdm-item.jpg'] }]
       }
     });
+  }
+  if (url.hostname === 'api.openalex.org' && /^\/works(?:\/W\d+)?$/.test(url.pathname)) {
+    return json(url.pathname.endsWith('/W1234567890') ? openAlexWorks[0] : { results: openAlexWorks });
+  }
+  if (url.hostname === 'api.crossref.org' && /^\/works(?:\/10\.5555\/shared-paper)?$/.test(url.pathname)) {
+    return json(url.pathname === '/works' ? { message: { items: [crossrefWork] } } : { message: crossrefWork });
+  }
+  if (url.hostname === 'export.arxiv.org' && url.pathname === '/api/query') {
+    return new Response(arxivFeed, { status: 200, headers: { 'Content-Type': 'application/atom+xml' } });
+  }
+  if (url.hostname === 'www.ebi.ac.uk' && url.pathname === '/europepmc/webservices/rest/search') {
+    return json({ resultList: { result: europePmcResults } });
+  }
+  if (url.hostname === 'eutils.ncbi.nlm.nih.gov' && url.pathname.endsWith('/esearch.fcgi')) {
+    return json({ esearchresult: { idlist: ['2468'] } });
+  }
+  if (url.hostname === 'eutils.ncbi.nlm.nih.gov' && url.pathname.endsWith('/esummary.fcgi')) {
+    return json({ result: { uids: ['2468'], '2468': pmcSummary } });
   }
 
   if (url.hostname === 'archive.org' && url.pathname === '/advancedsearch.php') {
@@ -360,6 +527,7 @@ async function main() {
   assertUnsupported(await openLibrary.getDownloadLinks({}));
   await testGoogleBooks();
   await testEuropeana();
+  await testFreeAcademicConnectors();
 
   const gutenberg = new GutenbergConnector();
     const gutenbergResults = await gutenberg.search('alice');
@@ -421,7 +589,7 @@ async function main() {
   if (oldToggle === undefined) delete process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED;
   else process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED = oldToggle;
 
-  for (const id of ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'] as const) {
+  for (const id of ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc'] as const) {
     assert.ok(getLibraryConnector(id));
   }
   console.log('library connector offline tests: PASS');

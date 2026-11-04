@@ -51,6 +51,7 @@ interface OnlineLibraryResult {
   source: string;
   sourceName?: string;
   sourceUrl?: string;
+  providerFullTextUrl?: string;
   pageTitle?: string;
   rightsClassification?: string;
   rightsNote?: string;
@@ -645,7 +646,12 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       europeana: 'Europeana',
                       archive: 'Internet Archive',
                       wikisource: 'Wikisource',
-                      ar_wikisource: '阿拉伯语维基文库'
+                      ar_wikisource: '阿拉伯语维基文库',
+                      openalex: 'OpenAlex',
+                      crossref: 'Crossref',
+                      arxiv: 'arXiv',
+                      europepmc: 'Europe PMC',
+                      pmc: 'PubMed Central'
                     } as Record<string, string>)[r.source] || r.source;
                     const resourceType = typeof r.metadata?.resourceType === 'string' ? r.metadata.resourceType : undefined;
                     const identifierLabel = r.doi ? `DOI ${r.doi}` : r.isbn?.length ? `ISBN ${r.isbn[0]}` : r.identifier ? `ID ${r.identifier}` : undefined;
@@ -654,6 +660,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       'licensed-thumbnail-and-official-source': '官方页面；许可缩略图',
                       'provider-preview': '提供方预览',
                       'provider-full-view': '提供方页面阅读',
+                      'open-access-link': '开放获取入口（官方来源）',
                       'provider-download': '提供方访问入口',
                       'metadata-only': '仅元数据',
                       'access-unknown': '访问状态未知',
@@ -671,6 +678,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       UNKNOWN: '权利状态未知'
                     } as Record<string, string>)[r.rightsClassification || 'UNKNOWN'] || '权利状态未知';
                     const licenseUrl = safeHttpsUrl(r.licenseUrl);
+                    const providerFullTextUrl = safeHttpsUrl(r.providerFullTextUrl);
                     return (
                       <div key={r.id} className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-amber-500/50 transition-all">
                         {r.coverImage && (
@@ -696,8 +704,13 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                               </button>
                             )}
                             {r.sourceUrl && (
-                              <a href={r.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-all">
+                              <a href={r.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors">
                                 <ExternalLink className="w-3 h-3" /><span>在来源平台查看</span>
+                              </a>
+                            )}
+                            {providerFullTextUrl && providerFullTextUrl !== r.sourceUrl && (
+                              <a href={providerFullTextUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-emerald-800/70 text-emerald-200 hover:text-white text-[11px] font-semibold transition-colors">
+                                <ExternalLink className="w-3 h-3" /><span>打开官方全文</span>
                               </a>
                             )}
                             {licenseUrl && (

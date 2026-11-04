@@ -37,6 +37,11 @@ async function main() {
       EARTH_ONE_LIBRARY_GUTENBERG_ENABLED: 'true',
       EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED: 'false',
       EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED: 'false',
+      EARTH_ONE_LIBRARY_OPENALEX_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_CROSSREF_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_ARXIV_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_PMC_ENABLED: 'true',
       GEMINI_API_KEY: '',
       OPENAI_API_KEY: '',
       ANTHROPIC_API_KEY: '',
@@ -116,6 +121,30 @@ async function main() {
     assert.equal(candidate.availability, 'verify-official-opds');
     assert.equal(candidate.sourceUrl, 'https://www.gutenberg.org/ebooks/1342');
 
+    const academicCases: Array<[string, string, string]> = [
+      ['openalex', 'artificial intelligence', 'https://openalex.org/'],
+      ['crossref', 'climate change', 'https://doi.org/'],
+      ['arxiv', 'machine learning', 'https://arxiv.org/abs/'],
+      ['europepmc', 'cancer', 'https://europepmc.org/'],
+      ['pmc', 'cancer', 'https://pmc.ncbi.nlm.nih.gov/articles/']
+    ];
+    const academicChecks = await Promise.all(academicCases.map(async ([source, query, sourcePrefix]) => {
+      const academicUrl = new URL('/api/library/search', baseUrl);
+      academicUrl.searchParams.set('q', query);
+      academicUrl.searchParams.set('source', source);
+      academicUrl.searchParams.set('limit', '1');
+      const response = await fetch(academicUrl, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
+      assert.equal(response.status, 200, `Live ${source} search endpoint returned HTTP ${response.status}`);
+      const body = await response.json() as any;
+      const status = body.sources?.find((item: any) => item.source === source);
+      const record = body.results?.find((item: any) => item.source === source);
+      assert.ok(status?.status === 'ok' && status.count > 0, `Live ${source} search returned no records: ${JSON.stringify(body.sources)}`);
+      assert.ok(record?.sourceUrl?.startsWith(sourcePrefix), `Live ${source} result did not preserve its official source URL`);
+      assert.equal(record.canImport, false, `${source} records cannot be locally imported`);
+      if (record.providerFullTextUrl) assert.ok(record.providerFullTextUrl.startsWith('https://'), `${source} full-text links must be HTTPS`);
+      return source;
+    }));
+
     const importResponse = await request('/api/library/ingest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -140,7 +169,7 @@ async function main() {
     const detailBody = await detailResponse.json() as any;
     assert.equal(detailBody.book?.id, book.id);
     assert.equal(detailBody.book?.rightsClassification, 'PUBLIC_DOMAIN');
-    console.log('Library connector live smoke: PASS (live Open Library + Internet Archive search; official Gutenberg search → per-book OPDS → isolated EPUB book record → local detail read; EPUB not downloaded).');
+    console.log(`Library connector live smoke: PASS (live Open Library + Internet Archive, ${academicChecks.join(', ')}; official Gutenberg search → per-book OPDS → isolated EPUB book record → local detail read; EPUB not downloaded).`);
   } catch (error) {
     console.error('Library connector live smoke failed:', error);
     if (childOutput) console.error('Temporary server output:\n' + childOutput);
