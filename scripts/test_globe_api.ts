@@ -153,6 +153,12 @@ async function main() {
       !JSON.stringify(globeNodes?.body).includes(String(privateNodeUser.location.lng)),
       'Globe node response contains only the established public fields and no private coordinate sentinels'
     );
+    const repeatedGlobeNodes = await get('/api/globe/nodes');
+    check(
+      repeatedGlobeNodes.status === globeNodes?.status &&
+      JSON.stringify(repeatedGlobeNodes.body) === JSON.stringify(globeNodes?.body),
+      'Repeated public globe-node GET returns an identical status and JSON response'
+    );
 
     let countries: Awaited<ReturnType<typeof get>> | undefined;
     for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -184,6 +190,12 @@ async function main() {
       Number.isFinite(jordan.lat) && Number.isFinite(jordan.lng),
       'Jordan retains English and localized names with numeric coordinates'
     );
+    const repeatedCountries = await get('/api/globe/countries');
+    check(
+      repeatedCountries.status === countries?.status &&
+      JSON.stringify(repeatedCountries.body) === JSON.stringify(countries?.body),
+      'Repeated globe-country catalog GET returns an identical status and JSON response'
+    );
 
     const globeStats = await get('/api/globe/stats');
     check(
@@ -196,12 +208,18 @@ async function main() {
       globeStats.body.stats.countries.some((country: any) => country.code === 'JO'),
       'Globe statistics match the catalog length and include Jordan'
     );
+    const repeatedGlobeStats = await get('/api/globe/stats');
+    check(
+      repeatedGlobeStats.status === globeStats.status &&
+      JSON.stringify(repeatedGlobeStats.body) === JSON.stringify(globeStats.body),
+      'Repeated globe-statistics GET returns an identical status and JSON response'
+    );
     check(
       requestedEndpoints.includes('/api/globe/nodes') &&
       requestedEndpoints.includes('/api/globe/countries') &&
       requestedEndpoints.includes('/api/globe/stats') &&
       requestedEndpoints.every(endpoint => ALLOWED_ENDPOINTS.has(endpoint)),
-      'Test accessed only the two allowlisted globe endpoints with GET requests'
+      'Test accessed only the three allowlisted globe endpoints with GET requests'
     );
 
     console.log(`Globe API regression: ${passed} passed, 0 failed (GET only; isolated temporary storage).`);
