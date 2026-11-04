@@ -164,8 +164,17 @@ Europeana 需要服务器环境变量 `EUROPEANA_API_KEY`（请求以 `wskey` �
 
 ## WORLD LIBRARY Phase 4 当前状态复核：PMC 与 DOAB（2026-11-04）
 
-此前 Phase 4 审计段记录的是 OpenAlex、Crossref、arXiv、Europe PMC 四源的初始实现。后续已加入 PubMed Central，统一连接器注册表现有 12 个来源。PMC 使用 NCBI 官方 E-utilities 无密钥搜索和书目详情接口，结果仅链接 PMC 官方文章页；因检索元数据本身不包含可复核的单篇许可，权利标记为 `UNKNOWN`，全文/下载 unsupported，服务端独立拒绝本地导入。NCBI 的请求队列按来源串行并至少间隔一秒。旧文档所示 `free fulltext[filter]` 在当前在线端点实测返回 0 条，故实现不依赖该筛选，也不把结果描述为已验证开放许可。
+此前 Phase 4 审计段记录的是 OpenAlex、Crossref、arXiv、Europe PMC 四源的初始实现。后续已加入 PubMed Central 和 PubMed，统一连接器注册表现有 13 个来源。PMC 使用 NCBI 官方 E-utilities 无密钥搜索和书目详情接口，结果仅链接 PMC 官方文章页；因检索元数据本身不包含可复核的单篇许可，权利标记为 `UNKNOWN`，全文/下载 unsupported，服务端独立拒绝本地导入。PubMed 使用独立的 `db=pubmed` 查询，标为 `METADATA_ONLY`，不会将 PubMed 书目记录视为全文。两个 NCBI 来源共用串行限速队列，至少间隔一秒。旧文档所示 PMC `free fulltext[filter]` 在当前在线端点实测返回 0 条，故 PMC 实现不依赖该筛选，也不把结果描述为已验证开放许可。
 
 DOAB 的官方元数据说明确认其书目元数据为 CC0，并提供 OAI-PMH 与若干导出/PRISM 服务；但 OAI-PMH 为分页收割接口，并非按用户关键词检索。当前环境对目录候选 REST 路径返回 HTTP 403/429，尚无可复核的稳定、限量关键词搜索接口，因此没有接入未验证路由或做整库抓取。DOAB 仍列为未完成项，不需要用户配置密钥。
 
 回归结果：TypeScript 检查、离线连接器 mock、隔离图书馆 API（27 项）、通用 API（85 项）、生产构建和限量实时来源烟测均通过；PMC 实时查询成功。构建保留原有 Three.js 大 chunk 提示。学术全文的许可复核、DOAB 搜索、阿拉伯语专项馆藏、管理后台、跨设备书架及移动端/浏览器验收仍不代表完成。
+
+
+## WORLD LIBRARY Phase 4 follow-up：PubMed 书目检索（2026-11-04）
+
+在已集成 PMC 的基础上新增 NCBI PubMed 独立连接器，使用官方 E-utilities `ESearch` / `ESummary` 查询 `db=pubmed`。无需用户注册、密钥或环境配置；默认加入统一搜索并可用 `EARTH_ONE_LIBRARY_PUBMED_ENABLED` 单独关闭。支持普通关键词、作者/题名字段以及 PMID、PMCID、DOI 查询，归一化作者、期刊、年份、DOI 和 PMID，并通过精确 DOI 规则与其他书目来源去重。PubMed 和 PMC 共用 NCBI 限速队列，避免并行搜索绕过同一服务的请求节流。
+
+PubMed 只提供书目检索与官方 PubMed 记录页，固定为 `METADATA_ONLY`；即使记录含有关联 PMCID，也不声称该 PubMed 结果已验证全文可用。全文、下载和本地导入明确不支持，API 对导入独立返回 403。结果权利提示也指出摘要可能含受版权保护内容，并链接 NCBI/NLM 官方免责声明。PMC 的 `UNKNOWN` 版权状态和其官方文章页流程保持不变。新增了搜索卡片来源标签、环境示例、离线接口/权限/去重测试及实时烟测用例。
+
+验证：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（29 项）、`npm run test:api`（85 项）、`npm run build` 和 `npm run test:library-connectors:live` 均通过；实时 PubMed 查询返回真实记录。生产构建仍有既有 Three.js 大 chunk 警告。测试使用 mock 或临时隔离存储，未修改正式用户书架或本地图书数据；未进行浏览器视觉或移动设备回归。

@@ -109,3 +109,17 @@ Europeana 当前仅可在服务器配置真实 API key 后启用；本地无密�
 | DOAB 关键词搜索 | ⚠️ 未接入：官方资料确认元数据开放且提供 OAI-PMH，但其分页收割不等同关键词搜索；当前环境候选目录 REST 路径返回 HTTP 403/429，未改用批量抓取或未验证接口。 |
 
 PMC 的当前实时搜索不依赖 NCBI 文档里一个在本环境返回 0 条的旧 `free fulltext[filter]` 查询示例；适配器因此将 PMC 项目权利保守标为 `UNKNOWN`，只提供官方文章页，并禁止全文下载/本地导入。实时结果不代表每篇文章均有相同阅读权限或再利用许可。所有自动化测试使用 mock 或临时隔离存储，未修改正式图书数据，也未下载或复制论文全文。
+
+
+## WORLD LIBRARY Phase 4 follow-up：PubMed（2026-11-04）
+
+| 检查 | 结果 |
+|---|---|
+| `npm run lint` | ✅ 全项目 TypeScript 检查通过。 |
+| `npm run test:library-connectors` | ✅ 离线 mock 通过；覆盖 PubMed ESearch/ESummary 书目字段、作者/PMID/PMCID/DOI 查询、无密钥请求、官方 PubMed 链接、NCBI/NLM 免责声明权利提示、`METADATA_ONLY` 权利、明确 unsupported 全文/下载，以及跨 OpenAlex/Crossref/PubMed 的精确 DOI 去重。 |
+| `npm run test:library-api` | ✅ 29 项通过、0 失败；隔离数据验证 13 个注册来源、8 个启用来源、PubMed 白名单和全文导入 403。 |
+| `npm run test:api` | ✅ 85 项通过、0 失败。 |
+| `npm run build` | ✅ Vite 生产构建成功；既有 Three.js chunk >500 kB 提示仍存在且不阻断。 |
+| `npm run test:library-connectors:live` | ✅ 限量真实烟测通过；PubMed 返回真实记录，并用该记录的 DOI 回查到同一篇文章；既有 Open Library、Internet Archive、Project Gutenberg、OpenAlex、Crossref、arXiv、Europe PMC、PMC 检查也通过。 |
+
+PubMed 与 PMC 使用同一串行 NCBI 请求队列。在线烟测只证明本次受限查询可从官方端点返回书目记录，不代表 PubMed 记录拥有全文或复用许可。没有下载或复制论文，也没有触碰正式书架/图书数据；本轮未做浏览器视觉或移动设备回归。

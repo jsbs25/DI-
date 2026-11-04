@@ -96,3 +96,11 @@
 DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据文件及 PRISM 接口；但 OAI-PMH 是分页记录收割，不是关键词搜索，当前目录 REST 候选接口返回 HTTP 403/429，故没有用未验证路由或批量抓取来冒充实时搜索。没有要求用户提供密钥或进行设置。详细官方来源与边界记录在 `LIBRARY_CONNECTORS.md`。
 
 最终验证：`npm run lint`、`npm run test:library-connectors`、隔离 `npm run test:library-api`（27/27）、`npm run test:api`（85/85）、`npm run build` 和 `npm run test:library-connectors:live` 全部通过；真实限量烟测包含 PMC 且无需密钥。构建仍有既有 Three.js 大 chunk 非阻断提示；测试使用隔离临时数据，没有修改正式用户书架或图书数据。
+
+
+### WORLD LIBRARY Phase 4 follow-up：PubMed 免密钥检索（2026-11-04）
+
+- 新增 NCBI PubMed 官方 E-utilities 连接器（`db=pubmed`），作为 PMC（`db=pmc`）之外的独立书目索引接入。无需用户密钥/账号，默认参与统一搜索，支持一般关键词、作者、题名、PMID、PMCID 和 DOI 查询；结果标准化为 PubMed 官方记录链接、作者、期刊、年份、PMID 和 DOI。
+- PubMed 与 PMC 共用 NCBI 的串行请求限速队列，避免两个连接器并行时超出同一服务的速率策略。PubMed 固定为 `METADATA_ONLY`，即使元数据带 PMCID 也不表示全文已确认；全文、下载和本地导入明确 unsupported / 403。用户可见权利提示还链接 NCBI/NLM 官方免责声明，并提醒摘要可能含受版权保护内容。跨库只按精确 DOI 去重。
+- PubMed 加入来源注册、统一搜索、服务端白名单和导入拒绝、搜索卡片来源名称、`.env.example` 的 `EARTH_ONE_LIBRARY_PUBMED_ENABLED` 开关、离线 mock 与真实限量烟测。更新 `PROJECT_AUDIT.md`、`TEST_REPORT.md` 和 `LIBRARY_CONNECTORS.md`；13 个来源保持此前全部功能与本地数据不变。
+- 验证：`npm run lint` 与 `npm run test:library-connectors` 通过；隔离图书馆 API 29/29、通用 API 85/85、生产构建通过；限量在线烟测中的 PubMed、PMC、OpenAlex、Crossref、arXiv、Europe PMC 和既有书目来源均返回结果。生产构建仍报告既有 Three.js 大 chunk 提示。未下载论文或改动正式书架数据；未运行浏览器/移动端视觉回归。

@@ -651,7 +651,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       crossref: 'Crossref',
                       arxiv: 'arXiv',
                       europepmc: 'Europe PMC',
-                      pmc: 'PubMed Central'
+                      pmc: 'PubMed Central',
+                      pubmed: 'PubMed'
                     } as Record<string, string>)[r.source] || r.source;
                     const resourceType = typeof r.metadata?.resourceType === 'string' ? r.metadata.resourceType : undefined;
                     const identifierLabel = r.doi ? `DOI ${r.doi}` : r.isbn?.length ? `ISBN ${r.isbn[0]}` : r.identifier ? `ID ${r.identifier}` : undefined;

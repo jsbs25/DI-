@@ -19,7 +19,7 @@ export enum RightsCategory {
   UNKNOWN = 'UNKNOWN'
 }
 
-export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'googlebooks' | 'europeana' | 'wikisource' | 'ar_wikisource' | 'openalex' | 'crossref' | 'arxiv' | 'europepmc' | 'pmc';
+export type LibrarySource = 'openlibrary' | 'archive' | 'gutenberg' | 'googlebooks' | 'europeana' | 'wikisource' | 'ar_wikisource' | 'openalex' | 'crossref' | 'arxiv' | 'europepmc' | 'pmc' | 'pubmed';
 export type ConnectorStatus = 'ok' | 'error' | 'unsupported';
 export interface ExternalLibraryRecord {
   id: string;
@@ -124,7 +124,8 @@ const SOURCE_NAMES: Record<LibrarySource, string> = {
   crossref: 'Crossref',
   arxiv: 'arXiv',
   europepmc: 'Europe PMC',
-  pmc: 'PubMed Central'
+  pmc: 'PubMed Central',
+  pubmed: 'PubMed'
 };
 const SOURCE_CONFIG: Record<LibrarySource, { env: string; website: string; api: string }> = {
   openlibrary: { env: 'EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED', website: 'https://openlibrary.org', api: 'https://openlibrary.org/search.json' },
@@ -138,7 +139,8 @@ const SOURCE_CONFIG: Record<LibrarySource, { env: string; website: string; api: 
   crossref: { env: 'EARTH_ONE_LIBRARY_CROSSREF_ENABLED', website: 'https://www.crossref.org', api: 'https://api.crossref.org/works' },
   arxiv: { env: 'EARTH_ONE_LIBRARY_ARXIV_ENABLED', website: 'https://arxiv.org', api: 'https://export.arxiv.org/api/query' },
   europepmc: { env: 'EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED', website: 'https://europepmc.org', api: 'https://www.ebi.ac.uk/europepmc/webservices/rest/search' },
-  pmc: { env: 'EARTH_ONE_LIBRARY_PMC_ENABLED', website: 'https://pmc.ncbi.nlm.nih.gov', api: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' }
+  pmc: { env: 'EARTH_ONE_LIBRARY_PMC_ENABLED', website: 'https://pmc.ncbi.nlm.nih.gov', api: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' },
+  pubmed: { env: 'EARTH_ONE_LIBRARY_PUBMED_ENABLED', website: 'https://pubmed.ncbi.nlm.nih.gov', api: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' }
 };
 const CACHE_TTL_MS = 60_000;
 const MIN_REQUEST_INTERVAL_MS = 1_000;
@@ -185,16 +187,17 @@ async function requestText(source: LibrarySource, url: string, timeoutMs = 10_00
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-  const previous = requestQueueBySource.get(source) || Promise.resolve();
+  const queueKey = source === 'pmc' || source === 'pubmed' ? 'ncbi-eutils' : source;
+  const previous = requestQueueBySource.get(queueKey) || Promise.resolve();
   let releaseQueue!: () => void;
   const queueTurn = new Promise<void>(resolve => { releaseQueue = resolve; });
   const queued = previous.catch(() => undefined).then(() => queueTurn);
-  requestQueueBySource.set(source, queued);
+  requestQueueBySource.set(queueKey, queued);
   await previous.catch(() => undefined);
   try {
     const freshCache = cache.get(cacheKey);
     if (freshCache && freshCache.expiresAt > Date.now()) return freshCache.value;
-    const lastRequest = lastRequestBySource.get(source) || 0;
+    const lastRequest = lastRequestBySource.get(queueKey) || 0;
     const minInterval = SOURCE_MIN_REQUEST_INTERVAL_MS[source] || MIN_REQUEST_INTERVAL_MS;
     const delay = Math.max(0, minInterval - (Date.now() - lastRequest));
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
@@ -202,7 +205,7 @@ async function requestText(source: LibrarySource, url: string, timeoutMs = 10_00
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      lastRequestBySource.set(source, Date.now());
+      lastRequestBySource.set(queueKey, Date.now());
       const response = await fetch(url, {
         signal: controller.signal,
         headers: {
@@ -231,7 +234,7 @@ async function requestText(source: LibrarySource, url: string, timeoutMs = 10_00
     }
   } finally {
     releaseQueue();
-    if (requestQueueBySource.get(source) === queued) requestQueueBySource.delete(source);
+    if (requestQueueBySource.get(queueKey) === queued) requestQueueBySource.delete(queueKey);
   }
 }
 
@@ -1442,6 +1445,126 @@ export class PmcConnector implements LibraryConnector {
   }
 }
 
+function mapPubmedSummary(summary: any): ExternalLibraryRecord | undefined {
+  const pmid = typeof summary?.uid === 'string' || typeof summary?.uid === 'number' ? String(summary.uid) : '';
+  if (!/^\d{1,12}$/.test(pmid)) return undefined;
+  const articleIds = Array.isArray(summary.articleids) ? summary.articleids : [];
+  const idValue = (type: string): string | undefined => {
+    const item = articleIds.find((entry: any) => String(entry?.idtype || '').toLowerCase() === type);
+    return typeof item?.value === 'string' ? item.value : undefined;
+  };
+  const doiFromLocation = typeof summary.elocationid === 'string' ? summary.elocationid.match(/(?:doi:\s*)?(10\.\d{4,9}\/[^\s]+)/i)?.[1] : undefined;
+  const doi = normalizeAcademicDoi(idValue('doi') || doiFromLocation);
+  const authors = Array.isArray(summary.authors)
+    ? summary.authors.map((author: any) => author?.name).filter((name: unknown): name is string => typeof name === 'string' && !!name.trim())
+    : [];
+  const publicationDate = [summary.pubdate, summary.epubdate, summary.sortpubdate].find((value: unknown) => typeof value === 'string') || '';
+  const title = typeof summary.title === 'string' && summary.title.trim() ? summary.title.trim() : 'Untitled PubMed article';
+  const sourceUrl = `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`;
+  return baseRecord('pubmed', {
+    id: `pubmed:${pmid}`,
+    externalId: pmid,
+    identifier: `PMID:${pmid}`,
+    title,
+    author: authors[0] || 'Unknown Author',
+    authors,
+    language: 'und',
+    year: publicationDate.match(/\b(?:19|20)\d{2}\b/)?.[0],
+    publisher: typeof summary.fulljournalname === 'string' ? summary.fulljournalname : typeof summary.source === 'string' ? summary.source : undefined,
+    doi,
+    description: '',
+    sourceUrl,
+    rights: RightsCategory.METADATA_ONLY,
+    rightsNote: 'PubMed provides bibliographic discovery metadata, not article access or reuse permission; abstracts may contain copyrighted material. Check the official record and item-level license. NCBI/NLM does not provide legal advice: https://www.ncbi.nlm.nih.gov/About/disclaimer.html',
+    availability: 'official-source-only',
+    canImport: false,
+    downloadLinks: [],
+    metadata: { pmid, pmcid: idValue('pmcid'), journal: summary.fulljournalname || summary.source, volume: summary.volume, issue: summary.issue, pages: summary.pages, publicationDate, articleIds }
+  });
+}
+
+export class PubmedConnector implements LibraryConnector {
+  readonly source = 'pubmed' as const;
+
+  private entrezTerm(query: string): string {
+    const raw = query.trim();
+    const doi = normalizeAcademicDoi(raw);
+    const pmid = raw.match(/^(?:pmid\s*:\s*)?(\d{1,12})$/i)?.[1];
+    const pmcid = raw.match(/^(?:pmcid\s*:\s*)?(PMC\d+)$/i)?.[1];
+    const author = raw.match(/^author\s*:\s*(.+)$/i)?.[1];
+    const title = raw.match(/^title\s*:\s*(.+)$/i)?.[1];
+    const phrase = (value: string) => `"${value.replace(/"/g, '').trim()}"`;
+    return doi ? `"${doi}"[AID]`
+      : pmid ? `${pmid}[PMID]`
+        : pmcid ? `${pmcid}[PMC]`
+          : author ? `${phrase(author)}[AU]`
+            : title ? `${phrase(title)}[TI]`
+              : raw;
+  }
+
+  private async searchRecords(query: string, limit: number): Promise<ExternalLibraryRecord[]> {
+    const searchUrl = new URL(SOURCE_CONFIG[this.source].api);
+    searchUrl.searchParams.set('db', 'pubmed');
+    searchUrl.searchParams.set('term', this.entrezTerm(query));
+    searchUrl.searchParams.set('retmode', 'json');
+    searchUrl.searchParams.set('retmax', String(cap(limit)));
+    searchUrl.searchParams.set('tool', 'earth_one_world_library');
+    const searchResponse = JSON.parse(await requestText(this.source, searchUrl.toString()));
+    const ids = searchResponse?.esearchresult?.idlist;
+    if (!Array.isArray(ids)) throw new Error('NCBI ESearch response did not contain an ID list.');
+    const numericIds = ids.filter((id: unknown) => /^\d{1,12}$/.test(String(id)));
+    if (!numericIds.length) return [];
+
+    const summaryUrl = new URL('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi');
+    summaryUrl.searchParams.set('db', 'pubmed');
+    summaryUrl.searchParams.set('id', numericIds.join(','));
+    summaryUrl.searchParams.set('retmode', 'json');
+    summaryUrl.searchParams.set('tool', 'earth_one_world_library');
+    const summaryResponse = JSON.parse(await requestText(this.source, summaryUrl.toString()));
+    const result = summaryResponse?.result;
+    if (!Array.isArray(result?.uids)) throw new Error('NCBI ESummary response did not contain a UID list.');
+    return result.uids.slice(0, cap(limit))
+      .map((uid: string) => mapPubmedSummary(result[uid]))
+      .filter((record: ExternalLibraryRecord | undefined): record is ExternalLibraryRecord => !!record);
+  }
+
+  async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
+    if (!query.trim()) return ok([]);
+    try { return ok(await this.searchRecords(query, limit)); }
+    catch (error) { return failed(error); }
+  }
+
+  async getBook(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
+    const raw = String(locator.record?.externalId || locator.record?.identifier || locator.identifier || locator.id || '');
+    const doi = normalizeAcademicDoi(locator.record?.doi || locator.doi || raw);
+    const pmcid = raw.match(/^(?:PMCID\s*:?\s*)?(PMC\d+)$/i)?.[1];
+    const pmid = raw.match(/^(?:pubmed\s*:\s*)?(?:PMID\s*:?\s*)?(\d{1,12})$/i)?.[1] ||
+      (locator.record?.metadata?.pmid && /^\d{1,12}$/.test(String(locator.record.metadata.pmid)) ? String(locator.record.metadata.pmid) : undefined);
+    const query = doi ? `doi:${doi}` : pmcid || (pmid ? `pmid:${pmid}` : undefined);
+    if (!query) return failed(new Error('PubMed requires a valid PMID, PMCID, or DOI.'));
+    try {
+      const record = (await this.searchRecords(query, 1))[0];
+      return record ? ok(record) : failed(new Error('PubMed record was not found.'));
+    } catch (error) { return failed(error); }
+  }
+
+  getMetadata(locator: BookLocator) { return this.getBook(locator); }
+  async getAvailability(locator: BookLocator): Promise<ConnectorResponse<unknown>> {
+    const result = await this.getBook(locator);
+    if (result.status !== 'ok' || !result.data) return propagateFailure<unknown>(result, 'Could not verify the PubMed record.');
+    return ok({ rights: result.data.rights, officialUrl: result.data.sourceUrl, fullText: 'check-official-record', reuse: 'not-confirmed', canImport: false });
+  }
+  async getFullText(_locator: BookLocator) { return unsupported<FullText>('PubMed is a bibliographic index; article reading, when available, remains on the official record or linked provider.'); }
+  async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('PubMed bibliographic records do not grant article downloads; check the official record and item-level license.'); }
+  getSourceInformation() {
+    return enabledSourceInformation(this.source, [
+      'Uses official NCBI E-utilities ESearch and ESummary for bounded PubMed metadata queries; no account or API key is required.',
+      'PubMed is distinct from PubMed Central: results are bibliographic metadata with official PubMed links, not verified full text.',
+      'PubMed and PMC share one serialized NCBI request queue to stay below NCBI rate guidance; no article text is copied or imported.'
+    ]);
+  }
+}
+
 export class GutenbergConnector implements LibraryConnector {
   readonly source = 'gutenberg' as const;
 
@@ -1746,7 +1869,8 @@ export function createLibraryConnectors(): Record<LibrarySource, LibraryConnecto
     crossref: new CrossrefConnector(),
     arxiv: new ArxivConnector(),
     europepmc: new EuropePmcConnector(),
-    pmc: new PmcConnector()
+    pmc: new PmcConnector(),
+    pubmed: new PubmedConnector()
   };
 }
 
@@ -1782,7 +1906,7 @@ function dedupeByExactIdentifier(records: ExternalLibraryRecord[]): ExternalLibr
 }
 
 export async function searchLibrary(query: string, options: LibrarySearchOptions = {}): Promise<{ results: ExternalLibraryRecord[]; sources: SourceSearchStatus[] }> {
-  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'];
+  const selectedIds = options.sources || ['openlibrary', 'archive', 'gutenberg', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc', 'pubmed', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource'];
   const limit = cap(options.limit || 10);
   const selected = selectedIds.map(id => getLibraryConnector(id)).filter((connector): connector is LibraryConnector => !!connector);
   const enabled = selected.filter(connector => isLibraryConnectorEnabled(connector.source));

@@ -42,6 +42,7 @@ async function main() {
       EARTH_ONE_LIBRARY_ARXIV_ENABLED: 'true',
       EARTH_ONE_LIBRARY_EUROPEPMC_ENABLED: 'true',
       EARTH_ONE_LIBRARY_PMC_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_PUBMED_ENABLED: 'true',
       GEMINI_API_KEY: '',
       OPENAI_API_KEY: '',
       ANTHROPIC_API_KEY: '',
@@ -126,7 +127,8 @@ async function main() {
       ['crossref', 'climate change', 'https://doi.org/'],
       ['arxiv', 'machine learning', 'https://arxiv.org/abs/'],
       ['europepmc', 'cancer', 'https://europepmc.org/'],
-      ['pmc', 'cancer', 'https://pmc.ncbi.nlm.nih.gov/articles/']
+      ['pmc', 'cancer', 'https://pmc.ncbi.nlm.nih.gov/articles/'],
+      ['pubmed', 'cancer', 'https://pubmed.ncbi.nlm.nih.gov/']
     ];
     const academicChecks = await Promise.all(academicCases.map(async ([source, query, sourcePrefix]) => {
       const academicUrl = new URL('/api/library/search', baseUrl);
@@ -142,6 +144,18 @@ async function main() {
       assert.ok(record?.sourceUrl?.startsWith(sourcePrefix), `Live ${source} result did not preserve its official source URL`);
       assert.equal(record.canImport, false, `${source} records cannot be locally imported`);
       if (record.providerFullTextUrl) assert.ok(record.providerFullTextUrl.startsWith('https://'), `${source} full-text links must be HTTPS`);
+      if (source === 'pubmed') {
+        assert.ok(typeof record.doi === 'string' && record.doi.length > 0, 'Live PubMed record should expose a DOI for the identifier lookup check');
+        const doiUrl = new URL('/api/library/search', baseUrl);
+        doiUrl.searchParams.set('q', record.doi);
+        doiUrl.searchParams.set('source', 'pubmed');
+        doiUrl.searchParams.set('limit', '1');
+        const doiResponse = await fetch(doiUrl, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
+        assert.equal(doiResponse.status, 200, 'Live PubMed DOI search should return successfully');
+        const doiBody = await doiResponse.json() as any;
+        const doiRecord = doiBody.results?.find((item: any) => item.source === 'pubmed');
+        assert.equal(doiRecord?.doi?.toLowerCase(), record.doi.toLowerCase(), 'Live PubMed DOI lookup should resolve the same record');
+      }
       return source;
     }));
 

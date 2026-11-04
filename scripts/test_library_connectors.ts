@@ -11,6 +11,7 @@ import {
   ArxivConnector,
   EuropePmcConnector,
   PmcConnector,
+  PubmedConnector,
   isLibraryConnectorEnabled,
   OpenLibraryConnector,
   RightsCategory,
@@ -116,6 +117,15 @@ const pmcSummary = {
     { idtype: 'pmcid', value: 'PMC2468' },
     { idtype: 'pmid', value: '12345678' },
     { idtype: 'doi', value: '10.5555/pmc-article' }
+  ]
+};
+const pubmedSummary = {
+  uid: '98765432', pubdate: '2023 Jan', source: 'Fixture Medicine',
+  fulljournalname: 'Journal of Fixture Medicine', title: 'PubMed Metadata Fixture',
+  authors: [{ name: 'R. Clinician' }, { name: 'S. Researcher' }],
+  articleids: [
+    { idtype: 'pmcid', value: 'PMC9876543' },
+    { idtype: 'doi', value: '10.5555/shared-paper' }
   ]
 };
 
@@ -400,10 +410,45 @@ async function testFreeAcademicConnectors() {
   assertUnsupported(await pmc.getFullText({ identifier: 'PMCID:PMC2468' }));
   assertUnsupported(await pmc.getDownloadLinks({ identifier: 'PMCID:PMC2468' }));
 
+  const pubmed = new PubmedConnector();
+  const pubmedResponse = await pubmed.search('author:R. Clinician', 2);
+  assert.equal(pubmedResponse.status, 'ok', 'PubMed E-utilities search works without an API key');
+  const pubmedRecord = pubmedResponse.data?.[0];
+  assert.equal(pubmedRecord?.title, 'PubMed Metadata Fixture');
+  assert.deepEqual(pubmedRecord?.authors, ['R. Clinician', 'S. Researcher']);
+  assert.equal(pubmedRecord?.year, '2023');
+  assert.equal(pubmedRecord?.doi, '10.5555/shared-paper');
+  assert.equal(pubmedRecord?.identifier, 'PMID:98765432');
+  assert.equal(pubmedRecord?.sourceUrl, 'https://pubmed.ncbi.nlm.nih.gov/98765432/');
+  assert.equal(pubmedRecord?.providerFullTextUrl, undefined, 'a linked PMCID is not claimed as a verified full-text entitlement');
+  assert.equal(pubmedRecord?.rights, RightsCategory.METADATA_ONLY);
+  assert.match(pubmedRecord?.rightsNote || '', /ncbi\.nlm\.nih\.gov\/About\/disclaimer\.html/);
+  assert.equal(pubmedRecord?.canImport, false);
+  assert.deepEqual(pubmedRecord?.downloadLinks, []);
+  assert.equal(pubmed.getSourceInformation().data?.authentication, 'none');
+  const pubmedSearchUrl = new URL(requests.filter(url => url.includes('eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi') && new URL(url).searchParams.get('db') === 'pubmed').at(-1)!);
+  assert.equal(pubmedSearchUrl.searchParams.get('db'), 'pubmed');
+  assert.match(pubmedSearchUrl.searchParams.get('term') || '', /\[AU\]/);
+  assert.equal(pubmedSearchUrl.searchParams.has('api_key'), false);
+  const pubmedSummaryUrl = new URL(requests.filter(url => url.includes('eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi') && new URL(url).searchParams.get('db') === 'pubmed').at(-1)!);
+  assert.equal(pubmedSummaryUrl.searchParams.get('id'), '98765432');
+  assert.equal(pubmedSummaryUrl.searchParams.has('api_key'), false);
+  assert.equal((await pubmed.getBook({ doi: sharedAcademicDoi })).status, 'ok', 'PubMed supports DOI metadata lookup');
+  const pubmedDoiUrl = new URL(requests.filter(url => url.includes('eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi') && new URL(url).searchParams.get('db') === 'pubmed').at(-1)!);
+  assert.match(pubmedDoiUrl.searchParams.get('term') || '', /"10\.5555\/shared-paper"\[AID\]/);
+  assert.equal((await pubmed.getBook({ identifier: 'PMCID:PMC9876543' })).status, 'ok', 'PubMed can resolve an explicit PMCID');
+  const pubmedPmcidUrl = new URL(requests.filter(url => url.includes('eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi') && new URL(url).searchParams.get('db') === 'pubmed').at(-1)!);
+  assert.match(pubmedPmcidUrl.searchParams.get('term') || '', /PMC9876543\[PMC\]/);
+  assert.equal((await pubmed.getAvailability({ id: '98765432' })).status, 'ok');
+  assertUnsupported(await pubmed.getFullText({ id: '98765432' }));
+  assertUnsupported(await pubmed.getDownloadLinks({ id: '98765432' }));
+  assert.equal((await pubmed.getBook({ id: '../unsafe' })).status, 'error');
+
   clearLibraryConnectorCache();
-  const duplicate = await searchLibrary('same', { sources: ['openalex', 'crossref'], limit: 3 });
-  assert.equal(duplicate.results.length, 1, 'academic records merge only on an exact DOI');
+  const duplicate = await searchLibrary('same', { sources: ['openalex', 'crossref', 'pubmed'], limit: 3 });
+  assert.equal(duplicate.results.length, 1, 'academic records merge only on an exact DOI across index providers');
   assert.equal(duplicate.results[0].alternateSources?.[0].source, 'crossref');
+  assert.equal(duplicate.results[0].alternateSources?.[1].source, 'pubmed');
 }
 
 function archiveDoc(query: string) {
@@ -468,10 +513,12 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
     return json({ resultList: { result: europePmcResults } });
   }
   if (url.hostname === 'eutils.ncbi.nlm.nih.gov' && url.pathname.endsWith('/esearch.fcgi')) {
-    return json({ esearchresult: { idlist: ['2468'] } });
+    return json({ esearchresult: { idlist: [url.searchParams.get('db') === 'pubmed' ? '98765432' : '2468'] } });
   }
   if (url.hostname === 'eutils.ncbi.nlm.nih.gov' && url.pathname.endsWith('/esummary.fcgi')) {
-    return json({ result: { uids: ['2468'], '2468': pmcSummary } });
+    return url.searchParams.get('db') === 'pubmed'
+      ? json({ result: { uids: ['98765432'], '98765432': pubmedSummary } })
+      : json({ result: { uids: ['2468'], '2468': pmcSummary } });
   }
 
   if (url.hostname === 'archive.org' && url.pathname === '/advancedsearch.php') {
@@ -589,7 +636,7 @@ async function main() {
   if (oldToggle === undefined) delete process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED;
   else process.env.EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED = oldToggle;
 
-  for (const id of ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc'] as const) {
+  for (const id of ['openlibrary', 'archive', 'gutenberg', 'googlebooks', 'europeana', 'wikisource', 'ar_wikisource', 'openalex', 'crossref', 'arxiv', 'europepmc', 'pmc', 'pubmed'] as const) {
     assert.ok(getLibraryConnector(id));
   }
   console.log('library connector offline tests: PASS');
