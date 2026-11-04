@@ -9,7 +9,7 @@
 | EARTH ID、注册/登录、引导、资料 | `src/components/auth/`、`src/components/profile/`、`server.ts`、`server/store.ts` | 注册、登录、资料和会话相关代码存在；公开用户接口已使用白名单脱敏；身份查询无有效令牌时返回空用户；引导、资料更新、位置隐私开关要求有效会话；其他 HTTP 权限仍需回归。 |
 | 3D 地球与全球节点 | `src/components/globe/`、`/api/globe/*` | Three.js 地球与节点路径存在；独立 Chromium 确认 canvas 挂载和地球页面返回路径；API 统计/国家只读契约已有 HTTP 回归。视觉改版不得替换地球交互或隐私设置；实机 GPU 性能未验证。 |
 | 宇宙/太阳系探索 | `src/universe/` | 桌面抽屉与天体栏实测净距 9px，隔离 Chromium 地球→宇宙→返回通过。关闭按钮已有双语可访问名称，9 项静态渲染通过；窄屏宇宙、键盘和读屏仍待验证，保留所有切换与参数展示能力。 |
-| 社交动态与趋势 | `src/components/social/`、`/api/posts*` | 综合 HTTP 回归覆盖动态发布/互动与最新排序；独立 `test:social-feed-api` GET-only 回归覆盖公开 feed 字段、默认/最新/热门排序、大小写兼容筛选、类别组合与文本搜索。桌面列表加载通过；完整 UI、真实鉴权及数据隔离仍待后续验证/批准。 |
+| 社交动态与趋势 | `src/components/social/`、`/api/posts*` | 综合 HTTP 回归覆盖动态发布/互动与最新排序；独立 `test:social-feed-api` GET-only 回归覆盖公开 feed 字段、默认/最新/热门排序、默认及最新列表重复 GET 的状态/完整 JSON 一致性、大小写兼容筛选、类别组合与文本搜索。桌面列表加载通过；完整 UI、真实鉴权及数据隔离仍待后续验证/批准。 |
 | 消息与 AI 翻译 | `src/components/chat/`、`/api/conversations/*` | 消息持久化与翻译路径存在；翻译依赖模型配置，回退内容不能冒充真实翻译。 |
 | AI HUB | `src/components/ai/`、`server/aiGateway.ts`、`/api/ai/*` | 多模式及模型网关代码存在；修复模型状态/选择栏在窄屏的 flex 内在宽度；390×844 阿语 RTL/中文和 1274×649 阿语桌面无页面级横向溢出。真实模型调用未执行，需服务端凭据和服务可用，不提交或暴露密钥。 |
 | 创作者中心与文章 | `src/components/creator/`、`/api/articles*` | 综合 HTTP 回归覆盖文章列表和缺少必填正文校验；独立 `test:creator-api` GET-only 回归再检查目录字段、唯一 ID 与既有文章样本。成功写入及完整 UI 仍待验证；赞赏统计不等同真实支付。 |

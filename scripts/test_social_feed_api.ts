@@ -131,6 +131,12 @@ async function main() {
       ['post_1', 'post_2', 'post_3', 'post_4'].every(id => globalIds.includes(id)),
       'Existing seeded feed entries remain present'
     );
+    const repeatedGlobalResponse = await get('/api/posts');
+    check(
+      repeatedGlobalResponse.status === globalResponse?.status &&
+      JSON.stringify(repeatedGlobalResponse.body) === JSON.stringify(globalResponse?.body),
+      'Repeated public global-feed GET returns an identical status and JSON response'
+    );
 
     const latestResponse = await get('/api/posts?feed=latest');
     const latestPosts = latestResponse.body.posts;
@@ -144,6 +150,12 @@ async function main() {
         index === 0 || Date.parse(latestPosts[index - 1].createdAt) >= Date.parse(post.createdAt)
       ),
       'Latest feed timestamps are monotonically non-increasing'
+    );
+    const repeatedLatestResponse = await get('/api/posts?feed=latest');
+    check(
+      repeatedLatestResponse.status === latestResponse.status &&
+      JSON.stringify(repeatedLatestResponse.body) === JSON.stringify(latestResponse.body),
+      'Repeated latest-feed GET returns an identical status and JSON response'
     );
 
     const trendingResponse = await get('/api/posts?feed=trending');
