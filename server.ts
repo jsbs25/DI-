@@ -741,6 +741,26 @@ app.post('/api/library/shelf/:bookId/reading-state', (req, res) => {
   res.json({ success: true, item });
 });
 
+app.post('/api/library/shelf/:bookId/epub-reading-state', (req, res) => {
+  const user = getSessionUser(req);
+  if (!user) return res.status(401).json({ success: false, error: 'Unauthorized.' });
+  if (req.body.ownerId !== user.id) {
+    return res.status(403).json({ success: false, error: 'Reading state account does not match the active session' });
+  }
+  const book = store.books.find(b => b.id === req.params.bookId);
+  if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
+  const { cfi, progress } = req.body;
+  if (typeof cfi !== 'string' || cfi.length > 2048 || !/^epubcfi\(.+\)$/.test(cfi)) {
+    return res.status(400).json({ success: false, error: 'A valid EPUB CFI location is required' });
+  }
+  if (typeof progress !== 'number' || !Number.isFinite(progress)) {
+    return res.status(400).json({ success: false, error: 'A valid reading progress percentage is required' });
+  }
+  const item = store.updateBookShelfEpubReadingState(user.id, book.id, cfi, progress);
+  if (!item) return res.status(404).json({ success: false, error: 'Book is not on this user’s bookshelf' });
+  res.json({ success: true, item });
+});
+
 app.get('/api/library/books', (req, res) => {
   const { category, search } = req.query;
   let books = store.books;

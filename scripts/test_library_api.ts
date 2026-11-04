@@ -27,7 +27,7 @@ const ALLOWED_FIXED_ENDPOINTS = new Set([
 const ALLOWED_BOOK_DETAILS = new Set(['book_republic']);
 const ALLOWED_POST_ENDPOINTS = new Set(['/api/library/ingest', '/api/library/shelf', '/api/auth/register']);
 function isAllowedPostEndpoint(endpoint: string): boolean {
-  return ALLOWED_POST_ENDPOINTS.has(endpoint) || /^\/api\/library\/shelf\/[A-Za-z0-9_-]+\/reading-state$/.test(endpoint);
+  return ALLOWED_POST_ENDPOINTS.has(endpoint) || /^\/api\/library\/shelf\/[A-Za-z0-9_-]+\/(?:reading-state|epub-reading-state)$/.test(endpoint);
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -318,6 +318,44 @@ async function main() {
       savedReadingState.body.item.progress === 40 && savedReadingState.body.item.status === 'reading',
       'Reading-state API saves a valid chapter marker and promotes a started book to Reading'
     );
+    const savedEpubCfi = 'epubcfi(/6/4[chapter01]!/4/2/18:5)';
+    const savedEpubState = await post('/api/library/shelf/book_republic/epub-reading-state', {
+      cfi: savedEpubCfi,
+      progress: 63,
+      ownerId: accountA.body.user.id
+    }, accountA.body.token);
+    check(
+      savedEpubState.status === 200 && savedEpubState.body.success &&
+      savedEpubState.body.item.lastReadEpubCfi === savedEpubCfi && savedEpubState.body.item.progress === 63,
+      'EPUB reading-state API saves a bounded CFI location to the owning reader’s shelf'
+    );
+    const unauthenticatedEpubState = await post('/api/library/shelf/book_republic/epub-reading-state', {
+      cfi: savedEpubCfi,
+      progress: 63,
+      ownerId: accountA.body.user.id
+    });
+    check(
+      unauthenticatedEpubState.status === 401 && unauthenticatedEpubState.body.success === false,
+      'EPUB reading-state API rejects requests without an authenticated account'
+    );
+    const mismatchedOwnerEpubState = await post('/api/library/shelf/book_republic/epub-reading-state', {
+      cfi: savedEpubCfi,
+      progress: 63,
+      ownerId: accountA.body.user.id
+    }, accountB.body.token);
+    check(
+      mismatchedOwnerEpubState.status === 403 && mismatchedOwnerEpubState.body.success === false,
+      'EPUB reading-state API rejects account IDs that do not match the active session'
+    );
+    const invalidEpubState = await post('/api/library/shelf/book_republic/epub-reading-state', {
+      cfi: 'not-a-valid-cfi',
+      progress: 63,
+      ownerId: accountA.body.user.id
+    }, accountA.body.token);
+    check(
+      invalidEpubState.status === 400 && invalidEpubState.body.success === false,
+      'EPUB reading-state API rejects malformed CFI locations'
+    );
     const invalidReadingState = await post('/api/library/shelf/book_republic/reading-state', {
       chapterId: 'chapter-from-another-book',
       progress: 40
@@ -331,15 +369,18 @@ async function main() {
     const shelfItemA = shelfA.body.items?.find((item: any) => item.bookId === 'book_republic');
     const shelfItemB = shelfB.body.items?.find((item: any) => item.bookId === 'book_republic');
     check(
-      shelfA.status === 200 && shelfItemA?.lastReadChapterId === chapterToResume.id && shelfItemA?.progress === 40 &&
-      shelfB.status === 200 && shelfItemB?.lastReadChapterId === undefined && shelfItemB?.progress === 0,
-      'Reading position is visible to its owner but remains isolated from another account'
+      shelfA.status === 200 && shelfItemA?.lastReadChapterId === chapterToResume.id &&
+      shelfItemA?.lastReadEpubCfi === savedEpubCfi && shelfItemA?.progress === 63 &&
+      shelfB.status === 200 && shelfItemB?.lastReadChapterId === undefined &&
+      shelfItemB?.lastReadEpubCfi === undefined && shelfItemB?.progress === 0,
+      'Text and EPUB reading positions remain visible only to their owning account'
     );
     const persistedState = JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
     check(
       persistedState.bookShelf?.some((item: any) => item.userId === accountA.body.user.id &&
-        item.bookId === 'book_republic' && item.lastReadChapterId === chapterToResume.id && item.progress === 40),
-      'Account-scoped chapter marker and progress are persisted in the isolated data file'
+        item.bookId === 'book_republic' && item.lastReadChapterId === chapterToResume.id &&
+        item.lastReadEpubCfi === savedEpubCfi && item.progress === 63),
+      'Account-scoped chapter and EPUB CFI positions persist in the isolated data file'
     );
 
     const missingBook = await get('/api/library/books/not-a-real-book');

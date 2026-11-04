@@ -1346,6 +1346,21 @@ class DataStore {
     return item;
   }
 
+  updateBookShelfEpubReadingState(userId: string, bookId: string, cfi: string, progress: number): BookShelfItem | null {
+    const item = this.bookShelf.find(s => s.userId === userId && s.bookId === bookId);
+    if (!item) return null;
+    item.lastReadEpubCfi = cfi;
+    item.progress = Math.min(100, Math.max(0, progress));
+    item.updatedAt = new Date().toISOString();
+    if (item.progress >= 100 && item.status !== 'finished') {
+      item.status = 'finished';
+    } else if (item.progress > 0 && item.status === 'want_to_read') {
+      item.status = 'reading';
+    }
+    this.saveToDisk();
+    return item;
+  }
+
   addAnnotation(bookId: string, chapterId: string, selectedText: string, note: string, aiExplanation?: string): BookAnnotation {
     const ann: BookAnnotation = {
       id: `ann_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,

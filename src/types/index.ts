@@ -287,6 +287,8 @@ export interface BookShelfItem {
   progress: number; // 0-100
   /** Stable chapter identifier used to resume a text book for this user. */
   lastReadChapterId?: string;
+  /** EPUB CFI location used to resume an EPUB for this user. */
+  lastReadEpubCfi?: string;
   savedAt: string;
   updatedAt: string;
 }

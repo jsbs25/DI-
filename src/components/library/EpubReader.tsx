@@ -12,6 +12,9 @@ import { Book } from '../../types/index.ts';
 interface EpubReaderProps {
   book: Book;
   onClose: () => void;
+  initialCfi?: string;
+  ownerId?: string;
+  onProgress?: (progress: number, cfi: string, bookId: string, ownerId?: string) => void;
 }
 
 /**
@@ -19,7 +22,7 @@ interface EpubReaderProps {
  * (same-origin) to avoid CORS, renders into a viewport with page turn,
  * table-of-contents, and fullscreen support.
  */
-export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose }) => {
+export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCfi, ownerId, onProgress }) => {
   const viewerRef = useRef<HTMLDivElement>(null);
   const [bookInstance, setBookInstance] = useState<any>(null);
   const [rendition, setRendition] = useState<any>(null);
@@ -29,6 +32,29 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose }) => {
   const [showToc, setShowToc] = useState(false);
   const [fontSize, setFontSize] = useState(100);
   const [progress, setProgress] = useState(0);
+  const onProgressRef = useRef(onProgress);
+  const pendingProgressRef = useRef<{ progress: number; cfi: string; bookId: string; ownerId?: string } | null>(null);
+  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  onProgressRef.current = onProgress;
+
+  const flushProgress = () => {
+    if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
+    progressTimerRef.current = null;
+    const pending = pendingProgressRef.current;
+    pendingProgressRef.current = null;
+    if (pending) onProgressRef.current?.(pending.progress, pending.cfi, pending.bookId, pending.ownerId);
+  };
+
+  const queueProgress = (nextProgress: number, cfi: string, bookId: string, progressOwnerId?: string) => {
+    pendingProgressRef.current = { progress: nextProgress, cfi, bookId, ownerId: progressOwnerId };
+    if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
+    progressTimerRef.current = setTimeout(flushProgress, 600);
+  };
+
+  const closeReader = () => {
+    flushProgress();
+    onClose();
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -64,16 +90,24 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose }) => {
         setRendition(rend);
         setToc(flatToc);
         setLoading(false);
-
-        await rend.display();
+        activeRendition = rend;
         rend.on('relocated', (location: any) => {
           if (location.start && location.end) {
             const pct = location.start.percentage || 0;
             setProgress(Math.round(pct * 100));
+            const cfi = location.start.cfi;
+            if (ownerId && typeof cfi === 'string' && cfi.startsWith('epubcfi(') && cfi.length <= 2048) {
+              queueProgress(Math.round(pct * 100), cfi, book.id, ownerId);
+            }
           }
         });
 
-        activeRendition = rend;
+        try {
+          await rend.display(initialCfi || undefined);
+        } catch {
+          if (initialCfi) await rend.display();
+          else throw new Error('Unable to open the EPUB location');
+        }
       } catch (err: any) {
         if (!cancelled) {
           setError('EPUB 加载失败: ' + (err?.message || err));
@@ -86,6 +120,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose }) => {
 
     return () => {
       cancelled = true;
+      flushProgress();
       try { activeRendition?.destroy?.(); } catch {}
       try { bookInstance?.destroy?.(); } catch {}
     };
@@ -124,7 +159,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose }) => {
       {/* Toolbar */}
       <header className="h-14 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 bg-[#02050f]">
         <div className="flex items-center space-x-3 min-w-0">
-          <button onClick={onClose} className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer">
+          <button onClick={closeReader} className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer">
             <X className="w-4 h-4" />
             <span className="hidden sm:inline">返回</span>
           </button>

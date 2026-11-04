@@ -483,6 +483,25 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
   };
 
+  const saveEpubProgress = async (bookId: string, progress: number, cfi: string, ownerId?: string) => {
+    if (!ownerId || currentUser?.id !== ownerId || !shelf.some(item => item.bookId === bookId && item.userId === ownerId)) return;
+    try {
+      const res = await fetch(`/api/library/shelf/${encodeURIComponent(bookId)}/epub-reading-state`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
+        body: JSON.stringify({ progress, cfi, ownerId })
+      });
+      const data = await res.json();
+      if (data.success && data.item) {
+        setShelf(prev => prev.map(item => item.bookId === bookId
+          ? { ...data.item, book: item.book }
+          : item));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     if (!readingBook || !shelf.some(item => item.bookId === readingBook.id)) return;
     void saveShelfReadingState(readingBook, activeChapterIndex);
@@ -1247,7 +1266,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {/* EPUB READER                                                          */}
       {/* ===================================================================== */}
       {readingEpub && (
-        <EpubReader book={readingEpub} onClose={() => setReadingEpub(null)} />
+        <EpubReader
+          key={`${currentUser?.id || 'guest'}:${readingEpub.id}`}
+          book={readingEpub}
+          ownerId={currentUser?.id}
+          initialCfi={shelf.find(item => item.bookId === readingEpub.id && item.userId === currentUser?.id)?.lastReadEpubCfi}
+          onProgress={(progress, cfi, bookId, ownerId) => { void saveEpubProgress(bookId, progress, cfi, ownerId); }}
+          onClose={() => setReadingEpub(null)}
+        />
       )}
     </div>
   );
