@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   User,
   Post,
@@ -13,23 +13,23 @@ import {
 import { translations } from './i18n/translations.ts';
 import { Navbar } from './components/layout/Navbar.tsx';
 import { Sidebar } from './components/layout/Sidebar.tsx';
-const DigitalGlobe = lazy(() => import('./components/globe/DigitalGlobe.tsx').then(module => ({ default: module.DigitalGlobe })));
-const GlobalFeed = lazy(() => import('./components/social/GlobalFeed.tsx').then(module => ({ default: module.GlobalFeed })));
-const GlobalMessenger = lazy(() => import('./components/chat/GlobalMessenger.tsx').then(module => ({ default: module.GlobalMessenger })));
-const AIHub = lazy(() => import('./components/ai/AIHub.tsx').then(module => ({ default: module.AIHub })));
-const CreatorHub = lazy(() => import('./components/creator/CreatorHub.tsx').then(module => ({ default: module.CreatorHub })));
-const VideoCenter = lazy(() => import('./components/video/VideoCenter.tsx').then(module => ({ default: module.VideoCenter })));
-const GameCenter = lazy(() => import('./components/games/GameCenter.tsx').then(module => ({ default: module.GameCenter })));
-const CommunityList = lazy(() => import('./components/community/CommunityList.tsx').then(module => ({ default: module.CommunityList })));
+import { DigitalGlobe } from './components/globe/DigitalGlobe.tsx';
+import { GlobalFeed } from './components/social/GlobalFeed.tsx';
+import { GlobalMessenger } from './components/chat/GlobalMessenger.tsx';
+import { AIHub } from './components/ai/AIHub.tsx';
+import { CreatorHub } from './components/creator/CreatorHub.tsx';
+import { VideoCenter } from './components/video/VideoCenter.tsx';
+import { GameCenter } from './components/games/GameCenter.tsx';
+import { CommunityList } from './components/community/CommunityList.tsx';
 import { UserProfileModal } from './components/profile/UserProfileModal.tsx';
 import { LuxuryAdBanner } from './components/commercial/LuxuryAdBanner.tsx';
 import { AuthModal } from './components/auth/AuthModal.tsx';
 import { OnboardingModal } from './components/auth/OnboardingModal.tsx';
-const DigitalLibrary = lazy(() => import('./components/library/DigitalLibrary.tsx').then(module => ({ default: module.DigitalLibrary })));
-const WebBrowser = lazy(() => import('./components/browser/WebBrowser.tsx').then(module => ({ default: module.WebBrowser })));
-const CrawlerDashboard = lazy(() => import('./components/crawler/CrawlerDashboard.tsx').then(module => ({ default: module.CrawlerDashboard })));
-const KnowledgeUniverse = lazy(() => import('./components/knowledge/KnowledgeUniverse.tsx').then(module => ({ default: module.KnowledgeUniverse })));
-const UniverseEngine = lazy(() => import('./universe/UniverseEngine.tsx').then(module => ({ default: module.UniverseEngine })));
+import { DigitalLibrary } from './components/library/DigitalLibrary.tsx';
+import { WebBrowser } from './components/browser/WebBrowser.tsx';
+import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
+import { KnowledgeUniverse } from './components/knowledge/KnowledgeUniverse.tsx';
+import { UniverseEngine } from './universe/UniverseEngine.tsx';
 import { HolographicAICompanion } from './components/ai/HolographicAICompanion.tsx';
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 
@@ -419,7 +419,6 @@ export default function App() {
 
       {/* 2. Main View Content Switcher */}
       <main className="flex-1 flex flex-col">
-        <Suspense fallback={<div className="flex-1 grid min-h-[50vh] place-items-center text-sm text-cyan-200" role="status" aria-live="polite">Loading EARTH ONE module…</div>}>
         {currentTab === 'globe' && (
           <div className="flex-1 flex flex-col min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)]">
             <DigitalGlobe
@@ -513,7 +512,6 @@ export default function App() {
             lang={lang}
           />
         )}
-        </Suspense>
       </main>
 
       {/* 3. Luxury Sponsor Ad Banner (Chapter 10) */}
