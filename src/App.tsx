@@ -39,6 +39,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('globe');
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showGlobeTools, setShowGlobeTools] = useState(false);
 
   // Core Data State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -424,6 +425,8 @@ export default function App() {
             <DigitalGlobe
               nodes={nodes}
               countries={countries}
+              showGlobeTools={showGlobeTools}
+              onToggleGlobeTools={() => setShowGlobeTools(open => !open)}
               onSelectTab={setCurrentTab}
               activeCountry={activeCountry}
               currentUserId={currentUser?.id}
@@ -553,6 +556,7 @@ export default function App() {
       {/* 7. 3D Holographic AI Companion */}
       <HolographicAICompanion
         lang={lang}
+        showLauncher={currentTab !== 'globe' || showGlobeTools}
         onFlyTo={(lat, lng) => {
           setFocusCoordinates({ lat, lng, timestamp: Date.now() });
           setCurrentTab('globe');

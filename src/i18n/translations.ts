@@ -120,6 +120,8 @@ export interface TranslationDictionary {
   firstUseHint: string;
   dismissFirstUseHint: string;
   globeControls: string;
+  showGlobeTools: string;
+  hideGlobeTools: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -228,6 +230,8 @@ export const translations: Record<Language, TranslationDictionary> = {
     firstUseHint: '拖动地球来旋转，点击发光信标即可认识地球上的公民。',
     dismissFirstUseHint: '关闭首次使用提示',
     globeControls: '地球控制',
+    showGlobeTools: '显示工具与实时数据',
+    hideGlobeTools: '收起工具与实时数据',
     issTracker: '国际空间站实时遥测',
     issAltitude: '轨道高度',
     issVelocity: '运行速度',
@@ -345,6 +349,8 @@ export const translations: Record<Language, TranslationDictionary> = {
     firstUseHint: 'Drag to rotate Earth, then select a glowing beacon to meet a citizen.',
     dismissFirstUseHint: 'Dismiss first-use hint',
     globeControls: 'Globe controls',
+    showGlobeTools: 'Show tools & live data',
+    hideGlobeTools: 'Hide tools & live data',
     issTracker: 'ISS Live Orbit Tracker',
     issAltitude: 'Orbital Altitude',
     issVelocity: 'Orbital Velocity',
@@ -461,7 +467,9 @@ export const translations: Record<Language, TranslationDictionary> = {
     noResults: 'لا توجد نتائج',
     firstUseHint: 'اسحب لتدوير الأرض، ثم اختر منارة مضيئة للتعرّف على أحد السكان.',
     dismissFirstUseHint: 'إخفاء تلميح الاستخدام الأول',
-    globeControls: 'عناصر التحكم بالكرة الأرضية'
+    globeControls: 'عناصر التحكم بالكرة الأرضية',
+    showGlobeTools: 'إظهار الأدوات والبيانات المباشرة',
+    hideGlobeTools: 'إخفاء الأدوات والبيانات المباشرة'
   },
   es: {
     appName: 'EARTH ONE',
@@ -567,7 +575,9 @@ export const translations: Record<Language, TranslationDictionary> = {
     noResults: 'Sin resultados',
     firstUseHint: 'Arrastra para girar la Tierra y selecciona una baliza luminosa para conocer a alguien.',
     dismissFirstUseHint: 'Cerrar el consejo inicial',
-    globeControls: 'Controles del globo'
+    globeControls: 'Controles del globo',
+    showGlobeTools: 'Mostrar herramientas y datos en directo',
+    hideGlobeTools: 'Ocultar herramientas y datos en directo'
   },
   fr: {
     appName: 'EARTH ONE',
@@ -673,7 +683,9 @@ export const translations: Record<Language, TranslationDictionary> = {
     noResults: 'Aucun résultat',
     firstUseHint: 'Faites glisser pour faire tourner la Terre, puis sélectionnez une balise lumineuse.',
     dismissFirstUseHint: 'Masquer le conseil initial',
-    globeControls: 'Commandes du globe'
+    globeControls: 'Commandes du globe',
+    showGlobeTools: 'Afficher outils et données en direct',
+    hideGlobeTools: 'Masquer outils et données en direct'
   },
   ru: {
     appName: 'EARTH ONE',
@@ -779,6 +791,8 @@ export const translations: Record<Language, TranslationDictionary> = {
     noResults: 'Ничего не найдено',
     firstUseHint: 'Перетаскивайте, чтобы вращать Землю, и выберите светящийся маяк, чтобы познакомиться с жителем.',
     dismissFirstUseHint: 'Скрыть первую подсказку',
-    globeControls: 'Управление глобусом'
+    globeControls: 'Управление глобусом',
+    showGlobeTools: 'Показать инструменты и данные',
+    hideGlobeTools: 'Скрыть инструменты и данные'
   }
 };

@@ -46,6 +46,8 @@ import {
 interface DigitalGlobeProps {
   nodes: GlobeUserNode[];
   countries: GlobeCountryStat[];
+  showGlobeTools: boolean;
+  onToggleGlobeTools: () => void;
   activeCountry: string | null;
   currentUserId?: string;
   focusCoordinates?: { lat: number; lng: number; timestamp?: number } | null;
@@ -60,6 +62,8 @@ interface DigitalGlobeProps {
 export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   nodes,
   countries,
+  showGlobeTools,
+  onToggleGlobeTools,
   activeCountry,
   currentUserId,
   focusCoordinates,
@@ -750,7 +754,19 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         </div>
       )}
 
-      <aside className="absolute bottom-6 left-3 top-4 z-20 hidden w-[174px] flex-col rounded-[26px] border border-slate-700/70 bg-[#071020]/85 p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl md:flex">
+      <button
+        type="button"
+        onClick={onToggleGlobeTools}
+        aria-expanded={showGlobeTools}
+        aria-controls="globe-local-nav globe-mobile-controls globe-telemetry-panel globe-statistics-panel globe-controls-rail globe-ai-launcher"
+        aria-label={showGlobeTools ? t.hideGlobeTools : t.showGlobeTools}
+        className="absolute right-4 top-4 z-30 inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-200 shadow-xl backdrop-blur-xl transition-colors hover:border-cyan-500/50 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+      >
+        <Layers className="h-4 w-4 text-cyan-300" />
+        <span>{showGlobeTools ? t.hideGlobeTools : t.showGlobeTools}</span>
+      </button>
+
+      <aside id="globe-local-nav" style={{ display: showGlobeTools ? undefined : 'none' }} className="absolute bottom-6 left-3 top-4 z-20 hidden w-[174px] flex-col rounded-[26px] border border-slate-700/70 bg-[#071020]/85 p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl md:flex">
         <div className="flex items-center gap-2 border-b border-slate-800/90 px-2 pb-3 pt-1">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-blue-400/30 bg-blue-500/15 text-blue-300 shadow-[0_0_24px_rgba(37,99,235,.24)]">
             <Globe2 className="h-5 w-5" />
@@ -828,7 +844,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       {/* ============================================================== */}
       {/* 2. WORLD-CLASS USER HERO OVERLAY                               */}
       {/* ============================================================== */}
-      <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-[220px] lg:pl-[220px] flex flex-col justify-start md:justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
+      <div className={`relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 flex flex-col pb-8 pointer-events-none ${showGlobeTools ? 'md:pl-[220px] lg:pl-[220px] justify-start md:justify-between pt-8 sm:pt-20' : 'justify-start pt-4 sm:pt-8'}`}>
         {/* Hero CTA */}
         <div className="max-w-xl pointer-events-auto">
           {showFirstUseHint && (
@@ -850,8 +866,21 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             </div>
           )}
 
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={handleToggleExplore}
+              aria-pressed={isZoomedIn}
+              className="inline-flex min-h-12 items-center gap-2.5 rounded-full border border-cyan-300/40 bg-gradient-to-r from-blue-600/95 to-cyan-500/90 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-blue-950/45 transition-all hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+            >
+              <Orbit className="h-4 w-4" />
+              <span>{isZoomedIn ? t.overviewView : t.startExploring}</span>
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+
           {/* Mobile controls stay in document flow instead of covering the stats. */}
-          <div className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden" aria-label={t.globeControls}>
+          <div id="globe-mobile-controls" style={{ display: showGlobeTools ? undefined : 'none' }} className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden" aria-label={t.globeControls}>
             <button onClick={handleToggleExplore} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={isZoomedIn ? t.zoomOut : t.inspectEarth} title={isZoomedIn ? t.zoomOut : t.inspectEarth}>
               <Orbit className="h-4 w-4" />
             </button>
@@ -872,10 +901,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           </div>
         </div>
 
-        <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />
+        {showGlobeTools && <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />}
 
         {/* Bottom Telemetry HUD Deck: ISS Live Orbit + USGS Earthquakes + Geospatial Layers */}
-        <div className="w-full grid grid-cols-1 gap-3 pointer-events-auto pt-6 sm:pt-10 lg:grid-cols-3 lg:gap-4">
+        <div id="globe-telemetry-panel" style={{ display: showGlobeTools ? undefined : 'none' }} className="w-full grid grid-cols-1 gap-3 pointer-events-auto pt-6 sm:pt-10 lg:grid-cols-3 lg:gap-4">
           {/* Card 1: ISS Live Orbit Telemetry */}
           <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col justify-between">
             <div>
@@ -1068,14 +1097,14 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         </div>
 
         {/* Centered Footer Motto (omitted when empty to keep space clean) */}
-        {t.footerMotto ? (
+        {showGlobeTools && t.footerMotto ? (
           <div className="w-full text-center mt-6 pt-4 border-t border-slate-900/80 text-[11px] text-slate-500 font-mono tracking-wider">
             {t.footerMotto}
           </div>
         ) : null}
       </div>
 
-      <aside className="absolute right-[76px] top-[28%] z-20 hidden w-60 rounded-3xl border border-blue-400/30 bg-[#071020]/80 p-4 shadow-2xl shadow-blue-950/40 backdrop-blur-2xl xl:block">
+      <aside id="globe-statistics-panel" style={{ display: showGlobeTools ? undefined : 'none' }} className="absolute right-[76px] top-[28%] z-20 hidden w-60 rounded-3xl border border-blue-400/30 bg-[#071020]/80 p-4 shadow-2xl shadow-blue-950/40 backdrop-blur-2xl xl:block">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-bold text-white">{t.globeTab}</span>
           <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-[9px] font-semibold text-emerald-300">
@@ -1110,7 +1139,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       {/* ============================================================== */}
       {/* 3. RIGHT FLOATING VERTICAL ACTION RAIL                         */}
       {/* ============================================================== */}
-      <aside className="hidden md:flex fixed right-6 top-1/2 -translate-y-1/2 z-20 flex-col space-y-3 pointer-events-auto">
+      <aside id="globe-controls-rail" style={{ display: showGlobeTools ? undefined : 'none' }} className="hidden md:flex fixed right-6 top-1/2 -translate-y-1/2 z-20 flex-col space-y-3 pointer-events-auto">
         <div className="p-2 rounded-2xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col space-y-3 text-slate-400">
           {/* Orbit switch */}
           <button

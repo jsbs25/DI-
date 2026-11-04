@@ -24,6 +24,7 @@ import {
 
 interface HolographicAICompanionProps {
   lang: Language;
+  showLauncher?: boolean;
   onFlyTo?: (lat: number, lng: number) => void;
   onExploreUniverse?: () => void;
   onOpenAIHub?: () => void;
@@ -39,6 +40,7 @@ interface MessageItem {
 
 export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   lang,
+  showLauncher = true,
   onFlyTo,
   onExploreUniverse,
   onOpenAIHub
@@ -315,11 +317,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   ];
 
   return (
-    <div className="fixed bottom-6 right-6 z-40 select-none">
+    <div id="globe-ai-launcher" className="fixed bottom-6 right-6 z-40 select-none">
       {/* Floating 3D Holographic AI Widget Bubble */}
-      {!isOpen && (
+      {!isOpen && showLauncher && (
         <button
+          type="button"
           onClick={() => setIsOpen(true)}
+          aria-label={lang === 'zh' ? '打开地球计划 AI 对话' : 'Open Project Earth AI chat'}
           className="group relative flex items-center space-x-3 px-4 py-3 rounded-full bg-slate-950/90 hover:bg-slate-900 border border-cyan-500/60 hover:border-cyan-400 backdrop-blur-2xl shadow-2xl shadow-cyan-500/25 cursor-pointer transition-all hover:scale-105 active:scale-95"
           title="点击直接与地球计划 AI 对话"
         >
