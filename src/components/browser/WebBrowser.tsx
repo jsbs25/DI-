@@ -93,7 +93,8 @@ const DEFAULT_BOOKMARKS: BookmarkItem[] = [
   { id: 'bm_gutenberg', title: 'Project Gutenberg', url: 'https://www.gutenberg.org', category: 'Library' },
   { id: 'bm_arxiv', title: 'arXiv Astrophysics', url: 'https://arxiv.org/archive/astro-ph', category: 'Research' },
   { id: 'bm_sep', title: 'Stanford Encyclopedia of Philosophy', url: 'https://plato.stanford.edu', category: 'Philosophy' },
-  { id: 'bm_wiki', title: 'Wikipedia Knowledge', url: 'https://en.wikipedia.org/wiki/Earth', category: 'Encyclopedia' }
+  { id: 'bm_wiki', title: 'Wikipedia Knowledge', url: 'https://en.wikipedia.org/wiki/Earth', category: 'Encyclopedia' },
+  { id: 'bm_souju', title: '在线电视剧（souju6）', url: 'https://souju6.ai/', category: '视频娱乐' }
 ];
 
 const PRESET_PAGES: Record<string, { title: string; author: string; content: string; readTime: string }> = {
