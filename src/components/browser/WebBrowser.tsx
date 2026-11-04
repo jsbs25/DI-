@@ -19,6 +19,40 @@ import {
 import { Language } from '../../types/index.ts';
 import { BrowserFrame } from './BrowserFrame.tsx';
 
+/**
+ * Convert a YouTube / Vimeo watch URL into its embeddable endpoint so videos
+ * play inside the browser viewport (the full sites block iframe embedding).
+ * Non-video URLs are returned unchanged.
+ */
+function toEmbedUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+
+    if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtu.be') {
+      let videoId = '';
+      if (host === 'youtu.be') {
+        videoId = u.pathname.split('/').filter(Boolean)[0] || '';
+      } else if (u.pathname === '/watch') {
+        videoId = u.searchParams.get('v') || '';
+      } else if (u.pathname.startsWith('/shorts/')) {
+        videoId = u.pathname.slice('/shorts/'.length);
+      } else if (u.pathname.startsWith('/embed/')) {
+        return url;
+      }
+      if (videoId) return `https://www.youtube.com/embed/${videoId}`;
+    }
+
+    if (host === 'vimeo.com' || host === 'player.vimeo.com') {
+      const m = u.pathname.match(/\/(\d+)/);
+      if (m) return `https://player.vimeo.com/video/${m[1]}`;
+    }
+  } catch {
+    // invalid URL — leave as-is
+  }
+  return url;
+}
+
 interface BrowserTab {
   id: string;
   title: string;
@@ -110,7 +144,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       id: 'tab_1',
       title: 'NASA Earth Observatory',
       url: 'https://earthobservatory.nasa.gov',
-      readerMode: true,
+      readerMode: false,
       content: PRESET_PAGES['https://earthobservatory.nasa.gov'].content,
       author: PRESET_PAGES['https://earthobservatory.nasa.gov'].author,
       readTime: PRESET_PAGES['https://earthobservatory.nasa.gov'].readTime
@@ -335,7 +369,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
       id: newId,
       title: 'New Tab',
       url: 'https://en.wikipedia.org/wiki/Earth',
-      readerMode: true,
+      readerMode: false,
       content: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].content,
       author: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].author,
       readTime: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].readTime
@@ -827,7 +861,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang }) => {
             ) : (
               <div className="relative flex h-full min-h-[480px] w-full flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-slate-950">
                 <iframe
-                  src={activeTab.url}
+                  src={toEmbedUrl(activeTab.url)}
                   title={activeTab.title}
                   className="w-full flex-1 border-0 bg-white"
                   sandbox="allow-scripts allow-same-origin allow-popups"
