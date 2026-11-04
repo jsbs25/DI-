@@ -3,6 +3,14 @@
 
 ---
 
+### [2026-11-04] Commit feat(saturn): 土星影视生态扩展，接入公版电影并新增我的片单
+* **公版片源核实**: 通过 Internet Archive metadata/advancedsearch 核实 5 部公版电影标识符（月球旅行记/将军号/女友礼拜五/外太空九号计划/活死人之夜），全部公共领域，不接任何盗版源。
+* **分类导航**: 全部/太空探索/公版电影 三个分类标签。
+* **我的片单**: localStorage 持久化收藏，支持添加/移除并展示计数。
+* **验证**: `tsc --noEmit` 0 报错；`vite build` 通过。
+
+---
+
 ### [2026-11-04] Commit feat(universe): 统一十个天体生态入口，清理盗版观影链接
 * **星球生态入口统一接线**:
   - 新增单一事实来源 `src/universe/planetEcosystems.ts`，将十个天体映射到对应数字生态与 `currentTab`。

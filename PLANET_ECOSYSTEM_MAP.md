@@ -26,7 +26,7 @@ GLOBAL CORE (EARTH ID / AI Gateway / 搜索 / 通知 / 存储 / 权限)
 | 🌙 MOON 月球 | GLOBAL ACADEMY | 全球教育与学习中心 | — | ❌ 未实现 | 外部仓库 `rengdeng-student` 未接入 |
 | ♂ MARS 火星 | GAME UNIVERSE | 游戏与互动娱乐中心 | `game` → `GameCenter` | ✅ 已实现 | 棋类/问答等开源小游戏 |
 | ♃ JUPITER 木星 | COSMIC BROWSER | 全球智能浏览器 | `browser` → `WebBrowser` | ✅ 已实现 | 标签/书签/历史/下载管理 + 桌面 Electron 原型 |
-| ♄ SATURN 土星 | CINEMA UNIVERSE | 全球影视娱乐中心 | `saturn` → `SaturnSpace` | 🚧 骨架 | NASA 公版影像；待扩展分类/详情/片单（仅用公共领域） |
+| ♄ SATURN 土星 | CINEMA UNIVERSE | 全球影视娱乐中心 | `saturn` → `SaturnSpace` | ✅ 已实现 | NASA 公版影像 + Internet Archive 公版电影，分类 + 我的片单(localStorage) |
 | ♅ URANUS 天王星 | AI INTELLIGENCE | 全球人工智能中枢 | `aihub` → `AIHub` | ✅ 已实现 | 多模型 AI Gateway、Deep Research、工具集 |
 | ♆ NEPTUNE 海王星 | CREATOR UNIVERSE | 全球创作者与数字媒体中心 | `creator`/`video` | ✅ 已实现 | CreatorHub + VideoCenter |
 
