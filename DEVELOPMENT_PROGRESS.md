@@ -45,6 +45,7 @@
 37. 为地球国家目录增加两项只读 HTTP 回归：验证约旦英文/本地化名称与坐标字段，以及 `/api/globe/stats` 国家总数与 `/api/globe/countries` 目录长度一致。`npm run lint` 通过；仅在临时 JSON 服务上定向请求这两个 GET，结果通过（12 个国家、约旦元数据存在、统计数量一致）。完整 `test:api` 未重跑，因为现有全量脚本包含待用户批准的会话读取测试；未请求会话/消息端点。
 38. 将上一轮手动定向 smoke 固化为 `npm run test:globe-api` 独立脚本：国家目录非空、国家代码唯一且格式合理、名称/坐标字段与边界有效、约旦本地化元数据正确、统计结构和目录数量一致；脚本白名单只含 `/api/globe/countries`、`/api/globe/stats` 两个 GET 接口，使用独立临时 JSON 并关闭后台书籍采集。本轮 7 项通过，`npm run lint` 通过；没有运行完整 API 套件。
 39. 新增 `npm run test:ai-api`，为 `/api/ai/models` 与 `/api/ai/stats` 建立独立 GET-only 回归；使用临时 JSON、在测试子进程清空模型密钥并关闭后台采集，检查元数据结构、模型 ID 唯一性、未配置掩码和统计汇总。9 项通过；`npm run lint` 与 `npm run test:globe-api`（7 项）通过。未调用模型或会话/消息路由，未运行包含待批准读取路径的完整 `test:api`。
+40. 静态巡检确认六种支持语言各有 104 个非空翻译值；新增 `npm run test:i18n`，检查支持语言集合、字典键一致性与非空值，共 13 项通过。`npm run lint` 与 `npm run test:globe`（30 项）通过。此测试不证明翻译质量、RTL 几何或浏览器交互。
 
 ## 验证结果
 
