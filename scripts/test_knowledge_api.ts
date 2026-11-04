@@ -131,6 +131,12 @@ async function main() {
       ),
       'Every relation points to one unique node in the published graph'
     );
+    const repeatedCatalog = await get('/api/knowledge/nodes');
+    check(
+      repeatedCatalog.status === catalog?.status &&
+      JSON.stringify(repeatedCatalog.body) === JSON.stringify(catalog?.body),
+      'Repeated knowledge catalog GET returns an identical status and JSON response'
+    );
 
     const detailResponses = await Promise.all(
       (nodes || []).map((node: any) => get(`/api/knowledge/nodes/${encodeURIComponent(node.id)}`))
@@ -153,6 +159,12 @@ async function main() {
       aliasSearch.status === 200 && aliasSearch.body.success === true &&
       aliasSearch.body.nodes.some((node: any) => node.id === 'per_ibn_sina'),
       'Knowledge search matches the Avicenna alias'
+    );
+    const repeatedAliasSearch = await get('/api/knowledge/search?q=Avicenna');
+    check(
+      repeatedAliasSearch.status === aliasSearch.status &&
+      JSON.stringify(repeatedAliasSearch.body) === JSON.stringify(aliasSearch.body),
+      'Repeated knowledge alias-search GET returns an identical status and JSON response'
     );
     const filteredSearch = await get('/api/knowledge/search?q=Islamic&category=civilization');
     check(

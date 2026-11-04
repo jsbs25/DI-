@@ -19,7 +19,7 @@
 | 数字图书馆、阅读器、书架 | `src/components/library/`、`server/bookHarvester.ts`、`/api/library/*` | 本地图书目录/详情独立 GET-only 回归现为 14 项，含字段/唯一性、哲学筛选、本地搜索、章节结构、结构化 404，以及目录和已知详情重复 GET 的状态/完整 JSON 一致性；既有综合套件中的书架进度契约与桌面目录到详情 smoke 仍在记录中。阅读器、外部来源、版权和管理权限仍需持续验证。 |
 | 网页浏览与收藏 | `src/components/browser/`、`/api/browser/*` | 搜索、预览、书签/保存路径存在；修复地址栏工具栏与分栏面板 flex 收缩，390×844 阿语 RTL/中文及 1274×649 阿语桌面无页面级横向溢出；窄屏工具栏保留自身横向滚动。未触发搜索/抓取；外部地址须继续审查 SSRF、来源限制与隐私。 |
 | 爬虫与内容收集 | `src/components/crawler/`、`server/webFetcher.ts`、`/api/crawler/*` | 新增独立 GET-only 回归（12 项）检查任务/采集页结构、唯一 ID、任务关联和待审核状态；桌面仪表盘只读布局也已覆盖。未创建/运行任务、发起抓取或批准/拒绝页面；执行与审核流程仍需权限、目标域约束及 SSRF 安全测试。 |
-| 知识图谱/知识宇宙 | `src/components/knowledge/`、`server/knowledgeGraph.ts`、`/api/knowledge/*` | HTTP 回归覆盖搜索、类别/国家筛选、关联节点、详情与不存在节点 404；不得将种子/示例内容描述为实时全球知识数据。 |
+| 知识图谱/知识宇宙 | `src/components/knowledge/`、`server/knowledgeGraph.ts`、`/api/knowledge/*` | 独立 `test:knowledge-api` GET-only 回归现为 14 项，覆盖目录、33 个节点详情、图边/书籍关系、别名与筛选搜索、空结果/404，以及目录和 Avicenna 别名搜索重复 GET 的状态/完整 JSON 一致性；不得将种子/示例内容描述为实时全球知识数据。 |
 | 广告与赞助 | `src/components/commercial/`、`/api/ads/*` | 独立 `test:catalog-api` GET-only 回归检查广告字段、唯一 ID 与既有样例，不执行点击写操作；竞价和结算未列为已实现。 |
 | 多语言与阿拉伯语 RTL | `src/i18n/translations.ts`、`src/index.css`、应用方向设置 | 中文、英语、阿拉伯语、西班牙语、法语、俄语翻译资源存在；真实语言菜单切换后的阿语 RTL 移动导航和关键桌面/窄屏布局已测；其他语言主要有静态结构覆盖，不能据此宣称所有文案/页面均已完成浏览器实测。 |
 | 持久化数据与 API | `server/store.ts`、`server.ts`、`server_data.json`（本机忽略文件） | 保留现有 API 与用户数据；测试须使用临时数据文件；未经授权不得清空或不可逆迁移。 |
