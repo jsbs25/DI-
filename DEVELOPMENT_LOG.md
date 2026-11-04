@@ -113,3 +113,13 @@ DOAB 官方资料确认其元数据为 CC0，并提供 OAI-PMH、公开元数据
 - 在首页增加已核实的 [Waqfeya 图书目录](https://waqfeya.net/books)、[Shamela 搜索页](https://shamela.ws/search)和 [QDL 检索页](https://www.qdl.qa/en/search/site/)官方跳转。Waqfeya 与 QDL 未发现可核验的正式机器检索接口；不抓取或批量复制，仅提供官网入口。QDL 官网的“免费使用和复用”声明不替代具体条目权利核验。
 - 验证通过：`npm run lint`、`npm run test:library-connectors`、`npm run test:library-api`（31/31）、`npm run test:api`（85/85）、`npm run build`、`npm run test:library-connectors:live`。真实在线测试通过 Shamela 阿语搜索并验证官方 URL、`UNKNOWN` 权利及不能导入。构建保留既有 Three.js 大 chunk 警告；未做浏览器视觉/手机回归，未下载或保存原文。
 - GitHub 推送未执行：当前环境 `gh auth status` 显示未登录，且无可用的已授权 GitHub connector。未更换凭证、未修改认证配置、未推送。
+
+### Phase 5 同步续接（2026-11-04）
+- 续接执行时先查询 GitHub 仓库默认分支并确认 `main` 仍位于 `32db81455171108c3671d020ac39514ed6894107`，与未提交改动基线一致；没有重置或改写其他 worktree。
+- 使用当时已授权的 GitHub 连接器进行普通提交和非强制推送，Phase 5 提交 `8bff41d04390d1a7f3e9366541fa12cfb1d020ae` 已由 GitHub API 确认出现在 `main`。未执行 `gh auth login`、未更改 Git 全局配置或账户凭证。
+
+### WORLD LIBRARY Phase 6：OpenAlex 作者与机构发现（2026-11-04）
+- OpenAlex 连接器新增显式查询语法 `author:<name>` 和 `institution:<name>`，分别请求官方 `/authors` 与 `/institutions` 搜索 API；原有不带前缀的学术作品搜索和 DOI 精确查询保持不变。只请求档案展示所需字段，并将 OpenAlex A/I ID 纳入安全校验后的详情读取。
+- 作者档案映射 ORCID、计数和最近机构名称；机构档案映射类型、国家代码、作品/引用计数、官网及 ROR 标识。前端搜索提示标明前缀。作者和机构都固定为 `METADATA_ONLY`、`canImport=false`，没有全文下载或本地复制路径。
+- 官方文档确认基础 HTTP API 可免费且无需账号或 key。限定实时请求对 `author:Carl Sagan` 和 `institution:University of Jordan` 返回官方档案；未使用任何用户密钥或进行批量查询。
+- 离线回归覆盖端点与字段、官方档案链接、detail ID、空凭证和权限；`npm run lint`、`npm run test:library-connectors`、`npm run test:library-api`（31/31）、`npm run test:api`（85/85）、`npm run build` 与 `npm run test:library-connectors:live` 均通过。构建仍有既有 Three.js chunk 大小提示；未运行浏览器视觉/手机回归，未修改正式用户书架或图书数据。

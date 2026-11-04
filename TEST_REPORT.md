@@ -136,4 +136,18 @@ PubMed 与 PMC 使用同一串行 NCBI 请求队列。在线烟测只证明本�
 | `npm run build` | ✅ Vite 生产构建成功；保留既有 Three.js >500 kB chunk 非阻断提示。 |
 | `npm run test:library-connectors:live` | ✅ 限量实时 smoke 通过；Shamela 官方 MCP 的阿语搜索返回记录，官方页域名与路径有效，权利仍为 `UNKNOWN` 且不能导入；既有 Open Library、Internet Archive、Gutenberg、OpenAlex、Crossref、arXiv、Europe PMC、PMC 与 PubMed 检查也通过。 |
 
-Waqfeya 与 Qatar Digital Library 只验证官网和官方检索/目录页面，不自动查询、抓取或复制馆藏。自动化 API 测试使用临时隔离数据；在线 Shamela 请求只处理短暂搜索响应并仅向 API 输出书目与官方链接，没有保存或显示全文。未运行浏览器视觉、移动设备或全站人工 UI 回归。当前执行环境未提供已授权 GitHub 写入认证，因此本次改动尚未推送。
+Waqfeya 与 Qatar Digital Library 只验证官网和官方检索/目录页面，不自动查询、抓取或复制馆藏。自动化 API 测试使用临时隔离数据；在线 Shamela 请求只处理短暂搜索响应并仅向 API 输出书目与官方链接，没有保存或显示全文。未运行浏览器视觉、移动设备或全站人工 UI 回归。前次运行环境没有授权写入路径，故当时未推送；续接时确认 GitHub `main` 仍处于原始基线，并通过既有授权连接器普通推送 Phase 5 提交 `8bff41d04390d1a7f3e9366541fa12cfb1d020ae`，随后由 GitHub API 核验远端一致。未更换或新增认证配置。
+
+
+## WORLD LIBRARY Phase 6：OpenAlex 作者与机构搜索回归（2026-11-04）
+
+| 检查 | 结果 |
+|---|---|
+| `npm run lint` | ✅ TypeScript `--noEmit` 通过。 |
+| `npm run test:library-connectors` | ✅ 离线连接器测试通过；OpenAlex 覆盖普通作品检索、`author:` 与 `institution:` 路由、所需字段选择、官方档案 URL、A/I ID 详情查询、无 API key、`METADATA_ONLY` 与全文/下载/导入关闭。 |
+| `npm run test:library-api` | ✅ 31 项通过、0 失败。 |
+| `npm run test:api` | ✅ 85 项通过、0 失败。 |
+| `npm run build` | ✅ Vite 生产构建成功；仍有既有 Three.js chunk >500 kB 非阻断提示。 |
+| `npm run test:library-connectors:live` | ✅ 限量真实 smoke 通过；OpenAlex `author:Carl Sagan` 与 `institution:University of Jordan` 均返回官方资料页，权限仍是仅元数据且不能导入；既有书目/学术连接器和 Shamela 检查也通过。 |
+
+OpenAlex 官方说明基础 API 可免费且无需账号或 key。本次仅进行有界查询，没有复制全文或触碰正式图书/书架数据。未做浏览器视觉、移动设备或全站人工 UI 回归。

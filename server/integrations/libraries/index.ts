@@ -1026,22 +1026,110 @@ function validOpenAlexWorkId(raw: string | undefined): string | undefined {
   return /^W\d+$/i.test(id) ? id.toUpperCase() : undefined;
 }
 
+function validOpenAlexEntityId(raw: string | undefined, prefix: 'A' | 'I'): string | undefined {
+  if (!raw) return undefined;
+  const value = raw.trim();
+  const urlMatch = value.match(new RegExp(`^https?://(?:www\\.)?openalex\\.org/(${prefix}\\d+)$`, 'i'));
+  const id = urlMatch?.[1] || value;
+  return new RegExp(`^${prefix}\\d+$`, 'i').test(id) ? id.toUpperCase() : undefined;
+}
+
+function mapOpenAlexAuthor(author: any): ExternalLibraryRecord | undefined {
+  const authorId = validOpenAlexEntityId(typeof author?.id === 'string' ? author.id : undefined, 'A');
+  if (!authorId) return undefined;
+  const name = typeof author.display_name === 'string' && author.display_name.trim() ? author.display_name.trim() : 'Unnamed OpenAlex author';
+  const institutions = Array.isArray(author.last_known_institutions)
+    ? author.last_known_institutions.map((item: any) => item?.display_name).filter((value: unknown): value is string => typeof value === 'string' && !!value.trim())
+    : [];
+  const orcid = academicHttpsUrl(author.orcid);
+  const stats = [
+    Number.isFinite(author.works_count) ? `${author.works_count} works` : undefined,
+    Number.isFinite(author.cited_by_count) ? `${author.cited_by_count} citations` : undefined
+  ].filter(Boolean);
+  return baseRecord('openalex', {
+    id: `openalex:${authorId}`,
+    externalId: authorId,
+    title: name,
+    author: name,
+    authors: [name],
+    description: [stats.join(' · '), institutions.length ? `Affiliation: ${institutions.join(', ')}` : undefined, orcid ? `ORCID: ${orcid}` : undefined].filter(Boolean).join(' · '),
+    sourceUrl: `https://openalex.org/${authorId}`,
+    rights: RightsCategory.METADATA_ONLY,
+    rightsNote: 'OpenAlex author profile metadata is provided for discovery only; it does not expose or authorize copying article full text.',
+    availability: 'metadata-only',
+    canImport: false,
+    downloadLinks: [],
+    metadata: {
+      resourceType: 'author',
+      worksCount: Number.isFinite(author.works_count) ? author.works_count : undefined,
+      citedByCount: Number.isFinite(author.cited_by_count) ? author.cited_by_count : undefined,
+      orcid,
+      affiliations: institutions
+    }
+  });
+}
+
+function mapOpenAlexInstitution(institution: any): ExternalLibraryRecord | undefined {
+  const institutionId = validOpenAlexEntityId(typeof institution?.id === 'string' ? institution.id : undefined, 'I');
+  if (!institutionId) return undefined;
+  const name = typeof institution.display_name === 'string' && institution.display_name.trim() ? institution.display_name.trim() : 'Unnamed OpenAlex institution';
+  const countryCode = typeof institution.country_code === 'string' ? institution.country_code : undefined;
+  const institutionType = typeof institution.type === 'string' ? institution.type : undefined;
+  const stats = [
+    Number.isFinite(institution.works_count) ? `${institution.works_count} works` : undefined,
+    Number.isFinite(institution.cited_by_count) ? `${institution.cited_by_count} citations` : undefined
+  ].filter(Boolean);
+  return baseRecord('openalex', {
+    id: `openalex:${institutionId}`,
+    externalId: institutionId,
+    title: name,
+    author: [institutionType, countryCode].filter(Boolean).join(' · ') || 'Research institution',
+    description: stats.join(' · '),
+    sourceUrl: `https://openalex.org/${institutionId}`,
+    rights: RightsCategory.METADATA_ONLY,
+    rightsNote: 'OpenAlex institution profile metadata is provided for discovery only; it does not expose or authorize copying article full text.',
+    availability: 'metadata-only',
+    canImport: false,
+    downloadLinks: [],
+    metadata: {
+      resourceType: 'institution',
+      countryCode,
+      institutionType,
+      worksCount: Number.isFinite(institution.works_count) ? institution.works_count : undefined,
+      citedByCount: Number.isFinite(institution.cited_by_count) ? institution.cited_by_count : undefined,
+      homepageUrl: typeof institution.homepage_url === 'string' ? institution.homepage_url : undefined,
+      ror: typeof institution.ror === 'string' ? institution.ror : undefined
+    }
+  });
+}
+
 export class OpenAlexConnector implements LibraryConnector {
   readonly source = 'openalex' as const;
 
   async search(query: string, limit = 10): Promise<ConnectorResponse<ExternalLibraryRecord[]>> {
     if (!query.trim()) return ok([]);
     try {
+      const prefixMatch = query.trim().match(/^(author|institution):\s*(.*)$/i);
+      const entity = prefixMatch?.[1].toLowerCase();
+      const term = prefixMatch ? prefixMatch[2].trim() : query.trim();
+      if (prefixMatch && !term) return ok([]);
+      const endpoint = entity === 'author' ? 'authors' : entity === 'institution' ? 'institutions' : 'works';
       const url = new URL(SOURCE_CONFIG[this.source].api);
-      const doi = normalizeAcademicDoi(query);
+      url.pathname = `/${endpoint}`;
+      const doi = endpoint === 'works' ? normalizeAcademicDoi(term) : undefined;
       if (doi) url.searchParams.set('filter', `doi:https://doi.org/${doi}`);
-      else url.searchParams.set('search', query.trim());
+      else url.searchParams.set('search', term);
       url.searchParams.set('per_page', String(cap(limit)));
-      url.searchParams.set('select', 'id,doi,title,publication_year,language,authorships,primary_location,best_oa_location,open_access,type,ids');
+      const fields = endpoint === 'authors'
+        ? 'id,display_name,orcid,works_count,cited_by_count,last_known_institutions'
+        : endpoint === 'institutions'
+          ? 'id,display_name,country_code,type,works_count,cited_by_count,homepage_url,ror'
+          : 'id,doi,title,publication_year,language,authorships,primary_location,best_oa_location,open_access,type,ids';
+      url.searchParams.set('select', fields);
       const response = JSON.parse(await requestText(this.source, url.toString()));
       if (!Array.isArray(response.results)) throw new Error('OpenAlex response did not contain a results array.');
       return ok(response.results.slice(0, cap(limit))
-        .map(mapOpenAlexWork)
+        .map((record: any) => endpoint === 'authors' ? mapOpenAlexAuthor(record) : endpoint === 'institutions' ? mapOpenAlexInstitution(record) : mapOpenAlexWork(record))
         .filter((record: ExternalLibraryRecord | undefined): record is ExternalLibraryRecord => !!record));
     } catch (error) {
       return failed(error);
@@ -1049,12 +1137,20 @@ export class OpenAlexConnector implements LibraryConnector {
   }
 
   async getBook(locator: BookLocator): Promise<ConnectorResponse<ExternalLibraryRecord>> {
-    const id = validOpenAlexWorkId(locator.record?.externalId || locator.identifier || locator.id);
-    if (!id) return failed(new Error('OpenAlex requires a valid work ID such as W2741809807.'));
+    const rawId = locator.record?.externalId || locator.identifier || locator.id;
+    const workId = validOpenAlexWorkId(rawId);
+    const authorId = validOpenAlexEntityId(rawId, 'A');
+    const institutionId = validOpenAlexEntityId(rawId, 'I');
+    const id = workId || authorId || institutionId;
+    if (!id) return failed(new Error('OpenAlex requires a valid work (W), author (A), or institution (I) ID.'));
     try {
-      const response = JSON.parse(await requestText(this.source, `${SOURCE_CONFIG[this.source].api}/${id}`));
-      const record = mapOpenAlexWork(response);
-      return record ? ok(record) : failed(new Error('OpenAlex did not return a valid work record.'));
+      const endpoint = authorId ? 'authors' : institutionId ? 'institutions' : 'works';
+      const url = endpoint === 'works'
+        ? `${SOURCE_CONFIG[this.source].api}/${id}`
+        : `https://api.openalex.org/${endpoint}/${id}`;
+      const response = JSON.parse(await requestText(this.source, url));
+      const record = endpoint === 'authors' ? mapOpenAlexAuthor(response) : endpoint === 'institutions' ? mapOpenAlexInstitution(response) : mapOpenAlexWork(response);
+      return record ? ok(record) : failed(new Error(`OpenAlex did not return a valid ${endpoint} record.`));
     } catch (error) {
       return failed(error);
     }
@@ -1070,7 +1166,8 @@ export class OpenAlexConnector implements LibraryConnector {
   async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('OpenAlex metadata does not authorize downloads or local copies; use the article provider link.'); }
   getSourceInformation() {
     return enabledSourceInformation(this.source, [
-      'Uses the official OpenAlex Works API; basic searches are free and do not require an account or API key.',
+      'Uses the official OpenAlex Works, Authors, and Institutions APIs; basic searches are free and do not require an account or API key.',
+      'Use author:<name> or institution:<name> for profile discovery; ordinary queries and DOI lookup continue to search works.',
       'OpenAlex metadata is CC0, but article access and reuse rights are assessed separately; this connector never imports article text.'
     ]);
   }

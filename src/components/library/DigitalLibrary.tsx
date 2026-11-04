@@ -584,7 +584,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     <Globe className="w-3.5 h-3.5" />
                     <span>{isSearchingOnline ? '正在检索全球书库...' : '搜索全球馆藏'}</span>
                   </button>
-                  <span className="text-[11px] text-slate-500">支持书名、作者、ISBN、DOI 与多语言检索</span>
+                  <span className="text-[11px] text-slate-500">支持书名、作者、ISBN、DOI 与多语言检索；OpenAlex 作者可用 author:姓名，机构可用 institution:名称</span>
                 </div>
                 <div className="mt-4">
                   <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">阿拉伯语馆藏官方入口 · 仅跳转，不复制全文</p>

@@ -160,6 +160,28 @@ async function main() {
       return source;
     }));
 
+    const openAlexProfileCases: Array<[string, string, string]> = [
+      ['author:Carl Sagan', 'author', 'https://openalex.org/A'],
+      ['institution:University of Jordan', 'institution', 'https://openalex.org/I']
+    ];
+    const openAlexProfileChecks = await Promise.all(openAlexProfileCases.map(async ([query, resourceType, sourcePrefix]) => {
+      const profileUrl = new URL('/api/library/search', baseUrl);
+      profileUrl.searchParams.set('q', query);
+      profileUrl.searchParams.set('source', 'openalex');
+      profileUrl.searchParams.set('limit', '1');
+      const response = await fetch(profileUrl, { redirect: 'error', signal: AbortSignal.timeout(30_000) });
+      assert.equal(response.status, 200, `Live OpenAlex ${resourceType} search returned HTTP ${response.status}`);
+      const body = await response.json() as any;
+      const status = body.sources?.find((item: any) => item.source === 'openalex');
+      const record = body.results?.find((item: any) => item.source === 'openalex');
+      assert.ok(status?.status === 'ok' && status.count > 0, `Live OpenAlex ${resourceType} search returned no records: ${JSON.stringify(body.sources)}`);
+      assert.ok(record?.sourceUrl?.startsWith(sourcePrefix), `Live OpenAlex ${resourceType} result did not preserve its official profile URL`);
+      assert.equal(record?.metadata?.resourceType, resourceType);
+      assert.equal(record?.rightsClassification, 'METADATA_ONLY');
+      assert.equal(record?.canImport, false);
+      return resourceType;
+    }));
+
     const shamelaUrl = new URL('/api/library/search', baseUrl);
     shamelaUrl.searchParams.set('q', 'ابن خلدون');
     shamelaUrl.searchParams.set('source', 'shamela');
@@ -200,7 +222,7 @@ async function main() {
     const detailBody = await detailResponse.json() as any;
     assert.equal(detailBody.book?.id, book.id);
     assert.equal(detailBody.book?.rightsClassification, 'PUBLIC_DOMAIN');
-    console.log(`Library connector live smoke: PASS (live Open Library + Internet Archive, ${academicChecks.join(', ')}, Shamela Arabic search; official-source-only rights preserved; official Gutenberg search → per-book OPDS → isolated EPUB book record → local detail read; EPUB not downloaded).`);
+    console.log(`Library connector live smoke: PASS (live Open Library + Internet Archive, ${academicChecks.join(', ')}, OpenAlex ${openAlexProfileChecks.join(' and ')} profile search, Shamela Arabic search; official-source-only rights preserved; official Gutenberg search → per-book OPDS → isolated EPUB book record → local detail read; EPUB not downloaded).`);
   } catch (error) {
     console.error('Library connector live smoke failed:', error);
     if (childOutput) console.error('Temporary server output:\n' + childOutput);

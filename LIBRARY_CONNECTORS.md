@@ -118,7 +118,7 @@ The shared WORLD LIBRARY result card now surfaces each provider's availability/e
 
 Six independent scholarly discovery connectors are now registered and included in the default unified search. They use no user-provided key or account, have independent environment switches, and can be disabled individually. Their public APIs remain subject to provider terms, fair-use limits, and availability.
 
-- **OpenAlex** uses the official [OpenAlex API](https://help.openalex.org/api/). Basic HTTP queries are free and do not require a key; OpenAlex metadata is CC0, but the underlying article is not thereby cleared for copying. The connector labels `is_oa` only as `OPEN_ACCESS`, provides the OpenAlex work page and a provider landing link only when supplied over HTTPS, and never imports article text.
+- **OpenAlex** uses the official [OpenAlex API](https://help.openalex.org/api/). Basic HTTP queries are free and do not require a key; OpenAlex metadata is CC0, but the underlying article is not thereby cleared for copying. The connector supports ordinary/DOI Works searches plus explicit `author:<name>` and `institution:<name>` profile discovery through the official Authors and Institutions endpoints. Work results retain the existing `is_oa` mapping; author/institution records are `METADATA_ONLY`. All records link to OpenAlex profiles and never import article text.
 - **Crossref** uses its [public REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) and [access guidance](https://www.crossref.org/documentation/retrieve-metadata/rest-api/access-and-authentication/). No sign-up or key is required. An already-configured `EARTH_ONE_LIBRARY_CONTACT_EMAIL` is sent as `mailto` when available; no setup is requested. Publisher `license[]` fields are retained as provenance metadata, not asserted as reuse rights; records stay metadata-only.
 - **arXiv** uses the [official Atom API](https://info.arxiv.org/help/api/user-manual.html), supports ordinary, author, title, and abstract query prefixes, and preserves versions, DOI, and categories. The shared request queue waits at least three seconds between arXiv requests. An HTTPS PDF link is surfaced only if the API explicitly returns an arXiv-hosted PDF link; it is a provider reading link, not a local download or import grant.
 - **Europe PMC** uses the [official REST service](https://europepmc.org/RestfulWebService). Search is keyless. A reported open-access item with a validated PMCID may link to its official Europe PMC article page. The OA flag indicates access, not permission to reuse; no full text is copied locally.
@@ -152,3 +152,18 @@ Shamela 的环境开关为 `EARTH_ONE_LIBRARY_SHAMELA_ENABLED`，默认启用、
 
 ### Verification and limits
 `npm run lint`、`npm run test:library-connectors`、隔离图书馆 API 回归（31 项）、全站 API 回归（85 项）、`npm run build` 与 `npm run test:library-connectors:live` 均通过；实时 smoke 对 Shamela 使用阿语查询并验证官方记录 URL 和全文禁用。生产构建仍有既有 Three.js chunk size 提示。未做浏览器视觉/手机回归；Waqfeya/QDL 尚无机器查询接入；当前 Shamela 连接器不把中文、英文或拉丁转写自动翻译为阿语。
+
+
+## Phase 6：OpenAlex 作者与机构发现（2026-11-04）
+
+### Official API references
+- [OpenAlex API overview](https://help.openalex.org/api/) documents entity endpoints, list/search patterns, selective fields, public HTTP access, and that basic use is free without an account.
+- The official [Authors search guide](https://github.com/ourresearch/openalex-docs/blob/main/api-entities/authors/search-authors.md) documents `/authors?search=` over author names and alternatives; the official [Institutions search guide](https://github.com/ourresearch/openalex-docs/blob/main/api-entities/institutions/search-institutions.md) documents `/institutions?search=` over institution names and alternatives.
+
+### Implementation and rights
+The existing OpenAlex connector now interprets only explicit `author:<name>` and `institution:<name>` prefixes as profile searches. Ordinary free-text queries and DOI lookup remain Works searches. The adapter uses source-local search queues and bounded `per_page` values, selects only profile fields needed for display, maps author name/ORCID/works and citation counts/recent institution names, and maps institution type/country/works and citation counts/homepage/ROR. OpenAlex `A…` and `I…` identifiers are validated against their entity type before `getBook`/`getMetadata` detail requests. The UI indicates record type and shows the syntax beside the global search field.
+
+Author and institution cards carry `METADATA_ONLY`, `canImport: false`, and no download links. The provider profile URL is the official OpenAlex record; this does not imply any access or reuse right for linked papers. Full-text extraction and downloads remain explicitly unsupported; no API key or user setup is needed for basic searches.
+
+### Verification and limits
+Offline tests cover both endpoint paths, provider fields, profile links, A/I detail IDs, missing-key behavior, metadata-only rights, and denied import/download. Live smoke verifies `author:Carl Sagan` and `institution:University of Jordan` return current OpenAlex profiles. TypeScript, connector offline tests, library API (31), general API (85), production build, and the multi-provider live smoke pass. No browser or mobile visual regression was run. Profile search is deliberately opt-in by prefix; advanced author–work browsing, facet filters, and institutional relationship maps remain future work.

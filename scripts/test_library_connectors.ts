@@ -100,6 +100,14 @@ const openAlexWorks = [{
   open_access: { is_oa: true, oa_status: 'gold' },
   best_oa_location: { landing_page_url: 'https://publisher.example.org/open-paper', license: 'cc-by' }
 }];
+const openAlexAuthors = [{
+  id: 'https://openalex.org/A1234567890', display_name: 'Carl Sagan', orcid: 'https://orcid.org/0000-0001-5672-1884',
+  works_count: 831, cited_by_count: 26710, last_known_institutions: [{ display_name: 'Cornell University' }]
+}];
+const openAlexInstitutions = [{
+  id: 'https://openalex.org/I114972647', display_name: 'University of Jordan', country_code: 'JO', type: 'education',
+  works_count: 38111, cited_by_count: 1136506, homepage_url: 'http://ju.edu.jo/home.aspx', ror: 'https://ror.org/05k89ew48'
+}];
 const crossrefWork = {
   DOI: sharedAcademicDoi, title: ['Crossref Scholarly Fixture'], author: [{ given: 'B.', family: 'Scholar' }],
   publisher: 'Fixture Publisher', type: 'journal-article', language: 'en',
@@ -319,8 +327,37 @@ async function testFreeAcademicConnectors() {
   const openAlexSearchUrl = new URL(requests.filter(url => url.includes('api.openalex.org/works?')).at(-1)!);
   assert.equal(openAlexSearchUrl.searchParams.get('search'), 'artificial intelligence');
   assert.equal(openAlexSearchUrl.searchParams.has('api_key'), false);
+  const openAlexAuthorResponse = await openAlex.search('author:Carl Sagan', 2);
+  assert.equal(openAlexAuthorResponse.status, 'ok', 'OpenAlex author prefix searches the official Authors API');
+  const openAlexAuthor = openAlexAuthorResponse.data?.[0];
+  assert.equal(openAlexAuthor?.title, 'Carl Sagan');
+  assert.equal(openAlexAuthor?.sourceUrl, 'https://openalex.org/A1234567890');
+  assert.equal(openAlexAuthor?.rights, RightsCategory.METADATA_ONLY);
+  assert.equal(openAlexAuthor?.canImport, false);
+  assert.equal((openAlexAuthor?.metadata as any)?.resourceType, 'author');
+  assert.deepEqual((openAlexAuthor?.metadata as any)?.affiliations, ['Cornell University']);
+  const openAlexAuthorUrl = new URL(requests.filter(url => url.includes('api.openalex.org/authors?')).at(-1)!);
+  assert.equal(openAlexAuthorUrl.searchParams.get('search'), 'Carl Sagan');
+  assert.equal(openAlexAuthorUrl.searchParams.get('select'), 'id,display_name,orcid,works_count,cited_by_count,last_known_institutions');
+  assert.equal(openAlexAuthorUrl.searchParams.has('api_key'), false);
+
+  const openAlexInstitutionResponse = await openAlex.search('institution:University of Jordan', 2);
+  assert.equal(openAlexInstitutionResponse.status, 'ok', 'OpenAlex institution prefix searches the official Institutions API');
+  const openAlexInstitution = openAlexInstitutionResponse.data?.[0];
+  assert.equal(openAlexInstitution?.title, 'University of Jordan');
+  assert.equal(openAlexInstitution?.sourceUrl, 'https://openalex.org/I114972647');
+  assert.equal(openAlexInstitution?.rights, RightsCategory.METADATA_ONLY);
+  assert.equal(openAlexInstitution?.canImport, false);
+  assert.equal((openAlexInstitution?.metadata as any)?.resourceType, 'institution');
+  assert.equal((openAlexInstitution?.metadata as any)?.countryCode, 'JO');
+  const openAlexInstitutionUrl = new URL(requests.filter(url => url.includes('api.openalex.org/institutions?')).at(-1)!);
+  assert.equal(openAlexInstitutionUrl.searchParams.get('search'), 'University of Jordan');
+  assert.equal(openAlexInstitutionUrl.searchParams.has('api_key'), false);
+
   const openAlexDetail = await openAlex.getBook({ id: 'W1234567890' });
   assert.equal(openAlexDetail.status, 'ok');
+  assert.equal((await openAlex.getBook({ id: 'A1234567890' })).data?.title, 'Carl Sagan');
+  assert.equal((await openAlex.getBook({ id: 'I114972647' })).data?.title, 'University of Jordan');
   assert.equal((await openAlex.getAvailability({ id: 'W1234567890' })).status, 'ok');
   assertUnsupported(await openAlex.getFullText({ id: 'W1234567890' }));
   assertUnsupported(await openAlex.getDownloadLinks({ id: 'W1234567890' }));
@@ -518,6 +555,12 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.hostname === 'api.openalex.org' && /^\/works(?:\/W\d+)?$/.test(url.pathname)) {
     return json(url.pathname.endsWith('/W1234567890') ? openAlexWorks[0] : { results: openAlexWorks });
+  }
+  if (url.hostname === 'api.openalex.org' && /^\/authors(?:\/A\d+)?$/.test(url.pathname)) {
+    return json(url.pathname.endsWith('/A1234567890') ? openAlexAuthors[0] : { results: openAlexAuthors });
+  }
+  if (url.hostname === 'api.openalex.org' && /^\/institutions(?:\/I\d+)?$/.test(url.pathname)) {
+    return json(url.pathname.endsWith('/I114972647') ? openAlexInstitutions[0] : { results: openAlexInstitutions });
   }
   if (url.hostname === 'api.crossref.org' && /^\/works(?:\/10\.5555\/shared-paper)?$/.test(url.pathname)) {
     return json(url.pathname === '/works' ? { message: { items: [crossrefWork] } } : { message: crossrefWork });

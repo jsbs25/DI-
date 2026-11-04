@@ -188,6 +188,15 @@ PubMed 只提供书目检索与官方 PubMed 记录页，固定为 `METADATA_ONL
 
 **Waqfeya 与 Qatar Digital Library：官方跳转。** [Waqfeya 官方图书目录](https://waqfeya.net/books)和 [QDL 官方检索页](https://www.qdl.qa/en/search/site/)已核实并加入首页入口。当前没有找到 Waqfeya 可公开核验的正式机器检索 API，也没有找到 QDL 官方发布的机器检索 API 文档，因此没有抓取、批量索引或复制全文；两者只跳转到官网。QDL 官网声明资源免费使用与复用，但每件数字资源仍须遵循其具体权利信息；EARTH ONE 不据此批量复制媒体或全文。
 
-**验证。** 离线连接器 mock、隔离图书馆 API（31 项）、通用 API（85 项）、TypeScript 检查、生产构建及限量在线 connector smoke 均通过；真实 Shamela 阿语搜索有返回记录，结果仅含书目字段和官方页链接。生产构建仍有既有 Three.js 大 chunk 非阻断提示。没有做浏览器视觉或手机设备验收。GitHub 远端同步未执行：本执行环境当前无已授权 GitHub 登录或可用连接器，故没有改用未授权写入路径。
+**验证。** 离线连接器 mock、隔离图书馆 API（31 项）、通用 API（85 项）、TypeScript 检查、生产构建及限量在线 connector smoke 均通过；真实 Shamela 阿语搜索有返回记录，结果仅含书目字段和官方页链接。生产构建仍有既有 Three.js 大 chunk 非阻断提示。没有做浏览器视觉或手机设备验收。前次运行环境无已授权写入路径，所以当时未推送；本次续接确认 GitHub `main` 仍是 `32db814`，使用现有授权连接器正常提交并推送 Phase 5 的 `8bff41d04390d1a7f3e9366541fa12cfb1d020ae`，并通过 GitHub API 核实远端提交。未更换或新增账户凭证。
 
 **仍未完成。** Waqfeya/QDL 的机器接口接入、将中文/英文查询可靠映射为阿拉伯语、更多阿语馆藏、馆藏筛选、个人书架跨设备验证、移动端实测和基于具体许可的全文阅读仍待后续阶段。
+
+
+## WORLD LIBRARY Phase 6：OpenAlex 作者与机构发现（2026-11-04）
+
+**新增能力。** OpenAlex 除原有作品与 DOI 搜索外，现在支持 `author:姓名` 及 `institution:机构名` 显式前缀，分别调用官方 Authors 与 Institutions 列表端点；OpenAlex A/I 实体 ID 也可用于统一连接器详情查询。搜索卡片展示作者/机构档案类别、作者 ORCID/当前机构提示，或机构类别、国家代码、作品/引用计数。普通搜索和 DOI 查询仍按原逻辑查作品，搜索框同步提示两种前缀。
+
+**官方接口与边界。** 依据 [OpenAlex API 概览](https://help.openalex.org/api/)、[作者搜索文档](https://github.com/ourresearch/openalex-docs/blob/main/api-entities/authors/search-authors.md)及[机构搜索文档](https://github.com/ourresearch/openalex-docs/blob/main/api-entities/institutions/search-institutions.md)，使用官方 `/authors?search=` 与 `/institutions?search=`，仅请求所需字段、限制每次最多 25 项。OpenAlex 基础 API 可免账号及 API key 使用。档案仅标为 `METADATA_ONLY`；没有全文、下载或本地导入入口，OpenAlex 对元数据的 CC0 声明不被当成研究文章全文的许可。
+
+**验证与限制。** 离线 mock 覆盖两类搜索端点、选取字段、官方 URL、A/I 详情 ID、免密钥、元数据权限及拒绝导入；限量在线 smoke 对 `author:Carl Sagan` 和 `institution:University of Jordan` 均实际返回官方档案。TypeScript 检查、连接器离线测试、图书馆 API（31 项）、全站 API（85 项）、生产构建与连接器实时 smoke 全部通过。构建仍有既有 Three.js 大 chunk 提示。未进行浏览器视觉/移动设备回归。当前只在用户明确输入前缀时搜索作者或机构，未建立完整作者—作品关系浏览、年份/学科筛选或研究机构地图。
