@@ -194,3 +194,13 @@
 - 浏览器发出的 48 个 API GET 均由 Playwright 路由在网络发送前拦截并回复合成空数据；不启动 Express/API 后端。应用尝试的身份、会话目录、书架/书签/保存文章列表等读取只得到本地合成响应；本次不测试认证、授权或私信行为，未请求消息详情路径。无写请求；所有外网请求被阻断（观察到 1 次）。JavaScript `pageerror` 为 0；控制台有 1 条 `net::ERR_FAILED` 资源提示，与被阻断的外网加载相符。
 - 未读取、修改或暂存正式 `server_data.json`，未检查、停止或改动现有服务、配置或日志。该回归只证明模拟浏览器中的语言方向和页面级宽度，不证明实体设备、硬件 GPU、逐页业务功能、翻译准确度或真实后端行为。
 - GitHub 同步：回归与项目记录提交 `23bd0f2afbe5c5329fd33066a2f7661d96fc5871` 从 `ced585d83bf17206fb8597b29eabc78dc57c8bcb` 普通快进推送至 `main`；推送前连接器 API 与 `origin/main` 确认远端仍在基线，推送后 `git fetch` 和连接器 API 均核验 `HEAD`、`origin/main`、远端 `main` 一致。未强推或修改全局 Git 配置。
+
+
+## 2026-11-04 系统减少动态效果偏好续作
+
+- 从干净的 `main` / `3f445ecd0da10ea0c27eb9b0721ec77871540692` 开始；仅修改全局 CSS、增加静态样式回归命令并更新项目文档，没有改服务端路由、权限策略或业务数据。
+- `src/index.css` 新增 `prefers-reduced-motion: reduce` 媒体规则，仅在系统偏好减少动态效果时将动画/过渡时长缩至 0.01ms、迭代限制为一次，并将平滑滚动改为自动；保留所有控件、内容和静态状态提示。
+- 新增 `npm run test:motion`，静态检查 6 项通过；`npm run lint`、`npm run build`、`git diff --check` 通过。构建输出的生产 CSS 已单独核实包含媒体查询及动画时长、动画迭代、过渡时长、滚动行为四项覆盖。生产构建仍保留既有 551.65 KB Three.js chunk 警告。
+- 本地 Chromium 计算样式对照尝试在工具等待限时内未返回结果，不计为浏览器运行时通过；检查后确认没有该临时配置对应的 Chromium 进程，并清除了本轮专用临时 HTML 和浏览器配置目录。实体设备、屏幕阅读器和辅助技术行为仍未实测。
+- 本轮未访问或修改身份/会话/消息授权、正式 `server_data.json` 或既有服务/配置/日志；没有发起 API 请求。
+- GitHub 同步状态：当前搜索结果将 GitHub 连接器列为已启用且列出授权账号，但 `activeAccountUid` 为空；本运行环境没有 `$MANUS_CONFIG_HOME/connectors/github/gh`，普通 `gh auth status` 显示未登录。`git ls-remote` 仅能读取公开 `main` 基线。由于当前没有可用的授权写入口，未推送、未尝试绕过连接器；待授权入口恢复后应先 fetch，再仅以普通快进方式同步。

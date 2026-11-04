@@ -22,6 +22,7 @@
 | 知识图谱/知识宇宙 | `src/components/knowledge/`、`server/knowledgeGraph.ts`、`/api/knowledge/*` | 独立 `test:knowledge-api` GET-only 回归现为 14 项，覆盖目录、33 个节点详情、图边/书籍关系、别名与筛选搜索、空结果/404，以及目录和 Avicenna 别名搜索重复 GET 的状态/完整 JSON 一致性；不得将种子/示例内容描述为实时全球知识数据。 |
 | 广告与赞助 | `src/components/commercial/`、`/api/ads/*` | 独立 `test:catalog-api` GET-only 回归检查广告字段、唯一 ID 与既有样例，不执行点击写操作；竞价和结算未列为已实现。 |
 | 多语言与阿拉伯语 RTL | `src/i18n/translations.ts`、`src/index.css`、应用方向设置 | 中文、英语、阿拉伯语、西班牙语、法语、俄语翻译资源存在；真实语言菜单切换后的阿语 RTL 移动导航和关键桌面/窄屏布局已测；其他语言主要有静态结构覆盖，不能据此宣称所有文案/页面均已完成浏览器实测。 |
+| 动效偏好与可访问性 | `src/index.css`、`scripts/test_motion_accessibility.ts` | CSS 在系统 `prefers-reduced-motion: reduce` 偏好下缩短动画/过渡并关闭平滑滚动；静态契约回归保护该规则。实体设备、辅助技术和浏览器行为仍未实测。 |
 | 持久化数据与 API | `server/store.ts`、`server.ts`、`server_data.json`（本机忽略文件） | 保留现有 API 与用户数据；测试须使用临时数据文件；未经授权不得清空或不可逆迁移。 |
 
 ## 完成度标记

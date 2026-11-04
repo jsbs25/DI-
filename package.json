@@ -21,6 +21,7 @@
     "test:social-feed-api": "tsx scripts/test_social_feed_api.ts",
     "test:public-users-api": "tsx scripts/test_public_users_api.ts",
     "test:i18n": "tsx scripts/test_i18n.ts",
+    "test:motion": "tsx scripts/test_motion_accessibility.ts",
     "test:globe": "tsx scripts/test_globe_render.tsx",
     "test:universe": "tsx scripts/test_universe_render.tsx"
   },
