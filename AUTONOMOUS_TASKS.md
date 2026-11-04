@@ -36,12 +36,12 @@
 - 新增 `npm run test:crawler-api` 独立 GET-only 回归：临时 JSON、随机本地端口和 `/api/crawler/tasks`、`/api/crawler/pages` 两端点白名单；检查字段/ID 唯一性、页面任务关联及待审核样例，共 12 项通过，`npm run lint` 通过。未创建任务、执行抓取、批准/拒绝页面、访问外部网站或修改数据；完整 `test:api` 未运行。
 - 新增 `npm run test:creator-api` 独立 GET-only 回归：使用自动清理的临时 JSON 与随机本地端口，仅请求 `/api/articles`、`/api/videos`；11 项通过，验证文章/视频字段、唯一 ID 和既有目录条目。未写入文章、获取媒体或访问私信/正式数据/既有服务；`npm run lint` 通过，完整 `test:api` 未运行。
 - 新增 `npm run test:catalog-api` 独立 GET-only 回归：临时 JSON、随机端口及 `/api/communities`、`/api/games/rooms`、`/api/ads` 白名单；16 项通过，检查字段、唯一标识和现有社区/房间/广告样例。未加入社区、修改游戏房间或广告点击状态、获取媒体或访问会话/消息、正式数据及既有服务；`npm run lint` 通过。
-- 已确认现有 GitHub connector wrapper 可用，认证账户 `jsbs25` 可读取目标仓库；系统默认 `gh` 仍未登录，因此 GitHub 操作只走该授权 wrapper。提交后核验远端分支，再仅在可快进时同步；不使用含强制推送的旧脚本、不强推、不修改账户设置。
+- 上述测试与项目记录已通过现有 GitHub connector wrapper 快进推送；提交 `e4403a8` 后 fetch 确认本地 `main` 与 `origin/main` 一致。只使用该授权 wrapper；没有强推或修改账户设置。
 
 ### P2 — 进行中：降低首屏 JavaScript 体积
-
 - 已将 13 个导航模块改为按需加载，入口 chunk 从基线约 1,160.76 KB（gzip 306.07 KB）降至 316.71 KB（gzip 97.92 KB）；原有页面、导航和组件 props 保持不变。
 - 构建仍提示共享 `three.module` chunk 约 551.65 KB；不通过隐藏警告或移除 3D 功能解决。
+
 - 隔离 Chromium 实测确认首页会按需载入地球模块与 Three.js（Three.js 原始响应约 551.9 KB；构建 gzip 估算约 137.3 KB）；桌面与窄屏模块视觉已通过限定路径测试。Three.js 生命周期与首屏依赖尚未安全拆分，继续先评估，不隐藏警告。
 - 本轮 Chromium Resource Timing 单次观测：首屏 7 个 JS 资源 encoded body 合计 253,077 B、decoded 942,755 B；CSS 为 16,324/112,399 B；其中 Three.js 为 136,323/551,656 B。另 12 个页面块均在首次切换到对应模块后才请求，CrawlerDashboard 为 4,849/17,678 B。
 - 当前首页默认就是交互式 3D 地球；不经产品确认就延后 Three.js、先显示占位或要求点击，都会改变首屏行为。暂不再拆分共享依赖；如接受该体验变化，需单独审查场景初始化/清理并补全地球与宇宙回归。上述字节为单次 Chromium 模拟器的本地资源时序，不含响应头或外网资源，不是网速/实机基准。
