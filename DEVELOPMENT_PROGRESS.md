@@ -178,3 +178,4 @@
 - 对白名单 `GET /api/ai/models` 与 `GET /api/ai/stats` 各增加一次重复读取比较，要求 HTTP 状态与完整 JSON 响应保持一致。
 - `npm run test:ai-api`：11 项通过、0 失败；`npm run lint` 与 `git diff --check` 通过。测试使用临时 JSON、随机本地端口；子进程清空模型凭据，不调用模型。
 - 未访问会话/消息路径、写接口、外部来源、正式 `server_data.json`；未检查、停止或修改既有服务、配置或日志。完整 `npm run test:api` 因包含待批准的会话读取路径未运行；本次未运行构建或浏览器测试。
+- GitHub 同步：AI 回归与项目记录提交 `539e4fa29258ae50465dc9d951eadd0b79c0a780` 从父提交 `8e2b94e` 普通快进推送至 `main`；推送后授权连接器 fetch 与 GitHub API 回读均核验 `main`、`origin/main` 与本地提交一致。未强推或修改全局 Git 配置。
