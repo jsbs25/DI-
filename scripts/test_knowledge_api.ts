@@ -12,6 +12,7 @@ const ALLOWED_FIXED_ENDPOINTS = new Set([
   '/api/knowledge/nodes?country=sa',
   '/api/knowledge/search?q=Avicenna',
   '/api/knowledge/search?q=Islamic&category=civilization',
+  '/api/knowledge/search?q=no-such-earth-one-node-9f31',
   '/api/knowledge/nodes/not-a-real-node'
 ]);
 const ALLOWED_NODE_TYPES = new Set([
@@ -158,6 +159,13 @@ async function main() {
       filteredSearch.status === 200 && filteredSearch.body.nodes.some((node: any) => node.id === 'civ_islamic') &&
       filteredSearch.body.nodes.every((node: any) => node.type === 'civilization'),
       'Knowledge search combines text and category filters'
+    );
+    const noMatchSearch = await get('/api/knowledge/search?q=no-such-earth-one-node-9f31');
+    check(
+      noMatchSearch.status === 200 && noMatchSearch.body.success === true &&
+      noMatchSearch.body.query === 'no-such-earth-one-node-9f31' &&
+      Array.isArray(noMatchSearch.body.nodes) && noMatchSearch.body.nodes.length === 0,
+      'Knowledge search returns a successful structured empty collection when no node matches'
     );
     const countryFilter = await get('/api/knowledge/nodes?country=sa');
     check(

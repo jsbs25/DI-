@@ -2,7 +2,7 @@
 
 更新时间：2026-11-04
 仓库：`https://github.com/jsbs25/DI-`
-分支：`main` / `origin/main`；本次续作基线 `3cf4386`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
+分支：`main` / `origin/main`；本次续作基线 `11f36c2`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
 
 ## 本轮已完成
 
@@ -124,3 +124,12 @@
 - `npm run lint` 与 `git diff --check` 通过。测试服务使用随机本地端口，后台书籍采集关闭；不运行完整 `test:api`（其含待批准会话读取路径），不运行构建或浏览器测试，不访问外部来源、正式 `server_data.json` 或既有服务。
 - 下一步继续选择普通、无外部副作用、无权限策略变更的回归任务；会话/消息边界、既有服务配置/日志和正式数据继续保持未触碰。
 - GitHub 同步：回归代码与项目记录提交 `17561300293bf7782445e7f80bf0a43bf665faa6` 从父提交 `3cf4386ddd978fcfd0036fd6bcf7c9679b59e2ea` 正常快进推送到 `main`；推送后 `git fetch` 与授权 connector API 回读均确认远端 `main`、`origin/main`、本地 `HEAD` 同为 `1756130`，工作区干净。未强推、未更改账户设置或全局 Git 配置。
+
+
+## 2026-11-04 知识图谱无匹配搜索 GET-only 续测
+
+- 从 `main` / `11f36c2` 继续，仅扩展 `scripts/test_knowledge_api.ts` 的白名单与断言；没有改动服务端路由、业务数据或权限策略。
+- 专项回归现为 12 项通过，包含 33 个知识节点详情。新断言只增加 `GET /api/knowledge/search?q=no-such-earth-one-node-9f31`，要求返回 HTTP 200、`success: true`、原查询字符串及空 `nodes` 数组。
+- `npm run test:knowledge-api` 的固定 GET 白名单为 `/api/knowledge/nodes`、`/api/knowledge/nodes?country=sa`、`/api/knowledge/search?q=Avicenna`、`/api/knowledge/search?q=Islamic&category=civilization`、`/api/knowledge/search?q=no-such-earth-one-node-9f31` 与 `/api/knowledge/nodes/not-a-real-node`；另对目录返回的 33 个 ID 各请求一次 `/api/knowledge/nodes/:id`。测试内端点/方法白名单检查仍启用。
+- `npm run test:globe-api` 复跑 11 项通过；`npm run lint` 与 `git diff --check` 通过。两项专项测试均使用自动清理的临时 JSON 与随机本地端口；未运行包含待批准会话读取路径的完整 `npm run test:api`、构建或浏览器回归。
+- 未请求身份、会话/消息接口或写接口；未访问外部来源、正式 `server_data.json` 或既有服务，也未检查现有服务日志/配置。
