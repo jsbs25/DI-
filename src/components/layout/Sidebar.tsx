@@ -7,6 +7,7 @@ import {
   Compass,
   MessageSquare,
   Search,
+  SearchCheck,
   Radar,
   Network,
   PenTool,
@@ -39,6 +40,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { tab: 'globe', icon: Home, label: { zh: '首页', en: 'HOME' } },
   { tab: 'universe', icon: Orbit, label: { zh: '探索', en: 'EXPLORE' } },
+  { tab: 'mercury', icon: SearchCheck, label: { zh: '搜索', en: 'SEARCH' } },
   { tab: 'aihub', icon: Sparkles, label: { zh: '人工智能', en: 'INTELLIGENCE' } },
   { tab: 'library', icon: BookOpen, label: { zh: '图书馆', en: 'LIBRARY' } },
   { tab: 'feed', icon: Compass, label: { zh: '社区', en: 'COMMUNITY' } },

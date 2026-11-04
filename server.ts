@@ -1115,10 +1115,22 @@ app.get('/api/search/global', (req, res) => {
 
   const knowledge = searchKnowledge(q, 5);
 
+  const articles = store.articles
+    .filter(a =>
+      a.title.toLowerCase().includes(lower) ||
+      a.summary.toLowerCase().includes(lower) ||
+      a.content.toLowerCase().includes(lower)
+    )
+    .slice(0, 5);
+
+  const videos = store.videos
+    .filter(v => v.title.toLowerCase().includes(lower) || v.description.toLowerCase().includes(lower))
+    .slice(0, 5);
+
   res.json({
     success: true,
     query: q,
-    results: { users: users.map(toPublicUser), posts, books, communities, knowledge }
+    results: { users: users.map(toPublicUser), posts, books, communities, knowledge, articles, videos }
   });
 });
 

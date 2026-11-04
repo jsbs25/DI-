@@ -31,6 +31,7 @@ import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
 import { KnowledgeUniverse } from './components/knowledge/KnowledgeUniverse.tsx';
 import { UniverseEngine } from './universe/UniverseEngine.tsx';
 import { SaturnSpace } from './universe/SaturnSpace.tsx';
+import { MercurySearch } from './components/search/MercurySearch.tsx';
 import { getPlanetEcosystem } from './universe/planetEcosystems.ts';
 import { HolographicAICompanion } from './components/ai/HolographicAICompanion.tsx';
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
@@ -466,6 +467,22 @@ export default function App() {
 
         {currentTab === 'saturn' && (
           <SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} />
+        )}
+
+        {currentTab === 'mercury' && (
+          <MercurySearch
+            lang={lang}
+            onBack={() => setCurrentTab('universe')}
+            onOpenBook={bookId => {
+              setLibraryFocusBookId(bookId);
+              setCurrentTab('library');
+            }}
+            onOpenKnowledge={nodeId => {
+              setKnowledgeFocusNodeId(nodeId);
+              setCurrentTab('knowledge');
+            }}
+            onSelectTab={setCurrentTab}
+          />
         )}
 
         {currentTab === 'feed' && (

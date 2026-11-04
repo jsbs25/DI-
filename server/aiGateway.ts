@@ -201,18 +201,27 @@ class AIGateway {
 
     // 1. FREE OPEN-SOURCE MODELS (DeepSeek-R1, Qwen 2.5, Llama 3.3)
     if (targetModel.id === 'deepseek-r1-open' || targetModel.id === 'qwen-2.5-open' || targetModel.id === 'llama-3.3-open') {
-      const result = await this.runOpenSourceModel(targetModel.id, prompt, systemInstruction);
-      const latency = Date.now() - startTime;
-      const tokens = result.tokens || Math.ceil((prompt.length + result.content.length) / 3.5);
+      try {
+        const result = await this.runOpenSourceModel(targetModel.id, prompt, systemInstruction);
+        const latency = Date.now() - startTime;
+        const tokens = result.tokens || Math.ceil((prompt.length + result.content.length) / 3.5);
 
-      targetModel.totalCalls += 1;
-      targetModel.totalTokens += tokens;
-      targetModel.averageLatencyMs = Math.round(
-        (targetModel.averageLatencyMs * (targetModel.totalCalls - 1) + latency) / targetModel.totalCalls
-      );
-      targetModel.lastUsedAt = new Date().toISOString();
+        targetModel.totalCalls += 1;
+        targetModel.totalTokens += tokens;
+        targetModel.averageLatencyMs = Math.round(
+          (targetModel.averageLatencyMs * (targetModel.totalCalls - 1) + latency) / targetModel.totalCalls
+        );
+        targetModel.lastUsedAt = new Date().toISOString();
+        targetModel.status = 'active';
+        targetModel.errorMessage = undefined;
 
-      return { success: true, content: result.content, tokens };
+        return { success: true, content: result.content, tokens };
+      } catch (err: any) {
+        const message = String(err?.message || err);
+        targetModel.status = 'error';
+        targetModel.errorMessage = message;
+        return { success: false, content: '', errorMessage: message };
+      }
     }
 
     // 2. Custom OpenAI-compatible or Ollama providers
@@ -378,17 +387,16 @@ class AIGateway {
     prompt: string,
     systemInstruction?: string
   ): Promise<{ content: string; tokens?: number }> {
-    // Attempt 1: Fast community open inference with short timeout
+    const openModelName = modelId === 'deepseek-r1-open'
+      ? 'deepseek'
+      : modelId === 'qwen-2.5-open'
+        ? 'qwen'
+        : 'llama';
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 4000);
-
-      const openModelName = modelId === 'deepseek-r1-open'
-        ? 'deepseek'
-        : modelId === 'qwen-2.5-open'
-          ? 'qwen'
-          : 'llama';
-
       const res = await fetch('https://text.pollinations.ai/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -404,166 +412,30 @@ class AIGateway {
 
       clearTimeout(timer);
 
-      if (res.ok) {
-        const text = await res.text();
-        if (text && !text.includes('Free limit reached') && !text.includes('"error":')) {
-          if (modelId === 'deepseek-r1-open' && !text.includes('<think>')) {
-            const reasoned = `<think>\n[DeepSeek-R1 深度思考推理中... 正在分析问题多维语义与逻辑结构]\n</think>\n\n${text}`;
-            return { content: reasoned };
-          }
-          return { content: text };
-        }
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
       }
-    } catch {
-      // Endpoint busy or rate limited, gracefully proceed to autonomous reasoning synthesizer
-    }
 
-    // Attempt 2: Earth Plan Autonomous Neural Reasoning Core
-    // Provides rich, structured, comprehensive, nuanced answers across all human domains
-    const synthesized = this.synthesizeAutonomousResponse(modelId, prompt);
-    return { content: synthesized };
-  }
-
-  /**
-   * Autonomous Neural Reasoning Core for Earth Plan.
-   * Delivers DeepSeek-R1 / Qwen / Llama grade structured intelligence for all queries.
-   */
-  private synthesizeAutonomousResponse(modelId: string, prompt: string): string {
-    const q = prompt.trim();
-    const isR1 = modelId === 'deepseek-r1-open';
-    const isQwen = modelId === 'qwen-2.5-open';
-
-    const thinkHeader = isR1
-      ? `<think>\n用户提问："${q.slice(0, 80)}..."\n1. 核心意图分析：识别问题领域的底层逻辑、约束条件与最优解答路径。\n2. 知识检索与关联：调取地球计划全域知识图谱、前沿科学、工程架构与多语种文献资料。\n3. 结构化推导：采用由浅入深、因果链条严密、代码与理论兼备的体系化输出。\n</think>\n\n`
-      : '';
-
-    // 1. Astronomy / Universe / Space
-    if (/宇宙|地球|太阳系|黑洞|引力|星球|银河|航天|开普勒|太空|行星|恒星|space|universe|galaxy|earth|planet/i.test(q)) {
-      return `${thinkHeader}### 🌌 地球计划 · 宇宙与天体物理深度解析
-
-针对您的探讨 **"${q}"**，从现代天体物理学、行星演化与空间观测的视角来看，其核心规律与前沿进展如下：
-
-#### 1. 天体物理机理与动力学演化
-- **引力场与时空结构**：宇宙尺度上的大结构形成受广义相对论引力场方程与暗物质晕支配。天体自转与公转遵循开普勒天体运动三大定律与角动量守恒定理。
-- **空间环境与生命庇护所**：地球作为目前人类已知唯一孕育智慧文明的行星，其核心磁场（地核发电机效应）构筑了强大的范艾伦辐射带，抵御了绝大部分高能太阳风暴与宇宙射线。
-
-#### 2. 地球与太阳系的数字孪生测绘
-在「地球计划」的三维宇宙引擎与数字地球系统中：
-1. **多体引力模拟**：基于改进的 Runge-Kutta（RK4）数值积分算法，实时计算天体引力摄动；
-2. **光照与大气散射**：采用大卫·希尔（David Hill）物理真实单次与多次瑞利/米氏大气散射模型（Rayleigh & Mie Scattering）；
-3. **地表遥感遥测**：汇聚全球地表高程（DEM）、叶绿素荧光、海温与地磁数据，构成活体行星感知矩阵。
-
-> 🔭 **科学启示**：从深空凝视地球，国界与纷争隐退，展现出的是一颗在宇宙虚空中脆弱而珍贵、八十亿人休戚与共的生命方舟（Overview Effect）。`;
-    }
-
-    // 2. Coding / Computer Science / Engineering
-    if (/代码|编程|前端|后端|vue|react|node|python|java|c\+\+|ts|typescript|docker|git|sql|bug|函数|算法|css|html|api/i.test(q)) {
-      return `${thinkHeader}### 💻 地球计划 · 架构与工程实现方案
-
-针对您提出的技术问题 **"${q}"**，以下是最佳工程实践与高可靠实现方案：
-
-#### 1. 核心设计原则
-- **高内聚低耦合**：模块职责单一，接口定义严格，规避隐含全局状态；
-- **类型安全保障**：全面推行严格模式（Strict Mode），避免 \`any\` 漂移；
-- **确定性与幂等性**：关键读写接口支持幂等调用与优雅降级。
-
-#### 2. 生产级参考实现代码
-
-\`\`\`typescript
-// Production-grade implementation for high-throughput pipeline
-export interface TaskConfig<T> {
-  id: string;
-  payload: T;
-  retryLimit?: number;
-  timeoutMs?: number;
-}
-
-export class ResilientEngine<T, R> {
-  private cache = new Map<string, R>();
-
-  async execute(task: TaskConfig<T>, handler: (payload: T) => Promise<R>): Promise<R> {
-    if (this.cache.has(task.id)) {
-      return this.cache.get(task.id)!;
-    }
-
-    const maxRetries = task.retryLimit ?? 3;
-    let attempt = 0;
-
-    while (attempt < maxRetries) {
-      try {
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Operation timeout')), task.timeoutMs ?? 5000)
-        );
-        const result = await Promise.race([handler(task.payload), timeoutPromise]);
-        this.cache.set(task.id, result);
-        return result;
-      } catch (err) {
-        attempt++;
-        if (attempt >= maxRetries) throw err;
-        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 100));
+      const text = await res.text();
+      if (!text || text.includes('Free limit reached') || text.trim().startsWith('{')) {
+        throw new Error('rate limited or invalid response');
       }
+
+      if (modelId === 'deepseek-r1-open' && !text.includes('<think>')) {
+        return { content: `<think>\n[DeepSeek-R1 深度思考推理中...]\n</think>\n\n${text}` };
+      }
+
+      return { content: text };
+    } catch (err: any) {
+      clearTimeout(timer);
+      const detail = String(err?.message || err);
+      const isTimeout = detail.includes('AbortError') || detail.includes('aborted') || detail.includes('timeout');
+      throw new Error(
+        isTimeout
+          ? '免费开源推理端点响应超时，请稍后重试，或配置官方 API Key 以获得稳定服务。'
+          : `免费开源推理端点暂时不可用（${detail}）。请稍后重试，或配置官方 API Key。`
+      );
     }
-    throw new Error('Unreachable state in ResilientEngine');
-  }
-}
-\`\`\`
-
-#### 3. 部署与性能调优建议
-- **并发与背压控制**：使用令牌桶（Token Bucket）或信号量限制并发请求，防止内存抖动与长尾延迟；
-- **全链路追踪**：引入分布式上下文（Trace ID），保障跨微服务调用的可观测性。`;
-    }
-
-    // 3. Philosophy / Culture / History
-    if (/哲学|历史|文明|文化|人类|和平|意义|思考|社会|心理|思想/i.test(q)) {
-      return `${thinkHeader}### 🏛️ 地球计划 · 全球文明与思想交汇
-
-针对您探讨的主题 **"${q}"**，从全球多元文明与哲学演进的视角展开深层分析：
-
-#### 1. 轴心时代的智慧共振
-公元前 800 至前 200 年的“轴心时代”，世界各大独立文明几乎在同一时期诞生了深刻的精神突破：
-- **东方智慧**：老庄的“天地与我并生，而万物与我为一”与孔子的“和而不同、天下为公”，构筑了天人合一与群己平衡的宏大包容度；
-- **希腊理知**：苏格拉底的未经省察的人生不值得过、亚里士多德的逻辑与经验论，点燃了理性批判与科学求索的火炬；
-- **近东与阿拉伯启蒙**：智慧宫时期的跨文化大翻译运动，使古代典籍在数学、天文与医学的繁荣中薪火相传。
-
-#### 2. 数字时代的现代省思
-在数字化全面互联的今天，信息冗余与认知茧房并存。「地球计划」倡导的核心价值在于：
-1. **打破地理与语言隔阂**：通过高保真 AI 实时跨语言交互，让每个人看见异质文明的真实温度；
-2. **构建人类命运共同体认知**：认识到文明因交流而多彩、因互鉴而丰富，在求同存异中追寻人类理性的最大公约数。`;
-    }
-
-    // 4. Languages & Translation
-    if (/翻译|英文|英语|法语|西班牙语|阿拉伯语|俄语|日语|translate|translation/i.test(q)) {
-      return `${thinkHeader}### 🌐 地球计划 · 跨文化多语种高保真翻译
-
-针对您的翻译需求 **"${q}"**，提供保留文化语境与情感细腻度的多语种对照：
-
-| 语种 | 规范翻译 | 文化语境说明 |
-| :--- | :--- | :--- |
-| **English (US)** | Natural and idiomatic expression preserving philosophical resonance. | 贴近当代母语者高阶书面与口语表达，用词精准克制。 |
-| **العربية (Arabic)** | ترجمة أصيلة بليغة تحافظ على المعنى الثقافي والعمق الإنساني. | 遵循标准阿拉伯语语法规范，兼具诗性韵律与严谨修辞。 |
-| **Français (French)** | Une traduction fluide et élégante, respectant la nuance littéraire. | 严谨的阴阳性与时态搭配，体现法语独特的逻辑性与艺术感。 |
-| **Español (Spanish)** | Traducción precisa y cálida, conservando la fuerza expresiva. | 适用于广泛的西语世界，表达自然亲切且富有感染力。 |
-
-💡 **翻译心得**：真正的跨文化沟通绝非词对词的机械对应，而是在透彻理解两端文化背景后的“意译融合”与“精神重塑”。`;
-    }
-
-    // 5. General intelligent assistant response
-    return `${thinkHeader}### 🌍 地球计划 · 智能问答与多维分析
-
-很高兴与您交流探讨关于 **"${q}"** 的课题。
-
-#### 1. 核心观点阐释
-对于此问题，我们可以从以下几个关键维度展开全景式审视：
-- **本质归因**：透过现象看本质，任何系统的行为特征都受其内在基础结构与外部环境约束共同决定；
-- **实践路径**：从理论走向落地，需要清晰的里程碑规划、反馈回路以及持续迭代的敏捷演进机制；
-- **长远影响**：在更广阔的时间与空间尺度上，该事物将对整个生态体系产生深远的链式正向收益。
-
-#### 2. 行动与探索建议
-1. **明确关键指标**：梳理核心目标，设定可量化、可验证的阶段性成效基准；
-2. **保持敏锐求知**：善用全球开放开源资源与工具链，博采众长；
-3. **人机智慧协同**：在思考与创作过程中，将 AI 作为拓展思维边界的认知外脑。
-
-随时欢迎您继续深入追问，无论是科技前沿、代码实现、全球地理还是人文探讨，地球计划 AI 始终与您同行！`;
   }
 
   /**

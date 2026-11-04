@@ -11,6 +11,20 @@
 
 ---
 
+### [2026-11-04] Commit feat(uranus,mercury): AI 网关诚实化 + MERCURY 独立搜索星球页
+* **URANUS AI Gateway 诚实化**:
+  - 删除 `synthesizeAutonomousResponse`（原会在免费端点失败时生成伪造内容，违反“不得伪造数据”）。
+  - `runOpenSourceModel` 在 pollinations.ai 失败/超时时改为抛出诚实错误，并在 `generateContent` 中捕获为 `success:false` + 错误描述，不再输出假内容。
+  - 顺带清除该文件中的“地球计划”品牌残留（均在已删除的伪造合成器内）。
+* **MERCURY 独立搜索星球页**:
+  - 新增 `src/components/search/MercurySearch.tsx`：全屏搜索 + 分类筛选（书籍/知识/用户/社区/动态/文章/视频）+ 搜索历史(localStorage) + 跨模块路由。
+  - 扩展 `/api/search/global` 支持文章(`articles`) 与视频(`videos`)。
+  - 接入 `App.tsx` (`currentTab === 'mercury'`)，且 `planetEcosystems.ts` 将水星标为可用；侧边栏新增“搜索 SEARCH”入口。
+* **验证**: `tsc --noEmit` 0 报错；`vite build` 通过；`scripts/test_universe_render.tsx` 9/9 通过。
+  - 注：`test_ai_api.ts` 为历史遗留失败（断言期望 `apiKeyMasked === 'Not Configured'`，与现有中文“未配置”及免费模型本就 active 不符），与本次改动无关。
+
+---
+
 ### [2026-11-04] Commit feat(universe): 统一十个天体生态入口，清理盗版观影链接
 * **星球生态入口统一接线**:
   - 新增单一事实来源 `src/universe/planetEcosystems.ts`，将十个天体映射到对应数字生态与 `currentTab`。

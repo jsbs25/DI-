@@ -34,11 +34,11 @@ export const PLANET_ECOSYSTEMS: Record<string, PlanetEcosystem> = {
   },
   mercury: {
     planetId: 'mercury',
-    tab: '',
+    tab: 'mercury',
     titleZh: '全球搜索',
     titleEn: 'World Search',
-    available: false,
-    buttonClass: 'from-slate-500 to-slate-600',
+    available: true,
+    buttonClass: 'from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500',
     descriptionZh: '全球搜索与信息发现中心'
   },
   venus: {

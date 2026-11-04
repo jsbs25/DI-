@@ -20,7 +20,7 @@ GLOBAL CORE (EARTH ID / AI Gateway / 搜索 / 通知 / 存储 / 权限)
 | 天体 | 生态 | 定位 | 前端入口 (App.tsx `currentTab`) | 状态 | 说明 |
 |---|---|---|---|---|---|
 | ☀️ SUN 太阳 | WORLD LIBRARY | 全球数字图书馆与知识中心 | `library` → `DigitalLibrary` | ✅ 已实现 | 多书源 Connector、EPUB/PDF 阅读器、AI 阅读、中文经典采集器 |
-| ☿ MERCURY 水星 | WORLD SEARCH | 全球搜索与信息发现中心 | — | ⚠️ 部分 | 有全局搜索(`GLOBAL_SEARCH`)，无独立星球页 |
+| ☿ MERCURY 水星 | WORLD SEARCH | 全球搜索与信息发现中心 | `mercury` → `MercurySearch` | ✅ 已实现 | 独立搜索星球页：分类筛选 + 搜索历史 + 跨模块路由 |
 | ♀ VENUS 金星 | MUSIC & ART | 音乐与艺术生态 | — | ❌ 未实现 | 无模块 |
 | 🌍 EARTH 地球 | HUMANITY | 全球社交与人类连接 | `globe`/`feed`/`chat`/`community` | ✅ 已实现 | 社区、消息、身份、动态 |
 | 🌙 MOON 月球 | GLOBAL ACADEMY | 全球教育与学习中心 | — | ❌ 未实现 | 外部仓库 `rengdeng-student` 未接入 |
