@@ -104,6 +104,9 @@ export interface TranslationDictionary {
   relatedBooks: string;
   viewInLibrary: string;
   noResults: string;
+  firstUseHint: string;
+  dismissFirstUseHint: string;
+  globeControls: string;
 }
 
 export const translations: Record<Language, TranslationDictionary> = {
@@ -207,7 +210,10 @@ export const translations: Record<Language, TranslationDictionary> = {
     relatedConnections: '相关连接',
     relatedBooks: '相关书籍',
     viewInLibrary: '在图书馆查看',
-    noResults: '暂无搜索结果'
+    noResults: '暂无搜索结果',
+    firstUseHint: '拖动地球来旋转，点击发光信标即可认识地球上的公民。',
+    dismissFirstUseHint: '关闭首次使用提示',
+    globeControls: '地球控制'
   },
   en: {
     appName: 'EARTH ONE',
@@ -309,7 +315,10 @@ export const translations: Record<Language, TranslationDictionary> = {
     relatedConnections: 'Related Connections',
     relatedBooks: 'Related Books',
     viewInLibrary: 'View in Library',
-    noResults: 'No results found'
+    noResults: 'No results found',
+    firstUseHint: 'Drag to rotate Earth, then select a glowing beacon to meet a citizen.',
+    dismissFirstUseHint: 'Dismiss first-use hint',
+    globeControls: 'Globe controls'
   },
   ar: {
     appName: 'EARTH ONE',
@@ -411,7 +420,10 @@ export const translations: Record<Language, TranslationDictionary> = {
     relatedConnections: 'روابط ذات صلة',
     relatedBooks: 'كتب ذات صلة',
     viewInLibrary: 'عرض في المكتبة',
-    noResults: 'لا توجد نتائج'
+    noResults: 'لا توجد نتائج',
+    firstUseHint: 'اسحب لتدوير الأرض، ثم اختر منارة مضيئة للتعرّف على أحد السكان.',
+    dismissFirstUseHint: 'إخفاء تلميح الاستخدام الأول',
+    globeControls: 'عناصر التحكم بالكرة الأرضية'
   },
   es: {
     appName: 'EARTH ONE',
@@ -513,7 +525,10 @@ export const translations: Record<Language, TranslationDictionary> = {
     relatedConnections: 'Conexiones Relacionadas',
     relatedBooks: 'Libros Relacionados',
     viewInLibrary: 'Ver en la Biblioteca',
-    noResults: 'Sin resultados'
+    noResults: 'Sin resultados',
+    firstUseHint: 'Arrastra para girar la Tierra y selecciona una baliza luminosa para conocer a alguien.',
+    dismissFirstUseHint: 'Cerrar el consejo inicial',
+    globeControls: 'Controles del globo'
   },
   fr: {
     appName: 'EARTH ONE',
@@ -615,7 +630,10 @@ export const translations: Record<Language, TranslationDictionary> = {
     relatedConnections: 'Connexions Liées',
     relatedBooks: 'Livres Liés',
     viewInLibrary: 'Voir dans la Bibliothèque',
-    noResults: 'Aucun résultat'
+    noResults: 'Aucun résultat',
+    firstUseHint: 'Faites glisser pour faire tourner la Terre, puis sélectionnez une balise lumineuse.',
+    dismissFirstUseHint: 'Masquer le conseil initial',
+    globeControls: 'Commandes du globe'
   },
   ru: {
     appName: 'EARTH ONE',
@@ -717,6 +735,9 @@ export const translations: Record<Language, TranslationDictionary> = {
     relatedConnections: 'Связанные узлы',
     relatedBooks: 'Связанные книги',
     viewInLibrary: 'Открыть в библиотеке',
-    noResults: 'Ничего не найдено'
+    noResults: 'Ничего не найдено',
+    firstUseHint: 'Перетаскивайте, чтобы вращать Землю, и выберите светящийся маяк, чтобы познакомиться с жителем.',
+    dismissFirstUseHint: 'Скрыть первую подсказку',
+    globeControls: 'Управление глобусом'
   }
 };

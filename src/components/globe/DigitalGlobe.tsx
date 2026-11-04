@@ -30,7 +30,9 @@ import {
   RotateCw,
   Eye,
   EyeOff,
-  ChevronRight
+  ChevronRight,
+  Users2,
+  X
 } from 'lucide-react';
 
 interface DigitalGlobeProps {
@@ -42,6 +44,7 @@ interface DigitalGlobeProps {
   onSelectCountry: (countryCode: string | null) => void;
   onSelectUser: (user: GlobeUserNode) => void;
   onExploreUniverse?: () => void;
+  onExploreCommunity?: () => void;
   lang: Language;
 }
 
@@ -54,10 +57,18 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   onSelectCountry,
   onSelectUser,
   onExploreUniverse,
+  onExploreCommunity,
   lang
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const t = translations[lang] || translations.zh;
+  const [showFirstUseHint, setShowFirstUseHint] = useState(() => {
+    try {
+      return !localStorage.getItem('earth-one-globe-hint-dismissed');
+    } catch {
+      return true;
+    }
+  });
 
   // Camera & Mode state
   const [isZoomedIn, setIsZoomedIn] = useState(false);
@@ -496,7 +507,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   }, [nodes, currentUserId, onSelectUser, flyToCoordinates]);
 
   return (
-    <div className="relative w-full h-full min-h-[calc(100vh-4rem)] flex-1 overflow-hidden bg-[#010309] select-none">
+    <div className="relative w-full h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] flex-1 overflow-hidden bg-[#010309] select-none">
       {/* ============================================================== */}
       {/* 1. LIVE THREE.JS 3D WEBGL UNIVERSE CANVAS                      */}
       {/* ============================================================== */}
@@ -505,7 +516,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       {/* ============================================================== */}
       {/* 2. WORLD-CLASS USER HERO OVERLAY                               */}
       {/* ============================================================== */}
-      <div className="relative z-10 h-full min-h-[calc(100vh-4rem)] max-w-7xl mx-auto px-6 sm:px-10 lg:px-12 flex flex-col justify-between pt-14 sm:pt-20 pb-8 pointer-events-none">
+      <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-7xl mx-auto px-5 sm:px-10 lg:px-12 flex flex-col justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
         {/* Left Hero Title & CTA */}
         <div className="max-w-xl pointer-events-auto">
           <h1 className="font-extrabold text-5xl sm:text-6xl md:text-7xl tracking-tight text-white font-sans drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]">
@@ -518,23 +529,63 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             {t.heroDescription}
           </p>
 
+          {showFirstUseHint && (
+            <div className="mt-3 flex max-w-md items-start gap-2 rounded-xl border border-cyan-900/70 bg-slate-950/75 px-3 py-2 text-xs leading-relaxed text-cyan-100/90 shadow-lg backdrop-blur-md">
+              <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
+              <p className="flex-1">{t.firstUseHint}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFirstUseHint(false);
+                  try { localStorage.setItem('earth-one-globe-hint-dismissed', '1'); } catch {}
+                }}
+                className="rounded-md p-0.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+                aria-label={t.dismissFirstUseHint}
+                title={t.dismissFirstUseHint}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Start Exploring Action Button */}
-          <div className="mt-8 flex items-center space-x-4">
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             <button
-              onClick={handleToggleExplore}
+              onClick={onExploreUniverse}
               className="inline-flex items-center space-x-3 px-8 py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-sm sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
             >
-              <span>{isZoomedIn ? t.overviewView : t.startExploring}</span>
+              <span>{t.startExploring}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </button>
 
-            {onExploreUniverse && (
+            {onExploreCommunity && (
               <button
-                onClick={onExploreUniverse}
+                onClick={onExploreCommunity}
                 className="inline-flex items-center space-x-2 px-5 py-3.5 rounded-full bg-slate-900/80 hover:bg-slate-800/90 border border-slate-700/80 text-slate-200 text-sm font-medium backdrop-blur-md cursor-pointer transition-all hover:text-white"
               >
-                <Orbit className="w-4 h-4 text-purple-400" />
-                <span>{t.solarSystem}</span>
+                <Users2 className="w-4 h-4 text-emerald-300" />
+                <span>{t.communityTab}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Mobile controls stay in document flow instead of covering the stats. */}
+          <div className="mt-4 flex items-center gap-2 pointer-events-auto md:hidden" aria-label={t.globeControls}>
+            <button onClick={handleToggleExplore} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={isZoomedIn ? t.zoomOut : t.inspectEarth} title={isZoomedIn ? t.zoomOut : t.inspectEarth}>
+              <Orbit className="h-4 w-4" />
+            </button>
+            <button onClick={() => setShowBeacons(!showBeacons)} className={`rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 ${showBeacons ? 'text-cyan-300' : 'text-slate-500'}`} aria-label={t.toggleBeacons} title={t.toggleBeacons}>
+              <Network className="h-4 w-4" />
+            </button>
+            <button onClick={() => setAutoRotate(!autoRotate)} className={`rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 ${autoRotate ? 'text-cyan-300' : 'text-slate-500'}`} aria-label={t.autoRotation} title={t.autoRotation}>
+              <RotateCw className="h-4 w-4" />
+            </button>
+            <button onClick={() => setSoundEnabled(!soundEnabled)} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={soundEnabled ? t.mute : t.playCosmicSound} title={soundEnabled ? t.mute : t.playCosmicSound}>
+              {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            </button>
+            {onExploreUniverse && (
+              <button onClick={onExploreUniverse} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-purple-300" aria-label={t.solarSystemEngine} title={t.solarSystemEngine}>
+                <Sparkles className="h-4 w-4" />
               </button>
             )}
           </div>
@@ -635,7 +686,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       {/* ============================================================== */}
       {/* 3. RIGHT FLOATING VERTICAL ACTION RAIL                         */}
       {/* ============================================================== */}
-      <aside className="fixed right-6 top-1/2 -translate-y-1/2 z-20 flex flex-col space-y-3 pointer-events-auto">
+      <aside className="hidden md:flex fixed right-6 top-1/2 -translate-y-1/2 z-20 flex-col space-y-3 pointer-events-auto">
         <div className="p-2 rounded-2xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col space-y-3 text-slate-400">
           {/* Orbit switch */}
           <button

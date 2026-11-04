@@ -407,7 +407,7 @@ export default function App() {
       {/* 2. Main View Content Switcher */}
       <main className="flex-1 flex flex-col">
         {currentTab === 'globe' && (
-          <div className="flex-1 flex flex-col min-h-[calc(100vh-4rem)]">
+          <div className="flex-1 flex flex-col min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)]">
             <DigitalGlobe
               nodes={nodes}
               countries={countries}
@@ -422,6 +422,7 @@ export default function App() {
               }}
               onSelectUser={handleSelectGlobeUser}
               onExploreUniverse={() => setCurrentTab('universe')}
+              onExploreCommunity={() => setCurrentTab('community')}
               lang={lang}
             />
           </div>

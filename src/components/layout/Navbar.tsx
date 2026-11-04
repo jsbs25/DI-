@@ -6,8 +6,8 @@ import {
   Home,
   Compass,
   Sparkles,
-  Info,
   ChevronDown,
+  Menu,
   Sun,
   Moon,
   MessageSquare,
@@ -101,6 +101,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [ecosystemMenuOpen, setEcosystemMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
 
   // Global unified search across all modules
@@ -156,15 +157,15 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   return (
-    <header className="sticky top-0 z-50 w-full bg-[#02050f]/80 backdrop-blur-xl border-b border-slate-800/60 transition-all select-none">
+    <header className="sticky top-0 z-50 w-full bg-[#02050f]/95 backdrop-blur-xl border-b border-slate-800/60 transition-all select-none relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-3">
           {/* 1. Left Brand: Glowing Earth Sphere + EARTH ONE + Motto */}
           <div
             onClick={() => onSelectTab('globe')}
-            className="flex items-center space-x-3 cursor-pointer group shrink-0"
+              className="flex items-center space-x-2 sm:space-x-3 cursor-pointer group shrink-0"
           >
-            <div className="relative w-9 h-9 rounded-full overflow-hidden border border-cyan-400/50 shadow-lg shadow-cyan-500/25 group-hover:scale-105 transition-transform">
+            <div className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden border border-cyan-400/50 shadow-lg shadow-cyan-500/25 group-hover:scale-105 transition-transform">
               <img
                 src="/assets/aistudio/88edd78a66e82722354887034fb38db6_26f71533.jpg"
                 alt="EARTH ONE"
@@ -172,11 +173,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               />
               <div className="absolute inset-0 bg-blue-500/20 mix-blend-overlay" />
             </div>
-            <div>
+            <div className="min-w-0">
               <span className="block font-bold text-base sm:text-lg tracking-wider text-white font-sans">
                 EARTH ONE
               </span>
-              <span className="block text-[11px] text-slate-400 font-sans tracking-tight">
+              <span className="hidden sm:block text-[11px] text-slate-400 font-sans tracking-tight">
                 {t.brandTagline}
               </span>
             </div>
@@ -283,7 +284,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* 2. Center Navigation Capsule (Identical to User Reference Design) */}
-          <nav className="hidden md:flex items-center p-1 rounded-full bg-slate-900/70 border border-slate-700/60 shadow-xl backdrop-blur-md">
+          <nav aria-label="Primary navigation" className="hidden md:flex items-center p-1 rounded-full bg-slate-900/70 border border-slate-700/60 shadow-xl backdrop-blur-md">
             {/* Home */}
             <button
               onClick={() => onSelectTab('globe')}
@@ -332,7 +333,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
               }`}
             >
-              <Info className="w-3.5 h-3.5" />
+              <Users2 className="w-3.5 h-3.5 text-emerald-300" />
               <span>{t.communityTab}</span>
             </button>
 
@@ -437,11 +438,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
 
           {/* 3. Right Cluster: Theme Toggle + Language Dropdown + User Profile */}
-          <div className="flex items-center space-x-2.5">
+          <div className="flex items-center space-x-1 sm:space-x-2.5">
             {/* Theme Toggle Button */}
             <button
               onClick={() => setIsDarkMode(!isDarkMode)}
-              className="p-2 rounded-full border border-slate-700/60 bg-slate-900/70 hover:bg-slate-800 text-slate-300 hover:text-white backdrop-blur-md cursor-pointer transition-colors"
+              className="hidden sm:block p-2 rounded-full border border-slate-700/60 bg-slate-900/70 hover:bg-slate-800 text-slate-300 hover:text-white backdrop-blur-md cursor-pointer transition-colors"
               title="Toggle Theme"
             >
               {isDarkMode ? <Sun className="w-4 h-4 text-amber-300" /> : <Moon className="w-4 h-4 text-cyan-300" />}
@@ -451,16 +452,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="relative">
               <button
                 onClick={() => setLangMenuOpen(!langMenuOpen)}
-                className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full border border-slate-700/60 bg-slate-900/70 hover:bg-slate-800 text-xs font-semibold text-slate-200 backdrop-blur-md cursor-pointer transition-all"
+                className="flex items-center space-x-1 px-2 sm:px-3.5 py-1.5 rounded-full border border-slate-700/60 bg-slate-900/70 hover:bg-slate-800 text-xs font-semibold text-slate-200 backdrop-blur-md cursor-pointer transition-all"
+                aria-label="Select language"
               >
-                <span>{languages.find(l => l.code === lang)?.label || 'Language'}</span>
+                <span className="sm:hidden">{lang.toUpperCase()}</span>
+                <span className="hidden sm:inline">{languages.find(l => l.code === lang)?.label || 'Language'}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
 
               {langMenuOpen && (
                 <div
                   onMouseLeave={() => setLangMenuOpen(false)}
-                  className="absolute right-0 mt-2 w-44 rounded-2xl bg-slate-950/95 border border-slate-800 shadow-2xl py-2 z-50 backdrop-blur-xl animate-in fade-in"
+                className="absolute right-0 mt-2 w-44 rounded-2xl bg-slate-950/95 border border-slate-800 shadow-2xl py-2 z-50 backdrop-blur-xl animate-in fade-in"
                 >
                   {languages.map(l => (
                     <button
@@ -564,14 +567,78 @@ export const Navbar: React.FC<NavbarProps> = ({
             ) : (
               <button
                 onClick={onOpenAuth}
-                className="px-4 py-1.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/30 transition-all cursor-pointer"
+                className="px-2.5 sm:px-4 py-1.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/30 transition-all cursor-pointer whitespace-nowrap"
               >
                 {t.signIn}
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(open => !open)}
+              className="md:hidden p-2 rounded-full border border-slate-700/60 bg-slate-900/70 text-slate-200 hover:bg-slate-800 transition-colors"
+              aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              aria-expanded={mobileMenuOpen}
+            >
+              {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            </button>
           </div>
         </div>
+
+        <nav aria-label="Primary navigation" className="md:hidden -mx-1 flex items-center gap-1 overflow-x-auto border-t border-slate-800/60 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {[
+            { id: 'globe', label: t.globeTab, icon: <Home className="w-3.5 h-3.5" /> },
+            { id: 'feed', label: t.feedTab, icon: <Compass className="w-3.5 h-3.5" /> },
+            { id: 'universe', label: t.universeTab, icon: <Orbit className="w-3.5 h-3.5" /> },
+            { id: 'community', label: t.communityTab, icon: <Users2 className="w-3.5 h-3.5" /> }
+          ].map(item => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => { onSelectTab(item.id); setMobileMenuOpen(false); }}
+              aria-current={currentTab === item.id ? 'page' : undefined}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-2 text-[11px] font-semibold transition-colors ${currentTab === item.id ? 'bg-blue-600 text-white' : item.id === 'community' ? 'text-emerald-200 hover:bg-emerald-950/50' : 'text-slate-300 hover:bg-slate-800'}`}
+            >
+              {item.icon}<span>{item.label}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(open => !open)}
+            className="flex shrink-0 items-center gap-1 rounded-full px-3 py-2 text-[11px] font-semibold text-slate-400 hover:bg-slate-800"
+            aria-expanded={mobileMenuOpen}
+          >
+            <Menu className="w-3.5 h-3.5" /><span>{t.apps}</span>
+          </button>
+        </nav>
       </div>
+
+      {mobileMenuOpen && (
+        <div className="md:hidden absolute left-0 right-0 top-full max-h-[calc(100dvh-7rem)] overflow-y-auto border-b border-slate-800 bg-slate-950/98 p-4 shadow-2xl backdrop-blur-xl">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">{t.apps}</div>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { id: 'chat', label: t.globalMessenger, icon: <MessageSquare className="w-4 h-4 text-cyan-400" /> },
+              { id: 'aihub', label: t.aiHubTab, icon: <Cpu className="w-4 h-4 text-purple-400" /> },
+              { id: 'library', label: t.digitalLibrary, icon: <BookOpen className="w-4 h-4 text-amber-400" /> },
+              { id: 'knowledge', label: t.knowledgeTab, icon: <Network className="w-4 h-4 text-amber-300" /> },
+              { id: 'browser', label: t.webBrowser, icon: <Search className="w-4 h-4 text-blue-400" /> },
+              { id: 'creator', label: t.creatorArticles, icon: <PenTool className="w-4 h-4 text-emerald-400" /> },
+              { id: 'video', label: t.worldVideoCenter, icon: <Film className="w-4 h-4 text-red-400" /> },
+              { id: 'game', label: t.globalGameCenter, icon: <Gamepad2 className="w-4 h-4 text-yellow-400" /> }
+            ].map(item => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => { onSelectTab(item.id); setMobileMenuOpen(false); }}
+                className={`flex min-h-12 items-center gap-2.5 rounded-xl border px-3 py-2 text-left text-xs transition-colors ${currentTab === item.id ? 'border-blue-500/60 bg-blue-950/60 text-white' : 'border-slate-800 bg-slate-900/60 text-slate-300 hover:bg-slate-800'}`}
+              >
+                {item.icon}<span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </header>
   );
 };
