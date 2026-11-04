@@ -43,3 +43,15 @@
 - 密码哈希：SHA-256+盐 → scrypt（内存困难），旧哈希登录时透明升级。
 - 登录/注册限流：内存滑动窗口，登录 10 次/15 分钟、注册 20 次/15 分钟（按 IP）。
 - 验证：种子账号登录成功并自动迁移为 scrypt 哈希；错误密码 401。
+
+
+### WORLD LIBRARY：真实全球图书来源连接器（2026-11-04）
+
+- 建立 `server/integrations/libraries/index.ts` 统一连接器接口、来源注册表、标准书目/权利字段、结果聚合和精确 ISBN/DOI 去重；Open Library、Internet Archive、Project Gutenberg 与既有中文/阿拉伯语 Wikisource 共五个来源可分别由环境变量开关。
+- 新增 `/api/library/connectors`、`/api/library/search`，并将 `/api/library/ingest` 改为使用来源 ID 在服务端重新查询官方记录后再判断权利和可用文件；Open Library 元数据、权利未知/借阅受限记录不会伪装为全文。既有本地图书目录、书架、进度、详情和阅读器流程保留。
+- Internet Archive 查询按官方 Lucene 语法限制在 `title`、`creator`、`identifier` 字段和 `mediatype:texts`，降低全文索引的无关结果；导入还要求明确可复制权利标记及官方元数据列出的 OCR 文件。Gutenberg 使用官方 OPDS `query` 参数，并在导入时再读取单书 OPDS 验证 TXT/EPUB 链接；公共领域说明带美国法域提醒。OPDS 语言字段从命名空间 XML 读取，不存在时返回 `und`，不再默认误标为英语。
+- 新增 `LIBRARY_CONNECTORS.md`、`scripts/test_library_connectors.ts`、`scripts/test_library_connectors_live.ts`，并注册 `test:library-connectors` 与 `test:library-connectors:live` 命令；更新功能清单与项目专项审计。
+- 配置只新增可选联系邮箱与五个连接器开关示例，无新增 API 密钥；未实现的学术、Europeana、Google Books 与阿拉伯语资源清楚列为后续事项。
+- 验证：TypeScript 检查通过；离线连接器测试通过；隔离图书馆 API 回归 20 项通过；生产构建成功；实时官方来源烟测通过（Open Library、Internet Archive 搜索，以及 Gutenberg 搜索至隔离书目详情链路，未下载 EPUB）。全站浏览器回归和其他待批准权限相关路由未执行。
+
+- UI 搜索卡片/详情页显示来源权利说明及通过 HTTPS 校验的许可原文链接；客户端仅在来源明确返回 `canImport: true` 时提供本地导入按钮，服务器仍再次验证来源记录和权限。该 UI 变更通过类型检查与生产构建，未进行本轮浏览器视觉验收。

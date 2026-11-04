@@ -1,11 +1,13 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import { createHash } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
-import { fetchAndExtract, searchWeb, searchBooks, searchWikisource, fetchBookFullText, fetchWikisourceFullText, searchArabicWikisource, fetchArabicWikisourceFullText, searchInternetArchive, fetchInternetArchiveFullText } from './server/webFetcher.ts';
+import { fetchAndExtract, searchWeb } from './server/webFetcher.ts';
+import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 import {
   searchKnowledge,
@@ -481,81 +483,135 @@ app.post('/api/ai/translate', async (req, res) => {
 // 8. DIGITAL LIBRARY (CHAPTER 5)
 // -------------------------------------------------------------
 
-// Search public-domain books online (Gutenberg + Chinese/Arabic Wikisource + Internet Archive)
+// Provider registry is read-only; enable/disable settings are applied from server environment.
+app.get('/api/library/connectors', (_req, res) => {
+  const sources = libraryConnectors.map(connector => connector.getSourceInformation()).flatMap(result => result.status === 'ok' && result.data ? [result.data] : []);
+  res.json({ success: true, sources });
+});
+
+// Search enabled sources in parallel; metadata-only records remain externally linked.
 app.get('/api/library/search', async (req, res) => {
-  const { q } = req.query;
-  if (!q || typeof q !== 'string' || !q.trim()) {
+  const q = req.query.q;
+  if (typeof q !== 'string' || !q.trim()) {
     return res.status(400).json({ success: false, error: 'Search query required' });
   }
+  if (q.trim().length > 200) return res.status(400).json({ success: false, error: 'Search query must be 200 characters or fewer' });
   try {
-    // Run all sources in parallel; each source degrades gracefully on failure
-    const [gutenberg, wikisource, arWikisource, archive] = await Promise.all([
-      searchBooks(q, 8),
-      searchWikisource(q, 6),
-      searchArabicWikisource(q, 6),
-      searchInternetArchive(q, 6)
-    ]);
-    const results = [...gutenberg, ...wikisource, ...arWikisource, ...archive];
-    res.json({ success: true, query: q, results });
+    const knownSources: LibrarySource[] = ['openlibrary', 'archive', 'gutenberg', 'wikisource', 'ar_wikisource'];
+    let selectedSources: LibrarySource[] | undefined;
+    const sourceParam = req.query.sources ?? req.query.source;
+    if (typeof sourceParam === 'string' && sourceParam.trim()) {
+      const parsed = sourceParam.split(',').map(value => value.trim()).filter(Boolean);
+      if (parsed.some(value => !knownSources.includes(value as LibrarySource))) {
+        return res.status(400).json({ success: false, error: 'Unknown library source' });
+      }
+      selectedSources = parsed as LibrarySource[];
+    }
+    const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 8;
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(10, Math.floor(rawLimit))) : 8;
+    const result = await searchLibrary(q.trim(), { sources: selectedSources, limit });
+    res.json({ success: true, query: q.trim(), results: result.results, sources: result.sources });
   } catch (err: any) {
-    res.status(502).json({ success: false, error: err.message || 'Book search failed' });
+    console.error('Library connector search failed:', err);
+    res.status(502).json({ success: false, error: 'Library search failed; retry later.' });
   }
 });
 
-// Download a book's full text and save it to the library
+// Import only after server-side provider metadata and reuse rights are revalidated.
 app.post('/api/library/ingest', async (req, res) => {
-  const { textUrl, pageTitle, epubUrl, source, title, author, coverImage, description, language, identifier } = req.body;
+  const { textUrl, pageTitle, epubUrl, source: rawSource, title, author, coverImage, description, language, identifier, externalId } = req.body;
+  const knownSources: LibrarySource[] = ['openlibrary', 'archive', 'gutenberg', 'wikisource', 'ar_wikisource'];
+  if (typeof rawSource !== 'string' || !knownSources.includes(rawSource as LibrarySource)) {
+    return res.status(400).json({ success: false, error: 'A supported source is required' });
+  }
+  const source = rawSource as LibrarySource;
+  if (!isLibraryConnectorEnabled(source)) return res.status(503).json({ success: false, error: 'This library source is disabled' });
+  if (source === 'openlibrary') return res.status(403).json({ success: false, error: 'Open Library provides discovery metadata; open the official record for reading or borrowing options.' });
+
+  let recordLocator: { id?: string; identifier?: string; pageTitle?: string };
+  if (source === 'archive') {
+    const archiveId = typeof identifier === 'string' ? identifier : typeof externalId === 'string' ? externalId : '';
+    recordLocator = { id: archiveId, identifier: archiveId };
+  } else if (source === 'gutenberg') {
+    let gutId = typeof externalId === 'string' ? externalId.replace(/^gutenberg_/, '') : typeof identifier === 'string' ? identifier.replace(/^gutenberg_/, '') : '';
+    if (!/^\d{1,8}$/.test(gutId)) {
+      const candidate = typeof textUrl === 'string' ? textUrl : typeof epubUrl === 'string' ? epubUrl : '';
+      try {
+        const url = new URL(candidate);
+        if (url.protocol === 'https:' && (url.hostname === 'gutenberg.org' || url.hostname.endsWith('.gutenberg.org'))) {
+          gutId = url.pathname.match(/\/(?:ebooks|files|cache\/epub)\/(\d+)(?:\/|$)/)?.[1] || '';
+        }
+      } catch { /* invalid client URL is ignored; the provider ID remains required */ }
+    }
+    if (!/^\d{1,8}$/.test(gutId)) return res.status(400).json({ success: false, error: 'A valid Project Gutenberg ebook ID is required' });
+    recordLocator = { id: gutId };
+  } else {
+    const title = typeof pageTitle === 'string' ? pageTitle : '';
+    if (!title || title.length > 500) return res.status(400).json({ success: false, error: 'A valid Wikisource page title is required' });
+    recordLocator = { pageTitle: title };
+  }
 
   try {
-    let fullText: { title: string; author: string; chapters: { title: string; content: string }[] };
-    let bookId: string;
-    let sourceLabel: 'Project Gutenberg' | 'Internet Archive' | 'Open Library' | 'Open Access';
-    let category: import('./src/types/index.ts').Book['category'] = 'literature';
-
-    if (source === 'ar_wikisource' && pageTitle) {
-      fullText = await fetchArabicWikisourceFullText(pageTitle);
-      bookId = `ar_wikisource_${Date.now()}`;
-      sourceLabel = 'Open Access';
-      category = 'islamic_studies';
-    } else if (source === 'archive' && identifier) {
-      fullText = await fetchInternetArchiveFullText(identifier);
-      bookId = `archive_${Date.now()}`;
-      sourceLabel = 'Internet Archive';
-    } else if (source === 'wikisource' && pageTitle) {
-      fullText = await fetchWikisourceFullText(pageTitle);
-      bookId = `wikisource_${Date.now()}`;
-      sourceLabel = 'Open Access';
-    } else if (textUrl) {
-      fullText = await fetchBookFullText(textUrl);
-      bookId = `gutenberg_${Date.now()}`;
-      sourceLabel = 'Project Gutenberg';
-    } else if (epubUrl) {
-      // EPUB-only book (no plain text) — create a minimal placeholder
-      fullText = { title: title || 'Untitled', author: author || 'Unknown', chapters: [] };
-      bookId = `gutenberg_${Date.now()}`;
-      sourceLabel = 'Project Gutenberg';
-    } else {
-      return res.status(400).json({ success: false, error: 'textUrl, pageTitle, identifier, or epubUrl required' });
+    const connector = getLibraryConnector(source);
+    if (!connector) return res.status(404).json({ success: false, error: 'Library connector not found' });
+    const locator = { ...recordLocator, record: undefined };
+    const providerRecord = await connector.getBook(locator);
+    if (providerRecord.status !== 'ok' || !providerRecord.data) {
+      const status = providerRecord.status === 'unsupported' ? 403 : 502;
+      return res.status(status).json({ success: false, error: providerRecord.reason || 'Could not verify the provider record' });
+    }
+    const record = providerRecord.data;
+    if (!record.canImport || ![RightsCategory.PUBLIC_DOMAIN, RightsCategory.OPEN_LICENSE].includes(record.rights)) {
+      return res.status(403).json({ success: false, error: 'Local import is blocked because explicit public-domain or open-license rights were not confirmed. Use the official source link instead.' });
     }
 
+    let fullText: { title: string; author: string; chapters: { title: string; content: string }[] };
+    const hasText = !!record.textUrl || source === 'archive';
+    if (hasText) {
+      const textResult = await connector.getFullText(locator);
+      if (textResult.status !== 'ok' || !textResult.data) {
+        const status = textResult.status === 'unsupported' ? 403 : 502;
+        return res.status(status).json({ success: false, error: textResult.reason || 'Provider did not make readable full text available' });
+      }
+      fullText = textResult.data;
+    } else if (source === 'gutenberg' && record.epubUrl) {
+      fullText = { title: record.title, author: record.author, chapters: [] };
+    } else {
+      return res.status(403).json({ success: false, error: 'This record has no supported readable full-text file; use the official source page.' });
+    }
+
+    const stableKey = record.externalId || record.identifier || record.pageTitle || record.id;
+    const bookId = `${source}_${createHash('sha256').update(`${source}:${stableKey}`).digest('hex').slice(0, 24)}`;
+    const sourceLabel: 'Project Gutenberg' | 'Internet Archive' | 'Open Library' | 'Open Access' = source === 'gutenberg' ? 'Project Gutenberg' : source === 'archive' ? 'Internet Archive' : 'Open Access';
+    let category: import('./src/types/index.ts').Book['category'] = 'literature';
     const book: import('./src/types/index.ts').Book = {
       id: bookId,
-      title: title || fullText.title,
-      author: author || fullText.author,
+      title: record.title || fullText.title || title || 'Untitled',
+      author: record.author || fullText.author || author || 'Unknown Author',
       category,
-      language: language || 'en',
+      language: record.language !== 'und' ? record.language : language || 'en',
       source: sourceLabel,
-      coverImage,
-      description: description || `Full public-domain text of ${fullText.title}.`,
+      year: record.year,
+      publisher: record.publisher,
+      isbn: record.isbn?.[0],
+      coverImage: record.coverImage || coverImage,
+      description: record.description || description || `Readable full text from ${record.sourceName}.`,
       readProgress: 0,
       chapters: fullText.chapters.map((ch, i) => ({
         id: `ch${i + 1}`,
         title: ch.title,
         content: ch.content
       })),
-      epubUrl: epubUrl || undefined,
-      formatType: epubUrl ? 'epub' : 'text',
-      copyrightStatus: 'public_domain'
+      epubUrl: record.epubUrl || undefined,
+      externalReadUrl: record.sourceUrl,
+      sourceUrl: record.sourceUrl,
+      connectorId: source,
+      externalId: record.externalId,
+      licenseUrl: record.licenseUrl,
+      rightsClassification: record.rights,
+      rightsNote: record.rightsNote,
+      formatType: record.epubUrl && fullText.chapters.length === 0 ? 'epub' : 'text',
+      copyrightStatus: record.rights === RightsCategory.PUBLIC_DOMAIN ? 'public_domain' : record.rights === RightsCategory.OPEN_LICENSE ? 'licensed' : 'copyrighted'
     };
     const saved = store.addBook(book);
     res.json({ success: true, book: saved });

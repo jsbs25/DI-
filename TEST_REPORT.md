@@ -36,3 +36,21 @@
 | 错误密码 | ✅ 401 |
 | 旧 SHA-256 哈希透明升级 scrypt | ✅ 已迁移 |
 | tsc --noEmit | ✅ 通过 |
+
+
+## WORLD LIBRARY 外部连接器测试（2026-11-04）
+
+| 测试 | 结果 |
+|---|---|
+| `npm run lint` | ✅ TypeScript 全项目检查通过（新增 OPDS 命名空间语言解析、连接器和测试脚本均通过）。 |
+| `npm run test:library-connectors` | ✅ 离线适配器回归通过：Open Library 元数据只读和 unsupported 能力、Gutenberg OPDS 查询/单书 TXT·EPUB 链接/命名空间语言字段、Internet Archive 未知权利拒绝与开放许可 OCR 样例、权利开关、精确 ISBN 合并及相似书名不误合并。所有外部请求由测试内 mock 拦截。 |
+| `npm run test:library-api` | ✅ 20 项通过、0 失败：隔离临时 JSON 与本地 Express 仅验证来源目录/开关、关闭源搜索、空查询/未知源、Open Library 元数据入库拒绝、禁用源入库拒绝和既有本地图书接口；未触碰正式数据。 |
+| `npm run test:library-connectors:live` | ✅ 真实官方连通性通过：Open Library 与 Internet Archive 各一次限量只读搜索；Gutenberg 官方 OPDS 搜索、单书 OPDS 二次验证、临时书目入库与本地详情读取通过。只校验 EPUB URL，未下载 EPUB 全文；数据写入隔离临时存储并自动清理。需要联网，属于可选 live smoke。 |
+| `npm run build` | ✅ Vite 生产构建成功；原有 `three.module` 约 551.65 KB 分块提示仍存在，未为消除提示而删改 3D 功能。 |
+
+### 本轮未覆盖
+
+未运行全项目全量 API/浏览器/实体移动设备回归；未实测 Open Library 借阅可用性（适配器明确返回 unsupported）；未验证 Google Books、Europeana、学术数据库、阿拉伯语专项数字馆藏或跨设备真实用户书架；也未通过 IA 借阅接口尝试借阅或下载受限制内容。实时检查只证明在该时刻官方搜索端点可返回记录，不保证外部服务长期可用。
+
+
+UI 补充：搜索结果/详情显示来源权利说明，并仅对有效 HTTPS 许可地址提供链接；导入动作仅在 `canImport === true` 时出现，服务端另行复核。`npm run lint` 与 `npm run build` 覆盖编译；本轮没有新增浏览器视觉/交互断言，故不将该 UI 标记为浏览器验收通过。

@@ -8,6 +8,10 @@ import { tmpdir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const ALLOWED_FIXED_ENDPOINTS = new Set([
+  '/api/library/connectors',
+  '/api/library/search?q=valid&source=gutenberg',
+  '/api/library/search?q=&source=gutenberg',
+  '/api/library/search?q=valid&source=not-a-real-source',
   '/api/library/books',
   '/api/library/books?category=philosophy',
   '/api/library/books?category=not-a-real-category',
@@ -15,6 +19,7 @@ const ALLOWED_FIXED_ENDPOINTS = new Set([
   '/api/library/books/not-a-real-book'
 ]);
 const ALLOWED_BOOK_DETAILS = new Set(['book_republic']);
+const ALLOWED_POST_ENDPOINTS = new Set(['/api/library/ingest']);
 
 async function getAvailablePort(): Promise<number> {
   const server = net.createServer();
@@ -41,6 +46,11 @@ async function main() {
       PORT: String(port),
       EARTH_ONE_DATA_FILE: dataFile,
       EARTH_ONE_SKIP_BOOK_HARVEST: 'true',
+      EARTH_ONE_LIBRARY_OPENLIBRARY_ENABLED: 'true',
+      EARTH_ONE_LIBRARY_ARCHIVE_ENABLED: 'false',
+      EARTH_ONE_LIBRARY_GUTENBERG_ENABLED: 'false',
+      EARTH_ONE_LIBRARY_WIKISOURCE_ENABLED: 'false',
+      EARTH_ONE_LIBRARY_AR_WIKISOURCE_ENABLED: 'false',
       GEMINI_API_KEY: '',
       OPENAI_API_KEY: '',
       ANTHROPIC_API_KEY: '',
@@ -92,6 +102,19 @@ async function main() {
     return { status: response.status, body: await response.json() as any };
   }
 
+  async function post(endpoint: string, body: unknown) {
+    assert.ok(ALLOWED_POST_ENDPOINTS.has(endpoint), `Unexpected POST endpoint blocked by test: ${endpoint}`);
+    requested.push({ endpoint, method: 'POST' });
+    const response = await fetch(new URL(endpoint, baseUrl), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      redirect: 'error',
+      signal: AbortSignal.timeout(5000)
+    });
+    return { status: response.status, body: await response.json() as any };
+  }
+
   try {
     let catalog: Awaited<ReturnType<typeof get>> | undefined;
     for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -105,6 +128,28 @@ async function main() {
     }
 
     check(catalog?.status === 200 && catalog.body.success === true, 'Library catalog becomes ready from isolated storage');
+    const connectors = await get('/api/library/connectors');
+    check(
+      connectors.status === 200 && connectors.body.success === true && Array.isArray(connectors.body.sources) &&
+      connectors.body.sources.length === 5 && connectors.body.sources.filter((source: any) => source.enabled).length === 1 &&
+      connectors.body.sources.find((source: any) => source.name === 'Open Library')?.enabled === true,
+      'Connector registry reports all sources and honors per-source environment flags'
+    );
+    const disabledSearch = await get('/api/library/search?q=valid&source=gutenberg');
+    check(
+      disabledSearch.status === 200 && disabledSearch.body.success === true && disabledSearch.body.results.length === 0 &&
+      disabledSearch.body.sources.length === 1 && disabledSearch.body.sources[0].status === 'disabled',
+      'Unified search returns a clear disabled status without calling external services'
+    );
+    const blankSearch = await get('/api/library/search?q=&source=gutenberg');
+    check(blankSearch.status === 400 && blankSearch.body.success === false, 'Blank global search is rejected');
+    const invalidSource = await get('/api/library/search?q=valid&source=not-a-real-source');
+    check(invalidSource.status === 400 && invalidSource.body.success === false, 'Unknown connector names are rejected');
+    const metadataOnlyImport = await post('/api/library/ingest', { source: 'openlibrary', externalId: '/works/OL1W' });
+    check(metadataOnlyImport.status === 403 && metadataOnlyImport.body.success === false, 'Metadata-only Open Library records cannot be imported as full text');
+    const disabledImport = await post('/api/library/ingest', { source: 'gutenberg', externalId: '11' });
+    check(disabledImport.status === 503 && disabledImport.body.success === false, 'Disabled sources cannot be used for full-text import');
+
     const books = catalog?.body.books;
     check(Array.isArray(books) && books.length > 0, 'Library catalog returns a non-empty local collection');
     check(
@@ -187,15 +232,15 @@ async function main() {
     );
     check(
       [...ALLOWED_FIXED_ENDPOINTS].every(endpoint => requested.some(request => request.endpoint === endpoint)) &&
-      requested.every(request => request.method === 'GET' && (
+      requested.every(request => (request.method === 'GET' && (
         ALLOWED_FIXED_ENDPOINTS.has(request.endpoint) ||
         (/^\/api\/library\/books\/[A-Za-z0-9_-]+$/.test(request.endpoint) &&
           ALLOWED_BOOK_DETAILS.has(decodeURIComponent(request.endpoint.split('/').at(-1) || '')))
-      )),
-      'Test issued only GET requests to allowlisted local catalog and detail endpoints'
+      )) || (request.method === 'POST' && ALLOWED_POST_ENDPOINTS.has(request.endpoint))),
+      'Test issued only allowlisted local GET requests and the two controlled import-rejection POSTs'
     );
 
-    console.log(`Library API regression: ${passed} passed, 0 failed (local catalog/details only; GET only; isolated temporary storage).`);
+    console.log(`Library API regression: ${passed} passed, 0 failed (allowlisted local routes; isolated temporary storage).`);
   } catch (error) {
     console.error('Library API regression failed:', error);
     if (childOutput) console.error('Temporary server output:\n' + childOutput);

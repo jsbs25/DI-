@@ -265,6 +265,16 @@ export interface Book {
   epubUrl?: string;
   /** Comma-separated subject tags. */
   subjects?: string;
+  /** Stable provider identifier such as `openlibrary` or `archive`. */
+  connectorId?: string;
+  /** Provider-native work, edition, or item identifier. */
+  externalId?: string;
+  /** Canonical source page for attribution and lawful external access. */
+  sourceUrl?: string;
+  /** Provider-supplied rights/license evidence; never inferred from searchability. */
+  licenseUrl?: string;
+  rightsClassification?: string;
+  rightsNote?: string;
 }
 
 export type BookshelfStatus = 'reading' | 'finished' | 'want_to_read' | 'favorite';

@@ -31,3 +31,11 @@
 - **存储层已测**：当前完整性套件覆盖部分数据层逻辑与隔离文件持久化。
 - **HTTP/浏览器待测**：除非回归记录明确写明通过，不视为端到端验证。
 - **外部依赖待配置**：模型、云存储、支付或流媒体等服务可能需要额外凭据/基础设施。
+
+
+## WORLD LIBRARY 连接器能力保护（2026-11-04）
+
+- 五个来源注册项：Open Library、Internet Archive、Project Gutenberg、中文 Wikisource、阿拉伯语 Wikisource；统一入口为 `server/integrations/libraries/`，查询和只读源清单为 `/api/library/search`、`/api/library/connectors`。
+- 保留本地图书目录、详情、现有书架/阅读进度/批注与 EPUB 阅读器；外部来源仅经 `/api/library/ingest` 重新核验 provider 权利和实际文件后保存。Open Library 只提供元数据；Gutenberg 的单书 OPDS 要在导入时重核，EPUB 未在服务器烟测中下载；未知权利的中阿 Wikisource 条目只提供官方跳转。
+- Internet Archive 只在明确可复制权利依据及 OCR 文件同时满足时开放全文导入；搜索查询限制字段并按官方页给出的 Lucene 语法构造。所有来源独立可禁用，单源故障不会导致整体搜索端点失败，跨源去重只使用精确 ISBN/DOI。
+- 连接器离线回归、20 项隔离 API 回归、Open Library/IA 实时搜索与 Gutenberg 入库 smoke 均已通过；这些测试不替代移动端/完整用户账户书架回归，也不意味着 Google Books、Europeana、学术或阿拉伯语数字馆藏已接入。

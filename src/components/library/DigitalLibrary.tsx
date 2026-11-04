@@ -37,6 +37,38 @@ interface DigitalLibraryProps {
   focusBookId?: string | null;
 }
 
+interface OnlineLibraryResult {
+  id: string;
+  externalId?: string;
+  title: string;
+  author: string;
+  language: string;
+  coverImage?: string;
+  description: string;
+  year?: string;
+  textUrl?: string;
+  epubUrl?: string;
+  source: string;
+  sourceName?: string;
+  sourceUrl?: string;
+  pageTitle?: string;
+  identifier?: string;
+  rightsClassification?: string;
+  rightsNote?: string;
+  licenseUrl?: string;
+  canImport?: boolean;
+}
+
+function safeHttpsUrl(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Real category taxonomy (only real books are shown — no fabricated entries)
 // ---------------------------------------------------------------------------
@@ -71,9 +103,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
 
   // ---- Online search ----
-  const [onlineResults, setOnlineResults] = useState<
-    Array<{ id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; epubUrl?: string; source: string; pageTitle?: string; identifier?: string }>
-  >([]);
+  const [onlineResults, setOnlineResults] = useState<OnlineLibraryResult[]>([]);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
@@ -171,7 +201,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       if (data.success && data.results) {
         setOnlineResults(data.results);
         if (data.results.length === 0) {
-          setIngestError('未找到可诵读的公共领域书籍，请尝试其他书名或作者。');
+          setIngestError('未找到匹配的全球馆藏，请尝试其他书名、作者、ISBN 或 DOI。');
         }
       } else {
         setIngestError(data.error || '在线搜索失败，请稍后重试。');
@@ -183,8 +213,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
   };
 
-  const handleIngestBook = async (r: { id: string; title: string; author: string; language: string; coverImage?: string; description: string; textUrl?: string; epubUrl?: string; source: string; pageTitle?: string; identifier?: string }) => {
-    if ((!r.textUrl && !r.pageTitle && !r.identifier && !r.epubUrl) || ingestingId) return;
+  const handleIngestBook = async (r: OnlineLibraryResult) => {
+    if (r.canImport !== true || (!r.textUrl && !r.pageTitle && !r.identifier && !r.epubUrl) || ingestingId) return;
     setIngestingId(r.id);
     setIngestError(null);
     try {
@@ -193,6 +223,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           textUrl: r.textUrl,
+          externalId: r.externalId,
           pageTitle: r.pageTitle,
           identifier: r.identifier,
           epubUrl: r.epubUrl,
@@ -201,7 +232,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           author: r.author,
           coverImage: r.coverImage,
           description: r.description,
-          language: r.language
+          language: r.language,
+          sourceUrl: r.sourceUrl,
+          rightsClassification: r.rightsClassification
         })
       });
       const data = await res.json();
@@ -532,9 +565,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-semibold transition-all cursor-pointer"
                   >
                     <Globe className="w-3.5 h-3.5" />
-                    <span>{isSearchingOnline ? '正在检索全球书库...' : '搜索全球公版书籍'}</span>
+                    <span>{isSearchingOnline ? '正在检索全球书库...' : '搜索全球馆藏'}</span>
                   </button>
-                  <span className="text-[11px] text-slate-500">支持书名、作者、主题、语言</span>
+                  <span className="text-[11px] text-slate-500">支持书名、作者、ISBN、DOI 与多语言检索</span>
                 </div>
               </div>
             </div>
@@ -571,31 +604,66 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               <h3 className="text-sm font-semibold text-amber-300 mb-3">全球检索结果</h3>
               {ingestError && <div className="text-xs text-red-400 mb-3">{ingestError}</div>}
               {isSearchingOnline ? (
-                <div className="text-xs text-slate-400 py-4 text-center">正在检索可诵读的全球书籍...</div>
+                <div className="text-xs text-slate-400 py-4 text-center">正在查询全球图书馆与开放资源...</div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {onlineResults.map(r => (
-                    <div key={r.id} className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-amber-500/50 transition-all">
-                      {r.coverImage && (
-                        <img src={r.coverImage} alt={r.title} className="w-12 h-16 object-cover rounded-lg shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-xs font-bold text-white line-clamp-1">{r.title}</h4>
-                        <p className="text-[11px] text-amber-400 mb-1">
-                          {r.author} · {r.language?.toUpperCase()}
-                          {r.source === 'wikisource' ? ' · 维基文库' : r.source === 'ar_wikisource' ? ' · 阿拉伯语维基文库' : r.source === 'archive' ? ' · Internet Archive' : ' · Gutenberg'}
-                        </p>
-                        <p className="text-[11px] text-slate-400 line-clamp-2 mb-2">{r.description}</p>
-                        <button
-                          onClick={() => handleIngestBook(r)}
-                          disabled={ingestingId === r.id || (!r.textUrl && !r.pageTitle && !r.identifier)}
-                          className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer transition-all"
-                        >
-                          {ingestingId === r.id ? <span>正在下载全文...</span> : <><BookOpen className="w-3 h-3" /><span>保存并诵读</span></>}
-                        </button>
+                  {onlineResults.map(r => {
+                    const canImport = r.canImport === true;
+                    const sourceName = r.sourceName || ({
+                      openlibrary: 'Open Library',
+                      gutenberg: 'Project Gutenberg',
+                      archive: 'Internet Archive',
+                      wikisource: 'Wikisource',
+                      ar_wikisource: '阿拉伯语维基文库'
+                    } as Record<string, string>)[r.source] || r.source;
+                    const rightsLabel = ({
+                      PUBLIC_DOMAIN: '公共领域（依来源声明）',
+                      OPEN_LICENSE: '开放许可',
+                      OPEN_ACCESS: '开放获取',
+                      BORROWABLE: '需经来源借阅',
+                      PREVIEW_ONLY: '仅预览',
+                      METADATA_ONLY: '仅元数据',
+                      COPYRIGHT_RESTRICTED: '受版权限制',
+                      UNKNOWN: '权利状态未知'
+                    } as Record<string, string>)[r.rightsClassification || 'UNKNOWN'] || '权利状态未知';
+                    const licenseUrl = safeHttpsUrl(r.licenseUrl);
+                    return (
+                      <div key={r.id} className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-amber-500/50 transition-all">
+                        {r.coverImage && (
+                          <img src={r.coverImage} alt={r.title} className="w-12 h-16 object-cover rounded-lg shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-xs font-bold text-white line-clamp-1">{r.title}</h4>
+                          <p className="text-[11px] text-amber-400 mb-1">
+                            {r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}
+                          </p>
+                          <p className="text-[11px] text-slate-400 line-clamp-2 mb-1">{r.description}</p>
+                          <p className="text-[10px] text-slate-500 mb-2">权利状态：{rightsLabel}{r.rightsNote ? ` · ${r.rightsNote}` : ''}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {canImport && (
+                              <button
+                                onClick={() => handleIngestBook(r)}
+                                disabled={ingestingId === r.id}
+                                className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer transition-all"
+                              >
+                                {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="w-3 h-3" /><span>保存并诵读</span></>}
+                              </button>
+                            )}
+                            {r.sourceUrl && (
+                              <a href={r.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-all">
+                                <ExternalLink className="w-3 h-3" /><span>在来源平台查看</span>
+                              </a>
+                            )}
+                            {licenseUrl && (
+                              <a href={licenseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-all">
+                                <ExternalLink className="w-3 h-3" /><span>查看许可证</span>
+                              </a>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -692,13 +760,20 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 />
               </div>
               <div className="mt-4 space-y-2">
-                <button
-                  onClick={() => openReader(selectedBook)}
-                  className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-all cursor-pointer"
-                >
-                  <BookOpen className="w-4 h-4" />
-                  <span>立即阅读</span>
-                </button>
+                {selectedBook.chapters.length > 0 || selectedBook.epubUrl ? (
+                  <button
+                    onClick={() => openReader(selectedBook)}
+                    className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-all cursor-pointer"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>立即阅读</span>
+                  </button>
+                ) : (selectedBook.sourceUrl || selectedBook.externalReadUrl) ? (
+                  <a href={selectedBook.sourceUrl || selectedBook.externalReadUrl} target="_blank" rel="noreferrer" className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-all">
+                    <ExternalLink className="w-4 h-4" />
+                    <span>前往来源平台查看</span>
+                  </a>
+                ) : null}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => isOnShelf(selectedBook.id) ? removeFromShelf(selectedBook.id) : addToShelf(selectedBook, 'want_to_read')}
@@ -735,9 +810,20 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 {selectedBook.isbn && <MetaItem label="ISBN" value={selectedBook.isbn} />}
                 {selectedBook.language && <MetaItem label="语言" value={selectedBook.language.toUpperCase()} />}
                 {selectedBook.originalLanguage && <MetaItem label="原始语言" value={selectedBook.originalLanguage} />}
-                <MetaItem label="版权状态" value={selectedBook.copyrightStatus === 'copyrighted' ? '受版权保护' : selectedBook.copyrightStatus === 'licensed' ? '授权许可' : '公共领域'} />
+                <MetaItem label="版权/许可" value={selectedBook.rightsClassification === 'PUBLIC_DOMAIN' || selectedBook.copyrightStatus === 'public_domain' ? '公共领域（按来源标注）' : selectedBook.rightsClassification === 'OPEN_LICENSE' || selectedBook.copyrightStatus === 'licensed' ? '开放许可' : selectedBook.rightsClassification === 'OPEN_ACCESS' || selectedBook.copyrightStatus === 'open_access' ? '开放获取（再利用权需看许可）' : selectedBook.rightsClassification === 'COPYRIGHT_RESTRICTED' || selectedBook.copyrightStatus === 'copyrighted' ? '受版权保护' : '状态未确认'} />
                 <MetaItem label="章节" value={`${selectedBook.chapters.length} 章`} />
               </div>
+
+              {(selectedBook.rightsNote || safeHttpsUrl(selectedBook.licenseUrl)) && (
+                <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400">
+                  {selectedBook.rightsNote && <p>来源权利说明：{selectedBook.rightsNote}</p>}
+                  {safeHttpsUrl(selectedBook.licenseUrl) && (
+                    <a href={safeHttpsUrl(selectedBook.licenseUrl)} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-amber-300 hover:text-amber-200">
+                      <ExternalLink className="w-3 h-3" />查看许可证原文
+                    </a>
+                  )}
+                </div>
+              )}
 
               {/* Description */}
               <div className="mt-6">
@@ -762,16 +848,18 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
               {/* Actions */}
               <div className="mt-8 flex flex-wrap gap-3">
-                <button
-                  onClick={() => openReader(selectedBook)}
-                  className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-all cursor-pointer"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>AI 解读</span>
-                </button>
-                {selectedBook.externalReadUrl && (
+                {selectedBook.chapters.some(chapter => chapter.content.trim().length > 0) && (
+                  <button
+                    onClick={() => openReader(selectedBook)}
+                    className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-all cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>AI 解读</span>
+                  </button>
+                )}
+                {(selectedBook.sourceUrl || selectedBook.externalReadUrl) && (
                   <a
-                    href={selectedBook.externalReadUrl}
+                    href={selectedBook.sourceUrl || selectedBook.externalReadUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-200 text-xs font-semibold transition-all"

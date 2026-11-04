@@ -112,3 +112,18 @@
 - 本次新增地球国家目录只读契约：约旦英文/本地名称与坐标字段齐全，统计接口国家数与目录长度一致；新增两项已在隔离临时 JSON 服务上通过定向 GET smoke，`npm run lint` 通过。未调用受限会话/消息路由，未运行会覆盖这些路由的完整 API 套件；未接触正式数据或既有服务。
 
 - 本轮 GitHub 同步：提交 `88eb83f4b2760ffb79b60f6314ff88ff509bc2df` 从 `11f36c2` 正常快进推送；推送后再次 fetch 确认 `HEAD` 与 `origin/main` 一致，本地 `main` 工作区干净。通过现有授权 GitHub 连接执行，未强推、未更改账户或全局 Git 配置。
+
+
+### P1 — 已完成首批：WORLD LIBRARY 全球图书源连接器（2026-11-04）
+
+- 在独立干净副本保护旧工作区的基础上，完成 Phase 1 统一接口/功能清单与 Phase 2 Open Library、Internet Archive、Project Gutenberg；既有中阿 Wikisource 搜索保留为注册来源。`npm run test:library-connectors`、20 项 `npm run test:library-api`、三源限量实时 smoke、`npm run lint`、`npm run build` 已通过。
+- 读者搜索时看到可验证来源页、权利注释与可用性；Open Library 不作为全文库；IA 受限/未知权利内容不可本地复制；Gutenberg 使用官方 OPDS 并带来源法域提醒。没有下载受限内容、修改正式书籍数据或破坏原书架/阅读器流程。
+- 不把首批适配器标为全球图书馆最终完成：完整学术搜索、Google Books、Europeana、阿拉伯语数字库、授权/语言筛选、后台同步日志与实体移动端验证仍待完成。
+
+### P1 — 下一阶段：扩展官方资源矩阵
+
+1. 核实 Google Books 与 Europeana 的官方 API、配额/申请条件、权利字段和 key 配置；获准前不写入真实密钥、不把密钥放入前端。
+2. 分别为 OpenAlex、Crossref、arXiv、PubMed Central、DOAB 接入官方 API，区分论文元数据、OA 状态、全文位置和具体许可，不将 DOI 或开放获取标签视为全文再发布许可。
+3. 研究 Waqfeya、Shamela、Qatar Digital Library 及其他阿拉伯语资源的正式接口/条款；无公开许可时只展示核实的官方跳转，不批量抓取或复制全文。
+4. 进一步实现查询语言/年份/分类筛选、作者/ISBN/DOI 精确入口、合法来源许可链接展示、逐地区权利策略及可观察的 provider 运行/缓存/错误管理；逐项补独立隔离测试。
+5. 继续保护既有本地书架、阅读进度、注释、AI 解读和全文分离存储；相关真实登录/跨设备数据策略须先审查授权边界，不把当前测试冒充为用户数据同步验证。

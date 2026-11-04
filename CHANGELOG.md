@@ -141,3 +141,14 @@
   - Full translations for Chinese, English, Arabic (with RTL bidirectional layout), Spanish, French, and Russian.
 - **Complete Documentation Suite**:
   - `PROJECT_MASTER_PLAN.md`, `ARCHITECTURE.md`, `DATABASE_SCHEMA.md`, `API_DOCUMENTATION.md`, `DESIGN_SYSTEM.md`, `OPEN_SOURCE_AUDIT.md`, `LICENSE_COMPLIANCE.md`, `AI_HUB_ARCHITECTURE.md`, `SECURITY.md`, `DEVELOPMENT_ROADMAP.md`, `CHANGELOG.md`, `README.md`.
+
+
+## 2026-11-04 — WORLD LIBRARY external connectors
+
+### Added
+- Added official Open Library, Internet Archive, and Project Gutenberg connectors plus registry entries for the existing Chinese and Arabic Wikisource search sources; added unified provider status/search and a server-side revalidated import path.
+- Added offline connector and isolated API regressions plus an optional live three-provider smoke command. Preserved existing local books, reader, bookshelf, progress, and annotation routes.
+
+### Safety and limits
+- Open Library stays metadata-only; Internet Archive local text import requires recognized reusable-rights evidence and a listed OCR file; Gutenberg is revalidated against per-book OPDS and retains its jurisdiction caveat. Unknown-rights Wikisource items remain official-page links.
+- Search deduplication is exact ISBN/DOI only. Google Books, Europeana, academic providers, and dedicated Arabic digital libraries remain unimplemented.

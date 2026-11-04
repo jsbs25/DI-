@@ -245,3 +245,15 @@
 - `npm run lint`、`git diff --check` 与 `package.json` JSON 解析均通过。未运行完整 `npm run test:api`（其中包含仍待批准的会话读取路径）、构建或浏览器 UI 测试。
 - 没有修改业务路由或访问策略；未请求写入、身份、会话/消息、外部 URL、正式 `server_data.json`，未读取/改动/停止既有服务配置或日志。项目数据保护和其他现有功能保持不变。
 - 下一步：继续队列中另一个独立、可回滚且不涉及待审批区域的事项；如需同步，先确认远端是本地提交祖先，再仅经当前已授权 GitHub connector 普通快进推送并 fetch 核验。
+
+
+## 2026-11-04 WORLD LIBRARY 真实图书来源连接器阶段
+
+- 为保护现场，保留含既有未提交差异的 `/workspace/DI-review` 原样不动；在单独 `/workspace/DI-current` 从远端 `main` / `4f6fe82` 的干净基线实现和测试。未检出覆盖、清理或暂存旧工作区文件。
+- 盘点现有 `DigitalLibrary`、`Book` 类型、持久化书籍全文分离、书架/阅读进度/注释 API 和现有 Gutenberg、Internet Archive、中阿 Wikisource fetcher；没有删除既有功能或既有书目。
+- 完成 Phase 1 架构清单和 Phase 2 三个重点资源的真实适配器，并将中文/阿拉伯语 Wikisource 原有搜索保留为独立来源；同时完成 Phase 6 的初步统一聚合搜索、来源状态、精确标识去重与服务器端权利门控。阶段状态不等于整份项目简报完成。
+- Open Library 仅作书目发现和官方链接，rights=UNKNOWN、全文/下载/借阅显式 unsupported；Internet Archive 用官方 Advanced Search + Item Metadata，按题名/作者/标识字段检索，只有确认可复制的权利标记且有 OCR 文件才导入；Gutenberg 用官方 OPDS，导入时单书 OPDS 重验，保留 TXT/EPUB 正式入口并提示公共领域声明的美国法域范围。未知权利的 Wikisource 结果只链接来源页。
+- 新增连接器登记簿及 `test:library-connectors` / `test:library-connectors:live` 两套测试命令；设置按源可关闭的环境变量及可选联系邮箱，不需要新增密钥。书目搜索排序/高级筛选和完整资源管理后台尚未实现。
+- 本轮验证：`npm run lint` ✅；`npm run test:library-connectors` ✅；`npm run test:library-api` 20/20 ✅；`npm run test:library-connectors:live` ✅（Open Library、Internet Archive 限量搜索 + Gutenberg 官方搜索/单书 OPDS/隔离书目详情）；`npm run build` ✅。生产构建既有约 551.65 KB Three.js chunk 警告保留。实时测试不下载 EPUB；所有写操作使用临时目录。
+- 下一阶段按简报继续评估 Google Books / Europeana 官方 API 与凭据配置，再接 OpenAlex / Crossref / arXiv / PubMed Central / DOAB；对 Waqfeya、Shamela、Qatar Digital Library 先审条款与正式接口，不做未授权批量抓取。另需评估多语种筛选、rights 法域、授权展示和管理后台。
+- GitHub 同步待最终代码/文档复核后仅使用现有授权入口普通快进，不强推；当前没有执行账户或仓库设置变更。

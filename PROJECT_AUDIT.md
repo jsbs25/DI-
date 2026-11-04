@@ -107,3 +107,26 @@
   1. 将文件持久化存储 (`server_data.json`) 平滑演进至 PostgreSQL + PostGIS 真实关系型数据库。
   2. 将即时通讯从短轮询升级为双向权威 WebSocket 传输协议。
   3. 视频中心增加直传云对象存储 (S3 / GCS) 与 HLS 视频切片协议支持。
+
+
+## WORLD LIBRARY 全球数字图书连接器专项审计（2026-11-04）
+
+### 审计结论
+
+- 在不重做页面、不清理旧书目、不改变现有登录/书架/阅读记录与批注数据结构的前提下，建立 `server/integrations/libraries/` 统一适配器，接入 Open Library、Internet Archive、Project Gutenberg，并将既有中文与阿拉伯语 Wikisource 搜索保留为注册来源。
+- 增加只读连接器清单、跨源搜索和受服务端权利复核保护的入库流程。搜索可用不等于允许阅读或下载：Open Library 只提供发现元数据；Internet Archive 未确认权利或受限条目只链接官方页；Gutenberg 单书 OPDS 在服务器重新核验，EPUB 只记录官方 URL，不在导入时下载；维基文库页面未有逐页权利确认时不复制全文。
+- 搜索只按精确 ISBN/DOI 合并，书名相似不合并；各源独立开关、单源错误状态、60 秒缓存与每源串行节流，降低外部服务故障/超频对图书馆的影响。
+
+### 实际范围与明确边界
+
+本次完成实现简报的 Phase 1、Phase 2 核心（Open Library、Internet Archive、Project Gutenberg）以及 Phase 6 中的初步统一搜索、精确去重与权利门控；这**不代表**整个 WORLD LIBRARY 简报或最终验收已完成。Google Books、Europeana、OpenAlex、Crossref、arXiv、PubMed Central、DOAB 和 Waqfeya/Shamela/Qatar Digital Library 等尚未接入；作者/ISBN/DOI 专用搜索、语言/年份/分类筛选、完整借阅可用性、资源管理后台、跨设备书架、移动端实测和完整 AI 阅读引用也未在本轮完成。
+
+Internet Archive 只在记录具备被识别为公共领域/开放许可的权利依据且存在 OCR 文本文件时允许本地文本导入；借阅状态并未被推断，也不绕过 DRM、借阅或登录限制。Project Gutenberg 的公共领域状态按其美国来源声明展示，并提示阅读地区适用法律可能不同。Open Library 与 Wikisource 的权利状态不被猜测为“公版”。
+
+### 数据与执行边界
+
+最初发现 `/workspace/DI-review` 含既有未提交改动和未跟踪测试文件；该目录未被覆盖、清理或暂存。本轮在独立 `/workspace/DI-current` 克隆中基于当时远端 `main`（`4f6fe82`）实施。所有 HTTP/实时烟测使用临时 JSON 与随机本地端口；没有读取、改写、暂存或迁移正式 `server_data.json`，也没有触碰旧工作区已有文件。
+
+### 验证摘要
+
+`npm run lint` 通过；`npm run build` 成功（保留既有约 551.65 KB Three.js chunk 提示）；连接器离线回归通过；隔离图书馆 API 回归 20 项通过；可选实时烟测通过：Open Library 与 Internet Archive 各完成一次官方实时搜索，Gutenberg 完成官方搜索→单书 OPDS 复核→临时 EPUB 书目保存→本地详情读取，未下载 EPUB。完整项目全量测试套件及实体手机/浏览器 UI 验证未在本轮运行，不能据此声明无全站回归。

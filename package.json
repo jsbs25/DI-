@@ -15,6 +15,8 @@
     "test:ai-api": "tsx scripts/test_ai_api.ts",
     "test:knowledge-api": "tsx scripts/test_knowledge_api.ts",
     "test:library-api": "tsx scripts/test_library_api.ts",
+    "test:library-connectors": "tsx scripts/test_library_connectors.ts",
+    "test:library-connectors:live": "tsx scripts/test_library_connectors_live.ts",
     "test:crawler-api": "tsx scripts/test_crawler_api.ts",
     "test:creator-api": "tsx scripts/test_creator_api.ts",
     "test:catalog-api": "tsx scripts/test_catalogs_api.ts",

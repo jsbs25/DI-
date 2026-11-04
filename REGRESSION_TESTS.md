@@ -149,3 +149,14 @@
 - 全局 `prefers-reduced-motion: reduce` 仅在用户系统偏好开启时缩短动画和过渡并关闭平滑滚动，不删除控件或静态提示。
 - `npm run test:motion`：6 项静态 CSS 契约检查通过；`npm run lint`、`npm run build` 与 `git diff --check` 通过。单独检查生成文件，确认发布 CSS 含媒体查询及四项覆盖声明。
 - 本地 Chromium 计算样式尝试未在工具等待限时内完成，未记为浏览器实测通过；实体设备、屏幕阅读器及其他辅助技术仍待验证。未访问 API、正式数据或既有服务。
+
+
+## 2026-11-04 WORLD LIBRARY 外部来源连接器
+
+| 命令 | 覆盖范围 | 当前结果/注意事项 |
+|---|---|---|
+| `npm run test:library-connectors` | 全离线 provider 回归：Open Library 元数据权限边界，Gutenberg 官方 OPDS 查询、单书详情、命名空间语言/下载链接，Internet Archive 字段化 Advanced Search、权利与 OCR 门控，来源开关、限流缓存、精确 ISBN/DOI 去重；`fetch` 被 mock，未发起外网请求。 | 2026-11-04：通过。相似标题不会模糊合并；缺失权利默认不允许本地复制。 |
+| `npm run test:library-api` | 随机本地端口和临时 JSON 下的连接器目录、逐源开关、统一搜索路由校验、空/未知源处理、metadata-only 与已禁用来源入库拒绝，以及本地图书目录/详情既有契约。 | 2026-11-04：20 项通过、0 失败。仅对白名单本地路由发请求，未读写正式数据；测试禁用外部源。 |
+| `npm run test:library-connectors:live` | 需联网的有限实时烟测：Open Library 与 Internet Archive 各一次限量检索；Project Gutenberg 官方 OPDS 检索→单书 OPDS 核验→临时 EPUB 书目保存→本地详情读取。 | 2026-11-04：通过。临时文件自动清理；不下载 EPUB 正文、不访问真实用户书架、不修改正式数据库。外部 API 瞬时不可用时可失败，故不作为默认离线测试。 |
+
+上述测试未验证全站 UI、实体手机、完整学术/文化遗产资源矩阵或所有现有功能的端到端路径；其结果不可表述为 WORLD LIBRARY 总体验收完成。
