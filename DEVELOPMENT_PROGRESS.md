@@ -2,7 +2,7 @@
 
 更新时间：2026-11-04
 仓库：`https://github.com/jsbs25/DI-`
-分支：`main` / `origin/main`；本次续作基线 `aff6e42`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
+分支：`main` / `origin/main`；本次续作基线 `2f537a0`，更早阶段以 Git 提交历史为准；当前实现、验证与阻塞见下。
 
 ## 本轮已完成
 
@@ -39,12 +39,13 @@
 31. 单次隔离生产 Chromium Resource Timing 观测到首屏 7 个 JS 资源 encoded body 共 253,077 B、decoded 942,755 B，CSS 共 16,324/112,399 B；Three.js 单块为 136,323/551,656 B。其余 12 个页面块在首次导航后才下载，CrawlerDashboard 为 4,849/17,678 B。该值是模拟器单次本地资源快照，不计响应头，也不是网络带宽或实机性能测试。
 32. 没有继续延迟 Three.js：当前首页默认显示交互式 3D 地球，先占位或要求点击会改变行为；未经明确产品取舍，不改默认首屏或场景生命周期。
 33. 范围更正：浏览器会话的 App 启动自动 GET `/api/conversations`；切换到 Messenger 后，合成 `conv_global` 会使组件 GET `/api/conversations/conv_global/messages`。图书馆和网页浏览器挂载也 GET 了临时服务的书架、书签与保存文章列表。它们只访问临时 DataStore 的合成种子/空集合，没有正式用户数据或既有服务；这些读取并未作为权限测试或断言。
+34. 延续普通 API 回归覆盖：为本地 `/api/library/books` 增加哲学类别筛选与无匹配类别空集合两项契约断言。`npm run test:api` 现为 80 项通过、0 失败，`npm run lint` 通过；测试使用脚本创建并清理的临时 JSON，不访问外部服务、私信读取路径或正式数据。
 
 ## 验证结果
 
 - `npx tsx scripts/test_earth_one.ts`：44 项通过，0 项失败。
 - `npm run test:api`：67 项 HTTP 断言通过，0 项失败；测试服务器只写临时 JSON 文件，并关闭后台采集；覆盖身份/隐私、普通内容业务及文章/视频/知识图谱/社区/游戏房间/广告读取契约。
-- `npm run test:api` 上次续作结果：73 项 HTTP 断言通过，0 项失败；后续新增五项只读契约后，本轮最新结果为 78 项通过、0 失败。
+- `npm run test:api` 上次续作结果：73 项 HTTP 断言通过，0 项失败；后续新增五项只读契约后曾为 78 项，本次再增加两项图书类别过滤契约，最新结果为 80 项通过、0 失败。
 - 临时 Express 实例 HTTP smoke：用户列表、用户资料、全局搜索均未返回邮箱/内部 onboarding 字段；私密位置的纬经度为屏蔽值。
 - 正式 `server_data.json` 在 04:55 校验仍与本轮测试前一致；04:57 再查发现其于 04:56:30 变化。该时间早于静态渲染测试、晚于本轮服务停止；已有默认路径的 3000 服务且每小时采集开启，时间相符但未直接证明归属。未覆盖、回滚或提交该文件，不再笼统宣称整轮哈希不变。
 - `npm run test:globe`：六语言共 30 项通过；只验证静态内容、Crawler 菜单标签翻译键及网格/逻辑边框/波形行的结构契约。
@@ -56,7 +57,8 @@
 - 1274×649 桌面生产预览已确认抽屉净距和地球选择/返回流程；favicon 已修复，所测路径控制台无错误。其余模块、首屏实际资源统计、窄屏交互与 RTL 仍未验证。
 - 隔离 Chromium 生产构建实测：首页 1274×649 的中文指标卡 x=220、宽 328px，三个单元各宽 90px且互不重叠；阿拉伯语 RTL 卡片 x=908，列顺序按 RTL 反转，宽度仍无溢出。390×844 中文指标卡宽 350px、三列各 100px，页面可纵向滚动且横向宽度为 390px。地球→宇宙→地球交互通过；API 响应为空的内存模拟，任何非 GET 均被拒绝。
 - 本轮 `npm run lint`、`npm run test:globe`（30 项）、`npm run test:universe`（9 项）以及独立目录生产构建均通过；构建警告仍提示 Three.js 551.65 KB。
-- 本轮 `npm run test:api`（78 项）、`npx tsx scripts/test_earth_one.ts`（44 项）、`npm run lint`、`npm run test:globe`（30 项）、`npm run test:universe`（9 项）及独立目录生产构建均通过。18 个隔离 Chromium 视口/模块样本均无页面宽度溢出，page errors=0，非 GET=0；本次运行阻断 43 个外部资源请求，因此出现的网络失败提示是预期边界。
+- 前序隔离 Chromium 续作的 `npm run test:api`（78 项）、`npx tsx scripts/test_earth_one.ts`（44 项）、`npm run lint`、`npm run test:globe`（30 项）、`npm run test:universe`（9 项）及独立目录生产构建均通过。18 个视口/模块样本均无页面宽度溢出，page errors=0，非 GET=0；43 个外部资源请求按设计阻断。
+- 本次新增图书类别契约后 `npm run test:api`（80 项）与 `npm run lint` 均通过；临时 HTTP 测试未访问外部服务、私信读取路径或正式数据。
 
 ## 当前未解决/阻塞
 

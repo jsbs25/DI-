@@ -190,6 +190,10 @@ async function main() {
     const books = await request('/api/library/books?search=Plato');
     const republic = books.body.books.find((book: any) => book.id === 'book_republic');
     check(books.status === 200 && !!republic, 'Library search returns the seeded Plato book');
+    const philosophyBooks = await request('/api/library/books?category=philosophy');
+    check(philosophyBooks.status === 200 && philosophyBooks.body.books.some((book: any) => book.id === 'book_republic') && philosophyBooks.body.books.every((book: any) => book.category === 'philosophy'), 'Library category filter returns only matching books');
+    const unknownCategoryBooks = await request('/api/library/books?category=not-a-real-category');
+    check(unknownCategoryBooks.status === 200 && Array.isArray(unknownCategoryBooks.body.books) && unknownCategoryBooks.body.books.length === 0, 'Library category filter returns an empty collection when nothing matches');
     const bookDetails = await request('/api/library/books/book_republic');
     check(bookDetails.status === 200 && bookDetails.body.book.chapters.length > 0, 'Book detail includes readable chapter content');
     check(Array.isArray(bookDetails.body.annotations), 'Book detail returns an annotations collection');
