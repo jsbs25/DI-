@@ -125,6 +125,12 @@ async function main() {
       bookIds.has('book_republic') && bookIds.has('book_daodejing'),
       'Seeded philosophy titles remain present in the local catalog'
     );
+    const repeatedCatalogResponse = await get('/api/library/books');
+    check(
+      repeatedCatalogResponse.status === catalog?.status &&
+      JSON.stringify(repeatedCatalogResponse.body) === JSON.stringify(catalog?.body),
+      'Repeated local catalog GET returns an identical status and JSON response'
+    );
 
     const philosophy = await get('/api/library/books?category=philosophy');
     check(
@@ -165,6 +171,12 @@ async function main() {
         typeof chapter.id === 'string' && typeof chapter.title === 'string' && typeof chapter.content === 'string'
       ),
       'Every returned book chapter includes its identifier, title, and text fields'
+    );
+    const repeatedDetailResponse = await get('/api/library/books/book_republic');
+    check(
+      repeatedDetailResponse.status === detail.status &&
+      JSON.stringify(repeatedDetailResponse.body) === JSON.stringify(detail.body),
+      'Repeated known-book detail GET returns an identical status and JSON response'
     );
 
     const missingBook = await get('/api/library/books/not-a-real-book');
