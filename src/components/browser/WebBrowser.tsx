@@ -447,6 +447,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [isTranslating, setIsTranslating] = useState(false);
   const [browserEngineState, setBrowserEngineState] = useState<EarthOneBrowserState | null>(null);
   const [browserEngineError, setBrowserEngineError] = useState<string | null>(null);
+  const [canRestoreClosedTab, setCanRestoreClosedTab] = useState(false);
   const [browserPrintPending, setBrowserPrintPending] = useState(false);
   const [browserPrintMessage, setBrowserPrintMessage] = useState<string | null>(null);
   const [browserSessionSettingsReady, setBrowserSessionSettingsReady] = useState(!browserEngine?.getSessionState);
@@ -616,8 +617,30 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   }, [browserEngine]);
 
   useEffect(() => {
+    if (!browserEngine?.getCanRestoreClosedTab) return;
+    let cancelled = false;
+    const unsubscribe = browserEngine.onRestoreAvailability?.(available => {
+      if (!cancelled) setCanRestoreClosedTab(Boolean(available));
+    });
+    void browserEngine.getCanRestoreClosedTab().then(available => {
+      if (!cancelled) setCanRestoreClosedTab(Boolean(available));
+    }).catch(() => {
+      if (!cancelled) setCanRestoreClosedTab(false);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [browserEngine]);
+
+  useEffect(() => {
     if (!browserEngine) return;
     return browserEngine.onState(state => {
+      if (state.active && state.tabId !== activeTabIdRef.current) {
+        setActiveTabId(state.tabId);
+        setSearchResults([]);
+        setBrowserEngineError(null);
+      }
       if (state.active || state.tabId === activeTabId) {
         setBrowserEngineState(state);
         setIsLoading(state.loading);
@@ -937,6 +960,43 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     recordBrowserVisit(newId, newTab.url, newTab.title);
   };
 
+  const handleReorderTabs = (tabIds: string[]) => {
+    const currentTabs = tabsRef.current;
+    if (tabIds.length !== currentTabs.length || new Set(tabIds).size !== currentTabs.length) return;
+    const currentById = new Map(currentTabs.map(tab => [tab.id, tab]));
+    if (tabIds.some(id => !currentById.has(id))) return;
+
+    if (browserEngine?.reorderTabs) {
+      void browserEngine.reorderTabs(tabIds).then(result => {
+        if (!result.success) {
+          setBrowserEngineError(result.error || '无法调整浏览器标签顺序。');
+          return;
+        }
+        setTabs(previous => {
+          if (previous.length !== tabIds.length || tabIds.some(id => !previous.some(tab => tab.id === id))) return previous;
+          const byId = new Map(previous.map(tab => [tab.id, tab]));
+          return tabIds.map(id => byId.get(id)!);
+        });
+      }).catch(() => setBrowserEngineError('无法调整浏览器标签顺序。'));
+      return;
+    }
+
+    setTabs(tabIds.map(id => currentById.get(id)!));
+  };
+
+  const handleRestoreClosedTab = () => {
+    if (!browserEngine?.restoreLastClosedTab || !canRestoreClosedTab) return;
+    void browserEngine.restoreLastClosedTab().then(result => {
+      if (!result.success) {
+        setCanRestoreClosedTab(false);
+        setBrowserEngineError(result.error || '无法恢复最近关闭的标签页。');
+      }
+    }).catch(() => {
+      setCanRestoreClosedTab(false);
+      setBrowserEngineError('无法恢复最近关闭的标签页。');
+    });
+  };
+
   const goBack = () => {
     if (browserEngine) {
       void browserEngine.goBack(activeTabId);
@@ -998,9 +1058,14 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
   const handleCloseTab = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (tabs.length === 1) return;
-    void browserEngine?.closeTab(id);
-    const remaining = tabs.filter(t => t.id !== id);
+    if (tabsRef.current.length === 1) return;
+    if (browserEngine) {
+      void browserEngine.closeTab(id).then(result => {
+        if (!result.success) setBrowserEngineError('无法关闭该浏览器标签。');
+      }).catch(() => setBrowserEngineError('无法关闭该浏览器标签。'));
+      return;
+    }
+    const remaining = tabsRef.current.filter(t => t.id !== id);
     setTabs(remaining);
     if (activeTabId === id) {
       setActiveTabId(remaining[0].id);
@@ -1227,6 +1292,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         onSelectTab={setActiveTabId}
         onCloseTab={handleCloseTab}
         onNewTab={handleNewTab}
+        canRestoreClosedTab={Boolean(browserEngine && canRestoreClosedTab)}
+        onRestoreClosedTab={handleRestoreClosedTab}
+        onReorderTabs={handleReorderTabs}
       >
 
       {/* 2. Omnibox Toolbar */}

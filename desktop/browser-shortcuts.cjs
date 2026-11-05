@@ -20,6 +20,7 @@ function getBrowserShortcut(input) {
   if (!hasShift && keys.some(value => ['0', 'numpad0', 'num0', 'kp_0'].includes(value))) {
     return { action: 'zoom', direction: 'reset' };
   }
+  if (hasShift && key === 't') return { action: 'restore-closed-tab' };
   if (hasShift) return null;
   if (key === 't') return { action: 'new-tab' };
   if (key === 'w') return { action: 'close-tab' };

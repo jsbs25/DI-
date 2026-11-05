@@ -5,6 +5,8 @@ const { getBrowserShortcut } = require('./browser-shortcuts.cjs');
 
 const shortcut = (keyCode, modifiers, extra = {}) => getBrowserShortcut({ type: 'keyDown', keyCode, modifiers, ...extra });
 assert.deepEqual(shortcut('T', ['control']), { action: 'new-tab' });
+assert.deepEqual(shortcut('T', ['control', 'shift']), { action: 'restore-closed-tab' });
+assert.deepEqual(shortcut('t', ['meta', 'shift']), { action: 'restore-closed-tab' });
 assert.deepEqual(shortcut('W', ['meta']), { action: 'close-tab' });
 assert.deepEqual(shortcut('TAB', ['control']), { action: 'cycle-tab', direction: 1 });
 assert.deepEqual(shortcut('Tab', ['meta', 'shift']), { action: 'cycle-tab', direction: -1 });
@@ -34,4 +36,4 @@ for (const invalid of [
   assert.equal(getBrowserShortcut(invalid), null, `unexpected shortcut: ${JSON.stringify(invalid)}`);
 }
 
-console.log('BROWSER_SHORTCUTS_TEST_PASS: Ctrl/Cmd tab navigation, zoom plus/minus/reset, preserved L/F, and modifier/key filtering verified.');
+console.log('BROWSER_SHORTCUTS_TEST_PASS: Ctrl/Cmd tab navigation and restore-closed-tab, zoom plus/minus/reset, preserved L/F, and modifier/key filtering verified.');

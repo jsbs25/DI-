@@ -149,10 +149,14 @@ declare global {
     printToPdf(): Promise<EarthOneBrowserPrintResult>;
     setActive(active: boolean): Promise<void>;
     setBounds(bounds: EarthOneBrowserBounds | null): Promise<void>;
+    getCanRestoreClosedTab(): Promise<boolean>;
+    restoreLastClosedTab(): Promise<{ success: boolean; restored?: boolean; tabId?: string; url?: string; error?: string }>;
+    reorderTabs(tabIds: string[]): Promise<{ success: boolean; tabIds?: string[]; error?: string }>;
     selectTab(tabId: string, url: string): Promise<{ success: boolean; error?: string }>;
-    closeTab(tabId: string): Promise<void>;
+    closeTab(tabId: string): Promise<{ success: boolean; closed: boolean; replaced?: boolean; activeTabId?: string | null }>;
     onNewTab(listener: (tab: EarthOneBrowserNewTab) => void): () => void;
     onTabClosed(listener: (tab: EarthOneBrowserTabClosed) => void): () => void;
+    onRestoreAvailability(listener: (available: boolean) => void): () => void;
     navigate(tabId: string, url: string): Promise<{ success: boolean; url?: string; error?: string }>;
     goBack(tabId: string): Promise<void>;
     goForward(tabId: string): Promise<void>;

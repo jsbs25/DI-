@@ -1,5 +1,5 @@
-import type { MouseEvent, ReactNode } from 'react';
-import { Globe, Plus, X } from 'lucide-react';
+import type { DragEvent, MouseEvent, ReactNode } from 'react';
+import { Globe, Plus, RotateCcw, X } from 'lucide-react';
 
 export interface BrowserFrameTab {
   id: string;
@@ -13,6 +13,9 @@ interface BrowserFrameProps {
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string, event: MouseEvent<HTMLButtonElement>) => void;
   onNewTab: () => void;
+  canRestoreClosedTab: boolean;
+  onRestoreClosedTab: () => void;
+  onReorderTabs: (tabIds: string[]) => void;
   children: ReactNode;
 }
 
@@ -27,6 +30,9 @@ export function BrowserFrame({
   onSelectTab,
   onCloseTab,
   onNewTab,
+  canRestoreClosedTab,
+  onRestoreClosedTab,
+  onReorderTabs,
   children
 }: BrowserFrameProps) {
   return (
@@ -48,6 +54,27 @@ export function BrowserFrame({
               <div
                 key={tab.id}
                 role="presentation"
+                draggable
+                data-browser-tab-id={tab.id}
+                onDragStart={(event: DragEvent<HTMLDivElement>) => {
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', tab.id);
+                }}
+                onDragOver={(event: DragEvent<HTMLDivElement>) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(event: DragEvent<HTMLDivElement>) => {
+                  event.preventDefault();
+                  const draggedId = event.dataTransfer.getData('text/plain');
+                  const fromIndex = tabs.findIndex(item => item.id === draggedId);
+                  const toIndex = tabs.findIndex(item => item.id === tab.id);
+                  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+                  const reordered = [...tabs];
+                  const [dragged] = reordered.splice(fromIndex, 1);
+                  reordered.splice(toIndex, 0, dragged);
+                  onReorderTabs(reordered.map(item => item.id));
+                }}
                 className={`group flex min-w-[118px] max-w-[220px] shrink-0 items-center rounded-t-xl border border-b-0 px-2 py-2 transition-colors sm:min-w-[145px] sm:px-3 ${
                   selected
                     ? 'border-white/[0.09] bg-[#0b1118] text-slate-100'
@@ -80,6 +107,18 @@ export function BrowserFrame({
             );
           })}
         </div>
+
+        <button
+          type="button"
+          onClick={onRestoreClosedTab}
+          disabled={!canRestoreClosedTab}
+          aria-label="恢复最近关闭的标签页"
+          aria-keyshortcuts="Control+Shift+T Meta+Shift+T"
+          title="恢复最近关闭的标签页（Ctrl/Cmd+Shift+T）"
+          className="mb-1 shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.07] hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70 disabled:cursor-not-allowed disabled:opacity-30"
+        >
+          <RotateCcw className="h-4 w-4" />
+        </button>
 
         <button
           type="button"

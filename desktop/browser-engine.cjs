@@ -68,6 +68,7 @@ function createBrowserEngine({
   onContextMenuLink = () => {},
   onNewTab = () => {},
   onTabClosed = () => {},
+  onRestoreAvailability = () => {},
   defaultNewTabUrl = DEFAULT_BROWSER_NEW_TAB_URL,
   appOrigin = null,
   downloadStorePath = null,
@@ -76,6 +77,7 @@ function createBrowserEngine({
   const safeDefaultNewTabUrl = normalizeBrowserUrl(defaultNewTabUrl);
   const tabs = new Map();
   let activeTabId = null;
+  let lastClosedTab = null;
   let browserActive = false;
   let viewportBounds = null;
   let disposed = false;
@@ -204,6 +206,10 @@ function createBrowserEngine({
         closeTab(tabId);
         return;
       }
+      if (shortcut.action === 'restore-closed-tab') {
+        void restoreLastClosedTab();
+        return;
+      }
       if (shortcut.action === 'cycle-tab') {
         const tabIds = [...tabs.keys()];
         const currentIndex = tabIds.indexOf(activeTabId);
@@ -279,6 +285,14 @@ function createBrowserEngine({
 
   async function selectTab(tabId, initialUrl) {
     if (!validTabId(tabId)) return { success: false, error: '浏览器标签 ID 无效。' };
+    let safeInitialUrl = null;
+    if (initialUrl !== undefined) {
+      try {
+        safeInitialUrl = normalizeBrowserUrl(initialUrl);
+      } catch (error) {
+        return { success: false, error: error.message || '网页地址无效。' };
+      }
+    }
     if (activeTabId && activeTabId !== tabId) {
       const previousEntry = tabs.get(activeTabId);
       if (previousEntry) {
@@ -291,15 +305,14 @@ function createBrowserEngine({
     if (!entry) entry = createTab(tabId);
     activeTabId = tabId;
 
-    if (isNew && initialUrl) {
+    if (isNew && safeInitialUrl) {
       try {
-        const url = normalizeBrowserUrl(initialUrl);
-        entry.lastUrl = url;
-        await entry.view.webContents.loadURL(url);
+        entry.lastUrl = safeInitialUrl;
+        await entry.view.webContents.loadURL(safeInitialUrl);
       } catch (error) {
         return { success: false, error: error.message || '网页无法打开。' };
       }
-    } else if (!entry.view.webContents.getURL() && initialUrl) {
+    } else if (!entry.view.webContents.getURL() && safeInitialUrl) {
       if (entry.initialLoadPromise) {
         try {
           await entry.initialLoadPromise;
@@ -308,9 +321,8 @@ function createBrowserEngine({
         }
       } else {
         try {
-          const url = normalizeBrowserUrl(initialUrl);
-          entry.lastUrl = url;
-          await entry.view.webContents.loadURL(url);
+          entry.lastUrl = safeInitialUrl;
+          await entry.view.webContents.loadURL(safeInitialUrl);
         } catch (error) {
           return { success: false, error: error.message || '网页无法打开。' };
         }
@@ -324,8 +336,13 @@ function createBrowserEngine({
     return { success: true };
   }
 
-  async function openNewTab(target) {
-    const url = normalizePopupTarget(target, appOrigin);
+  async function openNewTab(target, allowAppOrigin = false) {
+    let url = null;
+    if (allowAppOrigin) {
+      try { url = normalizeBrowserUrl(target); } catch {}
+    } else {
+      url = normalizePopupTarget(target, appOrigin);
+    }
     if (!url || disposed) return { success: false, error: '新标签页地址无效。' };
 
     if (activeTabId) {
@@ -453,6 +470,9 @@ function createBrowserEngine({
       void navigate(tabId, safeDefaultNewTabUrl);
       return { success: true, closed: false, replaced: true, activeTabId: tabId };
     }
+    const closedState = snapshot(tabId, entry);
+    const restorableUrl = sanitizeRestoredUrl(closedState.url);
+    lastClosedTab = restorableUrl ? { url: restorableUrl } : null;
     const wasActive = activeTabId === tabId;
     stopFindForEntry(tabId, entry);
     onPermissionContextChange(entry.view.webContents);
@@ -479,7 +499,50 @@ function createBrowserEngine({
     } catch {
       // UI synchronization is best effort; closing the native tab is already complete.
     }
+    try {
+      onRestoreAvailability(Boolean(lastClosedTab));
+    } catch {
+      // The in-memory restore state remains authoritative if UI notification fails.
+    }
     return { success: true, closed: true, activeTabId };
+  }
+
+  function reorderTabs(tabIds) {
+    if (!Array.isArray(tabIds) || tabIds.length !== tabs.size) {
+      return { success: false, error: '浏览器标签顺序无效。' };
+    }
+    const seen = new Set();
+    for (const tabId of tabIds) {
+      if (!validTabId(tabId) || !tabs.has(tabId) || seen.has(tabId)) {
+        return { success: false, error: '浏览器标签顺序包含未知或重复标签。' };
+      }
+      seen.add(tabId);
+    }
+    const orderedEntries = tabIds.map(tabId => [tabId, tabs.get(tabId)]);
+    tabs.clear();
+    for (const [tabId, entry] of orderedEntries) tabs.set(tabId, entry);
+    return { success: true, tabIds: [...tabs.keys()] };
+  }
+
+  async function restoreLastClosedTab() {
+    const candidate = lastClosedTab;
+    const url = sanitizeRestoredUrl(candidate?.url);
+    if (!candidate || !url) {
+      lastClosedTab = null;
+      try { onRestoreAvailability(false); } catch {}
+      return { success: false, restored: false, error: '没有可恢复的已关闭标签页。' };
+    }
+
+    // Consume the URL-only snapshot before opening, so duplicate shortcut/IPC calls
+    // cannot create multiple tabs or supply their own tab IDs or destinations.
+    lastClosedTab = null;
+    try { onRestoreAvailability(false); } catch {}
+    const result = await openNewTab(url, true);
+    return { ...result, restored: Boolean(result.success) };
+  }
+
+  function canRestoreClosedTab() {
+    return Boolean(lastClosedTab && sanitizeRestoredUrl(lastClosedTab.url));
   }
 
   function setActive(active) {
@@ -683,6 +746,7 @@ function createBrowserEngine({
     }
     activeTabId = null;
     viewportBounds = null;
+    lastClosedTab = null;
   }
 
   return {
@@ -692,6 +756,9 @@ function createBrowserEngine({
     openNewTab,
     restoreTabs,
     closeTab,
+    reorderTabs,
+    restoreLastClosedTab,
+    canRestoreClosedTab,
     navigate,
     goBack: tabId => historyMethod(tabId, 'back'),
     goForward: tabId => historyMethod(tabId, 'forward'),

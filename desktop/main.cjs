@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
@@ -377,6 +378,18 @@ function registerBrowserIpc() {
       browserEngine.setBounds(bounds);
       browserPermissionManager?.revalidatePending();
     },
+    'browser:get-can-restore-closed-tab': () => browserEngine.canRestoreClosedTab(),
+    'browser:restore-last-closed-tab': async () => {
+      const result = await browserEngine.restoreLastClosedTab();
+      browserPermissionManager?.revalidatePending();
+      if (result.success) scheduleBrowserSessionPersist();
+      return result;
+    },
+    'browser:reorder-tabs': (_event, tabIds) => {
+      const result = browserEngine.reorderTabs(tabIds);
+      if (result.success) scheduleBrowserSessionPersist();
+      return result;
+    },
     'browser:select-tab': (_event, tabId, url) => {
       const result = browserEngine.selectTab(tabId, url);
       browserPermissionManager?.revalidatePending();
@@ -384,9 +397,10 @@ function registerBrowserIpc() {
       return result;
     },
     'browser:close-tab': (_event, tabId) => {
-      browserEngine.closeTab(tabId);
+      const result = browserEngine.closeTab(tabId);
       browserPermissionManager?.revalidatePending();
       scheduleBrowserSessionPersist();
+      return result;
     },
     'browser:navigate': (_event, tabId, url) => {
       const result = browserEngine.navigate(tabId, url);
@@ -986,6 +1000,15 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
         }
         throw new Error(`快捷键关闭后 EARTH ONE 标签栏未同步到 ${count} 个标签。`);
       };
+      const waitForUiActiveTab = async tabId => {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const selectedId = await appContents.executeJavaScript(`Array.from(document.querySelectorAll('[data-browser-tab-id]')).find(element => element.querySelector('[role="tab"]')?.getAttribute('aria-selected') === 'true')?.getAttribute('data-browser-tab-id') || ''`);
+          if (selectedId === tabId) return;
+          await delay(40);
+        }
+        throw new Error(`EARTH ONE 标签栏没有同步选中 Chromium 活动标签 ${tabId}。`);
+      };
       const waitForActiveTab = async tabId => {
         const deadline = Date.now() + 3000;
         while (Date.now() < deadline) {
@@ -1008,6 +1031,90 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
         appContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers: ['control'] });
         appContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers: ['control'] });
         await delay(80);
+      };
+      const waitForTabOrder = async expected => {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const engineOrder = browserEngine.getTabIdsForTesting();
+          const uiOrder = await appContents.executeJavaScript(`Array.from(document.querySelectorAll('[data-browser-tab-id]')).map(element => element.getAttribute('data-browser-tab-id'))`);
+          if (JSON.stringify(engineOrder) === JSON.stringify(expected) && JSON.stringify(uiOrder) === JSON.stringify(expected)) return;
+          await delay(40);
+        }
+        throw new Error(`Browser 可见标签顺序与主进程不一致；期待 ${JSON.stringify(expected)}，主进程 ${JSON.stringify(browserEngine.getTabIdsForTesting())}。`);
+      };
+      const dragTab = async (sourceId, targetId) => {
+        const beforeOrder = browserEngine.getTabIdsForTesting();
+        const fromIndex = beforeOrder.indexOf(sourceId);
+        const toIndex = beforeOrder.indexOf(targetId);
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) throw new Error('真实 Electron 拖拽标签 ID 无效。');
+        const expectedOrder = [...beforeOrder];
+        const [movedTab] = expectedOrder.splice(fromIndex, 1);
+        expectedOrder.splice(toIndex, 0, movedTab);
+        const points = await appContents.executeJavaScript(`(() => {
+          const pointFor = id => {
+            const element = Array.from(document.querySelectorAll('[data-browser-tab-id]')).find(item => item.getAttribute('data-browser-tab-id') === id);
+            if (!element) return null;
+            const rect = element.getBoundingClientRect();
+            return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+          };
+          return { source: pointFor(${JSON.stringify(sourceId)}), target: pointFor(${JSON.stringify(targetId)}) };
+        })()`);
+        if (!points?.source || !points?.target) throw new Error('无法定位真实 Electron 标签栏拖拽目标。');
+        mainWindow.webContents.focus();
+        if (process.env.DISPLAY) {
+          const contentBounds = mainWindow.getContentBounds();
+          const sx = contentBounds.x + points.source.x;
+          const sy = contentBounds.y + points.source.y;
+          const tx = contentBounds.x + points.target.x;
+          const ty = contentBounds.y + points.target.y;
+          spawnSync('xdotool', [
+            'mousemove', '--sync', String(sx), String(sy),
+            'mousedown', '1', 'sleep', '0.2',
+            'mousemove', '--sync', String(Math.round((sx + tx) / 2)), String(Math.round((sy + ty) / 2)),
+            'mousemove', '--sync', String(tx), String(ty), 'sleep', '0.2', 'mouseup', '1'
+          ], { encoding: 'utf8', timeout: 5000 });
+        } else {
+          appContents.sendInputEvent({ type: 'mouseMove', x: points.source.x, y: points.source.y });
+          appContents.sendInputEvent({ type: 'mouseDown', x: points.source.x, y: points.source.y, button: 'left', clickCount: 1 });
+          for (let step = 1; step <= 8; step += 1) {
+            const x = Math.round(points.source.x + (points.target.x - points.source.x) * step / 8);
+            const y = Math.round(points.source.y + (points.target.y - points.source.y) * step / 8);
+            appContents.sendInputEvent({ type: 'mouseMove', x, y, movementX: x - points.source.x, movementY: y - points.source.y });
+            await delay(25);
+          }
+          await delay(120);
+          appContents.sendInputEvent({ type: 'mouseUp', x: points.target.x, y: points.target.y, button: 'left', clickCount: 1 });
+        }
+        await delay(300);
+        let rendererEventFallback = false;
+        if (JSON.stringify(browserEngine.getTabIdsForTesting()) !== JSON.stringify(expectedOrder)) {
+          rendererEventFallback = true;
+          await appContents.executeJavaScript(`(() => {
+            const items = Array.from(document.querySelectorAll('[data-browser-tab-id]'));
+            const source = items.find(item => item.getAttribute('data-browser-tab-id') === ${JSON.stringify(sourceId)});
+            const target = items.find(item => item.getAttribute('data-browser-tab-id') === ${JSON.stringify(targetId)});
+            if (!source || !target) return false;
+            const dataTransfer = new DataTransfer();
+            const dispatch = (element, type) => element.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }));
+            dispatch(source, 'dragstart');
+            dispatch(target, 'dragenter');
+            dispatch(target, 'dragover');
+            dispatch(target, 'drop');
+            dispatch(source, 'dragend');
+            return true;
+          })()`);
+        }
+        await waitForTabOrder(expectedOrder);
+        return rendererEventFallback ? 'electron-renderer-drag-event' : (process.env.DISPLAY ? 'xdotool-system-mouse' : 'electron-sendInputEvent');
+      };
+      const waitForRestoreButton = async enabled => {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const disabled = await appContents.executeJavaScript(`Boolean(document.querySelector('button[aria-label="恢复最近关闭的标签页"]')?.disabled)`);
+          if (disabled === !enabled) return;
+          await delay(40);
+        }
+        throw new Error(`恢复最近关闭标签按钮状态错误，期待 ${enabled ? '可用' : '禁用'}。`);
       };
 
       await waitForPage('/shortcuts', 'Browser Keyboard Fixture');
@@ -1054,6 +1161,100 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       if (activeId === testTabId) throw new Error('Ctrl+T 没有选中新标签。');
       await waitForTabPath(activeId, '/shortcuts-default', 'Safe Default Fixture');
       await waitForActiveTab(activeId);
+      await sendBrowserShortcut('T');
+      await waitForTabCount(3);
+      await waitForUiTabCount(3);
+      const thirdTabId = browserEngine.getSessionSnapshot().activeTabId;
+      await waitForUiActiveTab(thirdTabId);
+      await waitForTabPath(thirdTabId, '/shortcuts-default', 'Safe Default Fixture');
+      const originalThreeTabOrder = browserEngine.getTabIdsForTesting();
+      const firstDragPath = await dragTab(originalThreeTabOrder[0], originalThreeTabOrder[2]);
+      const draggedOrder = [originalThreeTabOrder[1], originalThreeTabOrder[2], originalThreeTabOrder[0]];
+      await waitForTabOrder(draggedOrder);
+      if (browserEngine.getSessionSnapshot().activeTabId !== thirdTabId) throw new Error('拖拽排序不得改变活动标签或其 Chromium 焦点。');
+      const forgedReorder = await appContents.executeJavaScript(`window.earthOneBrowser.reorderTabs(["tab_forged"])`);
+      if (forgedReorder.success !== false) throw new Error('主进程必须拒绝包含未签发标签 ID 的重排请求。');
+      const secondDragPath = await dragTab(originalThreeTabOrder[0], originalThreeTabOrder[1]);
+      await waitForTabOrder(originalThreeTabOrder);
+      console.log(`BROWSER_TAB_DRAG_INPUT: ${firstDragPath}, ${secondDragPath}`);
+      const activeAfterDrag = browserEngine.getSessionSnapshot().activeTabId;
+      browserEngine.getWebContentsForTesting(activeAfterDrag)?.focus();
+      await waitForActiveTab(activeAfterDrag);
+
+      await sendBrowserShortcut('3');
+      await waitForActiveTab(thirdTabId);
+      const safeRestoreUrl = `${new URL(testUrl).origin}/shortcuts-default?topic=space#private-fragment`;
+      await submitAddress(safeRestoreUrl);
+      await waitForTabPath(thirdTabId, '/shortcuts-default', 'Safe Default Fixture');
+      await sendBrowserShortcut('W');
+      await waitForTabCount(2);
+      await waitForUiTabCount(2);
+      await waitForActiveTab(browserEngine.getSessionSnapshot().activeTabId);
+      await waitForRestoreButton(true);
+      await sendBrowserShortcut('T', ['control', 'shift']);
+      await waitForTabCount(3);
+      await waitForUiTabCount(3);
+      const keyboardRestoredId = browserEngine.getSessionSnapshot().activeTabId;
+      if (!keyboardRestoredId || originalThreeTabOrder.includes(keyboardRestoredId)) throw new Error('恢复标签必须使用新的主进程标签身份。');
+      await waitForTabPath(keyboardRestoredId, '/shortcuts-default', 'Safe Default Fixture');
+      const keyboardRestoredUrl = new URL(browserEngine.getWebContentsForTesting(keyboardRestoredId).getURL());
+      if (keyboardRestoredUrl.searchParams.get('topic') !== 'space' || keyboardRestoredUrl.hash) {
+        throw new Error(`恢复标签必须保留普通查询并移除片段：${keyboardRestoredUrl.href}`);
+      }
+      await waitForRestoreButton(false);
+      await sendBrowserShortcut('T', ['control', 'shift']);
+      await delay(120);
+      if (browserEngine.getTabIdsForTesting().length !== 3) throw new Error('一次性关闭快照不得通过连续恢复快捷键重复创建标签。');
+
+      await sendBrowserShortcut('W');
+      await waitForTabCount(2);
+      await waitForUiTabCount(2);
+      await waitForRestoreButton(true);
+      const restoreButtonClicked = await appContents.executeJavaScript(`(() => {
+        const button = document.querySelector('button[aria-label="恢复最近关闭的标签页"]');
+        if (!button || button.disabled) return false;
+        button.click();
+        return true;
+      })()`);
+      if (!restoreButtonClicked) throw new Error('显式恢复关闭标签按钮没有可用。');
+      await waitForTabCount(3);
+      await waitForUiTabCount(3);
+      const toolbarRestoredId = browserEngine.getSessionSnapshot().activeTabId;
+      await waitForUiActiveTab(toolbarRestoredId);
+      await waitForTabPath(toolbarRestoredId, '/shortcuts-default', 'Safe Default Fixture');
+      await waitForRestoreButton(false);
+
+      const sensitiveNavigation = await browserEngine.navigate(toolbarRestoredId, `${new URL(testUrl).origin}/shortcuts-default?access_token=synthetic-secret`);
+      if (!sensitiveNavigation.success) throw new Error(`敏感 URL 合成页导航失败：${sensitiveNavigation.error || '未知错误'}`);
+      await waitForTabPath(toolbarRestoredId, '/shortcuts-default', 'Safe Default Fixture');
+      const sensitiveClose = browserEngine.closeTab(toolbarRestoredId);
+      if (!sensitiveClose.success || !sensitiveClose.closed) throw new Error('主进程未能安全关闭含敏感查询的合成标签。');
+      await waitForTabCount(2);
+      await waitForUiTabCount(2);
+      const safeAfterSensitiveClose = browserEngine.getSessionSnapshot();
+      if (browserEngine.canRestoreClosedTab() || safeAfterSensitiveClose.tabs.some(tab => tab.url.includes('synthetic-secret'))) {
+        throw new Error('含 access_token 的 URL 不得进入标签恢复快照或会话 URL。');
+      }
+      await waitForRestoreButton(false);
+      await waitForActiveTab(browserEngine.getSessionSnapshot().activeTabId);
+      await sendBrowserShortcut('T', ['control', 'shift']);
+      await delay(120);
+      if (browserEngine.getTabIdsForTesting().length !== 2) throw new Error('敏感 URL 关闭后不得被恢复快捷键重新打开。');
+
+      const forgedClose = await appContents.executeJavaScript(`window.earthOneBrowser.closeTab("tab_forged")`);
+      if (forgedClose.success !== false || browserEngine.getTabIdsForTesting().length !== 2) {
+        throw new Error('主进程必须拒绝关闭不属于当前标签集合的伪造 ID。');
+      }
+      const remoteAttempt = await browserEngine.getWebContentsForTesting('tab_1').executeJavaScript(`({
+        bridge: typeof window.earthOneBrowser,
+        require: typeof require,
+        call: window.earthOneBrowser?.closeTab('tab_1') ?? 'unavailable'
+      })`);
+      if (remoteAttempt.bridge !== 'undefined' || remoteAttempt.require !== 'undefined' || remoteAttempt.call !== 'unavailable' ||
+          browserEngine.getTabIdsForTesting().length !== 2) {
+        throw new Error(`远程合成页面不应能经 IPC 选择或关闭任意标签：${JSON.stringify(remoteAttempt)}`);
+      }
+
       while (browserEngine.getTabIdsForTesting().length < 9) {
         const targetCount = browserEngine.getTabIdsForTesting().length + 1;
         await sendBrowserShortcut('T');
@@ -1138,7 +1339,7 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       await sendBrowserShortcut('W');
       await waitForTabCount(1);
       await waitForTabPath(lastTabId, '/shortcuts-default', 'Safe Default Fixture');
-      console.log('BROWSER_SHORTCUTS_SMOKE_PASS: trusted Electron key input covers Ctrl/Cmd+T/W/Tab/1-9, active-tab focus, UI synchronization, input/Reader/inactive exclusions, safe last-tab replacement, and remote no-preload/no-Node/no-shortcut delivery.');
+      console.log('BROWSER_SHORTCUTS_SMOKE_PASS: Electron tab drag/reorder, toolbar and Ctrl/Cmd+Shift+T restore, trusted Ctrl/Cmd+T/W/Tab/1-9, active-tab focus/UI synchronization, input/Reader/inactive exclusions, sensitive-URL omission, safe last-tab replacement, and remote no-preload/no-Node/no-tab-control isolation verified.');
       app.quit();
       return;
     }
@@ -2176,6 +2377,9 @@ app.whenReady().then(async () => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:tab-closed', tab);
       browserPermissionManager?.revalidatePending();
       scheduleBrowserSessionPersist();
+    },
+    onRestoreAvailability: available => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:restore-availability', Boolean(available));
     },
     defaultNewTabUrl: ['shortcuts', 'zoom'].includes(process.env.EARTH_ONE_BROWSER_TEST_PHASE)
       ? getSafeSmokeNewTabUrl(smokeTest, smokeUrl, process.env.EARTH_ONE_BROWSER_TEST_NEW_TAB_URL) || DEFAULT_BROWSER_NEW_TAB_URL

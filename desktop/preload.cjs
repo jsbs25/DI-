@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
   printToPdf: () => ipcRenderer.invoke('browser:print-to-pdf'),
   setActive: active => ipcRenderer.invoke('browser:set-active', Boolean(active)),
   setBounds: bounds => ipcRenderer.invoke('browser:set-bounds', bounds),
+  getCanRestoreClosedTab: () => ipcRenderer.invoke('browser:get-can-restore-closed-tab'),
+  restoreLastClosedTab: () => ipcRenderer.invoke('browser:restore-last-closed-tab'),
+  reorderTabs: tabIds => ipcRenderer.invoke('browser:reorder-tabs', tabIds),
   selectTab: (tabId, url) => ipcRenderer.invoke('browser:select-tab', tabId, url),
   closeTab: tabId => ipcRenderer.invoke('browser:close-tab', tabId),
   onNewTab: listener => {
@@ -32,6 +35,11 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
     const wrapped = (_event, tab) => listener(tab);
     ipcRenderer.on('browser:tab-closed', wrapped);
     return () => ipcRenderer.removeListener('browser:tab-closed', wrapped);
+  },
+  onRestoreAvailability: listener => {
+    const wrapped = (_event, available) => listener(Boolean(available));
+    ipcRenderer.on('browser:restore-availability', wrapped);
+    return () => ipcRenderer.removeListener('browser:restore-availability', wrapped);
   },
   navigate: (tabId, url) => ipcRenderer.invoke('browser:navigate', tabId, url),
   goBack: tabId => ipcRenderer.invoke('browser:back', tabId),
