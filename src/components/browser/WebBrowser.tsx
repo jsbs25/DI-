@@ -1367,15 +1367,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       >
 
       {/* 2. Omnibox Toolbar */}
-      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/[0.06] bg-[#0d151d] px-3 py-3 sm:px-5">
-        <div className="flex w-full min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-col gap-2 border-b border-white/[0.06] bg-[#0d151d] px-3 py-4 sm:px-5">
+        <div className="flex w-full min-w-0 items-center gap-3">
           <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/[0.06] bg-white/[0.025] p-1 text-slate-400">
             <button
               onClick={goBack}
               disabled={browserEngine
                 ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoBack)
                 : (historyIndex[activeTabId] ?? 0) <= 0}
-              className="flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+              className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
               aria-label="后退"
               title="Back"
             >
@@ -1386,7 +1386,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               disabled={browserEngine
                 ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoForward)
                 : (historyIndex[activeTabId] ?? 0) >= (history[activeTabId]?.length ?? 1) - 1}
-              className="flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+              className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
               aria-label="前进"
               title="Forward"
             >
@@ -1394,7 +1394,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
             </button>
             <button
               onClick={() => browserEngine ? void browserEngine.reload(activeTabId) : void handleNavigate(inputUrl)}
-              className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white ${
+              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white ${
                 isLoading ? 'animate-spin text-cyan-400' : ''
               }`}
               aria-label="重新加载"
@@ -1409,7 +1409,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               e.preventDefault();
               handleNavigate(inputUrl);
             }}
-            className="flex h-12 min-w-0 flex-1 items-center rounded-2xl border border-white/[0.12] bg-[#080f16] px-4 shadow-inner transition-all focus-within:border-cyan-400/60 focus-within:ring-2 focus-within:ring-cyan-400/15 sm:px-5"
+            data-browser-search-bar
+            className="flex h-14 min-w-0 flex-1 items-center gap-3 rounded-full border border-blue-400/30 bg-[#081625] px-4 shadow-[0_4px_24px_rgba(37,99,235,0.12)] transition-all focus-within:border-blue-400/70 focus-within:ring-2 focus-within:ring-blue-400/20 sm:px-6"
           >
             {browserEngine && !activeTab?.readerMode ? (
               <span
@@ -1438,14 +1439,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
             ) : !browserEngine ? (
               <Shield className="mr-2 h-3.5 w-3.5 shrink-0 text-emerald-400" />
             ) : null}
+            <Search aria-hidden="true" className="h-5 w-5 shrink-0 text-blue-400" />
             <input
               ref={addressBarRef}
               type="text"
               value={inputUrl}
               onChange={e => setInputUrl(e.target.value)}
               aria-label="输入网址或搜索词"
-              placeholder="输入网址或知识关键词 (如: https://earthobservatory.nasa.gov)..."
-              className="min-w-0 flex-1 bg-transparent text-base text-slate-100 placeholder-slate-500 focus:outline-none sm:text-lg"
+              placeholder="搜索网页，或输入网址"
+              className="min-w-0 flex-1 bg-transparent text-base text-slate-100 placeholder-slate-400/80 focus:outline-none sm:text-lg"
             />
             {inputUrl && (
               <button
@@ -1458,270 +1460,282 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                 <X className="w-3 h-3" />
               </button>
             )}
+            <button
+              type="submit"
+              aria-label="搜索或打开网址"
+              title="搜索或打开网址"
+              data-browser-search-submit
+              className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full bg-[#4285f4] px-4 text-sm font-semibold text-white shadow-sm shadow-blue-950/40 transition hover:bg-[#5a95f5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300/70"
+            >
+              <Search aria-hidden="true" className="h-4 w-4" />
+              <span>搜索</span>
+            </button>
           </form>
         </div>
 
-        <button
-          type="button"
-          onClick={openFindBar}
-          disabled={!browserEngine}
-          aria-label="在当前网页中查找"
-          title={browserEngine ? '在当前网页中查找（Ctrl+F / Cmd+F）' : '普通 Web 预览不支持内嵌页内查找；浏览器原有快捷键保持不变。'}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.035] text-slate-300 transition hover:bg-white/[0.08] hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Search className="h-4 w-4" />
-        </button>
-
-        {browserEngine && !activeTab?.readerMode && (() => {
-          const zoomState = browserEngineState?.tabId === activeTabId ? browserEngineState : null;
-          const zoomPercent = zoomState?.zoomPercent ?? 100;
-          const zoomReady = Boolean(zoomState?.active);
-          return (
-            <div
-              role="group"
-              aria-label="Chromium 网页缩放"
-              data-browser-zoom
-              className="inline-flex h-9 shrink-0 items-center gap-0.5 rounded-full border border-white/[0.07] bg-white/[0.035] p-0.5 text-slate-300"
-            >
-              <button
-                type="button"
-                onClick={() => void browserEngine.changeZoom('out')}
-                disabled={!zoomReady || zoomPercent <= 50}
-                aria-label="缩小网页"
-                title="缩小网页（Ctrl/Cmd+Minus）"
-                data-browser-zoom-out
-                className="flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-35"
-              >
-                <Minus className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => void browserEngine.changeZoom('reset')}
-                disabled={!zoomReady || zoomPercent === 100}
-                aria-label={`重置网页缩放，当前 ${zoomPercent}%`}
-                title="重置网页缩放（Ctrl/Cmd+0）"
-                data-browser-zoom-reset
-                className="min-w-[3.25rem] rounded-md px-1.5 text-center text-[11px] font-semibold tabular-nums text-slate-200 transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {zoomPercent}%
-              </button>
-              <button
-                type="button"
-                onClick={() => void browserEngine.changeZoom('in')}
-                disabled={!zoomReady || zoomPercent >= 200}
-                aria-label="放大网页"
-                title="放大网页（Ctrl/Cmd+Plus）"
-                data-browser-zoom-in
-                className="flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-35"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          );
-        })()}
-
-        <div className="inline-flex shrink-0 items-center gap-1.5">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 border-t border-white/[0.04] pt-2 opacity-80">
           <button
             type="button"
-            onClick={() => void handleSavePdf()}
-            disabled={!browserEngine || browserPrintPending || isLoading || activeTab?.readerMode || browserEngineState?.tabId !== activeTabId}
-            aria-label={browserEngine ? '保存当前 Chromium 网页为 PDF' : '保存 PDF（普通 Web 预览不支持）'}
-            title={!browserEngine
-              ? '普通 Web 网页预览不支持 Chromium 打印为 PDF；请在桌面版真实 Chromium 标签页中使用。'
-              : activeTab?.readerMode
-                ? '请先退出纯净阅读模式；PDF 仅从当前可见的 Chromium 网页生成。'
-                : '使用系统保存对话框将当前可见 Chromium 网页保存为 PDF。'}
-            data-browser-print
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={openFindBar}
+            disabled={!browserEngine}
+            aria-label="在当前网页中查找"
+            title={browserEngine ? '在当前网页中查找（Ctrl+F / Cmd+F）' : '普通 Web 预览不支持内嵌页内查找；浏览器原有快捷键保持不变。'}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.035] text-slate-300 transition hover:bg-white/[0.08] hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <Printer className="h-3.5 w-3.5 text-cyan-300" />
-            <span>{browserPrintPending ? '正在保存…' : '保存 PDF'}</span>
+            <Search className="h-4 w-4" />
           </button>
-          {!browserEngine && <span className="text-[10px] text-amber-200/80">网页预览不支持 Chromium PDF</span>}
-        </div>
 
-        <div
-          role="status"
-          aria-label={browserEngine ? '真实 Chromium 浏览器引擎' : '网页预览模式'}
-          title={browserEngine
-            ? '此桌面版由 Electron 内嵌的 Chromium 渲染网页'
-            : '此 Web 版为网页预览，不具备桌面浏览器引擎'}
-          className={`inline-flex min-h-8 shrink-0 items-center rounded-full border px-3 text-[11px] font-medium ${
-            browserEngine
-              ? 'border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-200'
-              : 'border-amber-300/20 bg-amber-300/[0.05] text-amber-200'
-          }`}
-        >
-          {browserEngine ? '真实 Chromium' : '网页预览'}
-        </div>
+          {browserEngine && !activeTab?.readerMode && (() => {
+            const zoomState = browserEngineState?.tabId === activeTabId ? browserEngineState : null;
+            const zoomPercent = zoomState?.zoomPercent ?? 100;
+            const zoomReady = Boolean(zoomState?.active);
+            return (
+              <div
+                role="group"
+                aria-label="Chromium 网页缩放"
+                data-browser-zoom
+                className="inline-flex h-9 shrink-0 items-center gap-0.5 rounded-full border border-white/[0.07] bg-white/[0.035] p-0.5 text-slate-300"
+              >
+                <button
+                  type="button"
+                  onClick={() => void browserEngine.changeZoom('out')}
+                  disabled={!zoomReady || zoomPercent <= 50}
+                  aria-label="缩小网页"
+                  title="缩小网页（Ctrl/Cmd+Minus）"
+                  data-browser-zoom-out
+                  className="flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-35"
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void browserEngine.changeZoom('reset')}
+                  disabled={!zoomReady || zoomPercent === 100}
+                  aria-label={`重置网页缩放，当前 ${zoomPercent}%`}
+                  title="重置网页缩放（Ctrl/Cmd+0）"
+                  data-browser-zoom-reset
+                  className="min-w-[3.25rem] rounded-md px-1.5 text-center text-[11px] font-semibold tabular-nums text-slate-200 transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {zoomPercent}%
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void browserEngine.changeZoom('in')}
+                  disabled={!zoomReady || zoomPercent >= 200}
+                  aria-label="放大网页"
+                  title="放大网页（Ctrl/Cmd+Plus）"
+                  data-browser-zoom-in
+                  className="flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-35"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })()}
 
-        <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 sm:w-auto">
-          {browserEngine && browserSessionSettingsReady && (
+          <div className="inline-flex shrink-0 items-center gap-1.5">
             <button
               type="button"
-              onClick={() => void handleToggleSessionRestore()}
-              disabled={browserSessionReadOnly || browserSessionTogglePending}
-              aria-label="启动时恢复上次打开的标签"
-              aria-pressed={browserSessionEnabled}
-              title="默认关闭。开启后仅在此设备保存最多 12 个 HTTP(S) 标签地址；普通查询参数保留，片段移除；含 token、auth、code、key、password、session、credential 等敏感查询键的网址不会保存。不保存 Cookie 或表单内容。关闭时会清除标签快照。"
-              data-browser-session-toggle
-              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${browserSessionEnabled ? 'border-cyan-300/25 bg-cyan-300/[0.08] text-cyan-100' : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'}`}
+              onClick={() => void handleSavePdf()}
+              disabled={!browserEngine || browserPrintPending || isLoading || activeTab?.readerMode || browserEngineState?.tabId !== activeTabId}
+              aria-label={browserEngine ? '保存当前 Chromium 网页为 PDF' : '保存 PDF（普通 Web 预览不支持）'}
+              title={!browserEngine
+                ? '普通 Web 网页预览不支持 Chromium 打印为 PDF；请在桌面版真实 Chromium 标签页中使用。'
+                : activeTab?.readerMode
+                  ? '请先退出纯净阅读模式；PDF 仅从当前可见的 Chromium 网页生成。'
+                  : '使用系统保存对话框将当前可见 Chromium 网页保存为 PDF。'}
+              data-browser-print
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <Clock3 className="h-3.5 w-3.5" />
-              <span>启动恢复：{browserSessionEnabled ? '开' : '关'}</span>
+              <Printer className="h-3.5 w-3.5 text-cyan-300" />
+              <span>{browserPrintPending ? '正在保存…' : '保存 PDF'}</span>
             </button>
-          )}
-
-          {browserEngine && (
-            <button
-              type="button"
-              onClick={() => {
-                setIsBrowserDataOpen(false);
-                setIsDownloadsOpen(false);
-                setIsPermissionsOpen(false);
-                setIsPrivacyOpen(true);
-              }}
-              aria-label="打开隐私与清除浏览数据"
-              title="选择要清除的本机 Browser 数据；下载文件和 PDF 会保留。"
-              data-browser-privacy-open
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] hover:text-cyan-100"
-            >
-              <ShieldAlert className="h-3.5 w-3.5 text-cyan-300" />
-              <span>隐私</span>
-            </button>
-          )}
-
-          {/* Language selector (controls search result language) */}
-          <div className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3">
-            <Globe className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-            <select
-              value={browserLang}
-              onChange={e => setBrowserLang(e.target.value as Language)}
-              className="cursor-pointer bg-transparent text-xs text-slate-300 focus:outline-none"
-              aria-label="搜索结果语言"
-              title="Language"
-            >
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-              <option value="ar">العربية</option>
-              <option value="es">Español</option>
-              <option value="fr">Français</option>
-              <option value="ru">Русский</option>
-            </select>
+            {!browserEngine && <span className="text-[10px] text-amber-200/80">网页预览不支持 Chromium PDF</span>}
           </div>
 
-          {/* Search engine selector */}
-          <div className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3">
-            <Search className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-            <select
-              value={searchEngine}
-              onChange={e => setSearchEngine(e.target.value as any)}
-              className="cursor-pointer bg-transparent text-xs text-slate-300 focus:outline-none"
-              aria-label="搜索引擎"
-              title="Search engine"
-            >
-              <option value="auto">自动</option>
-              <option value="bing">Bing</option>
-              <option value="duckduckgo">DuckDuckGo</option>
-              <option value="wikipedia">Wikipedia</option>
-              <option value="github">GitHub 开源项目</option>
-            </select>
+          <div
+            role="status"
+            aria-label={browserEngine ? '真实 Chromium 浏览器引擎' : '网页预览模式'}
+            title={browserEngine
+              ? '此桌面版由 Electron 内嵌的 Chromium 渲染网页'
+              : '此 Web 版为网页预览，不具备桌面浏览器引擎'}
+            className={`inline-flex min-h-8 shrink-0 items-center rounded-full border px-3 text-[11px] font-medium ${
+              browserEngine
+                ? 'border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-200'
+                : 'border-amber-300/20 bg-amber-300/[0.05] text-amber-200'
+            }`}
+          >
+            {browserEngine ? '真实 Chromium' : '网页预览'}
           </div>
 
-          <button
-            onClick={handleAddBookmark}
-            disabled={!browserStorageReady || browserStorageReadOnly}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.035] text-amber-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label="收藏当前页面"
-            title="Bookmark this page"
-          >
-            <Star className="w-4 h-4" />
-          </button>
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 sm:w-auto">
+            {browserEngine && browserSessionSettingsReady && (
+              <button
+                type="button"
+                onClick={() => void handleToggleSessionRestore()}
+                disabled={browserSessionReadOnly || browserSessionTogglePending}
+                aria-label="启动时恢复上次打开的标签"
+                aria-pressed={browserSessionEnabled}
+                title="默认关闭。开启后仅在此设备保存最多 12 个 HTTP(S) 标签地址；普通查询参数保留，片段移除；含 token、auth、code、key、password、session、credential 等敏感查询键的网址不会保存。不保存 Cookie 或表单内容。关闭时会清除标签快照。"
+                data-browser-session-toggle
+                className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${browserSessionEnabled ? 'border-cyan-300/25 bg-cyan-300/[0.08] text-cyan-100' : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'}`}
+              >
+                <Clock3 className="h-3.5 w-3.5" />
+                <span>启动恢复：{browserSessionEnabled ? '开' : '关'}</span>
+              </button>
+            )}
 
-          <button
-            onClick={() => { setIsDownloadsOpen(false); setIsBrowserDataOpen(true); }}
-            disabled={!browserStorageReady}
-            aria-label="打开本地浏览数据"
-            title="本机书签与浏览历史"
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
-          >
-            <Clock3 className="h-3.5 w-3.5 text-cyan-300" />
-            <span>本地记录 ({browserHistory.length})</span>
-          </button>
+            {browserEngine && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBrowserDataOpen(false);
+                  setIsDownloadsOpen(false);
+                  setIsPermissionsOpen(false);
+                  setIsPrivacyOpen(true);
+                }}
+                aria-label="打开隐私与清除浏览数据"
+                title="选择要清除的本机 Browser 数据；下载文件和 PDF 会保留。"
+                data-browser-privacy-open
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] hover:text-cyan-100"
+              >
+                <ShieldAlert className="h-3.5 w-3.5 text-cyan-300" />
+                <span>隐私</span>
+              </button>
+            )}
 
-          {browserEngine && (
+            {/* Language selector (controls search result language) */}
+            <div className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3">
+              <Globe className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <select
+                value={browserLang}
+                onChange={e => setBrowserLang(e.target.value as Language)}
+                className="cursor-pointer bg-transparent text-xs text-slate-300 focus:outline-none"
+                aria-label="搜索结果语言"
+                title="Language"
+              >
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+                <option value="ar">العربية</option>
+                <option value="es">Español</option>
+                <option value="fr">Français</option>
+                <option value="ru">Русский</option>
+              </select>
+            </div>
+
+            {/* Search engine selector */}
+            <div className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3">
+              <Search className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <select
+                value={searchEngine}
+                onChange={e => setSearchEngine(e.target.value as any)}
+                className="cursor-pointer bg-transparent text-xs text-slate-300 focus:outline-none"
+                aria-label="搜索引擎"
+                title="Search engine"
+              >
+                <option value="auto">自动</option>
+                <option value="bing">Bing</option>
+                <option value="duckduckgo">DuckDuckGo</option>
+                <option value="wikipedia">Wikipedia</option>
+                <option value="github">GitHub 开源项目</option>
+              </select>
+            </div>
+
+            <button
+              onClick={handleAddBookmark}
+              disabled={!browserStorageReady || browserStorageReadOnly}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.07] bg-white/[0.035] text-amber-300 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="收藏当前页面"
+              title="Bookmark this page"
+            >
+              <Star className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => { setIsDownloadsOpen(false); setIsBrowserDataOpen(true); }}
+              disabled={!browserStorageReady}
+              aria-label="打开本地浏览数据"
+              title="本机书签与浏览历史"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
+            >
+              <Clock3 className="h-3.5 w-3.5 text-cyan-300" />
+              <span>本地记录 ({browserHistory.length})</span>
+            </button>
+
+            {browserEngine && (
+              <button
+                onClick={() => {
+                  setIsBrowserDataOpen(false);
+                  setIsDownloadsOpen(true);
+                  void browserEngine.getDownloads().then(setDownloads).catch(() => {});
+                }}
+                aria-label={`打开下载管理器，共 ${downloads.length} 项`}
+                title="下载管理器"
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
+              >
+                <Download className="h-3.5 w-3.5 text-cyan-300" />
+                <span>下载 ({downloads.length})</span>
+              </button>
+            )}
+
+            {browserEngine && (
+              <button
+                type="button"
+                onClick={() => setIsPermissionsOpen(true)}
+                aria-label={`查看会话站点权限，共 ${browserPermissionState.grants.reduce((sum, grant) => sum + grant.permissions.length, 0)} 项授权`}
+                title="仅本次应用运行有效；可随时撤销"
+                data-browser-permissions-toggle
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
+              >
+                <Shield className="h-3.5 w-3.5 text-emerald-300" />
+                <span>站点权限 ({browserPermissionState.grants.reduce((sum, grant) => sum + grant.permissions.length, 0)})</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
-                setIsBrowserDataOpen(false);
-                setIsDownloadsOpen(true);
-                void browserEngine.getDownloads().then(setDownloads).catch(() => {});
+                const willPreview = activeTab?.readerMode;
+                setTabs(prev =>
+                  prev.map(t => (t.id === activeTabId ? { ...t, readerMode: !t.readerMode } : t))
+                );
+                if (willPreview && activeTab?.url) void loadPreviewHtml(activeTab.url);
               }}
-              aria-label={`打开下载管理器，共 ${downloads.length} 项`}
-              title="下载管理器"
-              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
+              aria-label="切换纯净阅读模式"
+              title="切换纯净阅读模式"
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all ${
+                activeTab?.readerMode
+                  ? 'border-cyan-300/25 bg-cyan-300/10 text-cyan-100 shadow-sm shadow-cyan-950/30'
+                  : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'
+              }`}
             >
-              <Download className="h-3.5 w-3.5 text-cyan-300" />
-              <span>下载 ({downloads.length})</span>
+              <BookOpen className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">纯净阅读模式</span>
             </button>
-          )}
 
-          {browserEngine && (
             <button
-              type="button"
-              onClick={() => setIsPermissionsOpen(true)}
-              aria-label={`查看会话站点权限，共 ${browserPermissionState.grants.reduce((sum, grant) => sum + grant.permissions.length, 0)} 项授权`}
-              title="仅本次应用运行有效；可随时撤销"
-              data-browser-permissions-toggle
+              onClick={() => setIsAiPanelOpen(!isAiPanelOpen)}
+              aria-label={isAiPanelOpen ? '关闭 AI 伴侣' : '打开 AI 伴侣'}
+              title={isAiPanelOpen ? '关闭 AI 伴侣' : '打开 AI 伴侣'}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all ${
+                isAiPanelOpen
+                  ? 'border-violet-300/25 bg-violet-300/10 text-violet-100 shadow-sm shadow-violet-950/30'
+                  : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden sm:inline">AI 伴侣</span>
+            </button>
+
+            <button
+              onClick={() => setIsSavedDrawerOpen(true)}
+              aria-label={`打开已归档网页知识库，共 ${savedArticles.length} 篇`}
+              title="已归档网页知识库"
               className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
             >
-              <Shield className="h-3.5 w-3.5 text-emerald-300" />
-              <span>站点权限 ({browserPermissionState.grants.reduce((sum, grant) => sum + grant.permissions.length, 0)})</span>
+              <Database className="w-3.5 h-3.5 text-blue-400" />
+              <span className="hidden md:inline">已归档 ({savedArticles.length})</span>
             </button>
-          )}
-
-          <button
-            onClick={() => {
-              const willPreview = activeTab?.readerMode;
-              setTabs(prev =>
-                prev.map(t => (t.id === activeTabId ? { ...t, readerMode: !t.readerMode } : t))
-              );
-              if (willPreview && activeTab?.url) void loadPreviewHtml(activeTab.url);
-            }}
-            aria-label="切换纯净阅读模式"
-            title="切换纯净阅读模式"
-            className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all ${
-              activeTab?.readerMode
-                ? 'border-cyan-300/25 bg-cyan-300/10 text-cyan-100 shadow-sm shadow-cyan-950/30'
-                : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">纯净阅读模式</span>
-          </button>
-
-          <button
-            onClick={() => setIsAiPanelOpen(!isAiPanelOpen)}
-            aria-label={isAiPanelOpen ? '关闭 AI 伴侣' : '打开 AI 伴侣'}
-            title={isAiPanelOpen ? '关闭 AI 伴侣' : '打开 AI 伴侣'}
-            className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all ${
-              isAiPanelOpen
-                ? 'border-violet-300/25 bg-violet-300/10 text-violet-100 shadow-sm shadow-violet-950/30'
-                : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-            <span className="hidden sm:inline">AI 伴侣</span>
-          </button>
-
-          <button
-            onClick={() => setIsSavedDrawerOpen(true)}
-            aria-label={`打开已归档网页知识库，共 ${savedArticles.length} 篇`}
-            title="已归档网页知识库"
-            className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08]"
-          >
-            <Database className="w-3.5 h-3.5 text-blue-400" />
-            <span className="hidden md:inline">已归档 ({savedArticles.length})</span>
-          </button>
+          </div>
         </div>
       </div>
 
@@ -1797,15 +1811,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       )}
 
       {/* 3. Bookmarks Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto border-b border-white/[0.06] bg-[#0a1118] px-4 py-2 text-[11px] [scrollbar-width:thin]">
-        <span className="flex shrink-0 items-center font-semibold text-slate-500">
-          <Bookmark className="w-3 h-3 mr-1 text-slate-400" /> 书签:
+      <div className="flex min-h-8 items-center gap-1.5 overflow-x-auto border-b border-white/[0.06] bg-[#090f15] px-4 py-1 text-[10px] text-slate-500 [scrollbar-width:thin]">
+        <span className="flex shrink-0 items-center font-medium text-slate-600">
+          <Bookmark className="w-3 h-3 mr-1 text-slate-600" /> 书签
         </span>
         {bookmarks.map(bm => (
           <button
             key={bm.id}
             onClick={() => handleNavigate(bm.url)}
-            className="min-h-8 shrink-0 rounded-full border border-white/[0.06] bg-white/[0.025] px-3 text-slate-300 transition-colors hover:border-cyan-200/20 hover:bg-cyan-200/[0.06] hover:text-cyan-100"
+            className="min-h-7 shrink-0 rounded-lg border border-transparent bg-transparent px-2.5 text-slate-500 transition-colors hover:border-blue-300/10 hover:bg-blue-300/[0.04] hover:text-blue-200"
           >
             {bm.title}
           </button>
