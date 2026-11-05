@@ -190,6 +190,18 @@ function createBrowserPermissionManager({
     return { success: true, revoked: changed };
   }
 
+  function clearAll() {
+    const grantCount = [...grants.values()].reduce((total, permissions) => total + permissions.size, 0);
+    const pendingItems = [...pending.values()];
+    grants.clear();
+    for (const item of pendingItems) {
+      removePending(item);
+      safeCallback(item.callback, false);
+    }
+    if (grantCount || pendingItems.length) publish();
+    return { success: true, cleared: grantCount, deniedPending: pendingItems.length };
+  }
+
   function cancelForContents(contents) {
     let changed = false;
     for (const item of [...pending.values()]) {
@@ -232,6 +244,7 @@ function createBrowserPermissionManager({
     getState: snapshot,
     revoke,
     revokeAll,
+    clearAll,
     cancelForContents,
     revalidatePending,
     dispose

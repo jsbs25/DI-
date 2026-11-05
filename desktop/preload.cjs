@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('earthOneBrowser', {
   getLocalData: () => ipcRenderer.invoke('browser:get-local-data'),
   saveLocalData: data => ipcRenderer.invoke('browser:save-local-data', data),
+  clearBrowsingData: (selection, timeRange) => ipcRenderer.invoke('browser:clear-browsing-data', selection, timeRange),
   getSessionState: () => ipcRenderer.invoke('browser:get-session-state'),
   setSessionEnabled: enabled => ipcRenderer.invoke('browser:set-session-enabled', Boolean(enabled)),
   restoreSession: () => ipcRenderer.invoke('browser:restore-session'),

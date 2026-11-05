@@ -190,6 +190,46 @@ async function main() {
     assert.equal(fs.existsSync(activePath), true, 'cancelling a transfer must not delete its partial file');
     clearHarness.manager.dispose();
 
+    const scopedStorePath = path.join(tempRoot, 'scoped-profile', 'earth-one-downloads.json');
+    const scopedStore = createDownloadStore(scopedStorePath);
+    const scopedNow = Date.now();
+    const scopedCutoff = scopedNow - 24 * 60 * 60 * 1000;
+    const recentRecordPath = path.join(tempRoot, 'recent-record-file.txt');
+    const olderRecordPath = path.join(tempRoot, 'older-record-file.txt');
+    const activeRecordPath = path.join(tempRoot, 'active-record-file.txt');
+    fs.writeFileSync(recentRecordPath, 'recent file remains\n');
+    fs.writeFileSync(olderRecordPath, 'older file remains\n');
+    fs.writeFileSync(activeRecordPath, 'active file remains\n');
+    const recentRecord = { ...createStoredRecord(11, new Date(scopedNow - 60 * 60 * 1000).toISOString()), savePath: recentRecordPath };
+    const olderRecord = { ...createStoredRecord(12, new Date(scopedNow - 3 * 24 * 60 * 60 * 1000).toISOString()), savePath: olderRecordPath };
+    const exactlyAtCutoff = createStoredRecord(13, new Date(scopedCutoff).toISOString());
+    const oneMillisecondBeforeCutoff = createStoredRecord(14, new Date(scopedCutoff - 1).toISOString());
+    const oneMillisecondAfterCutoff = createStoredRecord(15, new Date(scopedCutoff + 1).toISOString());
+    assert.equal(scopedStore.save([recentRecord, olderRecord, exactlyAtCutoff, oneMillisecondBeforeCutoff, oneMillisecondAfterCutoff]).success, true);
+    const scopedHarness = createHarness({ store: createDownloadStore(scopedStorePath) });
+    const scopedActiveItem = new SyntheticDownloadItem('https://fixture.test/active-scope', 'active-record.txt');
+    scopedHarness.start(scopedActiveItem);
+    scopedActiveItem.setSavePath(activeRecordPath);
+    scopedActiveItem.receivedBytes = 4;
+    scopedActiveItem.totalBytes = 10;
+    scopedActiveItem.emit('updated', {}, 'progressing');
+    const scopedActiveRecord = scopedHarness.manager.list().find(record => record.state === 'progressing');
+    assert.ok(scopedActiveRecord, 'fixture includes a genuine in-progress download record');
+    const scopedClear = scopedHarness.manager.clearTerminalSince(scopedCutoff);
+    assert.deepEqual(scopedClear, { success: true, cleared: 3 }, 'the cutoff itself and newer terminal records are included');
+    assert.deepEqual(new Set(scopedHarness.manager.list().map(record => record.id)),
+      new Set([olderRecord.id, oneMillisecondBeforeCutoff.id, scopedActiveRecord.id]), 'only older records and the active download are retained');
+    assert.equal(fs.existsSync(recentRecordPath), true, 'time-scoped clearing never deletes the recent downloaded file');
+    assert.equal(fs.existsSync(olderRecordPath), true, 'time-scoped clearing never deletes the older downloaded file');
+    const allTimeClear = scopedHarness.manager.clearTerminalSince(0);
+    assert.deepEqual(allTimeClear, { success: true, cleared: 2 }, 'zero cutoff removes every remaining terminal record');
+    assert.deepEqual(scopedHarness.manager.list().map(record => record.id), [scopedActiveRecord.id], 'all-time clearing still retains an active download record');
+    assert.equal(fs.existsSync(recentRecordPath), true, 'all-time record clearing never deletes the recent downloaded file');
+    assert.equal(fs.existsSync(olderRecordPath), true, 'all-time record clearing never deletes the older downloaded file');
+    assert.equal(fs.existsSync(activeRecordPath), true, 'clearing history never deletes an active download file');
+    assert.equal(scopedHarness.manager.clearTerminalSince(-1).success, false, 'invalid cutoff is rejected without clearing records');
+    scopedHarness.manager.dispose();
+
     // A path that was approved but later disappears is retained as unavailable history.
     const missingStorePath = path.join(tempRoot, 'missing-profile', 'earth-one-downloads.json');
     const missingPath = path.join(tempRoot, 'deleted-after-download.txt');

@@ -19,3 +19,11 @@
 - End-to-end conversation isolation.
 - Rate limiting on post and message creation to prevent automated spam.
 - User blocking and content reporting mechanism infrastructure in database schema.
+
+
+## 4. Desktop Browser privacy and selective clearing
+
+- The desktop-only **Privacy / Clear browsing data** panel lists the local Browser categories separately and requires a second confirmation. Time ranges are available only for timestamped browsing history and download-history records; bookmarks, session-restore snapshots, in-memory permission grants, and the current Browser session's site data are cleared as whole categories because those stores do not have a safe, consistent per-record timestamp.
+- Browsing history and bookmarks are stored in the Browser's local data file. Download-history clearing removes only terminal metadata records; it never cancels active downloads and never deletes downloaded files or user-created PDFs. Session-restore clearing disables the opt-in setting and removes only the URL snapshot. Permission clearing revokes this-run grants and denies pending requests.
+- Site-data clearing uses the dedicated, non-persistent `earth-one-browser` Chromium session—not EARTH ONE's app/default session. It explicitly clears the Browser session's cookies, cache, file systems, IndexedDB, local storage, service workers, WebSQL and background fetch data, and clears its HTTP-auth cache when supported. Current Browser tabs are safely unloaded, cleared, and restored; any tab that cannot be restored is reported. See Electron's [Session API](https://www.electronjs.org/docs/latest/api/session) for the clearing APIs.
+- The operation is local-only: it does not upload cleared content, touch `server_data.json`, user accounts, Library data, archived articles, app-origin storage, downloaded files, or unselected categories. A malformed or unreadable local store enters read-only protection rather than being overwritten. Ordinary Web fallback behavior is unchanged and does not expose this desktop panel.

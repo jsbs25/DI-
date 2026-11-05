@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { BrowserFrame } from './BrowserFrame.tsx';
+import { BrowserPrivacyPanel } from './BrowserPrivacyPanel.tsx';
 
 /**
  * Convert a YouTube / Vimeo watch URL into its embeddable endpoint so videos
@@ -279,6 +280,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [isDownloadsOpen, setIsDownloadsOpen] = useState(false);
   const [downloads, setDownloads] = useState<EarthOneBrowserDownload[]>([]);
   const [downloadStorageWarning, setDownloadStorageWarning] = useState<string | null>(null);
+  const [browserDownloadStorageReadOnly, setBrowserDownloadStorageReadOnly] = useState(false);
   const [browserStorageWarning, setBrowserStorageWarning] = useState<string | null>(null);
   const [browserStorageReady, setBrowserStorageReady] = useState(!browserEngine?.getLocalData);
   const [browserStorageReadOnly, setBrowserStorageReadOnly] = useState(false);
@@ -316,6 +318,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         const state = await browserEngine.getSessionState();
         if (cancelled) return;
         setBrowserSessionEnabled(Boolean(state.enabled));
+        setBrowserSessionSnapshotCount(Array.isArray(state.tabs) ? state.tabs.length : 0);
         setBrowserSessionReadOnly(Boolean(state.readOnly));
         setBrowserSessionWarning(state.warning || null);
 
@@ -454,11 +457,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [browserPrintMessage, setBrowserPrintMessage] = useState<string | null>(null);
   const [browserSessionSettingsReady, setBrowserSessionSettingsReady] = useState(!browserEngine?.getSessionState);
   const [browserSessionEnabled, setBrowserSessionEnabled] = useState(false);
+  const [browserSessionSnapshotCount, setBrowserSessionSnapshotCount] = useState(0);
   const [browserSessionReadOnly, setBrowserSessionReadOnly] = useState(false);
   const [browserSessionWarning, setBrowserSessionWarning] = useState<string | null>(null);
   const [browserSessionTogglePending, setBrowserSessionTogglePending] = useState(false);
   const [browserPermissionState, setBrowserPermissionState] = useState<EarthOneBrowserPermissionState>({ pending: [], grants: [] });
   const [isPermissionsOpen, setIsPermissionsOpen] = useState(false);
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
   const [sessionRestoreNotice, setSessionRestoreNotice] = useState<{
     kind: 'restoring' | 'restored' | 'failed';
     restoredCount: number;
@@ -680,6 +685,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     if (!browserEngine?.getDownloads || !browserEngine.onDownloads) {
       setDownloads([]);
       setDownloadStorageWarning(null);
+      setBrowserDownloadStorageReadOnly(false);
       return;
     }
     let cancelled = false;
@@ -688,6 +694,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       receivedPush = true;
       setDownloads(Array.isArray(records) ? records : []);
       setDownloadStorageWarning(status?.warning || null);
+      setBrowserDownloadStorageReadOnly(Boolean(status?.readOnly));
     });
     browserEngine.getDownloads().then(records => {
       if (!cancelled && !receivedPush) setDownloads(Array.isArray(records) ? records : []);
@@ -695,9 +702,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       if (!cancelled) setDownloads([]);
     });
     browserEngine.getDownloadStorageStatus?.().then(status => {
-      if (!cancelled) setDownloadStorageWarning(status?.warning || null);
+      if (!cancelled) {
+        setDownloadStorageWarning(status?.warning || null);
+        setBrowserDownloadStorageReadOnly(Boolean(status?.readOnly));
+      }
     }).catch(() => {
-      if (!cancelled) setDownloadStorageWarning('无法读取本机下载记录状态。');
+      if (!cancelled) {
+        setDownloadStorageWarning('无法读取本机下载记录状态。');
+        setBrowserDownloadStorageReadOnly(true);
+      }
     });
     return () => {
       cancelled = true;
@@ -743,7 +756,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     const syncViewport = () => {
       const element = nativeViewportRef.current;
       const mobileAiOverlay = isAiPanelOpen && window.innerWidth < 768;
-      if (!element || !activeTab || activeTab.readerMode || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || isDownloadsOpen || mobileAiOverlay) {
+      if (!element || !activeTab || activeTab.readerMode || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || isDownloadsOpen || isPrivacyOpen || mobileAiOverlay) {
         void browserEngine.setBounds(null);
         return;
       }
@@ -766,7 +779,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       document.removeEventListener('scroll', scheduleSync, true);
       void browserEngine.setBounds(null);
     };
-  }, [browserEngine, activeTabId, activeTab?.readerMode, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isAiPanelOpen]);
+  }, [browserEngine, activeTabId, activeTab?.readerMode, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isPrivacyOpen, isAiPanelOpen]);
 
   const pushHistory = (tabId: string, url: string) => {
     setHistory(prev => {
@@ -1102,6 +1115,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         return;
       }
       setBrowserSessionEnabled(result.enabled);
+      setBrowserSessionSnapshotCount(result.enabled ? tabs.length : 0);
       setBrowserSessionWarning(null);
       if (!result.enabled) setSessionRestoreNotice(null);
     } catch {
@@ -1143,6 +1157,41 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     } catch {
       // Keep the last verified list if IPC is unavailable.
     }
+  };
+
+  const handleClearBrowsingData = async (
+    selection: EarthOneBrowserPrivacySelection,
+    timeRange: EarthOneBrowserPrivacyTimeRange
+  ): Promise<EarthOneBrowserPrivacyResult> => {
+    if (!browserEngine?.clearBrowsingData) {
+      return { success: false, changed: false, error: '此操作仅在桌面 Chromium Browser 中可用。', results: {} };
+    }
+    const result = await browserEngine.clearBrowsingData(selection, timeRange);
+    const localData = result.results.localData;
+    if (localData?.success && localData.data) {
+      setBookmarks(localData.data.bookmarks);
+      setBrowserHistory(localData.data.history);
+      setWorkspaceRepos(localData.data.bookmarks.filter(bookmark => bookmark.category === 'GitHub / 待审核接入').map(bookmark => bookmark.title));
+    }
+    const [freshDownloads, freshSession, freshPermissions, freshDownloadStatus] = await Promise.all([
+      browserEngine.getDownloads().catch(() => null),
+      browserEngine.getSessionState().catch(() => null),
+      browserEngine.getPermissionState().catch(() => null),
+      browserEngine.getDownloadStorageStatus().catch(() => null)
+    ]);
+    if (freshDownloads) setDownloads(freshDownloads);
+    if (freshSession) {
+      setBrowserSessionEnabled(Boolean(freshSession.enabled));
+      setBrowserSessionSnapshotCount(Array.isArray(freshSession.tabs) ? freshSession.tabs.length : 0);
+      setBrowserSessionReadOnly(Boolean(freshSession.readOnly));
+      setBrowserSessionWarning(freshSession.warning || null);
+    }
+    if (freshPermissions) setBrowserPermissionState(freshPermissions);
+    if (freshDownloadStatus) {
+      setBrowserDownloadStorageReadOnly(Boolean(freshDownloadStatus.readOnly));
+      setDownloadStorageWarning(freshDownloadStatus.warning || null);
+    }
+    return result;
   };
 
   const handleAddBookmark = () => {
@@ -1518,6 +1567,25 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
             >
               <Clock3 className="h-3.5 w-3.5" />
               <span>启动恢复：{browserSessionEnabled ? '开' : '关'}</span>
+            </button>
+          )}
+
+          {browserEngine && (
+            <button
+              type="button"
+              onClick={() => {
+                setIsBrowserDataOpen(false);
+                setIsDownloadsOpen(false);
+                setIsPermissionsOpen(false);
+                setIsPrivacyOpen(true);
+              }}
+              aria-label="打开隐私与清除浏览数据"
+              title="选择要清除的本机 Browser 数据；下载文件和 PDF 会保留。"
+              data-browser-privacy-open
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] hover:text-cyan-100"
+            >
+              <ShieldAlert className="h-3.5 w-3.5 text-cyan-300" />
+              <span>隐私</span>
             </button>
           )}
 
@@ -2388,6 +2456,30 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
             </div>
           </div>
         </div>
+      )}
+
+      {isPrivacyOpen && browserEngine && (
+        <BrowserPrivacyPanel
+          counts={{
+            history: browserHistory.length,
+            bookmarks: bookmarks.length,
+            downloadRecords: downloads.filter(item => ['completed', 'cancelled', 'interrupted'].includes(item.state)).length,
+            activeDownloads: downloads.filter(item => ['awaiting-save', 'progressing', 'cancelling'].includes(item.state)).length,
+            sessionRestoreEnabled: browserSessionEnabled,
+            sessionRestoreTabs: browserSessionSnapshotCount,
+            permissions: browserPermissionState.grants.reduce((sum, grant) => sum + grant.permissions.length, 0),
+            pendingPermissions: browserPermissionState.pending.length
+          }}
+          disabledReasons={{
+            ...(!browserStorageReady ? { history: '正在读取本机浏览数据。', bookmarks: '正在读取本机浏览数据。' } : {}),
+            ...(browserStorageReadOnly ? { history: browserStorageWarning || '本机浏览数据处于只读保护状态。', bookmarks: browserStorageWarning || '本机浏览数据处于只读保护状态。' } : {}),
+            ...(browserDownloadStorageReadOnly ? { downloadRecords: downloadStorageWarning || '下载记录处于只读保护状态。' } : {}),
+            ...(!browserSessionSettingsReady ? { sessionRestore: '正在读取本机标签恢复设置。' } : {}),
+            ...(browserSessionReadOnly ? { sessionRestore: browserSessionWarning || '标签恢复数据处于只读保护状态。' } : {})
+          }}
+          onClear={handleClearBrowsingData}
+          onClose={() => setIsPrivacyOpen(false)}
+        />
       )}
     </div>
   );

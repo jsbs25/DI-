@@ -31,8 +31,12 @@ let finished = false;
 const activeFixtureResponses = new Set();
 const activeFixtureSockets = new Set();
 const sessionRequestAudit = [];
+const privacyRequestAudit = [];
 const secureFixtureRequests = [];
 let sessionOneRequestCount = 0;
+let privacyCookieIssued = false;
+let privacyPageRequestCount = 0;
+let privacyCacheRequestCount = 0;
 let alternateFixtureOrigin = null;
 let secureFixtureOrigin = null;
 function handleFixtureRequest(request, response) {
@@ -40,6 +44,38 @@ function handleFixtureRequest(request, response) {
   if (request.socket.encrypted) secureFixtureRequests.push(pathname);
   if (pathname.startsWith('/session-')) {
     sessionRequestAudit.push({ pathname, cookie: request.headers.cookie || '' });
+  }
+  if (pathname === '/privacy-cache-resource') {
+    privacyCacheRequestCount += 1;
+    response.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'public, max-age=3600'
+    });
+    response.end(`privacy-cache-response-${privacyCacheRequestCount}`);
+    return;
+  }
+  if (pathname === '/privacy') {
+    privacyRequestAudit.push({ pathname, cookie: request.headers.cookie || '' });
+    privacyPageRequestCount += 1;
+    if (privacyPageRequestCount > 1) {
+      response.writeHead(302, { Location: '/privacy-final' });
+      response.end();
+      return;
+    }
+    const shouldSetCookie = !privacyCookieIssued;
+    privacyCookieIssued = true;
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      ...(shouldSetCookie ? { 'Set-Cookie': 'earth-one-privacy=synthetic-cookie-secret; Path=/; HttpOnly; SameSite=Lax' } : {})
+    });
+    response.end('<!doctype html><html><head><title>Browser Privacy Fixture</title></head><body><h1>Browser Privacy Fixture</h1></body></html>');
+    return;
+  }
+  if (pathname === '/privacy-final') {
+    privacyRequestAudit.push({ pathname, cookie: request.headers.cookie || '' });
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><html><head><title>Browser Privacy Fixture</title></head><body><h1>Restored after same-origin redirect</h1></body></html>');
+    return;
   }
   if (pathname === '/session-one' || pathname === '/session-two') {
     const shouldSetSessionCookie = pathname === '/session-one' && sessionOneRequestCount === 0;
@@ -237,6 +273,14 @@ function launchSmoke(phase, options = {}) {
       EARTH_ONE_BROWSER_PRINT_SMOKE_TEST: phase === 'restart' ? '1' : '0',
       EARTH_ONE_BROWSER_TEST_PDF_PATH: path.join(downloadDir, 'earth-one-browser-print.pdf'),
       EARTH_ONE_BROWSER_TEST_PROFILE_DIR: runProfileDir,
+      EARTH_ONE_BROWSER_TEST_PRIVACY_RECENT_HISTORY_ID: options.privacyRecentHistoryId || '',
+      EARTH_ONE_BROWSER_TEST_PRIVACY_OLD_HISTORY_ID: options.privacyOldHistoryId || '',
+      EARTH_ONE_BROWSER_TEST_PRIVACY_BOOKMARK_ID: options.privacyBookmarkId || '',
+      EARTH_ONE_BROWSER_TEST_PRIVACY_RECENT_DOWNLOAD_ID: options.privacyRecentDownloadId || '',
+      EARTH_ONE_BROWSER_TEST_PRIVACY_OLD_DOWNLOAD_ID: options.privacyOldDownloadId || '',
+      EARTH_ONE_BROWSER_TEST_PRIVACY_DOWNLOAD_PATH: options.privacyDownloadPath || '',
+      EARTH_ONE_BROWSER_TEST_PRIVACY_OLDER_DOWNLOAD_PATH: options.privacyOlderDownloadPath || '',
+      EARTH_ONE_BROWSER_TEST_PRIVACY_PDF_PATH: options.privacyPdfPath || '',
       EARTH_ONE_DATA_FILE: path.join(downloadDir, 'server_data.json'),
       EARTH_ONE_SKIP_BOOK_HARVEST: 'true'
     },
@@ -341,6 +385,71 @@ const timeout = setTimeout(() => {
   void finish(1, `Browser 引擎跨进程集成测试超时。`);
 }, 180000);
 
+function createPrivacyProfile(fixtureOrigin) {
+  const privacyProfileDir = path.join(downloadDir, 'electron-privacy-profile');
+  fs.mkdirSync(privacyProfileDir, { recursive: true });
+  const privacyNow = Date.now();
+  const privacyIds = {
+    recentHistory: '11111111-1111-4111-8111-111111111111',
+    oldHistory: '22222222-2222-4222-8222-222222222222',
+    bookmark: '33333333-3333-4333-8333-333333333333',
+    recentDownload: '44444444-4444-4444-8444-444444444444',
+    oldDownload: '55555555-5555-4555-8555-555555555555'
+  };
+  const privacyDownloadPath = path.join(downloadDir, 'privacy-kept-download.txt');
+  const privacyOlderDownloadPath = path.join(downloadDir, 'privacy-kept-older-download.txt');
+  const privacyPdfPath = path.join(downloadDir, 'privacy-kept-user.pdf');
+  fs.writeFileSync(privacyDownloadPath, 'synthetic downloaded file; must be retained\n');
+  fs.writeFileSync(privacyOlderDownloadPath, 'synthetic older downloaded file; must be retained\n');
+  fs.writeFileSync(privacyPdfPath, '%PDF-synthetic user-created PDF; must be retained\n');
+  fs.writeFileSync(path.join(privacyProfileDir, 'earth-one-browser-data.json'), JSON.stringify({
+    version: 1,
+    bookmarks: [{ id: privacyIds.bookmark, title: 'Privacy fixture bookmark', url: `${fixtureOrigin}/one`, category: 'Test' }],
+    history: [
+      { id: privacyIds.recentHistory, tabId: 'tab_1', title: 'Recent synthetic history', url: `${fixtureOrigin}/two`, visitedAt: new Date(privacyNow - 2 * 60 * 60 * 1000).toISOString() },
+      { id: privacyIds.oldHistory, tabId: 'tab_1', title: 'Older synthetic history', url: `${fixtureOrigin}/one`, visitedAt: new Date(privacyNow - 3 * 24 * 60 * 60 * 1000).toISOString() }
+    ]
+  }), 'utf8');
+  fs.writeFileSync(path.join(privacyProfileDir, 'earth-one-downloads.json'), JSON.stringify({
+    version: 1,
+    records: [
+      { id: privacyIds.recentDownload, filename: 'privacy-kept-download.txt', source: `${fixtureOrigin}/download`, state: 'completed', receivedBytes: 1, totalBytes: 1, savePath: privacyDownloadPath, startedAt: new Date(privacyNow - 2 * 60 * 60 * 1000).toISOString() },
+      { id: privacyIds.oldDownload, filename: 'privacy-kept-older-download.txt', source: `${fixtureOrigin}/download`, state: 'completed', receivedBytes: 1, totalBytes: 1, savePath: privacyOlderDownloadPath, startedAt: new Date(privacyNow - 3 * 24 * 60 * 60 * 1000).toISOString() }
+    ]
+  }), 'utf8');
+  return { privacyProfileDir, privacyIds, privacyDownloadPath, privacyOlderDownloadPath, privacyPdfPath };
+}
+
+async function runPrivacySmoke(fixtureOrigin) {
+  const privacyProfile = createPrivacyProfile(fixtureOrigin);
+  const privacyAuditStart = privacyRequestAudit.length;
+  const privacyRun = launchSmoke('privacy', {
+    profileDir: privacyProfile.privacyProfileDir,
+    startUrl: `${fixtureOrigin}/privacy`,
+    privacyRecentHistoryId: privacyProfile.privacyIds.recentHistory,
+    privacyOldHistoryId: privacyProfile.privacyIds.oldHistory,
+    privacyBookmarkId: privacyProfile.privacyIds.bookmark,
+    privacyRecentDownloadId: privacyProfile.privacyIds.recentDownload,
+    privacyOldDownloadId: privacyProfile.privacyIds.oldDownload,
+    privacyDownloadPath: privacyProfile.privacyDownloadPath,
+    privacyOlderDownloadPath: privacyProfile.privacyOlderDownloadPath,
+    privacyPdfPath: privacyProfile.privacyPdfPath
+  });
+  activeRun = privacyRun;
+  await privacyRun.waitForMarker(/BROWSER_PRIVACY_SMOKE_PASS:/, 80000);
+  const privacyClose = await Promise.race([
+    privacyRun.closed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('privacy Electron smoke did not exit cleanly')), 12000))
+  ]);
+  assert.equal(privacyClose.code, 0, `privacy Electron smoke failed: ${privacyRun.getOutput()}`);
+  const auditedPrivacyRequests = privacyRequestAudit.slice(privacyAuditStart);
+  assert.ok(auditedPrivacyRequests.length >= 2, 'privacy fixture must be loaded and reloaded after clearing');
+  assert.ok(auditedPrivacyRequests.every(request => !request.cookie.includes('earth-one-privacy=synthetic-cookie-secret')),
+    'the post-clear tab reload must not send the erased Cookie to the fixture server');
+  console.log('BROWSER_TEST_DRIVER_PRIVACY_PASSED');
+  activeRun = null;
+}
+
 async function main() {
   await new Promise((resolve, reject) => {
     fixtureServer.once('error', reject);
@@ -357,6 +466,10 @@ async function main() {
   alternateFixtureOrigin = `http://127.0.0.1:${alternateFixtureServer.address().port}`;
   secureFixtureOrigin = `https://127.0.0.1:${secureFixtureServer.address().port}`;
   const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`;
+  if (process.env.EARTH_ONE_BROWSER_PRIVACY_ONLY === '1') {
+    await runPrivacySmoke(fixtureOrigin);
+    return;
+  }
 
   const connectionStatusRun = launchSmoke('connection-status', {
     startUrl: `${fixtureOrigin}/connection-http`,
@@ -526,6 +639,7 @@ async function main() {
   assert.equal(sessionOptOutClose.code, 0, `session opt-out Electron process failed: ${sessionOptOutRun.getOutput()}`);
   console.log('BROWSER_TEST_DRIVER_SESSION_OPTOUT_PASSED');
   activeRun = null;
+  await runPrivacySmoke(fixtureOrigin);
 }
 
 process.on('SIGINT', () => { void finish(130, '测试已中止。'); });

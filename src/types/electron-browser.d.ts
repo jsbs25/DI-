@@ -47,6 +47,40 @@ declare global {
     warning?: string;
   }
 
+  type EarthOneBrowserPrivacyCategory = 'history' | 'bookmarks' | 'downloadRecords' | 'sessionRestore' | 'permissions' | 'siteData';
+  type EarthOneBrowserPrivacyTimeRange = 'all' | 'hour' | 'day' | 'week' | 'fourWeeks';
+
+  interface EarthOneBrowserPrivacySelection {
+    history: boolean;
+    bookmarks: boolean;
+    downloadRecords: boolean;
+    sessionRestore: boolean;
+    permissions: boolean;
+    siteData: boolean;
+  }
+
+  interface EarthOneBrowserPrivacyCategoryResult {
+    success: boolean;
+    error?: string;
+    cleared?: boolean | number | { history?: number; bookmarks?: number };
+    data?: EarthOneLocalBrowserData;
+    retainedActive?: number;
+    deniedPending?: number;
+    reloadedTabs?: number;
+    reloadFailedTabs?: string[];
+    enabled?: boolean;
+  }
+
+  interface EarthOneBrowserPrivacyResult {
+    success: boolean;
+    changed: boolean;
+    skipped?: boolean;
+    since?: number;
+    timeRange?: EarthOneBrowserPrivacyTimeRange;
+    error?: string;
+    results: Partial<Record<EarthOneBrowserPrivacyCategory | 'localData', EarthOneBrowserPrivacyCategoryResult>>;
+  }
+
   interface EarthOneBrowserSessionTab {
     id: string;
     url: string;
@@ -137,6 +171,7 @@ declare global {
   interface EarthOneBrowserApi {
     getLocalData(): Promise<EarthOneLocalBrowserData>;
     saveLocalData(data: { bookmarks: EarthOneLocalBookmark[]; history: EarthOneLocalHistoryItem[] }): Promise<{ success: boolean; error?: string }>;
+    clearBrowsingData(selection: EarthOneBrowserPrivacySelection, timeRange: EarthOneBrowserPrivacyTimeRange): Promise<EarthOneBrowserPrivacyResult>;
     getSessionState(): Promise<EarthOneBrowserSessionState>;
     setSessionEnabled(enabled: boolean): Promise<{ success: boolean; enabled: boolean; error?: string }>;
     restoreSession(): Promise<EarthOneBrowserSessionRestoreResult>;

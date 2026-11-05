@@ -14,6 +14,16 @@ const DEFAULT_BROWSER_NEW_TAB_URL = 'https://en.wikipedia.org/wiki/Earth';
 const MIN_ZOOM_PERCENT = 50;
 const MAX_ZOOM_PERCENT = 200;
 const ZOOM_STEP_PERCENT = 10;
+const BROWSER_SITE_DATA_TYPES = Object.freeze([
+  'backgroundFetch',
+  'cache',
+  'cookies',
+  'fileSystems',
+  'indexedDB',
+  'localStorage',
+  'serviceWorkers',
+  'webSQL'
+]);
 
 function normalizeBrowserUrl(input) {
   if (typeof input !== 'string') throw new TypeError('请输入有效的网址。');
@@ -97,6 +107,7 @@ function createBrowserEngine({
   let browserActive = false;
   let viewportBounds = null;
   let disposed = false;
+  let privacyClearInProgress = false;
   const downloadStore = downloadStorePath ? createDownloadStore(downloadStorePath) : null;
   const downloadManager = createDownloadManager({
     browserSession,
@@ -170,13 +181,20 @@ function createBrowserEngine({
 
   function attachEvents(tabId, entry) {
     const contents = entry.view.webContents;
-    const validateNavigation = (event, url) => {
+    const validateNavigation = (event, url, isRedirect = false) => {
       onPermissionContextChange(contents);
+      if (privacyClearInProgress) {
+        if (entry.privacyUnloading && (url === 'about:blank' || url === entry.privacyRestoreUrl)) return;
+        // Preserve ordinary server redirects during restore, but validate every hop as credential-free HTTP(S).
+        if (isRedirect && entry.privacyRestoring && isAllowedNavigation(url)) return;
+        event.preventDefault();
+        return;
+      }
       if (!isAllowedNavigation(url)) event.preventDefault();
     };
 
-    contents.on('will-navigate', validateNavigation);
-    contents.on('will-redirect', validateNavigation);
+    contents.on('will-navigate', (event, url) => validateNavigation(event, url));
+    contents.on('will-redirect', (event, url) => validateNavigation(event, url, true));
     contents.on('did-start-navigation', details => {
       if (details?.isMainFrame !== true || details.isSameDocument) return;
       entry.connectionStatus = 'unknown';
@@ -282,7 +300,7 @@ function createBrowserEngine({
       entry.connectionStatus = getConnectionStatus(url);
       entry.certificateErrorCode = null;
       applyZoomForEntry(entry);
-      publish(tabId, entry, true);
+      publish(tabId, entry, !entry.privacyUnloading);
     });
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       if (isMainFrame !== true) return;
@@ -318,7 +336,10 @@ function createBrowserEngine({
       findRequestId: null,
       initialLoadPromise: null,
       connectionStatus: 'unknown',
-      certificateErrorCode: null
+      certificateErrorCode: null,
+      privacyUnloading: false,
+      privacyRestoring: false,
+      privacyRestoreUrl: ''
     };
     tabs.set(tabId, entry);
     window.contentView.addChildView(view);
@@ -328,6 +349,7 @@ function createBrowserEngine({
   }
 
   async function selectTab(tabId, initialUrl) {
+    if (privacyClearInProgress) return { success: false, error: '正在清除此浏览器会话的数据，请稍后重试。' };
     if (!validTabId(tabId)) return { success: false, error: '浏览器标签 ID 无效。' };
     let safeInitialUrl = null;
     if (initialUrl !== undefined) {
@@ -381,6 +403,7 @@ function createBrowserEngine({
   }
 
   async function openNewTab(target, allowAppOrigin = false) {
+    if (privacyClearInProgress) return { success: false, error: '正在清除此浏览器会话的数据，请稍后重试。' };
     let url = null;
     if (allowAppOrigin) {
       try { url = normalizeBrowserUrl(target); } catch {}
@@ -478,6 +501,7 @@ function createBrowserEngine({
   }
 
   async function navigate(tabId, target) {
+    if (privacyClearInProgress) return { success: false, error: '正在清除此浏览器会话的数据，请稍后重试。' };
     if (!validTabId(tabId)) return { success: false, error: '浏览器标签 ID 无效。' };
     let url;
     try {
@@ -506,6 +530,7 @@ function createBrowserEngine({
   }
 
   function closeTab(tabId) {
+    if (privacyClearInProgress) return { success: false, closed: false, error: '正在清除此浏览器会话的数据，请稍后重试。' };
     const entry = tabs.get(tabId);
     if (!entry) return { success: false, closed: false };
     if (tabs.size === 1) {
@@ -569,6 +594,7 @@ function createBrowserEngine({
   }
 
   async function restoreLastClosedTab() {
+    if (privacyClearInProgress) return { success: false, restored: false, error: '正在清除此浏览器会话的数据，请稍后重试。' };
     const candidate = lastClosedTab;
     const url = sanitizeRestoredUrl(candidate?.url);
     if (!candidate || !url) {
@@ -634,6 +660,7 @@ function createBrowserEngine({
   }
 
   function historyMethod(tabId, method) {
+    if (privacyClearInProgress) return;
     const entry = tabs.get(tabId);
     if (!entry) return;
     const history = entry.view.webContents.navigationHistory;
@@ -733,6 +760,7 @@ function createBrowserEngine({
   }
 
   function stopFindInPage(focusPage = false) {
+    if (privacyClearInProgress) return { success: false, error: '正在清除此浏览器会话的数据，请稍后重试。' };
     const active = getActiveEntry();
     if (!active) return { success: false, error: '当前没有可用的活动 Chromium 页面。' };
     const success = stopFindForEntry(active.tabId, active.entry, Boolean(focusPage));
@@ -768,6 +796,123 @@ function createBrowserEngine({
       savedTabs.push({ id: tabId, url });
     }
     return { tabs: savedTabs, activeTabId: activeTabId && savedTabs.some(tab => tab.id === activeTabId) ? activeTabId : null };
+  }
+
+  async function clearSiteDataAndReload(siteSession) {
+    if (privacyClearInProgress) return { success: false, cleared: false, error: '浏览器数据清除正在进行。' };
+    if (!siteSession || typeof siteSession.clearData !== 'function') {
+      return { success: false, cleared: false, error: '当前 Chromium 会话不支持清除网站数据。' };
+    }
+
+    const targets = [];
+    for (const [tabId, entry] of tabs) {
+      const contents = entry.view.webContents;
+      if (contents.isDestroyed()) continue;
+      let url = '';
+      try { url = contents.getURL(); } catch {}
+      if (!isAllowedNavigation(url) && isAllowedNavigation(entry.lastUrl)) url = entry.lastUrl;
+      if (!isAllowedNavigation(url)) {
+        return { success: false, cleared: false, error: '有标签网址无法安全验证，未清除网站数据。' };
+      }
+      targets.push({ tabId, entry, contents, url, unloaded: false });
+    }
+
+    privacyClearInProgress = true;
+    let dataCleared = false;
+    let clearError = null;
+    let authCacheCleared = false;
+    try {
+      for (const target of targets) {
+        const { tabId, entry, contents } = target;
+        stopFindForEntry(tabId, entry);
+        onPermissionContextChange(contents);
+        try { contents.stop(); } catch {}
+        entry.privacyUnloading = true;
+        entry.privacyRestoreUrl = target.url;
+        try {
+          await contents.loadURL('about:blank');
+          target.unloaded = true;
+        } catch (error) {
+          try { target.unloaded = contents.getURL() === 'about:blank'; } catch {}
+          throw error;
+        }
+      }
+
+      await siteSession.clearData({ dataTypes: [...BROWSER_SITE_DATA_TYPES] });
+      dataCleared = true;
+      if (typeof siteSession.clearAuthCache === 'function') {
+        try {
+          await siteSession.clearAuthCache();
+          authCacheCleared = true;
+        } catch (error) {
+          clearError = `网站数据已清除，但 HTTP 身份验证缓存清除失败${error?.message ? `：${error.message}` : '。'}`;
+        }
+      } else {
+        authCacheCleared = true;
+      }
+    } catch (error) {
+      clearError = error?.message || '无法清除此浏览器会话的网站数据。';
+    }
+
+    let reloadedTabs = 0;
+    const reloadFailedTabs = [];
+    try {
+      for (const target of targets) {
+        const { tabId, entry, contents, url } = target;
+        if (!target.unloaded && !dataCleared) {
+          entry.privacyUnloading = false;
+          entry.privacyRestoreUrl = '';
+          continue;
+        }
+        if (contents.isDestroyed()) {
+          reloadFailedTabs.push(tabId);
+          continue;
+        }
+        try {
+          entry.privacyUnloading = true;
+          entry.privacyRestoring = true;
+          entry.privacyRestoreUrl = url;
+          await contents.loadURL(url);
+          const restoredUrl = contents.getURL();
+          if (!isAllowedNavigation(restoredUrl)) throw new Error('恢复后的标签网址不在安全 HTTP(S) 范围内。');
+          entry.lastUrl = restoredUrl;
+          reloadedTabs += 1;
+        } catch {
+          reloadFailedTabs.push(tabId);
+        } finally {
+          entry.privacyUnloading = false;
+          entry.privacyRestoring = false;
+          entry.privacyRestoreUrl = '';
+        }
+        if (!contents.isDestroyed()) {
+          applyZoomForEntry(entry);
+          publish(tabId, entry);
+        }
+      }
+    } finally {
+      privacyClearInProgress = false;
+      for (const target of targets) {
+        target.entry.privacyUnloading = false;
+        target.entry.privacyRestoring = false;
+        target.entry.privacyRestoreUrl = '';
+      }
+    }
+    applyVisibility();
+    if (browserActive && viewportBounds && activeTabId) {
+      try { tabs.get(activeTabId)?.view.webContents.focus(); } catch {}
+    }
+
+    const allTabsRestored = reloadFailedTabs.length === 0 && reloadedTabs === targets.length;
+    const success = dataCleared && authCacheCleared && allTabsRestored;
+    return {
+      success,
+      cleared: dataCleared,
+      reloadedTabs,
+      reloadFailedTabs,
+      error: clearError || (dataCleared && !authCacheCleared
+        ? '网站数据已清除，但 HTTP 身份验证缓存清除失败。'
+        : (dataCleared && !allTabsRestored ? '网站数据已清除，但部分标签未能安全恢复。' : undefined))
+    };
   }
 
   function getTabIdsForTesting() {
@@ -811,6 +956,7 @@ function createBrowserEngine({
     cancelDownload: id => downloadManager.cancel(id),
     removeDownload: id => downloadManager.remove(id),
     clearDownloadRecords: () => downloadManager.clearTerminal(),
+    clearDownloadRecordsSince: since => downloadManager.clearTerminalSince(since),
     getDownloadStorageStatus: () => downloadManager.getStorageStatus(),
     findInPage,
     stopFindInPage,
@@ -820,6 +966,7 @@ function createBrowserEngine({
     isPermissionContext,
     isActiveTab,
     getSessionSnapshot,
+    clearSiteDataAndReload,
     dispose,
     getWebContentsForTesting,
     getTabIdsForTesting,
@@ -828,6 +975,7 @@ function createBrowserEngine({
 }
 
 module.exports = {
+  BROWSER_SITE_DATA_TYPES,
   DEFAULT_BROWSER_NEW_TAB_URL,
   createBrowserEngine,
   isAllowedNavigation,

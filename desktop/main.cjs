@@ -11,6 +11,7 @@ const { createBrowserSessionStore } = require('./session-store.cjs');
 const { assertTrustedAppSender: assertTrustedAppSenderForContext } = require('./browser-ipc-security.cjs');
 const { createBrowserPermissionManager } = require('./browser-permissions.cjs');
 const { createBrowserPdfExporter } = require('./browser-print-pdf.cjs');
+const { createBrowserPrivacyController, retainHistoryBeforeCutoff } = require('./browser-privacy.cjs');
 
 app.setName('EARTH ONE');
 if (process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1' && process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR) {
@@ -23,6 +24,7 @@ let mainWindow = null;
 let browserEngine = null;
 let browserPdfExporter = null;
 let browserPermissionManager = null;
+let browserPrivacyController = null;
 let appOrigin = null;
 let testDownloadDir = null;
 let browserBookmarkApiRequests = 0;
@@ -299,25 +301,7 @@ async function writeLocalBrowserData(value) {
   } catch (error) {
     return { success: false, error: error.message || '本机浏览数据无效。' };
   }
-  const filePath = getLocalBrowserDataPath();
-  const serialized = JSON.stringify({ version: 1, ...data });
-  const write = localBrowserDataWriteQueue.then(async () => {
-    await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-    const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-    let handle;
-    try {
-      handle = await fs.promises.open(temporaryPath, 'wx', 0o600);
-      await handle.writeFile(serialized, 'utf8');
-      await handle.sync();
-      await handle.close();
-      handle = null;
-      await fs.promises.rename(temporaryPath, filePath);
-    } catch (error) {
-      if (handle) await handle.close().catch(() => {});
-      await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
-      throw error;
-    }
-  });
+  const write = localBrowserDataWriteQueue.then(() => writeLocalBrowserDataSnapshot(data));
   localBrowserDataWriteQueue = write.catch(() => {});
   try {
     await write;
@@ -327,10 +311,70 @@ async function writeLocalBrowserData(value) {
   }
 }
 
+async function writeLocalBrowserDataSnapshot(data) {
+  if (localBrowserDataReadOnly) return { success: false, error: '本机浏览数据只读，拒绝覆盖。' };
+  const filePath = getLocalBrowserDataPath();
+  const serialized = JSON.stringify({ version: 1, ...data });
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  let handle;
+  try {
+    handle = await fs.promises.open(temporaryPath, 'wx', 0o600);
+    await handle.writeFile(serialized, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await fs.promises.rename(temporaryPath, filePath);
+    return { success: true };
+  } catch (error) {
+    if (handle) await handle.close().catch(() => {});
+    await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function clearLocalBrowserData(selection) {
+  if (!selection || typeof selection !== 'object' ||
+      typeof selection.history !== 'boolean' || typeof selection.bookmarks !== 'boolean' ||
+      !Number.isFinite(selection.since) || selection.since < 0 ||
+      (!selection.history && !selection.bookmarks)) {
+    return { success: false, error: '本机浏览数据清除选项无效。' };
+  }
+  if (localBrowserDataReadOnly) return { success: false, error: '本机浏览数据只读，拒绝清除。' };
+
+  const clear = localBrowserDataWriteQueue.then(async () => {
+    const current = await readLocalBrowserData();
+    if (current.readOnly || localBrowserDataReadOnly) {
+      return { success: false, error: current.warning || '本机浏览数据只读，拒绝清除。' };
+    }
+    const retainedHistory = selection.history ? retainHistoryBeforeCutoff(current.history, selection.since) : current.history;
+    if (!retainedHistory) return { success: false, error: '本机浏览历史时间范围无效。' };
+    const next = {
+      bookmarks: selection.bookmarks ? [] : current.bookmarks,
+      history: retainedHistory
+    };
+    const cleared = {
+      bookmarks: selection.bookmarks ? current.bookmarks.length : 0,
+      history: selection.history ? current.history.length - next.history.length : 0
+    };
+    const writeResult = await writeLocalBrowserDataSnapshot(next);
+    if (!writeResult.success) return writeResult;
+    return { success: true, cleared, data: { initialized: true, readOnly: false, ...next } };
+  });
+  localBrowserDataWriteQueue = clear.catch(() => {});
+  try {
+    return await clear;
+  } catch {
+    return { success: false, error: '无法将清除后的浏览数据安全保存到此设备。' };
+  }
+}
+
 function registerBrowserIpc() {
   const handlers = {
     'browser:get-local-data': () => readLocalBrowserData(),
     'browser:save-local-data': (_event, data) => writeLocalBrowserData(data),
+    'browser:clear-browsing-data': (_event, selection, timeRange) =>
+      browserPrivacyController?.clear(selection, timeRange) || { success: false, changed: false, error: '浏览器数据清除不可用。', results: {} },
     'browser:get-session-state': () => ({ ...browserSessionStatus, tabs: browserSessionStatus.tabs.map(tab => ({ ...tab })) }),
     'browser:get-permission-state': () => browserPermissionManager?.getState() || { pending: [], grants: [] },
     'browser:resolve-permission-request': (_event, requestId, decision) => browserPermissionManager?.resolve(requestId, decision) || { success: false },
@@ -547,6 +591,270 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       }
       throw new Error('等待本机标签恢复设置初始化超时。');
     };
+
+    if (process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'privacy') {
+      await waitForPage('/privacy', 'Browser Privacy Fixture');
+      const browserOnlySession = testContents.session;
+      if (browserOnlySession.getStoragePath() !== null) throw new Error('Browser 测试会话必须保持非持久化。');
+      await testContents.executeJavaScript(`localStorage.setItem('earth-one-privacy-site-sentinel', 'clear-this-site-value')`);
+      await appContents.executeJavaScript(`localStorage.setItem('earth-one-privacy-app-sentinel', 'preserve-app-value')`);
+      const siteStorageBeforeClear = await testContents.executeJavaScript(`(async () => {
+        const cache = await caches.open('earth-one-privacy-cache');
+        await cache.put('/privacy-cache-storage-sentinel', new Response('clear this Cache Storage value'));
+        await new Promise((resolve, reject) => {
+          const request = indexedDB.open('earth-one-privacy-db', 1);
+          request.onupgradeneeded = () => request.result.createObjectStore('sentinel');
+          request.onsuccess = () => { request.result.close(); resolve(); };
+          request.onerror = () => reject(request.error);
+        });
+        const firstHttpCacheValue = await fetch('/privacy-cache-resource').then(response => response.text());
+        const secondHttpCacheValue = await fetch('/privacy-cache-resource').then(response => response.text());
+        return {
+          cacheNames: await caches.keys(),
+          indexedDBNames: (await indexedDB.databases()).map(database => database.name),
+          firstHttpCacheValue,
+          secondHttpCacheValue
+        };
+      })()`);
+      if (!siteStorageBeforeClear.cacheNames.includes('earth-one-privacy-cache') ||
+          !siteStorageBeforeClear.indexedDBNames.includes('earth-one-privacy-db') ||
+          siteStorageBeforeClear.firstHttpCacheValue !== siteStorageBeforeClear.secondHttpCacheValue) {
+        throw new Error(`清除前未能建立 Browser Cache Storage、IndexedDB 与 HTTP cache 夹具：${JSON.stringify(siteStorageBeforeClear)}`);
+      }
+      const cookieBefore = await browserOnlySession.cookies.get({ url: testUrl });
+      if (!cookieBefore.some(cookie => cookie.name === 'earth-one-privacy' && cookie.value === 'synthetic-cookie-secret')) {
+        throw new Error('隐私夹具没有建立预期的 Browser 临时 Cookie。');
+      }
+
+      await appContents.executeJavaScript(`document.querySelector('[data-browser-session-toggle]')?.click()`);
+      const sessionDeadline = Date.now() + 5000;
+      let enabledSession = null;
+      while (Date.now() < sessionDeadline) {
+        enabledSession = await appContents.executeJavaScript('window.earthOneBrowser.getSessionState()');
+        if (enabledSession.enabled && enabledSession.tabs.length > 0) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (!enabledSession?.enabled || enabledSession.tabs.length !== 1) throw new Error('隐私 smoke 未能建立可清除的 URL 恢复快照。');
+
+      const boundsDeadline = Date.now() + 3000;
+      while (Date.now() < boundsDeadline && !browserEngine.getViewBoundsForTesting(testTabId)) {
+        await new Promise(resolve => setTimeout(resolve, 30));
+      }
+      const permissionOrigin = new URL(testContents.getURL()).origin;
+      let grantedDecision = null;
+      const permissionRequestId = browserPermissionManager.request(
+        testContents,
+        'notifications',
+        decision => { grantedDecision = decision; },
+        { isMainFrame: true, requestingUrl: testContents.getURL(), securityOrigin: permissionOrigin }
+      );
+      if (typeof permissionRequestId !== 'string' || !browserPermissionManager.resolve(permissionRequestId, 'allow').granted || grantedDecision !== true) {
+        throw new Error('隐私 smoke 未能建立真实的本机会话站点权限授权。');
+      }
+
+      const localDataPath = getLocalBrowserDataPath();
+      const downloadStorePath = path.join(app.getPath('userData'), 'earth-one-downloads.json');
+      const sessionPath = getBrowserSessionStorePath();
+      const browserDataBefore = await appContents.executeJavaScript('window.earthOneBrowser.getLocalData()');
+      const recentHistoryId = process.env.EARTH_ONE_BROWSER_TEST_PRIVACY_RECENT_HISTORY_ID;
+      const oldHistoryId = process.env.EARTH_ONE_BROWSER_TEST_PRIVACY_OLD_HISTORY_ID;
+      const bookmarkId = process.env.EARTH_ONE_BROWSER_TEST_PRIVACY_BOOKMARK_ID;
+      const recentDownloadId = process.env.EARTH_ONE_BROWSER_TEST_PRIVACY_RECENT_DOWNLOAD_ID;
+      const oldDownloadId = process.env.EARTH_ONE_BROWSER_TEST_PRIVACY_OLD_DOWNLOAD_ID;
+      if (!browserDataBefore.history.some(item => item.id === recentHistoryId) ||
+          !browserDataBefore.history.some(item => item.id === oldHistoryId) ||
+          !browserDataBefore.bookmarks.some(item => item.id === bookmarkId)) {
+        throw new Error('隐私测试隔离档案未加载预期的历史与书签记录。');
+      }
+      const storedDownloadsBefore = JSON.parse(fs.readFileSync(downloadStorePath, 'utf8'));
+      if (!storedDownloadsBefore.records.some(record => record.id === recentDownloadId) ||
+          !storedDownloadsBefore.records.some(record => record.id === oldDownloadId)) {
+        throw new Error('隐私测试隔离档案未加载预期的下载记录。');
+      }
+
+      const noOpResult = await appContents.executeJavaScript(`window.earthOneBrowser.clearBrowsingData({ history: false, bookmarks: false, downloadRecords: false, sessionRestore: false, permissions: false, siteData: false }, 'all')`);
+      if (!noOpResult.success || noOpResult.changed || !noOpResult.skipped) throw new Error('空选择必须是无副作用 no-op。');
+
+      const openPrivacyPanel = async () => {
+        await appContents.executeJavaScript(`document.querySelector('[data-browser-privacy-open]')?.click()`);
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const present = await appContents.executeJavaScript(`Boolean(document.querySelector('[data-browser-privacy-panel]'))`);
+          if (present) return;
+          await new Promise(resolve => setTimeout(resolve, 30));
+        }
+        throw new Error('隐私面板未能打开。');
+      };
+      const setPrivacyCategory = async (key, checked) => {
+        const state = await appContents.executeJavaScript(`(() => {
+          const input = document.querySelector('[data-privacy-category="${key}"]');
+          if (!input || input.disabled) return null;
+          if (input.checked !== ${checked ? 'true' : 'false'}) input.click();
+          return input.checked;
+        })()`);
+        if (state !== checked) throw new Error(`隐私类别未能设置：${key}=${checked}`);
+      };
+      const setPrivacyTimeRange = async value => {
+        const selected = await appContents.executeJavaScript(`(() => {
+          const select = document.querySelector('[data-privacy-time-range]');
+          if (!select) return false;
+          const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+          setter.call(select, ${JSON.stringify(value)});
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          return select.value === ${JSON.stringify(value)};
+        })()`);
+        if (!selected) throw new Error(`隐私面板未能设置时间范围 ${value}。`);
+      };
+      const reviewPrivacyClear = async () => {
+        await appContents.executeJavaScript(`document.querySelector('[data-privacy-review]')?.click()`);
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          if (await appContents.executeJavaScript(`Boolean(document.querySelector('[data-browser-privacy-confirmation]'))`)) return;
+          await new Promise(resolve => setTimeout(resolve, 30));
+        }
+        throw new Error('清除前的二次确认步骤未显示。');
+      };
+      const waitForPrivacyResult = async () => {
+        const deadline = Date.now() + 15000;
+        while (Date.now() < deadline) {
+          const text = await appContents.executeJavaScript(`document.querySelector('[data-browser-privacy-result]')?.innerText || ''`);
+          if (text.includes('清除完成') || text.includes('部分数据未能清除')) return text;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        throw new Error('隐私清除操作没有返回结果。');
+      };
+
+      await openPrivacyPanel();
+      await setPrivacyCategory('siteData', true);
+      await reviewPrivacyClear();
+      const confirmationText = await appContents.executeJavaScript(`document.querySelector('[data-browser-privacy-confirmation]')?.innerText || ''`);
+      if (!confirmationText.includes('确认清除所选数据') || !confirmationText.includes('下载文件和 PDF')) {
+        throw new Error('清除确认没有说明清除范围和保留的下载文件/PDF。');
+      }
+      const localDataBeforeCancel = fs.readFileSync(localDataPath, 'utf8');
+      const downloadsBeforeCancel = fs.readFileSync(downloadStorePath, 'utf8');
+      const sessionBeforeCancel = fs.readFileSync(sessionPath, 'utf8');
+      await appContents.executeJavaScript(`document.querySelector('[data-privacy-cancel]')?.click()`);
+      await new Promise(resolve => setTimeout(resolve, 120));
+      if (fs.readFileSync(localDataPath, 'utf8') !== localDataBeforeCancel ||
+          fs.readFileSync(downloadStorePath, 'utf8') !== downloadsBeforeCancel ||
+          fs.readFileSync(sessionPath, 'utf8') !== sessionBeforeCancel) {
+        throw new Error('取消清除确认不得改动任何浏览器数据文件。');
+      }
+      const cookieAfterCancel = await browserOnlySession.cookies.get({ url: testUrl });
+      const localStorageAfterCancel = await testContents.executeJavaScript(`localStorage.getItem('earth-one-privacy-site-sentinel')`);
+      if (!cookieAfterCancel.some(cookie => cookie.name === 'earth-one-privacy') || localStorageAfterCancel !== 'clear-this-site-value') {
+        throw new Error('取消清除确认不得删除 Cookie 或站点存储。');
+      }
+
+      await setPrivacyCategory('history', true);
+      await setPrivacyCategory('downloadRecords', true);
+      await setPrivacyCategory('sessionRestore', true);
+      await setPrivacyCategory('permissions', true);
+      await setPrivacyTimeRange('day');
+      await reviewPrivacyClear();
+      if (browserPermissionManager.getState().grants.length !== 1) throw new Error('清除前应有一项可重置的站点授权。');
+      await appContents.executeJavaScript(`(() => {
+        window.__earthOnePrivacyApiWrites = [];
+        window.__earthOnePrivacyAuditOn = true;
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init = {}) => {
+          const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+          const method = String(init.method || input?.method || 'GET').toUpperCase();
+          if (window.__earthOnePrivacyAuditOn && url.origin === location.origin && url.pathname.startsWith('/api/') && method !== 'GET') {
+            window.__earthOnePrivacyApiWrites.push({ method, path: url.pathname });
+          }
+          return originalFetch(input, init);
+        };
+        return true;
+      })()`);
+      await appContents.executeJavaScript(`document.querySelector('[data-privacy-confirm]')?.click()`);
+      const firstClearText = await waitForPrivacyResult();
+      if (!firstClearText.includes('清除完成') || firstClearText.includes('未能清除')) {
+        throw new Error(`首轮隐私清除未完整成功：${firstClearText}`);
+      }
+
+      const currentUrl = testContents.getURL();
+      if (new URL(currentUrl).pathname !== '/privacy-final' || testContents.isLoading() || !browserEngine.getTabIdsForTesting().includes(testTabId)) {
+        throw new Error('清除后应在原标签安全恢复网址，并允许有效的同源服务器重定向。');
+      }
+      const cookieAfterClear = await browserOnlySession.cookies.get({ url: testUrl });
+      const siteStorageAfterClear = await testContents.executeJavaScript(`localStorage.getItem('earth-one-privacy-site-sentinel')`);
+      const clearedSiteStores = await testContents.executeJavaScript(`(async () => ({
+        cacheNames: await caches.keys(),
+        indexedDBNames: (await indexedDB.databases()).map(database => database.name),
+        httpCacheValue: await fetch('/privacy-cache-resource').then(response => response.text())
+      }))()`);
+      const appStorageAfterClear = await appContents.executeJavaScript(`localStorage.getItem('earth-one-privacy-app-sentinel')`);
+      if (cookieAfterClear.some(cookie => cookie.name === 'earth-one-privacy') || siteStorageAfterClear !== null) {
+        throw new Error('清除网站数据后，原有 Browser Cookie 与 localStorage 应消失。');
+      }
+      if (clearedSiteStores.cacheNames.includes('earth-one-privacy-cache') ||
+          clearedSiteStores.indexedDBNames.includes('earth-one-privacy-db') ||
+          clearedSiteStores.httpCacheValue === siteStorageBeforeClear.firstHttpCacheValue) {
+        throw new Error(`Browser Cache Storage、IndexedDB 与 HTTP cache 应全部清除：${JSON.stringify(clearedSiteStores)}`);
+      }
+      if (appStorageAfterClear !== 'preserve-app-value') throw new Error('清除 Browser 网站数据不得影响 EARTH ONE 应用 origin 存储。');
+
+      const clearedLocalData = JSON.parse(fs.readFileSync(localDataPath, 'utf8'));
+      if (!clearedLocalData.history.some(item => item.id === oldHistoryId) ||
+          clearedLocalData.history.some(item => item.id === recentHistoryId) ||
+          !clearedLocalData.bookmarks.some(item => item.id === bookmarkId)) {
+        throw new Error('按最近 24 小时清除应删除近期历史、保留较早历史，并保留未选中的书签。');
+      }
+      const clearedDownloadStore = JSON.parse(fs.readFileSync(downloadStorePath, 'utf8'));
+      if (clearedDownloadStore.records.some(record => record.id === recentDownloadId) ||
+          !clearedDownloadStore.records.some(record => record.id === oldDownloadId)) {
+        throw new Error('按最近 24 小时清除应删除近期下载记录并保留较早记录。');
+      }
+      const sessionAfterClear = await appContents.executeJavaScript('window.earthOneBrowser.getSessionState()');
+      if (sessionAfterClear.enabled || sessionAfterClear.tabs.length !== 0 || browserPermissionManager.getState().grants.length !== 0) {
+        throw new Error('清除恢复快照与站点权限后，二者都必须立即重置。');
+      }
+      const userDownloadPath = process.env.EARTH_ONE_BROWSER_TEST_PRIVACY_DOWNLOAD_PATH;
+      const olderDownloadPath = process.env.EARTH_ONE_BROWSER_TEST_PRIVACY_OLDER_DOWNLOAD_PATH;
+      const userPdfPath = process.env.EARTH_ONE_BROWSER_TEST_PRIVACY_PDF_PATH;
+      if (!fs.existsSync(userDownloadPath) || !fs.existsSync(olderDownloadPath) || !fs.existsSync(userPdfPath)) {
+        throw new Error('清除下载历史不得删除近期/较早下载文件或独立的用户创建 PDF。');
+      }
+      const appApiWrites = await appContents.executeJavaScript(`(() => { window.__earthOnePrivacyAuditOn = false; return window.__earthOnePrivacyApiWrites || []; })()`);
+      if (appApiWrites.length !== 0 || browserBookmarkApiRequests !== 0) throw new Error('清除的浏览数据不得经 HTTP API 上传到服务器。');
+
+      await setPrivacyCategory('bookmarks', true);
+      await reviewPrivacyClear();
+      await appContents.executeJavaScript(`document.querySelector('[data-privacy-confirm]')?.click()`);
+      const bookmarkClearText = await waitForPrivacyResult();
+      if (!bookmarkClearText.includes('清除完成')) throw new Error(`书签类别定向清除失败：${bookmarkClearText}`);
+      const afterBookmarkClear = JSON.parse(fs.readFileSync(localDataPath, 'utf8'));
+      const afterBookmarkDownloadStore = JSON.parse(fs.readFileSync(downloadStorePath, 'utf8'));
+      if (afterBookmarkClear.bookmarks.length !== 0 || !afterBookmarkClear.history.some(item => item.id === oldHistoryId) ||
+          !afterBookmarkDownloadStore.records.some(record => record.id === oldDownloadId) ||
+          !fs.existsSync(userDownloadPath) || !fs.existsSync(olderDownloadPath) || !fs.existsSync(userPdfPath)) {
+        throw new Error('仅选书签时不得清除历史、下载记录、下载文件或 PDF。');
+      }
+      const finalApiWrites = await appContents.executeJavaScript(`window.__earthOnePrivacyApiWrites || []`);
+      if (finalApiWrites.length !== 0 || browserBookmarkApiRequests !== 0) throw new Error('书签清除不得请求服务器数据 API。');
+
+      await setPrivacyCategory('history', true);
+      await setPrivacyCategory('downloadRecords', true);
+      await setPrivacyTimeRange('all');
+      await reviewPrivacyClear();
+      await appContents.executeJavaScript(`document.querySelector('[data-privacy-confirm]')?.click()`);
+      const allTimeClearText = await waitForPrivacyResult();
+      if (!allTimeClearText.includes('清除完成') || allTimeClearText.includes('未能清除')) {
+        throw new Error(`全部时间隐私清除未完整成功：${allTimeClearText}`);
+      }
+      const afterAllTimeData = JSON.parse(fs.readFileSync(localDataPath, 'utf8'));
+      const afterAllTimeDownloads = JSON.parse(fs.readFileSync(downloadStorePath, 'utf8'));
+      if (afterAllTimeData.history.length !== 0 || afterAllTimeDownloads.records.length !== 0 ||
+          !fs.existsSync(userDownloadPath) || !fs.existsSync(olderDownloadPath) || !fs.existsSync(userPdfPath)) {
+        throw new Error('全部时间必须移除新旧浏览历史与所有终结下载记录，同时保留书签类别状态、下载文件和 PDF。');
+      }
+
+      console.log('BROWSER_PRIVACY_SMOKE_PASS: empty-selection no-op, cancelled confirmation, last-24-hours retention, all-time deletion of old and new records, bookmark-only isolation, Chromium cookie/cache/localStorage/Cache Storage/IndexedDB reset, session/permission reset, safe redirected tab reload, file/PDF preservation, app-origin storage isolation, and zero server writes verified.');
+      app.quit();
+      return;
+    }
 
     if (process.env.EARTH_ONE_BROWSER_SESSION_SMOKE_TEST === '1') {
       const phase = process.env.EARTH_ONE_BROWSER_TEST_PHASE;
@@ -1761,6 +2069,7 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
 
     await submitAddress(`${new URL(testUrl).origin}/find`);
     await waitForPage('/find', 'EARTH ONE Find Fixture');
+    mainWindow.focus();
     testContents.focus();
     await new Promise(resolve => setTimeout(resolve, 100));
     testContents.sendInputEvent({ type: 'keyDown', keyCode: 'F', modifiers: ['control'] });
@@ -1775,7 +2084,24 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       if (findFocused) break;
       await new Promise(resolve => setTimeout(resolve, 50));
     }
-    if (!findFocused) throw new Error('远程网页中的 Ctrl+F 未聚焦 EARTH ONE 页内查找框。');
+    if (!findFocused) {
+      const findFocusDiagnostic = await appContents.executeJavaScript(`(() => ({
+        appFocused: document.hasFocus(),
+        activeElement: document.activeElement?.outerHTML?.slice(0, 180) || '',
+        findInput: Boolean(document.querySelector('[data-browser-find-input]')),
+        findBar: Boolean(document.querySelector('[data-browser-find-bar]')),
+        privacyPanel: Boolean(document.querySelector('[data-browser-privacy-panel]'))
+      }))()`);
+      throw new Error(`远程网页中的 Ctrl+F 未聚焦 EARTH ONE 页内查找框：${JSON.stringify({
+        findFocusDiagnostic,
+        activeTabId: browserEngine.getSessionSnapshot().activeTabId,
+        expectedTabId: testTabId,
+        activeTab: browserEngine.isActiveTab(testTabId),
+        webContentsFocused: testContents.isFocused(),
+        appWindowFocused: mainWindow.isFocused(),
+        viewBounds: browserEngine.getViewBoundsForTesting(testTabId)
+      })}`);
+    }
     const pageSawShortcut = await testContents.executeJavaScript('window.__earthOneSawControlFind');
     if (pageSawShortcut) throw new Error('Ctrl+F 不应继续交给远程网页处理。');
 
@@ -2560,6 +2886,18 @@ app.whenReady().then(async () => {
     }
   });
 
+  browserPrivacyController = createBrowserPrivacyController({
+    clearLocalData: selection => clearLocalBrowserData(selection),
+    clearDownloadRecords: since => browserEngine?.clearDownloadRecordsSince(since) || { success: false, cleared: 0 },
+    clearSessionRestore: () => {
+      const tabCount = browserSessionStatus.tabs.length;
+      const result = setBrowserSessionEnabled(false);
+      return result.success ? { ...result, cleared: tabCount, enabled: false } : result;
+    },
+    clearPermissions: () => browserPermissionManager?.clearAll() || { success: false },
+    clearSiteData: () => browserEngine?.clearSiteDataAndReload(browserSession) || { success: false, cleared: false }
+  });
+
   registerBrowserIpc();
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -2574,6 +2912,7 @@ app.whenReady().then(async () => {
   mainWindow.on('closed', () => {
     browserPermissionManager?.dispose();
     browserPermissionManager = null;
+    browserPrivacyController = null;
     browserEngine?.dispose();
     browserEngine = null;
     browserPdfExporter = null;

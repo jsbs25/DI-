@@ -291,12 +291,13 @@ function createDownloadManager({
     return { success: true };
   }
 
-  function clearTerminal() {
+  function clearTerminalSince(since = 0) {
+    if (!Number.isFinite(since) || since < 0) return { success: false, cleared: 0, error: '下载记录时间范围无效。' };
     if (storageReadOnly) return { success: false, cleared: 0 };
     const before = [...records.entries()];
     let cleared = 0;
     for (const [id, record] of records) {
-      if (!TERMINAL_STATES.has(record.state)) continue;
+      if (!TERMINAL_STATES.has(record.state) || (since !== 0 && record.createdAt < since)) continue;
       records.delete(id);
       cleared += 1;
     }
@@ -311,6 +312,10 @@ function createDownloadManager({
       notify();
     }
     return { success: true, cleared };
+  }
+
+  function clearTerminal() {
+    return clearTerminalSince(0);
   }
 
   function getStorageStatus() {
@@ -330,7 +335,7 @@ function createDownloadManager({
     persist(true);
   }
 
-  return { list, cancel, remove, clearTerminal, getStorageStatus, dispose };
+  return { list, cancel, remove, clearTerminal, clearTerminalSince, getStorageStatus, dispose };
 }
 
 module.exports = {
