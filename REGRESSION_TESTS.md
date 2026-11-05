@@ -23,6 +23,7 @@
 | `npm run test:browser-find` | 模拟 WebContents 查找控制：仅活动可见标签、`new/next/previous`、非字符串/超长查询拒绝、过期结果过滤、清除高亮/焦点恢复、隐藏/销毁保护、切换活动标签聚焦页面，以及 Ctrl/Cmd+F 路由 | 2026-11-05：`BROWSER_FIND_ENGINE_TEST_PASS`；通过。 |
 | `npm run test:browser-shortcuts` | 快捷键白名单解析：Ctrl/Cmd 修饰键、Ctrl/Cmd+T/W/Shift+T、Tab 正向/反向循环、1–9 索引选择、保留 L/F，以及 keyUp/Alt/未允许的 Shift 和非法数字拒绝 | 2026-11-05：快捷键单元测试通过；Electron 集成 smoke 另验证最近关闭标签恢复。 |
 | `npm run test:browser-tabs` | 主进程标签管理：精确顺序白名单、可选会话快照顺序、URL-only 一次恢复、新标签 ID、敏感查询与片段过滤、恢复后 100% 缩放、伪造 ID/URL 拒绝及末标签替换 | 2026-11-05：`BROWSER_TABS_ENGINE_TEST_PASS`；通过。 |
+| `npm run test:browser-connection-status` | 模拟 WebContents 的顶层 HTTP/成功 HTTPS/最终重定向协议状态、标签隔离、子框架排除、自签证书错误阻断、中性普通导航失败及下一次有效导航清除错误 | 2026-11-05：`BROWSER_CONNECTION_STATUS_TEST_PASS`；真实 Electron/Xvfb `BROWSER_CONNECTION_STATUS_SMOKE_PASS`，使用临时 loopback 自签证书验证阻断与 UI，无信任库改动。 |
 | `npm run test:browser-zoom` | 缩放白名单解析、50%–200% 安全范围、活动标签专属、同源标签独立状态、最后标签安全替换及非法 bridge 参数拒绝 | 2026-11-05：`BROWSER_ZOOM_ENGINE_TEST_PASS`；真实 Electron 缩放与重启恢复由 `npm run test:browser-engine` 覆盖。 |
 | `npm run test:browser-popups` | 模拟 popup 安全策略与 Browser engine：危险/无效/凭据 URL、EARTH ONE 应用 origin、所有 Electron disposition 必须确认、POST popup 拒绝、右键链接回调、活动标签焦点、关闭活动 popup 后恢复并聚焦剩余标签、专用 Browser session 复用、无 preload/Node | 2026-11-05：`BROWSER_POPUP_SECURITY_TEST_PASS`；通过。 |
 | `npm run test:browser-ipc-security` | 合成 IPC 事件验证精确主窗口 WebContents、顶层 frame 和应用 origin；拒绝其他 WebContents、子框架及错误/畸形来源 | 2026-11-05：`BROWSER_IPC_SECURITY_TEST_PASS`；通过。 |
@@ -35,6 +36,8 @@
 | `npm run test:motion` | 静态检查全局 CSS 在 `prefers-reduced-motion: reduce` 媒体查询中覆盖元素与伪元素，并缩短动画/过渡、关闭平滑滚动 | 2026-11-04：6 项通过、0 失败；只检查源码规则，不证明浏览器运行时、实体设备或辅助技术行为。 |
 | `npm run test:motion:browser` | Chromium 计算样式回归：模拟系统 reduce 偏好，并在宿主默认为 no-preference 时确认原有动画、过渡及平滑滚动未改变；同时检查静态状态文字仍存在 | 2026-11-04：12 项通过（Chrome for Testing 151.0.7922.34；宿主默认 no-preference）；只加载内嵌 data URL，不启动应用/API 服务。实体设备和辅助技术仍未覆盖；若宿主默认 reduce，不适用的 no-preference 基线项会跳过。 |
 | `npm run test:motion:build` | 运行 Vite 生产构建，再检查构建 CSS 中减少动态效果媒体查询、全局元素/伪元素选择器、动画/过渡时长、迭代次数及滚动覆盖 | 2026-11-04：构建通过；9 项产物断言通过，覆盖 1 个 CSS 文件。Three.js 551.65 KB chunk 警告仍显示；构建产物 `dist` 被忽略，不调用 API 或启动服务。 |
+
+2026-11-05（快进至 `55b635a` 后）：完整 `npm run test:browser-engine` 返回 0，包含 `BROWSER_CONNECTION_STATUS_TEST_PASS`、`BROWSER_CONNECTION_STATUS_SMOKE_PASS` 与其余 Browser/Electron smoke 清理标记。
 
 ## 本轮生产构建桌面 smoke
 

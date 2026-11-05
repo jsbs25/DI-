@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const http = require('node:http');
+const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
@@ -30,10 +31,13 @@ let finished = false;
 const activeFixtureResponses = new Set();
 const activeFixtureSockets = new Set();
 const sessionRequestAudit = [];
+const secureFixtureRequests = [];
 let sessionOneRequestCount = 0;
 let alternateFixtureOrigin = null;
+let secureFixtureOrigin = null;
 function handleFixtureRequest(request, response) {
   const pathname = new URL(request.url || '/', 'http://127.0.0.1').pathname;
+  if (request.socket.encrypted) secureFixtureRequests.push(pathname);
   if (pathname.startsWith('/session-')) {
     sessionRequestAudit.push({ pathname, cookie: request.headers.cookie || '' });
   }
@@ -49,6 +53,31 @@ function handleFixtureRequest(request, response) {
   }
   if (pathname === '/session-fail') {
     request.socket.destroy();
+    return;
+  }
+  if (pathname === '/connection-http') {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end(`<!doctype html><html><head><title>Connection Status HTTP Fixture</title></head><body><h1>HTTP main-frame fixture</h1><iframe title="self-signed TLS subframe" src="${secureFixtureOrigin}/connection-subframe"></iframe></body></html>`);
+    return;
+  }
+  if (pathname === '/connection-redirect') {
+    response.writeHead(302, { Location: '/connection-final' });
+    response.end();
+    return;
+  }
+  if (pathname === '/connection-redirect-to-tls') {
+    response.writeHead(302, { Location: `${secureFixtureOrigin}/connection-https` });
+    response.end();
+    return;
+  }
+  if (pathname === '/connection-final') {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><html><head><title>Connection Status HTTP Final</title></head><body><h1>Final HTTP page after redirect</h1></body></html>');
+    return;
+  }
+  if (pathname === '/connection-https' || pathname === '/connection-subframe') {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><html><head><title>Self-Signed HTTPS Fixture</title></head><body><h1>Untrusted local TLS fixture</h1></body></html>');
     return;
   }
   if (pathname === '/popup-test') {
@@ -161,10 +190,29 @@ function handleFixtureRequest(request, response) {
 }
 const fixtureServer = http.createServer(handleFixtureRequest);
 const alternateFixtureServer = http.createServer(handleFixtureRequest);
-fixtureServer.on('connection', socket => {
-  activeFixtureSockets.add(socket);
-  socket.once('close', () => activeFixtureSockets.delete(socket));
-});
+const tlsKeyPath = path.join(downloadDir, 'connection-fixture-key.pem');
+const tlsCertificatePath = path.join(downloadDir, 'connection-fixture-cert.pem');
+const certificateResult = spawnSync('openssl', [
+  'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-sha256',
+  '-keyout', tlsKeyPath,
+  '-out', tlsCertificatePath,
+  '-days', '1',
+  '-subj', '/CN=127.0.0.1',
+  '-addext', 'subjectAltName=IP:127.0.0.1'
+], { encoding: 'utf8', timeout: 15000 });
+if (certificateResult.status !== 0) {
+  throw new Error(`无法生成临时 loopback TLS 测试证书：${certificateResult.stderr || certificateResult.error || certificateResult.status}`);
+}
+const secureFixtureServer = https.createServer({
+  key: fs.readFileSync(tlsKeyPath),
+  cert: fs.readFileSync(tlsCertificatePath)
+}, handleFixtureRequest);
+for (const server of [fixtureServer, alternateFixtureServer, secureFixtureServer]) {
+  server.on('connection', socket => {
+    activeFixtureSockets.add(socket);
+    socket.once('close', () => activeFixtureSockets.delete(socket));
+  });
+}
 
 function launchSmoke(phase, options = {}) {
   let output = '';
@@ -179,6 +227,7 @@ function launchSmoke(phase, options = {}) {
       EARTH_ONE_BROWSER_SESSION_SMOKE_TEST: options.sessionSmoke ? '1' : '0',
       EARTH_ONE_BROWSER_TEST_PHASE: phase,
       EARTH_ONE_BROWSER_TEST_URL: startUrl,
+      EARTH_ONE_BROWSER_TEST_SECURE_URL: options.secureUrl || '',
       EARTH_ONE_BROWSER_TEST_NEW_TAB_URL: phase === 'shortcuts' || phase === 'zoom'
         ? `${new URL(startUrl).origin}/shortcuts-default`
         : '',
@@ -262,7 +311,7 @@ async function stopRun(run) {
 async function cleanup() {
   if (activeRun) await stopRun(activeRun);
   for (const response of activeFixtureResponses) response.destroy();
-  for (const server of [fixtureServer, alternateFixtureServer]) {
+  for (const server of [fixtureServer, alternateFixtureServer, secureFixtureServer]) {
     if (!server.listening) continue;
     const closed = new Promise(resolve => server.close(() => resolve()));
     for (const response of activeFixtureResponses) response.destroy();
@@ -301,8 +350,29 @@ async function main() {
     alternateFixtureServer.once('error', reject);
     alternateFixtureServer.listen(0, '127.0.0.1', resolve);
   });
+  await new Promise((resolve, reject) => {
+    secureFixtureServer.once('error', reject);
+    secureFixtureServer.listen(0, '127.0.0.1', resolve);
+  });
   alternateFixtureOrigin = `http://127.0.0.1:${alternateFixtureServer.address().port}`;
+  secureFixtureOrigin = `https://127.0.0.1:${secureFixtureServer.address().port}`;
   const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`;
+
+  const connectionStatusRun = launchSmoke('connection-status', {
+    startUrl: `${fixtureOrigin}/connection-http`,
+    secureUrl: secureFixtureOrigin
+  });
+  activeRun = connectionStatusRun;
+  await connectionStatusRun.waitForMarker(/BROWSER_CONNECTION_STATUS_SMOKE_PASS:/, 50000);
+  const connectionStatusClose = await Promise.race([
+    connectionStatusRun.closed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('connection-status Electron smoke did not exit cleanly')), 12000))
+  ]);
+  assert.equal(connectionStatusClose.code, 0, `connection-status Electron smoke failed: ${connectionStatusRun.getOutput()}`);
+  assert.deepEqual(secureFixtureRequests, [], 'the local self-signed HTTPS fixture must be rejected before any HTTPS page request is served');
+  console.log('BROWSER_TEST_DRIVER_CONNECTION_STATUS_PASSED');
+  activeRun = null;
+  if (process.env.EARTH_ONE_BROWSER_CONNECTION_STATUS_ONLY === '1') return;
 
   if (process.env.EARTH_ONE_BROWSER_SHORTCUTS_ONLY !== '1') {
     const zoomRun = launchSmoke('zoom', { startUrl: `${fixtureOrigin}/zoom` });

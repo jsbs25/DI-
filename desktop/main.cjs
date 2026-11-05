@@ -722,9 +722,14 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
 
     const initialShortcutPhase = process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'shortcuts';
     const initialZoomPhase = process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'zoom';
+    const initialConnectionStatusPhase = process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'connection-status';
     await waitForPage(
-      initialShortcutPhase ? '/shortcuts' : initialZoomPhase ? '/zoom' : '/one',
-      initialShortcutPhase ? 'Browser Keyboard Fixture' : initialZoomPhase ? 'Chromium Zoom Fixture' : 'EARTH ONE Fixture One'
+      initialShortcutPhase ? '/shortcuts'
+        : initialZoomPhase ? '/zoom'
+          : initialConnectionStatusPhase ? '/connection-http' : '/one',
+      initialShortcutPhase ? 'Browser Keyboard Fixture'
+        : initialZoomPhase ? 'Chromium Zoom Fixture'
+          : initialConnectionStatusPhase ? 'Connection Status HTTP Fixture' : 'EARTH ONE Fixture One'
     );
     const defaultChromiumDeadline = Date.now() + 5000;
     let defaultChromiumReady = false;
@@ -743,6 +748,119 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     if (!defaultChromiumReady) throw new Error('Electron Browser 首次进入时没有默认显示并聚焦 Chromium 页面。');
+
+    if (initialConnectionStatusPhase) {
+      const waitForConnectionStatus = async expected => {
+        const deadline = Date.now() + 8000;
+        let observed = null;
+        while (Date.now() < deadline) {
+          observed = await appContents.executeJavaScript(`(() => {
+            const status = document.querySelector('[data-browser-connection-status]');
+            return status ? {
+              value: status.getAttribute('data-status'),
+              label: status.innerText,
+              title: status.title
+            } : null;
+          })()`);
+          if (observed?.value === expected) return observed;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        throw new Error(`连接状态 UI 未到达 ${expected}：${JSON.stringify(observed)}`);
+      };
+      const selectTabFromUi = async tabId => {
+        const clicked = await appContents.executeJavaScript(`(() => {
+          const wrapper = [...document.querySelectorAll('[data-browser-tab-id]')]
+            .find(node => node.getAttribute('data-browser-tab-id') === ${JSON.stringify(tabId)});
+          const button = wrapper?.querySelector('[role="tab"]');
+          if (!button) return false;
+          button.click();
+          return true;
+        })()`);
+        if (!clicked) throw new Error(`Browser UI 中找不到标签 ${tabId}。`);
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          if (browserEngine.getSessionSnapshot().activeTabId === tabId) return;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        throw new Error(`Browser UI 标签切换未同步到主进程：${tabId}`);
+      };
+      const initialHttpStatus = await waitForConnectionStatus('unencrypted');
+      if (!initialHttpStatus.label.includes('HTTP') || !initialHttpStatus.label.includes('未加密') ||
+          /安全|受信任|可信/i.test(initialHttpStatus.label)) {
+        throw new Error(`HTTP 地址栏状态必须明确未加密且不得声称安全：${JSON.stringify(initialHttpStatus)}`);
+      }
+
+      const httpRedirect = await browserEngine.navigate(testTabId, `${new URL(testUrl).origin}/connection-redirect`);
+      if (!httpRedirect.success) throw new Error('本机 HTTP 重定向导航失败。');
+      await waitForTabPath(testTabId, '/connection-final', 'Connection Status HTTP Final');
+      await waitForConnectionStatus('unencrypted');
+      const redirectedAddress = await appContents.executeJavaScript(
+        `document.querySelector('input[aria-label="输入网址或搜索词"]')?.value || ''`
+      );
+      if (!redirectedAddress.endsWith('/connection-final')) {
+        throw new Error(`HTTP 重定向后地址栏未跟随最终主框架 URL：${redirectedAddress}`);
+      }
+
+      const tlsRedirect = await browserEngine.navigate(testTabId, `${new URL(testUrl).origin}/connection-redirect-to-tls`);
+      if (tlsRedirect.success) throw new Error('自签证书 HTTPS 重定向不得被放行。');
+      const blockedTlsStatus = await waitForConnectionStatus('certificate-error');
+      const blockedTlsUi = await appContents.executeJavaScript(`(() => {
+        const status = document.querySelector('[data-browser-connection-status]');
+        const buttons = [...document.querySelectorAll('button')].map(button =>
+          button.innerText || button.getAttribute('aria-label') || ''
+        );
+        return {
+          status: status?.getAttribute('data-status') || '',
+          label: status?.innerText || '',
+          title: status?.title || '',
+          hasContinueOrBypass: buttons.some(label => /继续访问|绕过证书|忽略证书/.test(label))
+        };
+      })()`);
+      if (blockedTlsUi.status !== 'certificate-error' || !blockedTlsUi.label.includes('证书错误') ||
+          !blockedTlsUi.label.includes('已拦截') || !blockedTlsUi.title.includes('拒绝') ||
+          blockedTlsUi.hasContinueOrBypass || !blockedTlsStatus.title.includes('TLS')) {
+        throw new Error(`TLS 证书拒绝必须明确显示且不能提供绕过入口：${JSON.stringify(blockedTlsUi)}`);
+      }
+
+      const secondTab = await browserEngine.openNewTab(`${new URL(testUrl).origin}/connection-http`);
+      if (!secondTab.success || !secondTab.tabId) throw new Error('连接状态 smoke 无法创建第二个本机 HTTP 标签。');
+      await waitForTabPath(secondTab.tabId, '/connection-http', 'Connection Status HTTP Fixture');
+      await waitForConnectionStatus('unencrypted');
+      if (browserEngine.getSessionSnapshot().activeTabId !== secondTab.tabId) {
+        throw new Error('新标签应成为连接状态 smoke 的活动标签。');
+      }
+
+      await selectTabFromUi(testTabId);
+      await waitForConnectionStatus('certificate-error');
+      await selectTabFromUi(secondTab.tabId);
+      await waitForConnectionStatus('unencrypted');
+      await selectTabFromUi(testTabId);
+      const recoveredNavigation = await browserEngine.navigate(testTabId, `${new URL(testUrl).origin}/connection-final`);
+      if (!recoveredNavigation.success) throw new Error('TLS 错误后的本机有效 HTTP 页面未能加载。');
+      await waitForTabPath(testTabId, '/connection-final', 'Connection Status HTTP Final');
+      const recoveredStatus = await waitForConnectionStatus('unencrypted');
+      if (recoveredStatus.title.includes('拒绝') || recoveredStatus.title.includes('证书')) {
+        throw new Error(`后续有效页面加载后证书错误状态未清除：${JSON.stringify(recoveredStatus)}`);
+      }
+
+      await appContents.executeJavaScript(`document.querySelector('button[aria-label="切换纯净阅读模式"]')?.click()`);
+      const readerHiddenDeadline = Date.now() + 5000;
+      let connectionVisibleInReader = true;
+      while (Date.now() < readerHiddenDeadline) {
+        connectionVisibleInReader = await appContents.executeJavaScript(
+          `Boolean(document.querySelector('[data-browser-connection-status]'))`
+        );
+        if (!connectionVisibleInReader) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (connectionVisibleInReader) throw new Error('Reader preview 不得显示 Chromium 主框架连接状态。');
+      await appContents.executeJavaScript(`document.querySelector('button[aria-label="切换纯净阅读模式"]')?.click()`);
+      await waitForConnectionStatus('unencrypted');
+
+      console.log('BROWSER_CONNECTION_STATUS_SMOKE_PASS: local HTTP and redirect status, rejected self-signed TLS certificate without bypass, subframe exclusion, per-tab isolation, recovery clearing, and Reader preview exclusion verified.');
+      app.quit();
+      return;
+    }
 
     if (process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'zoom') {
       const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -1954,11 +2072,30 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       throw new Error('应用页面重载后，本机书签或浏览历史没有保留。');
     }
 
-    await appContents.executeJavaScript(`window.confirm = () => true;
-      document.querySelector('button[aria-label="打开本地浏览数据"]').click();`);
-    const localDataDialog = await appContents.executeJavaScript(`document.querySelector('[role="dialog"][aria-label="本地浏览数据"]')?.innerText || ''`);
+    await appContents.executeJavaScript(`window.confirm = () => true; void 0;`);
+    const localDataDialogDeadline = Date.now() + 5000;
+    let localDataDialog = '';
+    let localDataPanelOpenRequested = false;
+    while (Date.now() < localDataDialogDeadline) {
+      const panelState = await appContents.executeJavaScript(`(() => {
+        const dialog = document.querySelector('[role="dialog"][aria-label="本地浏览数据"]');
+        const openButton = document.querySelector('button[aria-label="打开本地浏览数据"]');
+        return {
+          dialogPresent: Boolean(dialog),
+          dialogText: dialog?.innerText || '',
+          openButtonPresent: Boolean(openButton)
+        };
+      })()`);
+      localDataDialog = panelState.dialogText;
+      if (!panelState.dialogPresent && panelState.openButtonPresent && !localDataPanelOpenRequested) {
+        localDataPanelOpenRequested = true;
+        await appContents.executeJavaScript(`document.querySelector('button[aria-label="打开本地浏览数据"]')?.click()`);
+      }
+      if (localDataDialog.includes('只保存在此设备') && localDataDialog.includes('清空书签') && localDataDialog.includes('清空历史')) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
     if (!localDataDialog.includes('只保存在此设备') || !localDataDialog.includes('清空书签') || !localDataDialog.includes('清空历史')) {
-      throw new Error('本地浏览数据面板缺少隐私说明或可见清除控件。');
+      throw new Error(`本地浏览数据面板缺少隐私说明或可见清除控件：${JSON.stringify(localDataDialog)}`);
     }
     await appContents.executeJavaScript(`document.querySelector('button[aria-label="清空本地浏览历史"]').click()`);
     const historyClearDeadline = Date.now() + 3000;
@@ -2296,6 +2433,16 @@ app.whenReady().then(async () => {
         throw new Error('权限集成测试的第二 origin 必须是无凭据的 loopback HTTP 地址。');
       }
       fixtureOrigins.add(alternate.origin);
+    }
+    const secureFixtureUrl = process.env.EARTH_ONE_BROWSER_TEST_SECURE_URL;
+    if (secureFixtureUrl) {
+      const secureFixture = new URL(secureFixtureUrl);
+      if (process.env.EARTH_ONE_BROWSER_TEST_PHASE !== 'connection-status' ||
+          secureFixture.protocol !== 'https:' || !['127.0.0.1', 'localhost'].includes(secureFixture.hostname) ||
+          secureFixture.username || secureFixture.password) {
+        throw new Error('TLS 状态 smoke 仅允许连接状态阶段使用无凭据的 loopback HTTPS 夹具。');
+      }
+      fixtureOrigins.add(secureFixture.origin);
     }
     browserSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details, callback) => {
       let requestedOrigin = '';

@@ -20,6 +20,7 @@ EARTH ONE 当前是 React/Vite/Express Web 应用；普通网页无法自行捆�
 
 - Browser 模块在桌面目标内真实加载 HTTP 和 HTTPS 页面，提供 Chromium 渲染、多标签独立的页面历史、地址栏、后退/前进和重载。
 - Electron 桌面端进入 Browser 后默认显示本机 Chromium 网页视图；“纯净阅读模式”仍可通过工具栏切换。没有 Electron Browser bridge 的普通 Web 回退继续默认使用现有纯净阅读模式。
+- 桌面地址栏只根据当前标签的 Chromium 主框架导航事件显示连接状态：成功的 HTTP 主框架标为“未加密”；成功的 HTTPS 主框架标为“已加密”，其说明限定为 Chromium 已接受该 TLS 证书，不代表网站本身可信或安全。TLS 证书被 Chromium 拒绝时，主框架失败状态明确标为“证书错误 · 已拦截”，导航仍被阻止，也没有“继续访问/绕过”入口。加载中或缺少精确证据时显示中性“状态未知”。子资源、非活动标签、Reader preview 和普通 Web 回退不会提供或继承这项状态。
 - 桌面 Chromium 中，网页的 `target="_blank"` 和 `window.open()` 请求经应用确认后，会在 EARTH ONE Browser 标签栏打开并聚焦新标签；Electron 原生弹窗一律拒绝，由应用创建使用同一 Browser 专用会话的独立页面视图。Electron 没有可信的 popup 用户手势标志，且 Chromium disposition 不能证明手势，因此所有网页 popup 都显示确认框；拒绝或没有活动来源标签时不创建新标签。右键安全的 HTTP(S) 链接由用户明确选择“在新标签页中打开链接”后直接打开。
 - 书签与浏览历史仅保存在当前设备：桌面版通过受限 IPC 写入 Electron `userData/earth-one-browser-data.json`，不依赖启动时的临时端口；普通 Web 回退使用当前浏览器配置的 `localStorage`。上限为 200 个书签和最近 500 条历史。工具栏的“本地记录”面板可打开记录、删除单条书签，并分别清空书签或历史；清除需确认。数据不跨设备同步、不加密，也不会自动迁移旧服务端书签；旧 `/api/browser/bookmarks` API 保留但本 Browser UI 不再读取或写入它。
 - 桌面版提供本机下载管理器：列表显示文件名、来源、进度/状态；下载需通过 Electron 系统保存对话框选择位置，最多在 Electron `userData/earth-one-downloads.json` 中保留最近 50 条已获准路径的记录，重启后恢复；未完成记录会显示为已中断。保存路径只在 Electron 返回用户选择的绝对路径后保存，来源隐藏查询参数和片段。可将单条记录移除或清除已结束记录，这些操作只删元数据、不删除文件，也不取消进行中的任务；“在文件夹中显示”只对再次确认仍存在的普通文件显示。记录不发送到服务器或云端，普通 Web 模式不显示此功能。
@@ -63,6 +64,7 @@ bun run desktop:dev
 bun run lint
 bun run build
 bun run test:session-store
+bun run test:browser-connection-status
 bun run test:browser-find
 bun run test:browser-shortcuts
 bun run test:browser-zoom
@@ -74,6 +76,8 @@ bun run test:browser-engine
 
 会话存储单元测试覆盖默认关闭、普通查询保留、片段删除、敏感查询键跳过、无效 URL 删除、12 标签/128 KiB 上限和损坏/超限文件不覆盖。`test:browser-find` 使用模拟 WebContents 检查活动标签隔离、前后方向、查询长度/类型、过期结果过滤、清除高亮调用、焦点恢复和隐藏/销毁保护；`test:browser-shortcuts` 检查 Ctrl/Cmd 修饰键、Tab 循环、数字标签和无效组合。`test:browser-zoom` 单测检查安全缩放范围、活动标签目标、同源标签独立状态、最后标签替换保留比例和非法操作拒绝；`test:browser-engine` 的 Xvfb 真实 Electron smoke 验证实际页面比例、工具栏及 Ctrl/Cmd 缩放、地址栏/查找框/Reader Mode 排除、同源和跨来源标签隔离、远程页面无 preload/Node 且收不到缩放快捷键；会话恢复 smoke 另验证缩放不写入 URL 快照且重启恢复到 100%。标签快捷键集成 smoke 另验证新建/关闭/循环/索引选择、UI 标签同步、非 Browser 活动状态不响应，以及远程页未获 preload/Node。`test:browser-popups` 覆盖协议及应用 origin 白名单、手势不明时要求确认、右键链接回调、活动标签焦点及专用 session/no preload/Node 设置。`test:browser-ipc-security` 验证只有精确主窗口顶层应用来源能调用 IPC。完整 Electron 集成测试还会使用独立本机窗口确认不可信 WebContents 的查找 IPC 被拒；在真实 Chromium 合成页验证真实 `target=_blank`/`window.open`、无手势拒绝路径、危险与无效 URL、应用路由边界、焦点、Browser session 复用以及新页没有 opener/preload/Node；查找仍验证匹配项、前后导航、关闭清除与焦点返回。会话与下载 smoke 继续覆盖默认关闭/启用后的 URL-only 恢复、失败页提示、表单/Cookie/凭据不持久化、本机记录及导航下载。所有 fixture 仅绑定 `127.0.0.1`，Chromium 测试策略阻止访问其他来源，临时服务端 JSON、Electron 用户配置和下载目录均自动清理。Xvfb 临时启用 Chromium SwiftShader；普通桌面启动不设置该参数。
 PDF 专项单测覆盖跨来源拦截、HTTP(S) 与主框架 origin 边界、非活动标签、对话框取消、路径校验、渲染器无法提供保存路径、切换标签后的中止以及原子写入。Electron 集成 smoke 在仅含 loopback 的双页合成站点上验证取消无输出、真实 `%PDF-` 文件头与页数、对话框指定路径、保存路径不返回 renderer，以及导出期间无网络/API 请求；生产环境始终使用系统原生保存对话框。
+
+连接状态单测与集成 smoke 分别验证主框架 HTTP/最终重定向协议/子框架隔离/每标签状态以及 Chromium 拒绝 TLS 证书后错误提示和继续阻止导航；真实 smoke 还覆盖后续有效页面清错、Reader preview 隐藏指示器。TLS 测试服务只监听 `127.0.0.1`，生成的一日自签证书与私钥写入临时目录并随 smoke 清理，Chromium 不接受该证书，测试不向系统或 Chromium 信任库添加例外，也不访问外部网站。
 
 ## 平台与维护
 

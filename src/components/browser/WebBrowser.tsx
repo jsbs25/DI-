@@ -26,6 +26,8 @@ import {
   Download,
   FolderOpen,
   Printer,
+  LockKeyhole,
+  ShieldAlert,
   Minus,
   Plus,
   Bell,
@@ -466,6 +468,24 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const engineManagedTabIdsRef = useRef<Set<string>>(new Set());
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+  const activeBrowserConnection = browserEngine && !activeTab?.readerMode && browserEngineState?.tabId === activeTabId
+    ? browserEngineState
+    : null;
+  const connectionStatus = activeBrowserConnection?.connectionStatus || 'unknown';
+  const connectionStatusLabel = connectionStatus === 'encrypted'
+    ? 'HTTPS · 已加密'
+    : connectionStatus === 'unencrypted'
+      ? 'HTTP · 未加密'
+      : connectionStatus === 'certificate-error'
+        ? '证书错误 · 已拦截'
+        : '状态未知';
+  const connectionStatusTitle = connectionStatus === 'encrypted'
+    ? '当前主框架使用 HTTPS 加密，且 Chromium 已接受其 TLS 证书；这不代表网站本身可信或安全。'
+    : connectionStatus === 'unencrypted'
+      ? '当前主框架使用 HTTP，传输未加密。'
+      : connectionStatus === 'certificate-error'
+        ? `Chromium 拒绝了当前主框架的 TLS 证书并阻止导航${activeBrowserConnection?.certificateErrorCode ? `（${activeBrowserConnection.certificateErrorCode}）` : ''}。`
+        : '没有足够的 Chromium 主框架导航证据来判断连接状态。';
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
   tabsRef.current = tabs;
@@ -1341,7 +1361,33 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
           }}
           className="flex min-h-10 min-w-[220px] flex-1 items-center rounded-full border border-white/[0.09] bg-[#080f16] px-4 shadow-inner transition-all focus-within:border-cyan-400/50 focus-within:ring-2 focus-within:ring-cyan-400/10"
         >
-          <Shield className="w-3.5 h-3.5 text-emerald-400 mr-2 shrink-0" />
+          {browserEngine && !activeTab?.readerMode ? (
+            <span
+              role="status"
+              aria-label={connectionStatusLabel}
+              title={connectionStatusTitle}
+              data-browser-connection-status
+              data-status={connectionStatus}
+              className={`mr-2 inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[10px] font-medium leading-none ${
+                connectionStatus === 'encrypted'
+                  ? 'bg-cyan-300/[0.08] text-cyan-200'
+                  : connectionStatus === 'unencrypted'
+                    ? 'bg-amber-300/[0.08] text-amber-200'
+                    : connectionStatus === 'certificate-error'
+                      ? 'bg-rose-300/[0.1] text-rose-200'
+                      : 'bg-white/[0.05] text-slate-400'
+              }`}
+            >
+              {connectionStatus === 'encrypted'
+                ? <LockKeyhole aria-hidden="true" className="h-3 w-3" />
+                : connectionStatus === 'certificate-error'
+                  ? <ShieldAlert aria-hidden="true" className="h-3 w-3" />
+                  : <Globe aria-hidden="true" className="h-3 w-3" />}
+              <span>{connectionStatusLabel}</span>
+            </span>
+          ) : !browserEngine ? (
+            <Shield className="mr-2 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+          ) : null}
           <input
             ref={addressBarRef}
             type="text"

@@ -50,6 +50,22 @@ function isAllowedNavigation(input) {
   }
 }
 
+function getConnectionStatus(url) {
+  try {
+    const protocol = new URL(url).protocol;
+    if (protocol === 'https:') return 'encrypted';
+    if (protocol === 'http:') return 'unencrypted';
+  } catch {
+    // A URL without a confirmed HTTP(S) main-frame navigation is neutral.
+  }
+  return 'unknown';
+}
+
+function getCertificateErrorCode(description) {
+  if (typeof description !== 'string') return null;
+  return description.match(/\bERR_CERT_[A-Z0-9_]+\b/)?.[0] || null;
+}
+
 function sanitizeRestoredUrl(input) {
   return sanitizeSessionUrl(input);
 }
@@ -119,7 +135,9 @@ function createBrowserEngine({
       navigated: false,
       canGoBack,
       canGoForward,
-      zoomPercent: entry.zoomPercent
+      zoomPercent: entry.zoomPercent,
+      connectionStatus: entry.connectionStatus,
+      certificateErrorCode: entry.certificateErrorCode
     };
   }
 
@@ -159,6 +177,12 @@ function createBrowserEngine({
 
     contents.on('will-navigate', validateNavigation);
     contents.on('will-redirect', validateNavigation);
+    contents.on('did-start-navigation', details => {
+      if (details?.isMainFrame !== true || details.isSameDocument) return;
+      entry.connectionStatus = 'unknown';
+      entry.certificateErrorCode = null;
+      publish(tabId, entry);
+    });
     contents.setWindowOpenHandler(details => {
       const url = normalizePopupTarget(details?.url, appOrigin);
       if (!url || details?.postBody != null || !isActiveTab(tabId)) return { action: 'deny' };
@@ -244,16 +268,26 @@ function createBrowserEngine({
       'did-start-loading',
       'did-stop-loading',
       'page-title-updated',
-      'did-fail-load',
       'render-process-gone'
     ]) {
       contents.on(eventName, () => publish(tabId, entry));
     }
-    contents.on('did-navigate', () => {
+    contents.on('did-fail-load', (_event, _errorCode, errorDescription, _validatedUrl, isMainFrame) => {
+      if (isMainFrame !== true) return;
+      entry.certificateErrorCode = getCertificateErrorCode(errorDescription);
+      entry.connectionStatus = entry.certificateErrorCode ? 'certificate-error' : 'unknown';
+      publish(tabId, entry);
+    });
+    contents.on('did-navigate', (_event, url) => {
+      entry.connectionStatus = getConnectionStatus(url);
+      entry.certificateErrorCode = null;
       applyZoomForEntry(entry);
       publish(tabId, entry, true);
     });
-    contents.on('did-navigate-in-page', () => {
+    contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      if (isMainFrame !== true) return;
+      entry.connectionStatus = getConnectionStatus(url);
+      entry.certificateErrorCode = null;
       onPermissionContextChange(contents);
       applyZoomForEntry(entry);
       publish(tabId, entry, true);
@@ -275,7 +309,17 @@ function createBrowserEngine({
         autoplayPolicy: 'user-gesture-required'
       }
     });
-    const entry = { view, lastUrl: '', lastTitle: '', zoomPercent: 100, findQuery: '', findRequestId: null, initialLoadPromise: null };
+    const entry = {
+      view,
+      lastUrl: '',
+      lastTitle: '',
+      zoomPercent: 100,
+      findQuery: '',
+      findRequestId: null,
+      initialLoadPromise: null,
+      connectionStatus: 'unknown',
+      certificateErrorCode: null
+    };
     tabs.set(tabId, entry);
     window.contentView.addChildView(view);
     attachEvents(tabId, entry);

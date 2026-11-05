@@ -1,6 +1,8 @@
 export {};
 
 declare global {
+  type EarthOneBrowserConnectionStatus = 'unknown' | 'unencrypted' | 'encrypted' | 'certificate-error';
+
   interface EarthOneBrowserState {
     tabId: string;
     active: boolean;
@@ -11,6 +13,8 @@ declare global {
     canGoBack: boolean;
     canGoForward: boolean;
     zoomPercent: number;
+    connectionStatus: EarthOneBrowserConnectionStatus;
+    certificateErrorCode: string | null;
   }
 
   interface EarthOneBrowserBounds {
