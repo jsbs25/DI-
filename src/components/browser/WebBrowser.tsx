@@ -117,6 +117,39 @@ interface WebBrowserProps {
   initialQuery?: string;
 }
 
+type JupiterEarthContent = {
+  id: string;
+  kind: 'article' | 'video' | 'book' | 'post';
+  title: string;
+  content: string;
+  summary?: string;
+  author?: string;
+  mediaUrl?: string;
+  mediaType?: string;
+  thumbnailUrl?: string;
+  duration?: string;
+  chapters?: Array<{ title: string; content: string }>;
+  createdAt?: string;
+};
+
+type JupiterSearchResult = {
+  id: string;
+  title: string;
+  url: string;
+  snippet: string;
+  source: 'web' | 'github' | 'earth';
+  kind: 'web' | 'article' | 'video' | 'book' | 'post';
+  domain: string;
+  content?: string;
+  repository?: string;
+  stars?: number;
+  forks?: number;
+  language?: string;
+  license?: string;
+  updatedAt?: string;
+  openIssues?: number;
+};
+
 const DEFAULT_BOOKMARKS: BookmarkItem[] = [
   { id: 'bm_nasa', title: 'NASA Earth Observatory', url: 'https://earthobservatory.nasa.gov', category: 'Science' },
   { id: 'bm_gutenberg', title: 'Project Gutenberg', url: 'https://www.gutenberg.org', category: 'Library' },
@@ -130,6 +163,23 @@ const LOCAL_HISTORY_KEY = 'earth-one.browser.history.v1';
 const MAX_LOCAL_BOOKMARKS = 200;
 const MAX_LOCAL_HISTORY = 500;
 const MAX_RESTORED_SESSION_TABS = 12;
+const JUPITER_HOME_URL = 'jupiter://home';
+
+function getJupiterContentRoute(value: string): { kind: JupiterEarthContent['kind']; id: string } | null {
+  try {
+    const pathname = new URL(value, window.location.origin).pathname;
+    const match = pathname.match(/^\/jupiter\/(read\/(article|book|post)|watch)\/([^/]+)$/);
+    if (!match) return null;
+    const kind = match[1] === 'watch' ? 'video' : match[2] as JupiterEarthContent['kind'];
+    return { kind, id: decodeURIComponent(match[3]) };
+  } catch {
+    return null;
+  }
+}
+
+function isJupiterContentUrl(value: string): boolean {
+  return getJupiterContentRoute(value) !== null;
+}
 
 function isHttpUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 4096) return false;
@@ -227,8 +277,9 @@ Earth's interior remains active with a solid iron inner core, a liquid outer cor
 };
 
 function getInitialBrowserUrl(): string {
-  const fallback = 'https://earthobservatory.nasa.gov';
+  const fallback = JUPITER_HOME_URL;
   if (typeof window === 'undefined') return fallback;
+  if (isJupiterContentUrl(window.location.pathname)) return window.location.pathname;
   const requested = new URLSearchParams(window.location.search).get('browserUrl');
   if (!requested) return fallback;
   try {
@@ -256,16 +307,16 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [tabs, setTabs] = useState<BrowserTab[]>([
     {
       id: 'tab_1',
-      title: initialPreset?.title || initialUrl,
+      title: initialUrl === JUPITER_HOME_URL ? 'JUPITER' : initialPreset?.title || initialUrl,
       url: initialUrl,
-      readerMode: !browserEngine,
+      readerMode: !browserEngine || initialUrl === JUPITER_HOME_URL || isJupiterContentUrl(initialUrl),
       content: initialPreset?.content || '',
       author: initialPreset?.author || '',
       readTime: initialPreset?.readTime || ''
     }
   ]);
   const [activeTabId, setActiveTabId] = useState('tab_1');
-  const [inputUrl, setInputUrl] = useState(initialUrl);
+  const [inputUrl, setInputUrl] = useState(initialUrl === JUPITER_HOME_URL ? '' : initialUrl);
   const [isLoading, setIsLoading] = useState(false);
   const [isFindOpen, setIsFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
@@ -289,9 +340,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
 
   // Live search state
-  const [searchResults, setSearchResults] = useState<Array<{ title: string; url: string; snippet: string; source?: 'web' | 'github'; repository?: string; stars?: number; forks?: number; language?: string; license?: string; updatedAt?: string; openIssues?: number }>>([]);
+  const [searchResults, setSearchResults] = useState<JupiterSearchResult[]>([]);
   const [lastSearchQuery, setLastSearchQuery] = useState('');
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [jupiterContent, setJupiterContent] = useState<JupiterEarthContent | null>(null);
+  const [jupiterContentError, setJupiterContentError] = useState<string | null>(null);
+  const [isJupiterContentLoading, setIsJupiterContentLoading] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
@@ -596,13 +651,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   }, [browserEngine]);
 
   useEffect(() => {
-    if (!browserEngine || !activeTab || !browserSessionSettingsReady || restoredTabIdsRef.current.has(activeTabId)) return;
+    if (!browserEngine || !activeTab || activeTab.readerMode || !browserSessionSettingsReady || restoredTabIdsRef.current.has(activeTabId)) return;
     if (engineManagedTabIdsRef.current.delete(activeTabId)) return;
     browserEngine.selectTab(activeTabId, activeTab.url).then(result => {
       if (!result.success) setBrowserEngineError(result.error || 'Chromium 网页无法打开。');
       else setBrowserEngineError(null);
     }).catch(error => setBrowserEngineError(error?.message || 'Chromium 引擎暂不可用。'));
-  }, [browserEngine, activeTabId, browserSessionSettingsReady]);
+  }, [browserEngine, activeTabId, activeTab?.readerMode, browserSessionSettingsReady]);
 
   useEffect(() => {
     if (!browserEngine?.onNewTab) return;
@@ -756,7 +811,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     const syncViewport = () => {
       const element = nativeViewportRef.current;
       const mobileAiOverlay = isAiPanelOpen && window.innerWidth < 768;
-      if (!element || !activeTab || activeTab.readerMode || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || isDownloadsOpen || isPrivacyOpen || mobileAiOverlay) {
+      if (!element || !activeTab || activeTab.readerMode || lastSearchQuery || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || isDownloadsOpen || isPrivacyOpen || mobileAiOverlay) {
         void browserEngine.setBounds(null);
         return;
       }
@@ -779,7 +834,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       document.removeEventListener('scroll', scheduleSync, true);
       void browserEngine.setBounds(null);
     };
-  }, [browserEngine, activeTabId, activeTab?.readerMode, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isPrivacyOpen, isAiPanelOpen]);
+  }, [browserEngine, activeTabId, activeTab?.readerMode, lastSearchQuery, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isPrivacyOpen, isAiPanelOpen]);
 
   const pushHistory = (tabId: string, url: string) => {
     setHistory(prev => {
@@ -805,6 +860,43 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     setTranslatedContent('');
     setShowTranslation(false);
   }, [activeTabId]);
+
+  useEffect(() => {
+    const route = activeTab ? getJupiterContentRoute(activeTab.url) : null;
+    if (!route) {
+      setJupiterContent(null);
+      setJupiterContentError(null);
+      setIsJupiterContentLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setJupiterContent(null);
+    setJupiterContentError(null);
+    setIsJupiterContentLoading(true);
+    fetch(`/api/jupiter/content/${route.kind}/${encodeURIComponent(route.id)}`, { signal: controller.signal })
+      .then(async response => {
+        const data = await response.json();
+        if (!response.ok || !data.success || !data.content) {
+          throw new Error(data.error || `内容加载失败（HTTP ${response.status}）。`);
+        }
+        return data.content as JupiterEarthContent;
+      })
+      .then(content => {
+        setJupiterContent(content);
+        setTabs(previous => previous.map(tab => tab.url === activeTab?.url
+          ? { ...tab, title: content.title, content: content.content, author: content.author || 'EARTH' }
+          : tab));
+      })
+      .catch(error => {
+        if (error?.name !== 'AbortError') setJupiterContentError(error instanceof Error ? error.message : '内容暂时无法打开。');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsJupiterContentLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [activeTab?.url]);
 
   useEffect(() => {
     fetch('/api/browser/saved-articles')
@@ -835,18 +927,22 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     if (!looksLikeUrl) {
       setIsSearching(true);
       setLastSearchQuery(cleanUrl);
+      setSearchError(null);
       setInputUrl(cleanUrl);
       try {
-        const res = await fetch(`/api/browser/search?q=${encodeURIComponent(cleanUrl)}&engine=${searchEngine}&lang=${browserLang}`);
+        const res = await fetch(`/api/jupiter/search?q=${encodeURIComponent(cleanUrl)}&engine=${searchEngine}&lang=${browserLang}`);
         const data = await res.json();
-        if (data.success && data.results) {
+        if (res.ok && data.success && Array.isArray(data.results)) {
           setSearchResults(data.results);
+          window.history.replaceState(null, '', `/jupiter/search?q=${encodeURIComponent(cleanUrl)}`);
         } else {
           setSearchResults([]);
+          setSearchError(data.error || `搜索失败（HTTP ${res.status}）。`);
         }
       } catch (e) {
         console.error(e);
         setSearchResults([]);
+        setSearchError(e instanceof Error ? e.message : '搜索服务暂时不可用。');
       } finally {
         setIsSearching(false);
       }
@@ -865,6 +961,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     setIsLoading(true);
     setInputUrl(cleanUrl);
     setSearchResults([]);
+    setLastSearchQuery('');
+    setSearchError(null);
     pushHistory(activeTabId, cleanUrl);
     recordBrowserVisit(activeTabId, cleanUrl, new URL(cleanUrl).hostname);
 
@@ -873,7 +971,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     setTabs(prev =>
       prev.map(t =>
         t.id === activeTabId
-          ? { ...t, url: cleanUrl, title: 'Loading…', content: '', author: '', readTime: '' }
+          ? { ...t, url: cleanUrl, title: 'Loading…', content: '', author: '', readTime: '', readerMode: !browserEngine }
           : t
       )
     );
@@ -974,16 +1072,46 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
   };
 
+  const openJupiterResult = (result: JupiterSearchResult) => {
+    if (result.source !== 'earth') {
+      void handleNavigate(result.url);
+      return;
+    }
+
+    const newId = `tab_${Date.now()}`;
+    const kindLabel: Record<JupiterSearchResult['kind'], string> = {
+      web: '网页',
+      article: 'EARTH 文章',
+      video: 'EARTH 视频',
+      book: 'EARTH 图书',
+      post: 'EARTH 动态'
+    };
+    const newTab: BrowserTab = {
+      id: newId,
+      title: result.title,
+      url: result.url,
+      readerMode: true,
+      content: result.content || result.snippet,
+      author: kindLabel[result.kind],
+      readTime: ''
+    };
+    setTabs(previous => [...previous, newTab]);
+    setActiveTabId(newId);
+    setInputUrl(result.url);
+    setSearchResults([]);
+    setLastSearchQuery('');
+    setHistory(previous => ({ ...previous, [newId]: [result.url] }));
+    setHistoryIndex(previous => ({ ...previous, [newId]: 0 }));
+  };
+
   const handleNewTab = () => {
     const newId = `tab_${Date.now()}`;
     const newTab: BrowserTab = {
       id: newId,
-      title: 'New Tab',
-      url: 'https://en.wikipedia.org/wiki/Earth',
-      readerMode: !browserEngine,
-      content: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].content,
-      author: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].author,
-      readTime: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].readTime
+      title: 'JUPITER',
+      url: JUPITER_HOME_URL,
+      readerMode: true,
+      content: ''
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newId);
@@ -1858,15 +1986,18 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       {/* 4. Split Layout */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[#080d13]">
         <div className="min-w-0 flex-1 overflow-y-auto bg-[#080d13] p-4 sm:p-8">
-          {searchResults.length > 0 || isSearching ? (
+          {lastSearchQuery || searchResults.length > 0 || isSearching ? (
             <div className="max-w-3xl mx-auto">
               <div className="mb-6">
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                  <span className={`rounded-full border px-2.5 py-1 font-medium ${searchEngine === 'github' ? 'border-slate-600 bg-slate-900 text-white' : 'border-cyan-200/15 bg-cyan-200/[0.06] text-cyan-100'}`}>
-                    {searchEngine === 'github' ? 'GitHub 开源项目' : '高质量网页搜索'}
+                  <span className="rounded-full border border-amber-200/20 bg-amber-200/[0.06] px-2.5 py-1 font-semibold tracking-[0.16em] text-amber-100">
+                    JUPITER
                   </span>
-                  {!isSearching && <span>约 {searchResults.length} 条结果</span>}
-                  {searchEngine === 'github' && <span className="text-emerald-300/80">按 Stars 排序 · 官方 API · 仅展示公开元数据</span>}
+                  <span className={`rounded-full border px-2.5 py-1 font-medium ${searchEngine === 'github' ? 'border-slate-600 bg-slate-900 text-white' : 'border-white/[0.08] bg-white/[0.04] text-slate-300'}`}>
+                    {searchEngine === 'github' ? 'GitHub 公共仓库' : '真实互联网搜索'}
+                  </span>
+                  {!isSearching && <span>{searchResults.length} 条结果</span>}
+                  <span className="text-slate-500">EARTH 内容与公开网页</span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-snug">
                   “{lastSearchQuery}”
@@ -1876,19 +2007,19 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               {isSearching ? (
                 <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-4">
                   <RotateCw className="w-8 h-8 animate-spin text-blue-400" />
-                  <span>正在搜索全网知识库...</span>
+                  <span>正在搜索 EARTH 内容与真实互联网…</span>
                 </div>
               ) : searchResults.length === 0 ? (
                 <div className="text-center text-slate-500 py-16 space-y-3">
-                  <p>没有找到相关结果。</p>
-                  <p className="text-xs">可尝试更换关键词，或直接输入网址打开页面。</p>
+                  <p>{searchError || '没有找到相关结果。'}</p>
+                  <p className="text-xs">结果来自真实搜索源；如果当前来源没有结果，可切换搜索源或输入网址直接打开。</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {searchResults.map((result, idx) => result.source === 'github' ? (
                     <div key={idx} className="group w-full rounded-2xl border border-white/[0.08] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6">
                       <div className="flex items-start justify-between gap-4">
-                        <button onClick={() => handleNavigate(result.url)} className="min-w-0 text-left">
+                        <button onClick={() => openJupiterResult(result)} className="min-w-0 text-left">
                           <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-cyan-300/80"><Code2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">github.com/{result.repository}</span></div>
                           <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-cyan-100 sm:text-lg">{result.title}</h2>
                         </button>
@@ -1907,17 +2038,112 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                       </div>
                     </div>
                   ) : (
-                    <button key={idx} onClick={() => handleNavigate(result.url)} className="group w-full cursor-pointer rounded-2xl border border-white/[0.07] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6">
-                      <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-emerald-300/80"><Globe className="h-3 w-3 shrink-0" /><span className="truncate">{result.url}</span></div>
-                      <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-cyan-100 sm:text-lg">{result.title}</h2>
+                    <button key={idx} onClick={() => openJupiterResult(result)} className="group w-full cursor-pointer rounded-2xl border border-white/[0.07] bg-[#0d151d] p-5 text-left transition-all hover:border-amber-200/20 hover:bg-[#111922] sm:p-6">
+                      <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-amber-200/80">
+                        {result.source === 'earth' ? <Globe className="h-3 w-3 shrink-0" /> : <ExternalLink className="h-3 w-3 shrink-0" />}
+                        <span className="truncate">{result.source === 'earth' ? `EARTH · ${result.kind}` : result.domain}</span>
+                      </div>
+                      <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-amber-100 sm:text-lg">{result.title}</h2>
                       {result.snippet && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-400 sm:text-sm">{result.snippet}</p>}
+                      <span className="mt-3 inline-flex items-center gap-1 text-[11px] text-amber-200/70">
+                        {result.source === 'earth' ? '在 JUPITER 内阅读' : '在 JUPITER 标签页打开'}
+                        <ChevronRight className="h-3 w-3" />
+                      </span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
           ) : activeTab ? (
-            activeTab.readerMode ? (
+            isJupiterContentUrl(activeTab.url) ? (
+              <article className="mx-auto w-full max-w-4xl rounded-3xl border border-white/[0.07] bg-[#0d151d] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-10">
+                {isJupiterContentLoading ? (
+                  <div className="py-20 text-center text-sm text-slate-400" role="status">正在从 EARTH 内容索引加载…</div>
+                ) : jupiterContentError ? (
+                  <div className="py-20 text-center text-sm text-rose-300" role="alert">{jupiterContentError}</div>
+                ) : jupiterContent ? (
+                  <>
+                    <div className="mb-6 border-b border-slate-800 pb-6">
+                      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                        <span className="rounded-full border border-amber-200/15 bg-amber-200/[0.06] px-2.5 py-1 font-medium text-amber-100">EARTH · {jupiterContent.kind}</span>
+                        {jupiterContent.author && <span>{jupiterContent.author}</span>}
+                        {jupiterContent.duration && <span>· {jupiterContent.duration}</span>}
+                        {jupiterContent.createdAt && <span>· {new Date(jupiterContent.createdAt).toLocaleDateString()}</span>}
+                      </div>
+                      <h1 className="text-2xl font-semibold leading-snug text-white sm:text-4xl">{jupiterContent.title}</h1>
+                      {jupiterContent.summary && <p className="mt-4 text-sm leading-7 text-slate-300">{jupiterContent.summary}</p>}
+                    </div>
+                    {jupiterContent.kind === 'video' && jupiterContent.mediaUrl && isHttpUrl(jupiterContent.mediaUrl) ? (
+                      <video
+                        className="mb-8 max-h-[70vh] w-full rounded-2xl bg-black"
+                        src={jupiterContent.mediaUrl}
+                        poster={jupiterContent.thumbnailUrl && isHttpUrl(jupiterContent.thumbnailUrl) ? jupiterContent.thumbnailUrl : undefined}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        aria-label={jupiterContent.title}
+                      />
+                    ) : null}
+                    {jupiterContent.kind === 'post' && jupiterContent.mediaUrl && isHttpUrl(jupiterContent.mediaUrl) ? (
+                      jupiterContent.mediaType === 'video'
+                        ? <video className="mb-8 max-h-[70vh] w-full rounded-2xl bg-black" src={jupiterContent.mediaUrl} controls playsInline preload="metadata" aria-label={jupiterContent.title} />
+                        : <img className="mb-8 max-h-[70vh] w-full rounded-2xl object-contain" src={jupiterContent.mediaUrl} alt={jupiterContent.title} loading="lazy" />
+                    ) : null}
+                    {jupiterContent.kind === 'book' && jupiterContent.chapters?.length ? (
+                      <div className="space-y-8">
+                        {jupiterContent.chapters.map((chapter, index) => (
+                          <section key={`${index}-${chapter.title}`} className="border-b border-white/[0.06] pb-7 last:border-0">
+                            <h2 className="mb-3 text-lg font-semibold text-amber-100">{chapter.title}</h2>
+                            <p className="whitespace-pre-wrap text-sm leading-8 text-slate-300">{chapter.content}</p>
+                          </section>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap text-sm leading-8 text-slate-300 sm:text-base">
+                        {jupiterContent.content || '此内容目前没有可供站内阅读的正文。'}
+                      </div>
+                    )}
+                  </>
+                ) : null}
+              </article>
+            ) : activeTab.url === JUPITER_HOME_URL ? (
+              <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-4 py-16 text-center">
+                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] text-amber-100">
+                  <Globe className="h-7 w-7" />
+                </div>
+                <p className="text-xs font-semibold tracking-[0.32em] text-amber-200/70">EARTH × JUPITER</p>
+                <h1 className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl">JUPITER</h1>
+                <p className="mt-3 text-sm text-slate-400 sm:text-base">Universal Internet Search &amp; Content Platform</p>
+                <p className="mt-2 max-w-xl text-xs leading-6 text-slate-500 sm:text-sm">
+                  搜索真实互联网内容，并探索 EARTH 中公开的文章、视频与图书。结果标明来源，不展示模拟内容。
+                </p>
+                <form
+                  onSubmit={event => {
+                    event.preventDefault();
+                    void handleNavigate(inputUrl);
+                  }}
+                  className="mt-8 flex w-full max-w-2xl items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-2 pl-4 shadow-xl shadow-black/20 focus-within:border-amber-200/40"
+                >
+                  <Search className="h-5 w-5 shrink-0 text-amber-200/80" />
+                  <input
+                    value={inputUrl}
+                    onChange={event => setInputUrl(event.target.value)}
+                    aria-label="搜索互联网或输入网址"
+                    placeholder="搜索互联网，或输入网址…"
+                    className="min-w-0 flex-1 bg-transparent py-2 text-sm text-white outline-none placeholder:text-slate-500 sm:text-base"
+                    autoComplete="off"
+                  />
+                  <button type="submit" className="rounded-xl bg-amber-200 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-100">
+                    搜索
+                  </button>
+                </form>
+                <div className="mt-4 flex flex-wrap justify-center gap-2 text-[11px] text-slate-500">
+                  <span className="rounded-full border border-white/[0.07] px-3 py-1.5">公开互联网搜索</span>
+                  <span className="rounded-full border border-white/[0.07] px-3 py-1.5">EARTH 内容索引</span>
+                  <span className="rounded-full border border-white/[0.07] px-3 py-1.5">站内阅读</span>
+                </div>
+              </div>
+            ) : activeTab.readerMode ? (
               <div className="mx-auto max-w-3xl rounded-3xl border border-white/[0.07] bg-[#0d151d] p-6 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-10">
                 <div className="border-b border-slate-800 pb-6 mb-6">
                   <div className="flex items-center space-x-3 mb-3 text-xs text-slate-400">

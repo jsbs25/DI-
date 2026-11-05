@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PlanetTelemetryDrawer } from '../src/universe/PlanetTelemetryDrawer.tsx';
-import { getCelestialBodyById } from '../src/universe/celestialBodies.ts';
+import { CELESTIAL_BODIES, getCelestialBodyById } from '../src/universe/celestialBodies.ts';
+import { SolarSystemDirectory } from '../src/universe/SolarSystemDirectory.tsx';
 
 // Static markup checks only: no browser input, focus/keyboard, camera or API behavior is exercised.
 let passed = 0;
@@ -44,5 +45,14 @@ const empty = renderToStaticMarkup(
   <PlanetTelemetryDrawer planet={null} onClose={noop} onFocusPlanet={noop} />
 );
 check(empty === '', 'No celestial selection still renders no drawer');
+
+const directory = renderToStaticMarkup(<SolarSystemDirectory onSelectPlanet={noop} />);
+check(CELESTIAL_BODIES.length === 10, 'Solar system source contains the Sun, eight planets and the Moon');
+check(directory.includes('太阳系 · 10 个天体'), 'Main-world directory clearly identifies the ten-body solar system');
+for (const body of CELESTIAL_BODIES) {
+  check(directory.includes(body.chineseName) && directory.includes(body.name), `${body.id}: appears as a bilingual celestial entry`);
+}
+check(directory.includes('地球是人类主世界'), 'Directory preserves Earth as humanity’s main world');
+check(directory.includes('生态建设中'), 'Unavailable planet ecosystems are labeled honestly');
 
 console.log(`Universe static-render regression: ${passed} passed, 0 failed (not a browser/keyboard test).`);

@@ -42,3 +42,45 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
+
+section[aria-label="JUPITER 全球互联网搜索与浏览器"] [role="tablist"] {
+  scroll-padding-inline: 0.75rem;
+  scrollbar-width: thin;
+}
+
+section[aria-label="JUPITER 全球互联网搜索与浏览器"] [data-browser-tab-id] {
+  max-width: min(34vw, 320px);
+  scroll-snap-align: start;
+}
+
+section[aria-label="JUPITER 全球互联网搜索与浏览器"] [role="tab"] {
+  align-items: flex-start;
+  line-height: 1.35;
+}
+
+section[aria-label="JUPITER 全球互联网搜索与浏览器"] [role="tab"] span {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+section[aria-label="JUPITER 全球互联网搜索与浏览器"] [role="tab"]:focus-visible {
+  border-radius: 0.5rem;
+  outline: 2px solid rgb(34 211 238 / 0.8);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  section[aria-label="JUPITER 全球互联网搜索与浏览器"] [role="tablist"] {
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  section[aria-label="JUPITER 全球互联网搜索与浏览器"] [data-browser-tab-id] {
+    max-width: min(82vw, 320px);
+  }
+}

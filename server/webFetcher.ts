@@ -261,6 +261,44 @@ export async function searchWeb(
   return (await searchWikipedia(q, limit, lang)).map(result => ({ ...result, source: 'web' as const }));
 }
 
+export async function searchWebProviders(
+  query: string,
+  limit = 10,
+  lang: 'en' | 'zh' | 'ar' | 'es' | 'fr' | 'ru' = 'en'
+): Promise<SearchResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+
+  const [google, duckDuckGo, bing] = await Promise.all([
+    searchGoogle(q, limit),
+    searchDuckDuckGo(q, limit),
+    searchBing(q, limit)
+  ]);
+  const relevantResults = [...google, ...duckDuckGo, ...bing]
+    .map(result => ({ ...result, source: 'web' as const }))
+    .filter(result => {
+      try {
+        const url = new URL(result.url);
+        if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return false;
+      } catch {
+        return false;
+      }
+      const terms = q.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [q.toLocaleLowerCase()];
+      const searchableText = `${result.title} ${result.snippet}`.toLocaleLowerCase();
+      return terms.some(term => searchableText.includes(term));
+    });
+
+  if (relevantResults.length) return relevantResults.slice(0, limit * 3);
+  const wikipedia = await searchWikipedia(q, limit, lang);
+  return wikipedia
+    .filter(result => {
+      const terms = q.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [q.toLocaleLowerCase()];
+      const searchableText = `${result.title} ${result.snippet}`.toLocaleLowerCase();
+      return terms.some(term => searchableText.includes(term));
+    })
+    .map(result => ({ ...result, source: 'web' as const }));
+}
+
 /** Google 搜索（Serper.dev）。配置 SERPER_API_KEY 后返回真实 Google 搜索结果，与 Google 首页一致。 */
 export async function searchGoogle(query: string, limit = 10): Promise<SearchResult[]> {
   const key = process.env.SERPER_API_KEY;

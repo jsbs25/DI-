@@ -6,9 +6,10 @@ import { GoogleGenAI } from '@google/genai';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
+import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthIndex } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
-import { fetchAndExtract, searchWeb } from './server/webFetcher.ts';
+import { fetchAndExtract, searchGitHubRepositories, searchWeb, searchWebProviders } from './server/webFetcher.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 import {
@@ -1030,6 +1031,61 @@ app.get('/api/browser/search', async (req, res) => {
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Search failed' });
   }
+});
+
+app.get('/api/jupiter/search', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q || q.length > 300) {
+    return res.status(400).json({ success: false, error: 'Search query must contain 1–300 characters.' });
+  }
+  const lang = req.query.lang === 'zh' || req.query.lang === 'ar' || req.query.lang === 'es' ||
+    req.query.lang === 'fr' || req.query.lang === 'ru' ? req.query.lang : 'en';
+  const engine = req.query.engine === 'bing' || req.query.engine === 'duckduckgo' ||
+    req.query.engine === 'wikipedia' || req.query.engine === 'github' ? req.query.engine : 'auto';
+  const cacheKey = `${lang}\u0000${engine}\u0000${q.toLocaleLowerCase()}`;
+  const cached = getCachedJupiterSearch(cacheKey);
+  if (cached) return res.json({ success: true, query: q, results: cached, cached: true, sources: [...new Set(cached.map(result => result.source))] });
+
+  try {
+    const internalResults = searchEarthIndex(q, store, 10);
+    const externalResults = engine === 'github'
+      ? await searchGitHubRepositories(q, 10)
+      : engine === 'auto'
+        ? await searchWebProviders(q, 10, lang)
+        : await searchWeb(q, 10, engine, lang);
+    const enrichedExternal = externalResults.map((result, index) => {
+      let domain = '';
+      try { domain = new URL(result.url).hostname.replace(/^www\./, ''); } catch { /* Invalid provider links are removed below. */ }
+      return {
+        ...result,
+        id: `web:${domain}:${index}:${result.url}`,
+        source: result.source === 'github' ? 'github' as const : 'web' as const,
+        kind: 'web' as const,
+        domain
+      };
+    }).filter(result => Boolean(result.domain));
+    const results = mergeAndRankJupiterResults(q, [...internalResults, ...enrichedExternal], 20);
+    cacheJupiterSearch(cacheKey, results);
+    res.json({
+      success: true,
+      query: q,
+      results,
+      cached: false,
+      sources: [...new Set(results.map(result => result.source))]
+    });
+  } catch (err) {
+    res.status(502).json({ success: false, error: err instanceof Error ? err.message : 'JUPITER search failed.' });
+  }
+});
+
+app.get('/api/jupiter/content/:kind/:id', (req, res) => {
+  const kind = req.params.kind;
+  if (kind !== 'article' && kind !== 'video' && kind !== 'book' && kind !== 'post') {
+    return res.status(400).json({ success: false, error: 'Unsupported EARTH content type.' });
+  }
+  const content = getJupiterEarthContent(kind, req.params.id, store);
+  if (!content) return res.status(404).json({ success: false, error: 'Content is unavailable in the public EARTH index.' });
+  return res.json({ success: true, content });
 });
 
 // -------------------------------------------------------------
