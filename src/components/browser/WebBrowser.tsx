@@ -76,6 +76,8 @@ interface BrowserTab {
   title: string;
   url: string;
   readerMode: boolean;
+  isStartPage?: boolean;
+  startPageUrl?: string;
   content?: string;
   author?: string;
   readTime?: string;
@@ -136,6 +138,14 @@ function isHttpUrl(value: unknown): value is string {
   try {
     const url = new URL(value);
     return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function sameHttpUrl(left: string, right: string): boolean {
+  try {
+    return new URL(left).href === new URL(right).href;
   } catch {
     return false;
   }
@@ -244,10 +254,17 @@ function getInitialBrowserUrl(): string {
 
 export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) => {
   const [initialUrl] = useState(getInitialBrowserUrl);
+  const [initialStartPage] = useState(() => {
+    const requestedUrl = typeof window === 'undefined'
+      ? null
+      : new URLSearchParams(window.location.search).get('browserUrl')?.trim();
+    return !initialQuery?.trim() && !requestedUrl;
+  });
   const initialPreset = PRESET_PAGES[initialUrl];
   const browserEngine = typeof window === 'undefined' ? undefined : window.earthOneBrowser;
   const nativeViewportRef = useRef<HTMLDivElement | null>(null);
   const addressBarRef = useRef<HTMLInputElement | null>(null);
+  const startPageSearchRef = useRef<HTMLInputElement | null>(null);
   const findInputRef = useRef<HTMLInputElement | null>(null);
 
   // Browser-local language (defaults to global app language; user can override)
@@ -256,16 +273,18 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [tabs, setTabs] = useState<BrowserTab[]>([
     {
       id: 'tab_1',
-      title: initialPreset?.title || initialUrl,
+      title: initialStartPage ? '新标签页' : initialPreset?.title || initialUrl,
       url: initialUrl,
       readerMode: !browserEngine,
+      isStartPage: initialStartPage,
+      ...(initialStartPage ? { startPageUrl: initialUrl } : {}),
       content: initialPreset?.content || '',
       author: initialPreset?.author || '',
       readTime: initialPreset?.readTime || ''
     }
   ]);
   const [activeTabId, setActiveTabId] = useState('tab_1');
-  const [inputUrl, setInputUrl] = useState(initialUrl);
+  const [inputUrl, setInputUrl] = useState(initialStartPage ? '' : initialUrl);
   const [isLoading, setIsLoading] = useState(false);
   const [isFindOpen, setIsFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState('');
@@ -329,7 +348,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               id: tab.id,
               title: tab.title || new URL(tab.url).host,
               url: tab.url,
-              readerMode: !browserEngine
+              readerMode: !browserEngine,
+              isStartPage: false
             }))
           : [];
 
@@ -473,6 +493,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const engineManagedTabIdsRef = useRef<Set<string>>(new Set());
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+  const activeHistoryIndex = historyIndex[activeTabId] ?? 0;
+  const previousHistoryUrl = history[activeTabId]?.[activeHistoryIndex - 1];
+  const canReturnToStartPage = Boolean(
+    !activeTab?.isStartPage && activeTab?.startPageUrl && previousHistoryUrl &&
+    sameHttpUrl(previousHistoryUrl, activeTab.startPageUrl)
+  );
   const activeBrowserConnection = browserEngine && !activeTab?.readerMode && browserEngineState?.tabId === activeTabId
     ? browserEngineState
     : null;
@@ -614,8 +640,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         : new URL(url).hostname;
       engineManagedTabIdsRef.current.add(tab.tabId);
       setTabs(previous => previous.some(existing => existing.id === tab.tabId)
-        ? previous.map(existing => existing.id === tab.tabId ? { ...existing, url, title } : existing)
-        : [...previous, { id: tab.tabId, title, url, readerMode: false }]);
+        ? previous.map(existing => existing.id === tab.tabId ? { ...existing, url, title, isStartPage: false, startPageUrl: undefined } : existing)
+        : [...previous, { id: tab.tabId, title, url, readerMode: false, isStartPage: false }]);
       setActiveTabId(tab.tabId);
       setInputUrl(url);
       setHistory(previous => ({ ...previous, [tab.tabId]: [url] }));
@@ -635,7 +661,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       const nextTab = remaining.find(tab => tab.id === closedTab.activeTabId) || remaining[0];
       if (!nextTab) return;
       setActiveTabId(nextTab.id);
-      setInputUrl(closedTab.activeTab?.url || nextTab.url);
+      setInputUrl(nextTab.isStartPage ? '' : nextTab.url);
       setSearchResults([]);
       setBrowserEngineError(null);
     });
@@ -661,6 +687,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   useEffect(() => {
     if (!browserEngine) return;
     return browserEngine.onState(state => {
+      const stateTab = tabsRef.current.find(tab => tab.id === state.tabId);
+      const isStartPageState = Boolean(
+        stateTab?.startPageUrl && state.url && sameHttpUrl(state.url, stateTab.startPageUrl) &&
+        (stateTab.isStartPage || (!state.canGoBack && state.canGoForward))
+      );
       if (state.active && state.tabId !== activeTabIdRef.current) {
         setActiveTabId(state.tabId);
         setSearchResults([]);
@@ -670,13 +701,18 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         setBrowserEngineState(state);
         setIsLoading(state.loading);
       }
-      if (state.navigated && state.url) recordBrowserVisit(state.tabId, state.url, state.title);
-      else if (state.url && state.title) updateRecentVisitTitle(state.tabId, state.url, state.title);
+      if (state.navigated && state.url && !isStartPageState) recordBrowserVisit(state.tabId, state.url, state.title);
+      else if (state.url && state.title && !isStartPageState) updateRecentVisitTitle(state.tabId, state.url, state.title);
       if (state.url) {
         setTabs(previous => previous.map(tab => tab.id === state.tabId
-          ? { ...tab, url: state.url, title: state.title || tab.title }
+          ? {
+              ...tab,
+              url: state.url,
+              title: isStartPageState ? '新标签页' : state.title || tab.title,
+              isStartPage: isStartPageState
+            }
           : tab));
-        if (state.active || state.tabId === activeTabId) setInputUrl(state.url);
+        if (state.active || state.tabId === activeTabId) setInputUrl(isStartPageState ? '' : state.url);
       }
     });
   }, [browserEngine, activeTabId, recordBrowserVisit, updateRecentVisitTitle]);
@@ -719,8 +755,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   }, [browserEngine]);
 
   useEffect(() => {
-    if (!browserEngine && activeTab) recordBrowserVisit(activeTab.id, activeTab.url, activeTab.title);
-  }, [browserEngine, activeTab?.id, activeTab?.url, activeTab?.title, recordBrowserVisit]);
+    if (!browserEngine && activeTab && !activeTab.isStartPage) recordBrowserVisit(activeTab.id, activeTab.url, activeTab.title);
+  }, [browserEngine, activeTab?.id, activeTab?.url, activeTab?.title, activeTab?.isStartPage, recordBrowserVisit]);
 
   useEffect(() => {
     if (!browserEngine) return;
@@ -756,7 +792,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     const syncViewport = () => {
       const element = nativeViewportRef.current;
       const mobileAiOverlay = isAiPanelOpen && window.innerWidth < 768;
-      if (!element || !activeTab || activeTab.readerMode || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || isDownloadsOpen || isPrivacyOpen || mobileAiOverlay) {
+      if (!element || !activeTab || activeTab.readerMode || activeTab.isStartPage || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || isDownloadsOpen || isPrivacyOpen || mobileAiOverlay) {
         void browserEngine.setBounds(null);
         return;
       }
@@ -779,7 +815,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       document.removeEventListener('scroll', scheduleSync, true);
       void browserEngine.setBounds(null);
     };
-  }, [browserEngine, activeTabId, activeTab?.readerMode, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isPrivacyOpen, isAiPanelOpen]);
+  }, [browserEngine, activeTabId, activeTab?.readerMode, activeTab?.isStartPage, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isPrivacyOpen, isAiPanelOpen]);
 
   const pushHistory = (tabId: string, url: string) => {
     setHistory(prev => {
@@ -799,12 +835,21 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
   useEffect(() => {
     if (activeTab) {
-      setInputUrl(activeTab.url);
+      setInputUrl(activeTab.isStartPage ? '' : activeTab.url);
     }
+    setSearchResults([]);
+    setLastSearchQuery('');
+    setIsSearching(false);
     // Reset translation whenever the active tab changes
     setTranslatedContent('');
     setShowTranslation(false);
   }, [activeTabId]);
+
+  useEffect(() => {
+    if (!activeTab?.isStartPage) return;
+    const frame = window.requestAnimationFrame(() => startPageSearchRef.current?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTabId, activeTab?.isStartPage]);
 
   useEffect(() => {
     fetch('/api/browser/saved-articles')
@@ -862,9 +907,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       cleanUrl = 'https://' + cleanUrl;
     }
 
+    const navigatesToStartPageUrl = Boolean(activeTab?.startPageUrl && sameHttpUrl(cleanUrl, activeTab.startPageUrl));
     setIsLoading(true);
     setInputUrl(cleanUrl);
     setSearchResults([]);
+    setLastSearchQuery('');
     pushHistory(activeTabId, cleanUrl);
     recordBrowserVisit(activeTabId, cleanUrl, new URL(cleanUrl).hostname);
 
@@ -873,7 +920,16 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     setTabs(prev =>
       prev.map(t =>
         t.id === activeTabId
-          ? { ...t, url: cleanUrl, title: 'Loading…', content: '', author: '', readTime: '' }
+          ? {
+              ...t,
+              url: cleanUrl,
+              title: 'Loading…',
+              content: '',
+              author: '',
+              readTime: '',
+              isStartPage: false,
+              ...(navigatesToStartPageUrl ? { startPageUrl: undefined } : {})
+            }
           : t
       )
     );
@@ -978,19 +1034,23 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     const newId = `tab_${Date.now()}`;
     const newTab: BrowserTab = {
       id: newId,
-      title: 'New Tab',
+      title: '新标签页',
       url: 'https://en.wikipedia.org/wiki/Earth',
       readerMode: !browserEngine,
+      isStartPage: true,
+      startPageUrl: 'https://en.wikipedia.org/wiki/Earth',
       content: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].content,
       author: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].author,
       readTime: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].readTime
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newId);
+    setInputUrl('');
     setHistory(prev => ({ ...prev, [newId]: [newTab.url] }));
     setHistoryIndex(prev => ({ ...prev, [newId]: 0 }));
     setSearchResults([]);
-    recordBrowserVisit(newId, newTab.url, newTab.title);
+    setLastSearchQuery('');
+    setIsSearching(false);
   };
 
   const handleReorderTabs = (tabIds: string[]) => {
@@ -1040,6 +1100,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     if (idx <= 0) return;
     const target = stack[idx - 1];
     setHistoryIndex(prev => ({ ...prev, [activeTabId]: idx - 1 }));
+    if (activeTab?.startPageUrl && sameHttpUrl(target, activeTab.startPageUrl)) {
+      setTabs(prev => prev.map(tab => tab.id === activeTabId
+        ? { ...tab, title: '新标签页', isStartPage: true }
+        : tab));
+      setInputUrl('');
+      setSearchResults([]);
+      setLastSearchQuery('');
+      return;
+    }
     handleNavigate(target);
   };
 
@@ -1372,9 +1441,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
           <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/[0.06] bg-white/[0.025] p-1 text-slate-400">
             <button
               onClick={goBack}
-              disabled={browserEngine
-                ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoBack)
-                : (historyIndex[activeTabId] ?? 0) <= 0}
+              disabled={Boolean(activeTab?.isStartPage) || (browserEngine
+                ? !(browserEngineState?.tabId === activeTabId && (browserEngineState.canGoBack || canReturnToStartPage))
+                : (historyIndex[activeTabId] ?? 0) <= 0)}
               className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
               aria-label="后退"
               title="Back"
@@ -1873,8 +1942,69 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
       {/* 4. Split Layout */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[#080d13]">
-        <div className="min-w-0 flex-1 overflow-y-auto bg-[#080d13] p-4 sm:p-8">
-          {searchResults.length > 0 || isSearching ? (
+        <div className={`min-w-0 flex-1 overflow-y-auto bg-[#080d13] ${activeTab?.isStartPage && !lastSearchQuery ? 'p-0' : 'p-4 sm:p-8'}`}>
+          {activeTab?.isStartPage && !lastSearchQuery ? (
+            <section
+              role="region"
+              aria-label="浏览器起始页"
+              data-browser-start-page
+              className="relative flex min-h-[440px] w-full items-center justify-center overflow-hidden bg-[#080d13] px-4 py-12 sm:min-h-[520px] sm:px-8"
+            >
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(37,99,235,0.18),transparent_58%)]"
+              />
+              <div className="relative z-10 mx-auto flex w-full max-w-[1200px] flex-col items-center">
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.32em] text-blue-300/80">EARTH ONE</div>
+                <h1 className="text-center text-3xl font-semibold tracking-tight text-white sm:text-4xl">开始你的搜索</h1>
+                <p className="mt-3 text-center text-sm text-slate-400 sm:text-base">搜索网页，或输入网址直接访问</p>
+
+                <form
+                  onSubmit={event => {
+                    event.preventDefault();
+                    void handleNavigate(inputUrl);
+                  }}
+                  aria-label="搜索网页或输入网址"
+                  data-browser-start-search
+                  className="mt-8 flex h-20 w-full items-center gap-2 rounded-full border-2 border-blue-400/60 bg-[#0a1624] px-3 shadow-[0_18px_60px_rgba(37,99,235,0.2)] transition-all focus-within:border-blue-300/90 focus-within:ring-4 focus-within:ring-blue-400/20 sm:h-24 sm:gap-3 sm:px-5"
+                >
+                  <Search aria-hidden="true" className="ml-2 h-6 w-6 shrink-0 text-blue-300 sm:ml-4 sm:h-7 sm:w-7" />
+                  <input
+                    ref={startPageSearchRef}
+                    type="text"
+                    value={inputUrl}
+                    onChange={event => setInputUrl(event.target.value)}
+                    aria-label="搜索网页或输入网址"
+                    placeholder="搜索网页，或输入网址"
+                    autoComplete="off"
+                    spellCheck={false}
+                    data-browser-start-search-input
+                    className="h-full min-w-0 flex-1 bg-transparent text-lg text-slate-100 placeholder-slate-500 focus:outline-none sm:text-xl md:text-2xl"
+                  />
+                  {inputUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setInputUrl('')}
+                      aria-label="清空搜索框"
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-white/[0.08] hover:text-white"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    aria-label="搜索或打开网址"
+                    data-browser-start-search-submit
+                    className="inline-flex h-14 w-14 shrink-0 items-center justify-center gap-2 rounded-full bg-[#4285f4] text-base font-semibold text-white shadow-sm shadow-blue-950/40 transition hover:bg-[#5a95f5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300/70 sm:h-16 sm:w-auto sm:px-8 sm:text-lg"
+                  >
+                    <Search aria-hidden="true" className="h-5 w-5" />
+                    <span className="hidden sm:inline">搜索</span>
+                  </button>
+                </form>
+                <p className="mt-6 text-center text-xs text-slate-500 sm:text-sm">按 Enter 搜索 · 输入网址即可直接打开</p>
+              </div>
+            </section>
+          ) : searchResults.length > 0 || isSearching || lastSearchQuery ? (
             <div className="max-w-3xl mx-auto">
               <div className="mb-6">
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
