@@ -335,6 +335,8 @@ export interface CrawledPage {
   cleanContent: string;
   crawledAt: string;
   status: 'pending_review' | 'approved' | 'rejected';
+  aiSummary?: string;
+  aiModelUsed?: string;
 }
 
 export interface BrowserBookmark {

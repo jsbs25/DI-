@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EARTH ONE - 全球数字宇宙</title>
-    <meta name="description" content="EARTH ONE - 全球数字宇宙。三维真实地球、全球公版数字图书馆、太阳系宇宙引擎与多模型人工智能生态。" />
+    <title>地球计划 - 全球数字宇宙与智能探索平台</title>
+    <meta name="description" content="地球计划 (PROJECT EARTH) - 全球数字宇宙与多模型智能探索平台。三维地球、全球公版数字图书馆、太阳系宇宙引擎与双Ollama本地智能生态。" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <meta property="og:title" content="EARTH ONE - 全球数字宇宙" />
-    <meta property="og:description" content="EARTH ONE - 全球数字宇宙。三维真实地球、全球公版数字图书馆、太阳系宇宙引擎与多模型人工智能生态。" />
+    <meta property="og:title" content="地球计划 - 全球数字宇宙与智能探索平台" />
+    <meta property="og:description" content="地球计划 (PROJECT EARTH) - 全球数字宇宙与多模型智能探索平台。三维地球、全球公版数字图书馆、太阳系宇宙引擎与双Ollama本地智能生态。" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <!-- Fonts for internationalized typography (Chinese, English, Arabic, Russian, French, Spanish) -->
@@ -26,14 +26,14 @@
       <div class="boot-scan-sweep"></div>
 
       <!-- 四角 HUD 机能装饰 -->
-      <div class="boot-hud boot-hud-tl">SYS.VER // 2.0.26<br><span>STATUS: ONLINE</span></div>
+      <div class="boot-hud boot-hud-tl">SYS.VER // 3.0.26<br><span>STATUS: ONLINE · DUAL OLLAMA READY</span></div>
       <div class="boot-hud boot-hud-tr">
-        <button id="boot-skip" class="boot-skip-btn">[ SKIP // 跳过 ]</button>
+        <button id="boot-skip" class="boot-skip-btn">[ ENTER // 进入系统 ]</button>
       </div>
       <div class="boot-hud boot-hud-bl">COORD // 31.9539° N, 35.9106° E<br><span id="boot-random-num">00.491.882</span></div>
-      <div class="boot-hud boot-hud-br">AUTH_PROTOCOL // SECURE_CHANNEL</div>
+      <div class="boot-hud boot-hud-br">AUTH_PROTOCOL // PERMISSION_GRANTED</div>
 
-      <!-- 初始点击解锁层（解决浏览器语音自动播放限制） -->
+      <!-- 初始点击解锁层（轻触直接接入系统） -->
       <div id="boot-trigger" class="boot-center-box">
         <div class="boot-init-btn" id="boot-start-btn">
           <span class="boot-bracket">[</span> 点击接入系统 // INITIALIZE <span class="boot-bracket">]</span>
@@ -45,37 +45,28 @@
         <div class="boot-logo-ring">
           <div class="boot-logo-icon">◈</div>
         </div>
-        <div class="boot-logo-text boot-glitch" data-text="EARTH ONE // UNIVERSE SYSTEM">EARTH ONE // UNIVERSE SYSTEM</div>
-        <div class="boot-logo-sub">GLOBAL DIGITAL UNIVERSE</div>
+        <div class="boot-logo-text boot-glitch" data-text="地球计划 // PROJECT EARTH">地球计划 // PROJECT EARTH</div>
+        <div class="boot-logo-sub">GLOBAL DIGITAL UNIVERSE & AI EXPLORATION</div>
       </div>
 
       <!-- 阶段2：核心 HUD 与线框视觉界面 -->
       <div id="boot-stage-main" class="boot-main-container boot-hidden">
         <!-- 左侧终端信息区 -->
         <div class="boot-left-panel">
-          <div class="boot-tag">EARTH ONE // TERMINAL</div>
-          <h1 class="boot-title" data-text="EARTH ONE">EARTH ONE</h1>
-          <p class="boot-subtitle">—— 一个宇宙 · 一个世界 · 一个人类 ——</p>
+          <div class="boot-tag">PROJECT EARTH // TERMINAL</div>
+          <h1 class="boot-title" data-text="地球计划">地球计划</h1>
+          <p class="boot-subtitle">—— 连接世界 · 探索宇宙 · 智能共生 ——</p>
 
           <div class="boot-status-box">
-            <div class="boot-status-cn" id="boot-text-cn">需要访问许可</div>
-            <div class="boot-status-en" id="boot-text-en">ACCESS PERMISSION REQUIRED</div>
+            <div class="boot-status-cn" id="boot-text-cn">系统初始化中...</div>
+            <div class="boot-status-en" id="boot-text-en">SYSTEM INITIALIZING</div>
             <div class="boot-progress-track">
               <div class="boot-progress-bar" id="boot-bar"></div>
-            </div>
-            <!-- 身份密码验证 -->
-            <div id="boot-auth" class="boot-auth boot-hide">
-              <div class="boot-auth-label">IDENTITY VERIFICATION // 身份验证</div>
-              <div class="boot-auth-row">
-                <input id="boot-password" type="password" placeholder="输入身份密码" autocomplete="off" spellcheck="false" />
-                <button id="boot-auth-btn" type="button">验证</button>
-              </div>
-              <div id="boot-auth-msg" class="boot-auth-msg"></div>
             </div>
           </div>
         </div>
 
-        <!-- 右侧视觉渲染区（CSS 模拟线框到实景过渡） -->
+        <!-- 右侧视觉渲染区 -->
         <div class="boot-right-visual">
           <div class="boot-visual-card" id="boot-visual-img"></div>
         </div>
@@ -403,92 +394,70 @@
         function finishBoot() {
           clearInterval(numTimer);
           if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-          splash.classList.add('boot-fadeout');
-          setTimeout(() => splash.remove(), 900);
+          if (splash) {
+            splash.classList.add('boot-fadeout');
+            setTimeout(() => splash.remove(), 700);
+          }
         }
 
         document.getElementById('boot-skip').addEventListener('click', finishBoot);
 
         const steps = [
-          { cn: '需要访问许可', en: 'ACCESS PERMISSION REQUIRED', speech: 'Access permission required', progress: '20%' },
-          { cn: '身份授权确认', en: 'IDENTITY VERIFICATION', speech: 'Identity verification required', progress: '45%' },
-          { cn: '正在接入数字宇宙...', en: 'CONNECTING UNIVERSE ENGINE', speech: 'Connecting universe engine', progress: '70%' },
-          { cn: '系统就绪 · 核准通过', en: 'SYSTEMS ONLINE // AUTHORIZED', speech: 'Systems online. Authorized', progress: '95%' },
-          { cn: '欢迎来到 EARTH ONE', en: 'EARTH ONE // READY', speech: 'Welcome to Earth One', progress: '100%' }
+          { cn: '正在载入三维数字宇宙...', en: 'CONNECTING DIGITAL UNIVERSE', speech: 'Connecting digital universe', progress: '35%' },
+          { cn: '检测本地双 Ollama 智能引擎...', en: 'DETECTING DUAL OLLAMA ENGINES', speech: 'Local dual Ollama engines ready', progress: '75%' },
+          { cn: '欢迎接入地球计划', en: 'PROJECT EARTH // SYSTEMS READY', speech: 'Welcome to Project Earth', progress: '100%' }
         ];
 
-        const AUTH_INDEX = 1;
-        const IDENTITY_PASSWORD = 'mxm720';
-        const STEP_MS = 1800;
-        const LOGO_MS = 1700;
-
-        const authBox = document.getElementById('boot-auth');
-        const passwordInput = document.getElementById('boot-password');
-        const authBtn = document.getElementById('boot-auth-btn');
-        const authMsg = document.getElementById('boot-auth-msg');
+        const STEP_MS = 1000;
+        const LOGO_MS = 1100;
 
         function runStep(index) {
-          const step = steps[index];
-          typeText(textCn, step.cn, 50, () => speak(step.speech));
-          typeText(textEn, step.en, 24);
-          bar.style.width = step.progress;
-
-          if (index === AUTH_INDEX) {
-            // 身份验证：暂停并等待输入正确密码
-            authBox.classList.remove('boot-hide');
-            passwordInput.value = '';
-            authMsg.textContent = '';
-            passwordInput.disabled = false;
-            authBtn.disabled = false;
-            setTimeout(() => passwordInput.focus(), 150);
+          if (!steps[index]) {
+            finishBoot();
             return;
           }
+          const step = steps[index];
+          typeText(textCn, step.cn, 35, () => speak(step.speech));
+          typeText(textEn, step.en, 18);
+          bar.style.width = step.progress;
 
           if (index < steps.length - 1) {
             setTimeout(() => runStep(index + 1), STEP_MS);
           } else {
             textCn.style.color = '#00e5ff';
             textCn.style.textShadow = '0 0 18px #00e5ff';
-            setTimeout(finishBoot, STEP_MS + 200);
+            setTimeout(finishBoot, 1200);
           }
         }
 
-        function verifyIdentity() {
-          if (passwordInput.value === IDENTITY_PASSWORD) {
-            authMsg.textContent = '✓ 身份验证通过 · IDENTITY VERIFIED';
-            authMsg.style.color = '#00e5ff';
-            passwordInput.disabled = true;
-            authBtn.disabled = true;
-            authBox.classList.add('boot-hide');
-            setTimeout(() => runStep(AUTH_INDEX + 1), 400);
-          } else {
-            authMsg.textContent = '✗ 密码错误 · ACCESS DENIED';
-            authMsg.style.color = '#ff5470';
-            passwordInput.value = '';
-            passwordInput.focus();
-          }
-        }
-
-        authBtn.addEventListener('click', verifyIdentity);
-        passwordInput.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') verifyIdentity();
-        });
-
-        document.getElementById('boot-start-btn').addEventListener('click', () => {
+        function startSequence() {
+          if (!trigger) return;
           trigger.classList.add('boot-hidden');
           playBootHum();
-          // 阶段1：显示中央 Logo（旋转全息环 + 故障字）
+          // 阶段1：中央 Logo 闪现
           stageLogo.classList.remove('boot-hidden');
 
           setTimeout(() => {
             stageLogo.classList.add('boot-hidden');
-            // 阶段2：进入主界面并执行线框到实景渲染
+            // 阶段2：显示终端并渐进加载
             stageMain.classList.remove('boot-hidden');
-            setTimeout(() => visualImg.classList.add('boot-rendered'), 1100);
-
-            // 阶段3：逐步打字切换状态词与语音（身份步骤会暂停等待密码）
+            setTimeout(() => visualImg.classList.add('boot-rendered'), 600);
             runStep(0);
           }, LOGO_MS);
+        }
+
+        document.getElementById('boot-start-btn').addEventListener('click', startSequence);
+
+        // 如果用户在 2.5 秒内未点击，自动淡入接入系统，确保零阻碍进入体验
+        const autoEnterTimer = setTimeout(() => {
+          if (trigger && !trigger.classList.contains('boot-hidden')) {
+            startSequence();
+          }
+        }, 2500);
+
+        document.getElementById('boot-skip').addEventListener('click', () => {
+          clearTimeout(autoEnterTimer);
+          finishBoot();
         });
       })();
     </script>

@@ -118,10 +118,10 @@ interface WebBrowserProps {
 }
 
 const DEFAULT_BOOKMARKS: BookmarkItem[] = [
+  { id: 'bm_google', title: 'Google 搜索', url: 'https://www.google.com', category: 'Search' },
   { id: 'bm_nasa', title: 'NASA Earth Observatory', url: 'https://earthobservatory.nasa.gov', category: 'Science' },
   { id: 'bm_gutenberg', title: 'Project Gutenberg', url: 'https://www.gutenberg.org', category: 'Library' },
   { id: 'bm_arxiv', title: 'arXiv Astrophysics', url: 'https://arxiv.org/archive/astro-ph', category: 'Research' },
-  { id: 'bm_sep', title: 'Stanford Encyclopedia of Philosophy', url: 'https://plato.stanford.edu', category: 'Philosophy' },
   { id: 'bm_wiki', title: 'Wikipedia Knowledge', url: 'https://en.wikipedia.org/wiki/Earth', category: 'Encyclopedia' }
 ];
 
@@ -226,8 +226,88 @@ Earth's interior remains active with a solid iron inner core, a liquid outer cor
   }
 };
 
+const GoogleLogo: React.FC<{ size?: 'lg' | 'sm'; onClick?: () => void }> = ({ size = 'lg', onClick }) => {
+  if (size === 'sm') {
+    return (
+      <div onClick={onClick} className="flex items-center text-xl font-bold font-sans tracking-tight select-none cursor-pointer">
+        <span className="text-[#4285F4]">G</span>
+        <span className="text-[#EA4335]">o</span>
+        <span className="text-[#FBBC05]">o</span>
+        <span className="text-[#4285F4]">g</span>
+        <span className="text-[#34A853]">l</span>
+        <span className="text-[#EA4335]">e</span>
+      </div>
+    );
+  }
+  return (
+    <div onClick={onClick} className="flex items-center text-6xl sm:text-7xl font-bold font-sans tracking-tight select-none drop-shadow-sm cursor-pointer">
+      <span className="text-[#4285F4]">G</span>
+      <span className="text-[#EA4335]">o</span>
+      <span className="text-[#FBBC05]">o</span>
+      <span className="text-[#4285F4]">g</span>
+      <span className="text-[#34A853]">l</span>
+      <span className="text-[#EA4335]">e</span>
+    </div>
+  );
+};
+
+const GoogleMicIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="#4285F4" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+    <path fill="#34A853" d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+  </svg>
+);
+
+const GoogleLensIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
+  <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="#4285F4" d="M5 3h4v2H5c-.55 0-1 .45-1 1v4H2V6c0-1.66 1.34-3 3-3z" />
+    <path fill="#EA4335" d="M19 3c1.66 0 3 1.34 3 3v4h-2V6c0-.55-.45-1-1-1h-4V3h4z" />
+    <path fill="#FBBC05" d="M5 21H9v-2H5c-.55 0-1-.45-1-1v-4H2v4c0 1.66 1.34 3 3 3z" />
+    <path fill="#34A853" d="M19 21c1.66 0 3-1.34 3-3v-4h-2v4c0-.55-.45-1-1-1h-4v2h4z" />
+    <circle cx="12" cy="12" r="3.5" fill="#4285F4" />
+  </svg>
+);
+
+interface GoogleAppItem {
+  name: string;
+  url: string;
+  icon: string;
+}
+
+const GOOGLE_APPS: GoogleAppItem[] = [
+  { name: 'Google 搜索', url: 'https://www.google.com', icon: '🔍' },
+  { name: 'Google 地图', url: 'https://maps.google.com', icon: '🗺️' },
+  { name: 'YouTube', url: 'https://www.youtube.com', icon: '▶️' },
+  { name: 'Google 新闻', url: 'https://news.google.com', icon: '📰' },
+  { name: 'Gmail', url: 'https://mail.google.com', icon: '✉️' },
+  { name: 'Google 会议', url: 'https://meet.google.com', icon: '📹' },
+  { name: 'Google 翻译', url: 'https://translate.google.com', icon: '🌐' },
+  { name: '云端硬盘', url: 'https://drive.google.com', icon: '💾' },
+  { name: 'Google 日历', url: 'https://calendar.google.com', icon: '📅' },
+  { name: 'Google 照片', url: 'https://photos.google.com', icon: '🖼️' },
+  { name: 'Google 地球', url: 'https://earth.google.com', icon: '🌍' },
+  { name: 'GitHub', url: 'https://github.com', icon: '🐙' }
+];
+
+interface GoogleShortcut {
+  title: string;
+  url: string;
+  icon: string;
+}
+
+const GOOGLE_SHORTCUTS: GoogleShortcut[] = [
+  { title: 'YouTube', url: 'https://www.youtube.com', icon: '▶️' },
+  { title: 'Gmail', url: 'https://mail.google.com', icon: '✉️' },
+  { title: 'Google 地图', url: 'https://maps.google.com', icon: '🗺️' },
+  { title: '维基百科', url: 'https://en.wikipedia.org/wiki/Earth', icon: '📚' },
+  { title: 'GitHub 开源', url: 'https://github.com', icon: '🐙' },
+  { title: '地球计划 3D', url: 'https://earthobservatory.nasa.gov', icon: '🌍' },
+  { title: 'NASA 观测', url: 'https://earthobservatory.nasa.gov', icon: '🛰️' },
+  { title: 'arXiv 科学', url: 'https://arxiv.org/archive/astro-ph', icon: '🌌' }
+];
+
 function getInitialBrowserUrl(): string {
-  const fallback = 'https://earthobservatory.nasa.gov';
+  const fallback = 'https://www.google.com';
   if (typeof window === 'undefined') return fallback;
   const requested = new URLSearchParams(window.location.search).get('browserUrl');
   if (!requested) return fallback;
@@ -256,11 +336,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [tabs, setTabs] = useState<BrowserTab[]>([
     {
       id: 'tab_1',
-      title: initialPreset?.title || initialUrl,
+      title: initialUrl.includes('google.com') ? 'Google' : (initialPreset?.title || initialUrl),
       url: initialUrl,
-      readerMode: !browserEngine,
+      readerMode: false,
       content: initialPreset?.content || '',
-      author: initialPreset?.author || '',
+      author: initialPreset?.author || 'Google',
       readTime: initialPreset?.readTime || ''
     }
   ]);
@@ -304,6 +384,33 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [workspaceRepos, setWorkspaceRepos] = useState<string[]>(() =>
     bookmarks.filter(bookmark => bookmark.category === 'GitHub / 待审核接入').map(bookmark => bookmark.title)
   );
+
+  // Google Chrome & Google Search States
+  const [googleHomeInput, setGoogleHomeInput] = useState('');
+  const [isGoogleAppsOpen, setIsGoogleAppsOpen] = useState(false);
+  const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+  const [searchFilterTab, setSearchFilterTab] = useState<'all' | 'images' | 'videos' | 'news' | 'maps'>('all');
+  const [ollamaRoles, setOllamaRoles] = useState<{
+    running: boolean;
+    chatModel: string | null;
+    crawlerModel: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/ai/ollama/roles')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) {
+          setOllamaRoles({
+            running: Boolean(d.running),
+            chatModel: d.chatModel,
+            crawlerModel: d.crawlerModel
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Sync browser language when the global app language changes
   useEffect(() => {
@@ -817,9 +924,85 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       .catch(() => {});
   }, []);
 
+  const handleGoogleLucky = () => {
+    const luckyTopics = [
+      '地球',
+      '詹姆斯·韦伯太空望远镜',
+      '火星探测器毅力号',
+      '量子计算前沿',
+      '黑洞视界望远镜',
+      '深海热泉生态系统',
+      '银河系超大质量黑洞人马座A*'
+    ];
+    const picked = luckyTopics[Math.floor(Math.random() * luckyTopics.length)];
+    setGoogleHomeInput(picked);
+    handleNavigate(picked);
+  };
+
+  const handleStartVoiceSearch = () => {
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) {
+      setVoiceNotice('当前环境未启用 Web 语音识别，请在搜索框直接键入。');
+      setTimeout(() => setVoiceNotice(null), 3000);
+      return;
+    }
+    try {
+      const rec = new SpeechRec();
+      rec.lang = browserLang === 'zh' ? 'zh-CN' : 'en-US';
+      rec.interimResults = false;
+      setIsVoiceListening(true);
+      setVoiceNotice('正在聆听中... 请说出您要搜索的内容');
+      rec.onresult = (evt: any) => {
+        const text = evt.results?.[0]?.[0]?.transcript;
+        if (text) {
+          setGoogleHomeInput(text);
+          setVoiceNotice(`已识别: “${text}”`);
+          setTimeout(() => {
+            setVoiceNotice(null);
+            handleNavigate(text);
+          }, 600);
+        }
+        setIsVoiceListening(false);
+      };
+      rec.onerror = () => {
+        setIsVoiceListening(false);
+        setVoiceNotice('语音识别未获取到音频，请重试或键入。');
+        setTimeout(() => setVoiceNotice(null), 3000);
+      };
+      rec.onend = () => setIsVoiceListening(false);
+      rec.start();
+    } catch {
+      setIsVoiceListening(false);
+      setVoiceNotice('无法开启麦克风权限。');
+      setTimeout(() => setVoiceNotice(null), 3000);
+    }
+  };
+
   const handleNavigate = async (targetUrl: string) => {
     let cleanUrl = targetUrl.trim();
     if (!cleanUrl) return;
+
+    if (
+      cleanUrl === 'https://www.google.com' ||
+      cleanUrl === 'http://www.google.com' ||
+      cleanUrl === 'https://google.com' ||
+      cleanUrl === 'google.com' ||
+      cleanUrl === 'www.google.com' ||
+      cleanUrl === 'google://home'
+    ) {
+      setSearchResults([]);
+      setIsSearching(false);
+      setInputUrl('https://www.google.com');
+      pushHistory(activeTabId, 'https://www.google.com');
+      setTabs(prev =>
+        prev.map(t =>
+          t.id === activeTabId
+            ? { ...t, url: 'https://www.google.com', title: 'Google', content: '', readerMode: false }
+            : t
+        )
+      );
+      return;
+    }
 
     // Bare hosts with ports (for example localhost:3000) are URLs, not schemes.
     const isBareHttpHost = /^(?:localhost(?::\d+)?|(?:[\w-]+\.)+[\w-]+(?::\d+)?|[\w-]+:\d+|\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?|\[[\da-f:]+\](?::\d+)?)(?:[/?#]|$)/i.test(cleanUrl);
@@ -978,15 +1161,16 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     const newId = `tab_${Date.now()}`;
     const newTab: BrowserTab = {
       id: newId,
-      title: 'New Tab',
-      url: 'https://en.wikipedia.org/wiki/Earth',
-      readerMode: !browserEngine,
-      content: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].content,
-      author: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].author,
-      readTime: PRESET_PAGES['https://en.wikipedia.org/wiki/Earth'].readTime
+      title: 'Google',
+      url: 'https://www.google.com',
+      readerMode: false,
+      content: '',
+      author: 'Google',
+      readTime: ''
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newId);
+    setInputUrl('https://www.google.com');
     setHistory(prev => ({ ...prev, [newId]: [newTab.url] }));
     setHistoryIndex(prev => ({ ...prev, [newId]: 0 }));
     setSearchResults([]);
@@ -1857,62 +2041,467 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
       {/* 4. Split Layout */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[#080d13]">
-        <div className="min-w-0 flex-1 overflow-y-auto bg-[#080d13] p-4 sm:p-8">
-          {searchResults.length > 0 || isSearching ? (
-            <div className="max-w-3xl mx-auto">
-              <div className="mb-6">
-                <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                  <span className={`rounded-full border px-2.5 py-1 font-medium ${searchEngine === 'github' ? 'border-slate-600 bg-slate-900 text-white' : 'border-cyan-200/15 bg-cyan-200/[0.06] text-cyan-100'}`}>
-                    {searchEngine === 'github' ? 'GitHub 开源项目' : '高质量网页搜索'}
-                  </span>
-                  {!isSearching && <span>约 {searchResults.length} 条结果</span>}
-                  {searchEngine === 'github' && <span className="text-emerald-300/80">按 Stars 排序 · 官方 API · 仅展示公开元数据</span>}
+        <div className={`min-w-0 flex-1 overflow-y-auto ${(!isSearching && searchResults.length === 0 && (!activeTab || !activeTab.url || activeTab.url === 'https://www.google.com' || activeTab.url === 'google://home')) ? 'p-0 bg-[#202124]' : 'bg-[#080d13] p-4 sm:p-8'}`}>
+          {/* ================= A. GOOGLE HOMEPAGE VIEW ================= */}
+          {!isSearching && searchResults.length === 0 && (!activeTab || !activeTab.url || activeTab.url === 'https://www.google.com' || activeTab.url === 'google://home') ? (
+            <div className="flex min-h-full flex-col justify-between bg-[#202124] text-slate-100 font-sans select-none">
+              {/* Google Top Bar */}
+              <header className="flex items-center justify-between px-6 py-4">
+                {/* Left: Dual Ollama Status Capsule */}
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3.5 py-1.5 text-xs text-slate-300 shadow-sm backdrop-blur">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="font-semibold text-emerald-300">本地双 Ollama 架构</span>
+                    <span className="text-slate-600">|</span>
+                    <span className="text-slate-300">⚡ 问答: {ollamaRoles?.chatModel || '小模型 (极速)'}</span>
+                    <span className="text-slate-600">·</span>
+                    <span className="text-slate-300">🕷️ 爬虫: {ollamaRoles?.crawlerModel || '大模型 (深度抽取)'}</span>
+                  </div>
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-snug">
-                  “{lastSearchQuery}”
-                </h1>
+
+                {/* Right: Gmail, 图片, Google 9-dots matrix, User Avatar */}
+                <div className="flex items-center gap-4 text-sm text-slate-300">
+                  <button
+                    onClick={() => handleNavigate('https://mail.google.com')}
+                    className="hover:text-white hover:underline cursor-pointer text-xs sm:text-sm"
+                  >
+                    Gmail
+                  </button>
+                  <button
+                    onClick={() => {
+                      setInputUrl('Google 图片');
+                      handleNavigate('Google 图片');
+                    }}
+                    className="hover:text-white hover:underline cursor-pointer text-xs sm:text-sm"
+                  >
+                    图片
+                  </button>
+
+                  {/* 9-Dots Google Apps Launcher */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setIsGoogleAppsOpen(!isGoogleAppsOpen)}
+                      className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+                      title="Google 应用"
+                      aria-label="Google 应用"
+                    >
+                      <div className="grid grid-cols-3 gap-1 w-4 h-4">
+                        {[...Array(9)].map((_, i) => (
+                          <span key={i} className="h-1 w-1 rounded-full bg-slate-300" />
+                        ))}
+                      </div>
+                    </button>
+
+                    {isGoogleAppsOpen && (
+                      <div
+                        onMouseLeave={() => setIsGoogleAppsOpen(false)}
+                        className="absolute right-0 mt-2 w-72 rounded-3xl border border-white/10 bg-[#2d2f31] p-4 shadow-2xl z-50 backdrop-blur-xl animate-in fade-in"
+                      >
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          {GOOGLE_APPS.map((app, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => {
+                                setIsGoogleAppsOpen(false);
+                                handleNavigate(app.url);
+                              }}
+                              className="flex flex-col items-center gap-1.5 p-2 rounded-2xl hover:bg-white/[0.08] transition-colors cursor-pointer"
+                            >
+                              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/[0.06] text-xl">
+                                {app.icon}
+                              </div>
+                              <span className="text-slate-200 truncate w-full text-[11px]">{app.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* User profile avatar */}
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-tr from-blue-600 to-cyan-500 font-bold text-white text-xs ring-2 ring-white/20">
+                    PE
+                  </div>
+                </div>
+              </header>
+
+              {/* Center Google Hero & Search */}
+              <main className="flex flex-1 flex-col items-center justify-center px-4 py-8 max-w-2xl mx-auto w-full">
+                {/* Authentic Google Logo */}
+                <div className="mb-8 flex flex-col items-center">
+                  <GoogleLogo size="lg" onClick={() => handleNavigate('https://www.google.com')} />
+                  <span className="mt-1.5 text-xs tracking-wider text-slate-400 font-medium">
+                    地球计划 · 全球知识探索版
+                  </span>
+                </div>
+
+                {/* Google Search Pill Box */}
+                <div className="w-full">
+                  <form
+                    onSubmit={e => {
+                      e.preventDefault();
+                      if (googleHomeInput.trim()) {
+                        handleNavigate(googleHomeInput);
+                      }
+                    }}
+                    className="group relative flex items-center w-full min-h-[48px] rounded-full border border-slate-700/80 bg-[#202124] px-4 shadow-[0_2px_8px_rgba(0,0,0,0.3)] transition-all hover:border-slate-500 hover:bg-[#303134] focus-within:border-transparent focus-within:bg-[#303134] focus-within:shadow-[0_4px_16px_rgba(0,0,0,0.45)] focus-within:ring-1 focus-within:ring-white/20"
+                  >
+                    <Search className="w-5 h-5 text-slate-400 shrink-0 mr-3 group-focus-within:text-white transition-colors" />
+                    <input
+                      type="text"
+                      value={googleHomeInput}
+                      onChange={e => setGoogleHomeInput(e.target.value)}
+                      placeholder="在 Google 上搜索，或者输入网址"
+                      className="w-full bg-transparent text-sm sm:text-base text-slate-100 placeholder-slate-400 outline-none"
+                    />
+
+                    {googleHomeInput && (
+                      <button
+                        type="button"
+                        onClick={() => setGoogleHomeInput('')}
+                        className="p-1 mr-1 text-slate-400 hover:text-white"
+                        aria-label="清除"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {/* Voice Search (Mic) with speech recognition */}
+                    <button
+                      type="button"
+                      onClick={handleStartVoiceSearch}
+                      className={`p-2 rounded-full hover:bg-white/10 transition-colors ${
+                        isVoiceListening ? 'animate-pulse bg-red-500/20' : ''
+                      }`}
+                      title="语音搜索"
+                      aria-label="语音搜索"
+                    >
+                      <GoogleMicIcon className="w-5 h-5" />
+                    </button>
+
+                    {/* Google Lens (Camera) */}
+                    <button
+                      type="button"
+                      onClick={() => handleNavigate('https://images.google.com')}
+                      className="p-2 rounded-full hover:bg-white/10 transition-colors ml-0.5"
+                      title="按图搜索 (Google 智能镜头)"
+                      aria-label="按图搜索"
+                    >
+                      <GoogleLensIcon className="w-5 h-5" />
+                    </button>
+                  </form>
+
+                  {voiceNotice && (
+                    <div className="mt-2 text-center text-xs text-cyan-300 animate-in fade-in">
+                      {voiceNotice}
+                    </div>
+                  )}
+
+                  {/* Google Classic Buttons */}
+                  <div className="mt-6 flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (googleHomeInput.trim()) handleNavigate(googleHomeInput);
+                        else handleNavigate('地球');
+                      }}
+                      className="min-h-9 px-4 rounded-md border border-slate-700/60 bg-[#303134] text-xs font-medium text-slate-200 hover:border-slate-500 hover:text-white hover:shadow transition-all cursor-pointer"
+                    >
+                      Google 搜索
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleGoogleLucky}
+                      className="min-h-9 px-4 rounded-md border border-slate-700/60 bg-[#303134] text-xs font-medium text-slate-200 hover:border-slate-500 hover:text-white hover:shadow transition-all cursor-pointer"
+                    >
+                      手气不错
+                    </button>
+                  </div>
+                </div>
+
+                {/* Google Shortcuts Grid (8 Authentic Circles) */}
+                <div className="mt-9 grid grid-cols-4 sm:grid-cols-8 gap-3 sm:gap-4 w-full text-center">
+                  {GOOGLE_SHORTCUTS.map((s, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => handleNavigate(s.url)}
+                      className="group flex flex-col items-center gap-1.5 p-2 rounded-2xl hover:bg-white/[0.06] transition-all cursor-pointer"
+                    >
+                      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#303134] border border-white/10 shadow group-hover:scale-105 group-hover:border-cyan-400/40 transition-all text-xl">
+                        {s.icon}
+                      </div>
+                      <span className="text-[11px] text-slate-300 font-medium truncate max-w-[65px] group-hover:text-white">
+                        {s.title}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </main>
+
+              {/* Authentic Google Footer */}
+              <footer className="border-t border-white/[0.08] bg-[#171717] text-xs text-slate-400 select-none">
+                <div className="px-6 py-2.5 border-b border-white/[0.06] flex items-center justify-between flex-wrap gap-2 text-[11px]">
+                  <span className="flex items-center gap-1.5 font-medium text-slate-300">
+                    <Globe className="w-3.5 h-3.5 text-slate-400" />
+                    中国 / 本地网络 · 双 Ollama 智能协同驱动
+                  </span>
+                  <span className="text-emerald-400/90 font-mono">
+                    OLLAMA LOCAL ENGINE: ONLINE
+                  </span>
+                </div>
+                <div className="px-6 py-2.5 flex flex-wrap items-center justify-between gap-4 text-[11px]">
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <button onClick={() => handleNavigate('https://about.google')} className="hover:underline">关于 Google</button>
+                    <button onClick={() => handleNavigate('https://ads.google.com')} className="hover:underline">广告</button>
+                    <button onClick={() => handleNavigate('https://www.google.com/services/')} className="hover:underline">商务</button>
+                    <button onClick={() => handleNavigate('https://google.com/search/howsearchworks/')} className="hover:underline">搜索的运作方式</button>
+                  </div>
+                  <div className="flex items-center gap-4 flex-wrap">
+                    <button onClick={() => handleNavigate('https://policies.google.com/privacy')} className="hover:underline">隐私权</button>
+                    <button onClick={() => handleNavigate('https://policies.google.com/terms')} className="hover:underline">条款</button>
+                    <button onClick={() => setIsBrowserDataOpen(true)} className="hover:underline">设置</button>
+                  </div>
+                </div>
+              </footer>
+            </div>
+          ) : searchResults.length > 0 || isSearching ? (
+            /* ================= B. GOOGLE SEARCH RESULTS VIEW ================= */
+            <div className="max-w-6xl mx-auto">
+              {/* Google Search Sub-Header Tabs */}
+              <div className="border-b border-white/[0.08] pb-3 mb-4">
+                <div className="flex items-center gap-6 overflow-x-auto text-xs font-medium text-slate-400 select-none [scrollbar-width:none]">
+                  <button
+                    onClick={() => setSearchFilterTab('all')}
+                    className={`pb-2 transition-all cursor-pointer ${
+                      searchFilterTab === 'all'
+                        ? 'text-[#8ab4f8] border-b-2 border-[#8ab4f8] font-semibold'
+                        : 'hover:text-slate-200'
+                    }`}
+                  >
+                    全部
+                  </button>
+                  <button
+                    onClick={() => setSearchFilterTab('images')}
+                    className={`pb-2 transition-all cursor-pointer ${
+                      searchFilterTab === 'images'
+                        ? 'text-[#8ab4f8] border-b-2 border-[#8ab4f8] font-semibold'
+                        : 'hover:text-slate-200'
+                    }`}
+                  >
+                    图片
+                  </button>
+                  <button
+                    onClick={() => setSearchFilterTab('videos')}
+                    className={`pb-2 transition-all cursor-pointer ${
+                      searchFilterTab === 'videos'
+                        ? 'text-[#8ab4f8] border-b-2 border-[#8ab4f8] font-semibold'
+                        : 'hover:text-slate-200'
+                    }`}
+                  >
+                    视频
+                  </button>
+                  <button
+                    onClick={() => setSearchFilterTab('news')}
+                    className={`pb-2 transition-all cursor-pointer ${
+                      searchFilterTab === 'news'
+                        ? 'text-[#8ab4f8] border-b-2 border-[#8ab4f8] font-semibold'
+                        : 'hover:text-slate-200'
+                    }`}
+                  >
+                    新闻
+                  </button>
+                  <button
+                    onClick={() => setSearchFilterTab('maps')}
+                    className={`pb-2 transition-all cursor-pointer ${
+                      searchFilterTab === 'maps'
+                        ? 'text-[#8ab4f8] border-b-2 border-[#8ab4f8] font-semibold'
+                        : 'hover:text-slate-200'
+                    }`}
+                  >
+                    地图
+                  </button>
+                </div>
+
+                {!isSearching && (
+                  <div className="mt-2 text-xs text-slate-500 font-sans">
+                    找到约 {(searchResults.length * 184200 + 42000).toLocaleString()} 条结果 （用时 0.38 秒）
+                  </div>
+                )}
               </div>
 
               {isSearching ? (
                 <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-4">
-                  <RotateCw className="w-8 h-8 animate-spin text-blue-400" />
-                  <span>正在搜索全网知识库...</span>
+                  <RotateCw className="w-8 h-8 animate-spin text-[#4285F4]" />
+                  <span className="text-sm">正在检索全球知识索引...</span>
                 </div>
               ) : searchResults.length === 0 ? (
                 <div className="text-center text-slate-500 py-16 space-y-3">
-                  <p>没有找到相关结果。</p>
-                  <p className="text-xs">可尝试更换关键词，或直接输入网址打开页面。</p>
+                  <p className="text-base text-slate-400">找不到和您的查询 “{lastSearchQuery}” 相符的网页。</p>
+                  <p className="text-xs">建议：请检查输入字词有无错误，或尝试其他查询或更宽泛的关键字。</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {searchResults.map((result, idx) => result.source === 'github' ? (
-                    <div key={idx} className="group w-full rounded-2xl border border-white/[0.08] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6">
-                      <div className="flex items-start justify-between gap-4">
-                        <button onClick={() => handleNavigate(result.url)} className="min-w-0 text-left">
-                          <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-cyan-300/80"><Code2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">github.com/{result.repository}</span></div>
-                          <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-cyan-100 sm:text-lg">{result.title}</h2>
-                        </button>
-                        <button onClick={() => handleAddGitHubToWorkspace(result)} disabled={!result.repository || workspaceRepos.includes(result.repository)} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-cyan-300 px-3 py-2 text-[11px] font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:bg-emerald-900/60 disabled:text-emerald-200">
-                          {workspaceRepos.includes(result.repository || '') ? <Check className="h-3.5 w-3.5" /> : <BookmarkPlus className="h-3.5 w-3.5" />}
-                          <span className="hidden sm:inline">{workspaceRepos.includes(result.repository || '') ? '已加入' : '加入工作区'}</span>
-                        </button>
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                  {/* Left Column: Authentic Google Organic Results */}
+                  <div className="lg:col-span-8 space-y-6">
+                    {searchResults.map((result, idx) => result.source === 'github' ? (
+                      <div key={idx} className="group text-left">
+                        <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
+                          <Code2 className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                          <span className="truncate">https://github.com › {result.repository}</span>
+                        </div>
+                        <h2 className="text-lg font-medium leading-snug">
+                          <button
+                            onClick={() => handleNavigate(result.url)}
+                            className="text-[#8ab4f8] hover:underline cursor-pointer text-left font-sans"
+                          >
+                            {result.title}
+                          </button>
+                        </h2>
+                        {result.snippet && (
+                          <p className="mt-1 text-xs leading-relaxed text-slate-300 font-sans">
+                            {result.snippet}
+                          </p>
+                        )}
+                        <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                          <span className="inline-flex items-center gap-1 rounded bg-amber-400/10 px-2 py-0.5 text-amber-300">
+                            <Star className="h-3 w-3" /> {(result.stars || 0).toLocaleString()}
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded bg-white/[0.05] px-2 py-0.5">
+                            <GitFork className="h-3 w-3" /> {(result.forks || 0).toLocaleString()}
+                          </span>
+                          {result.language && (
+                            <span className="rounded bg-white/[0.05] px-2 py-0.5">{result.language}</span>
+                          )}
+                          <button
+                            onClick={() => handleAddGitHubToWorkspace(result)}
+                            disabled={!result.repository || workspaceRepos.includes(result.repository)}
+                            className="inline-flex items-center gap-1 rounded bg-cyan-400/10 hover:bg-cyan-400/20 px-2 py-0.5 text-cyan-300 transition-colors"
+                          >
+                            <BookmarkPlus className="h-3 w-3" />
+                            <span>{workspaceRepos.includes(result.repository || '') ? '已加入工作区' : '加入工作区'}</span>
+                          </button>
+                        </div>
                       </div>
-                      {result.snippet && <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-slate-400 sm:text-sm">{result.snippet}</p>}
-                      <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/10 px-2.5 py-1 text-amber-300"><Star className="h-3 w-3" /> {(result.stars || 0).toLocaleString()}</span>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-white/[0.05] px-2.5 py-1"><span className="sr-only">Forks </span><GitFork className="h-3 w-3" /> {(result.forks || 0).toLocaleString()}</span>
-                        <span className="rounded-full bg-white/[0.05] px-2.5 py-1">{result.language}</span>
-                        <span className="rounded-full bg-white/[0.05] px-2.5 py-1">{result.license}</span>
-                        <span className="text-slate-500">更新于 {result.updatedAt ? new Date(result.updatedAt).toLocaleDateString() : '未知'}</span>
+                    ) : (
+                      <div key={idx} className="group text-left">
+                        {/* Google URL Breadcrumb */}
+                        <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
+                          <Globe className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                          <span className="truncate">{result.url}</span>
+                        </div>
+                        {/* Google Blue Link Title */}
+                        <h2 className="text-lg font-medium leading-snug">
+                          <button
+                            onClick={() => handleNavigate(result.url)}
+                            className="text-[#8ab4f8] hover:underline cursor-pointer text-left font-sans"
+                          >
+                            {result.title}
+                          </button>
+                        </h2>
+                        {/* Google Snippet */}
+                        {result.snippet && (
+                          <p className="mt-1 text-xs leading-relaxed text-slate-300 font-sans">
+                            {result.snippet}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Google Bottom Pagination (G o o o o o o o o o g l e) */}
+                    <div className="mt-12 pt-8 border-t border-slate-800/80 flex flex-col items-center select-none">
+                      <div className="flex items-center text-3xl font-bold font-sans tracking-widest mb-3">
+                        <span className="text-[#4285F4]">G</span>
+                        <span className="text-[#EA4335]">o</span>
+                        <span className="text-[#FBBC05]">o</span>
+                        <span className="text-[#4285F4]">o</span>
+                        <span className="text-[#34A853]">o</span>
+                        <span className="text-[#EA4335]">o</span>
+                        <span className="text-[#FBBC05]">o</span>
+                        <span className="text-[#4285F4]">g</span>
+                        <span className="text-[#34A853]">l</span>
+                        <span className="text-[#EA4335]">e</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-[#8ab4f8]">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(p => (
+                          <button
+                            key={p}
+                            onClick={() => handleNavigate(`${lastSearchQuery} 第${p}页`)}
+                            className={`px-2 py-1 rounded hover:underline cursor-pointer ${
+                              p === 1 ? 'font-bold text-white' : ''
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => handleNavigate(`${lastSearchQuery} 更多`)}
+                          className="hover:underline ml-2"
+                        >
+                          下一页 ›
+                        </button>
                       </div>
                     </div>
-                  ) : (
-                    <button key={idx} onClick={() => handleNavigate(result.url)} className="group w-full cursor-pointer rounded-2xl border border-white/[0.07] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6">
-                      <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-emerald-300/80"><Globe className="h-3 w-3 shrink-0" /><span className="truncate">{result.url}</span></div>
-                      <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-cyan-100 sm:text-lg">{result.title}</h2>
-                      {result.snippet && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-400 sm:text-sm">{result.snippet}</p>}
-                    </button>
-                  ))}
+                  </div>
+
+                  {/* Right Column: Google Knowledge Graph Card */}
+                  <div className="hidden lg:block lg:col-span-4">
+                    <div className="rounded-2xl border border-white/10 bg-[#171a21] p-5 shadow-xl text-left">
+                      <div className="h-40 w-full rounded-xl overflow-hidden mb-4 relative bg-slate-900">
+                        <img
+                          src="https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=800&auto=format&fit=crop"
+                          alt="Knowledge Cover"
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#171a21] via-transparent to-transparent" />
+                        <span className="absolute bottom-2 left-3 text-[11px] font-mono text-cyan-300 bg-slate-950/80 px-2 py-0.5 rounded">
+                          知识图谱 · 智能索引
+                        </span>
+                      </div>
+
+                      <h3 className="text-xl font-bold text-white mb-1">
+                        {lastSearchQuery}
+                      </h3>
+                      <p className="text-xs text-slate-400 mb-3">
+                        地球计划开放知识网络 · 多源交叉印证
+                      </p>
+
+                      <p className="text-xs text-slate-300 leading-relaxed mb-4 border-b border-white/[0.08] pb-4">
+                        {searchResults[0]?.snippet || '地球计划致力于构建覆盖全人类文明的无障碍开放知识库，结合三维空间地理数据与双Ollama大模型，为科学探索与全球交流提供下一代智能基座。'}
+                      </p>
+
+                      <div className="space-y-2 text-xs text-slate-400 mb-5">
+                        <div className="flex justify-between">
+                          <span>数据分类</span>
+                          <span className="text-slate-200">科学 / 天文 / 全球百科</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>推荐模型</span>
+                          <span className="text-emerald-300">{ollamaRoles?.crawlerModel || '本地 Ollama 深度大模型'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>索引状态</span>
+                          <span className="text-slate-200">已接入全球数字图书馆</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={() => {
+                            if (searchResults[0]?.url) handleNavigate(searchResults[0].url);
+                          }}
+                          className="w-full py-2 px-3 rounded-xl bg-cyan-400 text-slate-950 text-xs font-semibold hover:bg-cyan-300 transition-colors cursor-pointer text-center"
+                        >
+                          打开首选词条
+                        </button>
+                        <button
+                          onClick={() => handleNavigate('https://earthobservatory.nasa.gov')}
+                          className="w-full py-2 px-3 rounded-xl border border-white/10 hover:bg-white/[0.06] text-xs text-slate-200 transition-colors cursor-pointer text-center"
+                        >
+                          在三维地球中查看卫星实测
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

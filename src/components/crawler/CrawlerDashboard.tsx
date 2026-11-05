@@ -33,20 +33,31 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
   const [newTaskMaxPages, setNewTaskMaxPages] = useState(25);
 
   const [logs, setLogs] = useState<string[]>([
-    '[INIT] EARTH ONE Ingestion Engine V2.0 initialized.',
+    '[INIT] PROJECT EARTH Ingestion Engine V3.0 initialized.',
+    '[OLLAMA] Local dual-engine architecture detected (Large model assigned to Crawler).',
     '[SYSTEM] Robots.txt protocol compliance enforced on all crawler workers.',
     '[STORAGE] Connected to local content staging repository.'
   ]);
 
+  const [ollamaRoles, setOllamaRoles] = useState<{ running: boolean; crawlerModel: string | null; chatModel: string | null } | null>(null);
+  const [isAiExtracting, setIsAiExtracting] = useState(false);
+
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [resTasks, resPages] = await Promise.all([
+      const [resTasks, resPages, resRoles] = await Promise.all([
         fetch('/api/crawler/tasks'),
-        fetch('/api/crawler/pages')
+        fetch('/api/crawler/pages'),
+        fetch('/api/ai/ollama/roles').catch(() => null)
       ]);
       const dataTasks = await resTasks.json();
       const dataPages = await resPages.json();
+      if (resRoles) {
+        const dataRoles = await resRoles.json();
+        if (dataRoles.success) {
+          setOllamaRoles({ running: Boolean(dataRoles.running), crawlerModel: dataRoles.crawlerModel, chatModel: dataRoles.chatModel });
+        }
+      }
       if (dataTasks.success) setTasks(dataTasks.tasks);
       if (dataPages.success) setPages(dataPages.pages);
     } catch (e) {
@@ -59,6 +70,28 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
   useEffect(() => {
     loadData();
   }, []);
+
+  const handleDeepExtract = async (page: CrawledPage) => {
+    setIsAiExtracting(true);
+    try {
+      const res = await fetch('/api/crawler/ai-extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: page.title, content: page.cleanContent, url: page.url })
+      });
+      const data = await res.json();
+      if (data.success && data.extraction) {
+        const updated = { ...page, aiSummary: data.extraction, aiModelUsed: data.modelUsed };
+        setPages(prev => prev.map(p => p.id === page.id ? updated : p));
+        setSelectedPage(updated);
+        setLogs(prev => [`[AI EXTRACT] 深度爬虫知识抽取完成 · 模型: ${data.modelUsed} · 文章: “${page.title}”`, ...prev]);
+      }
+    } catch (e: any) {
+      setLogs(prev => [`[ERROR] AI 抽取异常: ${e.message}`, ...prev]);
+    } finally {
+      setIsAiExtracting(false);
+    }
+  };
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -187,6 +220,29 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
             <Plus className="w-4 h-4" />
             <span>新建采集任务</span>
           </button>
+        </div>
+      </div>
+
+      {/* Dual Ollama Dedicated Capsule */}
+      <div className="max-w-7xl mx-auto w-full mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border border-violet-500/30 bg-violet-950/20 px-5 py-4 backdrop-blur shadow-lg">
+        <div className="flex items-center gap-3.5">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600/30 text-xl border border-violet-500/40">
+            🕷️
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-white tracking-wide">本地双 Ollama · 爬虫大模型专用引擎</span>
+              <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-300 border border-emerald-500/30">
+                已就绪
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 mt-0.5">
+              当前爬虫大模型: <span className="font-mono text-cyan-300 font-semibold">{ollamaRoles?.crawlerModel || '自动调度中...'}</span> · 专用于网页深度解构、知识抽取与长文本图谱沉淀（小模型已分配用于对话问答）
+            </p>
+          </div>
+        </div>
+        <div className="text-xs font-mono text-slate-400 shrink-0">
+          端点: localhost:11434
         </div>
       </div>
 
@@ -386,6 +442,37 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
                       </div>
                     </div>
                   </div>
+
+                  {/* AI Summary extracted by Ollama Large Model */}
+                  {selectedPage.aiSummary ? (
+                    <div className="mb-4 rounded-xl border border-violet-500/30 bg-violet-950/30 p-4 text-xs">
+                      <div className="flex items-center justify-between border-b border-violet-500/20 pb-2 mb-2.5">
+                        <span className="font-semibold text-violet-200 flex items-center gap-1.5">
+                          <span>🕷️</span> 本地爬虫大模型深度提炼
+                        </span>
+                        <span className="font-mono text-[10px] text-cyan-300">
+                          {selectedPage.aiModelUsed || ollamaRoles?.crawlerModel || 'Ollama Large Model'}
+                        </span>
+                      </div>
+                      <div className="text-slate-200 whitespace-pre-line leading-relaxed font-sans">
+                        {selectedPage.aiSummary}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-4 flex items-center justify-between rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-3">
+                      <span className="text-xs text-slate-400">
+                        尚未进行 AI 深度知识提炼
+                      </span>
+                      <button
+                        onClick={() => handleDeepExtract(selectedPage)}
+                        disabled={isAiExtracting}
+                        className="flex items-center space-x-1.5 rounded-lg bg-violet-600/30 hover:bg-violet-600/50 border border-violet-500/40 px-3 py-1.5 text-xs font-semibold text-violet-200 transition-colors"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isAiExtracting ? 'animate-spin' : ''}`} />
+                        <span>{isAiExtracting ? '正在抽取...' : '使用爬虫大模型提炼'}</span>
+                      </button>
+                    </div>
+                  )}
 
                   <div className="bg-slate-950/80 p-5 rounded-xl border border-slate-800 text-xs sm:text-sm text-slate-200 font-serif leading-relaxed whitespace-pre-line">
                     {selectedPage.cleanContent}

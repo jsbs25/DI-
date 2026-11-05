@@ -502,6 +502,16 @@ app.get('/api/ai/models', (req, res) => {
   res.json({ success: true, models: aiGateway.getModels() });
 });
 
+app.get('/api/ai/ollama/roles', (req, res) => {
+  res.json({ success: true, ...aiGateway.getOllamaRoleAssignment() });
+});
+
+app.post('/api/ai/ollama/roles', (req, res) => {
+  const { chatModel, crawlerModel } = req.body;
+  const updated = aiGateway.setOllamaRoles(chatModel, crawlerModel);
+  res.json({ success: true, ...updated });
+});
+
 app.get('/api/ai/stats', (req, res) => {
   const models = aiGateway.getModels();
   const totalCalls = models.reduce((acc, m) => acc + m.totalCalls, 0);
@@ -520,7 +530,7 @@ app.post('/api/ai/chat', async (req, res) => {
 
   const resolvedModelId = apiKey
     ? 'custom'
-    : (modelId || model || 'deepseek-r1-open');
+    : (modelId || model || aiGateway.getChatModelId());
   const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
   if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
 
@@ -962,6 +972,33 @@ app.post('/api/crawler/tasks', (req, res) => {
 
 app.post('/api/crawler/tasks/:id/run', async (req, res) => {
   const result = await store.executeCrawl(req.params.id);
+  // Asynchronously trigger Ollama large model extraction on new pending pages
+  const newPages = store.crawledPages.filter(p => p.taskId === req.params.id && !p.aiSummary);
+  if (newPages.length > 0) {
+    (async () => {
+      for (const p of newPages.slice(0, 3)) {
+        try {
+          const ext = await aiGateway.runCrawlerExtraction({ title: p.title, content: p.cleanContent, url: p.url });
+          if (ext.success && ext.extraction) {
+            p.aiSummary = ext.extraction;
+            p.aiModelUsed = ext.modelUsed;
+            store.saveToDisk();
+          }
+        } catch {}
+      }
+    })();
+  }
+  res.json(result);
+});
+
+app.post('/api/crawler/ai-extract', async (req, res) => {
+  const { title, content, url } = req.body;
+  if (!content) return res.status(400).json({ success: false, error: 'Page content is required' });
+  const result = await aiGateway.runCrawlerExtraction({
+    title: title || 'Web Document',
+    content,
+    url: url || 'local://crawler'
+  });
   res.json(result);
 });
 

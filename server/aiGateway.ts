@@ -20,6 +20,9 @@ export interface AIModelMeta {
   errorMessage?: string;
   apiKeyMasked: string;
   isFree?: boolean;
+  ollamaRole?: 'chat' | 'crawler' | 'both';
+  parameterSize?: string;
+  sizeBytes?: number;
 }
 
 export interface ChatMessage {
@@ -28,10 +31,19 @@ export interface ChatMessage {
   timestamp?: string;
 }
 
+export interface OllamaModelInfo {
+  name: string;
+  id: string;
+  sizeBytes: number;
+  parameterSize: string;
+  estBillion: number;
+  role: 'chat' | 'crawler' | 'both';
+  displayName: string;
+}
+
 /**
- * Local Ollama models (especially 20B-class reasoning models) can take much
- * longer than a remote API to produce their first token, so give them a
- * generous ceiling while still bounding runaway requests.
+ * Local Ollama models (especially 20B/32B/70B reasoning models) can take longer
+ * to complete deep crawler extraction or first token reasoning.
  */
 const LOCAL_OLLAMA_TIMEOUT_MS = 300_000;
 
@@ -42,35 +54,72 @@ const LOCAL_OLLAMA_TIMEOUT_MS = 300_000;
 const OLLAMA_HOSTS = ['http://127.0.0.1:11434', 'http://localhost:11434'];
 
 /**
+ * Parse an estimated parameter count in Billions (B) to distinguish large models (for crawler)
+ * from smaller models (for fast interactive chat/speech).
+ */
+function parseParameterBillion(m: any): number {
+  if (m?.details?.parameter_size) {
+    const raw = String(m.details.parameter_size).trim().toUpperCase();
+    const match = raw.match(/([\d.]+)\s*([BMK]?)/);
+    if (match) {
+      const num = parseFloat(match[1]);
+      const unit = match[2];
+      if (unit === 'B') return num;
+      if (unit === 'M') return num / 1000;
+      if (unit === 'K') return num / 1_000_000;
+      return num;
+    }
+  }
+  // Try pattern from name: e.g. deepseek-r1:14b, qwen2.5:7b, gpt-oss:20b, llama3.2:3b
+  const nameMatch = String(m?.name || '').match(/[:\-_](\d+(\.\d+)?)b/i);
+  if (nameMatch) {
+    return parseFloat(nameMatch[1]);
+  }
+  // Fallback to byte size: 1B ~ 0.7 GB
+  if (typeof m?.size === 'number' && m.size > 0) {
+    return m.size / (700 * 1024 * 1024);
+  }
+  return 1;
+}
+
+/**
  * Produce a human-friendly display name and a sensible model category for an
  * auto-detected local Ollama model (the /api/tags name, e.g. "gpt-oss:20b").
  */
-function describeOllamaModel(name: string): { displayName: string; category: AIModelMeta['category'] } {
+function describeOllamaModel(
+  name: string,
+  role?: 'chat' | 'crawler' | 'both'
+): { displayName: string; category: AIModelMeta['category'] } {
   const lower = name.toLowerCase();
   const tag = name.includes(':') ? name.slice(name.indexOf(':') + 1) : '';
+  const roleSuffix = role === 'crawler'
+    ? ' · 🕷️ [爬虫深度抽取大模型]'
+    : role === 'chat'
+      ? ' · ⚡ [交互对话小模型 · 推荐]'
+      : ' · ⚡ [本地模型]';
 
   if (lower.startsWith('gpt-oss')) {
     return {
-      displayName: `GPT-OSS ${tag.toUpperCase()} · OpenAI 开源本地推理`,
+      displayName: `GPT-OSS ${tag.toUpperCase()} · OpenAI 本地推理${roleSuffix}`,
       category: 'reasoning'
     };
   }
   if (lower.startsWith('qwen3')) {
-    return { displayName: `通义千问 Qwen3 ${tag} · 本地模型`, category: 'text' };
+    return { displayName: `通义千问 Qwen3 ${tag}${roleSuffix}`, category: role === 'crawler' ? 'reasoning' : 'text' };
   }
   if (lower.startsWith('qwen')) {
-    return { displayName: `通义千问 Qwen ${tag} · 本地模型`, category: 'text' };
+    return { displayName: `通义千问 Qwen ${tag}${roleSuffix}`, category: role === 'crawler' ? 'reasoning' : 'text' };
   }
   if (lower.startsWith('deepseek-r1')) {
-    return { displayName: `DeepSeek-R1 ${tag} · 本地模型`, category: 'reasoning' };
+    return { displayName: `DeepSeek-R1 ${tag}${roleSuffix}`, category: 'reasoning' };
   }
   if (lower.startsWith('llama')) {
-    return { displayName: `Llama ${tag} · 本地模型`, category: 'text' };
+    return { displayName: `Llama ${tag}${roleSuffix}`, category: role === 'crawler' ? 'reasoning' : 'text' };
   }
   if (lower.startsWith('gemma')) {
-    return { displayName: `Gemma ${tag} · 本地模型`, category: 'text' };
+    return { displayName: `Gemma ${tag}${roleSuffix}`, category: 'text' };
   }
-  return { displayName: `本地 Ollama · ${name}`, category: 'text' };
+  return { displayName: `本地 Ollama · ${name}${roleSuffix}`, category: role === 'crawler' ? 'reasoning' : 'text' };
 }
 
 class AIGateway {
@@ -83,6 +132,10 @@ class AIGateway {
   private customBaseUrl: string = process.env.CUSTOM_BASE_URL || 'http://127.0.0.1:11434/v1';
   private customModel: string = process.env.CUSTOM_MODEL || 'llama3';
   private localOllamaModels: string[] = [];
+  private ollamaChatModel: string | null = process.env.OLLAMA_CHAT_MODEL || null;
+  private ollamaCrawlerModel: string | null = process.env.OLLAMA_CRAWLER_MODEL || null;
+  private localOllamaInfoList: OllamaModelInfo[] = [];
+  private ollamaDetected: boolean = false;
 
   constructor() {
     this.initProviders();
@@ -235,8 +288,9 @@ class AIGateway {
   }
 
   /**
-   * 自动探测本地 Ollama (localhost:11434) 正在运行的模型，并注册为可选模型。
-   * 无需 API Key，探测失败（Ollama 未启动）时静默忽略。
+   * 自动探测本地 Ollama (localhost:11434) 正在运行的模型，并根据模型尺寸自动划分职责：
+   * - 大模型（参数更大、深度理解力强）：专用于网络爬虫抽取、长文提炼与知识图谱
+   * - 小模型（轻量、低延迟）：专用于实时对话、语音交互与全息地球伴侣
    */
   public async detectLocalOllama(): Promise<void> {
     let data: any = null;
@@ -255,39 +309,156 @@ class AIGateway {
     }
     if (!data) return;
 
+    this.ollamaDetected = true;
     const tags: any[] = Array.isArray(data?.models) ? data.models : [];
-    const names = tags.map((m: any) => m?.name).filter((n: any): n is string => typeof n === 'string' && n.length > 0);
+    if (tags.length === 0) return;
+
+    // 按模型参数/体积从大到小排序
+    const sorted = [...tags].sort((a, b) => parseParameterBillion(b) - parseParameterBillion(a));
+    const names = sorted.map((m: any) => m?.name).filter((n: any): n is string => typeof n === 'string' && n.length > 0);
     this.localOllamaModels = names;
 
-    for (const name of names) {
-      const id = `ollama:${name}`;
-      if (!this.models.some(m => m.id === id)) {
-        const { displayName, category } = describeOllamaModel(name);
+    // 智能职责分配：有 2 个或以上模型时，最大的给爬虫，较小（或响应更快）的给交互对话
+    let crawlerTarget = this.ollamaCrawlerModel;
+    let chatTarget = this.ollamaChatModel;
+
+    if (!crawlerTarget || !names.includes(crawlerTarget)) {
+      crawlerTarget = names[0]; // 最大的模型
+    }
+    if (!chatTarget || !names.includes(chatTarget)) {
+      chatTarget = names.length > 1 ? names[names.length - 1] : names[0]; // 较小模型
+    }
+
+    this.ollamaCrawlerModel = crawlerTarget;
+    this.ollamaChatModel = chatTarget;
+
+    this.localOllamaInfoList = sorted.map(m => {
+      const isCrawler = m.name === this.ollamaCrawlerModel;
+      const isChat = m.name === this.ollamaChatModel;
+      const role: 'chat' | 'crawler' | 'both' = (isCrawler && isChat) ? 'both' : isCrawler ? 'crawler' : isChat ? 'chat' : 'both';
+      const { displayName } = describeOllamaModel(m.name, role);
+      return {
+        name: m.name,
+        id: `ollama:${m.name}`,
+        sizeBytes: typeof m.size === 'number' ? m.size : 0,
+        parameterSize: m.details?.parameter_size || `${parseParameterBillion(m).toFixed(1)}B`,
+        estBillion: parseParameterBillion(m),
+        role,
+        displayName
+      };
+    });
+
+    // 注册或更新到模型列表中
+    for (const info of this.localOllamaInfoList) {
+      const id = info.id;
+      const existing = this.models.find(m => m.id === id);
+      const isDefault = info.name === this.ollamaChatModel;
+      if (existing) {
+        existing.name = info.displayName;
+        existing.category = info.role === 'crawler' ? 'reasoning' : 'text';
+        existing.ollamaRole = info.role;
+        existing.parameterSize = info.parameterSize;
+        existing.sizeBytes = info.sizeBytes;
+        existing.isDefault = isDefault;
+      } else {
         this.models.push({
           id,
-          name: displayName,
+          name: info.displayName,
           provider: 'Custom',
-          category,
+          category: info.role === 'crawler' ? 'reasoning' : 'text',
           status: 'active',
-          isDefault: false,
+          isDefault,
           totalCalls: 0,
           totalTokens: 0,
           averageLatencyMs: 0,
-          apiKeyMasked: '本地模型 · 免密直连',
-          isFree: true
+          apiKeyMasked: '本地免密直连 (localhost:11434)',
+          isFree: true,
+          ollamaRole: info.role,
+          parameterSize: info.parameterSize,
+          sizeBytes: info.sizeBytes
         });
       }
     }
 
-    // Prefer a locally-running model (e.g. gpt-oss:20b) as the default over the
-    // remote free endpoint, so the AI Hub opens on local inference by default.
-    if (names.length > 0) {
-      const preferredLocal = names.find(n => n.toLowerCase().startsWith('gpt-oss')) || names[0];
-      const preferredLocalId = `ollama:${preferredLocal}`;
-      for (const m of this.models) {
-        m.isDefault = m.id === preferredLocalId;
+    // 确保默认模型选中小模型（交互流畅零延迟）
+    const preferredChatId = `ollama:${this.ollamaChatModel}`;
+    for (const m of this.models) {
+      m.isDefault = m.id === preferredChatId;
+    }
+  }
+
+  /**
+   * 获取双 Ollama 角色配置信息
+   */
+  public getOllamaRoleAssignment() {
+    return {
+      running: this.ollamaDetected,
+      chatModel: this.ollamaChatModel,
+      crawlerModel: this.ollamaCrawlerModel,
+      chatModelId: this.ollamaChatModel ? `ollama:${this.ollamaChatModel}` : null,
+      crawlerModelId: this.ollamaCrawlerModel ? `ollama:${this.ollamaCrawlerModel}` : null,
+      models: this.localOllamaInfoList
+    };
+  }
+
+  /**
+   * 用户手动切换/指派双模型角色
+   */
+  public setOllamaRoles(chatModel: string, crawlerModel: string) {
+    if (chatModel) this.ollamaChatModel = chatModel;
+    if (crawlerModel) this.ollamaCrawlerModel = crawlerModel;
+
+    for (const m of this.models) {
+      if (m.id.startsWith('ollama:')) {
+        const name = m.id.slice('ollama:'.length);
+        const isCrawler = name === this.ollamaCrawlerModel;
+        const isChat = name === this.ollamaChatModel;
+        const role: 'chat' | 'crawler' | 'both' = (isCrawler && isChat) ? 'both' : isCrawler ? 'crawler' : isChat ? 'chat' : 'both';
+        m.name = describeOllamaModel(name, role).displayName;
+        m.ollamaRole = role;
+        m.isDefault = name === this.ollamaChatModel;
       }
     }
+    return this.getOllamaRoleAssignment();
+  }
+
+  public getChatModelId(): string {
+    if (this.ollamaChatModel) return `ollama:${this.ollamaChatModel}`;
+    return 'deepseek-r1-open';
+  }
+
+  public getCrawlerModelId(): string {
+    if (this.ollamaCrawlerModel) return `ollama:${this.ollamaCrawlerModel}`;
+    if (this.ollamaChatModel) return `ollama:${this.ollamaChatModel}`;
+    return 'deepseek-r1-open';
+  }
+
+  /**
+   * 使用爬虫专用大模型进行网页正文深度知识抽取与总结
+   */
+  public async runCrawlerExtraction(page: { title: string; content: string; url: string }) {
+    const targetModelId = this.getCrawlerModelId();
+    const prompt = `你是地球计划全球知识库与智能爬虫解析核心。请对以下抓取到的页面进行深度结构化知识抽取：
+
+网页标题: ${page.title}
+网页来源: ${page.url}
+提取正文:
+${page.content.slice(0, 4500)}
+
+请输出：
+1. 【核心知识摘要】(200字以内，提炼主旨与关键论据)
+2. 【关键学术/地理/历史实体】(逗号隔开)
+3. 【学科知识图谱标签】(3-5个高价值分类标签)
+4. 【收录评级】(A级推荐/B级参考/C级待考)`;
+
+    const sys = '你作为地球计划核心爬虫抽取引擎，请提供准确、结构化、高信息密度的专业学术分析。';
+    const result = await this.generateContent(targetModelId, prompt, sys);
+    return {
+      success: result.success,
+      modelUsed: targetModelId,
+      extraction: result.content,
+      error: result.errorMessage
+    };
   }
 
   /**

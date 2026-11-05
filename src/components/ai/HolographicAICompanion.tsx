@@ -280,7 +280,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: text,
-          modelId: 'deepseek-r1-open',
+          modelId: '', // Server resolves to local small Ollama model or fast online fallback
           mode: 'general',
           useSearchGrounding: useSearch,
           history: messages.slice(-6).map(m => ({

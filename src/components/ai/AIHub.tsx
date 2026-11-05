@@ -104,8 +104,9 @@ Ask me anything below to begin!`
       .then(d => {
         if (d.success && Array.isArray(d.models)) {
           setAvailableModels(d.models);
-          const activeDefault = d.models.find((m: any) => m.id.startsWith('ollama:')) ||
+          const activeDefault = d.models.find((m: any) => m.ollamaRole === 'chat') ||
             d.models.find((m: any) => m.isDefault) ||
+            d.models.find((m: any) => m.id.startsWith('ollama:')) ||
             d.models[0];
           if (activeDefault) {
             setSelectedModel(activeDefault.id);
@@ -135,7 +136,7 @@ Ask me anything below to begin!`
 
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) {
-      alert(lang === 'zh' ? '当前浏览器不支持语音输入，请使用键盘输入。' : 'Voice input not supported in this browser.');
+      // Graceful fallback without blocking window.alert
       return;
     }
 
