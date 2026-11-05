@@ -1368,96 +1368,98 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
       {/* 2. Omnibox Toolbar */}
       <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/[0.06] bg-[#0d151d] px-3 py-3 sm:px-5">
-        <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/[0.06] bg-white/[0.025] p-1 text-slate-400">
-          <button
-            onClick={goBack}
-            disabled={browserEngine
-              ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoBack)
-              : (historyIndex[activeTabId] ?? 0) <= 0}
-            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-            aria-label="后退"
-            title="Back"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <button
-            onClick={goForward}
-            disabled={browserEngine
-              ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoForward)
-              : (historyIndex[activeTabId] ?? 0) >= (history[activeTabId]?.length ?? 1) - 1}
-            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-            aria-label="前进"
-            title="Forward"
-          >
-            <ArrowRight className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => browserEngine ? void browserEngine.reload(activeTabId) : void handleNavigate(inputUrl)}
-            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white ${
-              isLoading ? 'animate-spin text-cyan-400' : ''
-            }`}
-            aria-label="重新加载"
-            title="Reload"
-          >
-            <RotateCw className="w-4 h-4" />
-          </button>
-        </div>
-
-        <form
-          onSubmit={e => {
-            e.preventDefault();
-            handleNavigate(inputUrl);
-          }}
-          className="flex min-h-10 min-w-[220px] flex-1 items-center rounded-full border border-white/[0.09] bg-[#080f16] px-4 shadow-inner transition-all focus-within:border-cyan-400/50 focus-within:ring-2 focus-within:ring-cyan-400/10"
-        >
-          {browserEngine && !activeTab?.readerMode ? (
-            <span
-              role="status"
-              aria-label={connectionStatusLabel}
-              title={connectionStatusTitle}
-              data-browser-connection-status
-              data-status={connectionStatus}
-              className={`mr-2 inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[10px] font-medium leading-none ${
-                connectionStatus === 'encrypted'
-                  ? 'bg-cyan-300/[0.08] text-cyan-200'
-                  : connectionStatus === 'unencrypted'
-                    ? 'bg-amber-300/[0.08] text-amber-200'
-                    : connectionStatus === 'certificate-error'
-                      ? 'bg-rose-300/[0.1] text-rose-200'
-                      : 'bg-white/[0.05] text-slate-400'
-              }`}
-            >
-              {connectionStatus === 'encrypted'
-                ? <LockKeyhole aria-hidden="true" className="h-3 w-3" />
-                : connectionStatus === 'certificate-error'
-                  ? <ShieldAlert aria-hidden="true" className="h-3 w-3" />
-                  : <Globe aria-hidden="true" className="h-3 w-3" />}
-              <span>{connectionStatusLabel}</span>
-            </span>
-          ) : !browserEngine ? (
-            <Shield className="mr-2 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-          ) : null}
-          <input
-            ref={addressBarRef}
-            type="text"
-            value={inputUrl}
-            onChange={e => setInputUrl(e.target.value)}
-            aria-label="输入网址或搜索词"
-            placeholder="输入网址或知识关键词 (如: https://earthobservatory.nasa.gov)..."
-            className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-500 focus:outline-none"
-          />
-          {inputUrl && (
+        <div className="flex w-full min-w-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/[0.06] bg-white/[0.025] p-1 text-slate-400">
             <button
-              type="button"
-              onClick={() => setInputUrl('')}
-              className="text-slate-500 hover:text-slate-300 ml-1.5"
-              aria-label="清空地址栏"
-              title="清空地址栏"
+              onClick={goBack}
+              disabled={browserEngine
+                ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoBack)
+                : (historyIndex[activeTabId] ?? 0) <= 0}
+              className="flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label="后退"
+              title="Back"
             >
-              <X className="w-3 h-3" />
+              <ArrowLeft className="w-4 h-4" />
             </button>
-          )}
-        </form>
+            <button
+              onClick={goForward}
+              disabled={browserEngine
+                ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoForward)
+                : (historyIndex[activeTabId] ?? 0) >= (history[activeTabId]?.length ?? 1) - 1}
+              className="flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+              aria-label="前进"
+              title="Forward"
+            >
+              <ArrowRight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => browserEngine ? void browserEngine.reload(activeTabId) : void handleNavigate(inputUrl)}
+              className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white ${
+                isLoading ? 'animate-spin text-cyan-400' : ''
+              }`}
+              aria-label="重新加载"
+              title="Reload"
+            >
+              <RotateCw className="w-4 h-4" />
+            </button>
+          </div>
+
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              handleNavigate(inputUrl);
+            }}
+            className="flex h-12 min-w-0 flex-1 items-center rounded-2xl border border-white/[0.12] bg-[#080f16] px-4 shadow-inner transition-all focus-within:border-cyan-400/60 focus-within:ring-2 focus-within:ring-cyan-400/15 sm:px-5"
+          >
+            {browserEngine && !activeTab?.readerMode ? (
+              <span
+                role="status"
+                aria-label={connectionStatusLabel}
+                title={connectionStatusTitle}
+                data-browser-connection-status
+                data-status={connectionStatus}
+                className={`mr-2 inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1 text-[10px] font-medium leading-none ${
+                  connectionStatus === 'encrypted'
+                    ? 'bg-cyan-300/[0.08] text-cyan-200'
+                    : connectionStatus === 'unencrypted'
+                      ? 'bg-amber-300/[0.08] text-amber-200'
+                      : connectionStatus === 'certificate-error'
+                        ? 'bg-rose-300/[0.1] text-rose-200'
+                        : 'bg-white/[0.05] text-slate-400'
+                }`}
+              >
+                {connectionStatus === 'encrypted'
+                  ? <LockKeyhole aria-hidden="true" className="h-3 w-3" />
+                  : connectionStatus === 'certificate-error'
+                    ? <ShieldAlert aria-hidden="true" className="h-3 w-3" />
+                    : <Globe aria-hidden="true" className="h-3 w-3" />}
+                <span>{connectionStatusLabel}</span>
+              </span>
+            ) : !browserEngine ? (
+              <Shield className="mr-2 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+            ) : null}
+            <input
+              ref={addressBarRef}
+              type="text"
+              value={inputUrl}
+              onChange={e => setInputUrl(e.target.value)}
+              aria-label="输入网址或搜索词"
+              placeholder="输入网址或知识关键词 (如: https://earthobservatory.nasa.gov)..."
+              className="min-w-0 flex-1 bg-transparent text-base text-slate-100 placeholder-slate-500 focus:outline-none sm:text-lg"
+            />
+            {inputUrl && (
+              <button
+                type="button"
+                onClick={() => setInputUrl('')}
+                className="text-slate-500 hover:text-slate-300 ml-1.5"
+                aria-label="清空地址栏"
+                title="清空地址栏"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </form>
+        </div>
 
         <button
           type="button"
