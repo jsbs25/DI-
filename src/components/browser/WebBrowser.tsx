@@ -40,6 +40,7 @@ import { getJupiterDocumentSource, isRemotePdfUrl, toJupiterDocumentRoute } from
 import { getJupiterImageSource, isRemoteImageUrl, toJupiterImageRoute } from './imageDocumentUrl.ts';
 import { getJupiterAudioSource, isRemoteAudioUrl, toJupiterAudioRoute } from './audioDocumentUrl.ts';
 import { getJupiterVideoSource, isRemoteVideoUrl, toJupiterVideoRoute } from './videoDocumentUrl.ts';
+import { buildJupiterSearchRoute, parseJupiterSearchRoute, type JupiterSearchEngine } from './jupiterSearchRoute.ts';
 
 const LazyPdfDocumentViewer = lazy(() => import('./PdfDocumentViewer.tsx').then(module => ({ default: module.PdfDocumentViewer })));
 const LazyImageDocumentViewer = lazy(() => import('./ImageDocumentViewer.tsx').then(module => ({ default: module.ImageDocumentViewer })));
@@ -330,6 +331,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const nativeViewportRef = useRef<HTMLDivElement | null>(null);
   const addressBarRef = useRef<HTMLInputElement | null>(null);
   const findInputRef = useRef<HTMLInputElement | null>(null);
+  const searchResultsScrollRef = useRef<HTMLDivElement | null>(null);
+  const searchScrollPositionsRef = useRef<Record<string, number>>({});
+  const searchRequestIdRef = useRef(0);
 
   // Browser-local language (defaults to global app language; user can override)
   const [browserLang, setBrowserLang] = useState<Language>(lang);
@@ -385,7 +389,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [historyIndex, setHistoryIndex] = useState<Record<string, number>>({ tab_1: 0 });
 
   // Search engine selection
-  const [searchEngine, setSearchEngine] = useState<'auto' | 'bing' | 'duckduckgo' | 'wikipedia' | 'github'>('auto');
+  const [searchEngine, setSearchEngine] = useState<JupiterSearchEngine>('auto');
   const [workspaceRepos, setWorkspaceRepos] = useState<string[]>(() =>
     bookmarks.filter(bookmark => bookmark.category === 'GitHub / 待审核接入').map(bookmark => bookmark.title)
   );
@@ -868,19 +872,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   }, [browserEngine, activeTabId, activeTab?.readerMode, lastSearchQuery, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isPrivacyOpen, isAiPanelOpen]);
 
   const pushHistory = (tabId: string, url: string) => {
-    setHistory(prev => {
-      const stack = [...(prev[tabId] || [])];
-      const idx = historyIndex[tabId] ?? stack.length - 1;
-      // Truncate forward history if navigating after going back
-      const truncated = stack.slice(0, idx + 1);
-      if (truncated[truncated.length - 1] === url) return prev;
-      truncated.push(url);
-      return { ...prev, [tabId]: truncated };
-    });
-    setHistoryIndex(prev => {
-      const idx = (prev[tabId] ?? (history[tabId]?.length ?? 0));
-      return { ...prev, [tabId]: idx + 1 };
-    });
+    const stack = history[tabId] || [];
+    const idx = historyIndex[tabId] ?? stack.length - 1;
+    const truncated = stack.slice(0, idx + 1);
+    if (truncated[truncated.length - 1] === url) return;
+    truncated.push(url);
+    setHistory(prev => ({ ...prev, [tabId]: truncated }));
+    setHistoryIndex(prev => ({ ...prev, [tabId]: idx + 1 }));
   };
 
   useEffect(() => {
@@ -957,7 +955,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       .catch(() => {});
   }, []);
 
-  const openPdfDocument = (sourceUrl: string) => {
+  const saveCurrentSearchScroll = () => {
+    const route = activeTab ? parseJupiterSearchRoute(activeTab.url) : null;
+    if (route && searchResultsScrollRef.current) {
+      const key = buildJupiterSearchRoute(route.query, route.engine, route.lang);
+      searchScrollPositionsRef.current[key] = searchResultsScrollRef.current.scrollTop;
+    }
+  };
+
+  const openPdfDocument = (sourceUrl: string, fromHistory = false) => {
     const viewerRoute = toJupiterDocumentRoute(sourceUrl);
     if (!viewerRoute) {
       setBrowserEngineError('PDF 来源地址无效或不受支持。');
@@ -965,7 +971,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
 
     const title = getExternalAssetTitle(sourceUrl);
-    pushHistory(activeTabId, viewerRoute);
+    if (!fromHistory) {
+      saveCurrentSearchScroll();
+      pushHistory(activeTabId, viewerRoute);
+    }
     recordBrowserVisit(activeTabId, sourceUrl, title);
     setTabs(previous => previous.map(tab => tab.id === activeTabId
       ? { ...tab, url: viewerRoute, title, content: '', author: 'PDF', readTime: '', readerMode: true }
@@ -980,7 +989,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     window.history.replaceState(null, '', viewerRoute);
   };
 
-  const openImageDocument = (sourceUrl: string) => {
+  const openImageDocument = (sourceUrl: string, fromHistory = false) => {
     const viewerRoute = toJupiterImageRoute(sourceUrl);
     if (!viewerRoute) {
       setBrowserEngineError('图片来源地址无效或不受支持。');
@@ -988,7 +997,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
 
     const title = getExternalAssetTitle(sourceUrl);
-    pushHistory(activeTabId, viewerRoute);
+    if (!fromHistory) {
+      saveCurrentSearchScroll();
+      pushHistory(activeTabId, viewerRoute);
+    }
     recordBrowserVisit(activeTabId, sourceUrl, title);
     setTabs(previous => previous.map(tab => tab.id === activeTabId
       ? { ...tab, url: viewerRoute, title, content: '', author: 'Image', readTime: '', readerMode: true }
@@ -1003,7 +1015,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     window.history.replaceState(null, '', viewerRoute);
   };
 
-  const openAudioDocument = (sourceUrl: string) => {
+  const openAudioDocument = (sourceUrl: string, fromHistory = false) => {
     const viewerRoute = toJupiterAudioRoute(sourceUrl);
     if (!viewerRoute) {
       setBrowserEngineError('音频来源地址无效或不受支持。');
@@ -1011,7 +1023,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
 
     const title = getExternalAssetTitle(sourceUrl);
-    pushHistory(activeTabId, viewerRoute);
+    if (!fromHistory) {
+      saveCurrentSearchScroll();
+      pushHistory(activeTabId, viewerRoute);
+    }
     recordBrowserVisit(activeTabId, sourceUrl, title);
     setTabs(previous => previous.map(tab => tab.id === activeTabId
       ? { ...tab, url: viewerRoute, title, content: '', author: 'Audio', readTime: '', readerMode: true }
@@ -1026,7 +1041,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     window.history.replaceState(null, '', viewerRoute);
   };
 
-  const openVideoDocument = (sourceUrl: string) => {
+  const openVideoDocument = (sourceUrl: string, fromHistory = false) => {
     const viewerRoute = toJupiterVideoRoute(sourceUrl);
     if (!viewerRoute) {
       setBrowserEngineError('视频来源地址无效或不受支持。');
@@ -1034,7 +1049,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
 
     const title = getExternalAssetTitle(sourceUrl);
-    pushHistory(activeTabId, viewerRoute);
+    if (!fromHistory) {
+      saveCurrentSearchScroll();
+      pushHistory(activeTabId, viewerRoute);
+    }
     recordBrowserVisit(activeTabId, sourceUrl, title);
     setTabs(previous => previous.map(tab => tab.id === activeTabId
       ? { ...tab, url: viewerRoute, title, content: '', author: 'Video', readTime: '', readerMode: true }
@@ -1049,28 +1067,81 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     window.history.replaceState(null, '', viewerRoute);
   };
 
-  const handleNavigate = async (targetUrl: string) => {
+  const runJupiterSearch = async (
+    query: string,
+    options: { fromHistory?: boolean; engine?: JupiterSearchEngine; lang?: Language } = {}
+  ) => {
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return;
+    const engine = options.engine ?? searchEngine;
+    const searchLang = options.lang ?? browserLang;
+    const route = buildJupiterSearchRoute(cleanQuery, engine, searchLang);
+    const requestId = ++searchRequestIdRef.current;
+    if (!options.fromHistory) {
+      saveCurrentSearchScroll();
+      pushHistory(activeTabId, route);
+      searchScrollPositionsRef.current[route] = 0;
+    }
+
+    setSearchEngine(engine);
+    setBrowserLang(searchLang);
+    setInputUrl(cleanQuery);
+    setLastSearchQuery(cleanQuery);
+    setSearchResults([]);
+    setSearchError(null);
+    setBrowserEngineError(null);
+    setIsSearching(true);
+    setTabs(previous => previous.map(tab => tab.id === activeTabId ? { ...tab, url: route, title: cleanQuery, readerMode: true } : tab));
+    window.history.replaceState(null, '', route);
+
+    try {
+      const res = await fetch(`/api/jupiter/search?q=${encodeURIComponent(cleanQuery)}&engine=${engine}&lang=${searchLang}`);
+      const data = await res.json();
+      if (requestId !== searchRequestIdRef.current) return;
+      if (res.ok && data.success && Array.isArray(data.results)) {
+        setSearchResults(data.results);
+      } else {
+        setSearchResults([]);
+        setSearchError(data.error || `搜索失败（HTTP ${res.status}）。`);
+      }
+    } catch (error) {
+      if (requestId !== searchRequestIdRef.current) return;
+      console.error(error);
+      setSearchResults([]);
+      setSearchError(error instanceof Error ? error.message : '搜索服务暂时不可用。');
+    } finally {
+      if (requestId === searchRequestIdRef.current) setIsSearching(false);
+    }
+  };
+
+  const handleNavigate = async (targetUrl: string, fromHistory = false) => {
     let cleanUrl = targetUrl.trim();
     if (!cleanUrl) return;
 
+    const searchRoute = parseJupiterSearchRoute(cleanUrl);
+    if (searchRoute) {
+      await runJupiterSearch(searchRoute.query, { ...searchRoute, fromHistory: true });
+      return;
+    }
+
     const internalPdfSource = getJupiterDocumentSource(cleanUrl);
     if (internalPdfSource) {
-      openPdfDocument(internalPdfSource);
+      openPdfDocument(internalPdfSource, fromHistory);
       return;
     }
     const internalImageSource = getJupiterImageSource(cleanUrl);
     if (internalImageSource) {
-      openImageDocument(internalImageSource);
+      openImageDocument(internalImageSource, fromHistory);
       return;
     }
     const internalAudioSource = getJupiterAudioSource(cleanUrl);
     if (internalAudioSource) {
-      openAudioDocument(internalAudioSource);
+      openAudioDocument(internalAudioSource, fromHistory);
       return;
     }
     const internalVideoSource = getJupiterVideoSource(cleanUrl);
     if (internalVideoSource) {
-      openVideoDocument(internalVideoSource);
+      openVideoDocument(internalVideoSource, fromHistory);
       return;
     }
 
@@ -1086,27 +1157,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       (!bareHostPort && cleanUrl.includes('.') && !cleanUrl.includes(' '));
 
     if (!looksLikeUrl) {
-      setIsSearching(true);
-      setLastSearchQuery(cleanUrl);
-      setSearchError(null);
-      setInputUrl(cleanUrl);
-      try {
-        const res = await fetch(`/api/jupiter/search?q=${encodeURIComponent(cleanUrl)}&engine=${searchEngine}&lang=${browserLang}`);
-        const data = await res.json();
-        if (res.ok && data.success && Array.isArray(data.results)) {
-          setSearchResults(data.results);
-          window.history.replaceState(null, '', `/jupiter/search?q=${encodeURIComponent(cleanUrl)}`);
-        } else {
-          setSearchResults([]);
-          setSearchError(data.error || `搜索失败（HTTP ${res.status}）。`);
-        }
-      } catch (e) {
-        console.error(e);
-        setSearchResults([]);
-        setSearchError(e instanceof Error ? e.message : '搜索服务暂时不可用。');
-      } finally {
-        setIsSearching(false);
-      }
+      await runJupiterSearch(cleanUrl, { fromHistory, engine: searchEngine, lang: browserLang });
       return;
     }
 
@@ -1120,19 +1171,19 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
 
     if (isRemotePdfUrl(cleanUrl)) {
-      openPdfDocument(cleanUrl);
+      openPdfDocument(cleanUrl, fromHistory);
       return;
     }
     if (isRemoteImageUrl(cleanUrl)) {
-      openImageDocument(cleanUrl);
+      openImageDocument(cleanUrl, fromHistory);
       return;
     }
     if (isRemoteAudioUrl(cleanUrl)) {
-      openAudioDocument(cleanUrl);
+      openAudioDocument(cleanUrl, fromHistory);
       return;
     }
     if (isRemoteVideoUrl(cleanUrl)) {
-      openVideoDocument(cleanUrl);
+      openVideoDocument(cleanUrl, fromHistory);
       return;
     }
 
@@ -1141,7 +1192,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     setSearchResults([]);
     setLastSearchQuery('');
     setSearchError(null);
-    pushHistory(activeTabId, cleanUrl);
+    if (!fromHistory) {
+      saveCurrentSearchScroll();
+      pushHistory(activeTabId, cleanUrl);
+    }
     recordBrowserVisit(activeTabId, cleanUrl, new URL(cleanUrl).hostname);
 
     // Immediately show a loading placeholder in the article view so the user
@@ -1277,6 +1331,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       author: kindLabel[result.kind],
       readTime: ''
     };
+    saveCurrentSearchScroll();
     setTabs(previous => [...previous, newTab]);
     setActiveTabId(newId);
     setInputUrl(result.url);
@@ -1341,30 +1396,53 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   };
 
   const goBack = () => {
-    if (browserEngine) {
-      void browserEngine.goBack(activeTabId);
-      return;
-    }
     const stack = history[activeTabId] || [];
     const idx = historyIndex[activeTabId] ?? 0;
-    if (idx <= 0) return;
-    const target = stack[idx - 1];
-    setHistoryIndex(prev => ({ ...prev, [activeTabId]: idx - 1 }));
-    handleNavigate(target);
+    if (idx > 0) {
+      const target = stack[idx - 1];
+      setHistoryIndex(prev => ({ ...prev, [activeTabId]: idx - 1 }));
+      handleNavigate(target, true);
+      return;
+    }
+    if (browserEngine) void browserEngine.goBack(activeTabId);
   };
 
   const goForward = () => {
-    if (browserEngine) {
-      void browserEngine.goForward(activeTabId);
-      return;
-    }
     const stack = history[activeTabId] || [];
     const idx = historyIndex[activeTabId] ?? 0;
-    if (idx >= stack.length - 1) return;
-    const target = stack[idx + 1];
-    setHistoryIndex(prev => ({ ...prev, [activeTabId]: idx + 1 }));
-    handleNavigate(target);
+    if (idx < stack.length - 1) {
+      const target = stack[idx + 1];
+      setHistoryIndex(prev => ({ ...prev, [activeTabId]: idx + 1 }));
+      handleNavigate(target, true);
+      return;
+    }
+    if (browserEngine) void browserEngine.goForward(activeTabId);
   };
+
+  useEffect(() => {
+    const route = activeTab ? parseJupiterSearchRoute(activeTab.url) : null;
+    if (route) {
+      void runJupiterSearch(route.query, { ...route, fromHistory: true });
+      return;
+    }
+
+    searchRequestIdRef.current += 1;
+    setSearchResults([]);
+    setLastSearchQuery('');
+    setSearchError(null);
+    setIsSearching(false);
+  }, [activeTabId]);
+
+  useEffect(() => {
+    const route = activeTab ? parseJupiterSearchRoute(activeTab.url) : null;
+    if (!route || isSearching) return;
+    const key = buildJupiterSearchRoute(route.query, route.engine, route.lang);
+    const position = searchScrollPositionsRef.current[key] || 0;
+    const frame = window.requestAnimationFrame(() => {
+      searchResultsScrollRef.current?.scrollTo({ top: position });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTabId, isSearching, lastSearchQuery, searchResults]);
 
   // 星图联动：从宇宙引擎点击行星进入浏览器时，自动以行星名触发搜索
   useEffect(() => {
@@ -1681,9 +1759,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/[0.06] bg-white/[0.025] p-1 text-slate-400">
           <button
             onClick={goBack}
-            disabled={browserEngine
-              ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoBack)
-              : (historyIndex[activeTabId] ?? 0) <= 0}
+            disabled={(historyIndex[activeTabId] ?? 0) <= 0 &&
+              !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoBack)}
             className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
             aria-label="后退"
             title="Back"
@@ -1692,9 +1769,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
           </button>
           <button
             onClick={goForward}
-            disabled={browserEngine
-              ? !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoForward)
-              : (historyIndex[activeTabId] ?? 0) >= (history[activeTabId]?.length ?? 1) - 1}
+            disabled={(historyIndex[activeTabId] ?? 0) >= (history[activeTabId]?.length ?? 1) - 1 &&
+              !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoForward)}
             className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
             aria-label="前进"
             title="Forward"
@@ -2167,7 +2243,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
       {/* 4. Split Layout */}
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[#080d13]">
-        <div className="min-w-0 flex-1 overflow-y-auto bg-[#080d13] p-4 sm:p-8">
+        <div ref={searchResultsScrollRef} className="min-w-0 flex-1 overflow-y-auto bg-[#080d13] p-4 sm:p-8">
           {lastSearchQuery || searchResults.length > 0 || isSearching ? (
             <div className="max-w-3xl mx-auto">
               <div className="mb-6">

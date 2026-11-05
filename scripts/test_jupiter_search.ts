@@ -6,6 +6,18 @@ import {
   mergeAndRankJupiterResults,
   searchEarthIndex
 } from '../server/jupiterSearch.ts';
+import { buildJupiterSearchRoute, parseJupiterSearchRoute } from '../src/components/browser/jupiterSearchRoute.ts';
+
+const searchRoute = buildJupiterSearchRoute('climate change NASA', 'duckduckgo', 'zh');
+assert.equal(searchRoute, '/jupiter/search?q=climate+change+NASA&engine=duckduckgo&lang=zh');
+assert.deepEqual(parseJupiterSearchRoute(searchRoute), {
+  query: 'climate change NASA', engine: 'duckduckgo', lang: 'zh'
+});
+assert.deepEqual(parseJupiterSearchRoute('/jupiter/search?q=space+weather&engine=unknown&lang=xx'), {
+  query: 'space weather', engine: 'auto', lang: 'en'
+});
+assert.equal(parseJupiterSearchRoute('/jupiter/search'), null);
+assert.equal(parseJupiterSearchRoute('/jupiter/watch/video-1'), null);
 
 const earthResults = searchEarthIndex('climate earth', {
   articles: [
@@ -57,4 +69,4 @@ const cached = getCachedJupiterSearch('test-query', 1001);
 assert.deepEqual(cached, ranked);
 assert.notEqual(cached, ranked, 'Cache reads should return a separate result array.');
 assert.equal(getCachedJupiterSearch('test-query', 62_000), null, 'Search cache entries should expire.');
-console.log('JUPITER search index, content lookup, demo-data exclusion, dedupe, ranking and cache: 13 passed, 0 failed.');
+console.log('JUPITER search index, route state, content lookup, demo-data exclusion, dedupe, ranking and cache: 18 passed, 0 failed.');
