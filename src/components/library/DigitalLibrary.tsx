@@ -769,6 +769,31 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   <span id="world-library-search-help" className="text-[11px] text-slate-500">支持书名、作者、ISBN、DOI 与多语言检索；OpenAlex 作者可用 author:姓名，机构可用 institution:名称</span>
                 </div>
                 <div className="mt-4">
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                    国际数字图书馆官方入口 · {searchQuery.trim() ? '将当前关键词带到来源网站' : '可直接访问或搜索'}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href={`https://openlibrary.org/search?q=${encodeURIComponent(searchQuery.trim())}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="在 Open Library 官方网站搜索当前关键词（新标签页）"
+                      className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                    >
+                      Open Library <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                    </a>
+                    <a
+                      href={`https://www.europeana.eu/en/search?query=${encodeURIComponent(searchQuery.trim())}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="在 Europeana 官方网站搜索当前关键词（新标签页）"
+                      className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                    >
+                      Europeana <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                    </a>
+                  </div>
+                </div>
+                <div className="mt-4">
                   <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">阿拉伯语馆藏官方入口 · 仅跳转，不复制全文</p>
                   <div className="flex flex-wrap gap-2">
                     <a href="https://waqfeya.net/books" target="_blank" rel="noopener noreferrer" title="Waqfeya 官方扫描书目录" className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Waqfeya</a>

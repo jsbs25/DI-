@@ -28,17 +28,10 @@
       <!-- 四角 HUD 机能装饰 -->
       <div class="boot-hud boot-hud-tl">SYS.VER // 2.0.26<br><span>STATUS: ONLINE</span></div>
       <div class="boot-hud boot-hud-tr">
-        <button id="boot-skip" class="boot-skip-btn">[ SKIP // 跳过 ]</button>
+        <button id="boot-skip" class="boot-skip-btn" type="button" aria-label="Skip startup animation">[ SKIP // 跳过 ]</button>
       </div>
       <div class="boot-hud boot-hud-bl">COORD // 31.9539° N, 35.9106° E<br><span id="boot-random-num">00.491.882</span></div>
-      <div class="boot-hud boot-hud-br">AUTH_PROTOCOL // SECURE_CHANNEL</div>
-
-      <!-- 初始点击解锁层（解决浏览器语音自动播放限制） -->
-      <div id="boot-trigger" class="boot-center-box">
-        <div class="boot-init-btn" id="boot-start-btn">
-          <span class="boot-bracket">[</span> 点击接入系统 // INITIALIZE <span class="boot-bracket">]</span>
-        </div>
-      </div>
+      <div class="boot-hud boot-hud-br">STARTUP_SEQUENCE // READY</div>
 
       <!-- 阶段1：中央 Logo 闪现 -->
       <div id="boot-stage-logo" class="boot-center-box boot-hidden">
@@ -58,19 +51,10 @@
           <p class="boot-subtitle">—— 一个宇宙 · 一个世界 · 一个人类 ——</p>
 
           <div class="boot-status-box">
-            <div class="boot-status-cn" id="boot-text-cn">需要访问许可</div>
-            <div class="boot-status-en" id="boot-text-en">ACCESS PERMISSION REQUIRED</div>
-            <div class="boot-progress-track">
+            <div class="boot-status-cn" id="boot-text-cn" role="status" aria-live="polite">正在接入数字宇宙...</div>
+            <div class="boot-status-en" id="boot-text-en">CONNECTING UNIVERSE ENGINE</div>
+            <div class="boot-progress-track" id="boot-progress" role="progressbar" aria-label="Startup progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
               <div class="boot-progress-bar" id="boot-bar"></div>
-            </div>
-            <!-- 身份密码验证 -->
-            <div id="boot-auth" class="boot-auth boot-hide">
-              <div class="boot-auth-label">IDENTITY VERIFICATION // 身份验证</div>
-              <div class="boot-auth-row">
-                <input id="boot-password" type="password" placeholder="输入身份密码" autocomplete="off" spellcheck="false" />
-                <button id="boot-auth-btn" type="button">验证</button>
-              </div>
-              <div id="boot-auth-msg" class="boot-auth-msg"></div>
             </div>
           </div>
         </div>
@@ -88,7 +72,7 @@
         background: radial-gradient(circle at 70% 50%, #0a192f 0%, #02060d 75%);
         color: #e2f1ff; font-family: 'SF Pro Display', 'PingFang SC', Consolas, monospace;
         overflow: hidden; user-select: none;
-        transition: opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1), filter 0.5s ease;
+        transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), filter 0.35s ease;
       }
       .boot-overlay.boot-fadeout {
         opacity: 0; filter: brightness(2) contrast(2); pointer-events: none;
@@ -134,25 +118,16 @@
       .boot-hud-br { bottom: 28px; right: 36px; border-right: 2px solid #00e5ff; padding-right: 10px; }
       .boot-skip-btn {
         background: rgba(0, 229, 255, 0.08); border: 1px solid rgba(0, 229, 255, 0.35);
-        color: #00e5ff; padding: 6px 14px; font-size: 11px; letter-spacing: 1.5px;
+        color: #00e5ff; min-width: 44px; min-height: 44px; padding: 8px 14px; font-size: 11px; letter-spacing: 1.5px;
         cursor: pointer; transition: all 0.25s;
       }
       .boot-skip-btn:hover { background: #00e5ff; color: #02060d; box-shadow: 0 0 12px #00e5ff; }
+      .boot-skip-btn:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
       .boot-center-box {
         position: absolute; inset: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center; transition: opacity 0.4s ease;
       }
       .boot-hidden { opacity: 0; pointer-events: none; }
-      .boot-init-btn {
-        padding: 14px 32px; border: 1px solid rgba(0, 229, 255, 0.5);
-        background: rgba(0, 229, 255, 0.06); color: #00e5ff; font-size: 14px;
-        letter-spacing: 3px; cursor: pointer; transition: all 0.3s;
-        box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
-      }
-      .boot-init-btn:hover {
-        background: rgba(0, 229, 255, 0.18); box-shadow: 0 0 30px rgba(0, 229, 255, 0.45);
-        transform: scale(1.03);
-      }
       .boot-logo-icon { font-size: 48px; color: #00e5ff; text-shadow: 0 0 20px #00e5ff; animation: bootPulse 1.2s infinite; }
       .boot-logo-text { font-size: 22px; font-weight: 700; letter-spacing: 6px; margin-top: 12px; }
       .boot-logo-sub { font-size: 10px; letter-spacing: 4px; color: #00e5ff; margin-top: 6px; opacity: 0.7; }
@@ -214,6 +189,17 @@
         .boot-right-visual { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; opacity: 0.25; }
         .boot-status-box { border-left: none; border-top: 2px solid #00e5ff; padding-left: 0; }
         .boot-progress-track { margin: 14px auto 0; }
+      }
+      @media (max-width: 480px) {
+        .boot-hud { font-size: 9px; letter-spacing: 1px; }
+        .boot-hud-tl { top: 14px; left: 14px; }
+        .boot-hud-tr { top: 14px; right: 14px; }
+        .boot-hud-bl { bottom: 14px; left: 14px; }
+        .boot-hud-br { bottom: 14px; right: 14px; }
+        .boot-title { font-size: clamp(2rem, 11vw, 3rem); letter-spacing: 2px; }
+        .boot-subtitle { font-size: 11px; letter-spacing: 1px; margin-bottom: 24px; }
+        .boot-logo-text { font-size: clamp(14px, 4vw, 22px); letter-spacing: 2px; }
+        .boot-skip-btn { padding: 8px 10px; font-size: 10px; }
       }
 
       /* ============ 未来感增强层 ============ */
@@ -290,25 +276,20 @@
         content: '▌'; color: #00e5ff; margin-left: 3px; animation: bootBlink 0.75s step-end infinite; text-shadow: 0 0 10px #00e5ff;
       }
       @keyframes bootBlink { 50% { opacity: 0; } }
-      .boot-hide { display: none !important; }
-      .boot-auth { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(0,229,255,0.2); }
-      .boot-auth-label { font-size: 10px; letter-spacing: 2px; color: #8ab4f8; margin-bottom: 8px; }
-      .boot-auth-row { display: flex; gap: 8px; }
-      .boot-auth-row input {
-        flex: 1; min-width: 0; background: rgba(0,0,0,0.45); border: 1px solid rgba(0,229,255,0.4);
-        color: #00e5ff; padding: 8px 12px; font-size: 13px; letter-spacing: 2px; border-radius: 6px;
-        outline: none; font-family: 'SF Mono', Consolas, monospace;
-        box-shadow: inset 0 0 12px rgba(0,229,255,0.1);
+      @media (prefers-reduced-motion: reduce) {
+        .boot-overlay,
+        .boot-overlay *,
+        .boot-overlay::before,
+        .boot-overlay::after {
+          animation: none !important;
+          transition: none !important;
+        }
+        .boot-scanline,
+        .boot-scan-sweep,
+        .boot-stars,
+        .boot-particle,
+        .boot-overlay::before { display: none !important; }
       }
-      .boot-auth-row input:focus { border-color: #00e5ff; box-shadow: 0 0 14px rgba(0,229,255,0.35); }
-      .boot-auth-row input::placeholder { color: rgba(0,229,255,0.4); letter-spacing: 1px; }
-      .boot-auth-row button {
-        background: rgba(0,229,255,0.1); border: 1px solid rgba(0,229,255,0.5); color: #00e5ff;
-        padding: 0 16px; font-size: 12px; letter-spacing: 2px; border-radius: 6px; cursor: pointer;
-        transition: all 0.2s;
-      }
-      .boot-auth-row button:hover { background: #00e5ff; color: #02060d; box-shadow: 0 0 16px #00e5ff; }
-      .boot-auth-msg { font-size: 11px; letter-spacing: 1.5px; margin-top: 8px; min-height: 16px; font-family: 'SF Mono', Consolas, monospace; }
     </style>
 
     <div id="root"></div>
@@ -317,25 +298,64 @@
     <script>
       (function() {
         const splash = document.getElementById('boot-splash');
-        const trigger = document.getElementById('boot-trigger');
         const stageLogo = document.getElementById('boot-stage-logo');
         const stageMain = document.getElementById('boot-stage-main');
         const textCn = document.getElementById('boot-text-cn');
         const textEn = document.getElementById('boot-text-en');
         const bar = document.getElementById('boot-bar');
+        const progress = document.getElementById('boot-progress');
         const visualImg = document.getElementById('boot-visual-img');
+        const skipButton = document.getElementById('boot-skip');
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        let finished = false;
+        let numTimer;
+        const timers = new Set();
+
+        function schedule(callback, delay) {
+          const timer = setTimeout(() => {
+            timers.delete(timer);
+            if (!finished) callback();
+          }, delay);
+          timers.add(timer);
+        }
+
+        function finishBoot(immediate = false) {
+          if (finished) return;
+          finished = true;
+          clearInterval(numTimer);
+          timers.forEach(clearTimeout);
+          document.removeEventListener('keydown', onKeydown);
+          if (immediate) {
+            splash.remove();
+            return;
+          }
+          splash.classList.add('boot-fadeout');
+          setTimeout(() => splash.remove(), 400);
+        }
+
+        function onKeydown(event) {
+          if (event.key === 'Escape') finishBoot();
+        }
+
+        skipButton.addEventListener('click', () => finishBoot());
+        document.addEventListener('keydown', onKeydown);
+
+        if (reducedMotion) {
+          finishBoot(true);
+          return;
+        }
 
         // 随机坐标数字跳动
-        const numTimer = setInterval(() => {
+        numTimer = setInterval(() => {
           const el = document.getElementById('boot-random-num');
           if (el) el.innerText = (Math.random() * 99).toFixed(3) + '.' + Math.floor(100 + Math.random() * 899);
-        }, 120);
+        }, 500);
 
         // 漂浮粒子场
         (function spawnParticles() {
           const container = document.getElementById('boot-splash');
-          if (!container) return;
-          for (let i = 0; i < 46; i++) {
+          if (!container || window.matchMedia('(max-width: 768px)').matches) return;
+          for (let i = 0; i < 18; i++) {
             const p = document.createElement('div');
             p.className = 'boot-particle';
             p.style.left = (Math.random() * 100) + '%';
@@ -346,150 +366,33 @@
           }
         })();
 
-        // 未来感低频启动音（由点击手势触发）
-        function playBootHum() {
-          try {
-            const Ctx = window.AudioContext || window.webkitAudioContext;
-            if (!Ctx) return;
-            const ctx = new Ctx();
-            const osc = ctx.createOscillator();
-            const osc2 = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(48, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(120, ctx.currentTime + 5);
-            osc2.type = 'triangle';
-            osc2.frequency.setValueAtTime(96, ctx.currentTime);
-            osc2.frequency.exponentialRampToValueAtTime(240, ctx.currentTime + 5);
-            gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.07, ctx.currentTime + 1.6);
-            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 7);
-            osc.connect(gain);
-            osc2.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start();
-            osc2.start();
-            osc.stop(ctx.currentTime + 7.5);
-            osc2.stop(ctx.currentTime + 7.5);
-          } catch (e) {}
-        }
-
-        // 英文机械语音播报函数（更慢、更低、更有感觉）
-        function speak(text) {
-          if (!('speechSynthesis' in window)) return;
-          window.speechSynthesis.cancel();
-          const utter = new SpeechSynthesisUtterance(text);
-          utter.lang = 'en-US';
-          utter.rate = 0.62;
-          utter.pitch = 0.68;
-          utter.volume = 1;
-          window.speechSynthesis.speak(utter);
-        }
-
-        // 逐字打字机效果
-        function typeText(el, text, speed, done) {
-          el.innerText = '';
-          let i = 0;
-          const timer = setInterval(() => {
-            i++;
-            el.innerText = text.slice(0, i);
-            if (i >= text.length) {
-              clearInterval(timer);
-              if (done) done();
-            }
-          }, speed);
-        }
-
-        function finishBoot() {
-          clearInterval(numTimer);
-          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-          splash.classList.add('boot-fadeout');
-          setTimeout(() => splash.remove(), 900);
-        }
-
-        document.getElementById('boot-skip').addEventListener('click', finishBoot);
-
         const steps = [
-          { cn: '需要访问许可', en: 'ACCESS PERMISSION REQUIRED', speech: 'Access permission required', progress: '20%' },
-          { cn: '身份授权确认', en: 'IDENTITY VERIFICATION', speech: 'Identity verification required', progress: '45%' },
-          { cn: '正在接入数字宇宙...', en: 'CONNECTING UNIVERSE ENGINE', speech: 'Connecting universe engine', progress: '70%' },
-          { cn: '系统就绪 · 核准通过', en: 'SYSTEMS ONLINE // AUTHORIZED', speech: 'Systems online. Authorized', progress: '95%' },
-          { cn: '欢迎来到 EARTH ONE', en: 'EARTH ONE // READY', speech: 'Welcome to Earth One', progress: '100%' }
+          { cn: '正在接入数字宇宙...', en: 'CONNECTING UNIVERSE ENGINE', progress: '60%' },
+          { cn: '系统就绪 · 欢迎来到 EARTH ONE', en: 'EARTH ONE // READY', progress: '100%' }
         ];
-
-        const AUTH_INDEX = 1;
-        const IDENTITY_PASSWORD = 'mxm720';
-        const STEP_MS = 1800;
-        const LOGO_MS = 1700;
-
-        const authBox = document.getElementById('boot-auth');
-        const passwordInput = document.getElementById('boot-password');
-        const authBtn = document.getElementById('boot-auth-btn');
-        const authMsg = document.getElementById('boot-auth-msg');
 
         function runStep(index) {
           const step = steps[index];
-          typeText(textCn, step.cn, 50, () => speak(step.speech));
-          typeText(textEn, step.en, 24);
+          textCn.textContent = step.cn;
+          textEn.textContent = step.en;
           bar.style.width = step.progress;
-
-          if (index === AUTH_INDEX) {
-            // 身份验证：暂停并等待输入正确密码
-            authBox.classList.remove('boot-hide');
-            passwordInput.value = '';
-            authMsg.textContent = '';
-            passwordInput.disabled = false;
-            authBtn.disabled = false;
-            setTimeout(() => passwordInput.focus(), 150);
-            return;
-          }
-
+          progress.setAttribute('aria-valuenow', step.progress.replace('%', ''));
           if (index < steps.length - 1) {
-            setTimeout(() => runStep(index + 1), STEP_MS);
+            schedule(() => runStep(index + 1), 300);
           } else {
             textCn.style.color = '#00e5ff';
             textCn.style.textShadow = '0 0 18px #00e5ff';
-            setTimeout(finishBoot, STEP_MS + 200);
+            schedule(() => finishBoot(), 300);
           }
         }
 
-        function verifyIdentity() {
-          if (passwordInput.value === IDENTITY_PASSWORD) {
-            authMsg.textContent = '✓ 身份验证通过 · IDENTITY VERIFIED';
-            authMsg.style.color = '#00e5ff';
-            passwordInput.disabled = true;
-            authBtn.disabled = true;
-            authBox.classList.add('boot-hide');
-            setTimeout(() => runStep(AUTH_INDEX + 1), 400);
-          } else {
-            authMsg.textContent = '✗ 密码错误 · ACCESS DENIED';
-            authMsg.style.color = '#ff5470';
-            passwordInput.value = '';
-            passwordInput.focus();
-          }
-        }
-
-        authBtn.addEventListener('click', verifyIdentity);
-        passwordInput.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') verifyIdentity();
-        });
-
-        document.getElementById('boot-start-btn').addEventListener('click', () => {
-          trigger.classList.add('boot-hidden');
-          playBootHum();
-          // 阶段1：显示中央 Logo（旋转全息环 + 故障字）
-          stageLogo.classList.remove('boot-hidden');
-
-          setTimeout(() => {
-            stageLogo.classList.add('boot-hidden');
-            // 阶段2：进入主界面并执行线框到实景渲染
-            stageMain.classList.remove('boot-hidden');
-            setTimeout(() => visualImg.classList.add('boot-rendered'), 1100);
-
-            // 阶段3：逐步打字切换状态词与语音（身份步骤会暂停等待密码）
-            runStep(0);
-          }, LOGO_MS);
-        });
+        stageLogo.classList.remove('boot-hidden');
+        schedule(() => {
+          stageLogo.classList.add('boot-hidden');
+          stageMain.classList.remove('boot-hidden');
+          visualImg.classList.add('boot-rendered');
+          runStep(0);
+        }, 400);
       })();
     </script>
     <!-- ================= 赛博机能风开机引导层 END ================= -->

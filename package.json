@@ -53,6 +53,8 @@
     "test:motion": "tsx scripts/test_motion_accessibility.ts",
     "test:motion:browser": "tsx scripts/test_motion_accessibility_browser.ts",
     "test:motion:build": "npm run build && tsx scripts/test_motion_accessibility_build.ts",
+    "test:boot-splash": "node scripts/test_boot_splash.mjs",
+    "test:library-external-links": "node scripts/test_library_external_links.mjs",
     "test:globe": "tsx scripts/test_globe_render.tsx",
     "test:universe": "tsx scripts/test_universe_render.tsx"
   },
