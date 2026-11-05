@@ -104,6 +104,12 @@ declare global {
     warning: string | null;
   }
 
+  interface EarthOneBrowserPrintResult {
+    success: boolean;
+    cancelled?: boolean;
+    error?: string;
+  }
+
   type EarthOneBrowserFindDirection = 'new' | 'next' | 'previous';
 
   interface EarthOneBrowserFindResult {
@@ -131,6 +137,7 @@ declare global {
     clearDownloadRecords(): Promise<{ success: boolean; cleared: number; error?: string }>;
     getDownloadStorageStatus(): Promise<EarthOneDownloadStorageStatus>;
     showDownloadInFolder(id: string): Promise<{ success: boolean; error?: string }>;
+    printToPdf(): Promise<EarthOneBrowserPrintResult>;
     setActive(active: boolean): Promise<void>;
     setBounds(bounds: EarthOneBrowserBounds | null): Promise<void>;
     selectTab(tabId: string, url: string): Promise<{ success: boolean; error?: string }>;

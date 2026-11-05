@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const assert = require('node:assert/strict');
 const { MAX_SESSION_STORE_BYTES, MAX_SESSION_TABS } = require('./session-store.cjs');
 const { isAllowedNavigation, normalizeBrowserUrl } = require('./browser-engine.cjs');
@@ -64,6 +64,11 @@ function handleFixtureRequest(request, response) {
   if (pathname === '/one') {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end('<!doctype html><html><head><title>EARTH ONE Fixture One</title></head><body><h1>Local fixture one</h1><a href="/two">Next page</a></body></html>');
+    return;
+  }
+  if (pathname === '/print') {
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end('<!doctype html><html><head><title>Local Print Fixture</title><style>@page{size:A4;margin:20mm}body{font:18px sans-serif}.page-two{break-before:page;page-break-before:always}</style></head><body><h1>EARTH ONE PDF page 1</h1><section class="page-two"><h1>EARTH ONE PDF page 2</h1></section></body></html>');
     return;
   }
   if (pathname === '/two') {
@@ -162,6 +167,8 @@ function launchSmoke(phase, options = {}) {
       EARTH_ONE_BROWSER_TEST_ALT_URL: options.altUrl || `${alternateFixtureOrigin}/one`,
       EARTH_ONE_BROWSER_TEST_POPUP_DECISION: options.popupDecision || 'deny',
       EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR: downloadDir,
+      EARTH_ONE_BROWSER_PRINT_SMOKE_TEST: phase === 'restart' ? '1' : '0',
+      EARTH_ONE_BROWSER_TEST_PDF_PATH: path.join(downloadDir, 'earth-one-browser-print.pdf'),
       EARTH_ONE_BROWSER_TEST_PROFILE_DIR: runProfileDir,
       EARTH_ONE_DATA_FILE: path.join(downloadDir, 'server_data.json'),
       EARTH_ONE_SKIP_BOOK_HARVEST: 'true'
@@ -314,6 +321,18 @@ async function main() {
   await secondRun.waitForMarker(/BROWSER_SMOKE_PASS:/, 80000);
   assert.match(secondRun.getOutput(), /BROWSER_PERMISSION_RESTART_RESET_PASS:/, 'new process must start with no previous site grants');
   assert.match(secondRun.getOutput(), /BROWSER_PERMISSION_SMOKE_PASS:/, 'restarted process must re-run the local permission flow');
+  assert.match(secondRun.getOutput(), /BROWSER_PRINT_SMOKE_PASS:/, 'restarted process must save a synthetic local Chromium page as PDF');
+  const printedPdfPath = path.join(downloadDir, 'earth-one-browser-print.pdf');
+  const printedPdf = fs.readFileSync(printedPdfPath);
+  assert.equal(printedPdf.subarray(0, 5).toString('ascii'), '%PDF-', 'Chromium output must have a PDF header');
+  const pdfInfo = spawnSync('pdfinfo', [printedPdfPath], { encoding: 'utf8' });
+  let printedPageCount = pdfInfo.status === 0 ? Number(pdfInfo.stdout.match(/^Pages:\s+(\d+)/m)?.[1]) : NaN;
+  if (!Number.isFinite(printedPageCount)) {
+    const pageTree = printedPdf.toString('latin1').match(/\/Type\s*\/Pages\b[\s\S]{0,256}?\/Count\s+(\d+)/);
+    printedPageCount = Number(pageTree?.[1]);
+  }
+  assert.equal(printedPageCount, 2, 'synthetic Chromium fixture must yield exactly two PDF pages');
+  assert.equal(fs.readdirSync(downloadDir).some(name => name.endsWith('.tmp')), false, 'PDF export must leave no atomic-write temporary file');
   console.log('BROWSER_TEST_DRIVER_RESTART_PHASE_PASSED');
   const secondClose = await Promise.race([
     secondRun.closed,

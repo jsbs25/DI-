@@ -25,6 +25,7 @@ import {
   Trash2,
   Download,
   FolderOpen,
+  Printer,
   Bell,
   MapPin
 } from 'lucide-react';
@@ -444,6 +445,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [isTranslating, setIsTranslating] = useState(false);
   const [browserEngineState, setBrowserEngineState] = useState<EarthOneBrowserState | null>(null);
   const [browserEngineError, setBrowserEngineError] = useState<string | null>(null);
+  const [browserPrintPending, setBrowserPrintPending] = useState(false);
+  const [browserPrintMessage, setBrowserPrintMessage] = useState<string | null>(null);
   const [browserSessionSettingsReady, setBrowserSessionSettingsReady] = useState(!browserEngine?.getSessionState);
   const [browserSessionEnabled, setBrowserSessionEnabled] = useState(false);
   const [browserSessionReadOnly, setBrowserSessionReadOnly] = useState(false);
@@ -474,6 +477,22 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     void browserEngine?.stopFindInPage(returnFocus).catch(() => {});
   }, [browserEngine]);
 
+  const handleSavePdf = useCallback(async () => {
+    if (!browserEngine?.printToPdf || activeTab?.readerMode || isLoading || browserEngineState?.tabId !== activeTabId) return;
+    setBrowserPrintPending(true);
+    setBrowserPrintMessage(null);
+    try {
+      const result = await browserEngine.printToPdf();
+      if (result.success) setBrowserPrintMessage('PDF 已保存到你选择的本机位置。');
+      else if (result.cancelled) setBrowserPrintMessage('已取消保存 PDF。');
+      else setBrowserPrintMessage(result.error || '无法保存此网页的 PDF。');
+    } catch {
+      setBrowserPrintMessage('无法保存此网页的 PDF。');
+    } finally {
+      setBrowserPrintPending(false);
+    }
+  }, [browserEngine, activeTab?.readerMode, activeTabId, browserEngineState?.tabId, isLoading]);
+
   const runBrowserFind = useCallback((query: string, direction: EarthOneBrowserFindDirection) => {
     if (!browserEngine) return;
     if (!query.trim()) {
@@ -502,6 +521,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     setIsFindOpen(false);
     setFindQuery('');
     setFindStatus(null);
+    setBrowserPrintMessage(null);
   }, [activeTabId]);
 
   const recordBrowserVisit = useCallback((tabId: string, url: string, title: string) => {
@@ -1260,6 +1280,26 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
           <Search className="h-4 w-4" />
         </button>
 
+        <div className="inline-flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => void handleSavePdf()}
+            disabled={!browserEngine || browserPrintPending || isLoading || activeTab?.readerMode || browserEngineState?.tabId !== activeTabId}
+            aria-label={browserEngine ? '保存当前 Chromium 网页为 PDF' : '保存 PDF（普通 Web 预览不支持）'}
+            title={!browserEngine
+              ? '普通 Web 网页预览不支持 Chromium 打印为 PDF；请在桌面版真实 Chromium 标签页中使用。'
+              : activeTab?.readerMode
+                ? '请先退出纯净阅读模式；PDF 仅从当前可见的 Chromium 网页生成。'
+                : '使用系统保存对话框将当前可见 Chromium 网页保存为 PDF。'}
+            data-browser-print
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.035] px-3 text-xs font-medium text-slate-300 transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Printer className="h-3.5 w-3.5 text-cyan-300" />
+            <span>{browserPrintPending ? '正在保存…' : '保存 PDF'}</span>
+          </button>
+          {!browserEngine && <span className="text-[10px] text-amber-200/80">网页预览不支持 Chromium PDF</span>}
+        </div>
+
         <div
           role="status"
           aria-label={browserEngine ? '真实 Chromium 浏览器引擎' : '网页预览模式'}
@@ -1516,6 +1556,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       {browserEngineError && (
         <div role="alert" className="border-b border-rose-300/15 bg-rose-950/40 px-4 py-2 text-xs text-rose-200">
           {browserEngineError}
+        </div>
+      )}
+
+      {browserPrintMessage && (
+        <div role="status" aria-live="polite" data-browser-print-status className="border-b border-cyan-300/15 bg-cyan-950/30 px-4 py-2 text-xs text-cyan-100">
+          {browserPrintMessage}
         </div>
       )}
 

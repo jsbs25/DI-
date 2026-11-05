@@ -28,6 +28,7 @@ EARTH ONE 当前是 React/Vite/Express Web 应用；普通网页无法自行捆�
 - 在 Chromium 网页焦点下按 `Ctrl+L` 或 `Cmd+L`，会回到 EARTH ONE 地址栏并选中完整网址。
 - 在 Chromium 网页焦点下按 `Ctrl+F` 或 `Cmd+F`，会把焦点安全转回 EARTH ONE 查找框；按 Enter/Shift+Enter 或前后按钮浏览匹配项，显示当前序号与总数。关闭或按 Esc 会调用 Chromium `stopFindInPage('clearSelection')` 清除高亮并将焦点还给页面；最长查找词为 512 个字符。普通 Web 预览不提供此原生查找接口，工具栏会明确显示不可用，EARTH ONE 不拦截浏览器自己的查找快捷键。
 - Chromium 视图由占位框的实际位置和尺寸驱动，切换到其他 EARTH ONE 模块、进入阅读模式或打开覆盖层时会隐藏；Browser 标签的界面与地址栏仍留在 EARTH ONE 内。
+- 桌面 Chromium 工具栏提供“保存 PDF”：只对当前可见、未处于纯净阅读模式的 HTTP(S) Chromium 标签调用 Electron `webContents.printToPDF`。用户先通过系统保存对话框选择本机 `.pdf` 路径，完成后原子写入；取消不会生成文件。路径不回传到网页，不写入历史、会话、下载记录或服务器，也不会自动打开/执行 PDF。普通 Web 预览明确标为不支持 Chromium PDF，不调用网页宿主的打印功能。
 - 普通 Web 版继续使用原有回退界面；用户可从工具栏识别当前是“真实 Chromium”还是“网页预览”。
 
 ## 安全边界
@@ -35,6 +36,7 @@ EARTH ONE 当前是 React/Vite/Express Web 应用；普通网页无法自行捆�
 - 远程网页在无 Node.js 集成、启用 `contextIsolation`、启用渲染器 sandbox 和默认 Web 安全的 Chromium WebContents 中运行；远程网页没有 preload。点击打开和确认打开的弹窗都会被 Electron 拒绝创建原生子窗口，再由主进程建立新的 Browser `WebContentsView`，因此新页没有 `window.opener`、Node 能力或继承的 EARTH ONE preload；新视图明确使用专用的非持久 Browser session。
 - 只有 EARTH ONE 本地壳的 preload 暴露少量导航/尺寸/本机浏览数据及会话权限 API；主进程校验调用方 WebContents、顶层主框架和精确应用来源 origin。权限决定通过短期请求令牌绑定主进程记录的活动 Chromium 页面，不接受 renderer 提供的标签 ID；页面切换、导航或退出时待决请求会拒绝。主进程也拒绝 `file:`, `javascript:`, `data:`, `ftp:` 等非 HTTP(S) 导航。弹窗只接受无凭据的 HTTP(S) URL，阻断 EARTH ONE 自身 origin 和带 POST body 的新窗口表单；由于 Electron 不提供可信的用户手势标志，且 disposition 本身不足以证明用户输入，所有网页 popup 请求都会先由应用确认。右键菜单仅对校验通过、来自活动 Browser 标签的 HTTP(S) 链接提供新标签操作。应用路由仍留在 EARTH ONE 主窗口，不由远程 popup 接管。本机数据仅能通过固定的 JSON 结构读写；主进程限制字段、条数和 2 MiB 总大小，先同步临时文件再原子替换应用 `userData` 文件。检测到无法解析、版本未知、超限或含无效记录时，会以只读状态保护原文件。数据文件不加密，应按本机个人浏览数据对待。
 - 页内查找 IPC 同样经过主窗口 WebContents、顶层框架和精确应用来源校验；调用不接受标签 ID 或 WebContents ID，只允许主进程针对当前可见活动 Chromium 标签执行受限查询/清除。结果回传前核对标签与最新 Electron `requestId`，过期或非活动页面结果会丢弃。远程 `WebContentsView` 不设置 preload，且维持 Node 集成关闭。
+- 保存 PDF 的 IPC 同样只允许主窗口的精确顶层应用来源调用；preload 不接受标签 ID、URL、文件路径或打印选项。主进程只选取引擎当前可见活动标签，验证页面 URL 与主框架同源且为无凭据 HTTP(S)，并在系统保存对话框返回后再次确认标签、WebContents 与 URL 未变化。无效/非本机路径和非 PDF 目标会被拒绝；输出先写入同目录独占临时文件，再原子替换为用户选择的文件。路径只留在主进程内存，不调用任何自动打开或执行 API；整个功能不进行网络抓取或服务器请求。
 - 浏览器会话为应用进程内存会话（非 `persist:`），标签共享该会话，应用退出后不保留网站 cookie。上面的可选标签恢复仅保存经过限制的 URL 元数据，不序列化 Chromium session/cookie/cache；URL 使用独立版本化文件和白名单字段，普通查询参数保留、片段移除，明显敏感查询键会令该 URL 不入库。桌面 Chromium 仅支持通知与定位：对 HTTPS 和 HTTP loopback 安全来源的活动顶层页面，EARTH ONE 会显示来源与能力并默认拒绝；用户可明确允许本次应用运行，之后可在工具栏审阅并撤销。授权仅保存在进程内存，重启清空；不安全/非 HTTP(S) 来源、子框架和其他能力均拒绝。摄像头、麦克风、剪贴板与 USB 不在本里程碑支持范围内。普通 Web 回退保持原有行为。
 - 桌面下载使用 Electron 保存文件对话框；生产路径不会预设或静默写入路径。下载历史独立保存在 Electron `userData` 下、最多 50 条，原子写入并校验恢复数据；损坏文件以只读状态保护，不会静默覆盖。持久记录只包含保存对话框批准后的绝对路径和脱敏来源，不连接任何服务器 API，也不改动浏览器 cookie/session 设置。受限 IPC 只接受记录 ID；显示文件夹前由主进程重新校验路径存在且为文件，不接受 renderer 提供路径，不调用自动打开/执行 API。移除和清除只删除记录、不删除用户文件；未完成记录重启后标记为已中断。没有恶意文件扫描、大小/类型限制、暂停/续传。证书错误不做绕过。桌面 Chromium 在用户设备上直接打开用户输入的 HTTP(S) 地址（包括 localhost/内网地址），不让 EARTH ONE 服务器代访该地址；它不是通用 SSRF 隔离器。**自动化测试只连测试脚本在 127.0.0.1 上创建的合成页面/下载夹具，不探测或访问任意私网目标。**
 - 普通 Web 回退仍保留原有服务器端 `/api/browser/fetch-preview` 行为；该旧 API 未纳入本次 SSRF 硬化。若以公网可访问服务部署，需另行校验解析后的目标 IP 与每次重定向，不能把它当作通用公开 URL 代理。桌面 Chromium 不调用此端点。
@@ -58,12 +60,14 @@ bun run lint
 bun run build
 bun run test:session-store
 bun run test:browser-find
+bun run test:browser-print-pdf
 bun run test:browser-popups
 bun run test:browser-ipc-security
 bun run test:browser-engine
 ```
 
 会话存储单元测试覆盖默认关闭、普通查询保留、片段删除、敏感查询键跳过、无效 URL 删除、12 标签/128 KiB 上限和损坏/超限文件不覆盖。`test:browser-find` 使用模拟 WebContents 检查活动标签隔离、前后方向、查询长度/类型、过期结果过滤、清除高亮调用、焦点恢复、不可见/销毁保护和快捷键路由；`test:browser-popups` 覆盖协议及应用 origin 白名单、手势不明时要求确认、右键链接回调、活动标签焦点及专用 session/no preload/Node 设置。`test:browser-ipc-security` 验证只有精确主窗口顶层应用来源能调用 IPC。完整 Electron 集成测试还会使用独立本机窗口确认不可信 WebContents 的查找 IPC 被拒；在真实 Chromium 合成页验证真实 `target=_blank`/`window.open`、无手势拒绝路径、危险与无效 URL、应用路由边界、焦点、Browser session 复用以及新页没有 opener/preload/Node；查找仍验证匹配项、前后导航、关闭清除与焦点返回。会话与下载 smoke 继续覆盖默认关闭/启用后的 URL-only 恢复、失败页提示、表单/Cookie/凭据不持久化、本机记录及导航下载。所有 fixture 仅绑定 `127.0.0.1`，Chromium 测试策略阻止访问其他来源，临时服务端 JSON、Electron 用户配置和下载目录均自动清理。Xvfb 临时启用 Chromium SwiftShader；普通桌面启动不设置该参数。
+PDF 专项单测覆盖跨来源拦截、HTTP(S) 与主框架 origin 边界、非活动标签、对话框取消、路径校验、渲染器无法提供保存路径、切换标签后的中止以及原子写入。Electron 集成 smoke 在仅含 loopback 的双页合成站点上验证取消无输出、真实 `%PDF-` 文件头与页数、对话框指定路径、保存路径不返回 renderer，以及导出期间无网络/API 请求；生产环境始终使用系统原生保存对话框。
 
 ## 平台与维护
 

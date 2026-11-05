@@ -71,6 +71,10 @@ async function main() {
   assert.equal((await engine.selectTab('tab_A', 'http://127.0.0.1:43127/one')).success, true);
   const viewA = views.at(-1);
   assert.equal(viewA.visible, true);
+  const printTargetA = engine.getActivePrintTarget();
+  assert.equal(printTargetA.tabId, 'tab_A', 'PDF target comes from the engine active-tab state');
+  assert.equal(printTargetA.contents, viewA.webContents);
+  assert.equal(engine.isActivePrintTarget(printTargetA), true);
   const first = await engine.findInPage('synthetic phrase', 'new');
   assert.equal(first.success, true);
   assert.deepEqual(viewA.webContents.findCalls.at(-1), {
@@ -118,6 +122,10 @@ async function main() {
 
   assert.equal((await engine.selectTab('tab_B', 'http://127.0.0.1:43127/two')).success, true);
   const viewB = views.at(-1);
+  const printTargetB = engine.getActivePrintTarget();
+  assert.equal(printTargetB.tabId, 'tab_B');
+  assert.equal(engine.isActivePrintTarget(printTargetA), false, 'a previous tab cannot remain a PDF target after switching');
+  assert.equal(engine.isActivePrintTarget(printTargetB), true);
   assert.equal(viewA.webContents.stopCalls.at(-1), 'clearSelection', 'switching tabs clears old highlights');
   const callsOnAAfterSwitch = viewA.webContents.findCalls.length;
   assert.equal((await engine.findInPage('synthetic phrase', 'new')).success, true);
@@ -130,16 +138,20 @@ async function main() {
 
   engine.setBounds(null);
   assert.equal((await engine.findInPage('hidden', 'new')).success, false, 'hidden browser views cannot be targeted');
+  assert.equal(engine.getActivePrintTarget(), null, 'hidden Chromium viewport cannot be printed');
   engine.setBounds({ x: 0, y: 0, width: 800, height: 500 });
   engine.setActive(false);
   assert.equal((await engine.findInPage('inactive', 'new')).success, false, 'inactive Browser module cannot be targeted');
+  assert.equal(engine.getActivePrintTarget(), null, 'inactive Browser module cannot be printed');
   engine.setActive(true);
   engine.setBounds({ x: 0, y: 0, width: 800, height: 500 });
   viewB.webContents.destroyed = true;
   assert.equal((await engine.findInPage('destroyed', 'new')).success, false, 'destroyed contents cannot be targeted');
+  assert.equal(engine.getActivePrintTarget(), null, 'destroyed Chromium contents cannot be printed');
+  assert.equal(engine.isActivePrintTarget(printTargetB), false);
 
   engine.dispose();
-  console.log('BROWSER_FIND_ENGINE_TEST_PASS: active-target isolation, direction, validation, stale-result rejection, clear, focus, shortcut routing, and hidden/destroyed guards verified.');
+  console.log('BROWSER_FIND_ENGINE_TEST_PASS: active-target isolation, direction, validation, stale-result rejection, clear, focus, shortcut routing, and hidden/destroyed find/print guards verified.');
 }
 
 main().catch(error => {

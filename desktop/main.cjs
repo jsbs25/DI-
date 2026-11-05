@@ -9,6 +9,7 @@ const { createBrowserEngine, isAllowedNavigation } = require('./browser-engine.c
 const { createBrowserSessionStore } = require('./session-store.cjs');
 const { assertTrustedAppSender: assertTrustedAppSenderForContext } = require('./browser-ipc-security.cjs');
 const { createBrowserPermissionManager } = require('./browser-permissions.cjs');
+const { createBrowserPdfExporter } = require('./browser-print-pdf.cjs');
 
 app.setName('EARTH ONE');
 if (process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1' && process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR) {
@@ -19,6 +20,7 @@ if (process.env.EARTH_ONE_BROWSER_SMOKE_TEST === '1' && process.env.EARTH_ONE_BR
 
 let mainWindow = null;
 let browserEngine = null;
+let browserPdfExporter = null;
 let browserPermissionManager = null;
 let appOrigin = null;
 let testDownloadDir = null;
@@ -37,6 +39,8 @@ let browserPopupConfirmationOpen = false;
 let browserSmokeTest = false;
 let browserPopupTestDecision = null;
 let browserPopupSmokeConfirmationCount = 0;
+let browserPrintSmokePath = null;
+let browserPrintSmokeDialogCalls = 0;
 
 const MAX_LOCAL_BOOKMARKS = 200;
 const MAX_LOCAL_HISTORY = 500;
@@ -125,6 +129,25 @@ function getSafeSmokeApprovalPath(smokeTest, fixtureUrl, downloadDir) {
         return null;
       }
     };
+  } catch {
+    return null;
+  }
+}
+
+function getSafeSmokePdfPath(smokeTest, fixtureUrl, downloadDir, requestedPath) {
+  if (!smokeTest || process.env.EARTH_ONE_BROWSER_PRINT_SMOKE_TEST !== '1' ||
+      typeof fixtureUrl !== 'string' || typeof downloadDir !== 'string' || typeof requestedPath !== 'string') return null;
+  try {
+    const url = new URL(fixtureUrl);
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1') return null;
+    const tempRoot = fs.realpathSync(os.tmpdir());
+    const realDownloadDir = fs.realpathSync(downloadDir);
+    const expectedPath = path.join(realDownloadDir, 'earth-one-browser-print.pdf');
+    const tempPrefix = tempRoot.endsWith(path.sep) ? tempRoot : `${tempRoot}${path.sep}`;
+    if (!realDownloadDir.startsWith(tempPrefix) ||
+        !path.basename(realDownloadDir).startsWith('earth-one-browser-smoke-') ||
+        path.resolve(requestedPath) !== expectedPath) return null;
+    return expectedPath;
   } catch {
     return null;
   }
@@ -361,7 +384,8 @@ function registerBrowserIpc() {
     'browser:forward': (_event, tabId) => browserEngine.goForward(tabId),
     'browser:reload': (_event, tabId) => browserEngine.reload(tabId),
     'browser:find-in-page': (_event, query, direction) => browserEngine.findInPage(query, direction),
-    'browser:stop-find-in-page': (_event, returnFocus) => browserEngine.stopFindInPage(Boolean(returnFocus))
+    'browser:stop-find-in-page': (_event, returnFocus) => browserEngine.stopFindInPage(Boolean(returnFocus)),
+    'browser:print-to-pdf': () => browserPdfExporter?.saveActiveTab() || { success: false, error: 'PDF 导出暂不可用。' }
   };
 
   for (const [channel, handler] of Object.entries(handlers)) {
@@ -728,6 +752,7 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       const unauthorizedResults = await untrustedWindow.webContents.executeJavaScript(`Promise.all([
         window.earthOneBrowser.findInPage('EARTHONE_FIND_FIXTURE', 'new').then(() => false, () => true),
         window.earthOneBrowser.stopFindInPage().then(() => false, () => true),
+        window.earthOneBrowser.printToPdf().then(() => false, () => true),
         window.earthOneBrowser.getPermissionState().then(() => false, () => true),
         window.earthOneBrowser.resolvePermissionRequest('forged-request', 'allow').then(() => false, () => true),
         window.earthOneBrowser.revokePermission('https://example.test', 'notifications').then(() => false, () => true),
@@ -847,6 +872,10 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     if (!scriptPopupTabId) throw new Error('用户实际点击触发的 window.open 在 smoke 确认通过后没有成为新活动标签。');
     await waitForTabPath(scriptPopupTabId, '/popup-target', 'Popup Target Fixture');
     const scriptPopupContents = browserEngine.getWebContentsForTesting(scriptPopupTabId);
+    const scriptPopupFocusDeadline = Date.now() + 3000;
+    while (Date.now() < scriptPopupFocusDeadline && !scriptPopupContents.isFocused()) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
     const scriptPopupIsolation = await scriptPopupContents.executeJavaScript(`({
       openerIsAbsent: window.opener === null || typeof window.opener === 'undefined',
       requireType: typeof require,
@@ -924,6 +953,25 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       throw new Error(`target=_blank 目标或焦点状态不正确：${JSON.stringify({ url: anchorPopupUrl.href, active: browserEngine.isActiveTab(anchorPopupTabId), focused: anchorContents.isFocused(), activeTabId: browserEngine.getSessionSnapshot().activeTabId })}`);
     }
 
+    const anchorUiDeadline = Date.now() + 5000;
+    let anchorUiState = null;
+    while (Date.now() < anchorUiDeadline) {
+      anchorUiState = await appContents.executeJavaScript(`(() => {
+        const selected = document.querySelector('[role="tab"][aria-selected="true"]');
+        return {
+          count: document.querySelectorAll('[role="tab"]').length,
+          selected: selected?.getAttribute('aria-label') || ''
+        };
+      })()`);
+      if (anchorUiState.count === tabCountBeforeBlockedPopups + 2 &&
+          anchorUiState.selected === '切换到Popup Target Fixture') break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    if (anchorUiState?.count !== tabCountBeforeBlockedPopups + 2 ||
+        anchorUiState.selected !== '切换到Popup Target Fixture') {
+      throw new Error(`target=_blank popup 未在关闭前同步到标签栏：${JSON.stringify(anchorUiState)}`);
+    }
+
     const popupCloseDeadline = Date.now() + 10000;
     while (Date.now() < popupCloseDeadline && browserEngine.getTabIdsForTesting().length !== 1) {
       await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭Popup Target Fixture标签"]')?.click()`);
@@ -989,6 +1037,70 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     await waitForPage('/one', 'EARTH ONE Fixture One');
 
     const defaultSessionToggle = await waitForSessionToggle();
+
+    if (process.env.EARTH_ONE_BROWSER_PRINT_SMOKE_TEST === '1') {
+      const printFixtureOrigin = new URL(testUrl).origin;
+      await submitAddress(`${printFixtureOrigin}/print`);
+      await waitForPage('/print', 'Local Print Fixture');
+      await new Promise(resolve => setTimeout(resolve, 150));
+      const printButtonDeadline = Date.now() + 5000;
+      let printButtonReady = false;
+      while (Date.now() < printButtonDeadline) {
+        printButtonReady = await appContents.executeJavaScript(`(() => {
+          const button = document.querySelector('[data-browser-print]');
+          return Boolean(button && !button.disabled);
+        })()`);
+        if (printButtonReady) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (!printButtonReady) throw new Error('已加载的活动 Chromium 标签必须显示可用的保存 PDF 操作。');
+
+      const fixtureRequestsBeforePrint = browserFixtureRequestAudit.length;
+      const apiRequestsBeforePrint = browserBookmarkApiRequests;
+      const waitForPrintStatus = async expected => {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const status = await appContents.executeJavaScript(
+            `document.querySelector('[data-browser-print-status]')?.innerText || ''`
+          );
+          if (status.includes(expected)) return status;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        throw new Error(`保存 PDF 状态提示超时：${expected}`);
+      };
+
+      await appContents.executeJavaScript(`document.querySelector('[data-browser-print]').click()`);
+      await waitForPrintStatus('已取消保存 PDF');
+      if (browserPrintSmokeDialogCalls !== 1 || fs.existsSync(browserPrintSmokePath)) {
+        throw new Error('取消系统保存对话框后不得生成或写入 PDF。');
+      }
+
+      const enabledAgainDeadline = Date.now() + 3000;
+      let enabledAgain = false;
+      while (Date.now() < enabledAgainDeadline) {
+        enabledAgain = await appContents.executeJavaScript(
+          `Boolean(document.querySelector('[data-browser-print]') && !document.querySelector('[data-browser-print]').disabled)`
+        );
+        if (enabledAgain) break;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (!enabledAgain) throw new Error('取消后 PDF 工具栏操作应恢复可用。');
+      await appContents.executeJavaScript(`document.querySelector('[data-browser-print]').click()`);
+      const savedStatus = await waitForPrintStatus('PDF 已保存');
+      if (browserPrintSmokeDialogCalls !== 2 || !fs.existsSync(browserPrintSmokePath) ||
+          savedStatus.includes(browserPrintSmokePath)) {
+        throw new Error('成功导出应写入测试所选的本机路径，且不得将保存路径回传给 renderer。');
+      }
+      const generatedPdf = fs.readFileSync(browserPrintSmokePath);
+      if (generatedPdf.subarray(0, 5).toString('ascii') !== '%PDF-') throw new Error('Chromium printToPDF 输出缺少 PDF 文件头。');
+      const pageTree = generatedPdf.toString('latin1').match(/\/Type\s*\/Pages\b[\s\S]{0,256}?\/Count\s+(\d+)/);
+      if (Number(pageTree?.[1]) !== 2) throw new Error(`本地双页夹具的 PDF 页数不正确：${pageTree?.[1] || '未找到页面树'}`);
+      if (browserFixtureRequestAudit.length !== fixtureRequestsBeforePrint || browserBookmarkApiRequests !== apiRequestsBeforePrint) {
+        throw new Error('PDF 生成期间不得触发网页网络请求或书签服务器 API。');
+      }
+      console.log('BROWSER_PRINT_SMOKE_PASS: visible active Chromium only, native-dialog cancellation, local two-page PDF header/page tree, renderer receives no path, untrusted app origin rejected, and no network/API requests during export.');
+    }
+
     const defaultSessionState = await appContents.executeJavaScript('window.earthOneBrowser.getSessionState()');
     if (defaultSessionState.enabled || defaultSessionState.tabs.length !== 0 || defaultSessionToggle !== 'false') {
       throw new Error('未启用设置时应维持单个默认浏览器标签，不恢复任何旧标签。');
@@ -1487,6 +1599,16 @@ app.whenReady().then(async () => {
   if (smokeTest && !testApprovalPath) {
     throw new Error('smoke 下载批准仅支持 127.0.0.1 夹具和系统临时目录。');
   }
+  browserPrintSmokeDialogCalls = 0;
+  browserPrintSmokePath = getSafeSmokePdfPath(
+    smokeTest,
+    smokeUrl,
+    testDownloadDir,
+    process.env.EARTH_ONE_BROWSER_TEST_PDF_PATH
+  );
+  if (process.env.EARTH_ONE_BROWSER_PRINT_SMOKE_TEST === '1' && !browserPrintSmokePath) {
+    throw new Error('PDF smoke 输出必须是系统临时目录中的固定本机 PDF 文件。');
+  }
   const targetUrl = new URL(baseUrl);
   appOrigin = targetUrl.origin;
   if (smokeTest) {
@@ -1605,6 +1727,23 @@ app.whenReady().then(async () => {
     getTestApprovalPath: testApprovalPath || null
   });
 
+  browserPdfExporter = createBrowserPdfExporter({
+    getActiveTarget: () => browserEngine?.getActivePrintTarget?.() || null,
+    isTargetCurrent: target => browserEngine?.isActivePrintTarget?.(target) === true,
+    showSaveDialog: options => {
+      if (browserSmokeTest && process.env.EARTH_ONE_BROWSER_PRINT_SMOKE_TEST === '1') {
+        browserPrintSmokeDialogCalls += 1;
+        if (browserPrintSmokeDialogCalls === 1) return Promise.resolve({ canceled: true });
+        if (browserPrintSmokeDialogCalls === 2 && browserPrintSmokePath) {
+          return Promise.resolve({ canceled: false, filePath: browserPrintSmokePath });
+        }
+        return Promise.resolve({ canceled: true });
+      }
+      return dialog.showSaveDialog(mainWindow, options);
+    },
+    downloadsPath: app.getPath('downloads')
+  });
+
   browserPermissionManager = createBrowserPermissionManager({
     isActiveContext: (contents, origin, details) => browserEngine?.isPermissionContext(contents, origin, details) === true,
     onChange: state => {
@@ -1628,6 +1767,7 @@ app.whenReady().then(async () => {
     browserPermissionManager = null;
     browserEngine?.dispose();
     browserEngine = null;
+    browserPdfExporter = null;
     mainWindow = null;
   });
 

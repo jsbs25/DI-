@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
   clearDownloadRecords: () => ipcRenderer.invoke('browser:clear-download-records'),
   getDownloadStorageStatus: () => ipcRenderer.invoke('browser:get-download-storage-status'),
   showDownloadInFolder: id => ipcRenderer.invoke('browser:show-download-in-folder', id),
+  printToPdf: () => ipcRenderer.invoke('browser:print-to-pdf'),
   setActive: active => ipcRenderer.invoke('browser:set-active', Boolean(active)),
   setBounds: bounds => ipcRenderer.invoke('browser:set-bounds', bounds),
   selectTab: (tabId, url) => ipcRenderer.invoke('browser:select-tab', tabId, url),

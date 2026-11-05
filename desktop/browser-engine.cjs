@@ -484,6 +484,20 @@ function createBrowserEngine({
     return { tabId: activeTabId, entry };
   }
 
+  function getActivePrintTarget() {
+    const active = getActiveEntry();
+    if (!active || !isAllowedNavigation(active.entry.view.webContents.getURL())) return null;
+    return { tabId: active.tabId, contents: active.entry.view.webContents };
+  }
+
+  function isActivePrintTarget(target) {
+    if (!target || typeof target.tabId !== 'string' || !target.contents) return false;
+    const active = getActiveEntry();
+    return Boolean(active && active.tabId === target.tabId &&
+      active.entry.view.webContents === target.contents &&
+      isAllowedNavigation(target.contents.getURL()));
+  }
+
   function findInPage(query, direction) {
     if (typeof query !== 'string' || query.length > 512 || query.includes('\u0000')) {
       return { success: false, error: '查找内容无效或超出长度限制。' };
@@ -589,6 +603,8 @@ function createBrowserEngine({
     getDownloadStorageStatus: () => downloadManager.getStorageStatus(),
     findInPage,
     stopFindInPage,
+    getActivePrintTarget,
+    isActivePrintTarget,
     isPermissionContext,
     isActiveTab,
     getSessionSnapshot,
