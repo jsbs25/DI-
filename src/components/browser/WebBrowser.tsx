@@ -38,9 +38,11 @@ import { BrowserFrame } from './BrowserFrame.tsx';
 import { BrowserPrivacyPanel } from './BrowserPrivacyPanel.tsx';
 import { getJupiterDocumentSource, isRemotePdfUrl, toJupiterDocumentRoute } from './pdfDocumentUrl.ts';
 import { getJupiterImageSource, isRemoteImageUrl, toJupiterImageRoute } from './imageDocumentUrl.ts';
+import { getJupiterAudioSource, isRemoteAudioUrl, toJupiterAudioRoute } from './audioDocumentUrl.ts';
 
 const LazyPdfDocumentViewer = lazy(() => import('./PdfDocumentViewer.tsx').then(module => ({ default: module.PdfDocumentViewer })));
 const LazyImageDocumentViewer = lazy(() => import('./ImageDocumentViewer.tsx').then(module => ({ default: module.ImageDocumentViewer })));
+const LazyAudioDocumentViewer = lazy(() => import('./AudioDocumentViewer.tsx').then(module => ({ default: module.AudioDocumentViewer })));
 
 /**
  * Convert a YouTube / Vimeo watch URL into its embeddable endpoint so videos
@@ -124,7 +126,7 @@ interface WebBrowserProps {
 
 type JupiterEarthContent = {
   id: string;
-  kind: 'article' | 'video' | 'book' | 'post' | 'document' | 'image';
+  kind: 'article' | 'video' | 'book' | 'post' | 'document' | 'image' | 'audio';
   title: string;
   content: string;
   summary?: string;
@@ -171,13 +173,15 @@ const MAX_LOCAL_HISTORY = 500;
 const MAX_RESTORED_SESSION_TABS = 12;
 const JUPITER_HOME_URL = 'jupiter://home';
 
-type JupiterContentRoute = { kind: 'document' | 'image'; id: string } | { kind: Exclude<JupiterEarthContent['kind'], 'document' | 'image'>; id: string };
+type JupiterContentRoute = { kind: 'document' | 'image' | 'audio'; id: string } | { kind: Exclude<JupiterEarthContent['kind'], 'document' | 'image' | 'audio'>; id: string };
 
 function getJupiterContentRoute(value: string): JupiterContentRoute | null {
   const documentUrl = getJupiterDocumentSource(value);
   if (documentUrl) return { kind: 'document', id: documentUrl };
   const imageUrl = getJupiterImageSource(value);
   if (imageUrl) return { kind: 'image', id: imageUrl };
+  const audioUrl = getJupiterAudioSource(value);
+  if (audioUrl) return { kind: 'audio', id: audioUrl };
   try {
     const pathname = new URL(value, window.location.origin).pathname;
     const match = pathname.match(/^\/jupiter\/(read\/(article|book|post)|watch)\/([^/]+)$/);
@@ -896,7 +900,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     const controller = new AbortController();
     setJupiterContent(null);
     setJupiterContentError(null);
-    if (route.kind === 'document' || route.kind === 'image') {
+    if (route.kind === 'document' || route.kind === 'image' || route.kind === 'audio') {
       const title = getExternalAssetTitle(route.id);
       setJupiterContent({
         id: route.id,
@@ -904,10 +908,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         title,
         content: '',
         documentUrl: route.kind === 'document' ? route.id : undefined,
-        mediaUrl: route.kind === 'image' ? route.id : undefined
+        mediaUrl: route.kind === 'image' || route.kind === 'audio' ? route.id : undefined
       });
       setTabs(previous => previous.map(tab => tab.url === activeTab?.url
-        ? { ...tab, title, author: route.kind === 'document' ? 'PDF' : 'Image', readerMode: true }
+        ? { ...tab, title, author: route.kind === 'document' ? 'PDF' : route.kind === 'image' ? 'Image' : 'Audio', readerMode: true }
         : tab));
       setIsJupiterContentLoading(false);
       return;
@@ -995,6 +999,29 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     window.history.replaceState(null, '', viewerRoute);
   };
 
+  const openAudioDocument = (sourceUrl: string) => {
+    const viewerRoute = toJupiterAudioRoute(sourceUrl);
+    if (!viewerRoute) {
+      setBrowserEngineError('音频来源地址无效或不受支持。');
+      return;
+    }
+
+    const title = getExternalAssetTitle(sourceUrl);
+    pushHistory(activeTabId, viewerRoute);
+    recordBrowserVisit(activeTabId, sourceUrl, title);
+    setTabs(previous => previous.map(tab => tab.id === activeTabId
+      ? { ...tab, url: viewerRoute, title, content: '', author: 'Audio', readTime: '', readerMode: true }
+      : tab));
+    setInputUrl(viewerRoute);
+    setSearchResults([]);
+    setLastSearchQuery('');
+    setSearchError(null);
+    setBrowserEngineError(null);
+    setJupiterContentError(null);
+    setIsLoading(false);
+    window.history.replaceState(null, '', viewerRoute);
+  };
+
   const handleNavigate = async (targetUrl: string) => {
     let cleanUrl = targetUrl.trim();
     if (!cleanUrl) return;
@@ -1007,6 +1034,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     const internalImageSource = getJupiterImageSource(cleanUrl);
     if (internalImageSource) {
       openImageDocument(internalImageSource);
+      return;
+    }
+    const internalAudioSource = getJupiterAudioSource(cleanUrl);
+    if (internalAudioSource) {
+      openAudioDocument(internalAudioSource);
       return;
     }
 
@@ -1061,6 +1093,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
     if (isRemoteImageUrl(cleanUrl)) {
       openImageDocument(cleanUrl);
+      return;
+    }
+    if (isRemoteAudioUrl(cleanUrl)) {
+      openAudioDocument(cleanUrl);
       return;
     }
 
@@ -1182,6 +1218,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     if (result.source !== 'earth') {
       if (isRemotePdfUrl(result.url)) openPdfDocument(result.url);
       else if (isRemoteImageUrl(result.url)) openImageDocument(result.url);
+      else if (isRemoteAudioUrl(result.url)) openAudioDocument(result.url);
       else void handleNavigate(result.url);
       return;
     }
@@ -2158,7 +2195,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                           ? '在 JUPITER 内阅读'
                           : isRemotePdfUrl(result.url)
                             ? '在 JUPITER 内阅读 PDF'
-                            : isRemoteImageUrl(result.url) ? '在 JUPITER 内查看图片' : '在 JUPITER 标签页打开'}
+                            : isRemoteImageUrl(result.url)
+                              ? '在 JUPITER 内查看图片'
+                              : isRemoteAudioUrl(result.url) ? '在 JUPITER 内播放音频' : '在 JUPITER 标签页打开'}
                         <ChevronRight className="h-3 w-3" />
                       </span>
                     </button>
@@ -2178,6 +2217,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                 <div className="mx-auto w-full max-w-6xl">
                   <Suspense fallback={<div role="status" className="py-16 text-center text-sm text-slate-400">正在加载图片查看器…</div>}>
                     <LazyImageDocumentViewer sourceUrl={activeJupiterRoute.id} title={jupiterContent?.title || getExternalAssetTitle(activeJupiterRoute.id)} lang={browserLang} />
+                  </Suspense>
+                </div>
+              ) : activeJupiterRoute?.kind === 'audio' ? (
+                <div className="mx-auto w-full max-w-4xl">
+                  <Suspense fallback={<div role="status" className="py-16 text-center text-sm text-slate-400">正在加载音频播放器…</div>}>
+                    <LazyAudioDocumentViewer sourceUrl={activeJupiterRoute.id} title={jupiterContent?.title || getExternalAssetTitle(activeJupiterRoute.id)} lang={browserLang} />
                   </Suspense>
                 </div>
               ) : (
