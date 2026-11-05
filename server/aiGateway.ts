@@ -28,6 +28,51 @@ export interface ChatMessage {
   timestamp?: string;
 }
 
+/**
+ * Local Ollama models (especially 20B-class reasoning models) can take much
+ * longer than a remote API to produce their first token, so give them a
+ * generous ceiling while still bounding runaway requests.
+ */
+const LOCAL_OLLAMA_TIMEOUT_MS = 300_000;
+
+/**
+ * Ollama's default bind is IPv4 127.0.0.1:11434; `localhost` can resolve to ::1
+ * on some hosts, so try IPv4 first and fall back to localhost.
+ */
+const OLLAMA_HOSTS = ['http://127.0.0.1:11434', 'http://localhost:11434'];
+
+/**
+ * Produce a human-friendly display name and a sensible model category for an
+ * auto-detected local Ollama model (the /api/tags name, e.g. "gpt-oss:20b").
+ */
+function describeOllamaModel(name: string): { displayName: string; category: AIModelMeta['category'] } {
+  const lower = name.toLowerCase();
+  const tag = name.includes(':') ? name.slice(name.indexOf(':') + 1) : '';
+
+  if (lower.startsWith('gpt-oss')) {
+    return {
+      displayName: `GPT-OSS ${tag.toUpperCase()} · OpenAI 开源本地推理`,
+      category: 'reasoning'
+    };
+  }
+  if (lower.startsWith('qwen3')) {
+    return { displayName: `通义千问 Qwen3 ${tag} · 本地模型`, category: 'text' };
+  }
+  if (lower.startsWith('qwen')) {
+    return { displayName: `通义千问 Qwen ${tag} · 本地模型`, category: 'text' };
+  }
+  if (lower.startsWith('deepseek-r1')) {
+    return { displayName: `DeepSeek-R1 ${tag} · 本地模型`, category: 'reasoning' };
+  }
+  if (lower.startsWith('llama')) {
+    return { displayName: `Llama ${tag} · 本地模型`, category: 'text' };
+  }
+  if (lower.startsWith('gemma')) {
+    return { displayName: `Gemma ${tag} · 本地模型`, category: 'text' };
+  }
+  return { displayName: `本地 Ollama · ${name}`, category: 'text' };
+}
+
 class AIGateway {
   private models: AIModelMeta[] = [];
   private geminiClient: GoogleGenAI | null = null;
@@ -35,7 +80,7 @@ class AIGateway {
   private geminiKey: string = '';
   private deepseekKey: string = '';
   private customKey: string = '';
-  private customBaseUrl: string = process.env.CUSTOM_BASE_URL || 'http://localhost:11434/v1';
+  private customBaseUrl: string = process.env.CUSTOM_BASE_URL || 'http://127.0.0.1:11434/v1';
   private customModel: string = process.env.CUSTOM_MODEL || 'llama3';
   private localOllamaModels: string[] = [];
 
@@ -179,7 +224,7 @@ class AIGateway {
    */
   public registerCustomProvider(apiKey: string, baseUrl?: string, model?: string): void {
     this.customKey = (apiKey || '').trim();
-    this.customBaseUrl = (baseUrl || 'http://localhost:11434/v1').trim();
+    this.customBaseUrl = (baseUrl || 'http://127.0.0.1:11434/v1').trim();
     this.customModel = (model || 'llama3').trim();
 
     let entry = this.models.find(m => m.id === 'custom');
@@ -194,37 +239,54 @@ class AIGateway {
    * 无需 API Key，探测失败（Ollama 未启动）时静默忽略。
    */
   public async detectLocalOllama(): Promise<void> {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2000);
-      const res = await fetch('http://localhost:11434/api/tags', { signal: controller.signal });
-      clearTimeout(timer);
-      if (!res.ok) return;
-      const data = await res.json();
-      const tags: any[] = Array.isArray(data?.models) ? data.models : [];
-      const names = tags.map((m: any) => m?.name).filter((n: any): n is string => typeof n === 'string' && n.length > 0);
-      this.localOllamaModels = names;
-
-      for (const name of names) {
-        const id = `ollama:${name}`;
-        if (!this.models.some(m => m.id === id)) {
-          this.models.push({
-            id,
-            name: `本地 Ollama · ${name}`,
-            provider: 'Custom',
-            category: 'text',
-            status: 'active',
-            isDefault: false,
-            totalCalls: 0,
-            totalTokens: 0,
-            averageLatencyMs: 0,
-            apiKeyMasked: '本地模型 · 免密直连',
-            isFree: true
-          });
-        }
+    let data: any = null;
+    for (const host of OLLAMA_HOSTS) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch(`${host}/api/tags`, { signal: controller.signal });
+        clearTimeout(timer);
+        if (!res.ok) continue;
+        data = await res.json();
+        break;
+      } catch {
+        // Ollama not reachable on this host; try the next one.
       }
-    } catch {
-      // Ollama 未运行或不可达，静默忽略
+    }
+    if (!data) return;
+
+    const tags: any[] = Array.isArray(data?.models) ? data.models : [];
+    const names = tags.map((m: any) => m?.name).filter((n: any): n is string => typeof n === 'string' && n.length > 0);
+    this.localOllamaModels = names;
+
+    for (const name of names) {
+      const id = `ollama:${name}`;
+      if (!this.models.some(m => m.id === id)) {
+        const { displayName, category } = describeOllamaModel(name);
+        this.models.push({
+          id,
+          name: displayName,
+          provider: 'Custom',
+          category,
+          status: 'active',
+          isDefault: false,
+          totalCalls: 0,
+          totalTokens: 0,
+          averageLatencyMs: 0,
+          apiKeyMasked: '本地模型 · 免密直连',
+          isFree: true
+        });
+      }
+    }
+
+    // Prefer a locally-running model (e.g. gpt-oss:20b) as the default over the
+    // remote free endpoint, so the AI Hub opens on local inference by default.
+    if (names.length > 0) {
+      const preferredLocal = names.find(n => n.toLowerCase().startsWith('gpt-oss')) || names[0];
+      const preferredLocalId = `ollama:${preferredLocal}`;
+      for (const m of this.models) {
+        m.isDefault = m.id === preferredLocalId;
+      }
     }
   }
 
@@ -268,7 +330,7 @@ class AIGateway {
     if (targetModel.id.startsWith('ollama:')) {
       const modelName = targetModel.id.slice('ollama:'.length);
       return this.callOpenAICompatible({
-        baseUrl: this.customBaseUrl || 'http://localhost:11434/v1',
+        baseUrl: this.customBaseUrl || 'http://127.0.0.1:11434/v1',
         apiKey: this.customKey,
         model: modelName,
         prompt,
@@ -279,7 +341,7 @@ class AIGateway {
     // 3. Custom OpenAI-compatible or Ollama providers
     if (targetModel.provider === 'Custom' && targetModel.id === 'custom') {
       return this.callOpenAICompatible({
-        baseUrl: this.customBaseUrl || 'http://localhost:11434/v1',
+        baseUrl: this.customBaseUrl || 'http://127.0.0.1:11434/v1',
         apiKey: this.customKey,
         model: this.customModel || 'llama3',
         prompt,
@@ -505,11 +567,13 @@ class AIGateway {
     messages.push({ role: 'user', content: opts.prompt });
 
     try {
+      const isLocalOllama = opts.baseUrl.includes('localhost:11434') || opts.baseUrl.includes('127.0.0.1:11434');
       const result = await this.openAICompatibleProvider.generate({
         baseUrl: opts.baseUrl,
         apiKey: opts.apiKey,
         model: opts.model,
-        messages: messages as OpenAICompatibleMessage[]
+        messages: messages as OpenAICompatibleMessage[],
+        timeoutMs: isLocalOllama ? LOCAL_OLLAMA_TIMEOUT_MS : undefined
       });
       return {
         success: true,

@@ -246,7 +246,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: text,
-          modelId: 'deepseek-r1-open',
+          modelId: '',
           mode: 'general',
           useSearchGrounding: useSearch,
           history: messages.slice(-6).map(m => ({

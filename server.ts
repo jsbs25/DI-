@@ -520,9 +520,13 @@ app.post('/api/ai/chat', async (req, res) => {
     aiGateway.registerCustomProvider(apiKey, baseUrl, customModel);
   }
 
+  // Ensure locally-running Ollama models are registered before resolving the
+  // selected model, so `ollama:*` IDs never silently fall back to the default.
+  await aiGateway.detectLocalOllama();
+
   const resolvedModelId = apiKey
     ? 'custom'
-    : (modelId || model || 'deepseek-r1-open');
+    : (modelId || model || '');
   const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
   if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
 
@@ -1157,6 +1161,11 @@ async function startServer() {
   });
 
   app.use(vite.middlewares);
+
+  // Register locally-running Ollama models (e.g. gpt-oss:20b) at boot so they
+  // are immediately selectable in the AI Hub without a prior /api/ai/models
+  // round-trip.
+  await aiGateway.detectLocalOllama();
 
   app.listen(PORT, HOST, () => {
     console.log(`🌍 地球计划 Server listening on http://${HOST}:${PORT}`);

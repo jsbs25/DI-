@@ -41,7 +41,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const t = translations[lang];
 
   // Models state
-  const [selectedModel, setSelectedModel] = useState<string>('deepseek-r1-open');
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [availableModels, setAvailableModels] = useState<
     Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string; isFree?: boolean }>
   >([]);
@@ -69,12 +69,12 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     {
       id: 'msg_welcome',
       role: 'assistant',
-      model: 'DeepSeek-R1 (开源深度推理)',
+      model: '本地 Ollama (GPT-OSS 20B)',
       timestamp: '刚刚',
       content: lang === 'zh'
         ? `你好！我是**地球计划（Project Earth）**开放智能助理。
 
-本系统现已直连 **DeepSeek-R1 开源深度推理大模型** 及 **通义千问 Qwen 2.5 / Meta Llama 3.3** 等开源模型，**完全免费直连，无需复杂配置**。
+本系统默认使用**本地 Ollama 大模型（如 GPT-OSS 20B）**作为推理引擎，**完全本地、免密直连、无需联网**；同时保留 DeepSeek-R1 / Qwen / Llama 等开源模型作为备选。
 
 在这里您可以直接和我自由对话：
 - 🔍 **跨学科深度探究**：宇宙演化、地球科学、文明史与宏观哲学
@@ -85,7 +85,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
 随时在此输入您的提问，或点击下方话题开始交谈。`
         : `Greetings! I am the **Project Earth** AI Assistant.
 
-Connected directly to **DeepSeek-R1 Open Reasoning Engine**, **Qwen 2.5**, and **Llama 3.3** open-source models with zero barriers and zero paywalls.
+Powered by your **local Ollama model (e.g. GPT-OSS 20B)** as the default engine—fully local, keyless, and private; DeepSeek-R1, Qwen, and Llama remain available as fallbacks.
 
 Feel free to chat with me directly:
 - 🌌 **Cosmology & Planetary Science**: Orbital mechanics, Earth ecology, overview effect
@@ -104,10 +104,10 @@ Ask me anything below to begin!`
       .then(d => {
         if (d.success && Array.isArray(d.models)) {
           setAvailableModels(d.models);
-          const activeDefault = d.models.find((m: any) => m.id === 'deepseek-r1-open') ||
+          const activeDefault = d.models.find((m: any) => m.id.startsWith('ollama:')) ||
             d.models.find((m: any) => m.isDefault) ||
             d.models[0];
-          if (activeDefault && !selectedModel) {
+          if (activeDefault) {
             setSelectedModel(activeDefault.id);
           }
         }
@@ -315,10 +315,17 @@ Ask me anything below to begin!`
                 <span className="font-bold text-sm tracking-wide text-white truncate">
                   {lang === 'zh' ? '地球计划 AI 智能对话' : 'Project Earth AI Dialogue'}
                 </span>
-                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse" />
-                  开源直连 · 免配置
-                </span>
+                {availableModels.some(m => m.id.startsWith('ollama:')) ? (
+                  <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse" />
+                    {lang === 'zh' ? '本地 Ollama 已连接' : 'Local Ollama Online'}
+                  </span>
+                ) : (
+                  <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mr-1" />
+                    {lang === 'zh' ? '本地 Ollama 未连接' : 'Local Ollama Offline'}
+                  </span>
+                )}
               </div>
             </div>
           </div>
