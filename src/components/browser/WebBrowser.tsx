@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import {
   Globe,
   ArrowLeft,
@@ -36,6 +36,9 @@ import {
 import { Language } from '../../types/index.ts';
 import { BrowserFrame } from './BrowserFrame.tsx';
 import { BrowserPrivacyPanel } from './BrowserPrivacyPanel.tsx';
+import { getJupiterDocumentSource, isRemotePdfUrl, toJupiterDocumentRoute } from './pdfDocumentUrl.ts';
+
+const LazyPdfDocumentViewer = lazy(() => import('./PdfDocumentViewer.tsx').then(module => ({ default: module.PdfDocumentViewer })));
 
 /**
  * Convert a YouTube / Vimeo watch URL into its embeddable endpoint so videos
@@ -119,7 +122,7 @@ interface WebBrowserProps {
 
 type JupiterEarthContent = {
   id: string;
-  kind: 'article' | 'video' | 'book' | 'post';
+  kind: 'article' | 'video' | 'book' | 'post' | 'document';
   title: string;
   content: string;
   summary?: string;
@@ -128,6 +131,7 @@ type JupiterEarthContent = {
   mediaType?: string;
   thumbnailUrl?: string;
   duration?: string;
+  documentUrl?: string;
   chapters?: Array<{ title: string; content: string }>;
   createdAt?: string;
 };
@@ -165,7 +169,11 @@ const MAX_LOCAL_HISTORY = 500;
 const MAX_RESTORED_SESSION_TABS = 12;
 const JUPITER_HOME_URL = 'jupiter://home';
 
-function getJupiterContentRoute(value: string): { kind: JupiterEarthContent['kind']; id: string } | null {
+type JupiterContentRoute = { kind: 'document'; id: string } | { kind: Exclude<JupiterEarthContent['kind'], 'document'>; id: string };
+
+function getJupiterContentRoute(value: string): JupiterContentRoute | null {
+  const documentUrl = getJupiterDocumentSource(value);
+  if (documentUrl) return { kind: 'document', id: documentUrl };
   try {
     const pathname = new URL(value, window.location.origin).pathname;
     const match = pathname.match(/^\/jupiter\/(read\/(article|book|post)|watch)\/([^/]+)$/);
@@ -174,6 +182,16 @@ function getJupiterContentRoute(value: string): { kind: JupiterEarthContent['kin
     return { kind, id: decodeURIComponent(match[3]) };
   } catch {
     return null;
+  }
+}
+
+function getPdfTitle(sourceUrl: string): string {
+  try {
+    const url = new URL(sourceUrl);
+    const filename = decodeURIComponent(url.pathname.split('/').pop() || '');
+    return filename || url.hostname;
+  } catch {
+    return sourceUrl;
   }
 }
 
@@ -528,6 +546,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const engineManagedTabIdsRef = useRef<Set<string>>(new Set());
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+  const activeJupiterRoute = activeTab ? getJupiterContentRoute(activeTab.url) : null;
   const activeBrowserConnection = browserEngine && !activeTab?.readerMode && browserEngineState?.tabId === activeTabId
     ? browserEngineState
     : null;
@@ -873,6 +892,22 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     const controller = new AbortController();
     setJupiterContent(null);
     setJupiterContentError(null);
+    if (route.kind === 'document') {
+      const title = getPdfTitle(route.id);
+      setJupiterContent({
+        id: route.id,
+        kind: 'document',
+        title,
+        content: '',
+        documentUrl: route.id
+      });
+      setTabs(previous => previous.map(tab => tab.url === activeTab?.url
+        ? { ...tab, title, author: 'PDF', readerMode: true }
+        : tab));
+      setIsJupiterContentLoading(false);
+      return;
+    }
+
     setIsJupiterContentLoading(true);
     fetch(`/api/jupiter/content/${route.kind}/${encodeURIComponent(route.id)}`, { signal: controller.signal })
       .then(async response => {
@@ -909,9 +944,38 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       .catch(() => {});
   }, []);
 
+  const openPdfDocument = (sourceUrl: string) => {
+    const viewerRoute = toJupiterDocumentRoute(sourceUrl);
+    if (!viewerRoute) {
+      setBrowserEngineError('PDF 来源地址无效或不受支持。');
+      return;
+    }
+
+    const title = getPdfTitle(sourceUrl);
+    pushHistory(activeTabId, viewerRoute);
+    recordBrowserVisit(activeTabId, sourceUrl, title);
+    setTabs(previous => previous.map(tab => tab.id === activeTabId
+      ? { ...tab, url: viewerRoute, title, content: '', author: 'PDF', readTime: '', readerMode: true }
+      : tab));
+    setInputUrl(viewerRoute);
+    setSearchResults([]);
+    setLastSearchQuery('');
+    setSearchError(null);
+    setBrowserEngineError(null);
+    setJupiterContentError(null);
+    setIsLoading(false);
+    window.history.replaceState(null, '', viewerRoute);
+  };
+
   const handleNavigate = async (targetUrl: string) => {
     let cleanUrl = targetUrl.trim();
     if (!cleanUrl) return;
+
+    const internalPdfSource = getJupiterDocumentSource(cleanUrl);
+    if (internalPdfSource) {
+      openPdfDocument(internalPdfSource);
+      return;
+    }
 
     // Bare hosts with ports (for example localhost:3000) are URLs, not schemes.
     const isBareHttpHost = /^(?:localhost(?::\d+)?|(?:[\w-]+\.)+[\w-]+(?::\d+)?|[\w-]+:\d+|\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?|\[[\da-f:]+\](?::\d+)?)(?:[/?#]|$)/i.test(cleanUrl);
@@ -956,6 +1020,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
     if (!/^https?:\/\//i.test(cleanUrl)) {
       cleanUrl = 'https://' + cleanUrl;
+    }
+
+    if (isRemotePdfUrl(cleanUrl)) {
+      openPdfDocument(cleanUrl);
+      return;
     }
 
     setIsLoading(true);
@@ -1074,7 +1143,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
   const openJupiterResult = (result: JupiterSearchResult) => {
     if (result.source !== 'earth') {
-      void handleNavigate(result.url);
+      if (isRemotePdfUrl(result.url)) openPdfDocument(result.url);
+      else void handleNavigate(result.url);
       return;
     }
 
@@ -2046,7 +2116,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                       <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-amber-100 sm:text-lg">{result.title}</h2>
                       {result.snippet && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-400 sm:text-sm">{result.snippet}</p>}
                       <span className="mt-3 inline-flex items-center gap-1 text-[11px] text-amber-200/70">
-                        {result.source === 'earth' ? '在 JUPITER 内阅读' : '在 JUPITER 标签页打开'}
+                        {result.source === 'earth'
+                          ? '在 JUPITER 内阅读'
+                          : isRemotePdfUrl(result.url) ? '在 JUPITER 内阅读 PDF' : '在 JUPITER 标签页打开'}
                         <ChevronRight className="h-3 w-3" />
                       </span>
                     </button>
@@ -2056,6 +2128,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
             </div>
           ) : activeTab ? (
             isJupiterContentUrl(activeTab.url) ? (
+              activeJupiterRoute?.kind === 'document' ? (
+                <div className="mx-auto w-full max-w-5xl">
+                  <Suspense fallback={<div role="status" className="py-16 text-center text-sm text-slate-400">正在加载 PDF 查看器…</div>}>
+                    <LazyPdfDocumentViewer sourceUrl={activeJupiterRoute.id} title={jupiterContent?.title || getPdfTitle(activeJupiterRoute.id)} lang={browserLang} />
+                  </Suspense>
+                </div>
+              ) : (
               <article className="mx-auto w-full max-w-4xl rounded-3xl border border-white/[0.07] bg-[#0d151d] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-10">
                 {isJupiterContentLoading ? (
                   <div className="py-20 text-center text-sm text-slate-400" role="status">正在从 EARTH 内容索引加载…</div>
@@ -2106,6 +2185,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                   </>
                 ) : null}
               </article>
+              )
             ) : activeTab.url === JUPITER_HOME_URL ? (
               <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-4 py-16 text-center">
                 <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] text-amber-100">
