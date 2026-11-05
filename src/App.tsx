@@ -37,6 +37,7 @@ import { HolographicAICompanion } from './components/ai/HolographicAICompanion.t
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 import { SolarSystemDirectory } from './universe/SolarSystemDirectory.tsx';
 import { MoonAcademy } from './universe/MoonAcademy.tsx';
+import { VenusCreativeStudio } from './universe/VenusCreativeStudio.tsx';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('zh');
@@ -539,6 +540,15 @@ export default function App() {
           <MoonAcademy
             lang={lang}
             currentUser={currentUser}
+            onBack={() => setCurrentTab('universe')}
+          />
+        )}
+
+        {currentTab === 'venus' && (
+          <VenusCreativeStudio
+            articles={articles}
+            lang={lang}
+            onCreateArticle={handleCreateArticle}
             onBack={() => setCurrentTab('universe')}
           />
         )}

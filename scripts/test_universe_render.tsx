@@ -4,6 +4,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { PlanetTelemetryDrawer } from '../src/universe/PlanetTelemetryDrawer.tsx';
 import { CELESTIAL_BODIES, getCelestialBodyById } from '../src/universe/celestialBodies.ts';
 import { SolarSystemDirectory } from '../src/universe/SolarSystemDirectory.tsx';
+import { getPlanetEcosystem } from '../src/universe/planetEcosystems.ts';
+import { VenusCreativeStudio } from '../src/universe/VenusCreativeStudio.tsx';
 
 // Static markup checks only: no browser input, focus/keyboard, camera or API behavior is exercised.
 let passed = 0;
@@ -53,6 +55,14 @@ for (const body of CELESTIAL_BODIES) {
   check(directory.includes(body.chineseName) && directory.includes(body.name), `${body.id}: appears as a bilingual celestial entry`);
 }
 check(directory.includes('地球是人类主世界'), 'Directory preserves Earth as humanity’s main world');
-check(directory.includes('生态建设中'), 'Unavailable planet ecosystems are labeled honestly');
+check(directory.includes('进入创作工坊'), 'Venus is presented as an available creative ecosystem');
+check(!directory.includes('生态建设中'), 'Implemented planetary ecosystems are not mislabeled as under construction');
+check(getPlanetEcosystem('venus')?.available === true, 'Venus is available only through its implemented creative ecosystem');
+const venusStudio = renderToStaticMarkup(
+  <VenusCreativeStudio articles={[]} lang="zh" onCreateArticle={() => {}} onBack={noop} />
+);
+check(venusStudio.includes('EARTH ONE · VENUS'), 'Venus opens its own creative-studio experience');
+check(venusStudio.includes('撰写长文'), 'Venus reuses the existing creator publishing flow');
+check(venusStudio.includes('没有独立音乐库'), 'Venus honestly explains that it has no standalone music catalog');
 
 console.log(`Universe static-render regression: ${passed} passed, 0 failed (not a browser/keyboard test).`);

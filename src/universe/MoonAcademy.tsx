@@ -11,7 +11,7 @@ interface MoonAcademyProps {
 
 export const MoonAcademy: React.FC<MoonAcademyProps> = ({ lang, currentUser, onBack }) => (
   <div className="min-h-full bg-[#030712]">
-    <header className="border-b border-white/[0.08] bg-[radial-gradient(ellipse_at_top_right,rgba(125,155,255,0.12),transparent_55%)] px-4 py-8 sm:px-8 lg:px-12">
+    <header className="border-b border-white/[0.08] bg-[radial-gradient(ellipse_at_top_right,rgba(125,155,255,0.12),transparent_55%)] px-4 pb-8 pt-24 sm:px-8 lg:px-12">
       <div className="mx-auto max-w-7xl">
         <button
           type="button"
