@@ -90,7 +90,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   const [autoRotate, setAutoRotate] = useState(true);
   const [showBeacons, setShowBeacons] = useState(true);
   const [showISS, setShowISS] = useState(true);
-  const [showEarthquakes, setShowEarthquakes] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [appsExpanded, setAppsExpanded] = useState(false);
   const [hoveredNode, setHoveredNode] = useState<GlobeUserNode | null>(null);
@@ -105,15 +104,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     visibility: string;
     timestamp: number;
   } | null>(null);
-  const [earthquakes, setEarthquakes] = useState<Array<{
-    id: string;
-    title: string;
-    mag: number;
-    place: string;
-    lat: number;
-    lng: number;
-    depthKm: number;
-  }>>([]);
 
   // Mutable Three.js loop state
   const stateRef = useRef({
@@ -127,12 +117,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     connectionArcs: null as { update: (elapsed: number) => void } | null,
     beaconGroup: null as THREE.Group | null,
     issGroup: null as THREE.Group | null,
-    earthquakeGroup: null as THREE.Group | null,
     interactiveMeshes: [] as { mesh: THREE.Object3D; data: GlobeUserNode }[],
     autoRotate: true,
     showBeacons: true,
     showISS: true,
-    showEarthquakes: true,
     targetSphericalRotation: null as { x: number; y: number } | null,
     frameId: 0
   });
@@ -156,13 +144,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     }
   }, [showISS]);
 
-  useEffect(() => {
-    stateRef.current.showEarthquakes = showEarthquakes;
-    if (stateRef.current.earthquakeGroup) {
-      stateRef.current.earthquakeGroup.visible = showEarthquakes;
-    }
-  }, [showEarthquakes]);
-
   // Real-time telemetry fetching (ISS orbit & USGS earthquakes)
   useEffect(() => {
     let isMounted = true;
@@ -180,29 +161,12 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       }
     };
 
-    const fetchEarthquakes = async () => {
-      try {
-        const res = await fetch('/api/telemetry/earthquakes');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (isMounted && Array.isArray(data.features)) {
-          setEarthquakes(data.features.slice(0, 8));
-        }
-      } catch {
-        // network silent fallback
-      }
-    };
-
     fetchISS();
-    fetchEarthquakes();
-
     const issInterval = setInterval(fetchISS, 5000);
-    const eqInterval = setInterval(fetchEarthquakes, 60000);
 
     return () => {
       isMounted = false;
       clearInterval(issInterval);
-      clearInterval(eqInterval);
     };
   }, []);
 
@@ -214,48 +178,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     stateRef.current.issGroup.position.copy(pos);
     stateRef.current.issGroup.lookAt(0, 0, 0);
   }, [issData]);
-
-  // Update Earthquake markers in 3D scene
-  useEffect(() => {
-    const group = stateRef.current.earthquakeGroup;
-    if (!group) return;
-
-    while (group.children.length > 0) {
-      group.remove(group.children[0]);
-    }
-
-    const earthRadius = 4.5;
-    earthquakes.forEach((quake, idx) => {
-      const pos = latLngToVector3(quake.lat, quake.lng, earthRadius * 1.008);
-      const normal = pos.clone().normalize();
-      const qGroup = new THREE.Group();
-      qGroup.position.copy(pos);
-      qGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
-
-      const magColor = quake.mag >= 5.5 ? 0xef4444 : quake.mag >= 4.5 ? 0xf59e0b : 0x06b6d4;
-      const ringRadius = 0.08 + Math.min(quake.mag * 0.03, 0.25);
-
-      const ringGeo = new THREE.RingGeometry(ringRadius * 0.4, ringRadius, 24);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: magColor,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.85
-      });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.rotation.x = Math.PI / 2;
-      qGroup.add(ring);
-
-      const dotGeo = new THREE.SphereGeometry(0.035, 12, 12);
-      const dotMat = new THREE.MeshBasicMaterial({ color: magColor });
-      const dot = new THREE.Mesh(dotGeo, dotMat);
-      dot.position.y = 0.02;
-      qGroup.add(dot);
-
-      qGroup.userData = { pulseOffset: idx * 0.8 };
-      group.add(qGroup);
-    });
-  }, [earthquakes]);
 
   // Smoothly rotate the earth to a country or citizen coordinate.
   // Camera stays managed by OrbitControls (no zoom), so we only rotate the
@@ -543,12 +465,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     issGroup.visible = stateRef.current.showISS;
     stateRef.current.issGroup = issGroup;
 
-    // 5.6 Real-Time USGS Earthquakes Layer
-    const earthquakeGroup = new THREE.Group();
-    earthGroup.add(earthquakeGroup);
-    earthquakeGroup.visible = stateRef.current.showEarthquakes;
-    stateRef.current.earthquakeGroup = earthquakeGroup;
-
     // 6. ORBIT CONTROLS — drag to rotate, no zoom, damped, limited pitch
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableZoom = false;         // disable scroll/pinch zoom
@@ -696,14 +612,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       }
 
       // Earthquake ring pulsations
-      if (stateRef.current.earthquakeGroup && stateRef.current.earthquakeGroup.visible) {
-        stateRef.current.earthquakeGroup.children.forEach(child => {
-          const offset = (child.userData as { pulseOffset?: number })?.pulseOffset || 0;
-          const scale = 1 + 0.22 * Math.sin(elapsed * 3.5 + offset);
-          child.scale.set(scale, scale, scale);
-        });
-      }
-
       // ISS beacon ring pulsation
       if (stateRef.current.issGroup && stateRef.current.issGroup.visible) {
         const ring = stateRef.current.issGroup.children[3];
@@ -754,155 +662,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         </div>
       )}
 
-      <aside className="absolute bottom-6 left-3 top-4 z-20 hidden w-[174px] flex-col rounded-[26px] border border-slate-700/70 bg-[#071020]/85 p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl md:flex">
-        <div className="flex items-center gap-2 border-b border-slate-800/90 px-2 pb-3 pt-1">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-blue-400/30 bg-blue-500/15 text-blue-300 shadow-[0_0_24px_rgba(37,99,235,.24)]">
-            <Globe2 className="h-5 w-5" />
-          </span>
-          <div className="min-w-0">
-            <div className="text-[11px] font-bold tracking-[.12em] text-white">地球计划</div>
-            <div className="text-[9px] text-slate-400">One Universe. One World.</div>
-          </div>
-        </div>
-
-        <nav aria-label="Earth One navigation" className="mt-3 flex flex-col gap-1">
-          {[
-            { id: 'globe', label: t.globeTab, icon: <Globe2 className="h-4 w-4" /> },
-            { id: 'feed', label: t.feedTab, icon: <Compass className="h-4 w-4" /> },
-            { id: 'universe', label: t.universeTab, icon: <Orbit className="h-4 w-4" /> },
-            { id: 'community', label: t.communityTab, icon: <Users2 className="h-4 w-4" /> },
-            { id: 'knowledge', label: t.knowledgeTab, icon: <Network className="h-4 w-4" /> },
-            { id: 'library', label: t.digitalLibrary, icon: <BookOpen className="h-4 w-4" /> }
-          ].map(item => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onSelectTab(item.id)}
-              aria-current={item.id === 'globe' ? 'page' : undefined}
-              className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-[11px] font-semibold transition-all ${item.id === 'globe' ? 'bg-gradient-to-r from-blue-600/90 to-blue-500/50 text-white shadow-lg shadow-blue-900/40 ring-1 ring-blue-300/30' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'}`}
-            >
-              <span className={item.id === 'globe' ? 'text-blue-100' : 'text-slate-400'}>{item.icon}</span>
-              <span className="truncate">{item.label}</span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="mt-1">
-          <button
-            type="button"
-            onClick={() => setAppsExpanded(open => !open)}
-            aria-expanded={appsExpanded}
-            className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-[11px] font-semibold text-slate-300 transition-colors hover:bg-slate-800/80 hover:text-white"
-          >
-            <Sparkles className="h-4 w-4 text-cyan-300" />
-            <span className="flex-1">{t.apps}</span>
-            <ChevronRight className={`h-3.5 w-3.5 transition-transform ${appsExpanded ? 'rotate-90' : ''}`} />
-          </button>
-          {appsExpanded && (
-            <div className="ml-3 mt-1 flex flex-col gap-0.5 border-l border-slate-700 pl-2">
-              {[
-                { id: 'chat', label: t.globalMessenger },
-                { id: 'aihub', label: t.aiHubTab },
-                { id: 'browser', label: t.webBrowser },
-                { id: 'crawler', label: t.crawlerCenter },
-                { id: 'creator', label: t.creatorArticles },
-                { id: 'video', label: t.worldVideoCenter },
-                { id: 'game', label: t.globalGameCenter }
-              ].map(item => (
-                <button key={item.id} type="button" onClick={() => onSelectTab(item.id)} className="rounded-lg px-2 py-1.5 text-left text-[9px] text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white">
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-auto overflow-hidden rounded-2xl border border-blue-400/20 bg-[radial-gradient(ellipse_at_70%_20%,rgba(37,99,235,.35),transparent_54%),linear-gradient(145deg,#101e39,#070b17_75%)] p-3">
-          <div className="mb-2 flex h-12 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,.5),transparent_55%),radial-gradient(circle_at_20%_10%,#fff_0_1px,transparent_1.5px),radial-gradient(circle_at_74%_30%,#93c5fd_0_1px,transparent_1.5px),#050914]">
-            <Orbit className="h-7 w-7 text-blue-300 drop-shadow-[0_0_14px_rgba(96,165,250,.9)]" />
-          </div>
-          <p className="text-[10px] font-semibold text-white">{t.universeTab}</p>
-          <p className="mt-1 text-[9px] leading-relaxed text-slate-400">{t.vastHome}</p>
-          <button type="button" onClick={onExploreUniverse} className="mt-2 inline-flex items-center gap-1 text-[9px] font-semibold text-cyan-300 hover:text-white">
-            {t.learnMore}<ArrowRight className="h-3 w-3" />
-          </button>
-        </div>
-      </aside>
-
       {/* ============================================================== */}
-      {/* 2. WORLD-CLASS USER HERO OVERLAY                               */}
+      {/* 2. PURE 3D DIGITAL GLOBE (Clean, Unobstructed Viewport)        */}
       {/* ============================================================== */}
-      <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-[220px] lg:pl-[220px] flex flex-col justify-start md:justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
-        {/* Left Hero Title & CTA */}
-        <div className="max-w-xl pointer-events-auto">
-          <h1 className="font-extrabold text-3xl sm:text-6xl md:text-7xl tracking-tight text-white font-sans drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]">
-            {lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}
-          </h1>
-
-          {showFirstUseHint && (
-            <div className="mt-3 flex max-w-md items-start gap-2 rounded-xl border border-cyan-900/70 bg-slate-950/75 px-3 py-2 text-xs leading-relaxed text-cyan-100/90 shadow-lg backdrop-blur-md">
-              <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
-              <p className="flex-1">{t.firstUseHint}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowFirstUseHint(false);
-                  try { localStorage.setItem('earth-one-globe-hint-dismissed', '1'); } catch {}
-                }}
-                className="rounded-md p-0.5 text-slate-400 hover:bg-slate-800 hover:text-white"
-                aria-label={t.dismissFirstUseHint}
-                title={t.dismissFirstUseHint}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* Start Exploring Action Button */}
-          <div className="mt-4 sm:mt-6 flex flex-wrap items-center gap-2 sm:gap-3">
-            <button
-              onClick={onExploreUniverse}
-              className="inline-flex items-center space-x-2 sm:space-x-3 px-4 sm:px-8 py-2.5 sm:py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-xs sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
-            >
-              <span>{t.startExploring}</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
-            </button>
-
-            {onExploreCommunity && (
-              <button
-                onClick={onExploreCommunity}
-                className="inline-flex items-center space-x-2 px-3 sm:px-5 py-2.5 sm:py-3.5 rounded-full bg-slate-900/80 hover:bg-slate-800/90 border border-slate-700/80 text-slate-200 text-xs sm:text-sm font-medium backdrop-blur-md cursor-pointer transition-all hover:text-white"
-              >
-                <Users2 className="w-4 h-4 text-emerald-300" />
-                <span>{t.communityTab}</span>
-              </button>
-            )}
-          </div>
-
-          {/* Mobile controls stay in document flow instead of covering the stats. */}
-          <div className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden" aria-label={t.globeControls}>
-            <button onClick={handleToggleExplore} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={isZoomedIn ? t.zoomOut : t.inspectEarth} title={isZoomedIn ? t.zoomOut : t.inspectEarth}>
-              <Orbit className="h-4 w-4" />
-            </button>
-            <button onClick={() => setShowBeacons(!showBeacons)} className={`rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 ${showBeacons ? 'text-cyan-300' : 'text-slate-500'}`} aria-label={t.toggleBeacons} title={t.toggleBeacons}>
-              <Network className="h-4 w-4" />
-            </button>
-            <button onClick={() => setAutoRotate(!autoRotate)} className={`rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 ${autoRotate ? 'text-cyan-300' : 'text-slate-500'}`} aria-label={t.autoRotation} title={t.autoRotation}>
-              <RotateCw className="h-4 w-4" />
-            </button>
-            <button onClick={() => setSoundEnabled(!soundEnabled)} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={soundEnabled ? t.mute : t.playCosmicSound} title={soundEnabled ? t.mute : t.playCosmicSound}>
-              {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-            </button>
-            {onExploreUniverse && (
-              <button onClick={onExploreUniverse} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-purple-300" aria-label={t.solarSystemEngine} title={t.solarSystemEngine}>
-                <Sparkles className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />
-
+      <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 flex flex-col justify-end pb-8 pointer-events-none">
         {/* Ultra-Clean Floating Aerospace Telemetry Capsule (Sleek, Unobstructed, High-Tech) */}
         <div className="w-full flex justify-center pointer-events-auto pt-4 sm:pt-6">
           <div className="w-full max-w-4xl p-2.5 sm:p-3 rounded-2xl bg-slate-950/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-3 text-xs">

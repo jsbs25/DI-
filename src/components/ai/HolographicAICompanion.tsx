@@ -310,9 +310,37 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         speak(replyText, newMsgId);
       }
     } catch {
+      // 离线状态自动兜底：浏览器直接调用本地电脑运行的 Ollama (127.0.0.1:11434)
+      try {
+        const localRes = await fetch('http://127.0.0.1:11434/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'qwen',
+            messages: [{ role: 'user', content: text }],
+            stream: false
+          })
+        });
+        if (localRes.ok) {
+          const lData = await localRes.json();
+          const localReply = lData?.message?.content || lData?.response || '';
+          if (localReply) {
+            const newMsgId = `ai_${Date.now()}`;
+            setMessages(prev => [
+              ...prev,
+              { id: newMsgId, sender: 'ai', text: localReply, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+            ]);
+            if (voiceEnabled || activeTab === 'voice') speak(localReply, newMsgId);
+            return;
+          }
+        }
+      } catch {
+        // fall through
+      }
+
       const fallback = isZh
-        ? '星际网络节点通讯稍有延迟，已为你恢复就绪状态。请再试一次。'
-        : 'Network transient. System ready for retry.';
+        ? '当前处于无网络离线状态。已自动配置本地电脑 Ollama 引擎，请确认本地终端已运行 `ollama serve` (127.0.0.1:11434)。'
+        : 'Offline mode active. Please ensure local `ollama serve` is running at 127.0.0.1:11434.';
       setMessages(prev => [
         ...prev,
         {

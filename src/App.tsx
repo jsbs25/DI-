@@ -39,9 +39,10 @@ import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 export default function App() {
   const [lang, setLang] = useState<Language>('zh');
   const t = translations[lang] || translations.zh;
-  const [currentTab, setCurrentTab] = useState<string>(() =>
-    new URLSearchParams(window.location.search).get('module') === 'browser' ? 'browser' : 'globe'
-  );
+  const [currentTab, setCurrentTab] = useState<string>(() => {
+    const mod = new URLSearchParams(window.location.search).get('module');
+    return mod || 'browser';
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [browserInitialQuery, setBrowserInitialQuery] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);

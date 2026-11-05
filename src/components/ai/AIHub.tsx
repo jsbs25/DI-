@@ -97,7 +97,7 @@ Ask me anything below to begin!`
     }
   ]);
 
-  // Load models on mount
+  // Load models on mount (server gateway + direct local Ollama probe)
   useEffect(() => {
     fetch('/api/ai/models')
       .then(r => r.json())
@@ -111,6 +111,30 @@ Ask me anything below to begin!`
           if (activeDefault) {
             setSelectedModel(activeDefault.id);
           }
+        }
+      })
+      .catch(() => {});
+
+    // 浏览器直接探测本地电脑上的 Ollama (127.0.0.1:11434)，确保无网络时亦能直连
+    fetch('http://127.0.0.1:11434/api/tags')
+      .then(r => r.json())
+      .then(data => {
+        if (data?.models && Array.isArray(data.models) && data.models.length > 0) {
+          const localList = data.models.map((m: any, idx: number) => ({
+            id: `ollama:${m.name}`,
+            name: `本地电脑 · ${m.name} [离线直连]`,
+            status: 'active',
+            isDefault: idx === data.models.length - 1,
+            apiKeyMasked: '127.0.0.1:11434 免密离线',
+            isFree: true
+          }));
+          setAvailableModels(prev => {
+            const ids = new Set(prev.map(p => p.id));
+            const newOnes = localList.filter((l: any) => !ids.has(l.id));
+            return [...newOnes, ...prev];
+          });
+          const chatOllama = localList[localList.length - 1];
+          if (chatOllama) setSelectedModel(chatOllama.id);
         }
       })
       .catch(() => {});
@@ -246,12 +270,44 @@ Ask me anything below to begin!`
         speakText(replyContent);
       }
     } catch {
+      // 离线/无网络保护：浏览器直接尝试直连本地电脑运行的 Ollama (127.0.0.1:11434)
+      try {
+        const rawModel = selectedModel.startsWith('ollama:') ? selectedModel.slice(7) : (customModel || 'llama3');
+        const localRes = await fetch('http://127.0.0.1:11434/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: rawModel,
+            messages: [{ role: 'user', content: textToSend }],
+            stream: false
+          })
+        });
+        if (localRes.ok) {
+          const lData = await localRes.json();
+          const localReply = lData?.message?.content || lData?.response || '';
+          if (localReply) {
+            const aiMsg: Message = {
+              id: `ai_${Date.now()}`,
+              role: 'assistant',
+              content: localReply,
+              model: `本地 Ollama (${rawModel}) · 离线直连`,
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+            setMessages(prev => [...prev, aiMsg]);
+            if (voiceOutput) speakText(localReply);
+            return;
+          }
+        }
+      } catch {
+        // fall through
+      }
+
       setMessages(prev => [
         ...prev,
         {
           id: `ai_err_${Date.now()}`,
           role: 'assistant',
-          content: '与地球计划智能节点的网络连接受阻，请检查网络后重试。',
+          content: '当前为离线/无网络状态。已自动配置本地电脑 Ollama 双模型协同，请确保本地电脑已运行 `ollama serve` (127.0.0.1:11434) 即可完全离线对话。',
           model: selectedModel,
           timestamp: nowTime
         }

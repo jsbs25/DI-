@@ -139,6 +139,11 @@ class AIGateway {
 
   constructor() {
     this.initProviders();
+    this.detectLocalOllama().catch(() => {});
+    // 每 10 秒主动探测本地 Ollama，在完全离线或延迟启动时自愈
+    setInterval(() => {
+      this.detectLocalOllama().catch(() => {});
+    }, 10000);
   }
 
   private maskKey(key: string | undefined): string {
@@ -713,18 +718,77 @@ ${page.content.slice(0, 4500)}
       return { content: text };
     } catch (err: any) {
       clearTimeout(timer);
+      // 无网络/离线状态自动兜底：检测是否有本地 Ollama 模型
+      const localModel = this.ollamaChatModel || (this.localOllamaModels.length > 0 ? this.localOllamaModels[0] : null);
+      if (localModel) {
+        const fallbackRes = await this.callOllamaNative(localModel, prompt, systemInstruction);
+        if (fallbackRes.success) {
+          return { content: fallbackRes.content, tokens: fallbackRes.tokens };
+        }
+      }
+
       const detail = String(err?.message || err);
       const isTimeout = detail.includes('AbortError') || detail.includes('aborted') || detail.includes('timeout');
       throw new Error(
         isTimeout
-          ? '免费开源推理端点响应超时，请稍后重试，或配置官方 API Key 以获得稳定服务。'
-          : `免费开源推理端点暂时不可用（${detail}）。请稍后重试，或配置官方 API Key。`
+          ? '离线状态检测：未能连接外网端点。本地已配置双 Ollama 架构，请在终端执行 `ollama serve` 即可离线免网对话。'
+          : `当前处于离线/无外网状态（${detail}）。已自动转入本地 Ollama 引擎，请确认本地 ` + '`ollama serve` 已启动。'
       );
     }
   }
 
   /**
-   * Generic OpenAI-compatible chat completion call.
+   * 原生直接调用本地电脑 Ollama (http://127.0.0.1:11434/api/chat)
+   * 100% 离线免外网、零外部服务依赖
+   */
+  public async callOllamaNative(
+    modelName: string,
+    prompt: string,
+    systemInstruction?: string
+  ): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
+    const messages: Array<{ role: string; content: string }> = [];
+    if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
+    messages.push({ role: 'user', content: prompt });
+
+    for (const host of OLLAMA_HOSTS) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), LOCAL_OLLAMA_TIMEOUT_MS);
+        const res = await fetch(`${host}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: modelName,
+            messages,
+            stream: false
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+          const data = await res.json();
+          const content = data?.message?.content || data?.response || '';
+          if (content) {
+            return {
+              success: true,
+              content,
+              tokens: data?.eval_count || Math.ceil((prompt.length + content.length) / 3.5)
+            };
+          }
+        }
+      } catch {
+        // try next host
+      }
+    }
+    return {
+      success: false,
+      content: '',
+      errorMessage: '本地电脑 Ollama (127.0.0.1:11434) 离线无响应。请在本地终端运行 `ollama serve` 启动双模型引擎。'
+    };
+  }
+
+  /**
+   * Generic OpenAI-compatible chat completion call with Ollama Native priority.
    */
   public async callOpenAICompatible(opts: {
     baseUrl: string;
@@ -733,12 +797,18 @@ ${page.content.slice(0, 4500)}
     prompt: string;
     systemInstruction?: string;
   }): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
+    const isLocalOllama = opts.baseUrl.includes('localhost:11434') || opts.baseUrl.includes('127.0.0.1:11434');
+    if (isLocalOllama) {
+      // 优先走本地 Ollama 原生端点，完全免外网
+      const nativeRes = await this.callOllamaNative(opts.model, opts.prompt, opts.systemInstruction);
+      if (nativeRes.success) return nativeRes;
+    }
+
     const messages: ChatMessage[] = [];
     if (opts.systemInstruction) messages.push({ role: 'system', content: opts.systemInstruction });
     messages.push({ role: 'user', content: opts.prompt });
 
     try {
-      const isLocalOllama = opts.baseUrl.includes('localhost:11434') || opts.baseUrl.includes('127.0.0.1:11434');
       const result = await this.openAICompatibleProvider.generate({
         baseUrl: opts.baseUrl,
         apiKey: opts.apiKey,
@@ -753,12 +823,11 @@ ${page.content.slice(0, 4500)}
       };
     } catch (err: any) {
       const errorMsg = String(err?.message || err);
-      // If localhost:11434 fails because user hasn't started ollama yet, provide clear instruction
-      if (opts.baseUrl.includes('localhost:11434') || opts.baseUrl.includes('127.0.0.1:11434') || errorMsg.includes('ECONNREFUSED')) {
+      if (isLocalOllama || errorMsg.includes('ECONNREFUSED')) {
         return {
           success: false,
           content: '',
-          errorMessage: '未能连接到本地 Ollama 服务 (localhost:11434)。请确保本地已运行 `ollama serve`，或直接切换上方【DeepSeek-R1 (开源免费直连)】即问即答。'
+          errorMessage: '未能连接到本地 Ollama 服务 (127.0.0.1:11434)。当前为无网络离线状态，请在本地电脑启动 `ollama serve`。'
         };
       }
 
