@@ -38,6 +38,7 @@
     "test:jupiter-pdf": "tsx scripts/test_jupiter_pdf.ts",
     "test:jupiter-image": "tsx scripts/test_jupiter_image.ts",
     "test:jupiter-audio": "tsx scripts/test_jupiter_audio.ts",
+    "test:jupiter-video": "tsx scripts/test_jupiter_video.ts",
     "test:ai-provider": "tsx scripts/test_openai_compatible_provider.ts",
     "test:knowledge-api": "tsx scripts/test_knowledge_api.ts",
     "test:library-api": "tsx scripts/test_library_api.ts",
