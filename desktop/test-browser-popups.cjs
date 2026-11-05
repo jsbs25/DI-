@@ -65,7 +65,7 @@ async function testEnginePopupRouting() {
   const views = [];
   const session = new EventEmitter();
   const popupRequests = [];
-  const contextLinks = [];
+  const contextMenus = [];
   const contentView = {
     addChildView(view) { views.push(view); },
     removeChildView(view) { const index = views.indexOf(view); if (index >= 0) views.splice(index, 1); }
@@ -81,7 +81,7 @@ async function testEnginePopupRouting() {
     browserSession: session,
     appOrigin: 'http://earth-one.test',
     onOpenTabRequest: request => popupRequests.push(request),
-    onContextMenuLink: request => contextLinks.push(request)
+    onContextMenu: request => contextMenus.push(request)
   });
   engine.setActive(true);
   engine.setBounds({ x: 0, y: 0, width: 900, height: 600 });
@@ -111,12 +111,20 @@ async function testEnginePopupRouting() {
   });
   assert.equal(popupRequests.length, requestCount, 'unsafe targets and popup form submissions must not be routed');
 
-  source.emit('context-menu', {}, { linkURL: 'https://target.test/context-link' });
-  assert.deepEqual(contextLinks.at(-1), { url: 'https://target.test/context-link', sourceTabId: 'tab_source' });
-  const contextCount = contextLinks.length;
-  source.emit('context-menu', {}, { linkURL: 'javascript:alert(1)' });
-  source.emit('context-menu', {}, { linkURL: 'http://earth-one.test/?module=library' });
-  assert.equal(contextLinks.length, contextCount, 'unsafe and app-route context links must be omitted');
+  const safeContextParams = { linkURL: 'https://target.test/context-link', selectionText: '' };
+  const contextEvent = { prevented: false, preventDefault() { this.prevented = true; } };
+  source.emit('context-menu', contextEvent, safeContextParams);
+  assert.equal(contextEvent.prevented, true, 'uncontrolled Chromium default menus must be suppressed');
+  assert.deepEqual(contextMenus.at(-1), { contents: source, params: safeContextParams },
+    'the context handler receives only the event WebContents and trusted Electron params');
+  const contextCount = contextMenus.length;
+  const unsafeContextParams = { linkURL: 'javascript:alert(1)' };
+  const appRouteContextParams = { linkURL: 'http://earth-one.test/?module=library' };
+  source.emit('context-menu', {}, unsafeContextParams);
+  source.emit('context-menu', {}, appRouteContextParams);
+  assert.equal(contextMenus.length, contextCount + 2,
+    'active Chromium context events reach the main-process menu policy, which rejects unsafe/app-route link actions');
+  assert.deepEqual(contextMenus.slice(-2).map(context => context.params), [unsafeContextParams, appRouteContextParams]);
 
   const opened = await engine.openNewTab('https://target.test/opened-from-confirmation');
   assert.equal(opened.success, true);

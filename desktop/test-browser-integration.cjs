@@ -470,6 +470,19 @@ async function main() {
     await runPrivacySmoke(fixtureOrigin);
     return;
   }
+  if (process.env.EARTH_ONE_BROWSER_CONTEXT_MENU_ONLY === '1') {
+    const contextMenuRun = launchSmoke('initial', { startUrl: `${fixtureOrigin}/one` });
+    activeRun = contextMenuRun;
+    await contextMenuRun.waitForMarker(/BROWSER_CONTEXT_MENU_SMOKE_PASS:/, 80000);
+    const contextMenuClose = await Promise.race([
+      contextMenuRun.closed,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('context-menu Electron smoke did not exit cleanly')), 12000))
+    ]);
+    assert.equal(contextMenuClose.code, 0, `context-menu Electron smoke failed: ${contextMenuRun.getOutput()}`);
+    console.log('BROWSER_TEST_DRIVER_CONTEXT_MENU_PASSED');
+    activeRun = null;
+    return;
+  }
 
   const connectionStatusRun = launchSmoke('connection-status', {
     startUrl: `${fixtureOrigin}/connection-http`,

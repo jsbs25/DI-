@@ -5,8 +5,9 @@ const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, WebContentsView, ipcMain, session, shell, dialog, Menu } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, session, shell, dialog, Menu, clipboard } = require('electron');
 const { createBrowserEngine, isAllowedNavigation, DEFAULT_BROWSER_NEW_TAB_URL } = require('./browser-engine.cjs');
+const { createBrowserContextMenuTemplate } = require('./browser-context-menu.cjs');
 const { createBrowserSessionStore } = require('./session-store.cjs');
 const { assertTrustedAppSender: assertTrustedAppSenderForContext } = require('./browser-ipc-security.cjs');
 const { createBrowserPermissionManager } = require('./browser-permissions.cjs');
@@ -42,6 +43,8 @@ let browserPopupConfirmationOpen = false;
 let browserSmokeTest = false;
 let browserPopupTestDecision = null;
 let browserPopupSmokeConfirmationCount = 0;
+let browserContextMenuSmokeCapture = null;
+let browserContextMenuSmokeClipboardText = null;
 let browserPrintSmokePath = null;
 let browserPrintSmokeDialogCalls = 0;
 
@@ -95,13 +98,35 @@ function requestBrowserPopupConfirmation(request) {
   });
 }
 
-function showBrowserLinkContextMenu(request) {
-  if (!request || !browserEngine?.isActiveTab(request.sourceTabId) ||
+function showBrowserContextMenu(request) {
+  const contents = request?.contents;
+  if (!contents || !request.params || typeof request.params !== 'object' ||
+      !browserEngine?.isActiveWebContents(contents) ||
       !mainWindow || mainWindow.isDestroyed()) return;
-  const menu = Menu.buildFromTemplate([{
-    label: '在新标签页中打开链接',
-    click: () => openBrowserTabFromRequest(request)
-  }]);
+  const menuClipboard = browserSmokeTest
+    ? { writeText: text => { browserContextMenuSmokeClipboardText = text; } }
+    : clipboard;
+  const template = createBrowserContextMenuTemplate({
+    params: request.params,
+    contents,
+    isTargetActive: target => browserEngine?.isActiveWebContents(target) === true,
+    clipboard: menuClipboard,
+    openLinkInNewTab: url => {
+      if (browserEngine?.isActiveWebContents(contents)) void browserEngine.openNewTab(url);
+    },
+    appOrigin
+  });
+  if (!template.length) return;
+  if (browserSmokeTest) {
+    browserContextMenuSmokeCapture = {
+      contents,
+      params: request.params,
+      template,
+      activeAtCapture: browserEngine?.isActiveWebContents(contents) === true
+    };
+    return;
+  }
+  const menu = Menu.buildFromTemplate(template);
   menu.popup({ window: mainWindow });
 }
 
@@ -1102,9 +1127,15 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       if (!httpRedirect.success) throw new Error('本机 HTTP 重定向导航失败。');
       await waitForTabPath(testTabId, '/connection-final', 'Connection Status HTTP Final');
       await waitForConnectionStatus('unencrypted');
-      const redirectedAddress = await appContents.executeJavaScript(
-        `document.querySelector('input[aria-label="输入网址或搜索词"]')?.value || ''`
-      );
+      const redirectedAddressDeadline = Date.now() + 5000;
+      let redirectedAddress = '';
+      while (Date.now() < redirectedAddressDeadline) {
+        redirectedAddress = await appContents.executeJavaScript(
+          `document.querySelector('input[aria-label="输入网址或搜索词"]')?.value || ''`
+        );
+        if (redirectedAddress.endsWith('/connection-final')) break;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
       if (!redirectedAddress.endsWith('/connection-final')) {
         throw new Error(`HTTP 重定向后地址栏未跟随最终主框架 URL：${redirectedAddress}`);
       }
@@ -2065,7 +2096,161 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       }))()`);
       throw new Error(`关闭合成 popup 标签后应回到原始 Browser 标签：${JSON.stringify({ engineTabs: browserEngine.getTabIdsForTesting(), activeTabId: browserEngine.getSessionSnapshot().activeTabId, expectedTabId: testTabId, sourceFocused: testContents.isFocused(), uiTabs })}`);
     }
+
+    await testContents.executeJavaScript(`document.body.insertAdjacentHTML('beforeend', ${JSON.stringify(`<section id="context-menu-fixture">
+      <p id="context-selection">Trusted selected text fixture.</p>
+      <a id="context-safe-link" href="${fixtureOrigin}/popup-target?source=context-menu">Safe synthetic context link</a>
+      <a id="context-unsafe-link" href="javascript:window.__unsafeContextLink = true">Unsafe synthetic context link</a>
+      <a id="context-app-link" href="${appOrigin}/?module=library">EARTH ONE app route link</a>
+      <input id="context-editable" value="editable selection fixture">
+    </section>`)})`);
+    const rightClickContextTarget = async selector => {
+      browserContextMenuSmokeCapture = null;
+      browserContextMenuSmokeClipboardText = null;
+      const point = await testContents.executeJavaScript(`(() => {
+        const element = document.querySelector(${JSON.stringify(selector)});
+        if (!element) return null;
+        const selection = window.getSelection();
+        const selectedNode = selection?.anchorNode;
+        const selectedRect = selection?.rangeCount && selectedNode && element.contains(selectedNode)
+          ? selection.getRangeAt(0).getBoundingClientRect()
+          : null;
+        const rect = selectedRect && selectedRect.width > 0 && selectedRect.height > 0
+          ? selectedRect
+          : element.getBoundingClientRect();
+        return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+      })()`);
+      if (!point) throw new Error(`右键菜单合成页缺少目标：${selector}`);
+      mainWindow.focus();
+      testContents.focus();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      testContents.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
+      testContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'right', clickCount: 1 });
+      testContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'right', clickCount: 1 });
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline && !browserContextMenuSmokeCapture) await new Promise(resolve => setTimeout(resolve, 25));
+      if (!browserContextMenuSmokeCapture) {
+        const targetState = await testContents.executeJavaScript(`(() => {
+          const element = document.querySelector(${JSON.stringify(selector)});
+          const point = ${JSON.stringify(point)};
+          const hit = document.elementFromPoint(point.x, point.y);
+          return {
+            selectionText: window.getSelection()?.toString() || '',
+            targetTag: element?.tagName || '',
+            targetRect: element ? (() => { const rect = element.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; })() : null,
+            hitTag: hit?.tagName || '',
+            hitText: hit?.textContent?.slice(0, 120) || '',
+            viewport: { width: innerWidth, height: innerHeight, scrollY }
+          };
+        })()`);
+        throw new Error(`本地 Chromium 未向主进程发送可信右键事件：${JSON.stringify({ selector, point, targetState })}`);
+      }
+      if (browserContextMenuSmokeCapture.contents !== testContents || browserContextMenuSmokeCapture.activeAtCapture !== true) {
+        throw new Error(`右键菜单必须绑定当前可见活动 Chromium WebContents：${JSON.stringify({
+          sameContents: browserContextMenuSmokeCapture.contents === testContents,
+          activeAtCapture: browserContextMenuSmokeCapture.activeAtCapture,
+          activeContentsNow: browserEngine.isActiveWebContents(testContents),
+          activeTabId: browserEngine.getSessionSnapshot().activeTabId,
+          testTabId,
+          testUrl: testContents.getURL(),
+          contextUrl: browserContextMenuSmokeCapture.contents.getURL(),
+          bounds: browserEngine.getViewBoundsForTesting(testTabId)
+        })}`);
+      }
+      return browserContextMenuSmokeCapture;
+    };
+    const contextLinkCapture = await rightClickContextTarget('#context-safe-link');
+    const contextLinkHref = await testContents.executeJavaScript(`document.querySelector('#context-safe-link').href`);
+    const contextLinkLabels = contextLinkCapture.template.filter(item => item.label).map(item => item.label);
+    if (contextLinkCapture.params.linkURL !== contextLinkHref ||
+        !contextLinkLabels.includes('在新标签页中打开链接') || !contextLinkLabels.includes('复制链接地址')) {
+      throw new Error(`安全链接菜单必须来自 Chromium context-menu 参数：${JSON.stringify({ linkURL: contextLinkCapture.params.linkURL, contextLinkHref, labels: contextLinkLabels })}`);
+    }
+    contextLinkCapture.template.find(item => item.label === '复制链接地址').click();
+    if (browserContextMenuSmokeClipboardText !== contextLinkHref) throw new Error('复制链接地址必须写入 Electron 可信 context-menu 参数中的 URL。');
+    contextLinkCapture.template.find(item => item.label === '在新标签页中打开链接').click();
+    const contextOpenDeadline = Date.now() + 5000;
+    let contextOpenedTabId = null;
+    while (Date.now() < contextOpenDeadline) {
+      const snapshot = browserEngine.getSessionSnapshot();
+      if (browserEngine.getTabIdsForTesting().length === 2 && snapshot.activeTabId !== testTabId) {
+        contextOpenedTabId = snapshot.activeTabId;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    if (!contextOpenedTabId) throw new Error('右键打开安全链接未通过既有 Browser 新标签页路径创建标签。');
+    await waitForTabPath(contextOpenedTabId, '/popup-target', 'Popup Target Fixture');
+    const contextOpenedContents = browserEngine.getWebContentsForTesting(contextOpenedTabId);
+    const contextOpenedCapabilities = await contextOpenedContents.executeJavaScript(`({
+      openerAbsent: window.opener === null || typeof window.opener === 'undefined',
+      requireType: typeof require,
+      bridgeType: typeof window.earthOneBrowser
+    })`);
+    if (!contextOpenedCapabilities.openerAbsent || contextOpenedCapabilities.requireType !== 'undefined' ||
+        contextOpenedCapabilities.bridgeType !== 'undefined' || contextOpenedContents.session !== testContents.session) {
+      throw new Error('右键新标签必须复用隔离 Browser session，且没有 opener、Node 或 preload。');
+    }
+    browserEngine.closeTab(contextOpenedTabId);
+    const contextCloseDeadline = Date.now() + 5000;
+    let contextCloseSynced = false;
+    while (Date.now() < contextCloseDeadline) {
+      const snapshot = browserEngine.getSessionSnapshot();
+      const selectedUiTab = await appContents.executeJavaScript(`document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label') || ''`);
+      if (browserEngine.getTabIdsForTesting().length === 1 && snapshot.activeTabId === testTabId &&
+          selectedUiTab === '切换到Popup Source Fixture') {
+        contextCloseSynced = true;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    if (!contextCloseSynced) throw new Error('关闭右键新标签后，标签栏必须恢复到原始活动来源标签。');
+
+    await testContents.executeJavaScript(`(() => {
+      const text = document.querySelector('#context-safe-link');
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    })()`);
+    const selectedText = await testContents.executeJavaScript('window.getSelection().toString()');
+    const selectionCapture = await rightClickContextTarget('#context-safe-link');
+    if (selectionCapture.params.selectionText !== selectedText || selectedText !== 'Safe synthetic context link') {
+      throw new Error(`选择文本菜单必须使用 Chromium 事件文本快照：${JSON.stringify({ eventText: selectionCapture.params.selectionText, selectedText })}`);
+    }
+    const copySelectionItem = selectionCapture.template.find(item => item.label === '复制所选文字');
+    if (!copySelectionItem) throw new Error('已选中的普通网页文字必须显示“复制所选文字”。');
+    copySelectionItem.click();
+    if (browserContextMenuSmokeClipboardText !== selectedText) throw new Error('复制所选文字必须使用 Chromium context-menu 事件中的 selectionText。');
+
+    await testContents.executeJavaScript(`document.querySelector('#context-editable').setSelectionRange(0, 9)`);
+    const editableCapture = await rightClickContextTarget('#context-editable');
+    const editableLabels = editableCapture.template.filter(item => item.label).map(item => item.label);
+    const editableFlags = editableCapture.params.editFlags || {};
+    if (editableCapture.params.isEditable !== true) throw new Error('可编辑输入框的 context-menu 参数必须标记 isEditable。');
+    for (const [flag, label] of Object.entries({ canCut: '剪切', canPaste: '粘贴', canSelectAll: '全选' })) {
+      if (editableLabels.includes(label) !== (editableFlags[flag] === true)) {
+        throw new Error(`编辑菜单项 ${label} 必须严格遵循 Electron ${flag}：${JSON.stringify({ labels: editableLabels, editableFlags })}`);
+      }
+    }
+    if (editableLabels.includes('复制') !== (editableFlags.canCopy === true && Boolean(editableCapture.params.selectionText))) {
+      throw new Error(`编辑复制操作必须同时满足可复制标记和可信选中文本：${JSON.stringify({ labels: editableLabels, params: editableCapture.params })}`);
+    }
+
+    for (const selector of ['#context-unsafe-link', '#context-app-link']) {
+      const unsafeCapture = await rightClickContextTarget(selector);
+      const unsafeLabels = unsafeCapture.template.filter(item => item.label).map(item => item.label);
+      if (unsafeLabels.includes('在新标签页中打开链接') || unsafeLabels.includes('复制链接地址')) {
+        throw new Error(`不安全或 EARTH ONE 自有路由链接不得提供菜单动作：${JSON.stringify({ selector, url: unsafeCapture.params.linkURL, labels: unsafeLabels })}`);
+      }
+    }
+    console.log('BROWSER_CONTEXT_MENU_SMOKE_PASS: trusted local Chromium context-menu params, safe link open/copy, captured text copy, editable editFlags gating, unsafe/app-route rejection, active WebContents binding, isolated session, and remote no-preload/no-Node verified.');
     console.log('BROWSER_POPUP_SMOKE_PASS: user-initiated window.open confirmation, no-gesture prompt-and-deny, target=_blank foreground tab, dangerous/invalid targets, app-route boundary, active-tab focus, same Browser session, no opener/Node/preload, and tab-strip sync verified.');
+    if (process.env.EARTH_ONE_BROWSER_CONTEXT_MENU_ONLY === '1') {
+      app.quit();
+      return;
+    }
 
     await submitAddress(`${new URL(testUrl).origin}/find`);
     await waitForPage('/find', 'EARTH ONE Find Fixture');
@@ -2842,7 +3027,7 @@ app.whenReady().then(async () => {
       if (request.requiresConfirmation) requestBrowserPopupConfirmation(request);
       else openBrowserTabFromRequest(request);
     },
-    onContextMenuLink: showBrowserLinkContextMenu,
+    onContextMenu: showBrowserContextMenu,
     onNewTab: tab => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:new-tab', tab);
     },

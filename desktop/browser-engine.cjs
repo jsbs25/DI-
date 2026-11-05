@@ -91,7 +91,7 @@ function createBrowserEngine({
   onDownloads = () => {},
   onPermissionContextChange = () => {},
   onOpenTabRequest = () => {},
-  onContextMenuLink = () => {},
+  onContextMenu = () => {},
   onNewTab = () => {},
   onTabClosed = () => {},
   onRestoreAvailability = () => {},
@@ -217,13 +217,13 @@ function createBrowserEngine({
       // isolated WebContentsView only after its popup policy has accepted the URL.
       return { action: 'deny' };
     });
-    contents.on('context-menu', (_event, params) => {
-      const url = normalizePopupTarget(params?.linkURL, appOrigin);
-      if (!url || !isActiveTab(tabId)) return;
+    contents.on('context-menu', (event, params) => {
+      event?.preventDefault?.();
+      if (!params || typeof params !== 'object' || !isActiveTab(tabId)) return;
       try {
-        onContextMenuLink({ url, sourceTabId: tabId });
+        onContextMenu({ contents, params });
       } catch {
-        // A context-menu failure must not navigate or open an unmanaged window.
+        // A context-menu failure must not expose a default or unmanaged menu.
       }
     });
     contents.on('before-input-event', (event, input) => {
@@ -695,6 +695,11 @@ function createBrowserEngine({
     return { tabId: activeTabId, entry };
   }
 
+  function isActiveWebContents(contents) {
+    const active = getActiveEntry();
+    return Boolean(active && active.entry.view.webContents === contents);
+  }
+
   function changeZoom(action) {
     if (!['in', 'out', 'reset'].includes(action)) {
       return { success: false, error: '网页缩放操作无效。' };
@@ -965,6 +970,7 @@ function createBrowserEngine({
     isActivePrintTarget,
     isPermissionContext,
     isActiveTab,
+    isActiveWebContents,
     getSessionSnapshot,
     clearSiteDataAndReload,
     dispose,
