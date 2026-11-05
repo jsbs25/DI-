@@ -31,6 +31,7 @@ import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
 import { KnowledgeUniverse } from './components/knowledge/KnowledgeUniverse.tsx';
 import { UniverseEngine } from './universe/UniverseEngine.tsx';
 import { SaturnSpace } from './universe/SaturnSpace.tsx';
+import { VenusMusicSpace } from './universe/VenusMusicSpace.tsx';
 import { MercurySearch } from './components/search/MercurySearch.tsx';
 import { getPlanetEcosystem } from './universe/planetEcosystems.ts';
 import { HolographicAICompanion } from './components/ai/HolographicAICompanion.tsx';
@@ -470,6 +471,10 @@ export default function App() {
 
         {currentTab === 'saturn' && (
           <SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} />
+        )}
+
+        {currentTab === 'venus' && (
+          <VenusMusicSpace lang={lang} onBack={() => setCurrentTab('universe')} />
         )}
 
         {currentTab === 'mercury' && (

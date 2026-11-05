@@ -16,7 +16,8 @@ import {
   Users2,
   PanelLeftClose,
   PanelLeftOpen,
-  Globe2
+  Globe2,
+  Music2
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 
@@ -49,6 +50,7 @@ const NAV_ITEMS: NavItem[] = [
   { tab: 'crawler', icon: Radar, label: { zh: '采集中心', en: 'CRAWLER' } },
   { tab: 'knowledge', icon: Network, label: { zh: '知识', en: 'KNOWLEDGE' } },
   { tab: 'creator', icon: PenTool, label: { zh: '创作', en: 'CREATOR' } },
+  { tab: 'venus', icon: Music2, label: { zh: '金星音乐', en: 'MUSIC' } },
   { tab: 'video', icon: Film, label: { zh: '视频', en: 'VIDEO' } },
   { tab: 'game', icon: Gamepad2, label: { zh: '游戏', en: 'GAMES' } },
   { tab: 'community', icon: Users2, label: { zh: '社区列表', en: 'COMMUNITIES' } }

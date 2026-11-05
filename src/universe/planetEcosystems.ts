@@ -43,12 +43,12 @@ export const PLANET_ECOSYSTEMS: Record<string, PlanetEcosystem> = {
   },
   venus: {
     planetId: 'venus',
-    tab: '',
-    titleZh: '音乐与艺术',
-    titleEn: 'Music & Art',
-    available: false,
-    buttonClass: 'from-rose-500 to-pink-600',
-    descriptionZh: '全球音乐与艺术生态'
+    tab: 'venus',
+    titleZh: '金星音乐馆',
+    titleEn: 'Venus Music Station',
+    available: true,
+    buttonClass: 'from-pink-500 via-rose-600 to-purple-600 hover:from-pink-400 hover:to-rose-500',
+    descriptionZh: '全球音乐宇宙、电台原声与实时音频可视化'
   },
   earth: {
     planetId: 'earth',

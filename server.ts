@@ -18,6 +18,7 @@ import {
   getRelatedNodes,
   getKnowledgeNodeByCountry
 } from './server/knowledgeGraph.ts';
+import { musicStore } from './server/musicStore.ts';
 
 dotenv.config();
 
@@ -575,6 +576,33 @@ app.post('/api/ai/translate', async (req, res) => {
     res.json({ success: true, translation: result.content.trim() });
   } else {
     res.json({ success: false, error: result.errorMessage || 'Translation failed' });
+  }
+});
+
+// -------------------------------------------------------------
+// 7b. VENUS PLANET MUSIC UNIVERSE & FIXED AUDIO CRAWLER
+// -------------------------------------------------------------
+app.get('/api/music/tracks', (req, res) => {
+  const { genre } = req.query;
+  const tracks = musicStore.getTracks(typeof genre === 'string' ? genre : undefined);
+  res.json({ success: true, tracks });
+});
+
+app.get('/api/music/search', (req, res) => {
+  const { q, genre } = req.query;
+  const queryStr = typeof q === 'string' ? q : '';
+  const genreStr = typeof genre === 'string' ? genre : undefined;
+  const results = musicStore.searchTracks(queryStr, genreStr);
+  res.json({ success: true, query: queryStr, count: results.length, tracks: results });
+});
+
+app.post('/api/music/crawl', async (req, res) => {
+  const { sourceDomain, keyword } = req.body;
+  try {
+    const result = await musicStore.crawlExternalMusic(sourceDomain, keyword);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Music crawl failed' });
   }
 });
 

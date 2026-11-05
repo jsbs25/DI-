@@ -835,9 +835,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-[220px] lg:pl-[220px] flex flex-col justify-start md:justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
         {/* Left Hero Title & CTA */}
         <div className="max-w-xl pointer-events-auto">
-          <h1 className="font-extrabold text-3xl sm:text-6xl md:text-7xl tracking-tight text-white font-sans drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]">
-            {lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}
-          </h1>
+
 
           {showFirstUseHint && (
             <div className="mt-3 flex max-w-md items-start gap-2 rounded-xl border border-cyan-900/70 bg-slate-950/75 px-3 py-2 text-xs leading-relaxed text-cyan-100/90 shadow-lg backdrop-blur-md">
@@ -868,15 +866,6 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </button>
 
-            {onExploreCommunity && (
-              <button
-                onClick={onExploreCommunity}
-                className="inline-flex items-center space-x-2 px-3 sm:px-5 py-2.5 sm:py-3.5 rounded-full bg-slate-900/80 hover:bg-slate-800/90 border border-slate-700/80 text-slate-200 text-xs sm:text-sm font-medium backdrop-blur-md cursor-pointer transition-all hover:text-white"
-              >
-                <Users2 className="w-4 h-4 text-emerald-300" />
-                <span>{t.communityTab}</span>
-              </button>
-            )}
           </div>
 
           {/* Mobile controls stay in document flow instead of covering the stats. */}
