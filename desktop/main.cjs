@@ -5,7 +5,7 @@ const { randomUUID } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { app, BrowserWindow, WebContentsView, ipcMain, session, shell, dialog, Menu } = require('electron');
-const { createBrowserEngine, isAllowedNavigation } = require('./browser-engine.cjs');
+const { createBrowserEngine, isAllowedNavigation, DEFAULT_BROWSER_NEW_TAB_URL } = require('./browser-engine.cjs');
 const { createBrowserSessionStore } = require('./session-store.cjs');
 const { assertTrustedAppSender: assertTrustedAppSenderForContext } = require('./browser-ipc-security.cjs');
 const { createBrowserPermissionManager } = require('./browser-permissions.cjs');
@@ -148,6 +148,20 @@ function getSafeSmokePdfPath(smokeTest, fixtureUrl, downloadDir, requestedPath) 
         !path.basename(realDownloadDir).startsWith('earth-one-browser-smoke-') ||
         path.resolve(requestedPath) !== expectedPath) return null;
     return expectedPath;
+  } catch {
+    return null;
+  }
+}
+
+function getSafeSmokeNewTabUrl(smokeTest, fixtureUrl, requestedUrl) {
+  if (!smokeTest || typeof fixtureUrl !== 'string' || typeof requestedUrl !== 'string') return null;
+  try {
+    const fixture = new URL(fixtureUrl);
+    const candidate = new URL(requestedUrl);
+    if (fixture.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(fixture.hostname) ||
+        candidate.origin !== fixture.origin || candidate.pathname !== '/shortcuts-default' ||
+        candidate.search || candidate.hash || candidate.username || candidate.password) return null;
+    return candidate.href;
   } catch {
     return null;
   }
@@ -674,7 +688,11 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       throw new Error(`未知的 Browser session smoke 阶段：${phase}`);
     }
 
-    await waitForPage('/one', 'EARTH ONE Fixture One');
+    const initialShortcutPhase = process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'shortcuts';
+    await waitForPage(
+      initialShortcutPhase ? '/shortcuts' : '/one',
+      initialShortcutPhase ? 'Browser Keyboard Fixture' : 'EARTH ONE Fixture One'
+    );
     const defaultChromiumDeadline = Date.now() + 5000;
     let defaultChromiumReady = false;
     while (Date.now() < defaultChromiumDeadline) {
@@ -692,6 +710,171 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     if (!defaultChromiumReady) throw new Error('Electron Browser 首次进入时没有默认显示并聚焦 Chromium 页面。');
+
+    if (process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'shortcuts') {
+      const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+      const waitForTabCount = async count => {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          if (browserEngine.getTabIdsForTesting().length === count) return;
+          await delay(40);
+        }
+        throw new Error(`快捷键创建/关闭标签数量不正确；期待 ${count}，实际为 ${browserEngine.getTabIdsForTesting().length}，活动标签 ${browserEngine.getSessionSnapshot().activeTabId || '无'}。`);
+      };
+      const waitForUiTabCount = async count => {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const actual = await appContents.executeJavaScript(`document.querySelectorAll('[role="tablist"] [role="tab"]').length`);
+          if (actual === count) return;
+          await delay(40);
+        }
+        throw new Error(`快捷键关闭后 EARTH ONE 标签栏未同步到 ${count} 个标签。`);
+      };
+      const waitForActiveTab = async tabId => {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const contents = browserEngine.getWebContentsForTesting(tabId);
+          if (browserEngine.getSessionSnapshot().activeTabId === tabId && browserEngine.isActiveTab(tabId) && contents?.isFocused()) return;
+          await delay(30);
+        }
+        throw new Error(`快捷键未切换并聚焦到标签 ${tabId}。`);
+      };
+      const sendBrowserShortcut = async (keyCode, modifiers = ['control']) => {
+        const tabId = browserEngine.getSessionSnapshot().activeTabId;
+        const contents = browserEngine.getWebContentsForTesting(tabId);
+        if (!contents || contents.isDestroyed()) throw new Error('快捷键前没有可用的活动 Chromium 页面。');
+        await waitForActiveTab(tabId);
+        contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+        if (keyCode !== 'W') contents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+        await delay(80);
+      };
+      const sendAppShortcut = async keyCode => {
+        appContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers: ['control'] });
+        appContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers: ['control'] });
+        await delay(80);
+      };
+
+      await waitForPage('/shortcuts', 'Browser Keyboard Fixture');
+      mainWindow.webContents.focus();
+      const addressFocusState = await appContents.executeJavaScript(`(() => {
+        const input = document.querySelector('input[aria-label="输入网址或搜索词"]');
+        input?.focus();
+        return Boolean(input && document.activeElement === input);
+      })()`);
+      if (!addressFocusState) throw new Error('快捷键烟测无法聚焦 EARTH ONE 地址栏。');
+      await sendAppShortcut('F');
+      await sendAppShortcut('T');
+      const ownedInputState = await appContents.executeJavaScript(`({
+        addressFocused: document.activeElement === document.querySelector('input[aria-label="输入网址或搜索词"]'),
+        findOpen: Boolean(document.querySelector('[data-browser-find-input]'))
+      })`);
+      if (!ownedInputState.addressFocused || ownedInputState.findOpen || browserEngine.getTabIdsForTesting().length !== 1) {
+        throw new Error(`EARTH ONE 自有地址栏输入期间不应拦截 Ctrl+F/T：${JSON.stringify(ownedInputState)}`);
+      }
+
+      const readerToggle = `document.querySelector('button[aria-label="切换纯净阅读模式"]')`;
+      await appContents.executeJavaScript(`(${readerToggle})?.click()`);
+      const readerDeadline = Date.now() + 3000;
+      while (Date.now() < readerDeadline && browserEngine.isActiveTab(testTabId)) await delay(30);
+      if (browserEngine.isActiveTab(testTabId)) throw new Error('Reader Mode 没有停用 Chromium 快捷键目标。');
+      mainWindow.webContents.focus();
+      await appContents.executeJavaScript('document.activeElement?.blur(); document.body.focus();');
+      await sendAppShortcut('F');
+      const readerFindOpen = await appContents.executeJavaScript(`Boolean(document.querySelector('[data-browser-find-input]'))`);
+      if (readerFindOpen || browserEngine.getTabIdsForTesting().length !== 1) {
+        throw new Error('Reader Mode 中 Ctrl+F 不得打开 Chromium 查找或修改标签。');
+      }
+      await appContents.executeJavaScript(`(${readerToggle})?.click()`);
+      const restoreDeadline = Date.now() + 3000;
+      while (Date.now() < restoreDeadline && !browserEngine.isActiveTab(testTabId)) await delay(30);
+      const initialContents = browserEngine.getWebContentsForTesting(testTabId);
+      if (!browserEngine.isActiveTab(testTabId) || !initialContents?.isFocused()) {
+        throw new Error('Reader Mode 退出后未恢复原 Chromium 页焦点。');
+      }
+
+      await sendBrowserShortcut('T');
+      await waitForTabCount(2);
+      let activeId = browserEngine.getSessionSnapshot().activeTabId;
+      if (activeId === testTabId) throw new Error('Ctrl+T 没有选中新标签。');
+      await waitForTabPath(activeId, '/shortcuts-default', 'Safe Default Fixture');
+      await waitForActiveTab(activeId);
+      while (browserEngine.getTabIdsForTesting().length < 9) {
+        const targetCount = browserEngine.getTabIdsForTesting().length + 1;
+        await sendBrowserShortcut('T');
+        await waitForTabCount(targetCount);
+        activeId = browserEngine.getSessionSnapshot().activeTabId;
+        await waitForTabPath(activeId, '/shortcuts-default', 'Safe Default Fixture');
+        await waitForActiveTab(activeId);
+      }
+
+      const tabIds = browserEngine.getTabIdsForTesting();
+      for (let index = 0; index < 8; index += 1) {
+        await sendBrowserShortcut(String(index + 1));
+        await waitForActiveTab(tabIds[index]);
+      }
+      await sendBrowserShortcut('9');
+      await waitForActiveTab(tabIds.at(-1));
+      await sendBrowserShortcut('TAB');
+      await waitForActiveTab(tabIds[0]);
+      await sendBrowserShortcut('TAB', ['control', 'shift']);
+      await waitForActiveTab(tabIds.at(-1));
+      await sendBrowserShortcut('2', ['meta']);
+      await waitForActiveTab(tabIds[1]);
+      await sendBrowserShortcut('T', ['meta']);
+      await waitForTabCount(10);
+      const metaCreatedTabId = browserEngine.getSessionSnapshot().activeTabId;
+      await waitForTabPath(metaCreatedTabId, '/shortcuts-default', 'Safe Default Fixture');
+      await sendBrowserShortcut('W', ['meta']);
+      await waitForTabCount(9);
+      await waitForActiveTab(tabIds[0]);
+      await waitForUiTabCount(9);
+
+      for (const tabId of browserEngine.getTabIdsForTesting()) {
+        const contents = browserEngine.getWebContentsForTesting(tabId);
+        const capabilities = await contents.executeJavaScript(`({
+          bridge: typeof window.earthOneBrowser,
+          require: typeof require,
+          keys: window.__earthOneShortcutEvents.length
+        })`);
+        if (capabilities.bridge !== 'undefined' || capabilities.require !== 'undefined' || capabilities.keys !== 0) {
+          throw new Error(`Chromium 合成页不应收到 Browser 快捷键、preload 或 Node：${JSON.stringify({ tabId, capabilities })}`);
+        }
+      }
+
+      const selectedContents = browserEngine.getWebContentsForTesting(tabIds[0]);
+      const priorBounds = browserEngine.getViewBoundsForTesting(tabIds[0]);
+      browserEngine.setActive(false);
+      selectedContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: ['control'] });
+      selectedContents.sendInputEvent({ type: 'keyUp', keyCode: 'T', modifiers: ['control'] });
+      await delay(120);
+      if (browserEngine.getTabIdsForTesting().length !== 9) throw new Error('非 Browser 活动状态不应响应 Ctrl+T。');
+      browserEngine.setActive(true);
+      browserEngine.setBounds(priorBounds);
+      selectedContents.focus();
+
+      while (browserEngine.getTabIdsForTesting().length > 1) {
+        const targetCount = browserEngine.getTabIdsForTesting().length - 1;
+        await sendBrowserShortcut('W');
+        await waitForTabCount(targetCount);
+        await waitForUiTabCount(targetCount);
+      }
+      const lastTabId = browserEngine.getSessionSnapshot().activeTabId;
+      if (!lastTabId) throw new Error('关闭到最后一个标签时没有保留 Browser 标签。');
+      await sendBrowserShortcut('W');
+      await waitForTabCount(1);
+      await waitForTabPath(lastTabId, '/shortcuts-default', 'Safe Default Fixture');
+      const lastContents = browserEngine.getWebContentsForTesting(lastTabId);
+      if (browserEngine.getSessionSnapshot().activeTabId !== lastTabId || BrowserWindow.getAllWindows().length !== 1 ||
+          !lastContents?.isFocused()) {
+        throw new Error('关闭最后一个标签必须将它替换为安全默认页，且不得关闭应用窗口。');
+      }
+      await sendBrowserShortcut('W');
+      await waitForTabCount(1);
+      await waitForTabPath(lastTabId, '/shortcuts-default', 'Safe Default Fixture');
+      console.log('BROWSER_SHORTCUTS_SMOKE_PASS: trusted Electron key input covers Ctrl/Cmd+T/W/Tab/1-9, active-tab focus, UI synchronization, input/Reader/inactive exclusions, safe last-tab replacement, and remote no-preload/no-Node/no-shortcut delivery.');
+      app.quit();
+      return;
+    }
 
     const readerModeToggle = `document.querySelector('button[aria-label="切换纯净阅读模式"]')`;
     const toggleReaderMode = async () => {
@@ -1722,6 +1905,14 @@ app.whenReady().then(async () => {
     onNewTab: tab => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:new-tab', tab);
     },
+    onTabClosed: tab => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:tab-closed', tab);
+      browserPermissionManager?.revalidatePending();
+      scheduleBrowserSessionPersist();
+    },
+    defaultNewTabUrl: process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'shortcuts'
+      ? getSafeSmokeNewTabUrl(smokeTest, smokeUrl, process.env.EARTH_ONE_BROWSER_TEST_NEW_TAB_URL) || DEFAULT_BROWSER_NEW_TAB_URL
+      : DEFAULT_BROWSER_NEW_TAB_URL,
     appOrigin,
     downloadStorePath: path.join(app.getPath('userData'), 'earth-one-downloads.json'),
     getTestApprovalPath: testApprovalPath || null

@@ -463,6 +463,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const engineManagedTabIdsRef = useRef<Set<string>>(new Set());
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+  const tabsRef = useRef(tabs);
+  const activeTabIdRef = useRef(activeTabId);
+  tabsRef.current = tabs;
+  activeTabIdRef.current = activeTabId;
 
   const openFindBar = useCallback(() => {
     if (!browserEngine) return;
@@ -507,15 +511,18 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   }, [browserEngine]);
 
   useEffect(() => {
-    if (!browserEngine) return;
+    if (!browserEngine || activeTab?.readerMode) return;
     const handleShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.shiftKey || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') return;
+      const isOwnedEditable = (value: EventTarget | null) => value instanceof HTMLElement &&
+        (value.isContentEditable || Boolean(value.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')));
+      if (isOwnedEditable(event.target) || isOwnedEditable(document.activeElement)) return;
       event.preventDefault();
       openFindBar();
     };
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
-  }, [browserEngine, openFindBar]);
+  }, [browserEngine, activeTab?.readerMode, openFindBar]);
 
   useEffect(() => {
     setIsFindOpen(false);
@@ -585,6 +592,22 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       setInputUrl(url);
       setHistory(previous => ({ ...previous, [tab.tabId]: [url] }));
       setHistoryIndex(previous => ({ ...previous, [tab.tabId]: 0 }));
+      setSearchResults([]);
+      setBrowserEngineError(null);
+    });
+  }, [browserEngine]);
+
+  useEffect(() => {
+    if (!browserEngine?.onTabClosed) return;
+    return browserEngine.onTabClosed(closedTab => {
+      if (!closedTab || typeof closedTab.tabId !== 'string') return;
+      const remaining = tabsRef.current.filter(tab => tab.id !== closedTab.tabId);
+      setTabs(previous => previous.filter(tab => tab.id !== closedTab.tabId));
+      if (activeTabIdRef.current !== closedTab.tabId) return;
+      const nextTab = remaining.find(tab => tab.id === closedTab.activeTabId) || remaining[0];
+      if (!nextTab) return;
+      setActiveTabId(nextTab.id);
+      setInputUrl(closedTab.activeTab?.url || nextTab.url);
       setSearchResults([]);
       setBrowserEngineError(null);
     });

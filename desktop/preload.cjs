@@ -28,6 +28,11 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
     ipcRenderer.on('browser:new-tab', wrapped);
     return () => ipcRenderer.removeListener('browser:new-tab', wrapped);
   },
+  onTabClosed: listener => {
+    const wrapped = (_event, tab) => listener(tab);
+    ipcRenderer.on('browser:tab-closed', wrapped);
+    return () => ipcRenderer.removeListener('browser:tab-closed', wrapped);
+  },
   navigate: (tabId, url) => ipcRenderer.invoke('browser:navigate', tabId, url),
   goBack: tabId => ipcRenderer.invoke('browser:back', tabId),
   goForward: tabId => ipcRenderer.invoke('browser:forward', tabId),

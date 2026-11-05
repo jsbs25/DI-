@@ -4,6 +4,7 @@
 - `main.cjs`: secure desktop shell, origin-checked IPC, local browser data/session settings and ID-only download-folder validation in Electron `userData`.
 - `preload.cjs`: narrow EARTH ONE-only bridge for navigation, local bookmark/history data, opt-in tab-session restore, downloads, session-only site permission decisions/review, popup-created tab synchronization, address-bar focus, and a path-free save-PDF action.
 - `browser-engine.cjs`: Chromium `WebContentsView` lifecycle, HTTP(S)-only popup-to-tab routing, active-tab focus, link context-menu hooks, URL checks, navigation state, owned-tab downloads, and active-visible-tab print targeting.
+- `browser-shortcuts.cjs`: allowlisted Ctrl/Cmd Browser shortcuts parsed only from Electron's trusted `before-input-event`; it does not expose a renderer IPC command for remote pages to invoke.
 - `browser-print-pdf.cjs`: main-process-only Chromium PDF export through the native save dialog, same-origin HTTP(S) validation, active-tab revalidation, and atomic local file writes; it does not expose paths or open generated files.
 - `browser-popup-security.cjs`: validates popup/context-menu destinations, excludes the EARTH ONE app origin, and requires app confirmation for every webpage popup because Electron does not provide a trustworthy user-gesture signal.
 - `browser-permissions.cjs`: in-memory, per-origin permission state for notifications and geolocation; rejects insecure/non-HTTP(S), subframe, inactive-page and unsupported-permission requests, and clears grants on process exit.
@@ -14,6 +15,7 @@
 - `test-browser-permissions.cjs`: unit tests for default deny, explicit decisions, secure-origin rules, origin/capability isolation, revocation, timeout, invalidation, and session-only grants.
 - `test-browser-print-pdf.cjs`: synthetic tests for trusted-origin and main-frame boundaries, unsupported schemes, inactive-tab rejection, native-dialog cancellation, path validation, renderer-independent paths, and atomic PDF output.
 - `test-browser-popups.cjs`: synthetic policy/engine tests for dangerous protocols, malformed and credential-bearing URLs, app-route boundaries, gesture-ambiguous confirmation, context-menu routing, foreground focus, dedicated Browser-session reuse, and no preload/Node inheritance.
+- `test-browser-shortcuts.cjs`: unit coverage for Ctrl/Cmd modifiers, tab cycling/index selection, preserved address/find keys, and invalid modifier/key combinations; the Electron integration smoke sends native Chromium input events across synthetic pages.
 - `test-session-store.cjs`: tests default-off behavior, sensitive-query omission, ordinary-query/fragment handling, invalid URL removal, the 12-tab cap and corrupt/oversized-store protection.
 - `test-browser-integration.cjs`: starts isolated `127.0.0.1` fixtures and temporary server/Electron profiles; under Xvfb it verifies popup handling, permissions, restart reset, downloads/sessions, and real Chromium PDF output from a local two-page fixture, including cancel and no-network behavior. HTTP(S) requests outside fixture origins are canceled.
 

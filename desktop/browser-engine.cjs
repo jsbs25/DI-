@@ -8,6 +8,9 @@ const { createDownloadManager } = require('./download-manager.cjs');
 const { createDownloadStore } = require('./download-store.cjs');
 const { sanitizeSessionUrl } = require('./session-store.cjs');
 const { normalizePopupTarget, requiresPopupConfirmation } = require('./browser-popup-security.cjs');
+const { getBrowserShortcut } = require('./browser-shortcuts.cjs');
+
+const DEFAULT_BROWSER_NEW_TAB_URL = 'https://en.wikipedia.org/wiki/Earth';
 
 function normalizeBrowserUrl(input) {
   if (typeof input !== 'string') throw new TypeError('请输入有效的网址。');
@@ -61,10 +64,13 @@ function createBrowserEngine({
   onOpenTabRequest = () => {},
   onContextMenuLink = () => {},
   onNewTab = () => {},
+  onTabClosed = () => {},
+  defaultNewTabUrl = DEFAULT_BROWSER_NEW_TAB_URL,
   appOrigin = null,
   downloadStorePath = null,
   getTestApprovalPath = null
 }) {
+  const safeDefaultNewTabUrl = normalizeBrowserUrl(defaultNewTabUrl);
   const tabs = new Map();
   let activeTabId = null;
   let browserActive = false;
@@ -162,17 +168,37 @@ function createBrowserEngine({
       }
     });
     contents.on('before-input-event', (event, input) => {
-      const key = String(input.key || input.keyCode || '').toLowerCase();
-      const modifiers = Array.isArray(input.modifiers) ? input.modifiers : [];
-      const commandModifier = Boolean(input.control || input.meta || modifiers.includes('control') || modifiers.includes('meta'));
-      const alt = Boolean(input.alt || modifiers.includes('alt'));
-      const shift = Boolean(input.shift || modifiers.includes('shift'));
-      if (input.type !== 'keyDown' || !commandModifier || alt || shift) return;
-      if (key !== 'l' && key !== 'f') return;
+      const shortcut = getBrowserShortcut(input);
+      if (!isActiveTab(tabId) || !shortcut) return;
       event.preventDefault();
-      if (!window.isDestroyed()) window.webContents.focus();
-      if (key === 'l') onFocusAddressBar(tabId);
-      if (key === 'f') onFocusFind(tabId);
+      if (shortcut.action === 'focus-address' || shortcut.action === 'find') {
+        if (!window.isDestroyed()) window.webContents.focus();
+        if (shortcut.action === 'focus-address') onFocusAddressBar(tabId);
+        if (shortcut.action === 'find') onFocusFind(tabId);
+        return;
+      }
+      if (shortcut.action === 'new-tab') {
+        void openNewTab(safeDefaultNewTabUrl);
+        return;
+      }
+      if (shortcut.action === 'close-tab') {
+        closeTab(tabId);
+        return;
+      }
+      if (shortcut.action === 'cycle-tab') {
+        const tabIds = [...tabs.keys()];
+        const currentIndex = tabIds.indexOf(activeTabId);
+        if (currentIndex < 0 || tabIds.length < 2) return;
+        const nextIndex = (currentIndex + shortcut.direction + tabIds.length) % tabIds.length;
+        void selectTab(tabIds[nextIndex]).catch(() => {});
+        return;
+      }
+      if (shortcut.action === 'select-tab') {
+        const tabIdAtIndex = shortcut.index === 9
+          ? [...tabs.keys()].at(-1)
+          : [...tabs.keys()][shortcut.index - 1];
+        if (tabIdAtIndex) void selectTab(tabIdAtIndex).catch(() => {});
+      }
     });
 
     contents.on('found-in-page', (_event, result) => {
@@ -392,7 +418,13 @@ function createBrowserEngine({
 
   function closeTab(tabId) {
     const entry = tabs.get(tabId);
-    if (!entry) return;
+    if (!entry) return { success: false, closed: false };
+    if (tabs.size === 1) {
+      entry.lastUrl = safeDefaultNewTabUrl;
+      entry.lastTitle = new URL(safeDefaultNewTabUrl).hostname;
+      void navigate(tabId, safeDefaultNewTabUrl);
+      return { success: true, closed: false, replaced: true, activeTabId: tabId };
+    }
     const wasActive = activeTabId === tabId;
     stopFindForEntry(tabId, entry);
     onPermissionContextChange(entry.view.webContents);
@@ -403,8 +435,22 @@ function createBrowserEngine({
     applyVisibility();
     if (wasActive && browserActive && viewportBounds && activeTabId) {
       const nextEntry = tabs.get(activeTabId);
-      if (nextEntry && !nextEntry.view.webContents.isDestroyed()) nextEntry.view.webContents.focus();
+      if (nextEntry && !nextEntry.view.webContents.isDestroyed()) {
+        nextEntry.view.webContents.focus();
+        publish(activeTabId, nextEntry);
+      }
     }
+    try {
+      const activeEntry = tabs.get(activeTabId);
+      onTabClosed({
+        tabId,
+        activeTabId,
+        activeTab: activeEntry ? snapshot(activeTabId, activeEntry) : null
+      });
+    } catch {
+      // UI synchronization is best effort; closing the native tab is already complete.
+    }
+    return { success: true, closed: true, activeTabId };
   }
 
   function setActive(active) {
@@ -616,6 +662,7 @@ function createBrowserEngine({
 }
 
 module.exports = {
+  DEFAULT_BROWSER_NEW_TAB_URL,
   createBrowserEngine,
   isAllowedNavigation,
   normalizeBrowserUrl

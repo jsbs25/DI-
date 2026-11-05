@@ -71,6 +71,19 @@ function handleFixtureRequest(request, response) {
     response.end('<!doctype html><html><head><title>Local Print Fixture</title><style>@page{size:A4;margin:20mm}body{font:18px sans-serif}.page-two{break-before:page;page-break-before:always}</style></head><body><h1>EARTH ONE PDF page 1</h1><section class="page-two"><h1>EARTH ONE PDF page 2</h1></section></body></html>');
     return;
   }
+  if (pathname === '/shortcuts' || pathname === '/shortcuts-default') {
+    const title = pathname === '/shortcuts' ? 'Browser Keyboard Fixture' : 'Safe Default Fixture';
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.end(`<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1><input id="fixture-input" aria-label="Synthetic webpage input"><script>
+      window.__earthOneShortcutEvents = [];
+      document.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && ['t', 'w', 'tab', 'f', 'l', '1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(event.key.toLowerCase())) {
+          window.__earthOneShortcutEvents.push({ key: event.key, ctrl: event.ctrlKey, meta: event.metaKey });
+        }
+      }, true);
+    </script></body></html>`);
+    return;
+  }
   if (pathname === '/two') {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     response.end('<!doctype html><html><head><title>EARTH ONE Fixture Two</title></head><body><h1>Local fixture two</h1></body></html>');
@@ -164,6 +177,9 @@ function launchSmoke(phase, options = {}) {
       EARTH_ONE_BROWSER_SESSION_SMOKE_TEST: options.sessionSmoke ? '1' : '0',
       EARTH_ONE_BROWSER_TEST_PHASE: phase,
       EARTH_ONE_BROWSER_TEST_URL: startUrl,
+      EARTH_ONE_BROWSER_TEST_NEW_TAB_URL: phase === 'shortcuts'
+        ? `${new URL(startUrl).origin}/shortcuts-default`
+        : '',
       EARTH_ONE_BROWSER_TEST_ALT_URL: options.altUrl || `${alternateFixtureOrigin}/one`,
       EARTH_ONE_BROWSER_TEST_POPUP_DECISION: options.popupDecision || 'deny',
       EARTH_ONE_BROWSER_TEST_DOWNLOAD_DIR: downloadDir,
@@ -284,6 +300,19 @@ async function main() {
     alternateFixtureServer.listen(0, '127.0.0.1', resolve);
   });
   alternateFixtureOrigin = `http://127.0.0.1:${alternateFixtureServer.address().port}`;
+  const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`;
+
+  const shortcutsRun = launchSmoke('shortcuts', { startUrl: `${fixtureOrigin}/shortcuts` });
+  activeRun = shortcutsRun;
+  await shortcutsRun.waitForMarker(/BROWSER_SHORTCUTS_SMOKE_PASS:/, 50000);
+  const shortcutsClose = await Promise.race([
+    shortcutsRun.closed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('shortcut Electron smoke did not exit cleanly')), 12000))
+  ]);
+  assert.equal(shortcutsClose.code, 0, `shortcut Electron smoke failed: ${shortcutsRun.getOutput()}`);
+  console.log('BROWSER_TEST_DRIVER_SHORTCUTS_PASSED');
+  activeRun = null;
+  if (process.env.EARTH_ONE_BROWSER_SHORTCUTS_ONLY === '1') return;
 
   const firstRun = launchSmoke('initial');
   activeRun = firstRun;
@@ -345,7 +374,6 @@ async function main() {
   const sessionProfileDir = path.join(downloadDir, 'electron-session-profile');
   fs.mkdirSync(sessionProfileDir, { recursive: true });
   const sessionStorePath = path.join(sessionProfileDir, 'earth-one-browser-session.json');
-  const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`;
   const cookieAuditBeforeSave = sessionRequestAudit.length;
   const sessionSaveRun = launchSmoke('session-save', {
     profileDir: sessionProfileDir,
