@@ -32,6 +32,7 @@ interface GlobalFeedProps {
   onAddComment: (postId: string, text: string) => void;
   onCreatePost: (postData: { content: string; mediaUrl?: string; category: any }) => void;
   onSelectUser: (user: any) => void;
+  onFlyToCoordinates?: (lat: number, lng: number) => void;
   lang: Language;
 }
 
@@ -45,6 +46,7 @@ export const GlobalFeed: React.FC<GlobalFeedProps> = ({
   onAddComment,
   onCreatePost,
   onSelectUser,
+  onFlyToCoordinates,
   lang
 }) => {
   const t = translations[lang];
@@ -54,6 +56,10 @@ export const GlobalFeed: React.FC<GlobalFeedProps> = ({
   const [feedType, setFeedType] = useState<'global' | 'trending' | 'latest' | 'following'>('global');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [activeTopic, setActiveTopic] = useState<TrendingTopic | null>(null);
+
+  // AI Translation state
+  const [translatedPosts, setTranslatedPosts] = useState<Record<string, { text: string; loading?: boolean }>>({});
+  const [tipToast, setTipToast] = useState<string | null>(null);
 
   // Post composer state
   const [composerContent, setComposerContent] = useState('');
@@ -111,6 +117,42 @@ export const GlobalFeed: React.FC<GlobalFeedProps> = ({
     setComposerContent('');
     setComposerMediaUrl('');
     setShowMediaInput(false);
+  };
+
+  const handleTranslatePost = async (postId: string, text: string) => {
+    if (translatedPosts[postId]?.text) {
+      setTranslatedPosts(prev => {
+        const copy = { ...prev };
+        delete copy[postId];
+        return copy;
+      });
+      return;
+    }
+
+    setTranslatedPosts(prev => ({ ...prev, [postId]: { text: '', loading: true } }));
+    try {
+      const res = await fetch('/api/ai/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          targetLang: isZh ? 'Chinese' : 'English'
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.translation) {
+        setTranslatedPosts(prev => ({ ...prev, [postId]: { text: data.translation, loading: false } }));
+      } else {
+        setTranslatedPosts(prev => ({ ...prev, [postId]: { text: isZh ? '翻译解析稍后重试' : 'Translation retry later', loading: false } }));
+      }
+    } catch {
+      setTranslatedPosts(prev => ({ ...prev, [postId]: { text: isZh ? '网络通讯延迟，请重试' : 'Network error, please retry', loading: false } }));
+    }
+  };
+
+  const handleTip = (authorName: string) => {
+    setTipToast(isZh ? `已向 ${authorName} 赠送地球计划公民星光激励！` : `Appreciation sent to ${authorName}!`);
+    setTimeout(() => setTipToast(null), 3000);
   };
 
   const handleCommentSubmit = (postId: string) => {
@@ -386,10 +428,24 @@ export const GlobalFeed: React.FC<GlobalFeedProps> = ({
                           </span>
                         </div>
                         <div className="flex items-center space-x-2 text-xs text-slate-400">
-                          <span className="flex items-center space-x-0.5">
-                            <MapPin className="w-3 h-3 text-cyan-400" />
-                            <span>{post.cityName}, {post.countryName}</span>
-                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onFlyToCoordinates) {
+                                const cMatch = countries.find(c => c.code.toLowerCase() === post.countryCode.toLowerCase());
+                                const targetLat = cMatch ? cMatch.lat : 31.23;
+                                const targetLng = cMatch ? cMatch.lng : 121.47;
+                                onFlyToCoordinates(targetLat, targetLng);
+                              }
+                            }}
+                            className="flex items-center space-x-1 hover:text-cyan-300 transition-colors cursor-pointer group/geo text-left"
+                            title="在三维数字地球上定位该公民坐标"
+                          >
+                            <MapPin className="w-3 h-3 text-cyan-400 group-hover/geo:scale-125 transition-transform shrink-0" />
+                            <span className="group-hover/geo:underline">{post.cityName}, {post.countryName}</span>
+                            <span className="text-[10px] text-cyan-400 font-mono ml-1 opacity-80">(在地球上看 ↗)</span>
+                          </button>
                           <span>·</span>
                           <span>{new Date(post.createdAt).toLocaleDateString()}</span>
                         </div>
@@ -405,6 +461,33 @@ export const GlobalFeed: React.FC<GlobalFeedProps> = ({
                   <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-line">
                     {post.content}
                   </p>
+
+                  {/* AI Translated Container (if active) */}
+                  {translatedPosts[post.id]?.loading && (
+                    <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-300 flex items-center space-x-2 animate-pulse">
+                      <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                      <span>{isZh ? '地球计划 AI 正在跨语言即时翻译...' : 'Translating with Project Earth AI...'}</span>
+                    </div>
+                  )}
+
+                  {translatedPosts[post.id]?.text && !translatedPosts[post.id]?.loading && (
+                    <div className="p-3.5 rounded-xl bg-cyan-950/30 border border-cyan-500/40 text-xs text-cyan-100 space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-mono text-cyan-400 mb-1">
+                        <span className="flex items-center gap-1">
+                          <Sparkles className="w-3 h-3" />
+                          {isZh ? '地球计划 AI 智能同声翻译' : 'PROJECT EARTH AI TRANSLATION'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleTranslatePost(post.id, post.content)}
+                          className="text-slate-400 hover:text-white"
+                        >
+                          {isZh ? '收起翻译' : 'Hide'}
+                        </button>
+                      </div>
+                      <p className="leading-relaxed whitespace-pre-line">{translatedPosts[post.id].text}</p>
+                    </div>
+                  )}
 
                   {/* Media Attachment */}
                   {post.mediaUrl && (
@@ -443,10 +526,24 @@ export const GlobalFeed: React.FC<GlobalFeedProps> = ({
                         <Share2 className="w-4 h-4" />
                         <span>{post.sharesCount}</span>
                       </button>
+
+                      {/* AI Translate Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleTranslatePost(post.id, post.content)}
+                        className={`flex items-center space-x-1 cursor-pointer transition-colors ${
+                          translatedPosts[post.id]?.text ? 'text-cyan-400 font-medium' : 'hover:text-cyan-300 text-slate-400'
+                        }`}
+                        title="AI 智能双向翻译该动态"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>{translatedPosts[post.id]?.text ? (isZh ? '原文' : 'Original') : (isZh ? 'AI 翻译' : 'Translate')}</span>
+                      </button>
                     </div>
 
                     <button
-                      onClick={() => alert(`Tip sent to ${post.author.displayName}! (Voluntary appreciation)`)}
+                      type="button"
+                      onClick={() => handleTip(post.author.displayName)}
                       className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/40 cursor-pointer transition-colors font-medium"
                     >
                       <DollarSign className="w-3.5 h-3.5" />

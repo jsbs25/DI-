@@ -498,6 +498,10 @@ export default function App() {
             onAddComment={handleAddComment}
             onCreatePost={handleCreatePost}
             onSelectUser={u => setProfileModalUser(u)}
+            onFlyToCoordinates={(lat, lng) => {
+              setFocusCoordinates({ lat, lng, timestamp: Date.now() });
+              setCurrentTab('globe');
+            }}
             lang={lang}
           />
         )}

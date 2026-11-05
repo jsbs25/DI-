@@ -7,8 +7,8 @@ import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
-import { EpubArchiveError, fetchAllowedEpubResponse, getAuthorizedEpubSource, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
-import { fetchAndExtract, fetchRawHtml, searchGitHubRepositories, searchWeb } from './server/webFetcher.ts';
+import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
+import { fetchAndExtract, searchWeb } from './server/webFetcher.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 import {
@@ -23,7 +23,6 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-const HOST = process.env.EARTH_ONE_HOST || '0.0.0.0';
 
 app.use(express.json());
 
@@ -499,8 +498,7 @@ app.get('/api/games/rooms', (req, res) => {
 // -------------------------------------------------------------
 // 7. EARTH ONE UNIFIED AI GATEWAY & MULTI-MODEL DISPATCH
 // -------------------------------------------------------------
-app.get('/api/ai/models', async (req, res) => {
-  await aiGateway.detectLocalOllama();
+app.get('/api/ai/models', (req, res) => {
   res.json({ success: true, models: aiGateway.getModels() });
 });
 
@@ -520,13 +518,9 @@ app.post('/api/ai/chat', async (req, res) => {
     aiGateway.registerCustomProvider(apiKey, baseUrl, customModel);
   }
 
-  // Ensure locally-running Ollama models are registered before resolving the
-  // selected model, so `ollama:*` IDs never silently fall back to the default.
-  await aiGateway.detectLocalOllama();
-
   const resolvedModelId = apiKey
     ? 'custom'
-    : (modelId || model || '');
+    : (modelId || model || 'deepseek-r1-open');
   const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
   if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
 
@@ -722,22 +716,21 @@ app.post('/api/library/ingest', async (req, res) => {
   }
 });
 
-// EPUB proxy: only serve a URL stored on a locally ingested, explicitly reusable
-// book record. The client identifies the book; it never authorizes a raw URL.
+// EPUB proxy: download an EPUB from a legal source and stream it back
+// (same-origin) so the browser epub.js reader is not blocked by CORS.
 app.get('/api/library/epub-proxy', async (req, res) => {
-  const { bookId } = req.query;
-  if (!bookId || typeof bookId !== 'string' || bookId.length > 160) {
-    return res.status(400).json({ success: false, code: 'EPUB_BOOK_REQUIRED', error: 'A stored bookId is required' });
+  const { url } = req.query;
+  if (!url || typeof url !== 'string') {
+    return res.status(400).json({ success: false, error: 'url required' });
   }
-  const book = store.books.find(item => item.id === bookId);
-  if (!book) return res.status(404).json({ success: false, code: 'EPUB_BOOK_NOT_FOUND', error: 'Book not found' });
-  const parsedUrl = getAuthorizedEpubSource(book);
-  if (!parsedUrl) {
-    return res.status(403).json({ success: false, code: 'EPUB_RIGHTS_UNVERIFIED', error: 'This book has no EPUB that is bound to a supported source and explicitly reusable rights record.' });
+  // Restrict transport to known library hosts; item-level rights are a separate check.
+  let parsedUrl: URL;
+  try { parsedUrl = new URL(url); } catch { return res.status(400).json({ success: false, error: 'Invalid URL' }); }
+  if (parsedUrl.protocol !== 'https:' || parsedUrl.username || parsedUrl.password) {
+    return res.status(403).json({ success: false, error: 'Only credential-free HTTPS EPUB sources are allowed' });
   }
   try {
-    const providerHosts = book.connectorId === 'gutenberg' ? ['gutenberg.org'] : ['archive.org'];
-    const upstream = await fetchAllowedEpubResponse(parsedUrl, fetch, 5, providerHosts);
+    const upstream = await fetchAllowedEpubResponse(parsedUrl);
     if (!upstream.ok || !upstream.body) {
       return res.status(502).json({ success: false, error: `Upstream ${upstream.status}` });
     }
@@ -1011,18 +1004,6 @@ app.delete('/api/browser/saved-articles/:id', (req, res) => {
   res.json({ success: deleted });
 });
 
-app.get('/api/browser/raw-html', async (req, res) => {
-  const { url } = req.query;
-  if (!url || typeof url !== 'string') return res.status(400).json({ success: false, error: 'URL required' });
-  if (!/^https?:\/\//i.test(url)) return res.status(400).json({ success: false, error: 'Only HTTP(S) URLs supported' });
-  try {
-    const html = await fetchRawHtml(url);
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8').send(html);
-  } catch (err: any) {
-    res.status(502).json({ success: false, error: err?.message || 'Failed to fetch raw HTML' });
-  }
-});
-
 app.post('/api/browser/fetch-preview', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ success: false, error: 'URL required' });
@@ -1041,12 +1022,10 @@ app.get('/api/browser/search', async (req, res) => {
   if (!q || typeof q !== 'string' || !q.trim()) {
     return res.status(400).json({ success: false, error: 'Search query required' });
   }
-  const engineParam = engine === 'bing' || engine === 'duckduckgo' || engine === 'wikipedia' || engine === 'github' ? engine : 'auto';
+  const engineParam = engine === 'bing' || engine === 'duckduckgo' || engine === 'wikipedia' ? engine : 'auto';
   const langParam = lang === 'zh' || lang === 'ar' || lang === 'es' || lang === 'fr' || lang === 'ru' ? lang : 'en';
   try {
-    const results = engineParam === 'github'
-      ? await searchGitHubRepositories(q, 12)
-      : await searchWeb(q, 10, engineParam, langParam);
+    const results = await searchWeb(q, 10, engineParam, langParam);
     res.json({ success: true, query: q, results, engine: engineParam, lang: langParam });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Search failed' });
@@ -1132,22 +1111,10 @@ app.get('/api/search/global', (req, res) => {
 
   const knowledge = searchKnowledge(q, 5);
 
-  const articles = store.articles
-    .filter(a =>
-      a.title.toLowerCase().includes(lower) ||
-      a.summary.toLowerCase().includes(lower) ||
-      a.content.toLowerCase().includes(lower)
-    )
-    .slice(0, 5);
-
-  const videos = store.videos
-    .filter(v => v.title.toLowerCase().includes(lower) || v.description.toLowerCase().includes(lower))
-    .slice(0, 5);
-
   res.json({
     success: true,
     query: q,
-    results: { users: users.map(toPublicUser), posts, books, communities, knowledge, articles, videos }
+    results: { users: users.map(toPublicUser), posts, books, communities, knowledge }
   });
 });
 
@@ -1162,13 +1129,8 @@ async function startServer() {
 
   app.use(vite.middlewares);
 
-  // Register locally-running Ollama models (e.g. gpt-oss:20b) at boot so they
-  // are immediately selectable in the AI Hub without a prior /api/ai/models
-  // round-trip.
-  await aiGateway.detectLocalOllama();
-
-  app.listen(PORT, HOST, () => {
-    console.log(`🌍 地球计划 Server listening on http://${HOST}:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🌍 地球计划 Server listening on http://0.0.0.0:${PORT}`);
   });
 
   if (process.env.EARTH_ONE_SKIP_BOOK_HARVEST !== 'true') {

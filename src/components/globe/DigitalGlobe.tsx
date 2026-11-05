@@ -46,8 +46,6 @@ import {
 interface DigitalGlobeProps {
   nodes: GlobeUserNode[];
   countries: GlobeCountryStat[];
-  showGlobeTools: boolean;
-  onToggleGlobeTools: () => void;
   activeCountry: string | null;
   currentUserId?: string;
   focusCoordinates?: { lat: number; lng: number; timestamp?: number } | null;
@@ -56,14 +54,14 @@ interface DigitalGlobeProps {
   onSelectTab: (tab: string) => void;
   onExploreUniverse?: () => void;
   onExploreCommunity?: () => void;
+  showGlobeTools?: boolean;
+  onToggleGlobeTools?: () => void;
   lang: Language;
 }
 
 export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   nodes,
   countries,
-  showGlobeTools,
-  onToggleGlobeTools,
   activeCountry,
   currentUserId,
   focusCoordinates,
@@ -72,6 +70,8 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   onSelectTab,
   onExploreUniverse,
   onExploreCommunity,
+  showGlobeTools = true,
+  onToggleGlobeTools,
   lang
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -754,25 +754,13 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={onToggleGlobeTools}
-        aria-expanded={showGlobeTools}
-        aria-controls="globe-local-nav globe-mobile-controls globe-telemetry-panel globe-statistics-panel globe-controls-rail globe-ai-launcher"
-        aria-label={showGlobeTools ? t.hideGlobeTools : t.showGlobeTools}
-        className="absolute right-4 top-4 z-30 inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700/80 bg-slate-950/85 px-3 py-2 text-xs font-semibold text-slate-200 shadow-xl backdrop-blur-xl transition-colors hover:border-cyan-500/50 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
-      >
-        <Layers className="h-4 w-4 text-cyan-300" />
-        <span>{showGlobeTools ? t.hideGlobeTools : t.showGlobeTools}</span>
-      </button>
-
-      <aside id="globe-local-nav" style={{ display: showGlobeTools ? undefined : 'none' }} className="absolute bottom-6 left-3 top-4 z-20 hidden w-[174px] flex-col rounded-[26px] border border-slate-700/70 bg-[#071020]/85 p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl md:flex">
+      <aside className="absolute bottom-6 left-3 top-4 z-20 hidden w-[174px] flex-col rounded-[26px] border border-slate-700/70 bg-[#071020]/85 p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl md:flex">
         <div className="flex items-center gap-2 border-b border-slate-800/90 px-2 pb-3 pt-1">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-blue-400/30 bg-blue-500/15 text-blue-300 shadow-[0_0_24px_rgba(37,99,235,.24)]">
             <Globe2 className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <div className="text-[11px] font-bold tracking-[.12em] text-white">EARTH ONE</div>
+            <div className="text-[11px] font-bold tracking-[.12em] text-white">地球计划</div>
             <div className="text-[9px] text-slate-400">One Universe. One World.</div>
           </div>
         </div>
@@ -844,9 +832,13 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       {/* ============================================================== */}
       {/* 2. WORLD-CLASS USER HERO OVERLAY                               */}
       {/* ============================================================== */}
-      <div className={`relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 flex flex-col pb-8 pointer-events-none ${showGlobeTools ? 'md:pl-[220px] lg:pl-[220px] justify-start md:justify-between pt-8 sm:pt-20' : 'justify-start pt-4 sm:pt-8'}`}>
-        {/* Hero CTA */}
+      <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-[220px] lg:pl-[220px] flex flex-col justify-start md:justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
+        {/* Left Hero Title & CTA */}
         <div className="max-w-xl pointer-events-auto">
+          <h1 className="font-extrabold text-3xl sm:text-6xl md:text-7xl tracking-tight text-white font-sans drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]">
+            {lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}
+          </h1>
+
           {showFirstUseHint && (
             <div className="mt-3 flex max-w-md items-start gap-2 rounded-xl border border-cyan-900/70 bg-slate-950/75 px-3 py-2 text-xs leading-relaxed text-cyan-100/90 shadow-lg backdrop-blur-md">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
@@ -866,21 +858,29 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             </div>
           )}
 
-          <div className="mt-4">
+          {/* Start Exploring Action Button */}
+          <div className="mt-4 sm:mt-6 flex flex-wrap items-center gap-2 sm:gap-3">
             <button
-              type="button"
-              onClick={handleToggleExplore}
-              aria-pressed={isZoomedIn}
-              className="inline-flex min-h-12 items-center gap-2.5 rounded-full border border-cyan-300/40 bg-gradient-to-r from-blue-600/95 to-cyan-500/90 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-blue-950/45 transition-all hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
+              onClick={onExploreUniverse}
+              className="inline-flex items-center space-x-2 sm:space-x-3 px-4 sm:px-8 py-2.5 sm:py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-xs sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
             >
-              <Orbit className="h-4 w-4" />
-              <span>{isZoomedIn ? t.overviewView : t.startExploring}</span>
-              <ArrowRight className="h-4 w-4" />
+              <span>{t.startExploring}</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </button>
+
+            {onExploreCommunity && (
+              <button
+                onClick={onExploreCommunity}
+                className="inline-flex items-center space-x-2 px-3 sm:px-5 py-2.5 sm:py-3.5 rounded-full bg-slate-900/80 hover:bg-slate-800/90 border border-slate-700/80 text-slate-200 text-xs sm:text-sm font-medium backdrop-blur-md cursor-pointer transition-all hover:text-white"
+              >
+                <Users2 className="w-4 h-4 text-emerald-300" />
+                <span>{t.communityTab}</span>
+              </button>
+            )}
           </div>
 
           {/* Mobile controls stay in document flow instead of covering the stats. */}
-          <div id="globe-mobile-controls" style={{ display: showGlobeTools ? undefined : 'none' }} className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden" aria-label={t.globeControls}>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden" aria-label={t.globeControls}>
             <button onClick={handleToggleExplore} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={isZoomedIn ? t.zoomOut : t.inspectEarth} title={isZoomedIn ? t.zoomOut : t.inspectEarth}>
               <Orbit className="h-4 w-4" />
             </button>
@@ -901,50 +901,32 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           </div>
         </div>
 
-        {showGlobeTools && <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />}
+        <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />
 
-        {/* Bottom Telemetry HUD Deck: ISS Live Orbit + USGS Earthquakes + Geospatial Layers */}
-        <div id="globe-telemetry-panel" style={{ display: showGlobeTools ? undefined : 'none' }} className="w-full grid grid-cols-1 gap-3 pointer-events-auto pt-6 sm:pt-10 lg:grid-cols-3 lg:gap-4">
-          {/* Card 1: ISS Live Orbit Telemetry */}
-          <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between text-xs font-semibold leading-tight text-slate-300 tracking-wide mb-3">
-                <div className="flex items-center space-x-2">
-                  <Satellite className="w-4 h-4 text-cyan-400 animate-pulse" />
-                  <span>{t.issTracker || '国际空间站实时遥测'}</span>
+        {/* Ultra-Clean Floating Aerospace Telemetry Capsule (Sleek, Unobstructed, High-Tech) */}
+        <div className="w-full flex justify-center pointer-events-auto pt-4 sm:pt-6">
+          <div className="w-full max-w-4xl p-2.5 sm:p-3 rounded-2xl bg-slate-950/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+            {/* 1. ISS Live Telemetry */}
+            <div className="flex items-center space-x-3 w-full md:w-auto">
+              <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0">
+                <Satellite className="w-4 h-4 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center space-x-1.5">
+                  <span className="font-bold text-white text-xs">国际空间站 ISS</span>
+                  <span className="px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 font-mono text-[9px] border border-cyan-800/60">
+                    NORAD 25544
+                  </span>
                 </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-cyan-950/80 border border-cyan-800/60 text-cyan-300">
-                  NORAD 25544
-                </span>
+                <div className="text-[11px] font-mono text-slate-400 flex items-center space-x-2 mt-0.5">
+                  <span>{issData ? `${issData.lat.toFixed(1)}°, ${issData.lng.toFixed(1)}°` : '0.0°, 0.0°'}</span>
+                  <span>·</span>
+                  <span className="text-cyan-300">{issData ? `${issData.altitudeKm.toFixed(0)}km` : '420km'}</span>
+                  <span>·</span>
+                  <span className="text-emerald-300">{issData ? `${Math.round(issData.velocityKmh).toLocaleString()}km/h` : '27,580km/h'}</span>
+                </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-800/60">
-                <div className="text-center">
-                  <div className="text-[10px] text-slate-400 font-mono">LAT / LNG</div>
-                  <div className="font-mono text-xs sm:text-sm font-bold text-white mt-0.5 truncate">
-                    {issData ? `${issData.lat.toFixed(1)}°, ${issData.lng.toFixed(1)}°` : '0.0°, 0.0°'}
-                  </div>
-                </div>
-                <div className="text-center border-x border-slate-800/60">
-                  <div className="text-[10px] text-slate-400 font-mono">{t.issAltitude || '高度'}</div>
-                  <div className="font-mono text-xs sm:text-sm font-bold text-cyan-300 mt-0.5">
-                    {issData ? `${issData.altitudeKm.toFixed(0)} km` : '420 km'}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-[10px] text-slate-400 font-mono">{t.issVelocity || '时速'}</div>
-                  <div className="font-mono text-xs sm:text-sm font-bold text-emerald-300 mt-0.5">
-                    {issData ? `${Math.round(issData.velocityKmh).toLocaleString()} km/h` : '27,580 km/h'}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 flex items-center justify-between pt-1">
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
-                <span>实时轨道运行中</span>
-              </span>
               <button
                 type="button"
                 onClick={() => {
@@ -952,194 +934,83 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                     flyToCoordinates(issData.lat, issData.lng);
                   }
                 }}
-                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-cyan-500/15 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-xs font-medium transition-all cursor-pointer"
+                className="ml-auto md:ml-2 px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer"
+                title="镜头瞬移锁定空间站"
               >
-                <Navigation className="w-3.5 h-3.5" />
-                <span>{t.flyToIss || '锁定空间站'}</span>
+                <Navigation className="w-3 h-3" />
+                <span>锁定聚焦</span>
               </button>
             </div>
-          </div>
 
-          {/* Card 2: USGS Live Earthquakes Activity */}
-          <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between text-xs font-semibold leading-tight text-slate-300 tracking-wide mb-3">
-                <div className="flex items-center space-x-2">
-                  <Activity className="w-4 h-4 text-amber-400" />
-                  <span>{t.seismicMonitor || '全球地震带实时监测'}</span>
+            <div className="hidden md:block h-6 w-px bg-slate-800" />
+
+            {/* 2. Space Weather & Planetary Environment */}
+            <div className="hidden lg:flex items-center space-x-3 text-slate-400 text-[11px]">
+              <div className="w-8 h-8 rounded-xl bg-purple-950/80 border border-purple-500/40 flex items-center justify-center text-purple-400 shrink-0">
+                <Radio className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-semibold text-slate-200">太空环境 · 太阳风暴与地磁</div>
+                <div className="font-mono text-slate-400 text-[10px] mt-0.5">
+                  Kp-2.1 (地磁宁静) · 太阳风 412 km/s · 通讯正常
                 </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-950/80 border border-amber-800/60 text-amber-300">
-                  USGS M2.5+
-                </span>
-              </div>
-
-              <div className="space-y-1.5 max-h-[92px] overflow-y-auto pr-1 scrollbar-thin">
-                {earthquakes.length > 0 ? (
-                  earthquakes.slice(0, 3).map(quake => (
-                    <button
-                      key={quake.id}
-                      type="button"
-                      onClick={() => flyToCoordinates(quake.lat, quake.lng)}
-                      className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 text-left transition-colors cursor-pointer group"
-                    >
-                      <div className="flex items-center space-x-2 min-w-0">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
-                          quake.mag >= 5.5
-                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                            : quake.mag >= 4.5
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                            : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                        }`}>
-                          M{quake.mag.toFixed(1)}
-                        </span>
-                        <span className="text-[11px] text-slate-300 group-hover:text-white truncate">
-                          {quake.place}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">
-                        {quake.depthKm.toFixed(0)}km
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <div className="text-[11px] text-slate-500 py-4 text-center">
-                    正在同步全球活断层传感器数据...
-                  </div>
-                )}
               </div>
             </div>
 
-            <div className="mt-3 flex items-center justify-between pt-1 border-t border-slate-800/60">
-              <span className="text-[10px] text-slate-400">
-                已同步 {earthquakes.length} 起实时地震震中
-              </span>
-              <span className="text-[10px] text-cyan-400 font-medium">
-                点击震源瞬移聚焦
-              </span>
-            </div>
-          </div>
+            <div className="hidden md:block h-6 w-px bg-slate-800" />
 
-          {/* Card 3: Geospatial Layers & Spatial Controls */}
-          <div className="w-full min-w-0 p-4 sm:p-5 rounded-3xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between text-xs font-semibold leading-tight text-slate-300 tracking-wide mb-3">
-                <div className="flex items-center space-x-2">
-                  <Layers className="w-4 h-4 text-purple-400" />
-                  <span>{t.geospatialLayers || '空间图层与遥感'}</span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-purple-950/80 border border-purple-800/60 text-purple-300">
-                  WebGL 3D
-                </span>
-              </div>
+            {/* 3. Quick Layer Toggles */}
+            <div className="flex items-center space-x-1.5 w-full md:w-auto justify-end">
+              <button
+                type="button"
+                onClick={() => setShowISS(!showISS)}
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${
+                  showISS ? 'bg-cyan-950/60 border-cyan-500/50 text-cyan-300' : 'bg-slate-900 border-slate-800 text-slate-500'
+                }`}
+                title="开关国际空间站模型"
+              >
+                🛰️ 空间站
+              </button>
 
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowISS(!showISS)}
-                  className={`px-3 py-2 rounded-xl text-left border text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
-                    showISS
-                      ? 'bg-cyan-950/40 border-cyan-500/40 text-cyan-200'
-                      : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span className="truncate">{t.layerISS || '空间站'}</span>
-                  <span className={`h-2 w-2 rounded-full ${showISS ? 'bg-cyan-400 shadow-[0_0_8px_#38bdf8]' : 'bg-slate-700'}`} />
-                </button>
+              <button
+                type="button"
+                onClick={() => setShowBeacons(!showBeacons)}
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${
+                  showBeacons ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'
+                }`}
+                title="开关全球公民信标"
+              >
+                👥 公民信标
+              </button>
 
-                <button
-                  type="button"
-                  onClick={() => setShowEarthquakes(!showEarthquakes)}
-                  className={`px-3 py-2 rounded-xl text-left border text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
-                    showEarthquakes
-                      ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
-                      : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span className="truncate">{t.layerSeismic || '地震断裂'}</span>
-                  <span className={`h-2 w-2 rounded-full ${showEarthquakes ? 'bg-amber-400 shadow-[0_0_8px_#fbbf24]' : 'bg-slate-700'}`} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowBeacons(!showBeacons)}
-                  className={`px-3 py-2 rounded-xl text-left border text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
-                    showBeacons
-                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
-                      : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span className="truncate">{t.layerBeacons || '公民信标'}</span>
-                  <span className={`h-2 w-2 rounded-full ${showBeacons ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-slate-700'}`} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setAutoRotate(!autoRotate)}
-                  className={`px-3 py-2 rounded-xl text-left border text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
-                    autoRotate
-                      ? 'bg-blue-950/40 border-blue-500/40 text-blue-200'
-                      : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span className="truncate">{t.autoRotate}</span>
-                  <span className={`h-2 w-2 rounded-full ${autoRotate ? 'bg-blue-400 shadow-[0_0_8px_#60a5fa]' : 'bg-slate-700'}`} />
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-3 flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-400">
-              <span>遥测状态</span>
-              <span className="font-mono text-emerald-400">
-                ACTIVE · 60 FPS
-              </span>
+              <button
+                type="button"
+                onClick={() => setAutoRotate(!autoRotate)}
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${
+                  autoRotate ? 'bg-blue-950/60 border-blue-500/50 text-blue-300' : 'bg-slate-900 border-slate-800 text-slate-500'
+                }`}
+                title="开关地球自转"
+              >
+                🌍 自转
+              </button>
             </div>
           </div>
         </div>
 
         {/* Centered Footer Motto (omitted when empty to keep space clean) */}
-        {showGlobeTools && t.footerMotto ? (
+        {t.footerMotto ? (
           <div className="w-full text-center mt-6 pt-4 border-t border-slate-900/80 text-[11px] text-slate-500 font-mono tracking-wider">
             {t.footerMotto}
           </div>
         ) : null}
       </div>
 
-      <aside id="globe-statistics-panel" style={{ display: showGlobeTools ? undefined : 'none' }} className="absolute right-[76px] top-[28%] z-20 hidden w-60 rounded-3xl border border-blue-400/30 bg-[#071020]/80 p-4 shadow-2xl shadow-blue-950/40 backdrop-blur-2xl xl:block">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-bold text-white">{t.globeTab}</span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-[9px] font-semibold text-emerald-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]" />
-            {t.onlineUsers}
-          </span>
-        </div>
-        <div className="mt-4 flex items-center gap-3 border-b border-slate-800 pb-4">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full border border-cyan-400/30 bg-[radial-gradient(circle_at_35%_30%,#60a5fa,#102a56_60%,#020617)] text-cyan-100 shadow-[0_0_24px_rgba(59,130,246,.4)]">
-            <Globe2 className="h-7 w-7" />
-          </span>
-          <div>
-            <div className="text-xs font-semibold text-slate-100">EARTH ONE</div>
-            <p className="mt-1 text-[10px] leading-relaxed text-slate-400">{t.motto}</p>
-          </div>
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
-          <div className="rounded-xl bg-slate-900/70 p-2.5">
-            <div className="font-mono text-sm font-bold text-white">{nodes.length.toLocaleString()}</div>
-            <div className="mt-1 text-slate-400">{t.activeNodes}</div>
-          </div>
-          <div className="rounded-xl bg-slate-900/70 p-2.5">
-            <div className="font-mono text-sm font-bold text-white">{countries.length.toLocaleString()}</div>
-            <div className="mt-1 text-slate-400">{t.allCountries}</div>
-          </div>
-        </div>
-        <button type="button" onClick={onExploreCommunity} className="mt-3 flex w-full items-center justify-center gap-1 rounded-full border border-slate-700 bg-slate-900/70 py-2 text-[10px] font-semibold text-slate-200 transition-colors hover:border-blue-400/50 hover:text-white">
-          {t.learnMore}<ArrowRight className="h-3 w-3" />
-        </button>
-      </aside>
+
 
       {/* ============================================================== */}
       {/* 3. RIGHT FLOATING VERTICAL ACTION RAIL                         */}
       {/* ============================================================== */}
-      <aside id="globe-controls-rail" style={{ display: showGlobeTools ? undefined : 'none' }} className="hidden md:flex fixed right-6 top-1/2 -translate-y-1/2 z-20 flex-col space-y-3 pointer-events-auto">
+      <aside className="hidden md:flex fixed right-6 top-1/2 -translate-y-1/2 z-20 flex-col space-y-3 pointer-events-auto">
         <div className="p-2 rounded-2xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col space-y-3 text-slate-400">
           {/* Orbit switch */}
           <button

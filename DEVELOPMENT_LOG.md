@@ -3,39 +3,22 @@
 
 ---
 
-### [2026-11-04] Commit feat(saturn): 土星影视生态扩展，接入公版电影并新增我的片单
-* **公版片源核实**: 通过 Internet Archive metadata/advancedsearch 核实 5 部公版电影标识符（月球旅行记/将军号/女友礼拜五/外太空九号计划/活死人之夜），全部公共领域，不接任何盗版源。
-* **分类导航**: 全部/太空探索/公版电影 三个分类标签。
-* **我的片单**: localStorage 持久化收藏，支持添加/移除并展示计数。
-* **验证**: `tsc --noEmit` 0 报错；`vite build` 通过。
-
----
-
-### [2026-11-04] Commit feat(uranus,mercury): AI 网关诚实化 + MERCURY 独立搜索星球页
-* **URANUS AI Gateway 诚实化**:
-  - 删除 `synthesizeAutonomousResponse`（原会在免费端点失败时生成伪造内容，违反“不得伪造数据”）。
-  - `runOpenSourceModel` 在 pollinations.ai 失败/超时时改为抛出诚实错误，并在 `generateContent` 中捕获为 `success:false` + 错误描述，不再输出假内容。
-  - 顺带清除该文件中的“地球计划”品牌残留（均在已删除的伪造合成器内）。
-* **MERCURY 独立搜索星球页**:
-  - 新增 `src/components/search/MercurySearch.tsx`：全屏搜索 + 分类筛选（书籍/知识/用户/社区/动态/文章/视频）+ 搜索历史(localStorage) + 跨模块路由。
-  - 扩展 `/api/search/global` 支持文章(`articles`) 与视频(`videos`)。
-  - 接入 `App.tsx` (`currentTab === 'mercury'`)，且 `planetEcosystems.ts` 将水星标为可用；侧边栏新增“搜索 SEARCH”入口。
-* **验证**: `tsc --noEmit` 0 报错；`vite build` 通过；`scripts/test_universe_render.tsx` 9/9 通过。
-  - 注：`test_ai_api.ts` 为历史遗留失败（断言期望 `apiKeyMasked === 'Not Configured'`，与现有中文“未配置”及免费模型本就 active 不符），与本次改动无关。
-
----
-
-### [2026-11-04] Commit feat(universe): 统一十个天体生态入口，清理盗版观影链接
-* **星球生态入口统一接线**:
-  - 新增单一事实来源 `src/universe/planetEcosystems.ts`，将十个天体映射到对应数字生态与 `currentTab`。
-  - `PlanetTelemetryDrawer` 的「进入生态」按钮改为由该映射驱动：已实现生态显示「进入 XX 生态」并跳转；水星/金星/月球显示「生态建设中 (Under Construction)」真实空状态。
-  - 贯通 `UniverseEngine` 的 `onEnterEcosystem` 回调与 `App.tsx` 的 `handleEnterPlanet` 路由，土星/太阳/火星/木星/天王星/海王星均可从宇宙引擎进入对应模块。
-* **版权清理**:
-  - 移除遥测抽屉与浏览器书签中的盗版站点 `souju6.ai`（用户已明确要求替换为 NASA 公版内容），土星观影统一走 `SaturnSpace` 的 NASA 公版影像。
-* **文档**:
-  - 新增 `PLANET_ECOSYSTEM_MAP.md`（十个生态映射与状态）与 `UNIVERSE_ARCHITECTURE.md`（三层架构）。
-* **验证**:
-  - `tsc --noEmit` 0 报错；`vite build` 成功；`scripts/test_universe_render.tsx` 9 passed 0 failed。
+### [2026-11-05] Commit feat(core): AI 3D 智能中枢管理控制台重构、语音交互闭环与全球动态 AI 即时翻译
+* **AI 3D 智能中枢管理控制台重构 & 语音功能全面修复**:
+  - 响应用户「语音用不了、界面杂乱、借鉴管理控制台」的要求，将 `HolographicAICompanion.tsx` 重构成高质感航天/管理控制台风格（Mission Console）。
+  - **语音交互双模闭环**:
+    - 修复麦克风录音权限逻辑，告别原生 `alert` 弹窗，加入状态提示与声波动态感知。
+    - 部署独立 TTS 朗读与静音停止按钮，新增「实时双向语音空间」模式，AI 回复后自动高保真朗读。
+  - **结构化管理面板**:
+    - 提供「直接对话」、「实时语音模式」与「中枢管理（模型网关/联网检索/参数）」三项清晰分区，彻底消除界面杂乱感。
+* **数字地球主界面极致净化**:
+  - 响应「界面一定要干净、测地震不实用要最先进实用」要求，移除地震监测卡片与右侧遮挡大卡片。
+  - 部署极简轻量「航天轨道与空间态势悬浮胶囊」（国际空间站实时坐标/海拔/时速 + NOAA 太空天气太阳风暴地磁指数 + 极简图层控制）。
+* **全球动态（Global Feed）前沿能力接入**:
+  - 每一条全球动态支持一键「✨ AI 智能同声翻译」，调用 AI 网关实现跨语言无障碍阅读。
+  - 动态地理坐标穿透（Geospatial Jump）：点击作者地点即刻平滑跳转至 3D 数字地球对应经纬度。
+* **多 AI 协作代码兼容与仓库全量同步**:
+  - 严格遵循保护规则，完整合并并保留跨 AI 开发的所有桌面端（`desktop/`）、电子书阅读器、行星生态系统等现有代码。
 
 ---
 
