@@ -3,12 +3,14 @@ export {};
 declare global {
   interface EarthOneBrowserState {
     tabId: string;
+    active: boolean;
     url: string;
     title: string;
     loading: boolean;
     navigated: boolean;
     canGoBack: boolean;
     canGoForward: boolean;
+    zoomPercent: number;
   }
 
   interface EarthOneBrowserBounds {
@@ -117,6 +119,7 @@ declare global {
   }
 
   type EarthOneBrowserFindDirection = 'new' | 'next' | 'previous';
+  type EarthOneBrowserZoomAction = 'in' | 'out' | 'reset';
 
   interface EarthOneBrowserFindResult {
     tabId: string;
@@ -154,6 +157,7 @@ declare global {
     goBack(tabId: string): Promise<void>;
     goForward(tabId: string): Promise<void>;
     reload(tabId: string): Promise<void>;
+    changeZoom(action: EarthOneBrowserZoomAction): Promise<{ success: boolean; zoomPercent?: number; error?: string }>;
     findInPage(query: string, direction: EarthOneBrowserFindDirection): Promise<{ success: boolean; error?: string }>;
     stopFindInPage(returnFocus?: boolean): Promise<{ success: boolean; error?: string }>;
     onState(listener: (state: EarthOneBrowserState) => void): () => void;

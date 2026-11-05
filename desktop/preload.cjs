@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
   goBack: tabId => ipcRenderer.invoke('browser:back', tabId),
   goForward: tabId => ipcRenderer.invoke('browser:forward', tabId),
   reload: tabId => ipcRenderer.invoke('browser:reload', tabId),
+  changeZoom: action => ipcRenderer.invoke('browser:change-zoom', action),
   findInPage: (query, direction) => ipcRenderer.invoke('browser:find-in-page', query, direction),
   stopFindInPage: returnFocus => ipcRenderer.invoke('browser:stop-find-in-page', Boolean(returnFocus)),
   onState: listener => {

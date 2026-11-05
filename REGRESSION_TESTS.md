@@ -7,7 +7,7 @@
 | 命令 | 覆盖范围 | 当前结果/注意事项 |
 |---|---|---|
 | `npm run lint` | TypeScript 类型检查（`tsc --noEmit`） | 2026-11-05：通过。 |
-| `npm run build` | Vite 生产构建 | 2026-11-05：通过；Vite 8.3.5 最大 chunk 1,342.07 KB（gzip 358.07 KB），触发大 chunk 警告；本次未修改依赖声明或锁文件。 |
+| `npm run build` | Vite 生产构建 | 2026-11-05：通过；Vite 8.3.5 最大 chunk 1,354.80 KB（gzip 361.05 KB），触发既有大 chunk 警告；本次未修改依赖声明或锁文件。 |
 | `npx tsx scripts/test_earth_one.ts` | 天体常数、地理坐标、公开资料脱敏、存储层注册/登录/引导、动态/互动、消息、JSON 持久化与趋势种子检查 | 2026-11-04：44 项通过、0 失败；使用系统临时数据文件，成功或失败后清理。它不调用 Express HTTP 路由，也不测试浏览器 UI。 |
 | `npm run test:api` | 临时 Express 服务的身份/隐私核心路径，以及动态发布/互动/最新 feed 排序、图书检索/详情/类别筛选/书架、浏览器书签、爬虫任务排队、文章/视频列表、知识图谱搜索/筛选/详情、社区/游戏房间/广告列表、地球节点及位置分享/国家/统计、AI 模型/统计、爬虫任务/页面及已保存文章列表 | 最新完整执行为 83 项通过、0 失败；脚本现含 85 项断言，新增约旦国家元数据与目录/统计跨端点一致性两项。本次两项经独立临时服务 GET smoke 验证；未重跑会命中待授权会话读取路径的完整套件。使用临时 JSON，不触碰正式数据、不发起 AI、外部抓取或媒体请求。未变更私信访问控制及管理授权策略。 |
 | `npm run test:globe-api` | 隔离临时 Express 服务中 `/api/globe/nodes`、`/api/globe/countries`、`/api/globe/stats` 的 GET-only 契约；检查公开/私密位置节点、节点字段白名单、私密坐标不泄漏、国家目录及统计一致性，以及三端点重复 GET 的完整状态/JSON 一致性 | 2026-11-04：14 项通过、0 失败；仅使用合成用户与临时 JSON、随机端口；请求被限于三个白名单 GET，不访问身份/会话/消息路径、正式数据或既有服务。 |
@@ -22,11 +22,12 @@
 | `npm run test:browser-api` | 独立临时 Express 服务中 `/api/browser/bookmarks` 与 `/api/browser/saved-articles` 的 GET-only 兼容契约；使用合成记录检查集合字段、书签 ID 唯一性及两个列表重复读取时完整状态/JSON 一致性；请求白名单不含写操作、预览或删除 | 2026-11-05：12 项通过、0 失败；自动清理临时 JSON 和随机本地端口，仅请求两个列表 GET；未访问会话/消息路径、外部 URL、正式数据或既有服务。该旧 API 保留，但当前 Browser UI 不再调用书签端点。 |
 | `npm run test:browser-find` | 模拟 WebContents 查找控制：仅活动可见标签、`new/next/previous`、非字符串/超长查询拒绝、过期结果过滤、清除高亮/焦点恢复、隐藏/销毁保护、切换活动标签聚焦页面，以及 Ctrl/Cmd+F 路由 | 2026-11-05：`BROWSER_FIND_ENGINE_TEST_PASS`；通过。 |
 | `npm run test:browser-shortcuts` | 快捷键白名单解析：Ctrl/Cmd 修饰键、Ctrl/Cmd+T/W、Tab 正向/反向循环、1–9 索引选择、保留 L/F，以及 keyUp/Alt/未允许的 Shift 和非法数字拒绝 | 2026-11-05：单元测试通过；Electron 真实输入烟测见 Browser engine 行。 |
+| `npm run test:browser-zoom` | 缩放白名单解析、50%–200% 安全范围、活动标签专属、同源标签独立状态、最后标签安全替换及非法 bridge 参数拒绝 | 2026-11-05：`BROWSER_ZOOM_ENGINE_TEST_PASS`；真实 Electron 缩放与重启恢复由 `npm run test:browser-engine` 覆盖。 |
 | `npm run test:browser-popups` | 模拟 popup 安全策略与 Browser engine：危险/无效/凭据 URL、EARTH ONE 应用 origin、所有 Electron disposition 必须确认、POST popup 拒绝、右键链接回调、活动标签焦点、关闭活动 popup 后恢复并聚焦剩余标签、专用 Browser session 复用、无 preload/Node | 2026-11-05：`BROWSER_POPUP_SECURITY_TEST_PASS`；通过。 |
 | `npm run test:browser-ipc-security` | 合成 IPC 事件验证精确主窗口 WebContents、顶层 frame 和应用 origin；拒绝其他 WebContents、子框架及错误/畸形来源 | 2026-11-05：`BROWSER_IPC_SECURITY_TEST_PASS`；通过。 |
 | `npm run test:browser-permissions` | 权限状态机单测：默认拒绝、仅通知/定位、HTTPS/loopback 安全来源、显式会话允许、能力与 origin 隔离、拒绝/撤销、超时/导航取消、重建状态机后清空；无网络 | 2026-11-05：`BROWSER_PERMISSIONS_TEST_PASS`；通过。 |
 | `npm run test:download-manager` | 合成 DownloadItem/临时 userData：保存对话框批准前不落盘、成功/进度/完成、重启后恢复并将进行中的任务标为已中断、取消、来源 query 脱敏、最近 50 条限制、损坏存储只读保护、批准文件后来删除后的可用状态、写入失败时 remove/clear 回滚、清理保留活动传输、移除/清理不删除文件、无效 URL 与非浏览器来源拒绝 | 2026-11-05：`DOWNLOAD_MANAGER_TEST_PASS`；仅临时目录，无网络。 |
-| `npm run test:browser-engine` | Linux/Xvfb 实际 Electron/Chromium：首次 Browser 挂载/焦点与 Reader Mode 隐藏恢复；向 `127.0.0.1` 合成页发送真实 Electron 键盘输入，覆盖 Ctrl/Cmd+T/W、Ctrl/Cmd+Tab/Shift+Tab、1–8/9、活动页焦点、标签栏同步、输入框/Reader/inactive 状态排除、最后标签安全替换，以及网页收不到快捷键且没有 preload/Node；同时检查 popup、导航边界、查找、权限、下载、会话恢复和 PDF 回归。所有非夹具 HTTP(S) 请求在请求层取消 | 2026-11-05：完整套件退出码 0；快捷键、下载、会话、查找、PDF、popup、IPC 安全、权限和多进程恢复 smoke 全部通过。`npm run lint`、`npm run build` 与 Browser API（12/12）通过；构建仅保留既有大分块提示。 |
+| `npm run test:browser-engine` | Linux/Xvfb 实际 Electron/Chromium：首次 Browser 挂载/焦点与 Reader Mode 隐藏恢复；向 `127.0.0.1` 合成页发送真实 Electron 键盘输入，覆盖 Ctrl/Cmd+T/W、Ctrl/Cmd+Tab/Shift+Tab、1–8/9、活动页焦点、标签栏同步、输入框/Reader/inactive 状态排除、最后标签安全替换；独立缩放 smoke 验证真实 Chromium 页面比例、Ctrl/Cmd +/-/0、同源/跨来源每标签隔离、地址栏/查找/Reader 排除、末标签比例及远程页无 preload/Node 且收不到缩放键；同时检查 popup、导航边界、查找、权限、下载、会话恢复和 PDF 回归。所有非夹具 HTTP(S) 请求在请求层取消 | 2026-11-05：完整套件退出码 0；缩放、键盘、下载、会话恢复/退出、查找、PDF、popup、IPC 安全、权限及重启 smoke 全部通过。`npm run lint` 与 `npm run build` 通过；`npm run test:browser-api` 12/12 通过。构建保留既有大 chunk 警告。 |
 | `npm run test:i18n` | 纯本地静态检查六种支持语言的字典键集合一致且所有翻译值非空 | 2026-11-04：13 项通过、0 失败；发现每种语言均有 104 个共用键；不调用 API，不验证翻译准确度、浏览器表现或 RTL 几何。 |
 | `npm run test:globe` | React 静态渲染：六种语言的总览标题/标签、Crawler 菜单翻译键、三个原有指标值、三列网格/逻辑边框和波形独立行 | 2026-11-04：30 项通过、0 失败；不运行 effect、WebGL、浏览器输入或 API，不证明实际视觉几何、交互或 RTL 布局。 |
 | `npm run test:universe` | 地球/土星/空选择的遥测静态渲染：关闭按钮名称和类型、天体双语名称、对焦文字、条件地球入口 | 2026-11-04：9 项通过、0 失败；不测试浏览器点击、键盘、读屏或相机行为，原关闭回调未更改。 |

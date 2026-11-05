@@ -11,6 +11,9 @@ const { normalizePopupTarget, requiresPopupConfirmation } = require('./browser-p
 const { getBrowserShortcut } = require('./browser-shortcuts.cjs');
 
 const DEFAULT_BROWSER_NEW_TAB_URL = 'https://en.wikipedia.org/wiki/Earth';
+const MIN_ZOOM_PERCENT = 50;
+const MAX_ZOOM_PERCENT = 200;
+const ZOOM_STEP_PERCENT = 10;
 
 function normalizeBrowserUrl(input) {
   if (typeof input !== 'string') throw new TypeError('请输入有效的网址。');
@@ -107,12 +110,14 @@ function createBrowserEngine({
     }
     return {
       tabId,
+      active: isActiveTab(tabId),
       url: isAllowedNavigation(contents.getURL()) ? contents.getURL() : entry.lastUrl || '',
       title: contents.getTitle() || entry.lastTitle || '',
       loading: contents.isLoading(),
       navigated: false,
       canGoBack,
-      canGoForward
+      canGoForward,
+      zoomPercent: entry.zoomPercent
     };
   }
 
@@ -123,6 +128,16 @@ function createBrowserEngine({
     if (state.url) entry.lastUrl = state.url;
     if (state.title) entry.lastTitle = state.title;
     onState(state);
+  }
+
+  function applyZoomForEntry(entry) {
+    if (!entry || entry.view.webContents.isDestroyed()) return false;
+    try {
+      entry.view.webContents.setZoomFactor(entry.zoomPercent / 100);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function applyVisibility() {
@@ -171,6 +186,10 @@ function createBrowserEngine({
       const shortcut = getBrowserShortcut(input);
       if (!isActiveTab(tabId) || !shortcut) return;
       event.preventDefault();
+      if (shortcut.action === 'zoom') {
+        changeZoom(shortcut.direction);
+        return;
+      }
       if (shortcut.action === 'focus-address' || shortcut.action === 'find') {
         if (!window.isDestroyed()) window.webContents.focus();
         if (shortcut.action === 'focus-address') onFocusAddressBar(tabId);
@@ -224,9 +243,13 @@ function createBrowserEngine({
     ]) {
       contents.on(eventName, () => publish(tabId, entry));
     }
-    contents.on('did-navigate', () => publish(tabId, entry, true));
+    contents.on('did-navigate', () => {
+      applyZoomForEntry(entry);
+      publish(tabId, entry, true);
+    });
     contents.on('did-navigate-in-page', () => {
       onPermissionContextChange(contents);
+      applyZoomForEntry(entry);
       publish(tabId, entry, true);
     });
   }
@@ -246,7 +269,7 @@ function createBrowserEngine({
         autoplayPolicy: 'user-gesture-required'
       }
     });
-    const entry = { view, lastUrl: '', lastTitle: '', findQuery: '', findRequestId: null, initialLoadPromise: null };
+    const entry = { view, lastUrl: '', lastTitle: '', zoomPercent: 100, findQuery: '', findRequestId: null, initialLoadPromise: null };
     tabs.set(tabId, entry);
     window.contentView.addChildView(view);
     attachEvents(tabId, entry);
@@ -294,6 +317,7 @@ function createBrowserEngine({
       }
     }
 
+    applyZoomForEntry(entry);
     applyVisibility();
     if (browserActive && viewportBounds) entry.view.webContents.focus();
     publish(tabId, entry);
@@ -335,6 +359,7 @@ function createBrowserEngine({
     } finally {
       entry.initialLoadPromise = null;
       if (!disposed && !entry.view.webContents.isDestroyed()) {
+        applyZoomForEntry(entry);
         applyVisibility();
         if (browserActive && viewportBounds && activeTabId === tabId) entry.view.webContents.focus();
         publish(tabId, entry);
@@ -374,6 +399,7 @@ function createBrowserEngine({
             timeout = setTimeout(() => reject(new Error('restore-timeout')), 15000);
           })
         ]);
+        applyZoomForEntry(candidate.entry);
         return { tabId: candidate.tabId, success: true };
       } catch {
         return { tabId: candidate.tabId, success: false, error: '页面未能加载。' };
@@ -383,6 +409,7 @@ function createBrowserEngine({
     }));
 
     if (disposed) return { success: false, tabs: results };
+    if (activeCandidate) applyZoomForEntry(activeCandidate.entry);
     applyVisibility();
     if (browserActive && viewportBounds) activeCandidate?.entry.view.webContents.focus();
     for (const candidate of entries) publish(candidate.tabId, candidate.entry);
@@ -410,6 +437,7 @@ function createBrowserEngine({
     entry.lastUrl = url;
     try {
       await entry.view.webContents.loadURL(url);
+      applyZoomForEntry(entry);
       return { success: true, url };
     } catch (error) {
       return { success: false, error: error.message || '网页无法打开。' };
@@ -432,6 +460,7 @@ function createBrowserEngine({
     window.contentView.removeChildView(entry.view);
     if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close();
     if (wasActive) activeTabId = tabs.keys().next().value || null;
+    if (wasActive && activeTabId) applyZoomForEntry(tabs.get(activeTabId));
     applyVisibility();
     if (wasActive && browserActive && viewportBounds && activeTabId) {
       const nextEntry = tabs.get(activeTabId);
@@ -455,6 +484,7 @@ function createBrowserEngine({
 
   function setActive(active) {
     browserActive = Boolean(active);
+    if (browserActive && activeTabId) applyZoomForEntry(tabs.get(activeTabId));
     if (!browserActive && activeTabId) {
       const entry = tabs.get(activeTabId);
       if (entry) stopFindForEntry(activeTabId, entry);
@@ -488,6 +518,7 @@ function createBrowserEngine({
       width: Math.round(width),
       height: Math.round(height)
     };
+    if (!wasViewportVisible && activeTabId) applyZoomForEntry(tabs.get(activeTabId));
     applyVisibility();
     if (!wasViewportVisible && browserActive && activeTabId) {
       const entry = tabs.get(activeTabId);
@@ -528,6 +559,29 @@ function createBrowserEngine({
     const entry = tabs.get(activeTabId);
     if (!entry || entry.view.webContents.isDestroyed()) return null;
     return { tabId: activeTabId, entry };
+  }
+
+  function changeZoom(action) {
+    if (!['in', 'out', 'reset'].includes(action)) {
+      return { success: false, error: '网页缩放操作无效。' };
+    }
+    const active = getActiveEntry();
+    if (!active) return { success: false, error: '当前没有可用的活动 Chromium 页面。' };
+    const { entry } = active;
+    const currentPercent = entry.zoomPercent;
+    const nextPercent = action === 'reset'
+      ? 100
+      : action === 'in'
+        ? Math.min(MAX_ZOOM_PERCENT, currentPercent + ZOOM_STEP_PERCENT)
+        : Math.max(MIN_ZOOM_PERCENT, currentPercent - ZOOM_STEP_PERCENT);
+    try {
+      entry.view.webContents.setZoomFactor(nextPercent / 100);
+      entry.zoomPercent = nextPercent;
+      publish(active.tabId, entry);
+      return { success: true, zoomPercent: nextPercent };
+    } catch {
+      return { success: false, error: '当前网页无法调整缩放比例。' };
+    }
   }
 
   function getActivePrintTarget() {
@@ -649,6 +703,7 @@ function createBrowserEngine({
     getDownloadStorageStatus: () => downloadManager.getStorageStatus(),
     findInPage,
     stopFindInPage,
+    changeZoom,
     getActivePrintTarget,
     isActivePrintTarget,
     isPermissionContext,

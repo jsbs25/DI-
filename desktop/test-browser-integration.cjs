@@ -71,13 +71,15 @@ function handleFixtureRequest(request, response) {
     response.end('<!doctype html><html><head><title>Local Print Fixture</title><style>@page{size:A4;margin:20mm}body{font:18px sans-serif}.page-two{break-before:page;page-break-before:always}</style></head><body><h1>EARTH ONE PDF page 1</h1><section class="page-two"><h1>EARTH ONE PDF page 2</h1></section></body></html>');
     return;
   }
-  if (pathname === '/shortcuts' || pathname === '/shortcuts-default') {
-    const title = pathname === '/shortcuts' ? 'Browser Keyboard Fixture' : 'Safe Default Fixture';
+  if (pathname === '/shortcuts' || pathname === '/shortcuts-default' || pathname === '/zoom') {
+    const title = pathname === '/shortcuts' ? 'Browser Keyboard Fixture'
+      : pathname === '/zoom' ? 'Chromium Zoom Fixture'
+        : 'Safe Default Fixture';
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    response.end(`<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1><input id="fixture-input" aria-label="Synthetic webpage input"><script>
+    response.end(`<!doctype html><html><head><title>${title}</title><style>#zoom-probe{width:100px;height:20px;background:#123}</style></head><body><h1>${title}</h1><div id="zoom-probe"></div><input id="fixture-input" aria-label="Synthetic webpage input"><script>
       window.__earthOneShortcutEvents = [];
       document.addEventListener('keydown', event => {
-        if ((event.ctrlKey || event.metaKey) && ['t', 'w', 'tab', 'f', 'l', '1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(event.key.toLowerCase())) {
+        if ((event.ctrlKey || event.metaKey) && ['t', 'w', 'tab', 'f', 'l', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '=', '-', '0'].includes(event.key.toLowerCase())) {
           window.__earthOneShortcutEvents.push({ key: event.key, ctrl: event.ctrlKey, meta: event.metaKey });
         }
       }, true);
@@ -177,7 +179,7 @@ function launchSmoke(phase, options = {}) {
       EARTH_ONE_BROWSER_SESSION_SMOKE_TEST: options.sessionSmoke ? '1' : '0',
       EARTH_ONE_BROWSER_TEST_PHASE: phase,
       EARTH_ONE_BROWSER_TEST_URL: startUrl,
-      EARTH_ONE_BROWSER_TEST_NEW_TAB_URL: phase === 'shortcuts'
+      EARTH_ONE_BROWSER_TEST_NEW_TAB_URL: phase === 'shortcuts' || phase === 'zoom'
         ? `${new URL(startUrl).origin}/shortcuts-default`
         : '',
       EARTH_ONE_BROWSER_TEST_ALT_URL: options.altUrl || `${alternateFixtureOrigin}/one`,
@@ -301,6 +303,20 @@ async function main() {
   });
   alternateFixtureOrigin = `http://127.0.0.1:${alternateFixtureServer.address().port}`;
   const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`;
+
+  if (process.env.EARTH_ONE_BROWSER_SHORTCUTS_ONLY !== '1') {
+    const zoomRun = launchSmoke('zoom', { startUrl: `${fixtureOrigin}/zoom` });
+    activeRun = zoomRun;
+    await zoomRun.waitForMarker(/BROWSER_ZOOM_SMOKE_PASS:/, 50000);
+    const zoomClose = await Promise.race([
+      zoomRun.closed,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('zoom Electron smoke did not exit cleanly')), 12000))
+    ]);
+    assert.equal(zoomClose.code, 0, `zoom Electron smoke failed: ${zoomRun.getOutput()}`);
+    console.log('BROWSER_TEST_DRIVER_ZOOM_PASSED');
+    activeRun = null;
+  }
+  if (process.env.EARTH_ONE_BROWSER_ZOOM_ONLY === '1') return;
 
   const shortcutsRun = launchSmoke('shortcuts', { startUrl: `${fixtureOrigin}/shortcuts` });
   activeRun = shortcutsRun;

@@ -397,6 +397,7 @@ function registerBrowserIpc() {
     'browser:back': (_event, tabId) => browserEngine.goBack(tabId),
     'browser:forward': (_event, tabId) => browserEngine.goForward(tabId),
     'browser:reload': (_event, tabId) => browserEngine.reload(tabId),
+    'browser:change-zoom': (_event, action) => browserEngine.changeZoom(action),
     'browser:find-in-page': (_event, query, direction) => browserEngine.findInPage(query, direction),
     'browser:stop-find-in-page': (_event, returnFocus) => browserEngine.stopFindInPage(Boolean(returnFocus)),
     'browser:print-to-pdf': () => browserPdfExporter?.saveActiveTab() || { success: false, error: 'PDF 导出暂不可用。' }
@@ -584,9 +585,17 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
         const secondTabId = await createSyntheticTab(
           `${new URL(testUrl).origin}/session-two?view=article&page=2`, '/session-two', 'Session Fixture Two'
         );
+        const zoomTestContents = browserEngine.getWebContentsForTesting(secondTabId);
+        zoomTestContents?.setZoomFactor(1.7);
+        const preRestartZoom = zoomTestContents?.getZoomFactor();
+        if (Math.round((preRestartZoom || 0) * 100) !== 170) throw new Error('会话保存前的真实 Chromium 标签缩放应可达到 170%。');
         const failedTabId = await createSyntheticTab(
           `${new URL(testUrl).origin}/session-fail?attempt=1`, '/session-fail'
         );
+        const failedTabSelection = await browserEngine.selectTab(failedTabId);
+        if (!failedTabSelection.success || browserEngine.getSessionSnapshot().activeTabId !== failedTabId) {
+          throw new Error('保存会话前未能恢复原定的失败页活动标签。');
+        }
         const expectedProfileRoot = `${path.resolve(process.env.EARTH_ONE_BROWSER_TEST_PROFILE_DIR || '')}${path.sep}`;
         const sessionDeadline = Date.now() + 5000;
         let saved = null;
@@ -600,6 +609,9 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
         if (!sessionPath.startsWith(expectedProfileRoot) || !saved || saved.version !== 1 || !saved.enabled ||
             saved.tabs.length !== 3 || saved.activeTabId !== failedTabId) {
           throw new Error('启用后没有在独立 Electron userData 中保存有界的活动标签快照。');
+        }
+        if (saved.tabs.some(tab => Object.keys(tab).some(key => key.toLowerCase().includes('zoom')))) {
+          throw new Error('标签会话快照只保存 URL 元数据，不应保存个人网页缩放设置。');
         }
         const firstSaved = saved.tabs.find(tab => tab.id === testTabId);
         const secondSaved = saved.tabs.find(tab => tab.id === secondTabId);
@@ -647,6 +659,12 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
             !notice.includes('1 个页面未能加载') || !notice.includes('地址栏重试')) {
           throw new Error('恢复后的页面失败未被保留并明确提示，或恢复的标签/活动标签不正确。');
         }
+        for (const savedTab of sessionState.tabs) {
+          const restoredContents = browserEngine.getWebContentsForTesting(savedTab.id);
+          if (!restoredContents || Math.round(restoredContents.getZoomFactor() * 100) !== 100) {
+            throw new Error('应用重启后恢复的标签缩放必须回到 100%，不得恢复个人网页缩放设置。');
+          }
+        }
         const sessionText = fs.readFileSync(sessionPath, 'utf8');
         for (const forbidden of ['SYNTHETIC_FORM_PASSWORD_DO_NOT_PERSIST', 'synthetic-private@example.test', 'synthetic-cookie-secret', 'cookies', 'headers', 'formContents', 'networkLog']) {
           if (sessionText.includes(forbidden)) throw new Error(`重启恢复后的会话存储不应包含 ${forbidden}。`);
@@ -689,9 +707,10 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
     }
 
     const initialShortcutPhase = process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'shortcuts';
+    const initialZoomPhase = process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'zoom';
     await waitForPage(
-      initialShortcutPhase ? '/shortcuts' : '/one',
-      initialShortcutPhase ? 'Browser Keyboard Fixture' : 'EARTH ONE Fixture One'
+      initialShortcutPhase ? '/shortcuts' : initialZoomPhase ? '/zoom' : '/one',
+      initialShortcutPhase ? 'Browser Keyboard Fixture' : initialZoomPhase ? 'Chromium Zoom Fixture' : 'EARTH ONE Fixture One'
     );
     const defaultChromiumDeadline = Date.now() + 5000;
     let defaultChromiumReady = false;
@@ -710,6 +729,243 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     if (!defaultChromiumReady) throw new Error('Electron Browser 首次进入时没有默认显示并聚焦 Chromium 页面。');
+
+    if (process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'zoom') {
+      const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+      const waitForTabCount = async count => {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          if (browserEngine.getTabIdsForTesting().length === count) return;
+          await delay(40);
+        }
+        throw new Error(`缩放 smoke 标签数量错误：期待 ${count}，实际 ${browserEngine.getTabIdsForTesting().length}。`);
+      };
+      const waitForUiTabCount = async count => {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const actual = await appContents.executeJavaScript(`document.querySelectorAll('[role="tablist"] [role="tab"]').length`);
+          if (actual === count) return;
+          await delay(40);
+        }
+        throw new Error(`缩放 smoke 标签栏未同步到 ${count} 个标签。`);
+      };
+      const waitForActiveTab = async tabId => {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const contents = browserEngine.getWebContentsForTesting(tabId);
+          if (browserEngine.getSessionSnapshot().activeTabId === tabId && browserEngine.isActiveTab(tabId) && contents?.isFocused()) return;
+          await delay(30);
+        }
+        throw new Error(`缩放 smoke 未切换并聚焦到标签 ${tabId}。`);
+      };
+      const waitForZoomUi = async percent => {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          const text = await appContents.executeJavaScript(`document.querySelector('[data-browser-zoom-reset]')?.textContent?.trim() || ''`);
+          if (text === `${percent}%`) return;
+          await delay(40);
+        }
+        throw new Error(`缩放工具栏没有显示活动页 ${percent}%。`);
+      };
+      const clickZoomControl = async (selector, percent) => {
+        const clicked = await appContents.executeJavaScript(`(() => {
+          const button = document.querySelector(${JSON.stringify(selector)});
+          if (!button || button.disabled) return false;
+          button.click();
+          return true;
+        })()`);
+        if (!clicked) throw new Error(`缩放控件不可用：${selector}`);
+        const activeId = browserEngine.getSessionSnapshot().activeTabId;
+        const contents = browserEngine.getWebContentsForTesting(activeId);
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline && Math.round(contents.getZoomFactor() * 100) !== percent) await delay(30);
+        if (Math.round(contents.getZoomFactor() * 100) !== percent) throw new Error(`工具栏操作未将页面缩放到 ${percent}%。`);
+        await waitForZoomUi(percent);
+      };
+      const sendBrowserShortcut = async (keyCode, modifiers = ['control']) => {
+        const tabId = browserEngine.getSessionSnapshot().activeTabId;
+        const contents = browserEngine.getWebContentsForTesting(tabId);
+        await waitForActiveTab(tabId);
+        contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+        if (keyCode !== 'W') contents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+        await delay(80);
+      };
+      const sendAppShortcut = async (keyCode, modifiers = ['control']) => {
+        appContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+        appContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+        await delay(80);
+      };
+      const assertRealZoomScale = async (contents, percent, baselineDpr, context) => {
+        const actualPercent = Math.round(contents.getZoomFactor() * 100);
+        const devicePixelRatio = await contents.executeJavaScript('window.devicePixelRatio');
+        const scaleRatio = devicePixelRatio / baselineDpr;
+        if (actualPercent !== percent || Math.abs(scaleRatio - percent / 100) > 0.08) {
+          throw new Error(`${context} 没有产生真实 Chromium 页面缩放：${JSON.stringify({ actualPercent, percent, baselineDpr, devicePixelRatio, scaleRatio })}`);
+        }
+      };
+      const waitForTabPath = async (tabId, pathname, title) => {
+        const deadline = Date.now() + 10000;
+        let lastSeen = null;
+        while (Date.now() < deadline) {
+          const contents = browserEngine.getWebContentsForTesting(tabId);
+          if (contents && !contents.isDestroyed()) {
+            try {
+              const page = new URL(contents.getURL());
+              const pageTitle = await contents.executeJavaScript('document.title');
+              lastSeen = { url: contents.getURL(), title: pageTitle, loading: contents.isLoading() };
+              if (page.pathname === pathname && pageTitle === title && !contents.isLoading()) return;
+            } catch {}
+          }
+          await delay(40);
+        }
+        throw new Error(`缩放 smoke 页面未加载：${tabId} ${pathname}；当前状态 ${JSON.stringify(lastSeen)}`);
+      };
+
+      const firstDpr = await testContents.executeJavaScript('window.devicePixelRatio');
+      if (Math.round(testContents.getZoomFactor() * 100) !== 100 || !await appContents.executeJavaScript(`Boolean(document.querySelector('[data-browser-zoom]'))`)) {
+        throw new Error('桌面 Chromium 应显示 100% 缩放控件并以默认比例启动。');
+      }
+      await waitForZoomUi(100);
+      await clickZoomControl('[data-browser-zoom-in]', 110);
+      await assertRealZoomScale(testContents, 110, firstDpr, '工具栏加号');
+      await clickZoomControl('[data-browser-zoom-out]', 100);
+      await clickZoomControl('[data-browser-zoom-in]', 110);
+      await clickZoomControl('[data-browser-zoom-in]', 120);
+      await clickZoomControl('[data-browser-zoom-reset]', 100);
+      testContents.focus();
+      await sendBrowserShortcut('=', ['control', 'shift']);
+      await assertRealZoomScale(testContents, 110, firstDpr, 'Ctrl+Plus');
+      await waitForZoomUi(110);
+      await sendBrowserShortcut('-', ['meta']);
+      await assertRealZoomScale(testContents, 100, firstDpr, 'Cmd+Minus');
+      await sendBrowserShortcut('=', ['control', 'shift']);
+      await sendBrowserShortcut('0', ['control']);
+      await assertRealZoomScale(testContents, 100, firstDpr, 'Ctrl+0');
+
+      await clickZoomControl('[data-browser-zoom-in]', 110);
+      await clickZoomControl('[data-browser-zoom-in]', 120);
+      mainWindow.webContents.focus();
+      const addressFocused = await appContents.executeJavaScript(`(() => {
+        const input = document.querySelector('input[aria-label="输入网址或搜索词"]');
+        input?.focus();
+        return Boolean(input && document.activeElement === input);
+      })()`);
+      if (!addressFocused) throw new Error('无法聚焦 EARTH ONE 地址栏进行缩放排除测试。');
+      await sendAppShortcut('=', ['control', 'shift']);
+      await sendAppShortcut('0', ['control']);
+      const addressZoomState = {
+        zoomPercent: Math.round(testContents.getZoomFactor() * 100),
+        addressFocused: await appContents.executeJavaScript(`document.activeElement === document.querySelector('input[aria-label="输入网址或搜索词"]')`)
+      };
+      if (addressZoomState.zoomPercent !== 120 || !addressZoomState.addressFocused) {
+        throw new Error(`地址栏焦点期间不得将缩放快捷键路由到远程网页：${JSON.stringify(addressZoomState)}`);
+      }
+      mainWindow.webContents.focus();
+      await appContents.executeJavaScript(`document.querySelector('button[aria-label="在当前网页中查找"]')?.click()`);
+      const findDeadline = Date.now() + 3000;
+      let findFocused = false;
+      while (Date.now() < findDeadline) {
+        findFocused = await appContents.executeJavaScript(`document.activeElement === document.querySelector('[data-browser-find-input]')`);
+        if (findFocused) break;
+        await delay(30);
+      }
+      if (!findFocused) throw new Error('无法聚焦 EARTH ONE 页内查找输入框。');
+      await sendAppShortcut('=', ['control', 'shift']);
+      await sendAppShortcut('0', ['control']);
+      if (Math.round(testContents.getZoomFactor() * 100) !== 120 || !await appContents.executeJavaScript(`document.activeElement === document.querySelector('[data-browser-find-input]')`)) {
+        throw new Error('页内查找焦点期间不得将缩放快捷键路由到远程网页。');
+      }
+      await appContents.executeJavaScript(`document.querySelector('button[aria-label="关闭页内查找"]')?.click()`);
+      await clickZoomControl('[data-browser-zoom-reset]', 100);
+
+      const readerToggle = `document.querySelector('button[aria-label="切换纯净阅读模式"]')`;
+      await appContents.executeJavaScript(`(${readerToggle})?.click()`);
+      const readerDeadline = Date.now() + 3000;
+      while (Date.now() < readerDeadline && browserEngine.isActiveTab(testTabId)) await delay(30);
+      if (browserEngine.isActiveTab(testTabId) || await appContents.executeJavaScript(`Boolean(document.querySelector('[data-browser-zoom]'))`)) {
+        throw new Error('Reader Mode 必须隐藏 Chromium 缩放控件并停用原生页。');
+      }
+      mainWindow.webContents.focus();
+      await sendAppShortcut('=', ['control', 'shift']);
+      await sendAppShortcut('0', ['control']);
+      if (Math.round(testContents.getZoomFactor() * 100) !== 100) throw new Error('Reader Mode 中的 EARTH ONE 快捷键不得缩放隐藏的 Chromium 页面。');
+      await appContents.executeJavaScript(`(${readerToggle})?.click()`);
+      const restoreDeadline = Date.now() + 3000;
+      while (Date.now() < restoreDeadline && !browserEngine.isActiveTab(testTabId)) await delay(30);
+      if (!browserEngine.isActiveTab(testTabId)) throw new Error('Reader Mode 退出后没有恢复原生 Chromium 标签。');
+      await waitForZoomUi(100);
+
+      await clickZoomControl('[data-browser-zoom-in]', 110);
+      await sendBrowserShortcut('T');
+      await waitForTabCount(2);
+      await waitForUiTabCount(2);
+      const secondTabId = browserEngine.getSessionSnapshot().activeTabId;
+      const secondContents = browserEngine.getWebContentsForTesting(secondTabId);
+      await waitForTabPath(secondTabId, '/shortcuts-default', 'Safe Default Fixture');
+      const secondDpr = await secondContents.executeJavaScript('window.devicePixelRatio');
+      if (Math.round(secondContents.getZoomFactor() * 100) !== 100) throw new Error('同源新标签没有从独立 100% 缩放开始。');
+      await waitForZoomUi(100);
+      await sendBrowserShortcut('=', ['control', 'shift']);
+      await sendBrowserShortcut('=', ['control', 'shift']);
+      await assertRealZoomScale(secondContents, 120, secondDpr, '同源第二标签');
+      await sendBrowserShortcut('1');
+      await waitForActiveTab(testTabId);
+      await assertRealZoomScale(testContents, 110, firstDpr, '切回同源第一标签');
+      await waitForZoomUi(110);
+      await sendBrowserShortcut('2');
+      await waitForActiveTab(secondTabId);
+      await assertRealZoomScale(secondContents, 120, secondDpr, '切回同源第二标签');
+      await waitForZoomUi(120);
+
+      const alternateUrl = process.env.EARTH_ONE_BROWSER_TEST_ALT_URL;
+      if (!alternateUrl) throw new Error('跨来源缩放 smoke 缺少本机备用来源。');
+      const crossUrl = `${new URL(alternateUrl).origin}/zoom`;
+      if (new URL(crossUrl).origin === new URL(testUrl).origin) throw new Error('跨来源测试必须使用另一独立本机 origin。');
+      const crossOpen = await browserEngine.openNewTab(crossUrl);
+      if (!crossOpen.success || !crossOpen.tabId) throw new Error(`跨来源测试标签创建失败：${crossOpen.error || '未知错误'}`);
+      const crossTabId = crossOpen.tabId;
+      const crossContents = browserEngine.getWebContentsForTesting(crossTabId);
+      await waitForTabCount(3);
+      await waitForUiTabCount(3);
+      await waitForTabPath(crossTabId, '/zoom', 'Chromium Zoom Fixture');
+      const crossDpr = await crossContents.executeJavaScript('window.devicePixelRatio');
+      if (Math.round(crossContents.getZoomFactor() * 100) !== 100) throw new Error('跨来源新标签没有从独立 100% 缩放开始。');
+      await waitForZoomUi(100);
+      await sendBrowserShortcut('=', ['control', 'shift']);
+      await assertRealZoomScale(crossContents, 110, crossDpr, '跨来源标签');
+      await sendBrowserShortcut('0', ['control']);
+      await assertRealZoomScale(crossContents, 100, crossDpr, '跨来源标签重置');
+      const remoteCapabilities = await crossContents.executeJavaScript(`({ bridge: typeof window.earthOneBrowser, require: typeof require, zoomShortcuts: window.__earthOneShortcutEvents.length })`);
+      if (remoteCapabilities.bridge !== 'undefined' || remoteCapabilities.require !== 'undefined' || remoteCapabilities.zoomShortcuts !== 0) {
+        throw new Error(`远程跨来源页面不应获得桥接、Node 或缩放快捷键：${JSON.stringify(remoteCapabilities)}`);
+      }
+      await sendBrowserShortcut('1');
+      await waitForActiveTab(testTabId);
+      await assertRealZoomScale(testContents, 110, firstDpr, '跨来源切回第一标签');
+      await sendBrowserShortcut('2');
+      await waitForActiveTab(secondTabId);
+      await assertRealZoomScale(secondContents, 120, secondDpr, '跨来源切回第二标签');
+      browserEngine.closeTab(crossTabId);
+      await waitForTabCount(2);
+      await waitForUiTabCount(2);
+
+      browserEngine.closeTab(secondTabId);
+      await waitForTabCount(1);
+      await waitForUiTabCount(1);
+      await waitForActiveTab(testTabId);
+      const lastReset = browserEngine.changeZoom('reset');
+      const lastZoom = browserEngine.changeZoom('in');
+      if (lastReset.zoomPercent !== 100 || lastZoom.zoomPercent !== 110) {
+        throw new Error(`末标签缩放设置失败：${JSON.stringify({ lastReset, lastZoom })}`);
+      }
+      await waitForZoomUi(110);
+      await sendBrowserShortcut('W');
+      await waitForTabPath(testTabId, '/shortcuts-default', 'Safe Default Fixture');
+      if (Math.round(testContents.getZoomFactor() * 100) !== 110) throw new Error('安全替换最后一个标签时应保留当前应用会话中的 110% 缩放。');
+      console.log('BROWSER_ZOOM_SMOKE_PASS: real Electron scaling, toolbar, trusted Ctrl/Cmd +/-/0, app-input and Reader exclusions, per-tab same-origin restoration, cross-origin isolation, remote bridge isolation, and last-tab retention verified.');
+      app.quit();
+      return;
+    }
 
     if (process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'shortcuts') {
       const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -850,14 +1106,25 @@ async function runBrowserIntegrationSmokeTest(testUrl) {
       if (browserEngine.getTabIdsForTesting().length !== 9) throw new Error('非 Browser 活动状态不应响应 Ctrl+T。');
       browserEngine.setActive(true);
       browserEngine.setBounds(priorBounds);
-      selectedContents.focus();
+      const activeAfterRestore = browserEngine.getSessionSnapshot().activeTabId;
+      const activeContentsAfterRestore = browserEngine.getWebContentsForTesting(activeAfterRestore);
+      if (!activeAfterRestore || !activeContentsAfterRestore) throw new Error('恢复 Browser 活动状态后没有当前标签。');
+      activeContentsAfterRestore.focus();
+      await waitForActiveTab(activeAfterRestore);
 
-      while (browserEngine.getTabIdsForTesting().length > 1) {
+      while (browserEngine.getTabIdsForTesting().length > 2) {
+        const activeIdToClose = browserEngine.getSessionSnapshot().activeTabId;
         const targetCount = browserEngine.getTabIdsForTesting().length - 1;
-        await sendBrowserShortcut('W');
+        const closeResult = browserEngine.closeTab(activeIdToClose);
+        if (!closeResult.success || !closeResult.closed) throw new Error('快捷键 smoke 清理合成标签失败。');
         await waitForTabCount(targetCount);
         await waitForUiTabCount(targetCount);
+        if (targetCount > 1) await waitForActiveTab(browserEngine.getSessionSnapshot().activeTabId);
       }
+      await sendBrowserShortcut('W');
+      await waitForTabCount(1);
+      await waitForUiTabCount(1);
+      await waitForActiveTab(browserEngine.getSessionSnapshot().activeTabId);
       const lastTabId = browserEngine.getSessionSnapshot().activeTabId;
       if (!lastTabId) throw new Error('关闭到最后一个标签时没有保留 Browser 标签。');
       await sendBrowserShortcut('W');
@@ -1910,7 +2177,7 @@ app.whenReady().then(async () => {
       browserPermissionManager?.revalidatePending();
       scheduleBrowserSessionPersist();
     },
-    defaultNewTabUrl: process.env.EARTH_ONE_BROWSER_TEST_PHASE === 'shortcuts'
+    defaultNewTabUrl: ['shortcuts', 'zoom'].includes(process.env.EARTH_ONE_BROWSER_TEST_PHASE)
       ? getSafeSmokeNewTabUrl(smokeTest, smokeUrl, process.env.EARTH_ONE_BROWSER_TEST_NEW_TAB_URL) || DEFAULT_BROWSER_NEW_TAB_URL
       : DEFAULT_BROWSER_NEW_TAB_URL,
     appOrigin,

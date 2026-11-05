@@ -26,6 +26,8 @@ import {
   Download,
   FolderOpen,
   Printer,
+  Minus,
+  Plus,
   Bell,
   MapPin
 } from 'lucide-react';
@@ -616,15 +618,17 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   useEffect(() => {
     if (!browserEngine) return;
     return browserEngine.onState(state => {
-      setBrowserEngineState(state);
-      setIsLoading(state.loading);
+      if (state.active || state.tabId === activeTabId) {
+        setBrowserEngineState(state);
+        setIsLoading(state.loading);
+      }
       if (state.navigated && state.url) recordBrowserVisit(state.tabId, state.url, state.title);
       else if (state.url && state.title) updateRecentVisitTitle(state.tabId, state.url, state.title);
       if (state.url) {
         setTabs(previous => previous.map(tab => tab.id === state.tabId
           ? { ...tab, url: state.url, title: state.title || tab.title }
           : tab));
-        if (state.tabId === activeTabId) setInputUrl(state.url);
+        if (state.active || state.tabId === activeTabId) setInputUrl(state.url);
       }
     });
   }, [browserEngine, activeTabId, recordBrowserVisit, updateRecentVisitTitle]);
@@ -1302,6 +1306,54 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         >
           <Search className="h-4 w-4" />
         </button>
+
+        {browserEngine && !activeTab?.readerMode && (() => {
+          const zoomState = browserEngineState?.tabId === activeTabId ? browserEngineState : null;
+          const zoomPercent = zoomState?.zoomPercent ?? 100;
+          const zoomReady = Boolean(zoomState?.active);
+          return (
+            <div
+              role="group"
+              aria-label="Chromium 网页缩放"
+              data-browser-zoom
+              className="inline-flex h-9 shrink-0 items-center gap-0.5 rounded-full border border-white/[0.07] bg-white/[0.035] p-0.5 text-slate-300"
+            >
+              <button
+                type="button"
+                onClick={() => void browserEngine.changeZoom('out')}
+                disabled={!zoomReady || zoomPercent <= 50}
+                aria-label="缩小网页"
+                title="缩小网页（Ctrl/Cmd+Minus）"
+                data-browser-zoom-out
+                className="flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <Minus className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void browserEngine.changeZoom('reset')}
+                disabled={!zoomReady || zoomPercent === 100}
+                aria-label={`重置网页缩放，当前 ${zoomPercent}%`}
+                title="重置网页缩放（Ctrl/Cmd+0）"
+                data-browser-zoom-reset
+                className="min-w-[3.25rem] rounded-md px-1.5 text-center text-[11px] font-semibold tabular-nums text-slate-200 transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {zoomPercent}%
+              </button>
+              <button
+                type="button"
+                onClick={() => void browserEngine.changeZoom('in')}
+                disabled={!zoomReady || zoomPercent >= 200}
+                aria-label="放大网页"
+                title="放大网页（Ctrl/Cmd+Plus）"
+                data-browser-zoom-in
+                className="flex h-8 w-8 items-center justify-center rounded-full transition hover:bg-white/[0.08] hover:text-cyan-100 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          );
+        })()}
 
         <div className="inline-flex shrink-0 items-center gap-1.5">
           <button
