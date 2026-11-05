@@ -22,5 +22,9 @@ check(route.startsWith('/jupiter/image/'), 'Uses the internal JUPITER image rout
 check(getJupiterImageSource(route) === new URL(source).href, 'Round-trips the encoded image source URL');
 check(getJupiterImageSource('/jupiter/image/not-an-image') === null, 'Rejects non-image internal routes');
 check(getJupiterImageSource('/jupiter/image/%') === null, 'Rejects malformed route encoding');
+const extensionlessImageRoute = toJupiterImageRoute('https://images.example/image?id=42', true);
+check(!isRemoteImageUrl('https://images.example/image?id=42'), 'Does not infer image type from arbitrary extensionless URLs');
+check(Boolean(extensionlessImageRoute), 'Explicit image search results may route safe extensionless media URLs');
+check(getJupiterImageSource(extensionlessImageRoute!) === 'https://images.example/image?id=42', 'Explicit image routes preserve extensionless media URLs');
 
 console.log(`JUPITER image URL routing: ${passed} passed, 0 failed.`);

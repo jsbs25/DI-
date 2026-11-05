@@ -40,7 +40,7 @@ import { getJupiterDocumentSource, isRemotePdfUrl, toJupiterDocumentRoute } from
 import { getJupiterImageSource, isRemoteImageUrl, toJupiterImageRoute } from './imageDocumentUrl.ts';
 import { getJupiterAudioSource, isRemoteAudioUrl, toJupiterAudioRoute } from './audioDocumentUrl.ts';
 import { getJupiterVideoSource, isRemoteVideoUrl, toJupiterVideoRoute } from './videoDocumentUrl.ts';
-import { buildJupiterSearchRoute, parseJupiterSearchRoute, type JupiterSearchEngine } from './jupiterSearchRoute.ts';
+import { buildJupiterSearchRoute, parseJupiterSearchRoute, type JupiterSearchCategory, type JupiterSearchEngine } from './jupiterSearchRoute.ts';
 
 const LazyPdfDocumentViewer = lazy(() => import('./PdfDocumentViewer.tsx').then(module => ({ default: module.PdfDocumentViewer })));
 const LazyImageDocumentViewer = lazy(() => import('./ImageDocumentViewer.tsx').then(module => ({ default: module.ImageDocumentViewer })));
@@ -151,6 +151,9 @@ type JupiterSearchResult = {
   source: 'web' | 'github' | 'earth';
   kind: 'web' | 'article' | 'video' | 'book' | 'post';
   domain: string;
+  category?: 'images';
+  sourceUrl?: string;
+  thumbnailUrl?: string;
   content?: string;
   repository?: string;
   stars?: number;
@@ -378,6 +381,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const [lastSearchQuery, setLastSearchQuery] = useState('');
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchCategory, setSearchCategory] = useState<JupiterSearchCategory>('all');
+  const [searchPage, setSearchPage] = useState(1);
   const [jupiterContent, setJupiterContent] = useState<JupiterEarthContent | null>(null);
   const [jupiterContentError, setJupiterContentError] = useState<string | null>(null);
   const [isJupiterContentLoading, setIsJupiterContentLoading] = useState(false);
@@ -958,7 +963,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const saveCurrentSearchScroll = () => {
     const route = activeTab ? parseJupiterSearchRoute(activeTab.url) : null;
     if (route && searchResultsScrollRef.current) {
-      const key = buildJupiterSearchRoute(route.query, route.engine, route.lang);
+      const key = buildJupiterSearchRoute(route.query, route.engine, route.lang, route.category, route.page);
       searchScrollPositionsRef.current[key] = searchResultsScrollRef.current.scrollTop;
     }
   };
@@ -989,8 +994,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     window.history.replaceState(null, '', viewerRoute);
   };
 
-  const openImageDocument = (sourceUrl: string, fromHistory = false) => {
-    const viewerRoute = toJupiterImageRoute(sourceUrl);
+  const openImageDocument = (sourceUrl: string, fromHistory = false, allowUnknownImageExtension = false) => {
+    const viewerRoute = toJupiterImageRoute(sourceUrl, allowUnknownImageExtension);
     if (!viewerRoute) {
       setBrowserEngineError('图片来源地址无效或不受支持。');
       return;
@@ -1069,13 +1074,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
   const runJupiterSearch = async (
     query: string,
-    options: { fromHistory?: boolean; engine?: JupiterSearchEngine; lang?: Language } = {}
+    options: { fromHistory?: boolean; engine?: JupiterSearchEngine; lang?: Language; category?: JupiterSearchCategory; page?: number } = {}
   ) => {
     const cleanQuery = query.trim();
     if (!cleanQuery) return;
-    const engine = options.engine ?? searchEngine;
+    const category = options.category ?? searchCategory;
+    const engine = category === 'images' ? 'auto' : options.engine ?? searchEngine;
     const searchLang = options.lang ?? browserLang;
-    const route = buildJupiterSearchRoute(cleanQuery, engine, searchLang);
+    const page = options.page ?? 1;
+    const route = buildJupiterSearchRoute(cleanQuery, engine, searchLang, category, page);
     const requestId = ++searchRequestIdRef.current;
     if (!options.fromHistory) {
       saveCurrentSearchScroll();
@@ -1085,6 +1092,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
 
     setSearchEngine(engine);
     setBrowserLang(searchLang);
+    setSearchCategory(category);
+    setSearchPage(page);
     setInputUrl(cleanQuery);
     setLastSearchQuery(cleanQuery);
     setSearchResults([]);
@@ -1095,7 +1104,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     window.history.replaceState(null, '', route);
 
     try {
-      const res = await fetch(`/api/jupiter/search?q=${encodeURIComponent(cleanQuery)}&engine=${engine}&lang=${searchLang}`);
+      const res = await fetch(`/api/jupiter/search?q=${encodeURIComponent(cleanQuery)}&engine=${engine}&lang=${searchLang}&type=${category}`);
       const data = await res.json();
       if (requestId !== searchRequestIdRef.current) return;
       if (res.ok && data.success && Array.isArray(data.results)) {
@@ -1131,7 +1140,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
     const internalImageSource = getJupiterImageSource(cleanUrl);
     if (internalImageSource) {
-      openImageDocument(internalImageSource, fromHistory);
+      openImageDocument(internalImageSource, fromHistory, true);
       return;
     }
     const internalAudioSource = getJupiterAudioSource(cleanUrl);
@@ -1305,6 +1314,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   };
 
   const openJupiterResult = (result: JupiterSearchResult) => {
+    if (result.category === 'images') {
+      openImageDocument(result.url, false, true);
+      return;
+    }
+
     if (result.source !== 'earth') {
       if (isRemotePdfUrl(result.url)) openPdfDocument(result.url);
       else if (isRemoteImageUrl(result.url)) openImageDocument(result.url);
@@ -1430,19 +1444,29 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     setSearchResults([]);
     setLastSearchQuery('');
     setSearchError(null);
+    setSearchCategory('all');
+    setSearchPage(1);
     setIsSearching(false);
   }, [activeTabId]);
 
   useEffect(() => {
     const route = activeTab ? parseJupiterSearchRoute(activeTab.url) : null;
     if (!route || isSearching) return;
-    const key = buildJupiterSearchRoute(route.query, route.engine, route.lang);
+    const key = buildJupiterSearchRoute(route.query, route.engine, route.lang, route.category, route.page);
     const position = searchScrollPositionsRef.current[key] || 0;
     const frame = window.requestAnimationFrame(() => {
       searchResultsScrollRef.current?.scrollTo({ top: position });
     });
     return () => window.cancelAnimationFrame(frame);
   }, [activeTabId, isSearching, lastSearchQuery, searchResults]);
+
+  const searchPageCount = Math.max(1, Math.ceil(searchResults.length / 10));
+  const visibleSearchResults = searchResults.slice((searchPage - 1) * 10, searchPage * 10);
+  const navigateSearchPage = (page: number) => {
+    const route = activeTab ? parseJupiterSearchRoute(activeTab.url) : null;
+    if (!route || page < 1 || page > searchPageCount) return;
+    void runJupiterSearch(route.query, { ...route, page });
+  };
 
   // 星图联动：从宇宙引擎点击行星进入浏览器时，自动以行星名触发搜索
   useEffect(() => {
@@ -2251,15 +2275,35 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                   <span className="rounded-full border border-amber-200/20 bg-amber-200/[0.06] px-2.5 py-1 font-semibold tracking-[0.16em] text-amber-100">
                     JUPITER
                   </span>
-                  <span className={`rounded-full border px-2.5 py-1 font-medium ${searchEngine === 'github' ? 'border-slate-600 bg-slate-900 text-white' : 'border-white/[0.08] bg-white/[0.04] text-slate-300'}`}>
-                    {searchEngine === 'github' ? 'GitHub 公共仓库' : '真实互联网搜索'}
+                  <span className={`rounded-full border px-2.5 py-1 font-medium ${searchCategory === 'images' ? 'border-violet-300/20 bg-violet-300/[0.06] text-violet-100' : searchEngine === 'github' ? 'border-slate-600 bg-slate-900 text-white' : 'border-white/[0.08] bg-white/[0.04] text-slate-300'}`}>
+                    {searchCategory === 'images' ? '真实图片搜索' : searchEngine === 'github' ? 'GitHub 公共仓库' : '真实互联网搜索'}
                   </span>
                   {!isSearching && <span>{searchResults.length} 条结果</span>}
-                  <span className="text-slate-500">EARTH 内容与公开网页</span>
+                  <span className="text-slate-500">{searchCategory === 'images' ? 'EARTH 图片与外部图片索引' : 'EARTH 内容与公开网页'}</span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-snug">
                   “{lastSearchQuery}”
                 </h1>
+                <nav aria-label="JUPITER 搜索分类" className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                  {([
+                    ['all', '全部'],
+                    ['images', '图片']
+                  ] as const).map(([category, label]) => (
+                    <button
+                      key={category}
+                      type="button"
+                      aria-pressed={searchCategory === category}
+                      onClick={() => void runJupiterSearch(lastSearchQuery, { category, engine: searchEngine, lang: browserLang })}
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                        searchCategory === category
+                          ? 'border-amber-200/30 bg-amber-200/[0.1] text-amber-100'
+                          : 'border-white/[0.08] bg-white/[0.03] text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </nav>
               </div>
 
               {isSearching ? (
@@ -2274,7 +2318,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {searchResults.map((result, idx) => result.source === 'github' ? (
+                  {visibleSearchResults.map((result, idx) => result.source === 'github' ? (
                     <div key={idx} className="group w-full rounded-2xl border border-white/[0.08] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6">
                       <div className="flex items-start justify-between gap-4">
                         <button onClick={() => openJupiterResult(result)} className="min-w-0 text-left">
@@ -2297,6 +2341,17 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                     </div>
                   ) : (
                     <button key={idx} onClick={() => openJupiterResult(result)} className="group w-full cursor-pointer rounded-2xl border border-white/[0.07] bg-[#0d151d] p-5 text-left transition-all hover:border-amber-200/20 hover:bg-[#111922] sm:p-6">
+                      {result.category === 'images' && (
+                        <div className="mb-4 flex max-h-72 items-center justify-center overflow-hidden rounded-xl bg-black/20">
+                          <img
+                            src={result.thumbnailUrl || result.url}
+                            alt={result.title}
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                            className="max-h-72 w-full object-contain"
+                          />
+                        </div>
+                      )}
                       <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-amber-200/80">
                         {result.source === 'earth' ? <Globe className="h-3 w-3 shrink-0" /> : <ExternalLink className="h-3 w-3 shrink-0" />}
                         <span className="truncate">{result.source === 'earth' ? `EARTH · ${result.kind}` : result.domain}</span>
@@ -2317,6 +2372,27 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                       </span>
                     </button>
                   ))}
+                  {searchPageCount > 1 && (
+                    <nav aria-label="搜索结果分页" className="flex items-center justify-between gap-3 pt-3">
+                      <button
+                        type="button"
+                        disabled={searchPage <= 1 || isSearching}
+                        onClick={() => navigateSearchPage(searchPage - 1)}
+                        className="rounded-full border border-white/[0.1] px-4 py-2 text-xs text-slate-300 transition hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        上一页
+                      </button>
+                      <span className="text-xs text-slate-500">第 {searchPage} / {searchPageCount} 页 · 共 {searchResults.length} 条</span>
+                      <button
+                        type="button"
+                        disabled={searchPage >= searchPageCount || isSearching}
+                        onClick={() => navigateSearchPage(searchPage + 1)}
+                        className="rounded-full border border-white/[0.1] px-4 py-2 text-xs text-slate-300 transition hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        下一页
+                      </button>
+                    </nav>
+                  )}
                 </div>
               )}
             </div>

@@ -13,6 +13,9 @@ export interface SearchResult {
   url: string;
   snippet: string;
   source?: 'web' | 'github';
+  category?: 'images';
+  sourceUrl?: string;
+  thumbnailUrl?: string;
   repository?: string;
   stars?: number;
   forks?: number;
@@ -330,6 +333,64 @@ export async function searchGoogle(query: string, limit = 10): Promise<SearchRes
     })).filter(r => r.url);
   } catch {
     return [];
+  }
+}
+
+export function parseGoogleImageResults(data: unknown, limit = 20): SearchResult[] {
+  if (!data || typeof data !== 'object' || !Array.isArray((data as { images?: unknown }).images)) return [];
+  return ((data as { images: Array<Record<string, unknown>> }).images)
+    .slice(0, limit)
+    .flatMap(image => {
+      const imageUrl = typeof image.imageUrl === 'string' ? image.imageUrl : '';
+      const sourceUrl = typeof image.link === 'string' ? image.link : '';
+      const thumbnailUrl = typeof image.thumbnailUrl === 'string' ? image.thumbnailUrl : imageUrl;
+      const title = typeof image.title === 'string' && image.title.trim() ? image.title.trim() : 'Image result';
+      try {
+        const imageAddress = new URL(imageUrl);
+        const sourceAddress = new URL(sourceUrl);
+        const thumbnailAddress = new URL(thumbnailUrl);
+        if (imageUrl.length > 2048 || sourceUrl.length > 4096 || thumbnailUrl.length > 2048) return [];
+        if (!['http:', 'https:'].includes(imageAddress.protocol) || imageAddress.username || imageAddress.password) return [];
+        if (!['http:', 'https:'].includes(sourceAddress.protocol) || sourceAddress.username || sourceAddress.password) return [];
+        if (!['http:', 'https:'].includes(thumbnailAddress.protocol) || thumbnailAddress.username || thumbnailAddress.password) return [];
+      } catch {
+        return [];
+      }
+      const dimensions = Number.isFinite(image.imageWidth) && Number.isFinite(image.imageHeight)
+        ? `${image.imageWidth} × ${image.imageHeight}`
+        : '';
+      return [{
+        title,
+        url: imageUrl,
+        sourceUrl,
+        thumbnailUrl,
+        snippet: dimensions,
+        source: 'web' as const,
+        category: 'images' as const
+      }];
+    });
+}
+
+export async function searchGoogleImages(query: string, limit = 20): Promise<{ configured: boolean; results: SearchResult[] }> {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return { configured: false, results: [] };
+  const q = query.trim();
+  if (!q) return { configured: true, results: [] };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    const response = await fetch('https://google.serper.dev/images', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q, num: Math.min(limit, 20) })
+    });
+    if (!response.ok) throw new Error(`Image search provider returned HTTP ${response.status}.`);
+    const data: unknown = await response.json();
+    return { configured: true, results: parseGoogleImageResults(data, limit) };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

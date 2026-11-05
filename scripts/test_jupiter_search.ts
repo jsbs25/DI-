@@ -4,20 +4,47 @@ import {
   getJupiterEarthContent,
   getCachedJupiterSearch,
   mergeAndRankJupiterResults,
+  searchEarthImages,
   searchEarthIndex
 } from '../server/jupiterSearch.ts';
+import { parseGoogleImageResults } from '../server/webFetcher.ts';
 import { buildJupiterSearchRoute, parseJupiterSearchRoute } from '../src/components/browser/jupiterSearchRoute.ts';
 
 const searchRoute = buildJupiterSearchRoute('climate change NASA', 'duckduckgo', 'zh');
 assert.equal(searchRoute, '/jupiter/search?q=climate+change+NASA&engine=duckduckgo&lang=zh');
 assert.deepEqual(parseJupiterSearchRoute(searchRoute), {
-  query: 'climate change NASA', engine: 'duckduckgo', lang: 'zh'
+  query: 'climate change NASA', engine: 'duckduckgo', lang: 'zh', category: 'all', page: 1
 });
+assert.deepEqual(
+  parseJupiterSearchRoute(buildJupiterSearchRoute('aurora', 'auto', 'en', 'images', 2)),
+  { query: 'aurora', engine: 'auto', lang: 'en', category: 'images', page: 2 }
+);
 assert.deepEqual(parseJupiterSearchRoute('/jupiter/search?q=space+weather&engine=unknown&lang=xx'), {
-  query: 'space weather', engine: 'auto', lang: 'en'
+  query: 'space weather', engine: 'auto', lang: 'en', category: 'all', page: 1
 });
+assert.equal(parseJupiterSearchRoute('/jupiter/search?q=aurora&page=0')?.page, 1);
 assert.equal(parseJupiterSearchRoute('/jupiter/search'), null);
 assert.equal(parseJupiterSearchRoute('/jupiter/watch/video-1'), null);
+const parsedImages = parseGoogleImageResults({
+  images: [
+    { title: 'Aurora over Earth', imageUrl: 'https://images.example/aurora?id=1', link: 'https://photos.example/aurora', thumbnailUrl: 'https://thumbs.example/aurora', imageWidth: 1200, imageHeight: 800 },
+    { title: 'Invalid source', imageUrl: 'javascript:alert(1)', link: 'https://photos.example/invalid' }
+  ]
+});
+assert.equal(parsedImages.length, 1, 'Image search should reject non-HTTP media and preserve source metadata.');
+assert.equal(parsedImages[0].url, 'https://images.example/aurora?id=1');
+assert.equal(parsedImages[0].sourceUrl, 'https://photos.example/aurora');
+assert.equal(parsedImages[0].category, 'images');
+
+const earthImages = searchEarthImages('aurora', {
+  articles: [], videos: [], books: [],
+  posts: [
+    { id: 'public-image', content: 'Aurora over the northern horizon', mediaUrl: 'https://earth.example/aurora.jpg', mediaType: 'image/jpeg' },
+    { id: 'not-image', content: 'Aurora video', mediaUrl: 'https://earth.example/aurora.mp4', mediaType: 'video/mp4' }
+  ]
+});
+assert.equal(earthImages.length, 1, 'Image search should only include actual indexed image media.');
+assert.equal(earthImages[0].url, 'https://earth.example/aurora.jpg');
 
 const earthResults = searchEarthIndex('climate earth', {
   articles: [
@@ -69,4 +96,4 @@ const cached = getCachedJupiterSearch('test-query', 1001);
 assert.deepEqual(cached, ranked);
 assert.notEqual(cached, ranked, 'Cache reads should return a separate result array.');
 assert.equal(getCachedJupiterSearch('test-query', 62_000), null, 'Search cache entries should expire.');
-console.log('JUPITER search index, route state, content lookup, demo-data exclusion, dedupe, ranking and cache: 18 passed, 0 failed.');
+console.log('JUPITER search index, image search, route state, content lookup, demo-data exclusion, dedupe, ranking and cache: 26 passed, 0 failed.');

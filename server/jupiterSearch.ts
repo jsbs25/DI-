@@ -155,6 +155,40 @@ export function searchEarthIndex(query: string, store: SearchableStore, limit = 
     }));
 }
 
+export function searchEarthImages(query: string, store: SearchableStore, limit = 10): JupiterResult[] {
+  const terms = tokenize(query);
+  if (!terms.length) return [];
+  return store.posts
+    .filter(post => !DEMO_RECORD_IDS.has(post.id) && /^image(?:\/|$)/i.test(post.mediaType || '') && Boolean(post.mediaUrl))
+    .flatMap(post => {
+      const mediaUrl = post.mediaUrl || '';
+      try {
+        const url = new URL(mediaUrl);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return [];
+      } catch {
+        return [];
+      }
+
+      const title = post.content.trim().slice(0, 100) || 'EARTH image';
+      const text = `${title} ${post.content}`.toLocaleLowerCase();
+      const matchedTerms = terms.filter(term => text.includes(term)).length;
+      if (!matchedTerms) return [];
+      return [{
+        id: `earth:image:${post.id}`,
+        title,
+        url: mediaUrl,
+        sourceUrl: `/jupiter/read/post/${encodeURIComponent(post.id)}`,
+        snippet: post.content.replace(/\s+/g, ' ').trim().slice(0, 280),
+        source: 'earth' as const,
+        kind: 'post' as const,
+        domain: 'EARTH',
+        content: post.content.trim().slice(0, 20_000),
+        category: 'images' as const
+      }];
+    })
+    .slice(0, limit);
+}
+
 export function getJupiterEarthContent(
   kind: JupiterEarthContent['kind'],
   id: string,
