@@ -484,7 +484,14 @@ export default function App() {
         )}
 
         {currentTab === 'saturn' && (
-          <SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} />
+          <SaturnSpace
+            lang={lang}
+            onBack={() => setCurrentTab('universe')}
+            onOpenInJupiter={url => {
+              setBrowserInitialQuery(url);
+              setCurrentTab('browser');
+            }}
+          />
         )}
 
         {currentTab === 'mercury' && (

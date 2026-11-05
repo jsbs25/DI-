@@ -89,11 +89,11 @@ export const PLANET_ECOSYSTEMS: Record<string, PlanetEcosystem> = {
   saturn: {
     planetId: 'saturn',
     tab: 'saturn',
-    titleZh: '影视宇宙',
-    titleEn: 'Cinema Universe',
+    titleZh: '影视探索',
+    titleEn: 'Video Discovery',
     available: true,
     buttonClass: 'from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500',
-    descriptionZh: '全球影视娱乐中心'
+    descriptionZh: '通过 JUPITER 搜索真实公开视频来源并在内部浏览'
   },
   uranus: {
     planetId: 'uranus',
