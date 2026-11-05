@@ -6,10 +6,10 @@ import { GoogleGenAI } from '@google/genai';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
-import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
+import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
-import { fetchAndExtract, searchGitHubRepositories, searchGoogleImages, searchWeb, searchWebProviders, type SearchResult } from './server/webFetcher.ts';
+import { fetchAndExtract, searchGitHubRepositories, searchGoogleCategory, searchGoogleImages, searchWeb, searchWebProviders, type JupiterExternalSearchCategory, type SearchResult } from './server/webFetcher.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 import {
@@ -1042,10 +1042,12 @@ app.get('/api/jupiter/search', async (req, res) => {
     req.query.lang === 'fr' || req.query.lang === 'ru' ? req.query.lang : 'en';
   const engine = req.query.engine === 'bing' || req.query.engine === 'duckduckgo' ||
     req.query.engine === 'wikipedia' || req.query.engine === 'github' ? req.query.engine : 'auto';
-  const category = req.query.type === 'images' ? 'images' : 'all';
-  if (req.query.type && req.query.type !== 'all' && req.query.type !== 'images') {
+  const searchCategories = ['all', 'images', 'videos', 'news', 'pdf', 'audio', 'books', 'academic'] as const;
+  const requestedCategory = typeof req.query.type === 'string' ? req.query.type : '';
+  if (requestedCategory && !(searchCategories as readonly string[]).includes(requestedCategory)) {
     return res.status(400).json({ success: false, error: 'Unsupported JUPITER search type.' });
   }
+  const category = (requestedCategory || 'all') as typeof searchCategories[number];
   const cacheKey = `${category}\u0000${lang}\u0000${engine}\u0000${q.toLocaleLowerCase()}`;
   const cached = getCachedJupiterSearch(cacheKey);
   if (cached) return res.json({ success: true, query: q, results: cached, cached: true, sources: [...new Set(cached.map(result => result.source))] });
@@ -1054,7 +1056,7 @@ app.get('/api/jupiter/search', async (req, res) => {
     let internalResults: JupiterResult[];
     let externalResults: SearchResult[];
     if (category === 'images') {
-      const imageSearch = await searchGoogleImages(q, 20);
+      const imageSearch = await searchGoogleImages(q, 20, lang);
       if (!imageSearch.configured) {
         return res.status(503).json({
           success: false,
@@ -1063,13 +1065,30 @@ app.get('/api/jupiter/search', async (req, res) => {
       }
       internalResults = searchEarthImages(q, store, 10);
       externalResults = imageSearch.results;
-    } else {
+    } else if (category === 'all') {
       internalResults = searchEarthIndex(q, store, 10);
       externalResults = engine === 'github'
         ? await searchGitHubRepositories(q, 10)
         : engine === 'auto'
           ? await searchWebProviders(q, 10, lang)
           : await searchWeb(q, 10, engine, lang);
+    } else {
+      const verticalSearch = await searchGoogleCategory(q, category as JupiterExternalSearchCategory, 20, lang);
+      if (!verticalSearch.configured) {
+        return res.status(503).json({
+          success: false,
+          error: `${category} 搜索尚未配置。请在服务端设置 SERPER_API_KEY；不会用普通网页结果冒充该分类结果。`
+        });
+      }
+      const indexedResults = searchEarthIndex(q, store, 50);
+      internalResults = category === 'videos'
+        ? indexedResults.filter(result => result.kind === 'video').slice(0, 10)
+        : category === 'books'
+          ? indexedResults.filter(result => result.kind === 'book').slice(0, 10)
+          : category === 'audio'
+            ? searchEarthAudio(q, store, 10)
+            : [];
+      externalResults = verticalSearch.results;
     }
     const enrichedExternal = externalResults.map((result, index) => {
       let domain = '';

@@ -4,10 +4,11 @@ import {
   getJupiterEarthContent,
   getCachedJupiterSearch,
   mergeAndRankJupiterResults,
+  searchEarthAudio,
   searchEarthImages,
   searchEarthIndex
 } from '../server/jupiterSearch.ts';
-import { parseGoogleImageResults } from '../server/webFetcher.ts';
+import { parseGoogleCategoryResults, parseGoogleImageResults } from '../server/webFetcher.ts';
 import { buildJupiterSearchRoute, parseJupiterSearchRoute } from '../src/components/browser/jupiterSearchRoute.ts';
 
 const searchRoute = buildJupiterSearchRoute('climate change NASA', 'duckduckgo', 'zh');
@@ -25,6 +26,7 @@ assert.deepEqual(parseJupiterSearchRoute('/jupiter/search?q=space+weather&engine
 assert.equal(parseJupiterSearchRoute('/jupiter/search?q=aurora&page=0')?.page, 1);
 assert.equal(parseJupiterSearchRoute('/jupiter/search'), null);
 assert.equal(parseJupiterSearchRoute('/jupiter/watch/video-1'), null);
+assert.equal(parseJupiterSearchRoute('/jupiter/search?q=aurora&type=academic')?.category, 'academic');
 const parsedImages = parseGoogleImageResults({
   images: [
     { title: 'Aurora over Earth', imageUrl: 'https://images.example/aurora?id=1', link: 'https://photos.example/aurora', thumbnailUrl: 'https://thumbs.example/aurora', imageWidth: 1200, imageHeight: 800 },
@@ -45,6 +47,32 @@ const earthImages = searchEarthImages('aurora', {
 });
 assert.equal(earthImages.length, 1, 'Image search should only include actual indexed image media.');
 assert.equal(earthImages[0].url, 'https://earth.example/aurora.jpg');
+const earthAudio = searchEarthAudio('podcast', {
+  articles: [], videos: [], books: [],
+  posts: [
+    { id: 'public-audio', content: 'Climate podcast interview', mediaUrl: 'https://earth.example/episode.mp3', mediaType: 'audio/mpeg' },
+    { id: 'not-audio', content: 'Climate article', mediaUrl: 'https://earth.example/article', mediaType: 'text/html' }
+  ]
+});
+assert.equal(earthAudio.length, 1, 'Audio search should only include actual indexed audio media.');
+assert.equal(earthAudio[0].url, 'https://earth.example/episode.mp3');
+
+const videoResults = parseGoogleCategoryResults({
+  videos: [
+    { title: 'Aurora documentary', link: 'https://video.example/watch/1', description: 'Aurora from orbit', imageUrl: 'https://thumb.example/video.jpg', duration: '8:20' },
+    { title: 'Unsafe', link: 'javascript:alert(1)' }
+  ]
+}, 'videos');
+assert.equal(videoResults.length, 1);
+assert.equal(videoResults[0].category, 'videos');
+assert.equal(videoResults[0].thumbnailUrl, 'https://thumb.example/video.jpg');
+assert.equal(videoResults[0].duration, '8:20');
+const newsResults = parseGoogleCategoryResults({ news: [{ title: 'Climate update', link: 'https://news.example/story', snippet: 'Latest report', date: 'Today' }] }, 'news');
+assert.equal(newsResults[0].date, 'Today');
+assert.equal(parseGoogleCategoryResults({ organic: [{ title: 'PDF', link: 'https://docs.example/report.pdf' }, { title: 'HTML', link: 'https://docs.example/page' }] }, 'pdf').length, 1);
+assert.equal(parseGoogleCategoryResults({ organic: [{ title: 'Audio', link: 'https://media.example/episode.mp3' }] }, 'audio').length, 1);
+assert.equal(parseGoogleCategoryResults({ organic: [{ title: 'Open book', link: 'https://openlibrary.org/works/1' }, { title: 'Other', link: 'https://unknown.example/book' }] }, 'books').length, 1);
+assert.equal(parseGoogleCategoryResults({ organic: [{ title: 'Paper', link: 'https://papers.example/research', publicationInfo: 'Journal of Science' }] }, 'academic')[0].category, 'academic');
 
 const earthResults = searchEarthIndex('climate earth', {
   articles: [
@@ -96,4 +124,4 @@ const cached = getCachedJupiterSearch('test-query', 1001);
 assert.deepEqual(cached, ranked);
 assert.notEqual(cached, ranked, 'Cache reads should return a separate result array.');
 assert.equal(getCachedJupiterSearch('test-query', 62_000), null, 'Search cache entries should expire.');
-console.log('JUPITER search index, image search, route state, content lookup, demo-data exclusion, dedupe, ranking and cache: 26 passed, 0 failed.');
+console.log('JUPITER search index, media categories, route state, content lookup, demo-data exclusion, dedupe, ranking and cache: 38 passed, 0 failed.');

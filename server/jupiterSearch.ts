@@ -155,11 +155,11 @@ export function searchEarthIndex(query: string, store: SearchableStore, limit = 
     }));
 }
 
-export function searchEarthImages(query: string, store: SearchableStore, limit = 10): JupiterResult[] {
+function searchEarthMedia(query: string, store: SearchableStore, mediaKind: 'image' | 'audio', limit: number): JupiterResult[] {
   const terms = tokenize(query);
   if (!terms.length) return [];
   return store.posts
-    .filter(post => !DEMO_RECORD_IDS.has(post.id) && /^image(?:\/|$)/i.test(post.mediaType || '') && Boolean(post.mediaUrl))
+    .filter(post => !DEMO_RECORD_IDS.has(post.id) && new RegExp(`^${mediaKind}(?:/|$)`, 'i').test(post.mediaType || '') && Boolean(post.mediaUrl))
     .flatMap(post => {
       const mediaUrl = post.mediaUrl || '';
       try {
@@ -169,12 +169,12 @@ export function searchEarthImages(query: string, store: SearchableStore, limit =
         return [];
       }
 
-      const title = post.content.trim().slice(0, 100) || 'EARTH image';
+      const title = post.content.trim().slice(0, 100) || `EARTH ${mediaKind}`;
       const text = `${title} ${post.content}`.toLocaleLowerCase();
       const matchedTerms = terms.filter(term => text.includes(term)).length;
       if (!matchedTerms) return [];
       return [{
-        id: `earth:image:${post.id}`,
+        id: `earth:${mediaKind}:${post.id}`,
         title,
         url: mediaUrl,
         sourceUrl: `/jupiter/read/post/${encodeURIComponent(post.id)}`,
@@ -183,10 +183,18 @@ export function searchEarthImages(query: string, store: SearchableStore, limit =
         kind: 'post' as const,
         domain: 'EARTH',
         content: post.content.trim().slice(0, 20_000),
-        category: 'images' as const
+        category: mediaKind === 'image' ? 'images' as const : 'audio' as const
       }];
     })
     .slice(0, limit);
+}
+
+export function searchEarthImages(query: string, store: SearchableStore, limit = 10): JupiterResult[] {
+  return searchEarthMedia(query, store, 'image', limit);
+}
+
+export function searchEarthAudio(query: string, store: SearchableStore, limit = 10): JupiterResult[] {
+  return searchEarthMedia(query, store, 'audio', limit);
 }
 
 export function getJupiterEarthContent(

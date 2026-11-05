@@ -13,9 +13,11 @@ export interface SearchResult {
   url: string;
   snippet: string;
   source?: 'web' | 'github';
-  category?: 'images';
+  category?: 'images' | 'videos' | 'news' | 'pdf' | 'audio' | 'books' | 'academic';
   sourceUrl?: string;
   thumbnailUrl?: string;
+  duration?: string;
+  date?: string;
   repository?: string;
   stars?: number;
   forks?: number;
@@ -37,6 +39,14 @@ const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 EARTH-ONE-Ingestion/1.0';
 
 const DEFAULT_TIMEOUT_MS = 9000;
+const GOOGLE_SEARCH_LOCALES = {
+  en: { hl: 'en', gl: 'us' },
+  zh: { hl: 'zh-cn', gl: 'cn' },
+  ar: { hl: 'ar', gl: 'sa' },
+  es: { hl: 'es', gl: 'es' },
+  fr: { hl: 'fr', gl: 'fr' },
+  ru: { hl: 'ru', gl: 'ru' }
+} as const;
 
 // ---------------------------------------------------------------------------
 // HTTP layer
@@ -371,11 +381,16 @@ export function parseGoogleImageResults(data: unknown, limit = 20): SearchResult
     });
 }
 
-export async function searchGoogleImages(query: string, limit = 20): Promise<{ configured: boolean; results: SearchResult[] }> {
+export async function searchGoogleImages(
+  query: string,
+  limit = 20,
+  lang: 'en' | 'zh' | 'ar' | 'es' | 'fr' | 'ru' = 'en'
+): Promise<{ configured: boolean; results: SearchResult[] }> {
   const key = process.env.SERPER_API_KEY;
   if (!key) return { configured: false, results: [] };
   const q = query.trim();
   if (!q) return { configured: true, results: [] };
+  const locale = GOOGLE_SEARCH_LOCALES[lang];
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
@@ -384,11 +399,108 @@ export async function searchGoogleImages(query: string, limit = 20): Promise<{ c
       method: 'POST',
       signal: controller.signal,
       headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q, num: Math.min(limit, 20) })
+      body: JSON.stringify({ q, num: Math.min(limit, 20), ...locale })
     });
     if (!response.ok) throw new Error(`Image search provider returned HTTP ${response.status}.`);
     const data: unknown = await response.json();
     return { configured: true, results: parseGoogleImageResults(data, limit) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export type JupiterExternalSearchCategory = Exclude<NonNullable<SearchResult['category']>, 'images'>;
+
+const AUDIO_RESULT_PATH = /\.(?:aac|flac|m4a|mp3|oga|ogg|opus|wav)$/i;
+const BOOK_HOSTS = ['books.google.com', 'openlibrary.org', 'gutenberg.org', 'archive.org'];
+
+export function parseGoogleCategoryResults(
+  payload: unknown,
+  category: JupiterExternalSearchCategory,
+  limit = 20
+): SearchResult[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const data = payload as Record<string, unknown>;
+  const field = category === 'videos' ? 'videos' : category === 'news' ? 'news' : 'organic';
+  const items = data[field];
+  if (!Array.isArray(items)) return [];
+
+  return items.slice(0, limit).flatMap((item: unknown) => {
+      if (!item || typeof item !== 'object') return [];
+      const record = item as Record<string, unknown>;
+      const url = typeof record.link === 'string' ? record.link : '';
+      const title = typeof record.title === 'string' ? record.title.trim() : '';
+      if (!url || !title) return [];
+      try {
+        const address = new URL(url);
+        if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password) return [];
+        if (category === 'pdf' && !/\.pdf$/i.test(address.pathname)) return [];
+        if (category === 'audio' && !AUDIO_RESULT_PATH.test(address.pathname)) return [];
+        if (category === 'books' && !BOOK_HOSTS.some(host => address.hostname.toLowerCase() === host || address.hostname.toLowerCase().endsWith(`.${host}`))) return [];
+      } catch {
+        return [];
+      }
+
+      const snippet = [record.snippet, record.description, record.publicationInfo, record.authors]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .join(' · ');
+      const thumbnailUrl = typeof record.imageUrl === 'string' ? record.imageUrl : '';
+      let safeThumbnailUrl: string | undefined;
+      try {
+        const address = new URL(thumbnailUrl);
+        if (['http:', 'https:'].includes(address.protocol) && !address.username && !address.password && thumbnailUrl.length <= 2048) {
+          safeThumbnailUrl = thumbnailUrl;
+        }
+      } catch {
+        safeThumbnailUrl = undefined;
+      }
+      return [{
+        title,
+        url,
+        sourceUrl: url,
+        snippet: snippet.slice(0, 1000),
+        source: 'web' as const,
+        category,
+        thumbnailUrl: safeThumbnailUrl,
+        duration: typeof record.duration === 'string' ? record.duration : undefined,
+        date: typeof record.date === 'string' ? record.date : undefined
+      }];
+    });
+}
+
+export async function searchGoogleCategory(
+  query: string,
+  category: JupiterExternalSearchCategory,
+  limit = 20,
+  lang: 'en' | 'zh' | 'ar' | 'es' | 'fr' | 'ru' = 'en'
+): Promise<{ configured: boolean; results: SearchResult[] }> {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return { configured: false, results: [] };
+  const q = query.trim();
+  if (!q) return { configured: true, results: [] };
+  const locale = GOOGLE_SEARCH_LOCALES[lang];
+
+  const endpoint = category === 'videos' ? 'videos'
+    : category === 'news' ? 'news'
+      : category === 'academic' ? 'scholar'
+        : 'search';
+  const providerQuery = category === 'pdf' ? `${q} filetype:pdf`
+    : category === 'audio' ? `${q} (filetype:mp3 OR filetype:m4a OR filetype:ogg OR filetype:wav)`
+      : category === 'books' ? `${q} (site:books.google.com OR site:openlibrary.org OR site:gutenberg.org OR site:archive.org)`
+        : q;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    const response = await fetch(`https://google.serper.dev/${endpoint}`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'X-API-KEY': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: providerQuery, num: Math.min(limit, 20), ...locale })
+    });
+    if (!response.ok) throw new Error(`${category} search provider returned HTTP ${response.status}.`);
+    const payload: unknown = await response.json();
+    return { configured: true, results: parseGoogleCategoryResults(payload, category, limit) };
   } finally {
     clearTimeout(timer);
   }

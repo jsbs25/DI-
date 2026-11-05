@@ -151,9 +151,11 @@ type JupiterSearchResult = {
   source: 'web' | 'github' | 'earth';
   kind: 'web' | 'article' | 'video' | 'book' | 'post';
   domain: string;
-  category?: 'images';
+  category?: Exclude<JupiterSearchCategory, 'all'>;
   sourceUrl?: string;
   thumbnailUrl?: string;
+  duration?: string;
+  date?: string;
   content?: string;
   repository?: string;
   stars?: number;
@@ -178,6 +180,16 @@ const MAX_LOCAL_BOOKMARKS = 200;
 const MAX_LOCAL_HISTORY = 500;
 const MAX_RESTORED_SESSION_TABS = 12;
 const JUPITER_HOME_URL = 'jupiter://home';
+const JUPITER_SEARCH_CATEGORY_LABELS: Record<JupiterSearchCategory, string> = {
+  all: '全部',
+  videos: '视频',
+  images: '图片',
+  news: '新闻',
+  pdf: 'PDF',
+  audio: '音频',
+  books: '图书',
+  academic: '学术'
+};
 
 type JupiterContentRoute = { kind: 'document' | 'image' | 'audio' | 'external-video'; id: string } | { kind: Exclude<JupiterEarthContent['kind'], 'document' | 'image' | 'audio'>; id: string };
 
@@ -1079,7 +1091,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     const cleanQuery = query.trim();
     if (!cleanQuery) return;
     const category = options.category ?? searchCategory;
-    const engine = category === 'images' ? 'auto' : options.engine ?? searchEngine;
+    const engine = category === 'all' ? options.engine ?? searchEngine : 'auto';
     const searchLang = options.lang ?? browserLang;
     const page = options.page ?? 1;
     const route = buildJupiterSearchRoute(cleanQuery, engine, searchLang, category, page);
@@ -2275,20 +2287,19 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                   <span className="rounded-full border border-amber-200/20 bg-amber-200/[0.06] px-2.5 py-1 font-semibold tracking-[0.16em] text-amber-100">
                     JUPITER
                   </span>
-                  <span className={`rounded-full border px-2.5 py-1 font-medium ${searchCategory === 'images' ? 'border-violet-300/20 bg-violet-300/[0.06] text-violet-100' : searchEngine === 'github' ? 'border-slate-600 bg-slate-900 text-white' : 'border-white/[0.08] bg-white/[0.04] text-slate-300'}`}>
-                    {searchCategory === 'images' ? '真实图片搜索' : searchEngine === 'github' ? 'GitHub 公共仓库' : '真实互联网搜索'}
+                  <span className={`rounded-full border px-2.5 py-1 font-medium ${searchCategory !== 'all' ? 'border-violet-300/20 bg-violet-300/[0.06] text-violet-100' : searchEngine === 'github' ? 'border-slate-600 bg-slate-900 text-white' : 'border-white/[0.08] bg-white/[0.04] text-slate-300'}`}>
+                    {searchCategory !== 'all' ? `${JUPITER_SEARCH_CATEGORY_LABELS[searchCategory]}搜索` : searchEngine === 'github' ? 'GitHub 公共仓库' : '真实互联网搜索'}
                   </span>
                   {!isSearching && <span>{searchResults.length} 条结果</span>}
-                  <span className="text-slate-500">{searchCategory === 'images' ? 'EARTH 图片与外部图片索引' : 'EARTH 内容与公开网页'}</span>
+                  <span className="text-slate-500">{searchCategory === 'all' ? 'EARTH 内容与公开网页' : 'EARTH 内容与对应外部搜索源'}</span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-snug">
                   “{lastSearchQuery}”
                 </h1>
                 <nav aria-label="JUPITER 搜索分类" className="mt-4 flex gap-2 overflow-x-auto pb-1">
                   {([
-                    ['all', '全部'],
-                    ['images', '图片']
-                  ] as const).map(([category, label]) => (
+                    'all', 'videos', 'images', 'news', 'pdf', 'audio', 'books', 'academic'
+                  ] as const).map(category => (
                     <button
                       key={category}
                       type="button"
@@ -2300,7 +2311,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                           : 'border-white/[0.08] bg-white/[0.03] text-slate-400 hover:text-white'
                       }`}
                     >
-                      {label}
+                      {JUPITER_SEARCH_CATEGORY_LABELS[category]}
                     </button>
                   ))}
                 </nav>
@@ -2341,10 +2352,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                     </div>
                   ) : (
                     <button key={idx} onClick={() => openJupiterResult(result)} className="group w-full cursor-pointer rounded-2xl border border-white/[0.07] bg-[#0d151d] p-5 text-left transition-all hover:border-amber-200/20 hover:bg-[#111922] sm:p-6">
-                      {result.category === 'images' && (
+                      {(result.category === 'images' || result.category === 'videos') && result.thumbnailUrl && (
                         <div className="mb-4 flex max-h-72 items-center justify-center overflow-hidden rounded-xl bg-black/20">
                           <img
-                            src={result.thumbnailUrl || result.url}
+                            src={result.thumbnailUrl}
                             alt={result.title}
                             loading="lazy"
                             referrerPolicy="no-referrer"
@@ -2358,8 +2369,27 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                       </div>
                       <h2 className="mt-2 text-base font-semibold leading-snug text-slate-100 transition-colors group-hover:text-amber-100 sm:text-lg">{result.title}</h2>
                       {result.snippet && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-400 sm:text-sm">{result.snippet}</p>}
+                      {(result.date || result.duration) && (
+                        <span className="mt-2 block text-[11px] text-slate-500">
+                          {[result.date, result.duration].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
                       <span className="mt-3 inline-flex items-center gap-1 text-[11px] text-amber-200/70">
-                        {result.source === 'earth'
+                        {result.category === 'images'
+                          ? '在 JUPITER 内查看图片'
+                          : result.category === 'videos'
+                            ? '在 JUPITER 内打开视频来源'
+                            : result.category === 'news'
+                              ? '在 JUPITER 内阅读新闻来源'
+                              : result.category === 'pdf'
+                                ? '在 JUPITER 内阅读 PDF'
+                                : result.category === 'audio'
+                                  ? '在 JUPITER 内播放音频'
+                                  : result.category === 'books'
+                                    ? '在 JUPITER 内打开图书来源'
+                                    : result.category === 'academic'
+                                      ? '打开学术来源'
+                                      : result.source === 'earth'
                           ? '在 JUPITER 内阅读'
                           : isRemotePdfUrl(result.url)
                             ? '在 JUPITER 内阅读 PDF'

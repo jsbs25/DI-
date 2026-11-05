@@ -1,7 +1,7 @@
 import type { Language } from '../../types/index.ts';
 
 export type JupiterSearchEngine = 'auto' | 'bing' | 'duckduckgo' | 'wikipedia' | 'github';
-export type JupiterSearchCategory = 'all' | 'images';
+export type JupiterSearchCategory = 'all' | 'images' | 'videos' | 'news' | 'pdf' | 'audio' | 'books' | 'academic';
 
 export interface JupiterSearchRoute {
   query: string;
@@ -12,7 +12,7 @@ export interface JupiterSearchRoute {
 }
 
 const ENGINES: JupiterSearchEngine[] = ['auto', 'bing', 'duckduckgo', 'wikipedia', 'github'];
-const CATEGORIES: JupiterSearchCategory[] = ['all', 'images'];
+const CATEGORIES: JupiterSearchCategory[] = ['all', 'images', 'videos', 'news', 'pdf', 'audio', 'books', 'academic'];
 const LANGUAGES: Language[] = ['en', 'zh', 'ar', 'es', 'fr', 'ru'];
 const JUPITER_ORIGIN = 'https://jupiter.earth.invalid';
 
