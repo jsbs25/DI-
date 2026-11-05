@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { OpenAICompatibleProvider, type OpenAICompatibleMessage } from './ai/providers/openAICompatibleProvider.ts';
+import { getOllamaContextWindow, getOllamaTokenBudget, type AIConversationMessage } from './aiConversation.ts';
 
 // Load .env here as well — ESM imports are hoisted above `dotenv.config()`
 // in server.ts, so the gateway (instantiated at import time) must load env itself.
@@ -34,6 +35,7 @@ export interface ChatMessage {
  * generous ceiling while still bounding runaway requests.
  */
 const LOCAL_OLLAMA_TIMEOUT_MS = 300_000;
+const LOCAL_OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
 
 /**
  * Ollama's default bind is IPv4 127.0.0.1:11434; `localhost` can resolve to ::1
@@ -83,6 +85,7 @@ class AIGateway {
   private customBaseUrl: string = process.env.CUSTOM_BASE_URL || 'http://127.0.0.1:11434/v1';
   private customModel: string = process.env.CUSTOM_MODEL || 'llama3';
   private localOllamaModels: string[] = [];
+  private localOllamaWarmup: Promise<void> | null = null;
 
   constructor() {
     this.initProviders();
@@ -239,25 +242,30 @@ class AIGateway {
    * 无需 API Key，探测失败（Ollama 未启动）时静默忽略。
    */
   public async detectLocalOllama(): Promise<void> {
+    if (process.env.EARTH_ONE_SKIP_OLLAMA_DETECTION === 'true') return;
+
     let data: any = null;
     for (const host of OLLAMA_HOSTS) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 2000);
         const res = await fetch(`${host}/api/tags`, { signal: controller.signal });
-        clearTimeout(timer);
         if (!res.ok) continue;
         data = await res.json();
         break;
       } catch {
         // Ollama not reachable on this host; try the next one.
+      } finally {
+        clearTimeout(timer);
       }
     }
-    if (!data) return;
 
     const tags: any[] = Array.isArray(data?.models) ? data.models : [];
     const names = tags.map((m: any) => m?.name).filter((n: any): n is string => typeof n === 'string' && n.length > 0);
     this.localOllamaModels = names;
+    this.models = this.models.filter(model =>
+      !model.id.startsWith('ollama:') || names.includes(model.id.slice('ollama:'.length))
+    );
 
     for (const name of names) {
       const id = `ollama:${name}`;
@@ -282,11 +290,21 @@ class AIGateway {
     // Prefer a locally-running model (e.g. gpt-oss:20b) as the default over the
     // remote free endpoint, so the AI Hub opens on local inference by default.
     if (names.length > 0) {
-      const preferredLocal = names.find(n => n.toLowerCase().startsWith('gpt-oss')) || names[0];
+      const preferredLocal = names.find(n => n.toLowerCase().startsWith('qwen3')) ||
+        names.find(n => n.toLowerCase().startsWith('gpt-oss')) ||
+        names[0];
       const preferredLocalId = `ollama:${preferredLocal}`;
       for (const m of this.models) {
         m.isDefault = m.id === preferredLocalId;
       }
+      if (preferredLocal.toLowerCase().startsWith('qwen3') && !this.localOllamaWarmup) {
+        this.localOllamaWarmup = this.warmLocalOllamaModel(preferredLocal).catch(error => {
+          console.warn('Unable to warm local Ollama model:', error);
+          this.localOllamaWarmup = null;
+        });
+      }
+    } else {
+      for (const model of this.models) model.isDefault = model.id === 'deepseek-r1-open';
     }
   }
 
@@ -296,9 +314,23 @@ class AIGateway {
   public async generateContent(
     modelId: string,
     prompt: string,
-    systemInstruction?: string
+    systemInstruction?: string,
+    onToken?: (token: string) => void,
+    history?: AIConversationMessage[]
   ): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
-    const targetModel = this.getModel(modelId) || this.models.find(m => m.isDefault) || this.models[0];
+    let targetModel = this.getModel(modelId);
+    if (modelId.startsWith('ollama:') && !targetModel) {
+      await this.detectLocalOllama();
+      targetModel = this.getModel(modelId);
+      if (!targetModel) {
+        return {
+          success: false,
+          content: '',
+          errorMessage: `本地 Ollama 模型 ${modelId.slice('ollama:'.length)} 尚未检测到，请确认 Ollama 正在运行且模型已安装。`
+        };
+      }
+    }
+    targetModel = targetModel || this.models.find(m => m.isDefault) || this.models[0];
     const startTime = Date.now();
 
     // 1. FREE OPEN-SOURCE MODELS (DeepSeek-R1, Qwen 2.5, Llama 3.3)
@@ -329,9 +361,30 @@ class AIGateway {
     // 2. 本地 Ollama 模型（自动检测到 localhost:11434 的模型）
     if (targetModel.id.startsWith('ollama:')) {
       const modelName = targetModel.id.slice('ollama:'.length);
+      if (modelName.toLowerCase().startsWith('qwen3')) {
+        try {
+          const result = await this.runFastOllamaModel(modelName, prompt, systemInstruction, onToken, history);
+          const latency = Date.now() - startTime;
+          const tokens = result.tokens || Math.ceil((prompt.length + result.content.length) / 3.5);
+          targetModel.status = 'active';
+          targetModel.totalCalls += 1;
+          targetModel.totalTokens += tokens;
+          targetModel.averageLatencyMs = Math.round(
+            (targetModel.averageLatencyMs * (targetModel.totalCalls - 1) + latency) / targetModel.totalCalls
+          );
+          targetModel.lastUsedAt = new Date().toISOString();
+          targetModel.errorMessage = undefined;
+          return { success: true, content: result.content, tokens };
+        } catch (error: any) {
+          const message = String(error?.message || error);
+          targetModel.status = 'error';
+          targetModel.errorMessage = message;
+          return { success: false, content: '', errorMessage: message };
+        }
+      }
+
       return this.callOpenAICompatible({
-        baseUrl: this.customBaseUrl || 'http://127.0.0.1:11434/v1',
-        apiKey: this.customKey,
+        baseUrl: LOCAL_OLLAMA_BASE_URL,
         model: modelName,
         prompt,
         systemInstruction
@@ -549,6 +602,113 @@ class AIGateway {
           ? '免费开源推理端点响应超时，请稍后重试，或配置官方 API Key 以获得稳定服务。'
           : `免费开源推理端点暂时不可用（${detail}）。请稍后重试，或配置官方 API Key。`
       );
+    }
+  }
+
+  private async runFastOllamaModel(
+    model: string,
+    prompt: string,
+    systemInstruction?: string,
+    onToken?: (token: string) => void,
+    history: AIConversationMessage[] = []
+  ): Promise<{ content: string; tokens?: number }> {
+    await this.localOllamaWarmup;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), LOCAL_OLLAMA_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(`${OLLAMA_HOSTS[0]}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: [
+            ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
+            ...history,
+            { role: 'user', content: prompt }
+          ],
+          stream: Boolean(onToken),
+          think: false,
+          keep_alive: -1,
+          options: {
+            temperature: 0.2,
+            num_predict: getOllamaTokenBudget(prompt, history),
+            num_ctx: getOllamaContextWindow(prompt, systemInstruction, history)
+          }
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(`本地 Ollama 请求失败（HTTP ${response.status}）：${String(errorBody?.error || '未知错误').slice(0, 300)}`);
+      }
+
+      let data: any;
+      let content = '';
+      if (onToken) {
+        if (!response.body) throw new Error('本地 Ollama 未提供流式响应。');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const chunk = JSON.parse(line);
+            if (chunk.error) throw new Error(String(chunk.error));
+            const token = typeof chunk.message?.content === 'string' ? chunk.message.content : '';
+            if (token) {
+              content += token;
+              onToken(token);
+            }
+            if (chunk.done) data = chunk;
+          }
+          if (done) break;
+        }
+        if (buffer.trim()) {
+          const chunk = JSON.parse(buffer);
+          if (chunk.error) throw new Error(String(chunk.error));
+          const token = typeof chunk.message?.content === 'string' ? chunk.message.content : '';
+          if (token) {
+            content += token;
+            onToken(token);
+          }
+          if (chunk.done) data = chunk;
+        }
+      } else {
+        data = await response.json().catch(() => null);
+        content = typeof data?.message?.content === 'string' ? data.message.content.trim() : '';
+      }
+      if (!content) throw new Error('本地 Ollama 返回了空响应。');
+      return {
+        content,
+        tokens: Number.isFinite(data?.eval_count) ? data.eval_count : undefined
+      };
+    } catch (error: any) {
+      if (error?.name === 'AbortError') throw new Error('本地 Ollama 请求超时，请稍后重试。');
+      if (error instanceof TypeError) {
+        throw new Error('未能连接到本地 Ollama 服务（127.0.0.1:11434），请确认 Ollama 正在运行。');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async warmLocalOllamaModel(model: string): Promise<void> {
+    const response = await fetch(`${OLLAMA_HOSTS[0]}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, prompt: '', stream: false, keep_alive: -1, options: { num_predict: 0 } }),
+      signal: AbortSignal.timeout(LOCAL_OLLAMA_TIMEOUT_MS)
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(`Ollama warm-up failed (HTTP ${response.status}): ${String(data?.error || 'unknown error').slice(0, 300)}`);
     }
   }
 

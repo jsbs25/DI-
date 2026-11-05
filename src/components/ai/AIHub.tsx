@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
+import { readAIStream } from '../../utils/aiStream.ts';
+import { loadAIConversationHistory, saveAIConversationHistory } from '../../utils/aiSessionHistory.ts';
 import {
   Sparkles,
   Send,
@@ -47,6 +49,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   >([]);
   const [promptInput, setPromptInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [voiceOutput, setVoiceOutput] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -65,37 +68,37 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const recognitionRef = useRef<any>(null);
 
   // Chat message history
-  const [messages, setMessages] = useState<Message[]>([
-    {
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const saved = loadAIConversationHistory('earth-one-ai-hub:v1', (value): value is Message =>
+      !!value && typeof value === 'object' &&
+      typeof (value as Message).id === 'string' &&
+      ((value as Message).role === 'user' || (value as Message).role === 'assistant') &&
+      typeof (value as Message).content === 'string' &&
+      typeof (value as Message).timestamp === 'string'
+    );
+    if (saved.length) return saved;
+    return [{
       id: 'msg_welcome',
       role: 'assistant',
-      model: '本地 Ollama (GPT-OSS 20B)',
+      model: '本地 AI 助手',
       timestamp: '刚刚',
       content: lang === 'zh'
-        ? `你好！我是**地球计划（Project Earth）**开放智能助理。
+        ? `你好，我是**本地 AI 助手**。
 
-本系统默认使用**本地 Ollama 大模型（如 GPT-OSS 20B）**作为推理引擎，**完全本地、免密直连、无需联网**；同时保留 DeepSeek-R1 / Qwen / Llama 等开源模型作为备选。
+当前使用的模型显示在上方选择器中。回复会优先围绕你的问题，并参考当前对话。
 
-在这里您可以直接和我自由对话：
-- 🔍 **跨学科深度探究**：宇宙演化、地球科学、文明史与宏观哲学
-- 💻 **全栈软件工程**：架构设计、TypeScript/Python 代码编写与调试
-- 🌐 **高保真多语种翻译**：跨越八十亿人类的文化语境与思想沟通
-- ✍️ **深度内容创作**：学术长文、演讲稿、现代散文与诗歌
+你可以直接提问，也可以明确要求解释、写作或编程。`
+        : `Hello, I'm your **local AI assistant**.
 
-随时在此输入您的提问，或点击下方话题开始交谈。`
-        : `Greetings! I am the **Project Earth** AI Assistant.
+The model in use is shown in the selector above. I’ll focus on your question and use the current conversation as context.
 
-Powered by your **local Ollama model (e.g. GPT-OSS 20B)** as the default engine—fully local, keyless, and private; DeepSeek-R1, Qwen, and Llama remain available as fallbacks.
+Ask anything, or explicitly request an explanation, writing, or code.`
+    }];
+  });
 
-Feel free to chat with me directly:
-- 🌌 **Cosmology & Planetary Science**: Orbital mechanics, Earth ecology, overview effect
-- 💻 **Software Engineering**: System architecture, TypeScript, algorithms, and debugging
-- 🌐 **Polyglot Communication**: High-fidelity cultural translations
-- ✍️ **Deep Writing**: Essays, scientific discourse, and creative composition
-
-Ask me anything below to begin!`
-    }
-  ]);
+  useEffect(() => {
+    saveAIConversationHistory('earth-one-ai-hub:v1', messages);
+  }, [messages]);
 
   // Load models on mount
   useEffect(() => {
@@ -104,8 +107,8 @@ Ask me anything below to begin!`
       .then(d => {
         if (d.success && Array.isArray(d.models)) {
           setAvailableModels(d.models);
-          const activeDefault = d.models.find((m: any) => m.id.startsWith('ollama:')) ||
-            d.models.find((m: any) => m.isDefault) ||
+          const activeDefault = d.models.find((m: any) => m.isDefault) ||
+            d.models.find((m: any) => m.id.startsWith('ollama:')) ||
             d.models[0];
           if (activeDefault) {
             setSelectedModel(activeDefault.id);
@@ -205,12 +208,19 @@ Ask me anything below to begin!`
 
     setMessages(prev => [...prev, userMsg]);
     setIsLoading(true);
+    let activeStreamId: string | null = null;
 
     try {
+      const shouldStream = /^ollama:qwen3(?::|$)/i.test(selectedModel) && !customApiKey.trim();
       const payload: any = {
         prompt: textToSend,
         modelId: selectedModel,
-        mode: 'general'
+        mode: 'general',
+        history: messages.slice(-8).map(message => ({
+          role: message.role,
+          content: message.content
+        })),
+        ...(shouldStream ? { stream: true } : {})
       };
 
       if (selectedModel === 'custom' || customApiKey.trim()) {
@@ -225,10 +235,36 @@ Ask me anything below to begin!`
         body: JSON.stringify(payload)
       });
 
+      if (shouldStream) {
+        activeStreamId = `ai_${Date.now()}`;
+        setMessages(prev => [...prev, {
+          id: activeStreamId!,
+          role: 'assistant',
+          content: '',
+          model: selectedModel,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }]);
+        let replyContent = '';
+        const streamResult = await readAIStream(res, delta => {
+          setStreamingMessageId(activeStreamId);
+          replyContent += delta;
+          setMessages(prev => prev.map(message =>
+            message.id === activeStreamId ? { ...message, content: message.content + delta } : message
+          ));
+        });
+        setMessages(prev => prev.map(message =>
+          message.id === activeStreamId
+            ? { ...message, model: streamResult.model || selectedModel, tokens: streamResult.tokens }
+            : message
+        ));
+        if (voiceOutput) speakText(replyContent);
+        return;
+      }
+
       const data = await res.json();
       const replyContent = data.success && data.reply
         ? data.reply
-        : (data.error || '地球计划 AI 服务已完成思考与响应。');
+        : (data.error || '没有收到有效回复，请重试。');
 
       const aiMsg: Message = {
         id: `ai_${Date.now()}`,
@@ -244,19 +280,24 @@ Ask me anything below to begin!`
       if (voiceOutput) {
         speakText(replyContent);
       }
-    } catch {
-      setMessages(prev => [
-        ...prev,
-        {
+    } catch (error) {
+      const errorContent = error instanceof Error ? error.message : '与地球计划智能节点的网络连接受阻，请检查网络后重试。';
+      if (activeStreamId) {
+        setMessages(prev => prev.map(message =>
+          message.id === activeStreamId ? { ...message, content: errorContent } : message
+        ));
+      } else {
+        setMessages(prev => [...prev, {
           id: `ai_err_${Date.now()}`,
           role: 'assistant',
-          content: '与地球计划智能节点的网络连接受阻，请检查网络后重试。',
+          content: errorContent,
           model: selectedModel,
           timestamp: nowTime
-        }
-      ]);
+        }]);
+      }
     } finally {
       setIsLoading(false);
+      setStreamingMessageId(null);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
@@ -268,9 +309,9 @@ Ask me anything below to begin!`
         {
           id: `msg_init_${Date.now()}`,
           role: 'assistant',
-          model: 'DeepSeek-R1',
+          model: lang === 'zh' ? '本地 AI 助手' : 'Local AI Assistant',
           timestamp: '刚刚',
-          content: lang === 'zh' ? '对话已重置。请问您想探索或探讨什么主题？' : 'Chat reset. What would you like to explore?'
+          content: lang === 'zh' ? '对话已重置。你想聊些什么？' : 'Chat reset. What would you like to talk about?'
         }
       ]);
     }
@@ -278,16 +319,17 @@ Ask me anything below to begin!`
 
   // Quick starter chips
   const starterChips = lang === 'zh' ? [
-    '🌌 解释从太空凝视地球时的“总观效应”（Overview Effect）',
-    '💻 用 TypeScript 实现一个带重试和熔断机制的弹性请求池',
-    '🌍 地球八十亿人口如何实现跨文化理解与共同繁荣？',
-    '🚀 详细介绍开普勒行星运动三大定律在天体计算中的应用',
-    '🌐 请将“海内存知己，天涯若比邻”翻译为地道唯美的英文与法语'
+    '🔎 用简单例子解释什么是机器学习',
+    '🗓️ 帮我把一项复杂任务拆成可执行步骤',
+    '💻 写一个带输入校验的 TypeScript 函数',
+    '✍️ 写一段温暖简短的母亲主题文章',
+    '🌐 把“海内存知己，天涯若比邻”自然地翻译成英文'
   ] : [
-    '🌌 Explain the Overview Effect experienced by astronauts looking back at Earth',
-    '💻 Write a robust TypeScript rate-limited concurrent executor with backoff',
-    '🌍 How can international digital collaboration strengthen global peace?',
-    '🚀 How Kepler’s three laws govern modern planetary navigation'
+    '🔎 Explain machine learning with a simple example',
+    '🗓️ Break a complex task into actionable steps',
+    '💻 Write a TypeScript function with input validation',
+    '✍️ Write a short, warm piece about mothers',
+    '🌐 Translate “A bosom friend afar brings a distant land near” naturally'
   ];
 
   // Helper to parse <think> block
@@ -313,7 +355,7 @@ Ask me anything below to begin!`
             <div className="min-w-0">
               <div className="flex items-center space-x-2">
                 <span className="font-bold text-sm tracking-wide text-white truncate">
-                  {lang === 'zh' ? '地球计划 AI 智能对话' : 'Project Earth AI Dialogue'}
+                  {lang === 'zh' ? '本地 AI 助手' : 'Local AI Assistant'}
                 </span>
                 {availableModels.some(m => m.id.startsWith('ollama:')) ? (
                   <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
@@ -485,7 +527,7 @@ Ask me anything below to begin!`
               <div className={`flex flex-col min-w-0 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
                 {/* Header Tag */}
                 <div className="flex items-center space-x-2 text-[10px] text-slate-400 mb-1 px-1">
-                  <span>{isUser ? '您' : (msg.model || '地球计划 AI')}</span>
+                  <span>{isUser ? '您' : (msg.model || (lang === 'zh' ? '本地 AI 助手' : 'Local AI Assistant'))}</span>
                   <span>·</span>
                   <span>{msg.timestamp}</span>
                 </div>
@@ -575,14 +617,14 @@ Ask me anything below to begin!`
         })}
 
         {/* Loading Indicator */}
-        {isLoading && (
+        {isLoading && !streamingMessageId && (
           <div className="flex items-start gap-3.5 animate-in fade-in">
             <div className="w-9 h-9 rounded-2xl flex items-center justify-center bg-cyan-950 border border-cyan-500/40 text-cyan-400">
               <Bot className="w-4 h-4 animate-spin" />
             </div>
             <div className="p-4 rounded-3xl rounded-tl-none bg-[#0b1329] border border-cyan-500/30 text-cyan-300 text-xs flex items-center space-x-2">
               <Sparkles className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
-              <span>地球计划 AI 正在进行深度语义推理与知识合成...</span>
+              <span>{lang === 'zh' ? '正在生成回复…' : 'Generating a reply…'}</span>
             </div>
           </div>
         )}

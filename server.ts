@@ -6,6 +6,7 @@ import { GoogleGenAI } from '@google/genai';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
+import { buildConversationPrompt, normalizeConversationHistory } from './server/aiConversation.ts';
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
@@ -499,7 +500,8 @@ app.get('/api/games/rooms', (req, res) => {
 // -------------------------------------------------------------
 // 7. EARTH ONE UNIFIED AI GATEWAY & MULTI-MODEL DISPATCH
 // -------------------------------------------------------------
-app.get('/api/ai/models', (req, res) => {
+app.get('/api/ai/models', async (_req, res) => {
+  await aiGateway.detectLocalOllama();
   res.json({ success: true, models: aiGateway.getModels() });
 });
 
@@ -511,7 +513,7 @@ app.get('/api/ai/stats', (req, res) => {
 });
 
 app.post('/api/ai/chat', async (req, res) => {
-  const { prompt, messages, modelId, model, mode = 'general', apiKey, baseUrl, customModel } = req.body;
+  const { prompt, messages, history, modelId, model, mode = 'general', apiKey, baseUrl, customModel, stream } = req.body;
 
   // If the user supplied a custom API key, register it as the custom provider
   // and route this request through it.
@@ -524,16 +526,49 @@ app.post('/api/ai/chat', async (req, res) => {
     : (modelId || model || 'deepseek-r1-open');
   const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
   if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
+  const conversationHistory = normalizeConversationHistory(history);
+  const contextualPrompt = buildConversationPrompt(userPrompt, conversationHistory);
 
   const systemInstructions: Record<string, string> = {
-    general: 'You are 地球计划 AI (Project Earth AI), the global open intelligence system. Answer warmly, knowledgeably, and with global cross-cultural perspective. Provide clear, structured, and insightful answers.',
+    general: 'You are a general-purpose assistant, not a branded persona. Answer the current question directly in the user’s language. For follow-ups, prioritize the latest relevant conversation turns and honor the user’s constraints. Do not introduce unrelated themes or claim abilities you do not have. Keep simple answers concise; expand only when the user asks. Be accurate and say when uncertain.',
     translator: 'You are the Project Earth Polyglot Translator. Translate with native fidelity, preserving emotional nuance and cultural context.',
     writer: 'You are the Project Earth Creator Assistant. Help author eloquent global essays, articles, poetry, and stories.',
     tutor: 'You are the Project Earth International Language Coach. Help the user master natural conversation, idioms, and pronunciation.'
   };
 
   const systemPrompt = systemInstructions[mode] || systemInstructions.general;
-  const result = await aiGateway.generateContent(resolvedModelId, userPrompt, systemPrompt);
+  const shouldStream = stream === true && /^ollama:qwen3(?::|$)/i.test(resolvedModelId);
+  if (shouldStream) {
+    res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.flushHeaders();
+    try {
+      const result = await aiGateway.generateContent(
+        resolvedModelId,
+        userPrompt,
+        systemPrompt,
+        token => res.write(`${JSON.stringify({ delta: token })}\n`),
+        conversationHistory
+      );
+      if (result.success) {
+        res.write(`${JSON.stringify({ done: true, tokens: result.tokens, model: resolvedModelId })}\n`);
+      } else {
+        res.write(`${JSON.stringify({ error: result.errorMessage || 'AI 服务当前不可用，请稍后重试。' })}\n`);
+      }
+    } catch (error) {
+      res.write(`${JSON.stringify({ error: error instanceof Error ? error.message : 'AI 服务当前不可用，请稍后重试。' })}\n`);
+    }
+    return res.end();
+  }
+
+  const usesStructuredHistory = /^ollama:qwen3(?::|$)/i.test(resolvedModelId);
+  const result = await aiGateway.generateContent(
+    resolvedModelId,
+    usesStructuredHistory ? userPrompt : contextualPrompt,
+    systemPrompt,
+    undefined,
+    conversationHistory
+  );
 
   if (result.success) {
     res.json({
