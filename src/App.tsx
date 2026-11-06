@@ -41,6 +41,7 @@ import { SolarSystemDirectory } from './universe/SolarSystemDirectory.tsx';
 import { MoonAcademy } from './universe/MoonAcademy.tsx';
 import { VenusCreativeStudio } from './universe/VenusCreativeStudio.tsx';
 
+export default function App() {
   const [lang, setLang] = useState<Language>('zh');
   const t = translations[lang] || translations.zh;
   const [currentTab, setCurrentTab] = useState<string>(() => {

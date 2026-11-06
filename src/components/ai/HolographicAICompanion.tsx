@@ -363,6 +363,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
       if (voiceEnabled || activeTab === 'voice') {
         speak(replyText, newMsgId);
+      }
     } catch (error) {
       // 离线状态自动兜底：浏览器直接调用本地电脑运行的 Ollama (127.0.0.1:11434)
       try {

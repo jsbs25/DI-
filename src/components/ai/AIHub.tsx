@@ -303,6 +303,7 @@ Ask anything, or explicitly request an explanation, writing, or code.`
 
       if (voiceOutput) {
         speakText(replyContent);
+      }
     } catch (error) {
       // 离线/无网络保护：浏览器直接尝试直连本地电脑运行的 Ollama (127.0.0.1:11434)
       try {

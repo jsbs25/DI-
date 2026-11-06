@@ -33,6 +33,15 @@ export interface ExtractedPage {
   author: string;
   content: string;
   readTime: string;
+  description?: string;
+  wordCount?: number;
+  charCount?: number;
+  headings?: string[];
+  links?: string[];
+  images?: string[];
+  crawledAt?: string;
+  latencyMs?: number;
+  httpStatus?: number;
 }
 
 const USER_AGENT =
@@ -197,12 +206,42 @@ function extractLinks(html: string, baseUrl: string): string[] {
   return Array.from(links);
 }
 
+function extractHeadings(html: string): string[] {
+  const headings: string[] = [];
+  const re = /<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null && headings.length < 12) {
+    const text = stripHtml(m[1]).trim();
+    if (text.length > 2 && text.length < 120 && !headings.includes(text)) {
+      headings.push(text);
+    }
+  }
+  return headings;
+}
+
+function extractImages(html: string, baseUrl: string): string[] {
+  const images = new Set<string>();
+  const re = /<img[^>]+src=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null && images.size < 8) {
+    try {
+      const absolute = new URL(m[1], baseUrl);
+      if ((absolute.protocol === 'http:' || absolute.protocol === 'https:') && !absolute.href.includes('1x1') && !absolute.href.includes('tracking')) {
+        images.add(absolute.toString());
+      }
+    } catch {}
+  }
+  return Array.from(images);
+}
+
 // ---------------------------------------------------------------------------
-// Article extraction
+// Article extraction & Crawler Inspection
 // ---------------------------------------------------------------------------
 
 export async function fetchAndExtract(url: string): Promise<ExtractedPage> {
+  const start = Date.now();
   const html = await fetchText(url);
+  const latencyMs = Date.now() - start;
   const title = extractTitle(html);
   const author = extractAuthor(html) || new URL(url).hostname.replace(/^www\./, '');
   const description = extractDescription(html);
@@ -211,12 +250,27 @@ export async function fetchAndExtract(url: string): Promise<ExtractedPage> {
   if (content.length < 80) content = description || content;
 
   const hostname = new URL(url).hostname.replace(/^www\./, '');
+  const wordCount = content.split(/\s+/).filter(Boolean).length;
+  const charCount = content.length;
+  const headings = extractHeadings(html);
+  const links = extractLinks(html, url).slice(0, 16);
+  const images = extractImages(html, url);
+
   return {
     url,
     title: title || hostname,
     author,
+    description: description || undefined,
     content: content.length ? content : `No extractable text from ${url}.`,
-    readTime: estimateReadTime(content)
+    readTime: estimateReadTime(content),
+    wordCount,
+    charCount,
+    headings,
+    links,
+    images,
+    crawledAt: new Date().toISOString(),
+    latencyMs,
+    httpStatus: 200
   };
 }
 

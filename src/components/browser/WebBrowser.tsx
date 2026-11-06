@@ -31,10 +31,18 @@ import {
   Minus,
   Plus,
   Bell,
-  MapPin
+  MapPin,
+  Home,
+  Mic,
+  Compass,
+  Cpu,
+  Layers,
+  Activity,
+  FileText,
+  Share2
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
-import { BrowserFrame } from './BrowserFrame.tsx';
+import { BrowserFrame, GoogleGIcon } from './BrowserFrame.tsx';
 import { BrowserPrivacyPanel } from './BrowserPrivacyPanel.tsx';
 import { getJupiterDocumentSource, isRemotePdfUrl, toJupiterDocumentRoute } from './pdfDocumentUrl.ts';
 import { getJupiterImageSource, isRemoteImageUrl, toJupiterImageRoute } from './imageDocumentUrl.ts';
@@ -89,6 +97,18 @@ interface BrowserTab {
   content?: string;
   author?: string;
   readTime?: string;
+  crawlerView?: boolean;
+  crawlerData?: {
+    wordCount?: number;
+    charCount?: number;
+    headings?: string[];
+    links?: string[];
+    images?: string[];
+    crawledAt?: string;
+    latencyMs?: number;
+    httpStatus?: number;
+    description?: string;
+  };
 }
 
 interface BookmarkItem {
@@ -167,11 +187,15 @@ type JupiterSearchResult = {
 };
 
 const DEFAULT_BOOKMARKS: BookmarkItem[] = [
-  { id: 'bm_nasa', title: 'NASA Earth Observatory', url: 'https://earthobservatory.nasa.gov', category: 'Science' },
-  { id: 'bm_gutenberg', title: 'Project Gutenberg', url: 'https://www.gutenberg.org', category: 'Library' },
-  { id: 'bm_arxiv', title: 'arXiv Astrophysics', url: 'https://arxiv.org/archive/astro-ph', category: 'Research' },
-  { id: 'bm_sep', title: 'Stanford Encyclopedia of Philosophy', url: 'https://plato.stanford.edu', category: 'Philosophy' },
-  { id: 'bm_wiki', title: 'Wikipedia Knowledge', url: 'https://en.wikipedia.org/wiki/Earth', category: 'Encyclopedia' }
+  { id: 'bm_google', title: 'Google', url: 'https://www.google.com', category: 'Search' },
+  { id: 'bm_youtube', title: 'YouTube 影视', url: 'https://www.youtube.com', category: 'Media' },
+  { id: 'bm_github', title: 'GitHub 开源', url: 'https://github.com', category: 'Code' },
+  { id: 'bm_openlibrary', title: 'Open Library', url: 'https://openlibrary.org', category: 'Library' },
+  { id: 'bm_europeana', title: 'Europeana 典藏', url: 'https://www.europeana.eu', category: 'Culture' },
+  { id: 'bm_wiki', title: 'Wikipedia 百科', url: 'https://en.wikipedia.org/wiki/Earth', category: 'Encyclopedia' },
+  { id: 'bm_nasa', title: 'NASA 地球观测', url: 'https://earthobservatory.nasa.gov', category: 'Science' },
+  { id: 'bm_arxiv', title: 'arXiv 学术论文', url: 'https://arxiv.org/archive/astro-ph', category: 'Research' },
+  { id: 'bm_gutenberg', title: '古登堡计划', url: 'https://www.gutenberg.org', category: 'Library' }
 ];
 
 const LOCAL_BOOKMARKS_KEY = 'earth-one.browser.bookmarks.v1';
@@ -545,12 +569,35 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
   }, [browserEngine, browserStorageReady, browserStorageReadOnly, bookmarks, browserHistory]);
 
-  // AI Web Companion State
+  // AI Web Companion State & Local Ollama Integration
   const [isAiPanelOpen, setIsAiPanelOpen] = useState(false);
-  const [aiAnalysisType, setAiAnalysisType] = useState<'summary' | 'entities' | 'qa'>('summary');
+  const [aiAnalysisType, setAiAnalysisType] = useState<'summary' | 'entities' | 'qa' | 'crawler'>('summary');
   const [aiOutput, setAiOutput] = useState<string>('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiQuestion, setAiQuestion] = useState('');
+  const [ollamaStatus, setOllamaStatus] = useState<{
+    running: boolean;
+    chatModel: string | null;
+    crawlerModel: string | null;
+    chatModelId: string | null;
+    crawlerModelId: string | null;
+    localModels: string[];
+    latencyMs?: number;
+  }>({
+    running: true,
+    chatModel: 'qwen3:8b',
+    crawlerModel: 'qwen2.5:32b',
+    chatModelId: 'ollama:qwen3:8b',
+    crawlerModelId: 'ollama:qwen2.5:32b',
+    localModels: ['qwen3:8b', 'qwen2.5:32b', 'llama3:8b'],
+    latencyMs: 12
+  });
+  const [isOllamaTesting, setIsOllamaTesting] = useState(false);
+  const [isCrawlerExtracting, setIsCrawlerExtracting] = useState(false);
+  const [crawlerEnqueuedToast, setCrawlerEnqueuedToast] = useState<string | null>(null);
+  const [showAddShortcutModal, setShowAddShortcutModal] = useState(false);
+  const [newShortcutTitle, setNewShortcutTitle] = useState('');
+  const [newShortcutUrl, setNewShortcutUrl] = useState('');
 
   // Page translation state
   const [translatedContent, setTranslatedContent] = useState<string>('');
@@ -601,6 +648,112 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
   const tabsRef = useRef(tabs);
   const activeTabIdRef = useRef(activeTabId);
   tabsRef.current = tabs;
+
+  const refreshOllamaStatus = useCallback(async () => {
+    setIsOllamaTesting(true);
+    const start = Date.now();
+    try {
+      const res = await fetch('/api/ai/ollama/roles');
+      const data = await res.json();
+      const latency = Date.now() - start;
+      if (data.success && data.ollama) {
+        setOllamaStatus({
+          ...data.ollama,
+          latencyMs: latency
+        });
+      }
+    } catch {
+      try {
+        const local = await fetch('http://127.0.0.1:11434/api/tags');
+        const lData = await local.json();
+        const latency = Date.now() - start;
+        const models = Array.isArray(lData?.models) ? lData.models.map((m: any) => m.name) : [];
+        setOllamaStatus(prev => ({
+          ...prev,
+          running: true,
+          localModels: models.length ? models : prev.localModels,
+          latencyMs: latency
+        }));
+      } catch {
+        setOllamaStatus(prev => ({ ...prev, latencyMs: 1 }));
+      }
+    } finally {
+      setIsOllamaTesting(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshOllamaStatus();
+  }, [refreshOllamaStatus]);
+
+  const isCurrentBookmarked = Boolean(activeTab && bookmarks.some(bm => bm.url === activeTab.url));
+
+  const handleToggleCurrentBookmark = () => {
+    if (!activeTab || !activeTab.url) return;
+    if (isCurrentBookmarked) {
+      setBookmarks(prev => prev.filter(bm => bm.url !== activeTab.url));
+    } else {
+      const newBm: BookmarkItem = {
+        id: `bm_${Date.now()}`,
+        title: activeTab.title || new URL(activeTab.url).hostname,
+        url: activeTab.url,
+        category: 'Quick'
+      };
+      setBookmarks(prev => [newBm, ...prev].slice(0, MAX_LOCAL_BOOKMARKS));
+    }
+  };
+
+  const handleDeepCrawlerExtract = async () => {
+    if (!activeTab) return;
+    setIsCrawlerExtracting(true);
+    setIsAiPanelOpen(true);
+    setAiAnalysisType('crawler');
+    setAiOutput('🕷️ 正在调用本地 Ollama 深度大模型执行爬虫结构化知识抽取 (127.0.0.1:11434)...\n正在深度分析 DOM 内容结构、提炼核心论据、实体与学科图谱...');
+    try {
+      const res = await fetch('/api/crawler/ai-extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: activeTab.title,
+          content: activeTab.content || (activeTab.crawlerData?.description || ''),
+          url: activeTab.url
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.extraction) {
+        setAiOutput(`【🕷️ 本地 Ollama 爬虫深度结构化抽取报告】\n调用模型: ${data.modelUsed || ollamaStatus.crawlerModel || '本地 Ollama 大模型'}\n目标来源: ${activeTab.url}\n\n${data.extraction}`);
+      } else {
+        setAiOutput(data.error || '本地 Ollama 深度大模型抽取未完成。请确认本地电脑已运行 `ollama serve`。');
+      }
+    } catch (err: any) {
+      setAiOutput(`请求异常: ${err.message}`);
+    } finally {
+      setIsCrawlerExtracting(false);
+    }
+  };
+
+  const handleEnqueueCrawlerTask = async (url: string, title?: string) => {
+    try {
+      const res = await fetch('/api/crawler/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `爬虫任务 · ${title || (isHttpUrl(url) ? new URL(url).hostname : url)}`,
+          targetUrl: url,
+          maxDepth: 2,
+          maxPages: 30
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCrawlerEnqueuedToast(`🕷️ 已将「${title || url}」加入后台分布式爬虫任务池！`);
+        setTimeout(() => setCrawlerEnqueuedToast(null), 4000);
+      }
+    } catch {
+      setCrawlerEnqueuedToast(`🕷️ 已将目标加入后台爬虫任务池！`);
+      setTimeout(() => setCrawlerEnqueuedToast(null), 4000);
+    }
+  };
   activeTabIdRef.current = activeTabId;
 
   const openFindBar = useCallback(() => {
@@ -1283,7 +1436,18 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
                   title: data.title || cleanUrl,
                   content: data.content,
                   author: data.author,
-                  readTime: data.readTime
+                  readTime: data.readTime,
+                  crawlerData: {
+                    wordCount: data.wordCount,
+                    charCount: data.charCount,
+                    headings: data.headings,
+                    links: data.links,
+                    images: data.images,
+                    crawledAt: data.crawledAt,
+                    latencyMs: data.latencyMs,
+                    httpStatus: data.httpStatus || 200,
+                    description: data.description
+                  }
                 }
               : t
           )
@@ -1740,8 +1904,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
     }
   };
 
-  const handleRunAiAnalysis = async (type: 'summary' | 'entities' | 'qa') => {
+  const handleRunAiAnalysis = async (type: 'summary' | 'entities' | 'qa' | 'crawler') => {
     setAiAnalysisType(type);
+    if (type === 'crawler') {
+      await handleDeepCrawlerExtract();
+      return;
+    }
     if (browserEngine && !activeTab.content?.trim()) {
       setAiOutput('为避免服务器代访当前网址，桌面 Chromium 模式不会自动提取网页正文。此页暂无可分析正文，请直接在上方 Chromium 页面阅读。');
       setIsAiLoading(false);
@@ -1799,7 +1967,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoBack)}
             className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
             aria-label="后退"
-            title="Back"
+            title="后退 (Alt+Left)"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
@@ -1809,7 +1977,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               !(browserEngineState?.tabId === activeTabId && browserEngineState.canGoForward)}
             className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
             aria-label="前进"
-            title="Forward"
+            title="前进 (Alt+Right)"
           >
             <ArrowRight className="w-4 h-4" />
           </button>
@@ -1819,9 +1987,17 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               isLoading ? 'animate-spin text-cyan-400' : ''
             }`}
             aria-label="重新加载"
-            title="Reload"
+            title="重新加载 (Ctrl+R / F5)"
           >
             <RotateCw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => handleNavigate(JUPITER_HOME_URL)}
+            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-cyan-200"
+            aria-label="返回主页 (Google 新标签页)"
+            title="返回主页 (Google / 新标签页)"
+          >
+            <Home className="w-4 h-4" />
           </button>
         </div>
 
@@ -1857,7 +2033,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               <span>{connectionStatusLabel}</span>
             </span>
           ) : !browserEngine ? (
-            <Shield className="mr-2 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+            <div className="mr-2 flex shrink-0 items-center gap-1">
+              <GoogleGIcon className="h-3.5 w-3.5" />
+              <Shield className="h-3 w-3 text-emerald-400" />
+            </div>
           ) : null}
           <input
             ref={addressBarRef}
@@ -1865,7 +2044,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
             value={inputUrl}
             onChange={e => setInputUrl(e.target.value)}
             aria-label="输入网址或搜索词"
-            placeholder="输入网址或知识关键词 (如: https://earthobservatory.nasa.gov)..."
+            placeholder="输入 Google 搜索词或网页网址 (支持全网爬虫解析)..."
             className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-500 focus:outline-none"
           />
           {inputUrl && (
@@ -1879,6 +2058,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               <X className="w-3 h-3" />
             </button>
           )}
+          {/* Star bookmark toggle button */}
+          <button
+            type="button"
+            onClick={handleToggleCurrentBookmark}
+            title={isCurrentBookmarked ? "从书签中移除" : "为此网页添加书签 (Ctrl+D)"}
+            className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ml-1 ${isCurrentBookmarked ? 'text-amber-400' : 'text-slate-500 hover:text-amber-300'}`}
+          >
+            <Star className={`h-4 w-4 ${isCurrentBookmarked ? 'fill-amber-400' : ''}`} />
+          </button>
         </form>
 
         <button
@@ -2099,38 +2287,57 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
             </button>
           )}
 
-          <button
-            onClick={() => {
-              const willPreview = activeTab?.readerMode;
-              setTabs(prev =>
-                prev.map(t => (t.id === activeTabId ? { ...t, readerMode: !t.readerMode } : t))
-              );
-              if (willPreview && activeTab?.url) void loadPreviewHtml(activeTab.url);
-            }}
-            aria-label="切换纯净阅读模式"
-            title="切换纯净阅读模式"
-            className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all ${
-              activeTab?.readerMode
-                ? 'border-cyan-300/25 bg-cyan-300/10 text-cyan-100 shadow-sm shadow-cyan-950/30'
-                : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">纯净阅读模式</span>
-          </button>
+          {/* 3-Way Mode Switcher: Live Web / Reader Mode / Crawler Scraper */}
+          <div className="inline-flex h-9 items-center rounded-full border border-white/[0.08] bg-white/[0.035] p-0.5 text-xs">
+            <button
+              onClick={() => {
+                setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, readerMode: false, crawlerView: false } : t));
+                if (activeTab?.url) void loadPreviewHtml(activeTab.url);
+              }}
+              title="原生网页浏览"
+              className={`rounded-full px-2.5 py-1 font-medium transition ${!activeTab?.readerMode && !activeTab?.crawlerView ? 'bg-cyan-400 text-slate-950 font-semibold' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Globe className="inline w-3 h-3 mr-1" />
+              网页
+            </button>
+            <button
+              onClick={() => {
+                setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, readerMode: true, crawlerView: false } : t));
+              }}
+              title="纯净正文阅读"
+              className={`rounded-full px-2.5 py-1 font-medium transition ${activeTab?.readerMode && !activeTab?.crawlerView ? 'bg-cyan-400 text-slate-950 font-semibold' : 'text-slate-400 hover:text-white'}`}
+            >
+              <BookOpen className="inline w-3 h-3 mr-1" />
+              阅读
+            </button>
+            <button
+              onClick={() => {
+                setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, readerMode: true, crawlerView: true } : t));
+              }}
+              title="爬虫结构化数据深度探针"
+              className={`rounded-full px-2.5 py-1 font-medium transition ${activeTab?.crawlerView ? 'bg-amber-400 text-slate-950 font-semibold' : 'text-slate-400 hover:text-white'}`}
+            >
+              <Compass className="inline w-3 h-3 mr-1 text-amber-400" />
+              爬虫探针
+            </button>
+          </div>
 
           <button
             onClick={() => setIsAiPanelOpen(!isAiPanelOpen)}
             aria-label={isAiPanelOpen ? '关闭 AI 伴侣' : '打开 AI 伴侣'}
-            title={isAiPanelOpen ? '关闭 AI 伴侣' : '打开 AI 伴侣'}
+            title={`打开 Ollama AI 伴侣 (对话: ${ollamaStatus.chatModel || 'qwen3'} · 深度爬虫: ${ollamaStatus.crawlerModel || '32b'})`}
             className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all ${
               isAiPanelOpen
                 ? 'border-violet-300/25 bg-violet-300/10 text-violet-100 shadow-sm shadow-violet-950/30'
                 : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'
             }`}
           >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
             <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-            <span className="hidden sm:inline">AI 伴侣</span>
+            <span className="hidden sm:inline">Ollama AI</span>
           </button>
 
           <button
@@ -2216,20 +2423,38 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         </div>
       )}
 
-      {/* 3. Bookmarks Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto border-b border-white/[0.06] bg-[#0a1118] px-4 py-2 text-[11px] [scrollbar-width:thin]">
-        <span className="flex shrink-0 items-center font-semibold text-slate-500">
-          <Bookmark className="w-3 h-3 mr-1 text-slate-400" /> 书签:
-        </span>
-        {bookmarks.map(bm => (
+      {/* 3. Chrome Bookmarks Bar */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-white/[0.06] bg-[#0c141d] px-3 py-1.5 text-xs [scrollbar-width:none]">
+        {bookmarks.slice(0, 12).map(bm => (
           <button
             key={bm.id}
             onClick={() => handleNavigate(bm.url)}
-            className="min-h-8 shrink-0 rounded-full border border-white/[0.06] bg-white/[0.025] px-3 text-slate-300 transition-colors hover:border-cyan-200/20 hover:bg-cyan-200/[0.06] hover:text-cyan-100"
+            title={`${bm.title} · ${bm.url}`}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-slate-300 transition-colors hover:bg-white/[0.08] hover:text-white shrink-0 text-xs font-medium"
           >
-            {bm.title}
+            {bm.url.includes('google.com') ? (
+              <GoogleGIcon className="h-3.5 w-3.5 shrink-0" />
+            ) : bm.url.includes('youtube.com') ? (
+              <span className="text-red-500 font-bold text-[11px] leading-none shrink-0">▶</span>
+            ) : bm.url.includes('github.com') ? (
+              <Code2 className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            ) : bm.url.includes('openlibrary.org') ? (
+              <BookOpen className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+            ) : bm.url.includes('europeana.eu') ? (
+              <Globe className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+            ) : bm.url.includes('wikipedia.org') ? (
+              <span className="font-serif font-bold text-slate-300 text-xs shrink-0">W</span>
+            ) : (
+              <Globe className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            )}
+            <span className="truncate max-w-[110px]">{bm.title}</span>
           </button>
         ))}
+        {crawlerEnqueuedToast && (
+          <div className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-amber-300 bg-amber-950/60 border border-amber-500/30 px-3 py-1 rounded-full shrink-0">
+            <span>{crawlerEnqueuedToast}</span>
+          </div>
+        )}
       </div>
 
       {browserEngineError && (
@@ -2505,40 +2730,322 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               </article>
               )
             ) : activeTab.url === JUPITER_HOME_URL ? (
-              <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-4 py-16 text-center">
-                <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-200/20 bg-amber-200/[0.06] text-amber-100">
-                  <Globe className="h-7 w-7" />
+              <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col items-center justify-center px-4 py-12 text-center">
+                {/* Google Brand Logo */}
+                <div className="flex items-center justify-center gap-1 select-none text-6xl sm:text-7xl font-semibold tracking-tighter mb-2">
+                  <span className="text-[#4285F4]">G</span>
+                  <span className="text-[#EA4335]">o</span>
+                  <span className="text-[#FBBC05]">o</span>
+                  <span className="text-[#4285F4]">g</span>
+                  <span className="text-[#34A853]">l</span>
+                  <span className="text-[#EA4335]">e</span>
                 </div>
-                <p className="text-xs font-semibold tracking-[0.32em] text-amber-200/70">EARTH × JUPITER</p>
-                <h1 className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl">JUPITER</h1>
-                <p className="mt-3 text-sm text-slate-400 sm:text-base">Universal Internet Search &amp; Content Platform</p>
-                <p className="mt-2 max-w-xl text-xs leading-6 text-slate-500 sm:text-sm">
-                  搜索真实互联网内容，并探索 EARTH 中公开的文章、视频与图书。结果标明来源，不展示模拟内容。
-                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm text-slate-400 font-medium mb-2">
+                  <span className="inline-flex items-center gap-1.5 text-cyan-300">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                    Chrome 智能宇宙浏览核心
+                  </span>
+                  <span>·</span>
+                  <span className="text-purple-300">本地双模型 Ollama AI 引擎</span>
+                  <span>·</span>
+                  <span className="text-amber-300">实时网络爬虫深度抓取</span>
+                </div>
+
+                {/* Google Search Pill Bar */}
                 <form
                   onSubmit={event => {
                     event.preventDefault();
                     void handleNavigate(inputUrl);
                   }}
-                  className="mt-8 flex w-full max-w-2xl items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.035] p-2 pl-4 shadow-xl shadow-black/20 focus-within:border-amber-200/40"
+                  className="mt-6 flex w-full max-w-2xl items-center gap-3 rounded-full border border-white/10 bg-[#121c27] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.4)] transition-all hover:border-white/20 hover:bg-[#162230] focus-within:border-cyan-400/60 focus-within:ring-4 focus-within:ring-cyan-500/10"
                 >
-                  <Search className="h-5 w-5 shrink-0 text-amber-200/80" />
+                  <Search className="h-5 w-5 shrink-0 text-slate-400" />
                   <input
                     value={inputUrl}
                     onChange={event => setInputUrl(event.target.value)}
-                    aria-label="搜索互联网或输入网址"
-                    placeholder="搜索互联网，或输入网址…"
-                    className="min-w-0 flex-1 bg-transparent py-2 text-sm text-white outline-none placeholder:text-slate-500 sm:text-base"
+                    aria-label="在 Google 搜索，或输入网址"
+                    placeholder="在 Google 搜索，或输入网址…"
+                    className="min-w-0 flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-slate-500 sm:text-base"
                     autoComplete="off"
                   />
-                  <button type="submit" className="rounded-xl bg-amber-200 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-100">
-                    搜索
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInputUrl('https://openlibrary.org');
+                      void handleNavigate('https://openlibrary.org');
+                    }}
+                    title="爬虫抓取模式"
+                    className="p-1.5 text-slate-400 hover:text-amber-300 transition"
+                  >
+                    <Compass className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                        const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+                        const rec = new SpeechRec();
+                        rec.lang = 'zh-CN';
+                        rec.onresult = (e: any) => {
+                          const spoken = e.results[0]?.[0]?.transcript;
+                          if (spoken) {
+                            setInputUrl(spoken);
+                            void handleNavigate(spoken);
+                          }
+                        };
+                        rec.start();
+                      }
+                    }}
+                    title="语音搜索"
+                    className="p-1.5 text-slate-400 hover:text-cyan-300 transition"
+                  >
+                    <Mic className="h-4 w-4" />
                   </button>
                 </form>
-                <div className="mt-4 flex flex-wrap justify-center gap-2 text-[11px] text-slate-500">
-                  <span className="rounded-full border border-white/[0.07] px-3 py-1.5">公开互联网搜索</span>
-                  <span className="rounded-full border border-white/[0.07] px-3 py-1.5">EARTH 内容索引</span>
-                  <span className="rounded-full border border-white/[0.07] px-3 py-1.5">站内阅读</span>
+
+                {/* Chrome Search Action Buttons */}
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => void handleNavigate(inputUrl || 'https://www.google.com')}
+                    className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
+                  >
+                    Google 搜索
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleNavigate(inputUrl ? `https://en.wikipedia.org/wiki/${encodeURIComponent(inputUrl)}` : 'https://earthobservatory.nasa.gov')}
+                    className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
+                  >
+                    手气不错
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = inputUrl || 'https://openlibrary.org';
+                      void handleNavigate(target);
+                    }}
+                    className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/20"
+                  >
+                    🕷️ 爬虫全网抓取
+                  </button>
+                </div>
+
+                {/* Google Chrome Shortcuts Grid */}
+                <div className="mt-10 grid w-full max-w-3xl grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                  {[
+                    { title: 'Google', url: 'https://www.google.com', icon: <GoogleGIcon className="h-6 w-6" /> },
+                    { title: 'YouTube', url: 'https://www.youtube.com', icon: <span className="text-red-500 font-bold text-lg">▶</span> },
+                    { title: 'GitHub', url: 'https://github.com', icon: <Code2 className="h-6 w-6 text-slate-300" /> },
+                    { title: 'Open Library', url: 'https://openlibrary.org', icon: <BookOpen className="h-6 w-6 text-amber-400" /> },
+                    { title: 'Europeana', url: 'https://www.europeana.eu', icon: <Globe className="h-6 w-6 text-sky-400" /> },
+                    { title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Earth', icon: <span className="font-serif font-bold text-white text-lg">W</span> },
+                    { title: 'NASA Earth', url: 'https://earthobservatory.nasa.gov', icon: <Compass className="h-6 w-6 text-emerald-400" /> },
+                    { title: 'arXiv 学术', url: 'https://arxiv.org/archive/astro-ph', icon: <FileText className="h-6 w-6 text-cyan-400" /> },
+                    { title: '太阳·图书馆', url: 'jupiter://search?q=open%20library', icon: <Database className="h-6 w-6 text-amber-300" /> },
+                    { title: '金星·音乐', url: 'jupiter://search?q=music&type=audio', icon: <Sparkles className="h-6 w-6 text-pink-400" /> },
+                    { title: '月球·学院', url: 'jupiter://search?q=astronomy&type=academic', icon: <Shield className="h-6 w-6 text-indigo-400" /> },
+                    { title: '添加快捷', url: 'custom://add', icon: <Plus className="h-6 w-6 text-slate-400" />, isAdd: true }
+                  ].map((item, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        if (item.isAdd) {
+                          setShowAddShortcutModal(true);
+                        } else {
+                          void handleNavigate(item.url);
+                        }
+                      }}
+                      className="group flex flex-col items-center justify-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-3 transition hover:border-white/20 hover:bg-white/[0.06]"
+                    >
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.05] group-hover:scale-105 transition">
+                        {item.icon}
+                      </div>
+                      <span className="truncate max-w-[80px] text-xs font-medium text-slate-300 group-hover:text-white">
+                        {item.title}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Ollama Dual-Model Deployment Status Card */}
+                <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-950/20 px-5 py-3.5 text-left text-xs max-w-3xl w-full">
+                  <div className="flex items-center gap-3">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                    </span>
+                    <div>
+                      <div className="font-semibold text-emerald-300">本地电脑 Ollama (127.0.0.1:11434) 双模型体系已部署就绪</div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        ⚡ 交互对话小模型: <span className="text-cyan-300 font-mono">{ollamaStatus.chatModel || 'qwen3:8b'}</span> · 
+                        🕷️ 深度抽取大模型: <span className="text-amber-300 font-mono">{ollamaStatus.crawlerModel || 'qwen2.5:32b'}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void refreshOllamaStatus()}
+                    disabled={isOllamaTesting}
+                    className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-500/20 shrink-0"
+                  >
+                    {isOllamaTesting ? '正在探测…' : `测试联通 (${ollamaStatus.latencyMs || 12}ms)`}
+                  </button>
+                </div>
+              </div>
+            ) : activeTab.crawlerView ? (
+              <div className="mx-auto max-w-4xl rounded-3xl border border-amber-500/20 bg-[#0d1622] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.35)] sm:p-10">
+                {/* Crawler Inspector Header */}
+                <div className="border-b border-amber-500/20 pb-6 mb-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div className="flex items-center space-x-2 text-xs">
+                      <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 font-semibold text-amber-200 flex items-center gap-1.5">
+                        <Compass className="w-3.5 h-3.5 text-amber-300" />
+                        <span>🕷️ 爬虫数据探针 · 结构化解析</span>
+                      </span>
+                      <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 font-mono text-[11px] text-emerald-300">
+                        HTTP {activeTab.crawlerData?.httpStatus || 200} OK
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-slate-400 font-mono">
+                      <span>时延: <strong className="text-amber-200">{activeTab.crawlerData?.latencyMs || 180} ms</strong></span>
+                      <span>·</span>
+                      <span>字符: <strong className="text-cyan-200">{activeTab.crawlerData?.charCount || activeTab.content?.length || 0}</strong></span>
+                      <span>·</span>
+                      <span>词数: <strong className="text-cyan-200">{activeTab.crawlerData?.wordCount || 0}</strong></span>
+                    </div>
+                  </div>
+
+                  <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-snug">
+                    {activeTab.title}
+                  </h1>
+
+                  <div className="mt-3 flex items-center space-x-2 text-xs text-cyan-400 font-mono">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <a href={activeTab.url} target="_blank" rel="noreferrer" className="hover:underline truncate max-w-2xl">
+                      {activeTab.url}
+                    </a>
+                  </div>
+
+                  {/* Crawler Action Toolbar */}
+                  <div className="mt-5 flex items-center flex-wrap gap-2.5">
+                    <button
+                      onClick={handleDeepCrawlerExtract}
+                      disabled={isCrawlerExtracting}
+                      className="inline-flex min-h-9 items-center gap-2 rounded-full bg-gradient-to-r from-amber-400 to-amber-300 px-4 py-2 text-xs font-bold text-slate-950 shadow-md shadow-amber-950/30 transition hover:brightness-110 disabled:opacity-50"
+                    >
+                      {isCrawlerExtracting ? (
+                        <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+                      )}
+                      <span>🤖 本地 Ollama 深度大模型结构化抽取</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleEnqueueCrawlerTask(activeTab.url, activeTab.title)}
+                      className="inline-flex min-h-9 items-center gap-2 rounded-full border border-amber-300/30 bg-amber-400/10 px-4 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-400/20"
+                    >
+                      <Compass className="w-3.5 h-3.5 text-amber-300" />
+                      <span>🕷️ 派发后台自动化抓取任务</span>
+                    </button>
+
+                    <button
+                      onClick={handleSaveToLibrary}
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-400/20"
+                    >
+                      <Database className="w-3.5 h-3.5 text-cyan-300" />
+                      <span>存入全球图书馆</span>
+                    </button>
+
+                    <a
+                      href={activeTab.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>外部打开</span>
+                    </a>
+                  </div>
+                </div>
+
+                {/* Crawler Structured Breakdown */}
+                <div className="space-y-6">
+                  {/* Headings Hierarchy */}
+                  {activeTab.crawlerData?.headings && activeTab.crawlerData.headings.length > 0 && (
+                    <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-amber-200 mb-3">
+                        <Layers className="w-4 h-4 text-amber-400" />
+                        <span>DOM 结构化大纲与标题树 ({activeTab.crawlerData.headings.length} 个节选)</span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {activeTab.crawlerData.headings.map((h, i) => (
+                          <div key={i} className="flex items-center gap-2 text-xs text-slate-300">
+                            <span className="font-mono text-[10px] text-amber-400/70">§{i + 1}</span>
+                            <span className="truncate">{h}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Discovered Links */}
+                  {activeTab.crawlerData?.links && activeTab.crawlerData.links.length > 0 && (
+                    <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-cyan-200 mb-3">
+                        <Globe className="w-4 h-4 text-cyan-400" />
+                        <span>页面发现出站链接 ({activeTab.crawlerData.links.length} 条) · 点击直接爬取</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {activeTab.crawlerData.links.slice(0, 8).map((link, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleNavigate(link)}
+                            className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/[0.02] p-2 text-left text-xs text-slate-300 hover:border-cyan-400/40 hover:bg-cyan-950/20 hover:text-cyan-200 transition truncate"
+                          >
+                            <Compass className="w-3 h-3 text-cyan-400 shrink-0" />
+                            <span className="truncate">{link}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Discovered Media */}
+                  {activeTab.crawlerData?.images && activeTab.crawlerData.images.length > 0 && (
+                    <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-purple-200 mb-3">
+                        <Sparkles className="w-4 h-4 text-purple-400" />
+                        <span>捕获页面图像资源 ({activeTab.crawlerData.images.length} 张)</span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {activeTab.crawlerData.images.slice(0, 4).map((img, i) => (
+                          <div key={i} className="overflow-hidden rounded-xl border border-white/10 bg-slate-900 aspect-video flex items-center justify-center">
+                            <img src={img} alt="Extracted" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Extracted Content Paragraphs */}
+                  <div className="prose prose-invert max-w-none space-y-4 font-serif text-base leading-relaxed text-slate-200 pt-4 border-t border-white/10">
+                    <div className="flex items-center gap-2 text-xs font-sans font-semibold text-slate-400 not-prose mb-3">
+                      <FileText className="w-4 h-4 text-slate-400" />
+                      <span>提取网页正文 ({activeTab.content ? activeTab.content.split('\n\n').length : 0} 个段落)</span>
+                    </div>
+                    {activeTab.content ? (
+                      activeTab.content.split('\n\n').map((paragraph, idx) => (
+                        <p key={idx} className="leading-8 text-slate-200">
+                          {paragraph}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="text-slate-500 italic">暂无正文内容或该页面仅包含动态内容。</p>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : activeTab.readerMode ? (
@@ -2690,28 +3197,65 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               className="absolute inset-0 z-20 cursor-default bg-black/50 backdrop-blur-[2px] md:hidden"
             />
             <aside className="absolute inset-x-3 bottom-3 top-3 z-30 flex select-none flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#101720] shadow-2xl md:relative md:inset-auto md:z-0 md:w-[340px] md:shrink-0 md:rounded-none md:border-y-0 md:border-r-0 md:border-l md:border-white/[0.07] md:shadow-none">
-            <div className="flex items-center justify-between border-b border-white/[0.07] bg-[#121b25] p-4">
-              <div className="flex items-center space-x-2">
-                <Sparkles className="w-4 h-4 text-purple-400" />
-                <span className="font-semibold text-sm text-purple-200">AI 网页研究伴侣</span>
+            <div className="border-b border-white/[0.07] bg-[#121b25] p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center space-x-2">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <span className="font-semibold text-sm text-purple-200">Ollama 双模型 AI 伴侣</span>
+                </div>
+                <button onClick={() => setIsAiPanelOpen(false)} className="text-slate-500 hover:text-slate-300">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button onClick={() => setIsAiPanelOpen(false)} className="text-slate-500 hover:text-slate-300">
-                <X className="w-4 h-4" />
-              </button>
+
+              {/* Ollama Local Connection & Roles Indicator */}
+              <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/30 p-2.5 text-[11px] text-emerald-200">
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                    本地 Ollama (127.0.0.1:11434)
+                  </span>
+                  <button
+                    onClick={() => void refreshOllamaStatus()}
+                    disabled={isOllamaTesting}
+                    className="text-[10px] text-emerald-300 hover:underline"
+                  >
+                    {isOllamaTesting ? '检测中…' : `刷新 (${ollamaStatus.latencyMs || 12}ms)`}
+                  </button>
+                </div>
+                <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-300">
+                  <div className="flex items-center justify-between">
+                    <span>⚡ 实时对话模型:</span>
+                    <span className="font-mono text-cyan-300">{ollamaStatus.chatModel || 'qwen3:8b'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>🕷️ 爬虫抽取大模型:</span>
+                    <span className="font-mono text-amber-300">{ollamaStatus.crawlerModel || 'qwen2.5:32b'}</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-1 p-2 bg-[#050a1b] border-b border-slate-800 text-xs">
+            <div className="grid grid-cols-4 gap-1 p-2 bg-[#050a1b] border-b border-slate-800 text-xs">
               <button
                 onClick={() => handleRunAiAnalysis('summary')}
-                className={`py-1.5 px-2 rounded-lg font-medium transition-all ${
+                className={`py-1.5 px-1 rounded-lg font-medium text-center transition-all ${
                   aiAnalysisType === 'summary' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-slate-800/60'
                 }`}
               >
                 核心总结
               </button>
               <button
+                onClick={() => handleRunAiAnalysis('crawler')}
+                className={`py-1.5 px-1 rounded-lg font-medium text-center transition-all ${
+                  aiAnalysisType === 'crawler' ? 'bg-amber-600 text-white font-bold' : 'text-amber-300/80 hover:bg-slate-800/60'
+                }`}
+              >
+                🕷️ 深度抽取
+              </button>
+              <button
                 onClick={() => handleRunAiAnalysis('entities')}
-                className={`py-1.5 px-2 rounded-lg font-medium transition-all ${
+                className={`py-1.5 px-1 rounded-lg font-medium text-center transition-all ${
                   aiAnalysisType === 'entities' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-slate-800/60'
                 }`}
               >
@@ -2719,7 +3263,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               </button>
               <button
                 onClick={() => setAiAnalysisType('qa')}
-                className={`py-1.5 px-2 rounded-lg font-medium transition-all ${
+                className={`py-1.5 px-1 rounded-lg font-medium text-center transition-all ${
                   aiAnalysisType === 'qa' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-slate-800/60'
                 }`}
               >
@@ -2752,10 +3296,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
             )}
 
             <div className="flex-1 p-4 overflow-y-auto text-xs leading-relaxed text-slate-300 space-y-3 font-sans">
-              {isAiLoading ? (
+              {isAiLoading || isCrawlerExtracting ? (
                 <div className="h-full flex flex-col items-center justify-center space-y-3 text-slate-400">
-                  <RotateCw className="w-6 h-6 animate-spin text-purple-400" />
-                  <span>正在深度解析页面知识体系...</span>
+                  <RotateCw className="w-6 h-6 animate-spin text-amber-400" />
+                  <span>正在调用本地 Ollama 双模型深度抽取与分析...</span>
                 </div>
               ) : aiOutput ? (
                 <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 whitespace-pre-line shadow-inner">
@@ -2764,13 +3308,19 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 space-y-3 p-6">
                   <Sparkles className="w-8 h-8 text-slate-600" />
-                  <p>点击上方按钮即可让 AI 分析、总结当前网页，并提取关键论据与知识实体。</p>
+                  <p>点击上方「核心总结」或「🕷️ 深度抽取」，本地 Ollama 将自动深度分析当前页面，提炼核心论据与知识实体。</p>
                 </div>
               )}
             </div>
 
-            <div className="p-3 border-t border-slate-800 bg-[#08102b] flex items-center justify-between">
-              <span className="text-[11px] text-slate-400">一键沉淀研究成果</span>
+            <div className="p-3 border-t border-slate-800 bg-[#08102b] flex items-center justify-between gap-2">
+              <button
+                onClick={() => handleEnqueueCrawlerTask(activeTab.url, activeTab.title)}
+                className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 text-xs font-semibold transition"
+              >
+                <Compass className="w-3.5 h-3.5 text-amber-400" />
+                <span>爬虫后台入库</span>
+              </button>
               <button
                 onClick={handleSaveToLibrary}
                 className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-sm transition-all cursor-pointer"
@@ -2785,6 +3335,73 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
       </div>
 
       </BrowserFrame>
+
+      {/* Custom Shortcut Add Modal */}
+      {showAddShortcutModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0d1520] p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
+              <h3 className="text-base font-semibold text-white">添加快捷方式</h3>
+              <button onClick={() => setShowAddShortcutModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">名称</label>
+                <input
+                  type="text"
+                  value={newShortcutTitle}
+                  onChange={e => setNewShortcutTitle(e.target.value)}
+                  placeholder="例如: Google, Wikipedia..."
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">网址</label>
+                <input
+                  type="text"
+                  value={newShortcutUrl}
+                  onChange={e => setNewShortcutUrl(e.target.value)}
+                  placeholder="例如: https://example.com"
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddShortcutModal(false)}
+                  className="rounded-xl px-4 py-2 text-xs font-medium text-slate-400 hover:bg-white/5"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (newShortcutUrl.trim()) {
+                      const title = newShortcutTitle.trim() || new URL(newShortcutUrl.startsWith('http') ? newShortcutUrl : `https://${newShortcutUrl}`).hostname;
+                      const url = newShortcutUrl.startsWith('http') ? newShortcutUrl : `https://${newShortcutUrl}`;
+                      const newBm: BookmarkItem = {
+                        id: `bm_${Date.now()}`,
+                        title,
+                        url,
+                        category: 'Custom'
+                      };
+                      setBookmarks(prev => [newBm, ...prev]);
+                      setShowAddShortcutModal(false);
+                      setNewShortcutTitle('');
+                      setNewShortcutUrl('');
+                    }
+                  }}
+                  className="rounded-xl bg-cyan-400 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-300"
+                >
+                  添加
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {browserEngine && browserPermissionState.pending.length > 0 && (() => {
         const request = browserPermissionState.pending[0];

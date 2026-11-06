@@ -135,6 +135,7 @@ class AIGateway {
   private customModel: string = process.env.CUSTOM_MODEL || 'llama3';
   private ollamaChatModel: string | null = process.env.OLLAMA_CHAT_MODEL || null;
   private ollamaCrawlerModel: string | null = process.env.OLLAMA_CRAWLER_MODEL || null;
+  private localOllamaModels: string[] = [];
   private localOllamaInfoList: OllamaModelInfo[] = [];
   private ollamaDetected: boolean = false;
   private localOllamaWarmup: Promise<void> | null = null;
