@@ -25,6 +25,7 @@ import {
   LogOut,
   Layers,
   BookOpen,
+  GraduationCap,
   Search,
   Network,
   X
@@ -621,6 +622,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               { id: 'chat', label: t.globalMessenger, icon: <MessageSquare className="w-4 h-4 text-cyan-400" /> },
               { id: 'aihub', label: t.aiHubTab, icon: <Cpu className="w-4 h-4 text-purple-400" /> },
               { id: 'library', label: t.digitalLibrary, icon: <BookOpen className="w-4 h-4 text-amber-400" /> },
+              { id: 'arabic-learning', label: lang === 'zh' ? '阿语学习' : lang === 'ar' ? 'تعلّم العربية' : 'Arabic Learning', icon: <GraduationCap className="w-4 h-4 text-cyan-300" /> },
               { id: 'knowledge', label: t.knowledgeTab, icon: <Network className="w-4 h-4 text-amber-300" /> },
               { id: 'browser', label: t.webBrowser, icon: <Search className="w-4 h-4 text-blue-400" /> },
               { id: 'creator', label: t.creatorArticles, icon: <PenTool className="w-4 h-4 text-emerald-400" /> },

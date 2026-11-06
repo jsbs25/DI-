@@ -26,6 +26,7 @@ import { LuxuryAdBanner } from './components/commercial/LuxuryAdBanner.tsx';
 import { AuthModal } from './components/auth/AuthModal.tsx';
 import { OnboardingModal } from './components/auth/OnboardingModal.tsx';
 import { DigitalLibrary } from './components/library/DigitalLibrary.tsx';
+import { ArabicLearningHub } from './components/learning/ArabicLearningHub.tsx';
 import { WebBrowser } from './components/browser/WebBrowser.tsx';
 import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
 import { KnowledgeUniverse } from './components/knowledge/KnowledgeUniverse.tsx';
@@ -40,8 +41,8 @@ import { SolarSystemDirectory } from './universe/SolarSystemDirectory.tsx';
 import { MoonAcademy } from './universe/MoonAcademy.tsx';
 import { VenusCreativeStudio } from './universe/VenusCreativeStudio.tsx';
 
-export default function App() {
   const [lang, setLang] = useState<Language>('zh');
+  const t = translations[lang] || translations.zh;
   const [currentTab, setCurrentTab] = useState<string>(() => {
     const mod = new URLSearchParams(window.location.search).get('module');
     if (mod) return mod;
@@ -551,11 +552,16 @@ export default function App() {
         )}
 
         {currentTab === 'venus' && (
-          <VenusCreativeStudio
-            articles={articles}
+          <VenusMusicSpace
             lang={lang}
-            onCreateArticle={handleCreateArticle}
             onBack={() => setCurrentTab('universe')}
+          />
+        )}
+
+        {currentTab === 'arabic-learning' && (
+          <ArabicLearningHub
+            lang={lang}
+            onOpenLibrary={() => setCurrentTab('library')}
           />
         )}
 
