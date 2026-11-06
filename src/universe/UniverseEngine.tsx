@@ -38,6 +38,7 @@ import {
 interface UniverseEngineProps {
   onSwitchToEarthWorld: () => void;
   onEnterEcosystem?: (planetId: string) => void;
+  initialPlanetId?: string;
 }
 
 interface PlanetMeshNode {
@@ -50,9 +51,10 @@ interface PlanetMeshNode {
   currentAngle: number;
 }
 
-export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthWorld, onEnterEcosystem }) => {
+export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthWorld, onEnterEcosystem, initialPlanetId }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [selectedPlanet, setSelectedPlanet] = useState<CelestialBody | null>(() => getCelestialBodyById('saturn') || null);
+  const [selectedPlanet, setSelectedPlanet] = useState<CelestialBody | null>(() => getCelestialBodyById(initialPlanetId || 'saturn') || null);
+  const initialFocusRequestedRef = useRef(false);
   const [simSpeed, setSimSpeed] = useState<number>(1);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [showOrbits, setShowOrbits] = useState<boolean>(true);
@@ -335,6 +337,10 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
     });
 
     planetNodesRef.current = nodes;
+    if (initialPlanetId && !initialFocusRequestedRef.current) {
+      initialFocusRequestedRef.current = true;
+      handleFocusPlanet(initialPlanetId);
+    }
 
     // 6. Interactive Raycasting for Planet Selection
     const raycaster = new THREE.Raycaster();

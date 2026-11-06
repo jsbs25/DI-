@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { Language } from '../../types/index.ts';
+import { readAIStream } from '../../utils/aiStream.ts';
+import { loadAIConversationHistory, saveAIConversationHistory } from '../../utils/aiSessionHistory.ts';
 import {
   Sparkles,
   X,
@@ -55,6 +57,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const [activeTab, setActiveTab] = useState<'chat' | 'voice' | 'manage'>('chat');
   const [inputMsg, setInputMsg] = useState('');
   const [isThinking, setIsThinking] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState(true); // Default true so user voice response works
   const [isListening, setIsListening] = useState(false);
   const [useSearch, setUseSearch] = useState(true);
@@ -62,21 +65,32 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const [systemNotice, setSystemNotice] = useState<string | null>(null);
 
   // Model parameters (Management Console)
-  const [temperature, setTemperature] = useState(0.7);
-  const [modelName, setModelName] = useState('DeepSeek-R1 (开源深度推理)');
+  const [modelId, setModelId] = useState('ollama:qwen3:8b');
+  const [modelName, setModelName] = useState('本地 Ollama · Qwen3 8B');
 
   const initialGreeting = isZh
-    ? '你好！我是地球计划 3D 人工智能中枢。系统已直连 DeepSeek-R1 免费开源深度推理模型与全球知识库，已为您就绪语音交互与管理控制台模式。你可以随时向我提问、探讨科学、编写代码或开启语音对话。'
-    : 'Greetings! I am the Project Earth 3D AI Intelligence Console. Direct open connection with DeepSeek-R1 reasoning engine and global planetary knowledge base. Ready for voice and mission dialogue.';
+    ? '你好，我是本地 AI 助手。当前使用的模型显示在窗口顶部；你可以直接提问，也可以要求我解释、写作或编程。'
+    : 'Hello, I’m your local AI assistant. The active model is shown above. Ask anything, or request an explanation, writing, or code.';
 
-  const [messages, setMessages] = useState<MessageItem[]>([
-    {
+  const [messages, setMessages] = useState<MessageItem[]>(() => {
+    const saved = loadAIConversationHistory('earth-one-ai-companion:v1', (value): value is MessageItem =>
+      !!value && typeof value === 'object' &&
+      typeof (value as MessageItem).id === 'string' &&
+      ((value as MessageItem).sender === 'ai' || (value as MessageItem).sender === 'user') &&
+      typeof (value as MessageItem).text === 'string' &&
+      typeof (value as MessageItem).time === 'string'
+    );
+    return saved.length ? saved : [{
       id: 'msg_welcome',
       sender: 'ai',
       text: initialGreeting,
       time: 'Just now'
-    }
-  ]);
+    }];
+  });
+
+  useEffect(() => {
+    saveAIConversationHistory('earth-one-ai-companion:v1', messages);
+  }, [messages]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const headerCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -84,6 +98,23 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/ai/models')
+      .then(response => response.json())
+      .then(data => {
+        if (cancelled || !data.success || !Array.isArray(data.models)) return;
+        const preferred = data.models.find((model: { id: string; isDefault: boolean }) => model.id.startsWith('ollama:') && model.isDefault) ||
+          data.models.find((model: { id: string }) => model.id.startsWith('ollama:'));
+        if (preferred) {
+          setModelId(preferred.id);
+          setModelName(preferred.name);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const scrollToBottom = () => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -273,6 +304,17 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       { id: `user_${Date.now()}`, sender: 'user', text, time: nowTime }
     ]);
     setIsThinking(true);
+    const shouldStream = /^ollama:qwen3(?::|$)/i.test(modelId);
+    const streamId = shouldStream ? `ai_${Date.now()}` : null;
+    let streamedText = '';
+    if (streamId) {
+      setMessages(prev => [...prev, {
+        id: streamId,
+        sender: 'ai',
+        text: '',
+        time: nowTime
+      }]);
+    }
 
     try {
       const res = await fetch('/api/ai/chat', {
@@ -280,20 +322,33 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: text,
-          modelId: '', // Server resolves to local small Ollama model or fast online fallback
+          modelId: modelId || '',
           mode: 'general',
+          ...(shouldStream ? { stream: true } : {}),
           useSearchGrounding: useSearch,
-          history: messages.slice(-6).map(m => ({
+          history: messages.slice(-8).map(m => ({
             role: m.sender === 'user' ? 'user' : 'model',
             parts: [{ text: m.text }]
           }))
         })
       });
 
+      if (streamId) {
+        await readAIStream(res, delta => {
+          setStreamingMessageId(streamId);
+          streamedText += delta;
+          setMessages(prev => prev.map(message =>
+            message.id === streamId ? { ...message, text: message.text + delta } : message
+          ));
+        });
+        if (voiceEnabled || activeTab === 'voice') speak(streamedText, streamId);
+        return;
+      }
+
       const data = await res.json();
       const replyText = data.success && data.reply
         ? data.reply
-        : (data.error || (isZh ? '地球计划 AI 思考完成。随时为你解答更多问题。' : 'Project Earth intelligence active. Ready for your next query.'));
+        : (data.error || (isZh ? '没有收到有效回复，请重试。' : 'No valid reply was received. Please try again.'));
 
       const newMsgId = `ai_${Date.now()}`;
       setMessages(prev => [
@@ -308,8 +363,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
       if (voiceEnabled || activeTab === 'voice') {
         speak(replyText, newMsgId);
-      }
-    } catch {
+    } catch (error) {
       // 离线状态自动兜底：浏览器直接调用本地电脑运行的 Ollama (127.0.0.1:11434)
       try {
         const localRes = await fetch('http://127.0.0.1:11434/api/chat', {
@@ -341,17 +395,23 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       const fallback = isZh
         ? '当前处于无网络离线状态。已自动配置本地电脑 Ollama 引擎，请确认本地终端已运行 `ollama serve` (127.0.0.1:11434)。'
         : 'Offline mode active. Please ensure local `ollama serve` is running at 127.0.0.1:11434.';
-      setMessages(prev => [
-        ...prev,
-        {
+      if (streamId) {
+        setMessages(prev => prev.map(message =>
+          message.id === streamId
+            ? { ...message, text: streamedText ? `${streamedText}\n\n${fallback}` : fallback }
+            : message
+        ));
+      } else {
+        setMessages(prev => [...prev, {
           id: `ai_${Date.now()}`,
           sender: 'ai',
           text: fallback,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
+        }]);
+      }
     } finally {
       setIsThinking(false);
+      setStreamingMessageId(null);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
@@ -370,15 +430,15 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   };
 
   const quickStarters = isZh ? [
-    '💡 地球计划的愿景与开放生态',
-    '🔬 简述深空探测与引力透镜',
-    '💻 写一段 Python 实时轨道开普勒方程求解',
-    '🌍 探讨太空俯瞰的总观效应'
+    '🔎 用简单例子解释一个复杂概念',
+    '🗓️ 帮我把一项复杂任务拆成可执行步骤',
+    '💻 写一段可运行的 Python 示例',
+    '✍️ 写一段温暖简短的母亲主题文章'
   ] : [
-    '💡 Vision and open roadmap of Project Earth',
-    '🔬 Explain gravitational lensing & black holes',
-    '💻 Python Kepler orbit solver code',
-    '🌍 Overview effect from planetary orbit'
+    '🔎 Explain a complex idea with a simple example',
+    '🗓️ Break a complex task into actionable steps',
+    '💻 Write a runnable Python example',
+    '✍️ Write a short, warm piece about mothers'
   ];
 
   return (
@@ -388,7 +448,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         <button
           onClick={() => setIsOpen(true)}
           className="group relative flex items-center space-x-3 px-4 py-2.5 rounded-full bg-slate-950/90 hover:bg-slate-900 border border-cyan-500/50 hover:border-cyan-400 backdrop-blur-2xl shadow-2xl shadow-cyan-500/20 cursor-pointer transition-all hover:scale-105 active:scale-95"
-          title="打开地球计划 3D 智能管理中枢"
+          title="打开本地 AI 助手"
         >
           <div className="relative w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-cyan-950/80 border border-cyan-400/40">
             <canvas ref={canvasRef} className="w-8 h-8" />
@@ -398,11 +458,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           <div className="text-left">
             <div className="flex items-center space-x-1.5">
               <span className="text-xs font-bold font-mono tracking-wider text-cyan-300">
-                {isZh ? '地球计划 AI 控制中枢' : 'PROJECT EARTH AI'}
+                {isZh ? '本地 AI 助手' : 'LOCAL AI ASSISTANT'}
               </span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             </div>
-            <div className="text-[10px] text-slate-400 font-medium">DeepSeek-R1 · 语音已就绪</div>
+            <div className="text-[10px] text-slate-400 font-medium">{modelName} · 语音已就绪</div>
           </div>
         </button>
       )}
@@ -432,7 +492,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                     ONLINE
                   </span>
                 </div>
-                <p className="text-[10px] text-slate-400 font-mono">MODEL: DeepSeek-R1 · LATENCY: 86ms</p>
+                <p className="text-[10px] text-slate-400 font-mono">MODEL: {modelName}</p>
               </div>
             </div>
 
@@ -562,7 +622,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                     >
                       <div className="flex items-center space-x-1.5 mb-1 px-1">
                         <span className="text-[10px] font-mono text-slate-500">
-                          {isUser ? 'YOU' : (isZh ? '地球计划 AI' : 'Project Earth AI')}
+                          {isUser ? 'YOU' : (isZh ? '本地 AI 助手' : 'Local AI Assistant')}
                         </span>
                         <span className="text-[9px] text-slate-600">· {m.time}</span>
                       </div>
@@ -578,7 +638,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
                         {!isUser && (
                           <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
-                            <span className="text-slate-500 font-mono">DeepSeek-R1</span>
+                            <span className="text-slate-500 font-mono">{modelName}</span>
                             <div className="flex items-center space-x-3">
                               {/* Dedicated Speak Button */}
                               <button
@@ -611,11 +671,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                   );
                 })}
 
-                {isThinking && (
+                {isThinking && !streamingMessageId && (
                   <div className="flex flex-col items-start">
                     <div className="text-[10px] font-mono text-cyan-400 mb-1 px-1 flex items-center space-x-1">
                       <Sparkles className="w-3 h-3 animate-spin" />
-                      <span>{isZh ? '地球计划 AI 正在深度思考...' : 'Project Earth AI is reasoning...'}</span>
+                      <span>{isZh ? '正在生成回复…' : 'Generating a reply…'}</span>
                     </div>
                     <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-cyan-500/30 text-slate-300 rounded-tl-sm flex items-center space-x-2 text-xs">
                       <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
@@ -761,7 +821,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                 <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
                   <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
                     <div className="text-slate-500">主力推理引擎</div>
-                    <div className="font-semibold text-slate-200 mt-0.5">DeepSeek-R1 (开源)</div>
+                    <div className="font-semibold text-slate-200 mt-0.5">{modelName}</div>
                   </div>
                   <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
                     <div className="text-slate-500">知识联网检索</div>

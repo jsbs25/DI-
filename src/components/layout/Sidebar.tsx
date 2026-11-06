@@ -46,7 +46,7 @@ const NAV_ITEMS: NavItem[] = [
   { tab: 'library', icon: BookOpen, label: { zh: '图书馆', en: 'LIBRARY' } },
   { tab: 'feed', icon: Compass, label: { zh: '社区', en: 'COMMUNITY' } },
   { tab: 'chat', icon: MessageSquare, label: { zh: '消息', en: 'MESSAGES' } },
-  { tab: 'browser', icon: Search, label: { zh: '浏览器', en: 'BROWSER' } },
+  { tab: 'browser', icon: Search, label: { zh: 'JUPITER 木星搜索', en: 'JUPITER SEARCH' } },
   { tab: 'crawler', icon: Radar, label: { zh: '采集中心', en: 'CRAWLER' } },
   { tab: 'knowledge', icon: Network, label: { zh: '知识', en: 'KNOWLEDGE' } },
   { tab: 'creator', icon: PenTool, label: { zh: '创作', en: 'CREATOR' } },

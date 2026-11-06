@@ -6,9 +6,11 @@ import { GoogleGenAI } from '@google/genai';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { aiGateway } from './server/aiGateway.ts';
+import { buildConversationPrompt, normalizeConversationHistory } from './server/aiConversation.ts';
+import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
-import { fetchAndExtract, searchWeb } from './server/webFetcher.ts';
+import { fetchAndExtract, searchGitHubRepositories, searchGoogleCategory, searchGoogleImages, searchWeb, searchWebProviders, type JupiterExternalSearchCategory, type SearchResult } from './server/webFetcher.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 import {
@@ -499,7 +501,8 @@ app.get('/api/games/rooms', (req, res) => {
 // -------------------------------------------------------------
 // 7. EARTH ONE UNIFIED AI GATEWAY & MULTI-MODEL DISPATCH
 // -------------------------------------------------------------
-app.get('/api/ai/models', (req, res) => {
+app.get('/api/ai/models', async (_req, res) => {
+  await aiGateway.detectLocalOllama();
   res.json({ success: true, models: aiGateway.getModels() });
 });
 
@@ -521,7 +524,7 @@ app.get('/api/ai/stats', (req, res) => {
 });
 
 app.post('/api/ai/chat', async (req, res) => {
-  const { prompt, messages, modelId, model, mode = 'general', apiKey, baseUrl, customModel } = req.body;
+  const { prompt, messages, history, modelId, model, mode = 'general', apiKey, baseUrl, customModel, stream } = req.body;
 
   // If the user supplied a custom API key, register it as the custom provider
   // and route this request through it.
@@ -534,16 +537,49 @@ app.post('/api/ai/chat', async (req, res) => {
     : (modelId || model || aiGateway.getChatModelId());
   const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
   if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
+  const conversationHistory = normalizeConversationHistory(history);
+  const contextualPrompt = buildConversationPrompt(userPrompt, conversationHistory);
 
   const systemInstructions: Record<string, string> = {
-    general: 'You are 地球计划 AI (Project Earth AI), the global open intelligence system. Answer warmly, knowledgeably, and with global cross-cultural perspective. Provide clear, structured, and insightful answers.',
+    general: 'You are a general-purpose assistant, not a branded persona. Answer the current question directly in the user’s language. For follow-ups, prioritize the latest relevant conversation turns and honor the user’s constraints. Do not introduce unrelated themes or claim abilities you do not have. Keep simple answers concise; expand only when the user asks. Be accurate and say when uncertain.',
     translator: 'You are the Project Earth Polyglot Translator. Translate with native fidelity, preserving emotional nuance and cultural context.',
     writer: 'You are the Project Earth Creator Assistant. Help author eloquent global essays, articles, poetry, and stories.',
     tutor: 'You are the Project Earth International Language Coach. Help the user master natural conversation, idioms, and pronunciation.'
   };
 
   const systemPrompt = systemInstructions[mode] || systemInstructions.general;
-  const result = await aiGateway.generateContent(resolvedModelId, userPrompt, systemPrompt);
+  const shouldStream = stream === true && /^ollama:qwen3(?::|$)/i.test(resolvedModelId);
+  if (shouldStream) {
+    res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.flushHeaders();
+    try {
+      const result = await aiGateway.generateContent(
+        resolvedModelId,
+        userPrompt,
+        systemPrompt,
+        token => res.write(`${JSON.stringify({ delta: token })}\n`),
+        conversationHistory
+      );
+      if (result.success) {
+        res.write(`${JSON.stringify({ done: true, tokens: result.tokens, model: resolvedModelId })}\n`);
+      } else {
+        res.write(`${JSON.stringify({ error: result.errorMessage || 'AI 服务当前不可用，请稍后重试。' })}\n`);
+      }
+    } catch (error) {
+      res.write(`${JSON.stringify({ error: error instanceof Error ? error.message : 'AI 服务当前不可用，请稍后重试。' })}\n`);
+    }
+    return res.end();
+  }
+
+  const usesStructuredHistory = /^ollama:qwen3(?::|$)/i.test(resolvedModelId);
+  const result = await aiGateway.generateContent(
+    resolvedModelId,
+    usesStructuredHistory ? userPrompt : contextualPrompt,
+    systemPrompt,
+    undefined,
+    conversationHistory
+  );
 
   if (result.success) {
     res.json({
@@ -1095,6 +1131,98 @@ app.get('/api/browser/search', async (req, res) => {
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Search failed' });
   }
+});
+
+app.get('/api/jupiter/search', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q || q.length > 300) {
+    return res.status(400).json({ success: false, error: 'Search query must contain 1–300 characters.' });
+  }
+  const lang = req.query.lang === 'zh' || req.query.lang === 'ar' || req.query.lang === 'es' ||
+    req.query.lang === 'fr' || req.query.lang === 'ru' ? req.query.lang : 'en';
+  const engine = req.query.engine === 'bing' || req.query.engine === 'duckduckgo' ||
+    req.query.engine === 'wikipedia' || req.query.engine === 'github' ? req.query.engine : 'auto';
+  const searchCategories = ['all', 'images', 'videos', 'news', 'pdf', 'audio', 'books', 'academic'] as const;
+  const requestedCategory = typeof req.query.type === 'string' ? req.query.type : '';
+  if (requestedCategory && !(searchCategories as readonly string[]).includes(requestedCategory)) {
+    return res.status(400).json({ success: false, error: 'Unsupported JUPITER search type.' });
+  }
+  const category = (requestedCategory || 'all') as typeof searchCategories[number];
+  const cacheKey = `${category}\u0000${lang}\u0000${engine}\u0000${q.toLocaleLowerCase()}`;
+  const cached = getCachedJupiterSearch(cacheKey);
+  if (cached) return res.json({ success: true, query: q, results: cached, cached: true, sources: [...new Set(cached.map(result => result.source))] });
+
+  try {
+    let internalResults: JupiterResult[];
+    let externalResults: SearchResult[];
+    if (category === 'images') {
+      const imageSearch = await searchGoogleImages(q, 20, lang);
+      if (!imageSearch.configured) {
+        return res.status(503).json({
+          success: false,
+          error: '图片搜索尚未配置。请在服务端设置 SERPER_API_KEY；不会用普通网页结果冒充图片结果。'
+        });
+      }
+      internalResults = searchEarthImages(q, store, 10);
+      externalResults = imageSearch.results;
+    } else if (category === 'all') {
+      internalResults = searchEarthIndex(q, store, 10);
+      externalResults = engine === 'github'
+        ? await searchGitHubRepositories(q, 10)
+        : engine === 'auto'
+          ? await searchWebProviders(q, 10, lang)
+          : await searchWeb(q, 10, engine, lang);
+    } else {
+      const verticalSearch = await searchGoogleCategory(q, category as JupiterExternalSearchCategory, 20, lang);
+      if (!verticalSearch.configured) {
+        return res.status(503).json({
+          success: false,
+          error: `${category} 搜索尚未配置。请在服务端设置 SERPER_API_KEY；不会用普通网页结果冒充该分类结果。`
+        });
+      }
+      const indexedResults = searchEarthIndex(q, store, 50);
+      internalResults = category === 'videos'
+        ? indexedResults.filter(result => result.kind === 'video').slice(0, 10)
+        : category === 'books'
+          ? indexedResults.filter(result => result.kind === 'book').slice(0, 10)
+          : category === 'audio'
+            ? searchEarthAudio(q, store, 10)
+            : [];
+      externalResults = verticalSearch.results;
+    }
+    const enrichedExternal = externalResults.map((result, index) => {
+      let domain = '';
+      try { domain = new URL(result.sourceUrl || result.url).hostname.replace(/^www\./, ''); } catch { /* Invalid provider links are removed below. */ }
+      return {
+        ...result,
+        id: `web:${domain}:${index}:${result.url}`,
+        source: result.source === 'github' ? 'github' as const : 'web' as const,
+        kind: 'web' as const,
+        domain
+      };
+    }).filter(result => Boolean(result.domain));
+    const results = mergeAndRankJupiterResults(q, [...internalResults, ...enrichedExternal], 20);
+    cacheJupiterSearch(cacheKey, results);
+    res.json({
+      success: true,
+      query: q,
+      results,
+      cached: false,
+      sources: [...new Set(results.map(result => result.source))]
+    });
+  } catch (err) {
+    res.status(502).json({ success: false, error: err instanceof Error ? err.message : 'JUPITER search failed.' });
+  }
+});
+
+app.get('/api/jupiter/content/:kind/:id', (req, res) => {
+  const kind = req.params.kind;
+  if (kind !== 'article' && kind !== 'video' && kind !== 'book' && kind !== 'post') {
+    return res.status(400).json({ success: false, error: 'Unsupported EARTH content type.' });
+  }
+  const content = getJupiterEarthContent(kind, req.params.id, store);
+  if (!content) return res.status(404).json({ success: false, error: 'Content is unavailable in the public EARTH index.' });
+  return res.json({ success: true, content });
 });
 
 // -------------------------------------------------------------

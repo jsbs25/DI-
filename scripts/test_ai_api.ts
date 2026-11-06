@@ -38,7 +38,8 @@ async function main() {
       OPENAI_API_KEY: '',
       ANTHROPIC_API_KEY: '',
       DEEPSEEK_API_KEY: '',
-      CUSTOM_API_KEY: ''
+      CUSTOM_API_KEY: '',
+      EARTH_ONE_SKIP_OLLAMA_DETECTION: 'true'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -115,9 +116,12 @@ async function main() {
       'AI model catalog identifiers are unique'
     );
     check(
-      Array.isArray(models) && models.every((model: any) =>
-        model.status === 'unconfigured' && model.apiKeyMasked === 'Not Configured'
-      ),
+      Array.isArray(models) && models
+        .filter((model: any) => ['gemini-2.5-flash', 'deepseek-v3', 'gpt-4o', 'claude-3-5-sonnet'].includes(model.id))
+        .every((model: any) =>
+          model.status === 'unconfigured' && /未配置|Not Configured/.test(model.apiKeyMasked)
+        )
+        && !models.some((model: any) => model.id.startsWith('ollama:')),
       'AI credentials remain disabled and masked in the isolated test process'
     );
     const repeatedModels = await get('/api/ai/models');

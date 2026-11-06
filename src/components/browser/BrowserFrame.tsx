@@ -48,7 +48,7 @@ export function BrowserFrame({
 }: BrowserFrameProps) {
   return (
     <section
-      aria-label="EARTH ONE 网页浏览器"
+      aria-label="JUPITER 全球互联网搜索与浏览器"
       className="flex min-h-[calc(100vh-8rem)] flex-col overflow-hidden rounded-2xl border border-white/[0.09] bg-[#0b1118] shadow-[0_24px_80px_rgba(0,0,0,0.38)] ring-1 ring-black/30"
     >
       <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.07] bg-[#101720] px-3 pt-2.5 sm:px-4">

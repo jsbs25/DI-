@@ -36,18 +36,27 @@ import { MercurySearch } from './components/search/MercurySearch.tsx';
 import { getPlanetEcosystem } from './universe/planetEcosystems.ts';
 import { HolographicAICompanion } from './components/ai/HolographicAICompanion.tsx';
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
+import { SolarSystemDirectory } from './universe/SolarSystemDirectory.tsx';
+import { MoonAcademy } from './universe/MoonAcademy.tsx';
+import { VenusCreativeStudio } from './universe/VenusCreativeStudio.tsx';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('zh');
-  const t = translations[lang] || translations.zh;
   const [currentTab, setCurrentTab] = useState<string>(() => {
     const mod = new URLSearchParams(window.location.search).get('module');
-    return mod || 'globe';
+    if (mod) return mod;
+    if (window.location.pathname.startsWith('/jupiter/')) return 'browser';
+    return 'globe';
   });
   const [searchQuery, setSearchQuery] = useState('');
-  const [browserInitialQuery, setBrowserInitialQuery] = useState<string | null>(null);
+  const [browserInitialQuery, setBrowserInitialQuery] = useState<string | null>(() =>
+    window.location.pathname === '/jupiter/search'
+      ? new URLSearchParams(window.location.search).get('q')
+      : null
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showGlobeTools, setShowGlobeTools] = useState(true);
+  const [selectedSolarBodyId, setSelectedSolarBodyId] = useState<string | undefined>();
 
   // Core Data State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -457,6 +466,12 @@ export default function App() {
               onExploreCommunity={() => setCurrentTab('community')}
               lang={lang}
             />
+            <SolarSystemDirectory
+              onSelectPlanet={planetId => {
+                setSelectedSolarBodyId(planetId || undefined);
+                setCurrentTab('universe');
+              }}
+            />
           </div>
         )}
 
@@ -465,6 +480,7 @@ export default function App() {
             <UniverseEngine
               onSwitchToEarthWorld={() => setCurrentTab('globe')}
               onEnterEcosystem={handleEnterPlanet}
+              initialPlanetId={selectedSolarBodyId}
             />
           </div>
         )}
@@ -525,6 +541,23 @@ export default function App() {
         {currentTab === 'aihub' && <AIHub lang={lang} />}
 
         {currentTab === 'library' && <DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} />}
+
+        {currentTab === 'academy' && (
+          <MoonAcademy
+            lang={lang}
+            currentUser={currentUser}
+            onBack={() => setCurrentTab('universe')}
+          />
+        )}
+
+        {currentTab === 'venus' && (
+          <VenusCreativeStudio
+            articles={articles}
+            lang={lang}
+            onCreateArticle={handleCreateArticle}
+            onBack={() => setCurrentTab('universe')}
+          />
+        )}
 
         {currentTab === 'knowledge' && (
           <KnowledgeUniverse
