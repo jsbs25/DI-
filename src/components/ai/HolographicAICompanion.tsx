@@ -322,7 +322,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: text,
-          modelId: modelId || '',
+          modelId,
           mode: 'general',
           ...(shouldStream ? { stream: true } : {}),
           useSearchGrounding: useSearch,
