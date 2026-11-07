@@ -61,12 +61,12 @@ export const PLANET_ECOSYSTEMS: Record<string, PlanetEcosystem> = {
   },
   moon: {
     planetId: 'moon',
-    tab: '',
-    titleZh: '全球学院',
-    titleEn: 'Global Academy',
-    available: false,
-    buttonClass: 'from-slate-400 to-slate-500',
-    descriptionZh: '全球教育与学习中心'
+    tab: 'academy',
+    titleZh: '月球·太空学院',
+    titleEn: 'Moon Space Academy',
+    available: true,
+    buttonClass: 'from-slate-400 via-indigo-500 to-purple-600 hover:from-slate-300 hover:to-indigo-500',
+    descriptionZh: '全球教育、太空学院与学术研讨中心'
   },
   mars: {
     planetId: 'mars',

@@ -28,6 +28,7 @@ import {
   GraduationCap,
   Search,
   Network,
+  Music2,
   X
 } from 'lucide-react';
 
@@ -284,58 +285,97 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </div>
 
-          {/* 2. Center Navigation Capsule (Identical to User Reference Design) */}
-          <nav aria-label="Primary navigation" className={`${currentTab === 'globe' ? 'hidden' : 'hidden md:flex lg:hidden'} items-center p-1 rounded-full bg-slate-900/70 border border-slate-700/60 shadow-xl backdrop-blur-md`}>
-            {/* Home */}
+          {/* 2. Center Harmonized Navigation Capsule */}
+          <nav aria-label="Primary navigation" className="hidden md:flex items-center p-1 rounded-full bg-slate-900/80 border border-slate-700/60 shadow-xl backdrop-blur-md">
+            {/* Earth */}
             <button
               onClick={() => onSelectTab('globe')}
-              className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                 currentTab === 'globe'
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/35 border border-blue-400/50'
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
               }`}
             >
               <Home className="w-3.5 h-3.5" />
-              <span>{t.globeTab}</span>
+              <span>{lang === 'zh' ? '数字地球' : 'Earth'}</span>
             </button>
 
-            {/* Explore (Feed / Social) */}
-            <button
-              onClick={() => onSelectTab('feed')}
-              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                currentTab === 'feed'
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/35 border border-blue-400/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Compass className="w-3.5 h-3.5" />
-              <span>{t.feedTab}</span>
-            </button>
-
-            {/* Discover (Universe Engine & Planets) */}
+            {/* Universe */}
             <button
               onClick={() => onSelectTab('universe')}
-              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
                 currentTab === 'universe'
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/35 border border-blue-400/50'
+                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/35 border border-cyan-400/50'
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
               }`}
             >
               <Orbit className="w-3.5 h-3.5" />
-              <span>{t.universeTab}</span>
+              <span>{lang === 'zh' ? '3D宇宙' : 'Universe'}</span>
             </button>
 
-            {/* About (Global Community) */}
+            {/* Browser */}
             <button
-              onClick={() => onSelectTab('community')}
-              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                currentTab === 'community'
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/35 border border-blue-400/50'
+              onClick={() => onSelectTab('browser')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                currentTab === 'browser'
+                  ? 'bg-teal-600 text-white shadow-lg shadow-teal-500/35 border border-teal-400/50'
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
               }`}
             >
-              <Users2 className="w-3.5 h-3.5 text-emerald-300" />
-              <span>{t.communityTab}</span>
+              <Search className="w-3.5 h-3.5" />
+              <span>{lang === 'zh' ? '宇宙浏览器' : 'Browser'}</span>
+            </button>
+
+            {/* Saturn Cinema */}
+            <button
+              onClick={() => onSelectTab('saturn')}
+              className={`hidden lg:flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                currentTab === 'saturn'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-500/35 border border-amber-400/50'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Film className="w-3.5 h-3.5" />
+              <span>{lang === 'zh' ? '土星影院' : 'Saturn'}</span>
+            </button>
+
+            {/* Venus Music */}
+            <button
+              onClick={() => onSelectTab('venus')}
+              className={`hidden xl:flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                currentTab === 'venus'
+                  ? 'bg-rose-600 text-white shadow-lg shadow-rose-500/35 border border-rose-400/50'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Music2 className="w-3.5 h-3.5" />
+              <span>{lang === 'zh' ? '金星音乐' : 'Venus'}</span>
+            </button>
+
+            {/* World Library */}
+            <button
+              onClick={() => onSelectTab('library')}
+              className={`hidden xl:flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                currentTab === 'library'
+                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-500/35 border border-amber-400/50'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-300" />
+              <span>{lang === 'zh' ? '世界图书馆' : 'Library'}</span>
+            </button>
+
+            {/* Moon Academy */}
+            <button
+              onClick={() => onSelectTab('academy')}
+              className={`hidden 2xl:flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                currentTab === 'academy'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/35 border border-indigo-400/50'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <GraduationCap className="w-3.5 h-3.5 text-indigo-300" />
+              <span>{lang === 'zh' ? '太空学院' : 'Academy'}</span>
             </button>
 
             {/* Ecosystem Apps Dropdown */}
@@ -344,7 +384,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => setEcosystemMenuOpen(!ecosystemMenuOpen)}
                 className="flex items-center space-x-1 px-3 py-1.5 rounded-full text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/60 cursor-pointer transition-all"
               >
-                <span>{t.apps}</span>
+                <span>{lang === 'zh' ? '能力星系' : 'Worlds'}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
 

@@ -88,6 +88,14 @@ export default function App() {
     document.documentElement.lang = lang;
   }, [lang]);
 
+  const isImmersiveSpace = ['universe', 'globe', 'saturn', 'venus', 'browser', 'academy', 'mercury'].includes(currentTab);
+
+  useEffect(() => {
+    if (['universe', 'saturn', 'venus'].includes(currentTab)) {
+      setSidebarCollapsed(true);
+    }
+  }, [currentTab]);
+
   // Initial Data Fetch & Auth Check
   useEffect(() => {
     const storedToken = localStorage.getItem('earth_one_token');
@@ -445,7 +453,7 @@ export default function App() {
       />
 
       {/* 2. Main View Content Switcher */}
-      <main className="flex-1 flex flex-col">
+      <main className={`flex-1 relative flex flex-col ${isImmersiveSpace ? 'h-[calc(100vh-4rem)] overflow-hidden' : 'min-h-[calc(100vh-4rem)]'}`}>
         {currentTab === 'globe' && (
           <div className="flex-1 flex flex-col min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)]">
             <DigitalGlobe
@@ -552,13 +560,6 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'venus' && (
-          <VenusMusicSpace
-            lang={lang}
-            onBack={() => setCurrentTab('universe')}
-          />
-        )}
-
         {currentTab === 'arabic-learning' && (
           <ArabicLearningHub
             lang={lang}
@@ -578,7 +579,14 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'browser' && <WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} />}
+        {currentTab === 'browser' && (
+          <WebBrowser
+            lang={lang}
+            initialQuery={browserInitialQuery ?? undefined}
+            onBackToUniverse={() => setCurrentTab('universe')}
+            onBackToGlobe={() => setCurrentTab('globe')}
+          />
+        )}
 
         {currentTab === 'crawler' && <CrawlerDashboard lang={lang} />}
 
@@ -604,7 +612,7 @@ export default function App() {
       </main>
 
       {/* 3. Luxury Sponsor Ad Banner (Chapter 10) */}
-      <LuxuryAdBanner lang={lang} />
+      {!isImmersiveSpace && <LuxuryAdBanner lang={lang} />}
 
       {/* 4. Citizen Profile Modal */}
       {profileModalUser && (
@@ -639,7 +647,7 @@ export default function App() {
         />
       )}
 
-      {/* 7. 3D Holographic AI Companion */}
+      {/* 7. 3D Holographic AI Companion (Intelligence D) */}
       <HolographicAICompanion
         lang={lang}
         showLauncher={currentTab !== 'globe' || showGlobeTools}
@@ -649,29 +657,33 @@ export default function App() {
         }}
         onExploreUniverse={() => setCurrentTab('universe')}
         onOpenAIHub={() => setCurrentTab('aihub')}
+        onNavigateTab={tab => setCurrentTab(tab)}
+        currentTab={currentTab}
       />
 
       {/* 8. Minimalist Earth One Global Footer */}
-      <footer className="w-full border-t border-slate-900 bg-slate-950/80 py-6 px-4 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center space-x-2">
-            <Globe2 className="w-4 h-4 text-cyan-500" />
-            <span className="font-serif font-bold text-slate-300">{lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}</span>
-            <span>—</span>
-            <span className="text-slate-400">{t.motto}</span>
+      {!isImmersiveSpace && (
+        <footer className="w-full border-t border-slate-900 bg-slate-950/80 py-6 px-4 text-center text-xs text-slate-500">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center space-x-2">
+              <Globe2 className="w-4 h-4 text-cyan-500" />
+              <span className="font-serif font-bold text-slate-300">{lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}</span>
+              <span>—</span>
+              <span className="text-slate-400">{t.motto}</span>
+            </div>
+            <div className="flex items-center space-x-4 text-slate-400 text-[11px]">
+              <span>{t.motto}</span>
+              <span>·</span>
+              <span>{t.tagline}</span>
+              <span>·</span>
+              <span className="flex items-center space-x-1 text-emerald-400">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>{t.locationPrivate}</span>
+              </span>
+            </div>
           </div>
-          <div className="flex items-center space-x-4 text-slate-400 text-[11px]">
-            <span>{t.motto}</span>
-            <span>·</span>
-            <span>{t.tagline}</span>
-            <span>·</span>
-            <span className="flex items-center space-x-1 text-emerald-400">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>{t.locationPrivate}</span>
-            </span>
-          </div>
-        </div>
-      </footer>
+        </footer>
+      )}
       </div>
     </div>
   );

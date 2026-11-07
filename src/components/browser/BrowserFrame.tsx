@@ -1,5 +1,5 @@
 import type { DragEvent, MouseEvent, ReactNode } from 'react';
-import { Globe, Plus, RotateCcw, X } from 'lucide-react';
+import { Globe, Plus, RotateCcw, X, Orbit } from 'lucide-react';
 
 export function GoogleGIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
   return (
@@ -27,6 +27,8 @@ interface BrowserFrameProps {
   canRestoreClosedTab: boolean;
   onRestoreClosedTab: () => void;
   onReorderTabs: (tabIds: string[]) => void;
+  onBackToUniverse?: () => void;
+  onBackToGlobe?: () => void;
   children: ReactNode;
 }
 
@@ -44,6 +46,8 @@ export function BrowserFrame({
   canRestoreClosedTab,
   onRestoreClosedTab,
   onReorderTabs,
+  onBackToUniverse,
+  onBackToGlobe,
   children
 }: BrowserFrameProps) {
   return (
@@ -144,6 +148,36 @@ export function BrowserFrame({
         >
           <Plus className="h-4 w-4" />
         </button>
+
+        {/* Quick Universe / Globe Navigation Hub */}
+        {(onBackToUniverse || onBackToGlobe) && (
+          <div className="mb-1 ml-auto flex items-center gap-1.5 shrink-0">
+            {onBackToUniverse && (
+              <button
+                type="button"
+                onClick={onBackToUniverse}
+                aria-label="返回 3D 宇宙"
+                title="返回 3D 宇宙深空"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-cyan-500/30 bg-cyan-950/40 text-cyan-300 hover:bg-cyan-900/60 hover:text-white text-[11px] font-medium transition cursor-pointer"
+              >
+                <Orbit className="h-3.5 w-3.5 text-cyan-400" />
+                <span className="hidden sm:inline">🌌 返回宇宙</span>
+              </button>
+            )}
+            {onBackToGlobe && (
+              <button
+                type="button"
+                onClick={onBackToGlobe}
+                aria-label="返回数字地球"
+                title="返回人类数字地球"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-blue-500/30 bg-blue-950/40 text-blue-300 hover:bg-blue-900/60 hover:text-white text-[11px] font-medium transition cursor-pointer"
+              >
+                <Globe className="h-3.5 w-3.5 text-blue-400" />
+                <span className="hidden sm:inline">🌍 人类地球</span>
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>

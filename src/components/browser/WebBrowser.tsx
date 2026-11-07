@@ -145,6 +145,8 @@ interface BrowserFindStatus {
 interface WebBrowserProps {
   lang: Language;
   initialQuery?: string;
+  onBackToUniverse?: () => void;
+  onBackToGlobe?: () => void;
 }
 
 type JupiterEarthContent = {
@@ -363,7 +365,7 @@ function getInitialBrowserUrl(): string {
   return fallback;
 }
 
-export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) => {
+export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBackToUniverse, onBackToGlobe }) => {
   const [initialUrl] = useState(getInitialBrowserUrl);
   const initialPreset = PRESET_PAGES[initialUrl];
   const browserEngine = typeof window === 'undefined' ? undefined : window.earthOneBrowser;
@@ -1956,6 +1958,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery }) =>
         canRestoreClosedTab={Boolean(browserEngine && canRestoreClosedTab)}
         onRestoreClosedTab={handleRestoreClosedTab}
         onReorderTabs={handleReorderTabs}
+        onBackToUniverse={onBackToUniverse}
+        onBackToGlobe={onBackToGlobe}
       >
 
       {/* 2. Omnibox Toolbar */}

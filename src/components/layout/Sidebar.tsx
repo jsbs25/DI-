@@ -40,22 +40,24 @@ interface NavItem {
 // (Academy / News / Developer / Personal Space) are intentionally omitted so
 // the navigation never points at a non-existent page.
 const NAV_ITEMS: NavItem[] = [
-  { tab: 'globe', icon: Home, label: { zh: '首页', en: 'HOME' } },
-  { tab: 'universe', icon: Orbit, label: { zh: '探索', en: 'EXPLORE' } },
-  { tab: 'mercury', icon: SearchCheck, label: { zh: '搜索', en: 'SEARCH' } },
-  { tab: 'aihub', icon: Sparkles, label: { zh: '人工智能', en: 'INTELLIGENCE' } },
-  { tab: 'library', icon: BookOpen, label: { zh: '图书馆', en: 'LIBRARY' } },
-  { tab: 'arabic-learning', icon: GraduationCap, label: { zh: '阿语学习', en: 'ARABIC LEARNING' } },
-  { tab: 'feed', icon: Compass, label: { zh: '社区', en: 'COMMUNITY' } },
-  { tab: 'chat', icon: MessageSquare, label: { zh: '消息', en: 'MESSAGES' } },
-  { tab: 'browser', icon: Search, label: { zh: 'JUPITER 木星搜索', en: 'JUPITER SEARCH' } },
-  { tab: 'crawler', icon: Radar, label: { zh: '采集中心', en: 'CRAWLER' } },
-  { tab: 'knowledge', icon: Network, label: { zh: '知识', en: 'KNOWLEDGE' } },
-  { tab: 'creator', icon: PenTool, label: { zh: '创作', en: 'CREATOR' } },
-  { tab: 'venus', icon: Music2, label: { zh: '金星音乐', en: 'MUSIC' } },
-  { tab: 'video', icon: Film, label: { zh: '视频', en: 'VIDEO' } },
-  { tab: 'game', icon: Gamepad2, label: { zh: '游戏', en: 'GAMES' } },
-  { tab: 'community', icon: Users2, label: { zh: '社区列表', en: 'COMMUNITIES' } }
+  { tab: 'globe', icon: Home, label: { zh: '首页 · 数字地球', en: 'HOME · GLOBE' } },
+  { tab: 'universe', icon: Orbit, label: { zh: '探索 · 3D宇宙', en: 'EXPLORE · UNIVERSE' } },
+  { tab: 'browser', icon: Search, label: { zh: '木星 · 宇宙浏览器', en: 'JUPITER · BROWSER' } },
+  { tab: 'saturn', icon: Film, label: { zh: '土星 · 影视宇宙', en: 'SATURN · CINEMA' } },
+  { tab: 'venus', icon: Music2, label: { zh: '金星 · 音乐馆', en: 'VENUS · MUSIC' } },
+  { tab: 'library', icon: BookOpen, label: { zh: '太阳 · 世界图书馆', en: 'SUN · LIBRARY' } },
+  { tab: 'academy', icon: GraduationCap, label: { zh: '月球 · 太空学院', en: 'MOON · ACADEMY' } },
+  { tab: 'mercury', icon: SearchCheck, label: { zh: '水星 · 全球搜索', en: 'MERCURY · SEARCH' } },
+  { tab: 'aihub', icon: Sparkles, label: { zh: '天王星 · AI中枢', en: 'URANUS · AI HUB' } },
+  { tab: 'creator', icon: PenTool, label: { zh: '海王星 · 创作者', en: 'NEPTUNE · CREATOR' } },
+  { tab: 'game', icon: Gamepad2, label: { zh: '火星 · 游戏宇宙', en: 'MARS · GAMES' } },
+  { tab: 'crawler', icon: Radar, label: { zh: '采集网络中枢', en: 'CRAWLER HUB' } },
+  { tab: 'arabic-learning', icon: GraduationCap, label: { zh: '阿语沉浸学习', en: 'ARABIC LEARNING' } },
+  { tab: 'knowledge', icon: Network, label: { zh: '全域知识图谱', en: 'KNOWLEDGE' } },
+  { tab: 'feed', icon: Compass, label: { zh: '全球社群动态', en: 'COMMUNITY FEED' } },
+  { tab: 'chat', icon: MessageSquare, label: { zh: '全球即时通信', en: 'MESSENGER' } },
+  { tab: 'video', icon: Film, label: { zh: '全球视频流', en: 'GLOBAL VIDEO' } },
+  { tab: 'community', icon: Users2, label: { zh: '数字聚落社区', en: 'COMMUNITIES' } }
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, lang, collapsed, onToggleCollapsed }) => {

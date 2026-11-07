@@ -33,6 +33,8 @@ interface HolographicAICompanionProps {
   onFlyTo?: (lat: number, lng: number) => void;
   onExploreUniverse?: () => void;
   onOpenAIHub?: () => void;
+  onNavigateTab?: (tab: string) => void;
+  currentTab?: string;
   showLauncher?: boolean;
 }
 
@@ -49,6 +51,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   onFlyTo,
   onExploreUniverse,
   onOpenAIHub,
+  onNavigateTab,
+  currentTab,
   showLauncher = true
 }) => {
   const isZh = lang === 'zh';
@@ -69,8 +73,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const [modelName, setModelName] = useState('本地 Ollama · Qwen3 8B');
 
   const initialGreeting = isZh
-    ? '你好，我是本地 AI 助手。当前使用的模型显示在窗口顶部；你可以直接提问，也可以要求我解释、写作或编程。'
-    : 'Hello, I’m your local AI assistant. The active model is shown above. Ask anything, or request an explanation, writing, or code.';
+    ? '你好，我是宇宙智能体 D。你可以直接呼唤我提问、进行实时语音交流，或者随时吩咐我：“带我去宇宙”、“打开浏览器”、“去土星看电影”、“听金星音乐”、“去世界图书馆”，我将随时带领你在宇宙与各大能力世界中穿梭。'
+    : 'Hello, I am D — a living intelligence in the universe. Speak with me in real time or tell me to fly to the 3D Universe, Cosmic Browser, Saturn Cinema, Venus Music, or the World Library.';
 
   const [messages, setMessages] = useState<MessageItem[]>(() => {
     const saved = loadAIConversationHistory('earth-one-ai-companion:v1', (value): value is MessageItem =>
@@ -299,6 +303,59 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     if (!overridePrompt) setInputMsg('');
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+    // Celestial Intent & Cosmic Navigation Detection
+    const lower = text.toLowerCase();
+    let targetTab: string | null = null;
+    let navReply = '';
+
+    if (lower.includes('宇宙') || lower.includes('探索宇宙') || lower.includes('星空') || lower.includes('深空') || lower.includes('galaxy') || lower.includes('universe')) {
+      targetTab = 'universe';
+      navReply = isZh ? '🌌 收到指令。我是智能体 D，正在唤醒星辰粒子，带领您进入 3D 深度宇宙与各大行星世界。' : '🌌 Navigating to 3D Universe Engine...';
+    } else if (lower.includes('地球') || lower.includes('人类世界') || lower.includes('回到地球') || lower.includes('earth') || lower.includes('globe')) {
+      targetTab = 'globe';
+      navReply = isZh ? '🌍 收到指令。正在为您定位人类数字地球与全球网络。' : '🌍 Navigating to Digital Earth & Humanity...';
+    } else if (lower.includes('浏览器') || lower.includes('谷歌') || lower.includes('上网') || lower.includes('木星') || lower.includes('chrome') || lower.includes('browser')) {
+      targetTab = 'browser';
+      navReply = isZh ? '🌐 收到指令。正在启动木星·宇宙极速智能浏览器与网络探针。' : '🌐 Opening Cosmic Browser & Intelligent Web Hub...';
+    } else if (lower.includes('土星') || lower.includes('电影') || lower.includes('影院') || lower.includes('看片') || lower.includes('影视') || lower.includes('saturn') || lower.includes('cinema')) {
+      targetTab = 'saturn';
+      navReply = isZh ? '🪐 收到指令。正在前往土星环影视宇宙，为您展开环幕沉浸式影院。' : '🪐 Navigating to Saturn Cinema Universe...';
+    } else if (lower.includes('金星') || lower.includes('音乐') || lower.includes('歌曲') || lower.includes('电台') || lower.includes('venus') || lower.includes('music')) {
+      targetTab = 'venus';
+      navReply = isZh ? '🎵 收到指令。正在降落金星音乐世界，为您开启全球音乐宇宙与实时声波流。' : '🎵 Navigating to Venus Music Station...';
+    } else if (lower.includes('太阳') || lower.includes('图书馆') || lower.includes('看书') || lower.includes('书籍') || lower.includes('library') || lower.includes('sun')) {
+      targetTab = 'library';
+      navReply = isZh ? '📚 收到指令。正在进入太阳·世界数字图书馆（连接全球知识库与古籍典藏）。' : '📚 Entering the World Digital Library...';
+    } else if (lower.includes('月球') || lower.includes('学院') || lower.includes('太空学院') || lower.includes('学习') || lower.includes('academy') || lower.includes('moon')) {
+      targetTab = 'academy';
+      navReply = isZh ? '🎓 收到指令。正在前往月球·太空学院，开启星际知识研习与研讨。' : '🎓 Navigating to Moon Space Academy...';
+    } else if (lower.includes('水星') || lower.includes('全球搜索') || lower.includes('mercury')) {
+      targetTab = 'mercury';
+      navReply = isZh ? '⚡ 收到指令。正在带您前往水星·全球信息发现中心。' : '⚡ Navigating to Mercury Global Search...';
+    } else if (lower.includes('火星') || lower.includes('游戏') || lower.includes('mars') || lower.includes('game')) {
+      targetTab = 'game';
+      navReply = isZh ? '🚀 收到指令。正在前往火星·游戏与互动娱乐宇宙。' : '🚀 Navigating to Mars Game Universe...';
+    } else if (lower.includes('阿拉伯') || lower.includes('阿语') || lower.includes('arabic')) {
+      targetTab = 'arabic-learning';
+      navReply = isZh ? '📖 收到指令。正在打开阿拉伯语沉浸式学习中枢。' : '📖 Opening Arabic Learning Hub...';
+    }
+
+    if (targetTab) {
+      const navMsgId = `ai_nav_${Date.now()}`;
+      setMessages(prev => [
+        ...prev,
+        { id: `user_${Date.now()}`, sender: 'user', text, time: nowTime },
+        { id: navMsgId, sender: 'ai', text: navReply, time: nowTime }
+      ]);
+      if (voiceEnabled || activeTab === 'voice') speak(navReply, navMsgId);
+      if (onNavigateTab) {
+        onNavigateTab(targetTab);
+      } else if (targetTab === 'universe' && onExploreUniverse) {
+        onExploreUniverse();
+      }
+      return;
+    }
+
     setMessages(prev => [
       ...prev,
       { id: `user_${Date.now()}`, sender: 'user', text, time: nowTime }
@@ -448,22 +505,24 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       {!isOpen && showLauncher && (
         <button
           onClick={() => setIsOpen(true)}
-          className="group relative flex items-center space-x-3 px-4 py-2.5 rounded-full bg-slate-950/90 hover:bg-slate-900 border border-cyan-500/50 hover:border-cyan-400 backdrop-blur-2xl shadow-2xl shadow-cyan-500/20 cursor-pointer transition-all hover:scale-105 active:scale-95"
-          title="打开本地 AI 助手"
+          className="group relative flex items-center space-x-3 px-4 py-2.5 rounded-full bg-slate-950/95 hover:bg-slate-900 border border-cyan-400/60 hover:border-cyan-300 backdrop-blur-2xl shadow-2xl shadow-cyan-500/25 cursor-pointer transition-all hover:scale-105 active:scale-95"
+          title={isZh ? "唤醒宇宙智能体 D" : "Awaken Celestial Intelligence D"}
         >
-          <div className="relative w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-cyan-950/80 border border-cyan-400/40">
+          <div className="relative w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-cyan-950/80 border border-cyan-400/50 shadow-inner">
             <canvas ref={canvasRef} className="w-8 h-8" />
-            <div className="absolute inset-0 rounded-full ring-1 ring-cyan-400/50 animate-pulse pointer-events-none" />
+            <div className="absolute inset-0 rounded-full ring-1 ring-cyan-400/60 animate-pulse pointer-events-none" />
           </div>
 
           <div className="text-left">
             <div className="flex items-center space-x-1.5">
               <span className="text-xs font-bold font-mono tracking-wider text-cyan-300">
-                {isZh ? '本地 AI 助手' : 'LOCAL AI ASSISTANT'}
+                {isZh ? '✨ 宇宙智能体 D' : '✨ INTELLIGENCE D'}
               </span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             </div>
-            <div className="text-[10px] text-slate-400 font-medium">{modelName} · 语音已就绪</div>
+            <div className="text-[10px] text-slate-400 font-medium">
+              {isZh ? '数字生命 · 语音与跨星系穿梭已就绪' : `${modelName} · Voice & Space Ready`}
+            </div>
           </div>
         </button>
       )}
@@ -598,8 +657,62 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           {/* Tab 1: Direct Dialogue View */}
           {activeTab === 'chat' && (
             <>
+              {/* Cosmic Capability Quick Teleport Bar */}
+              <div className="px-3 py-1.5 bg-[#08101a] border-b border-slate-800/80 flex items-center space-x-1.5 overflow-x-auto text-[11px] scrollbar-none">
+                <span className="text-[10px] text-cyan-400 font-mono shrink-0 mr-1">🪐 快捷指令:</span>
+                <button
+                  type="button"
+                  onClick={() => handleSend('带我探索3D宇宙深空')}
+                  className="px-2.5 py-0.5 rounded-full bg-cyan-950/60 hover:bg-cyan-900 hover:text-white border border-cyan-500/40 text-cyan-200 shrink-0 cursor-pointer transition-all text-[11px] font-medium"
+                >
+                  🌌 3D宇宙
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSend('回到人类数字地球')}
+                  className="px-2.5 py-0.5 rounded-full bg-blue-950/60 hover:bg-blue-900 hover:text-white border border-blue-500/40 text-blue-200 shrink-0 cursor-pointer transition-all text-[11px] font-medium"
+                >
+                  🌍 数字地球
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSend('打开木星宇宙浏览器')}
+                  className="px-2.5 py-0.5 rounded-full bg-teal-950/60 hover:bg-teal-900 hover:text-white border border-teal-500/40 text-teal-200 shrink-0 cursor-pointer transition-all text-[11px] font-medium"
+                >
+                  🌐 宇宙浏览器
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSend('前往土星环幕影院看电影')}
+                  className="px-2.5 py-0.5 rounded-full bg-amber-950/60 hover:bg-amber-900 hover:text-white border border-amber-500/40 text-amber-200 shrink-0 cursor-pointer transition-all text-[11px] font-medium"
+                >
+                  🪐 土星影院
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSend('去金星音乐世界听音乐')}
+                  className="px-2.5 py-0.5 rounded-full bg-rose-950/60 hover:bg-rose-900 hover:text-white border border-rose-500/40 text-rose-200 shrink-0 cursor-pointer transition-all text-[11px] font-medium"
+                >
+                  🎵 金星音乐
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSend('进入太阳世界数字图书馆')}
+                  className="px-2.5 py-0.5 rounded-full bg-yellow-950/60 hover:bg-yellow-900 hover:text-white border border-yellow-500/40 text-yellow-200 shrink-0 cursor-pointer transition-all text-[11px] font-medium"
+                >
+                  📚 世界图书馆
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSend('前往月球太空学院研讨')}
+                  className="px-2.5 py-0.5 rounded-full bg-indigo-950/60 hover:bg-indigo-900 hover:text-white border border-indigo-500/40 text-indigo-200 shrink-0 cursor-pointer transition-all text-[11px] font-medium"
+                >
+                  🎓 太空学院
+                </button>
+              </div>
+
               {/* Quick Prompt Pills */}
-              <div className="px-3 py-2 bg-slate-900/40 border-b border-slate-800/60 flex items-center space-x-1.5 overflow-x-auto text-[11px] scrollbar-none">
+              <div className="px-3 py-1.5 bg-slate-900/40 border-b border-slate-800/60 flex items-center space-x-1.5 overflow-x-auto text-[11px] scrollbar-none">
                 {quickStarters.map((starter, idx) => (
                   <button
                     key={idx}
