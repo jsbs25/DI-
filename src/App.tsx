@@ -40,8 +40,16 @@ import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
 import { SolarSystemDirectory } from './universe/SolarSystemDirectory.tsx';
 import { MoonAcademy } from './universe/MoonAcademy.tsx';
 import { VenusCreativeStudio } from './universe/VenusCreativeStudio.tsx';
+import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 
 export default function App() {
+  const [showIntro, setShowIntro] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('earth_one_intro_completed') !== '1';
+    } catch {
+      return true;
+    }
+  });
   const [lang, setLang] = useState<Language>('zh');
   const t = translations[lang] || translations.zh;
   const [currentTab, setCurrentTab] = useState<string>(() => {
@@ -410,6 +418,18 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100 flex font-sans">
+      {showIntro && (
+        <CinematicIntro
+          onComplete={() => {
+            try {
+              sessionStorage.setItem('earth_one_intro_completed', '1');
+            } catch {
+              /* ignore */
+            }
+            setShowIntro(false);
+          }}
+        />
+      )}
       {/* Welcome Banner Toast */}
       {welcomeToast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-950/95 border border-cyan-500/60 text-cyan-200 text-xs shadow-2xl backdrop-blur-md flex items-center space-x-2 animate-in fade-in slide-in-from-top-2">
