@@ -12,3 +12,4 @@ server_data.backup.json
 server_data/
 package-lock.json
 zed:open settings file
+discovery.sqlite*

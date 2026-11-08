@@ -1,3 +1,4 @@
+import { initDiscoveryDatabase, initScheduler, performUnifiedSearch } from "./src/discovery/index.js";
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
@@ -1427,4 +1428,26 @@ async function startServer() {
 startServer().catch(err => {
   console.error('Failed to start server:', err);
   process.exit(1);
+});
+
+// -------------------------------------------------------------
+// X. DISCOVERY ENGINE INTEGRATION (Phase 6 & 8)
+// -------------------------------------------------------------
+// Initialize Discovery Engine on boot
+initDiscoveryDatabase();
+if (process.env.EARTH_ONE_SKIP_DISCOVERY_SCHEDULER !== 'true') {
+  initScheduler();
+}
+
+app.get('/api/discovery/search', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q) return res.status(400).json({ success: false, error: 'Query is required.' });
+
+  try {
+    const results = await performUnifiedSearch(q, 30);
+    res.json({ success: true, ...results });
+  } catch (err) {
+    console.error('[Discovery API] Search failed:', err);
+    res.status(500).json({ success: false, error: 'Search failed.' });
+  }
 });
