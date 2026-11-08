@@ -43,6 +43,7 @@ const PIPED_INSTANCES = [
 // 快捷探索频道标签
 const QUICK_CHANNELS: { key: string; zh: string; en: string; query: string }[] = [
   { key: 'daily', zh: '🔥 每日精选', en: 'Daily Picks', query: 'universe space documentary' },
+  { key: 'bilibili', zh: '📺 B站/Bilibili', en: 'Bilibili', query: '' },
   { key: 'space', zh: '🪐 宇宙与天文', en: 'Space & Astronomy', query: 'space astronomy universe NASA' },
   { key: 'tech', zh: '🤖 前沿科技', en: 'Frontier Tech', query: 'future technology AI science' },
   { key: 'doc', zh: '🎬 深度纪录片', en: 'Documentary', query: 'documentary nature science history' },
@@ -277,6 +278,13 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
     loadDaily();
   }, [loadDaily]);
 
+  const [biliQuery, setBiliQuery] = useState('航天纪录片');
+
+  const biliEmbedUrl = useMemo(() => {
+    const q = biliQuery.trim();
+    return q ? `https://search.bilibili.com/all?keyword=${encodeURIComponent(q)}` : 'https://www.bilibili.com';
+  }, [biliQuery]);
+
   const runSearch = useCallback(
     async (raw: string) => {
       const q = raw.trim();
@@ -314,6 +322,12 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
     async (ch: typeof QUICK_CHANNELS[number]) => {
       setActiveChannel(ch.key);
       setQuery('');
+      if (ch.key === 'bilibili') {
+        setSearched(true);
+        setError('');
+        setResults([]);
+        return;
+      }
       if (ch.key === 'daily') {
         setSearched(false);
         if (dailyVideos.length) {
@@ -437,6 +451,25 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
           </button>
         </div>
 
+
+        {/* Bilibili 官方入口（免 Key；iframe/登录/版权由 Bilibili 控制） */}
+        {activeChannel === 'bilibili' && (
+          <div className="mb-6 overflow-hidden rounded-2xl border border-sky-500/30 bg-slate-900/60 shadow-xl">
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950/60 p-3">
+              <span className="text-sm font-semibold text-sky-300">📺 B站 / Bilibili 官方搜索（免 Key）</span>
+              <input value={biliQuery} onChange={e => setBiliQuery(e.target.value)} placeholder="输入关键词，如 航天纪录片" className="min-w-[200px] flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 outline-none focus:border-sky-500" />
+              <a href={biliEmbedUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500"><ExternalLink className="h-3.5 w-3.5" />新窗口打开 B站</a>
+            </div>
+            <iframe
+              src={biliEmbedUrl}
+              title="Bilibili"
+              className="h-[72vh] min-h-[460px] w-full border-0 bg-white"
+              referrerPolicy="strict-origin-when-cross-origin"
+            />
+            <p className="px-3 py-2.5 text-[11px] leading-relaxed text-slate-400">通过 Bilibili 官方页面展示；是否允许 iframe、登录、播放、版权与地区限制由 Bilibili 控制。若空白或受限，请点击“新窗口打开 B站”。本应用不抓取、不下载受限内容。</p>
+          </div>
+        )}
+
         {/* 我的观影单（书签） */}
         {watchlist.length > 0 && (
           <div className="mb-6 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
@@ -472,9 +505,9 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
             {error}
           </div>
         )}
-        {!loading && !error && displayVideos.length === 0 && (
+        {!loading && !error && activeChannel !== 'bilibili' && displayVideos.length === 0 && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-10 text-center text-sm text-slate-400">
-            {isZh ? '暂无视频，点击上方频道标签或搜索开始探索。' : 'No videos yet. Pick a channel or search above.'}
+            {isZh ? '暂无视频，点击上方频道标签（含 B站/Bilibili）或搜索开始探索。' : 'No videos yet. Pick a channel (including Bilibili) or search above.'}
           </div>
         )}
 

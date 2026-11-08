@@ -47,7 +47,7 @@ import { BrowserPrivacyPanel } from './BrowserPrivacyPanel.tsx';
 import { getJupiterDocumentSource, isRemotePdfUrl, toJupiterDocumentRoute } from './pdfDocumentUrl.ts';
 import { getJupiterImageSource, isRemoteImageUrl, toJupiterImageRoute } from './imageDocumentUrl.ts';
 import { getJupiterAudioSource, isRemoteAudioUrl, toJupiterAudioRoute } from './audioDocumentUrl.ts';
-import { getJupiterVideoSource, isRemoteVideoUrl, toJupiterVideoRoute } from './videoDocumentUrl.ts';
+import { getJupiterVideoSource, isPlayableVideoUrl, isRemoteVideoUrl, isYouTubeOrVimeoUrl, toJupiterVideoRoute } from './videoDocumentUrl.ts';
 import { buildJupiterSearchRoute, parseJupiterSearchRoute, type JupiterSearchCategory, type JupiterSearchEngine } from './jupiterSearchRoute.ts';
 
 const LazyPdfDocumentViewer = lazy(() => import('./PdfDocumentViewer.tsx').then(module => ({ default: module.PdfDocumentViewer })));
@@ -190,6 +190,8 @@ type JupiterSearchResult = {
 
 const DEFAULT_BOOKMARKS: BookmarkItem[] = [
   { id: 'bm_google', title: 'Google', url: 'https://www.google.com', category: 'Search' },
+  { id: 'bm_duckduckgo', title: 'DuckDuckGo', url: 'https://duckduckgo.com', category: 'Search' },
+  { id: 'bm_bing', title: 'Bing', url: 'https://www.bing.com', category: 'Search' },
   { id: 'bm_youtube', title: 'YouTube 影视', url: 'https://www.youtube.com', category: 'Media' },
   { id: 'bm_github', title: 'GitHub 开源', url: 'https://github.com', category: 'Code' },
   { id: 'bm_openlibrary', title: 'Open Library', url: 'https://openlibrary.org', category: 'Library' },
@@ -1291,33 +1293,31 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
   };
 
   const handleNavigate = async (targetUrl: string, fromHistory = false) => {
+    if (targetUrl === JUPITER_HOME_URL) {
+      const newId = `tab_${Date.now()}`;
+      const newTab: BrowserTab = {
+        id: newId,
+        title: 'JUPITER',
+        url: JUPITER_HOME_URL,
+        readerMode: false,
+        content: '',
+        author: '',
+        readTime: ''
+      };
+      setTabs(previous => [...previous, newTab]);
+      setActiveTabId(newId);
+      setInputUrl('');
+      setSearchResults([]);
+      setLastSearchQuery('');
+      setSearchError(null);
+      return;
+    }
     let cleanUrl = targetUrl.trim();
     if (!cleanUrl) return;
 
     const searchRoute = parseJupiterSearchRoute(cleanUrl);
     if (searchRoute) {
       await runJupiterSearch(searchRoute.query, { ...searchRoute, fromHistory: true });
-      return;
-    }
-
-    const internalPdfSource = getJupiterDocumentSource(cleanUrl);
-    if (internalPdfSource) {
-      openPdfDocument(internalPdfSource, fromHistory);
-      return;
-    }
-    const internalImageSource = getJupiterImageSource(cleanUrl);
-    if (internalImageSource) {
-      openImageDocument(internalImageSource, fromHistory, true);
-      return;
-    }
-    const internalAudioSource = getJupiterAudioSource(cleanUrl);
-    if (internalAudioSource) {
-      openAudioDocument(internalAudioSource, fromHistory);
-      return;
-    }
-    const internalVideoSource = getJupiterVideoSource(cleanUrl);
-    if (internalVideoSource) {
-      openVideoDocument(internalVideoSource, fromHistory);
       return;
     }
 
@@ -1346,22 +1346,22 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
       cleanUrl = 'https://' + cleanUrl;
     }
 
-    if (isRemotePdfUrl(cleanUrl)) {
-      openPdfDocument(cleanUrl, fromHistory);
+    // 1) JUPITER books route: open internal library detail for earth books.
+    const jContent = (() => { try { const p = new URL(cleanUrl, 'https://jupiter.earth.invalid').pathname; const m = p.match(/^\/jupiter\/read\/book\/([^/]+)$/); return m ? decodeURIComponent(m[1]) : null; } catch { return null; } })();
+    if (jContent) {
+      // Navigate in-place to JUPITER content route (handled by reader render path).
+      if (!fromHistory) { saveCurrentSearchScroll(); pushHistory(activeTabId, cleanUrl); }
+      setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, url: cleanUrl, title: 'EARTH Book', readerMode: true } : t));
+      setInputUrl(cleanUrl);
+      setIsLoading(false);
       return;
     }
-    if (isRemoteImageUrl(cleanUrl)) {
-      openImageDocument(cleanUrl, fromHistory);
-      return;
-    }
-    if (isRemoteAudioUrl(cleanUrl)) {
-      openAudioDocument(cleanUrl, fromHistory);
-      return;
-    }
-    if (isRemoteVideoUrl(cleanUrl)) {
-      openVideoDocument(cleanUrl, fromHistory);
-      return;
-    }
+
+    // 2) Direct playable media URLs: open in JUPITER viewers (Saturn-style in-app playback for YouTube/Vimeo).
+    if (isRemotePdfUrl(cleanUrl)) { openPdfDocument(cleanUrl, fromHistory); return; }
+    if (isRemoteImageUrl(cleanUrl)) { openImageDocument(cleanUrl, fromHistory, true); return; }
+    if (isRemoteAudioUrl(cleanUrl)) { openAudioDocument(cleanUrl, fromHistory); return; }
+    if (isPlayableVideoUrl(cleanUrl)) { openVideoDocument(cleanUrl, fromHistory); return; }
 
     setIsLoading(true);
     setInputUrl(cleanUrl);
@@ -1398,6 +1398,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
           ? { ...tab, url: cleanUrl, title: preset.title, content: preset.content, author: preset.author, readTime: preset.readTime }
           : { ...tab, url: cleanUrl, title: tab.title === 'Loading…' ? new URL(cleanUrl).hostname : tab.title, content: '', author: cleanUrl, readTime: '' }
         : tab));
+      setIsLoading(false);
+      return;
+    }
+
+    if (!browserEngine) {
+      window.open(cleanUrl, '_blank', 'noopener,noreferrer');
       setIsLoading(false);
       return;
     }
@@ -1492,45 +1498,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
   };
 
   const openJupiterResult = (result: JupiterSearchResult) => {
-    if (result.category === 'images') {
-      openImageDocument(result.url, false, true);
-      return;
-    }
-
-    if (result.source !== 'earth') {
-      if (isRemotePdfUrl(result.url)) openPdfDocument(result.url);
-      else if (isRemoteImageUrl(result.url)) openImageDocument(result.url);
-      else if (isRemoteAudioUrl(result.url)) openAudioDocument(result.url);
-      else if (isRemoteVideoUrl(result.url)) openVideoDocument(result.url);
-      else void handleNavigate(result.url);
-      return;
-    }
-
-    const newId = `tab_${Date.now()}`;
-    const kindLabel: Record<JupiterSearchResult['kind'], string> = {
-      web: '网页',
-      article: 'EARTH 文章',
-      video: 'EARTH 视频',
-      book: 'EARTH 图书',
-      post: 'EARTH 动态'
-    };
-    const newTab: BrowserTab = {
-      id: newId,
-      title: result.title,
-      url: result.url,
-      readerMode: true,
-      content: result.content || result.snippet,
-      author: kindLabel[result.kind],
-      readTime: ''
-    };
-    saveCurrentSearchScroll();
-    setTabs(previous => [...previous, newTab]);
-    setActiveTabId(newId);
-    setInputUrl(result.url);
-    setSearchResults([]);
-    setLastSearchQuery('');
-    setHistory(previous => ({ ...previous, [newId]: [result.url] }));
-    setHistoryIndex(previous => ({ ...previous, [newId]: 0 }));
+    if (isRemotePdfUrl(result.url)) { openPdfDocument(result.url); return; }
+    if (isRemoteImageUrl(result.url)) { openImageDocument(result.url, false, true); return; }
+    if (isRemoteAudioUrl(result.url)) { openAudioDocument(result.url); return; }
+    if (isPlayableVideoUrl(result.url)) { openVideoDocument(result.url); return; }
+    void handleNavigate(result.url);
   };
 
   const handleNewTab = () => {
@@ -1646,9 +1618,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
     void runJupiterSearch(route.query, { ...route, page });
   };
 
-  // 星图联动：从宇宙引擎点击行星进入浏览器时，自动以行星名触发搜索
+  // 星图联动：仅 /jupiter/search 深链时消费 initialQuery；普通进入保持首页，避免地址栏被预填
   useEffect(() => {
-    if (initialQuery && initialQuery.trim()) {
+    if (initialQuery && initialQuery.trim() && typeof window !== 'undefined' && window.location.pathname === '/jupiter/search') {
       void handleNavigate(initialQuery.trim());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2233,6 +2205,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               title="Search engine"
             >
               <option value="auto">自动</option>
+              <option value="google">Google</option>
               <option value="bing">Bing</option>
               <option value="duckduckgo">DuckDuckGo</option>
               <option value="wikipedia">Wikipedia</option>
@@ -2606,8 +2579,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                       <span className="mt-3 inline-flex items-center gap-1 text-[11px] text-amber-200/70">
                         {result.category === 'images'
                           ? '在 JUPITER 内查看图片'
-                          : result.category === 'videos'
-                            ? '在 JUPITER 内打开视频来源'
+                          : result.category === 'videos' || result.kind === 'video' || isPlayableVideoUrl(result.url)
+                            ? (isPlayableVideoUrl(result.url) ? '在 JUPITER 内播放' : '打开视频来源')
                             : result.category === 'news'
                               ? '在 JUPITER 内阅读新闻来源'
                               : result.category === 'pdf'
@@ -2734,168 +2707,31 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               </article>
               )
             ) : activeTab.url === JUPITER_HOME_URL ? (
-              <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col items-center justify-center px-4 py-12 text-center">
-                {/* Google Brand Logo */}
-                <div className="flex items-center justify-center gap-1 select-none text-6xl sm:text-7xl font-semibold tracking-tighter mb-2">
-                  <span className="text-[#4285F4]">G</span>
-                  <span className="text-[#EA4335]">o</span>
-                  <span className="text-[#FBBC05]">o</span>
-                  <span className="text-[#4285F4]">g</span>
-                  <span className="text-[#34A853]">l</span>
-                  <span className="text-[#EA4335]">e</span>
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm text-slate-400 font-medium mb-2">
-                  <span className="inline-flex items-center gap-1.5 text-cyan-300">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    Chrome 智能宇宙浏览核心
-                  </span>
-                  <span>·</span>
-                  <span className="text-purple-300">本地双模型 Ollama AI 引擎</span>
-                  <span>·</span>
-                  <span className="text-amber-300">实时网络爬虫深度抓取</span>
-                </div>
-
-                {/* Google Search Pill Bar */}
+              <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col items-center justify-center px-4 py-12 text-center">
+                <img src="/favicon.svg" alt="EARTH ONE" className="h-20 w-20 mb-8" />
                 <form
                   onSubmit={event => {
                     event.preventDefault();
                     void handleNavigate(inputUrl);
                   }}
-                  className="mt-6 flex w-full max-w-2xl items-center gap-3 rounded-full border border-white/10 bg-[#121c27] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.4)] transition-all hover:border-white/20 hover:bg-[#162230] focus-within:border-cyan-400/60 focus-within:ring-4 focus-within:ring-cyan-500/10"
+                  className="w-full flex items-center gap-3 rounded-full border border-white/10 bg-[#121c27] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.4)] transition-all hover:border-white/20 focus-within:border-cyan-400/60 focus-within:ring-4 focus-within:ring-cyan-500/10"
                 >
                   <Search className="h-5 w-5 shrink-0 text-slate-400" />
                   <input
                     value={inputUrl}
                     onChange={event => setInputUrl(event.target.value)}
-                    aria-label="在 Google 搜索，或输入网址"
-                    placeholder="在 Google 搜索，或输入网址…"
+                    aria-label="搜索"
+                    placeholder="Google 搜索，或输入网址…"
                     className="min-w-0 flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-slate-500 sm:text-base"
                     autoComplete="off"
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setInputUrl('https://openlibrary.org');
-                      void handleNavigate('https://openlibrary.org');
-                    }}
-                    title="爬虫抓取模式"
-                    className="p-1.5 text-slate-400 hover:text-amber-300 transition"
-                  >
-                    <Compass className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                        const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-                        const rec = new SpeechRec();
-                        rec.lang = 'zh-CN';
-                        rec.onresult = (e: any) => {
-                          const spoken = e.results[0]?.[0]?.transcript;
-                          if (spoken) {
-                            setInputUrl(spoken);
-                            void handleNavigate(spoken);
-                          }
-                        };
-                        rec.start();
-                      }
-                    }}
-                    title="语音搜索"
-                    className="p-1.5 text-slate-400 hover:text-cyan-300 transition"
-                  >
-                    <Mic className="h-4 w-4" />
-                  </button>
                 </form>
-
-                {/* Chrome Search Action Buttons */}
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => void handleNavigate(inputUrl || 'https://www.google.com')}
-                    className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
-                  >
-                    Google 搜索
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleNavigate(inputUrl ? `https://en.wikipedia.org/wiki/${encodeURIComponent(inputUrl)}` : 'https://earthobservatory.nasa.gov')}
-                    className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
-                  >
-                    手气不错
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const target = inputUrl || 'https://openlibrary.org';
-                      void handleNavigate(target);
-                    }}
-                    className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/20"
-                  >
-                    🕷️ 爬虫全网抓取
-                  </button>
-                </div>
-
-                {/* Google Chrome Shortcuts Grid */}
-                <div className="mt-10 grid w-full max-w-3xl grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                  {[
-                    { title: 'Google', url: 'https://www.google.com', icon: <GoogleGIcon className="h-6 w-6" /> },
-                    { title: 'YouTube', url: 'https://www.youtube.com', icon: <span className="text-red-500 font-bold text-lg">▶</span> },
-                    { title: 'GitHub', url: 'https://github.com', icon: <Code2 className="h-6 w-6 text-slate-300" /> },
-                    { title: 'Open Library', url: 'https://openlibrary.org', icon: <BookOpen className="h-6 w-6 text-amber-400" /> },
-                    { title: 'Europeana', url: 'https://www.europeana.eu', icon: <Globe className="h-6 w-6 text-sky-400" /> },
-                    { title: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Earth', icon: <span className="font-serif font-bold text-white text-lg">W</span> },
-                    { title: 'NASA Earth', url: 'https://earthobservatory.nasa.gov', icon: <Compass className="h-6 w-6 text-emerald-400" /> },
-                    { title: 'arXiv 学术', url: 'https://arxiv.org/archive/astro-ph', icon: <FileText className="h-6 w-6 text-cyan-400" /> },
-                    { title: '太阳·图书馆', url: 'jupiter://search?q=open%20library', icon: <Database className="h-6 w-6 text-amber-300" /> },
-                    { title: '金星·音乐', url: 'jupiter://search?q=music&type=audio', icon: <Sparkles className="h-6 w-6 text-pink-400" /> },
-                    { title: '月球·学院', url: 'jupiter://search?q=astronomy&type=academic', icon: <Shield className="h-6 w-6 text-indigo-400" /> },
-                    { title: '添加快捷', url: 'custom://add', icon: <Plus className="h-6 w-6 text-slate-400" />, isAdd: true }
-                  ].map((item, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        if (item.isAdd) {
-                          setShowAddShortcutModal(true);
-                        } else {
-                          void handleNavigate(item.url);
-                        }
-                      }}
-                      className="group flex flex-col items-center justify-center gap-2 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-3 transition hover:border-white/20 hover:bg-white/[0.06]"
-                    >
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.05] group-hover:scale-105 transition">
-                        {item.icon}
-                      </div>
-                      <span className="truncate max-w-[80px] text-xs font-medium text-slate-300 group-hover:text-white">
-                        {item.title}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Ollama Dual-Model Deployment Status Card */}
-                <div className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-950/20 px-5 py-3.5 text-left text-xs max-w-3xl w-full">
-                  <div className="flex items-center gap-3">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-                    </span>
-                    <div>
-                      <div className="font-semibold text-emerald-300">本地电脑 Ollama (127.0.0.1:11434) 双模型体系已部署就绪</div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">
-                        ⚡ 交互对话小模型: <span className="text-cyan-300 font-mono">{ollamaStatus.chatModel || 'qwen3:8b'}</span> · 
-                        🕷️ 深度抽取大模型: <span className="text-amber-300 font-mono">{ollamaStatus.crawlerModel || 'qwen2.5:32b'}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void refreshOllamaStatus()}
-                    disabled={isOllamaTesting}
-                    className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-200 transition hover:bg-emerald-500/20 shrink-0"
-                  >
-                    {isOllamaTesting ? '正在探测…' : `测试联通 (${ollamaStatus.latencyMs || 12}ms)`}
-                  </button>
+                <div className="mt-6 flex items-center gap-4 text-xs text-slate-400">
+                  <button type="button" onClick={() => void handleNavigate('https://www.google.com')} className="hover:text-white transition">Google</button>
+                  <button type="button" onClick={() => void handleNavigate('https://duckduckgo.com')} className="hover:text-white transition">DuckDuckGo</button>
+                  <button type="button" onClick={() => void handleNavigate('https://www.youtube.com')} className="hover:text-white transition">YouTube</button>
+                  <button type="button" onClick={() => void handleNavigate('https://z-library.sk')} className="hover:text-white transition">Z-Library</button>
+                  <button type="button" onClick={() => void handleNavigate('jupiter://home')} className="hover:text-white transition">Home</button>
                 </div>
               </div>
             ) : activeTab.crawlerView ? (

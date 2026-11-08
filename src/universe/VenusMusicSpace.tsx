@@ -32,7 +32,9 @@ export interface MusicTrack {
   album: string;
   genre: string;
   durationSeconds: number;
-  audioUrl: string;
+  audioUrl?: string;
+  embedUrl?: string;
+  playable?: 'audio' | 'embed';
   coverUrl: string;
   source: string;
   sourceUrl: string;
@@ -78,6 +80,8 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   const [crawlerKeyword, setCrawlerKeyword] = useState('space ambient');
   const [isCrawling, setIsCrawling] = useState(false);
   const [crawlNotice, setCrawlNotice] = useState<string | null>(null);
+  const [ytSearching, setYtSearching] = useState(false);
+  const [ytTracks, setYtTracks] = useState<MusicTrack[]>([]);
 
   // Audio & Visualizer refs
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -97,7 +101,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       const res = await fetch(endpoint);
       const data = await res.json();
       if (data.success && Array.isArray(data.tracks)) {
-        setTracks(data.tracks);
+        setTracks(data.tracks.map((t: any) => ({ ...t, playable: t.playable === 'embed' || t.playable === 'youtube-embed' || t.embedUrl ? 'embed' : 'audio' })));
       }
     } catch {
       // offline fallback tracks if fetch fails
@@ -116,11 +120,41 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           license: 'CC0 Public Domain',
           crawledAt: new Date().toISOString(),
           bpm: 72,
-          description: '金星电离层低频声场，完全离线免网播放。'
+          description: '金星电离层低频声场，完全离线免网播放。',
+          playable: 'audio'
         }
       ]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const searchYouTubeMusic = async (queryOverride?: string) => {
+    const q = (queryOverride ?? searchQuery).trim();
+    if (!q) return;
+    setYtSearching(true);
+    setCrawlNotice(isZh ? `正在检索 YouTube 音乐：${q}` : `Searching YouTube music: ${q}`);
+    try {
+      const res = await fetch(`/api/music/youtube-search?q=${encodeURIComponent(q)}&limit=12`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.tracks)) {
+        const mapped = data.tracks.map((t: any) => ({ ...t, playable: t.playable === 'embed' || t.playable === 'youtube-embed' || t.embedUrl ? 'embed' : 'audio' }));
+        setYtTracks(mapped);
+        if (mapped.length) {
+          setTracks(mapped);
+          setCurrentTrackIndex(0);
+          setCrawlNotice(isZh ? `已找到 ${mapped.length} 条可嵌入音乐（官方嵌入：YouTube/SoundCloud/链接等；版权与可用性由来源控制）` : `Found ${mapped.length} embeddable tracks (official embeds; rights controlled by source).`);
+        } else {
+          setCrawlNotice(isZh ? '未找到可用的嵌入音乐结果。' : 'No embeddable music results found.');
+        }
+      } else {
+        setCrawlNotice(isZh ? 'YouTube 音乐检索暂不可用。' : 'YouTube music search unavailable.');
+      }
+    } catch {
+      setCrawlNotice(isZh ? 'YouTube 音乐检索失败，请稍后重试。' : 'YouTube music search failed.');
+    } finally {
+      setYtSearching(false);
+      setTimeout(() => setCrawlNotice(null), 4500);
     }
   };
 
@@ -213,12 +247,16 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
   // Handle Play/Pause
   const togglePlay = () => {
+    if (activeTrack?.playable === 'embed' || activeTrack?.embedUrl) {
+      setCrawlNotice(isZh ? '当前为官方嵌入播放器，请使用嵌入控件播放（不下载音频）。' : 'Use the official embed player controls.');
+      setTimeout(() => setCrawlNotice(null), 2500);
+      return;
+    }
     if (!audioRef.current) return;
     setupVisualizer();
     if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
       audioCtxRef.current.resume();
     }
-
     if (isPlaying) {
       audioRef.current.pause();
       setIsPlaying(false);
@@ -228,8 +266,14 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   };
 
   const handleSelectTrack = (index: number) => {
+    const track = tracks[index];
     setCurrentTrackIndex(index);
     setCurrentTime(0);
+    if (track?.playable === 'embed' || track?.embedUrl) {
+      if (audioRef.current) audioRef.current.pause();
+      setIsPlaying(true);
+      return;
+    }
     setTimeout(() => {
       if (audioRef.current) {
         setupVisualizer();
@@ -297,26 +341,40 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         <div className="absolute bottom-0 left-[20%] w-[60vw] h-[30vw] rounded-full bg-purple-700/10 blur-[160px]" />
       </div>
 
-      {/* Hidden Audio Element */}
-      <audio
-        ref={audioRef}
-        src={activeTrack?.audioUrl}
-        crossOrigin="anonymous"
-        onTimeUpdate={() => {
-          if (audioRef.current) {
-            setCurrentTime(audioRef.current.currentTime);
-            setDuration(audioRef.current.duration || 0);
-          }
-        }}
-        onEnded={() => {
-          if (isLoop && audioRef.current) {
-            audioRef.current.currentTime = 0;
-            audioRef.current.play();
-          } else {
-            handleNext();
-          }
-        }}
-      />
+      {/* Audio / YouTube embed player */}
+      {(activeTrack?.playable === 'embed' || activeTrack?.embedUrl) ? (
+        <div className="fixed bottom-[120px] left-4 right-4 z-30 mx-auto max-w-xl rounded-2xl border border-rose-500/30 bg-black/80 p-2 backdrop-blur-xl shadow-2xl">
+          <iframe
+            title={activeTrack?.title || 'Embedded music'}
+            src={activeTrack?.embedUrl}
+            className="aspect-video w-full rounded-xl border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
+          <p className="mt-1 px-1 text-[10px] text-slate-400">官方嵌入播放（YouTube/SoundCloud/Mixcloud/Bandcamp 等）；不下载音频，版权/可用性由来源控制。</p>
+        </div>
+      ) : (
+        <audio
+          ref={audioRef}
+          src={activeTrack?.audioUrl}
+          crossOrigin="anonymous"
+          onTimeUpdate={() => {
+            if (audioRef.current) {
+              setCurrentTime(audioRef.current.currentTime);
+              setDuration(audioRef.current.duration || 0);
+            }
+          }}
+          onEnded={() => {
+            if (isLoop && audioRef.current) {
+              audioRef.current.currentTime = 0;
+              audioRef.current.play();
+            } else {
+              handleNext();
+            }
+          }}
+        />
+      )}
 
       {/* 1. Header Navigation Bar */}
       <header className="sticky top-0 z-30 border-b border-rose-900/30 bg-[#07040d]/85 backdrop-blur-2xl px-4 sm:px-8 py-3.5 flex items-center justify-between">
@@ -482,18 +540,22 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
             {/* Search Input Bar */}
-            <div className="relative w-full sm:max-w-md">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => {
-                  setSearchQuery(e.target.value);
-                  loadTracks(selectedGenre, e.target.value);
-                }}
-                placeholder="搜索金星曲库中任意音乐、音乐人或情绪..."
-                className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition-all shadow-inner"
-              />
+            <div className="flex w-full sm:max-w-xl items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') void searchYouTubeMusic(); }}
+                  placeholder="搜索金星曲库 / 粘贴 YouTube·SoundCloud·Mixcloud·Bandcamp 链接或关键词后点嵌入搜索..."
+                  className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition-all shadow-inner"
+                />
+              </div>
+              <button type="button" onClick={() => void searchYouTubeMusic()} disabled={ytSearching || !searchQuery.trim()} className="shrink-0 rounded-2xl bg-rose-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">
+                {ytSearching ? '检索中…' : '嵌入搜索'}
+              </button>
+              <button type="button" onClick={() => void loadTracks(selectedGenre, searchQuery)} className="shrink-0 rounded-2xl border border-slate-700 px-3 py-2.5 text-xs text-slate-200">本地库</button>
             </div>
 
             <div className="text-xs text-slate-400 font-mono self-end sm:self-center">

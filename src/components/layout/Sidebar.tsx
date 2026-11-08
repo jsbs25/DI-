@@ -26,6 +26,7 @@ interface SidebarProps {
   currentTab: string;
   onSelectTab: (tab: string) => void;
   lang: Language;
+  onSelectLang?: (lang: Language) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }
@@ -50,7 +51,7 @@ const NAV_ITEMS: NavItem[] = [
   { tab: 'mercury', icon: SearchCheck, label: { zh: '水星 · 全球搜索', en: 'MERCURY · SEARCH' } },
   { tab: 'aihub', icon: Sparkles, label: { zh: '天王星 · AI中枢', en: 'URANUS · AI HUB' } },
   { tab: 'creator', icon: PenTool, label: { zh: '海王星 · 创作者', en: 'NEPTUNE · CREATOR' } },
-  { tab: 'game', icon: Gamepad2, label: { zh: '火星 · 游戏宇宙', en: 'MARS · GAMES' } },
+
   { tab: 'crawler', icon: Radar, label: { zh: '采集网络中枢', en: 'CRAWLER HUB' } },
   { tab: 'arabic-learning', icon: GraduationCap, label: { zh: '阿语沉浸学习', en: 'ARABIC LEARNING' } },
   { tab: 'knowledge', icon: Network, label: { zh: '全域知识图谱', en: 'KNOWLEDGE' } },

@@ -11,6 +11,7 @@ import {
   Compass,
   X,
   ExternalLink,
+  Info,
   Star,
   Volume2,
   VolumeX,
@@ -28,6 +29,7 @@ import {
 } from 'lucide-react';
 import { Book, Chapter, BookAnnotation, BookShelfItem, BookshelfStatus, Language } from '../../types/index.ts';
 import { EpubReader } from './EpubReader.tsx';
+import { getBookEmbedUrl } from './bookEmbedUrl.ts';
 import { AdminLibrary } from './AdminLibrary.tsx';
 import { filterLibrarySearchResults, getLibrarySearchFilterOptions, LIBRARY_RIGHTS_FILTER_LABELS } from './searchFilters.ts';
 
@@ -130,6 +132,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [onlineLanguageFilter, setOnlineLanguageFilter] = useState('all');
   const [onlineYearFilter, setOnlineYearFilter] = useState('all');
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
+  const [isCrawling, setIsCrawling] = useState(false);
+  const [crawlResults, setCrawlResults] = useState<any[]>([]);
+  const [crawlSources, setCrawlSources] = useState<any[]>([]);
+  const [crawlReader, setCrawlReader] = useState<any | null>(null);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
   const onlineFilterOptions = useMemo(() => getLibrarySearchFilterOptions(onlineResults), [onlineResults]);
@@ -225,6 +231,73 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   // =========================================================================
   // Search & ingest
   // =========================================================================
+  const handleCrawlBooks = async (overrideQuery?: string) => {
+    const q = (typeof overrideQuery === 'string' ? overrideQuery : searchQuery).trim();
+    if (!q) return;
+    if (typeof overrideQuery === 'string') setSearchQuery(overrideQuery);
+    setIsCrawling(true);
+    setIngestError(null);
+    setCrawlResults([]);
+    setCrawlSources([]);
+    setOnlineResults([]);
+    setOnlineSourceStatuses([]);
+    try {
+      const res = await fetch(`/api/library/crawl?q=${encodeURIComponent(q)}&limit=12`);
+      const data = await res.json();
+      if (data.success) {
+        setCrawlResults(Array.isArray(data.results) ? data.results : []);
+        setCrawlSources(Array.isArray(data.sources) ? data.sources : []);
+        if (!data.results?.length) setIngestError('未从开放图书来源检索到结果，请尝试其他关键词。');
+      } else {
+        setIngestError(data.error || '开放图书爬取/检索失败，请稍后重试。');
+      }
+    } catch (err: any) {
+      setIngestError(`爬取异常: ${err.message}`);
+    } finally {
+      setIsCrawling(false);
+    }
+  };
+
+  const handleIngestCrawledBook = async (r: any) => {
+    if (!r?.canImport || ingestingId) return;
+    setIngestingId(r.id);
+    setIngestError(null);
+    try {
+      const res = await fetch('/api/library/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          textUrl: r.textUrl,
+          externalId: r.id,
+          pageTitle: r.pageTitle,
+          identifier: r.identifier,
+          epubUrl: r.epubUrl,
+          source: r.source,
+          title: r.title,
+          author: r.author,
+          coverImage: r.coverImage,
+          description: r.description,
+          language: r.language,
+          sourceUrl: r.sourceUrl
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.book) {
+        setBooks(prev => (prev.find((b: Book) => b.id === data.book.id) ? prev : [data.book, ...prev]));
+        setCrawlResults([]);
+        setIngestingId(null);
+        setSelectedBook(data.book);
+        setView('detail');
+      } else {
+        setIngestError(data.error || '保存失败，请稍后重试。');
+        setIngestingId(null);
+      }
+    } catch (err: any) {
+      setIngestError(`保存异常: ${err.message}`);
+      setIngestingId(null);
+    }
+  };
+
   const handleOnlineSearch = async (overrideQuery?: string) => {
     const q = (typeof overrideQuery === 'string' ? overrideQuery : searchQuery).trim();
     if (!q) return;
@@ -239,6 +312,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     setOnlineYearFilter('all');
     setOnlineResults([]);
     setOnlineSourceStatuses([]);
+    setCrawlResults([]);
+    setCrawlSources([]);
+
     try {
       const res = await fetch(`/api/library/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
@@ -761,17 +837,29 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     onKeyDown={e => e.key === 'Enter' && handleOnlineSearch()}
                     placeholder="输入书名、作者、哲学、科学、文学或 ISBN..."
                     aria-describedby="world-library-search-help"
-                    className="w-full bg-slate-900/90 border border-amber-500/40 focus:border-amber-400 rounded-2xl pl-11 pr-28 py-3.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none transition-all shadow-inner"
+                    className="w-full bg-slate-900/90 border border-amber-500/40 focus:border-amber-400 rounded-2xl pl-11 pr-[13rem] py-3.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none transition-all shadow-inner"
                   />
-                  <button
-                    type="button"
-                    onClick={() => handleOnlineSearch()}
-                    disabled={isSearchingOnline || !searchQuery.trim()}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-xs font-semibold transition-all cursor-pointer shadow-md"
-                  >
-                    <Search className="w-3.5 h-3.5" />
-                    <span>{isSearchingOnline ? '检索中...' : '搜索'}</span>
-                  </button>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleCrawlBooks()}
+                      disabled={isCrawling || !searchQuery.trim()}
+                      title="像土星影视一样多源并行检索开放图书（Gutenberg/Open Library/Internet Archive/Wikisource）"
+                      className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-sky-500/40 bg-sky-950/40 hover:bg-sky-900/50 disabled:opacity-40 text-sky-100 text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      <Compass className="w-3.5 h-3.5" />
+                      <span>{isCrawling ? '爬取中...' : '开放爬取'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOnlineSearch()}
+                      disabled={isSearchingOnline || !searchQuery.trim()}
+                      className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-xs font-semibold transition-all cursor-pointer shadow-md"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      <span>{isSearchingOnline ? '检索中...' : '搜索'}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Popular open-source search chips */}
@@ -865,6 +953,59 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               </button>
             )}
           </section>
+
+          {/* Saturn-style open book crawl results */}
+          {(crawlResults.length > 0 || isCrawling) && (
+            <section aria-labelledby="library-crawl-results-title" aria-busy={isCrawling} className="p-5 rounded-2xl bg-slate-900/50 border border-sky-600/30">
+              <h3 id="library-crawl-results-title" className="text-sm font-semibold text-sky-300 mb-2">开放图书爬取/多源检索结果</h3>
+              <p className="text-[11px] text-slate-400 mb-3">并行检索 Gutenberg、Open Library、Internet Archive、Wikisource 等公开/开放来源；仅展示元数据与官方链接，不抓取受版权保护内容。</p>
+              {crawlSources.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {crawlSources.map((src: any) => (
+                    <span key={src.source} className={`rounded-md border px-2 py-1 text-[10px] ${src.ok ? 'text-emerald-300 border-emerald-800/70' : 'text-slate-400 border-slate-700'}`}>
+                      {src.source}: {src.ok ? `可用 ${src.count}` : '失败/超时'}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {isCrawling ? (
+                <div role="status" className="text-xs text-slate-400 py-4 text-center">正在并行爬取/检索开放图书来源...</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {crawlResults.map((r: any) => {
+                    const embedInfo = getBookEmbedUrl(r);
+                    return (
+                    <div key={r.id} className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-sky-500/50 transition-all">
+                      {r.coverImage && <img src={r.coverImage} alt={r.title} className="w-12 h-16 object-cover rounded-lg shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-xs font-bold text-white line-clamp-1">{r.title}</h4>
+                        <p className="text-[11px] text-sky-300 mb-1">{r.author} · {(r.language || '').toUpperCase()} · {r.source}{r.year ? ` · ${r.year}` : ''}</p>
+                        <p className="text-[11px] text-slate-400 line-clamp-2 mb-2">{r.description}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {r.canImport && (
+                            <button type="button" onClick={() => handleIngestCrawledBook(r)} disabled={ingestingId === r.id} className="min-h-11 inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer transition-all">
+                              {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="w-3 h-3" /><span>保存并诵读</span></>}
+                            </button>
+                          )}
+                          {(r.canReadOnline || embedInfo) && (
+                            <button type="button" onClick={() => setCrawlReader(r)} className="min-h-11 inline-flex items-center space-x-1 px-3 py-2 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white text-[11px] font-semibold transition-colors">
+                              <BookOpen className="w-3 h-3" /><span>在线阅读</span>
+                            </button>
+                          )}
+                          {r.sourceUrl && (
+                            <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center space-x-1 px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors">
+                              <ExternalLink className="w-3 h-3" /><span>官方来源</span>
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Online search results */}
           {(onlineResults.length > 0 || isSearchingOnline || ingestError) && (
@@ -1583,6 +1724,46 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           onClose={() => setReadingEpub(null)}
         />
       )}
+      {crawlReader && (() => {
+        const embed = getBookEmbedUrl(crawlReader);
+        return (
+          <div role="dialog" aria-modal="true" aria-label="在线阅读" className="fixed inset-0 z-50 flex flex-col bg-[#030712]/98 backdrop-blur-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-bold text-white">{crawlReader.title}</h2>
+                <p className="truncate text-[11px] text-slate-400">{crawlReader.author} · {crawlReader.source} · {embed?.label || '官方来源'}</p>
+              </div>
+              <div className="ml-3 flex shrink-0 items-center gap-2">
+                {crawlReader.sourceUrl && (
+                  <a href={crawlReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-slate-700 px-3 text-[11px] text-slate-300 hover:text-white">
+                    <ExternalLink className="h-3.5 w-3.5" /> 官方来源
+                  </a>
+                )}
+                <button type="button" onClick={() => setCrawlReader(null)} aria-label="关闭阅读器" className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>
+              </div>
+            </div>
+            {embed ? (
+              <>
+                <iframe
+                  src={embed.url}
+                  title={crawlReader.title}
+                  className="min-h-0 flex-1 border-0 bg-white"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads"
+                />
+                <p className="flex items-start gap-1.5 border-t border-slate-800 px-4 py-2 text-[10px] leading-relaxed text-slate-500">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 通过官方/公开阅读页面嵌入显示；内容版权、可用性与是否允许嵌入由来源站点控制。若空白或受限，请点击“官方来源”打开。
+                </p>
+              </>
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-slate-300">
+                <p>该来源暂不支持站内嵌入阅读，请使用官方来源打开。</p>
+                {crawlReader.sourceUrl && <a href={crawlReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-amber-600 px-4 py-2 text-white">打开官方来源</a>}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };

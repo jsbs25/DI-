@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { ExternalLink, Film } from 'lucide-react';
+import { ExternalLink, Film, Info } from 'lucide-react';
 import { Language } from '../../types/index.ts';
+import { toEmbedVideoUrl } from './videoDocumentUrl.ts';
 
 interface VideoDocumentViewerProps {
   sourceUrl: string;
@@ -15,6 +16,7 @@ export const VideoDocumentViewer: React.FC<VideoDocumentViewerProps> = ({ source
   const [playbackRate, setPlaybackRate] = useState(1);
   const [error, setError] = useState(false);
   const isChinese = lang === 'zh';
+  const embedUrl = toEmbedVideoUrl(sourceUrl);
 
   const handlePlaybackRate = (rate: number) => {
     setPlaybackRate(rate);
@@ -31,15 +33,32 @@ export const VideoDocumentViewer: React.FC<VideoDocumentViewerProps> = ({ source
           <p className="text-xs font-medium text-amber-200/80">JUPITER · VIDEO</p>
           <h1 className="mt-1 break-words text-xl font-semibold text-white sm:text-2xl">{title}</h1>
           <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex max-w-full items-center gap-1.5 break-all text-xs text-cyan-200 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70">
-            {isChinese ? '原始来源 / 下载（遵循来源权限）' : 'Original source / download (subject to source permissions)'}
+            {isChinese ? '原始来源' : 'Original source'}
             <ExternalLink className="h-3.5 w-3.5 shrink-0" />
           </a>
         </div>
       </header>
 
-      {error ? (
+      {embedUrl ? (
+        <>
+          <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-black">
+            <iframe
+              src={embedUrl}
+              title={title}
+              className="aspect-video w-full border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+              allowFullScreen
+              referrerPolicy="strict-origin-when-cross-origin"
+            />
+          </div>
+          <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-400">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+            <span>{isChinese ? '通过官方嵌入播放器播放；可用性、版权与地区限制由来源平台控制。若无法播放，请使用上方“原始来源”打开。' : 'Played via the official embed player; availability, copyright, and region restrictions are controlled by the source platform. If playback fails, open the original source above.'}</span>
+          </p>
+        </>
+      ) : error ? (
         <div role="alert" className="rounded-2xl border border-rose-300/15 bg-rose-950/30 p-6 text-sm text-rose-100">
-          <p>{isChinese ? '无法从原始来源播放此视频。来源可能不可用或拒绝访问。' : 'This video could not be played from its original source. The source may be unavailable or deny access.'}</p>
+          <p>{isChinese ? '无法从原始来源播放此视频。来源可能不可用、需要登录或拒绝访问。' : 'This video could not be played from its original source. The source may be unavailable, require login, or deny access.'}</p>
           <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-2 underline underline-offset-4">
             {isChinese ? '在来源网站打开' : 'Open at source'} <ExternalLink className="h-3.5 w-3.5" />
           </a>

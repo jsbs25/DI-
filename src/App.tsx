@@ -405,7 +405,7 @@ export default function App() {
     const eco = getPlanetEcosystem(planetId);
     if (!eco || !eco.available) return;
     setCurrentTab(eco.tab);
-    setBrowserInitialQuery(planetId === 'jupiter' ? `${eco.titleZh} ${eco.titleEn}` : null);
+    setBrowserInitialQuery(null);
   };
 
   return (
@@ -418,13 +418,14 @@ export default function App() {
         </div>
       )}
 
-      {/* Left sidebar navigation (desktop) */}
+      {/* Navigation */}
       <Sidebar
-        currentTab={currentTab}
-        onSelectTab={setCurrentTab}
         lang={lang}
+        onSelectLang={setLang}
+        currentTab={currentTab}
+        onSelectTab={(tab) => { setCurrentTab(tab); if (tab !== 'browser') setBrowserInitialQuery(null); }}
         collapsed={sidebarCollapsed}
-        onToggleCollapsed={() => setSidebarCollapsed(v => !v)}
+        onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -600,7 +601,7 @@ export default function App() {
 
         {currentTab === 'video' && <VideoCenter videos={videos} lang={lang} />}
 
-        {currentTab === 'game' && <GameCenter currentUser={currentUser} lang={lang} />}
+
 
         {currentTab === 'community' && (
           <CommunityList

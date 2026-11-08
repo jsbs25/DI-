@@ -295,12 +295,16 @@ export async function fetchRawHtml(url: string): Promise<string> {
 export async function searchWeb(
   query: string,
   limit = 8,
-  engine: 'auto' | 'bing' | 'duckduckgo' | 'wikipedia' = 'auto',
+  engine: 'auto' | 'google' | 'bing' | 'duckduckgo' | 'wikipedia' = 'auto',
   lang: 'en' | 'zh' | 'ar' | 'es' | 'fr' | 'ru' = 'en'
 ): Promise<SearchResult[]> {
   const q = query.trim();
   if (!q) return [];
 
+  if (engine === 'google') {
+    const r = await searchGoogle(q, limit);
+    return r.length > 0 ? r : await searchBing(q, limit);
+  }
   if (engine === 'bing') {
     const r = await searchBing(q, limit);
     return r.length > 0 ? r : await searchWikipedia(q, limit, lang);
@@ -837,6 +841,46 @@ function isDisallowed(pathname: string, disallowed: string[]): boolean {
     if (pattern === '/') return true;
     return pathname.startsWith(pattern);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Z-Library / open book discovery (metadata & official links only; no scraping)
+// ---------------------------------------------------------------------------
+
+export interface ZLibraryDiscoveryResult {
+  title: string;
+  url: string;
+  snippet: string;
+  source: 'web';
+  category: 'books';
+}
+
+/**
+ * Discover book-related pages via web search. Returns external links only —
+ * does not scrape or download content from any source. Intended as a safe
+ * fallback when dedicated book APIs are unavailable.
+ */
+export async function searchZLibraryDiscovery(
+  query: string,
+  limit = 10,
+  lang: 'en' | 'zh' | 'ar' | 'es' | 'fr' | 'ru' = 'en'
+): Promise<ZLibraryDiscoveryResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+  // Use general web search with book-oriented query; do not target or scrape
+  // any specific shadow library domain.
+  const searchQuery = `${q} book pdf epub`;
+  const results = await searchWeb(searchQuery, limit, 'auto', lang);
+  return results
+    .filter(r => r.url && /^https?:\/\//i.test(r.url))
+    .slice(0, limit)
+    .map(r => ({
+      title: r.title || 'Book result',
+      url: r.url,
+      snippet: r.snippet || '',
+      source: 'web' as const,
+      category: 'books' as const
+    }));
 }
 
 // ---------------------------------------------------------------------------

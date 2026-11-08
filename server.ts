@@ -10,9 +10,11 @@ import { buildConversationPrompt, normalizeConversationHistory } from './server/
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
-import { fetchAndExtract, searchGitHubRepositories, searchGoogleCategory, searchGoogleImages, searchWeb, searchWebProviders, type JupiterExternalSearchCategory, type SearchResult } from './server/webFetcher.ts';
+import { fetchAndExtract, searchGitHubRepositories, searchGoogleCategory, searchGoogleImages, searchWeb, searchWebProviders, searchZLibraryDiscovery, type JupiterExternalSearchCategory, type SearchResult } from './server/webFetcher.ts';
+import { searchYouTubeVideos } from './server/youtubeSearch.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
+import { crawlOpenBooks } from './server/bookCrawler.ts';
 import {
   searchKnowledge,
   getAllKnowledgeNodes,
@@ -21,6 +23,7 @@ import {
   getKnowledgeNodeByCountry
 } from './server/knowledgeGraph.ts';
 import { musicStore } from './server/musicStore.ts';
+import { resolveMusicEmbedUrl, searchYouTubeMusic } from './server/youtubeMusicSearch.ts';
 
 dotenv.config();
 
@@ -632,6 +635,20 @@ app.get('/api/music/search', (req, res) => {
   res.json({ success: true, query: queryStr, count: results.length, tracks: results });
 });
 
+app.get('/api/music/youtube-search', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
+  if (q.length > 200) return res.status(400).json({ success: false, error: 'Search query must be 200 characters or fewer' });
+  const limit = Math.max(1, Math.min(24, Number(req.query.limit) || 12));
+  try {
+    const direct = resolveMusicEmbedUrl(q);
+    const tracks = direct ? [direct] : await searchYouTubeMusic(q, limit);
+    res.json({ success: true, query: q, tracks, mode: direct ? 'embed-url' : 'search' });
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err.message || 'Music search failed' });
+  }
+});
+
 app.post('/api/music/crawl', async (req, res) => {
   const { sourceDomain, keyword } = req.body;
   try {
@@ -1123,13 +1140,44 @@ app.get('/api/browser/search', async (req, res) => {
   if (!q || typeof q !== 'string' || !q.trim()) {
     return res.status(400).json({ success: false, error: 'Search query required' });
   }
-  const engineParam = engine === 'bing' || engine === 'duckduckgo' || engine === 'wikipedia' ? engine : 'auto';
+  const engineParam = engine === 'google' || engine === 'bing' || engine === 'duckduckgo' || engine === 'wikipedia' ? engine : 'auto';
   const langParam = lang === 'zh' || lang === 'ar' || lang === 'es' || lang === 'fr' || lang === 'ru' ? lang : 'en';
   try {
     const results = await searchWeb(q, 10, engineParam, langParam);
     res.json({ success: true, query: q, results, engine: engineParam, lang: langParam });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Search failed' });
+  }
+});
+
+// Saturn-style multi-source open book crawler (metadata + official/open links)
+app.get('/api/library/crawl', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
+  if (q.length > 200) return res.status(400).json({ success: false, error: 'Search query must be 200 characters or fewer' });
+  const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 12;
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(24, Math.floor(rawLimit))) : 12;
+  try {
+    const data = await crawlOpenBooks(q, limit);
+    res.json({ success: true, query: q, ...data });
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err.message || 'Book crawl failed' });
+  }
+});
+
+// Book discovery (safe web search fallback for book queries; returns external links only)
+app.get('/api/library/discover', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
+  if (q.length > 200) return res.status(400).json({ success: false, error: 'Search query must be 200 characters or fewer' });
+  const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 10;
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(20, Math.floor(rawLimit))) : 10;
+  const lang = req.query.lang === 'zh' || req.query.lang === 'ar' || req.query.lang === 'es' || req.query.lang === 'fr' || req.query.lang === 'ru' ? req.query.lang : 'en';
+  try {
+    const results = await searchZLibraryDiscovery(q, limit, lang);
+    res.json({ success: true, query: q, results, source: 'web-discovery' });
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err.message || 'Book discovery failed' });
   }
 });
 
@@ -1140,7 +1188,7 @@ app.get('/api/jupiter/search', async (req, res) => {
   }
   const lang = req.query.lang === 'zh' || req.query.lang === 'ar' || req.query.lang === 'es' ||
     req.query.lang === 'fr' || req.query.lang === 'ru' ? req.query.lang : 'en';
-  const engine = req.query.engine === 'bing' || req.query.engine === 'duckduckgo' ||
+  const engine = req.query.engine === 'google' || req.query.engine === 'bing' || req.query.engine === 'duckduckgo' ||
     req.query.engine === 'wikipedia' || req.query.engine === 'github' ? req.query.engine : 'auto';
   const searchCategories = ['all', 'images', 'videos', 'news', 'pdf', 'audio', 'books', 'academic'] as const;
   const requestedCategory = typeof req.query.type === 'string' ? req.query.type : '';
@@ -1174,7 +1222,7 @@ app.get('/api/jupiter/search', async (req, res) => {
           : await searchWeb(q, 10, engine, lang);
     } else {
       const verticalSearch = await searchGoogleCategory(q, category as JupiterExternalSearchCategory, 20, lang);
-      if (!verticalSearch.configured) {
+      if (!verticalSearch.configured && category !== 'books' && category !== 'audio' && category !== 'videos') {
         return res.status(503).json({
           success: false,
           error: `${category} 搜索尚未配置。请在服务端设置 SERPER_API_KEY；不会用普通网页结果冒充该分类结果。`
@@ -1188,20 +1236,54 @@ app.get('/api/jupiter/search', async (req, res) => {
           : category === 'audio'
             ? searchEarthAudio(q, store, 10)
             : [];
-      externalResults = verticalSearch.results;
+      if (verticalSearch.configured) {
+        externalResults = verticalSearch.results;
+      } else if (category === 'videos') {
+        // Aggregate public video discovery (Saturn-style): YouTube metadata + open web providers.
+        // Shows results that can be found; playable sources open in JUPITER when embed/direct playback is allowed.
+        const [yt, web] = await Promise.all([
+          searchYouTubeVideos(q, 16).catch(() => []),
+          searchWebProviders(`${q} 8K 4K video site:youtube.com OR site:vimeo.com OR site:dailymotion.com OR site:bilibili.com OR site:twitch.tv`, 16, lang).catch(() => [])
+        ]);
+        const seen = new Set<string>();
+        externalResults = [...yt, ...web].filter(r => {
+          const u = String(r?.url || '');
+          if (!/^https?:\/\//i.test(u) || seen.has(u)) return false;
+          seen.add(u);
+          return true;
+        }).map(r => ({ ...r, category: 'videos' as const })).slice(0, 24);
+      } else if (category === 'books') {
+        // Safe discovery fallback: web search for book-related pages (external links only, no scraping).
+        const discovery = await searchZLibraryDiscovery(q, 20, lang);
+        externalResults = discovery;
+      } else {
+        externalResults = await searchWebProviders(`${q} ${category === 'audio' ? 'audio music' : 'book'}`, 20, lang);
+      }
     }
     const enrichedExternal = externalResults.map((result, index) => {
       let domain = '';
       try { domain = new URL(result.sourceUrl || result.url).hostname.replace(/^www\./, ''); } catch { /* Invalid provider links are removed below. */ }
+      const playable = /youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com|dailymotion\.com|bilibili\.com|facebook\.com|x\.com|twitter\.com|douyin\.com|kuaishou\.com/i.test(domain) || /\.(?:m4v|mov|mp4|ogv|webm)$/i.test(new URL(result.url).pathname);
       return {
         ...result,
         id: `web:${domain}:${index}:${result.url}`,
         source: result.source === 'github' ? 'github' as const : 'web' as const,
-        kind: 'web' as const,
+        kind: (category === 'videos' || result.category === 'videos' || playable) ? 'video' as const : 'web' as const,
+        category: category !== 'all' ? category : result.category,
         domain
       };
     }).filter(result => Boolean(result.domain));
-    const results = mergeAndRankJupiterResults(q, [...internalResults, ...enrichedExternal], 20);
+    let results = mergeAndRankJupiterResults(q, [...internalResults, ...enrichedExternal], 30);
+    if (category === 'videos') {
+      results = results
+        .map(r => ({ ...r, kind: r.source === 'earth' ? r.kind : 'video' as const, category: 'videos' as const }))
+        .sort((a, b) => {
+          const aPlay = /youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com|\.(mp4|webm|m4v|mov|ogv)(?:$|\?)/i.test(a.url) ? 1 : 0;
+          const bPlay = /youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com|\.(mp4|webm|m4v|mov|ogv)(?:$|\?)/i.test(b.url) ? 1 : 0;
+          return bPlay - aPlay;
+        })
+        .slice(0, 24);
+    }
     cacheJupiterSearch(cacheKey, results);
     res.json({
       success: true,
