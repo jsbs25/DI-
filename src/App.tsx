@@ -429,6 +429,8 @@ export default function App() {
             }
             setShowIntro(false);
           }}
+          onAuthSuccess={handleAuthSuccess}
+          currentUser={currentUser}
         />
       )}
 
