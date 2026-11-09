@@ -40,7 +40,7 @@ import {
   type IslamicLibraryBook,
   type IslamicLibraryCategory,
   type IslamicLibrarySource
-} from '../../../server/islamicLibraryCrawler.ts';
+} from './islamicLibraryData.ts';
 
 const STORAGE_KEY = 'earth_one_arabic_learning_v1';
 const DAILY_NEW_LIMIT = 5;
