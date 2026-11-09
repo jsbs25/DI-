@@ -473,6 +473,7 @@ export default function App() {
           setKnowledgeFocusNodeId(nodeId);
           setCurrentTab('knowledge');
         }}
+        onReplayIntro={() => setShowIntro(true)}
       />
 
       {/* 2. Main View Content Switcher */}
