@@ -113,7 +113,7 @@ export interface CrawlLog {
 }
 
 export interface SearchQuery {
-  q: string;
+  q?: string;
   planet?: PlanetId;
   category?: string;
   resourceType?: ResourceType;

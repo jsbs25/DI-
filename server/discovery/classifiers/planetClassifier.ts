@@ -129,13 +129,12 @@ export async function parseNaturalLanguageIntent(userPrompt: string): Promise<AI
 }`;
 
   try {
-    const rawAiOutput = await aiGateway.chat(
-      [
-        { role: 'system', content: systemInstructions },
-        { role: 'user', content: promptTrimmed }
-      ],
-      { temperature: 0.1, maxTokens: 250 }
+    const res = await aiGateway.generateContent(
+      'qwen-2.5-open',
+      promptTrimmed,
+      systemInstructions
     );
+    const rawAiOutput = res.content || '';
 
     // Extract JSON from response
     const jsonMatch = rawAiOutput.match(/\{[\s\S]*?\}/);
@@ -193,10 +192,8 @@ ${itemsExcerpt}
 2. 指出哪个资源最匹配、是否免费，以及来自哪个星球。`;
 
   try {
-    return await aiGateway.chat(
-      [{ role: 'user', content: prompt }],
-      { temperature: 0.3, maxTokens: 200 }
-    );
+    const res = await aiGateway.generateContent('qwen-2.5-open', prompt);
+    return res.content || '';
   } catch {
     const top = results[0];
     return `已为您检索到 ${results.length} 条关联资源。首选推荐「${top.name}」（${top.primaryPlanet.toUpperCase()} 星球，${top.accessType === 'open' ? '免费开放' : '可用'}），可点击直接访问。`;

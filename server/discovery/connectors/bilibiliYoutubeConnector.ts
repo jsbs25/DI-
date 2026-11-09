@@ -16,9 +16,9 @@ export async function harvestBilibiliVideos(query: string, limit = 8): Promise<n
     const results = await searchBilibiliVideos(query, limit);
     let saved = 0;
     for (const v of results) {
-      if (!v.url || !v.title) continue;
+      if (!v.sourceUrl || !v.title) continue;
       discoveryDb.insertOrUpdateResource({
-        url: v.url,
+        url: v.sourceUrl,
         name: v.title,
         description: v.description || `${v.title} · 哔哩哔哩 (UP主: ${v.author || 'bilibili'})`,
         resourceType: 'video' as ResourceType,
@@ -34,7 +34,7 @@ export async function harvestBilibiliVideos(query: string, limit = 8): Promise<n
         extraMeta: {
           bvid: v.bvid,
           author: v.author,
-          playCount: v.playCount,
+          play: String(v.play),
           duration: v.duration,
           embedUrl: v.embedUrl
         }
@@ -56,15 +56,16 @@ export async function harvestYouTubeVideos(query: string, limit = 8): Promise<nu
     const results = await searchYouTubeVideos(query, limit);
     let saved = 0;
     for (const v of results) {
-      if (!v.sourceUrl || !v.title) continue;
+      const videoUrl = v.sourceUrl || v.url;
+      if (!videoUrl || !v.title) continue;
       discoveryDb.insertOrUpdateResource({
-        url: v.sourceUrl,
+        url: videoUrl,
         name: v.title,
-        description: v.snippet || `${v.title} · YouTube 视频 (频道: ${v.channelTitle || 'YouTube'})`,
+        description: v.snippet || `${v.title} · YouTube 视频`,
         resourceType: 'video' as ResourceType,
         primaryPlanet: 'saturn' as PlanetId,
         category: 'youtube_video',
-        tags: ['YouTube', v.channelTitle || 'YouTube Channel', '4K原画'].filter(Boolean),
+        tags: ['YouTube', '视频', v.duration ? `时长:${v.duration}` : ''].filter(Boolean),
         language: 'en',
         icon: v.thumbnailUrl,
         source: 'youtube',
@@ -72,9 +73,8 @@ export async function harvestYouTubeVideos(query: string, limit = 8): Promise<nu
         accessType: 'open',
         qualityScore: 92,
         extraMeta: {
-          videoId: v.videoId,
-          channelTitle: v.channelTitle,
-          embedUrl: v.embedUrl
+          duration: v.duration,
+          source: v.source
         }
       });
       saved++;
@@ -94,9 +94,9 @@ export async function harvestYouTubeMusic(query: string, limit = 8): Promise<num
     const results = await searchYouTubeMusic(query, limit);
     let saved = 0;
     for (const m of results) {
-      if (!m.watchUrl || !m.title) continue;
+      if (!m.sourceUrl || !m.title) continue;
       discoveryDb.insertOrUpdateResource({
-        url: m.watchUrl,
+        url: m.sourceUrl,
         name: m.title,
         description: `${m.title} · 艺术家: ${m.artist} · 金星音乐馆`,
         resourceType: 'music' as ResourceType,
@@ -104,16 +104,16 @@ export async function harvestYouTubeMusic(query: string, limit = 8): Promise<num
         category: 'music_track',
         tags: ['金星音乐', m.artist, m.album || 'Single', '原声音频'].filter(Boolean),
         language: 'zh',
-        icon: m.thumbnailUrl,
+        icon: m.coverUrl,
         source: 'youtube_music',
         copyrightStatus: 'official',
         accessType: 'open',
         qualityScore: 94,
         extraMeta: {
-          videoId: m.videoId,
+          videoId: m.id,
           artist: m.artist,
           album: m.album,
-          duration: m.duration,
+          durationSeconds: m.durationSeconds,
           embedUrl: m.embedUrl
         }
       });

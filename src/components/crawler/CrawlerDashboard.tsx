@@ -552,7 +552,7 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
               </div>
 
               <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                <span className="text-[10px] text-slate-500 font-mono">{task.createdAt}</span>
+                <span className="text-[10px] text-slate-500 font-mono">{task.lastRunAt || '就绪'}</span>
                 <button
                   onClick={() => handleTriggerHealthCheck()}
                   className="px-3 py-1.5 rounded-xl bg-blue-600/20 text-cyan-300 hover:bg-blue-600 hover:text-white text-xs font-medium transition-all"
