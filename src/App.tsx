@@ -45,7 +45,9 @@ import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
     try {
-      return sessionStorage.getItem('earth_one_intro_completed') !== '1';
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('nointro') === '1') return false;
+      return true;
     } catch {
       return true;
     }
@@ -422,11 +424,6 @@ export default function App() {
       {showIntro && (
         <CinematicIntro
           onComplete={() => {
-            try {
-              sessionStorage.setItem('earth_one_intro_completed', '1');
-            } catch {
-              /* ignore */
-            }
             setShowIntro(false);
           }}
           onAuthSuccess={handleAuthSuccess}
