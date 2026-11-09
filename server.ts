@@ -31,6 +31,13 @@ import { executeUnifiedSearch } from './server/discovery/search/unifiedSearchEng
 import { startDiscoveryScheduler, runLinkHealthCheck, runRssSync } from './server/discovery/scheduler/taskScheduler.ts';
 import { harvestPublicWebUrl } from './server/discovery/connectors/webMetadataConnector.ts';
 import { harvestRssFeed } from './server/discovery/connectors/rssConnector.ts';
+import {
+  crawlIslamicLibraries,
+  getFeaturedIslamicBooks,
+  seedIslamicLibraryToDiscovery,
+  type IslamicLibraryCategory,
+  type IslamicLibrarySource
+} from './server/islamicLibraryCrawler.ts';
 
 dotenv.config();
 
@@ -1699,6 +1706,44 @@ app.get('/api/knowledge/nodes/:id', (req, res) => {
 });
 
 // -------------------------------------------------------------
+// 8b2. ISLAMIC DIGITAL LIBRARIES & ARABIC MANUSCRIPTS CRAWLER
+// -------------------------------------------------------------
+app.get('/api/learning/arabic/islamic-libraries', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  const category = typeof req.query.category === 'string' ? (req.query.category as IslamicLibraryCategory) : undefined;
+  const source = typeof req.query.source === 'string' ? (req.query.source as IslamicLibrarySource) : undefined;
+  const limit = req.query.limit ? Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10))) : 24;
+
+  try {
+    const data = await crawlIslamicLibraries(q, { category, source, limit });
+    res.json({ success: true, ...data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/learning/arabic/islamic-libraries/featured', (_req, res) => {
+  const books = getFeaturedIslamicBooks();
+  res.json({ success: true, books, total: books.length });
+});
+
+app.post('/api/learning/arabic/islamic-libraries/crawl', async (req, res) => {
+  const query = typeof req.body?.query === 'string' ? req.body.query : 'grammar';
+  const category = typeof req.body?.category === 'string' ? (req.body.category as IslamicLibraryCategory) : undefined;
+
+  try {
+    const result = await crawlIslamicLibraries(query, { category, limit: 30 });
+    res.json({
+      success: true,
+      message: `成功抓取各大伊斯兰图书馆，共索引 ${result.count} 部经典典籍与手稿`,
+      ...result
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
 // 8c. GLOBAL UNIFIED SEARCH (across all modules)
 // -------------------------------------------------------------
 app.get('/api/search/global', (req, res) => {
@@ -1765,6 +1810,9 @@ async function startServer() {
     // Prevent the interval from keeping the process alive in tests/edge cases
     harvestInterval.unref?.();
   }
+
+  // Pre-seed Islamic Digital Library classics into Discovery engine
+  seedIslamicLibraryToDiscovery();
 
   // Start Discovery background maintenance daemon
   startDiscoveryScheduler();
