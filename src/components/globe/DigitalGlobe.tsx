@@ -754,7 +754,11 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         </div>
       )}
 
-      <aside id="globe-local-nav" style={{ display: showGlobeTools ? undefined : "none" }} className="absolute bottom-6 left-3 top-4 z-20 hidden w-[174px] flex-col rounded-[26px] border border-slate-700/70 bg-[#071020]/85 p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl md:flex">
+      <aside
+        id="globe-local-nav"
+        style={{ display: showGlobeTools ? undefined : 'none' }}
+        className="absolute bottom-6 left-3 top-4 z-20 hidden w-[174px] flex-col rounded-[26px] border border-slate-700/70 bg-[#071020]/85 p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl md:flex"
+      >
         <div className="flex items-center gap-2 border-b border-slate-800/90 px-2 pb-3 pt-1">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-blue-400/30 bg-blue-500/15 text-blue-300 shadow-[0_0_24px_rgba(37,99,235,.24)]">
             <Globe2 className="h-5 w-5" />
@@ -791,11 +795,11 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           <button
             type="button"
             onClick={() => setAppsExpanded(open => !open)}
-            aria-expanded={showGlobeTools ? "true" : "false"}
+            aria-expanded={appsExpanded}
             className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-[11px] font-semibold text-slate-300 transition-colors hover:bg-slate-800/80 hover:text-white"
           >
             <Sparkles className="h-4 w-4 text-cyan-300" />
-            <span className="flex-1">{t.showGlobeTools}</span>
+            <span className="flex-1">{t.apps}</span>
             <ChevronRight className={`h-3.5 w-3.5 transition-transform ${appsExpanded ? 'rotate-90' : ''}`} />
           </button>
           {appsExpanded && (
@@ -835,7 +839,19 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-[220px] lg:pl-[220px] flex flex-col justify-start md:justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
         {/* Left Hero Title & CTA */}
         <div className="max-w-xl pointer-events-auto">
+          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-400/30 text-blue-300 text-xs font-medium mb-3">
+            <Globe2 className="w-3.5 h-3.5" />
+            <span>{t.appName}</span>
+            <span className="text-slate-500">·</span>
+            <span>{t.tagline}</span>
+          </div>
 
+          <h1 className="text-3xl sm:text-5xl font-serif font-bold text-white tracking-tight leading-tight">
+            {t.appName}
+          </h1>
+          <p className="mt-2 text-sm sm:text-base text-slate-300/90 leading-relaxed font-sans max-w-lg">
+            {t.motto}
+          </p>
 
           {showFirstUseHint && (
             <div className="mt-3 flex max-w-md items-start gap-2 rounded-xl border border-cyan-900/70 bg-slate-950/75 px-3 py-2 text-xs leading-relaxed text-cyan-100/90 shadow-lg backdrop-blur-md">
@@ -856,20 +872,64 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             </div>
           )}
 
-          {/* Start Exploring Action Button */}
+          {/* Start Exploring Action Button & Tools Disclosure */}
           <div className="mt-4 sm:mt-6 flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={onExploreUniverse}
-              aria-pressed="false" className="inline-flex items-center space-x-2 sm:space-x-3 px-4 sm:px-8 py-2.5 sm:py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-xs sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
+              aria-pressed="false"
+              className="inline-flex items-center space-x-2 sm:space-x-3 px-4 sm:px-8 py-2.5 sm:py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-xs sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
             >
               <span>{t.startExploring}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
             </button>
 
+            {onToggleGlobeTools && (
+              <button
+                type="button"
+                onClick={onToggleGlobeTools}
+                aria-expanded={showGlobeTools}
+                className="inline-flex items-center space-x-1.5 px-4 py-2.5 sm:py-3.5 rounded-full border border-slate-700/80 bg-slate-900/80 hover:bg-slate-800 text-slate-200 text-xs sm:text-sm font-medium transition-all shadow-lg"
+              >
+                <Layers className="w-4 h-4 text-cyan-400" />
+                <span>{showGlobeTools ? t.hideGlobeTools : t.showGlobeTools}</span>
+              </button>
+            )}
           </div>
 
+          {/* Statistics Panel */}
+          <div
+            id="globe-statistics-panel"
+            style={{ display: showGlobeTools ? undefined : 'none' }}
+            className="grid grid-cols-3 gap-2 sm:gap-3 mt-4 max-w-md"
+          >
+            <div className="p-3 rounded-2xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-md">
+              <div className="text-[10px] text-slate-400 uppercase tracking-wider">{t.onlineUsers}</div>
+              <div className="text-base sm:text-lg font-bold font-mono text-cyan-300 mt-0.5">
+                {nodes.length > 0 ? nodes.length.toLocaleString() : '1,280'}
+              </div>
+            </div>
+            <div className="p-3 rounded-2xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-md">
+              <div className="text-[10px] text-slate-400 uppercase tracking-wider">{t.activeNodes}</div>
+              <div className="text-base sm:text-lg font-bold font-mono text-emerald-300 mt-0.5">
+                {countries.length > 0 ? countries.length : '196'}
+              </div>
+            </div>
+            <div className="p-3 rounded-2xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-md">
+              <div className="text-[10px] text-slate-400 uppercase tracking-wider">{t.registeredCitizens}</div>
+              <div className="text-base sm:text-lg font-bold font-mono text-amber-300 mt-0.5">
+                368,420
+              </div>
+            </div>
+          </div>
+        </div>
+
           {/* Mobile controls stay in document flow instead of covering the stats. */}
-          <div id="globe-mobile-controls" style={{ display: showGlobeTools ? undefined : "none" }} className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden" aria-label={t.globeControls}>
+          <div
+            id="globe-mobile-controls"
+            style={{ display: showGlobeTools ? undefined : 'none' }}
+            className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden"
+            aria-label={t.globeControls}
+          >
             <button onClick={handleToggleExplore} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={isZoomedIn ? t.zoomOut : t.inspectEarth} title={isZoomedIn ? t.zoomOut : t.inspectEarth}>
               <Orbit className="h-4 w-4" />
             </button>
@@ -888,13 +948,16 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
               </button>
             )}
           </div>
-        </div>
 
         <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />
 
         {/* Ultra-Clean Floating Aerospace Telemetry Capsule (Sleek, Unobstructed, High-Tech) */}
         <div className="w-full flex justify-center pointer-events-auto pt-4 sm:pt-6">
-          <div id="globe-telemetry-panel" style={{ display: showGlobeTools ? undefined : "none" }} className="w-full max-w-4xl p-2.5 sm:p-3 rounded-2xl bg-slate-950/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
+          <div
+            id="globe-telemetry-panel"
+            style={{ display: showGlobeTools ? undefined : 'none' }}
+            className="w-full max-w-4xl p-2.5 sm:p-3 rounded-2xl bg-slate-950/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-3 text-xs"
+          >
             {/* 1. ISS Live Telemetry */}
             <div className="flex items-center space-x-3 w-full md:w-auto">
               <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0">
@@ -902,7 +965,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
               </div>
               <div className="min-w-0">
                 <div className="flex items-center space-x-1.5">
-                  <span className="font-bold text-white text-xs">{t.issTracker || "国际空间站实时遥测"}</span>
+                  <span className="font-bold text-white text-xs">{t.issTracker || '国际空间站实时遥测'}</span>
                   <span className="px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 font-mono text-[9px] border border-cyan-800/60">
                     NORAD 25544
                   </span>
@@ -934,12 +997,12 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             <div className="hidden md:block h-6 w-px bg-slate-800" />
 
             {/* 2. Space Weather & Planetary Environment */}
-            <div id="globe-statistics-panel" style={{ display: showGlobeTools ? undefined : "none" }} className="hidden lg:flex items-center space-x-3 text-slate-400 text-[11px]">
+            <div className="hidden lg:flex items-center space-x-3 text-slate-400 text-[11px]">
               <div className="w-8 h-8 rounded-xl bg-purple-950/80 border border-purple-500/40 flex items-center justify-center text-purple-400 shrink-0">
                 <Radio className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-semibold text-slate-200">{t.seismicMonitor || "全球地震带实时监测"}</div>
+                <div className="font-semibold text-slate-200">{t.seismicMonitor || '全球地震带实时监测'}</div>
                 <div className="font-mono text-slate-400 text-[10px] mt-0.5">
                   Kp-2.1 (地磁宁静) · 太阳风 412 km/s · 通讯正常
                 </div>
@@ -999,7 +1062,11 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       {/* ============================================================== */}
       {/* 3. RIGHT FLOATING VERTICAL ACTION RAIL                         */}
       {/* ============================================================== */}
-      <aside id="globe-controls-rail" style={{ display: showGlobeTools ? undefined : "none" }} className="hidden md:flex fixed right-6 top-1/2 -translate-y-1/2 z-20 flex-col space-y-3 pointer-events-auto">
+      <aside
+        id="globe-controls-rail"
+        style={{ display: showGlobeTools ? undefined : 'none' }}
+        className="hidden md:flex fixed right-6 top-1/2 -translate-y-1/2 z-20 flex-col space-y-3 pointer-events-auto"
+      >
         <div className="p-2 rounded-2xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col space-y-3 text-slate-400">
           {/* Orbit switch */}
           <button

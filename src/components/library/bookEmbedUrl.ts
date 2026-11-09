@@ -27,11 +27,14 @@ export function getBookEmbedUrl(book: EmbeddableBookRef): { url: string; label: 
   const sourceUrl = safeHttps(book.sourceUrl);
   const identifier = typeof book.identifier === 'string' && /^[A-Za-z0-9._-]+$/.test(book.identifier) ? book.identifier : null;
 
+  if ((book as any).embedUrl && safeHttps((book as any).embedUrl)) {
+    return { url: safeHttps((book as any).embedUrl)!, label: '官方嵌入阅读' };
+  }
   if (source === 'archive' || source === 'archive_islamic') {
-    if (identifier) return { url: `https://archive.org/stream/${encodeURIComponent(identifier)}`, label: 'Internet Archive Reader' };
+    if (identifier) return { url: `https://archive.org/embed/${encodeURIComponent(identifier)}`, label: 'Internet Archive 3D翻书阅读' };
     if (sourceUrl?.includes('archive.org/details/')) {
       const id = sourceUrl.split('/details/')[1]?.split(/[?#/]/)[0];
-      if (id) return { url: `https://archive.org/stream/${encodeURIComponent(id)}`, label: 'Internet Archive Reader' };
+      if (id) return { url: `https://archive.org/embed/${encodeURIComponent(id)}`, label: 'Internet Archive 3D翻书阅读' };
     }
   }
   if (source === 'openlibrary' && sourceUrl?.includes('openlibrary.org')) {

@@ -65,6 +65,51 @@ async function searchPiped(query: string, limit: number): Promise<SearchResult[]
   return [];
 }
 
+async function searchYouTubeDirectHtml(query: string, limit: number): Promise<SearchResult[]> {
+  try {
+    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+      },
+      signal: AbortSignal.timeout(7000)
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const start = html.indexOf('ytInitialData = ');
+    if (start === -1) return [];
+    const jsonStart = start + 'ytInitialData = '.length;
+    const end = html.indexOf(';</script>', jsonStart);
+    if (end === -1) return [];
+    const data = JSON.parse(html.slice(jsonStart, end));
+    const sectionList = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+    const out: SearchResult[] = [];
+    for (const section of sectionList) {
+      const items = section.itemSectionRenderer?.contents || [];
+      for (const item of items) {
+        const v = item.videoRenderer;
+        if (!v || !v.videoId) continue;
+        const videoId = v.videoId;
+        out.push({
+          title: v.title?.runs?.[0]?.text || 'YouTube video',
+          url: `https://www.youtube.com/watch?v=${videoId}`,
+          sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
+          snippet: [v.ownerText?.runs?.[0]?.text, v.publishedTimeText?.simpleText].filter(Boolean).join(' · '),
+          source: 'web' as const,
+          category: 'videos' as const,
+          thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          duration: v.lengthText?.simpleText
+        });
+        if (out.length >= limit) break;
+      }
+      if (out.length >= limit) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 export async function searchYouTubeVideos(query: string, limit = 12): Promise<SearchResult[]> {
   const q = query.trim();
   if (!q) return [];
@@ -91,5 +136,7 @@ export async function searchYouTubeVideos(query: string, limit = 12): Promise<Se
       }
     } catch { /* fallback */ }
   }
-  return searchPiped(q, limit);
+  const piped = await searchPiped(q, limit);
+  if (piped.length > 0) return piped;
+  return searchYouTubeDirectHtml(q, limit);
 }

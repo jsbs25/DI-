@@ -9,19 +9,17 @@ import {
   Volume2,
   VolumeX,
   Repeat,
-  Shuffle,
   Music2,
   Radio,
   Sparkles,
-  Download,
   ExternalLink,
   Bot,
-  Disc3,
   Waves,
-  FolderOpen,
-  ListMusic,
-  CheckCircle2,
-  Loader2
+  Loader2,
+  Tv,
+  Youtube,
+  X,
+  Maximize2
 } from 'lucide-react';
 import { Language } from '../types/index.ts';
 
@@ -51,6 +49,8 @@ interface VenusMusicSpaceProps {
 
 const GENRE_FILTERS = [
   { id: 'all', zh: '✨ 全部精选', en: 'All' },
+  { id: 'bilibili_live', zh: '📺 B站音乐 & 现场', en: 'Bilibili Music' },
+  { id: 'youtube_music', zh: '▶️ YouTube 音乐', en: 'YouTube Music' },
   { id: 'Ambient Space', zh: '🌌 深空氛围', en: 'Ambient Space' },
   { id: 'Neo-Classical', zh: '🎻 新古典主义', en: 'Neo-Classical' },
   { id: 'Electronic', zh: '⚡ 脉冲电子', en: 'Electronic' },
@@ -58,6 +58,14 @@ const GENRE_FILTERS = [
   { id: 'Cyberpunk', zh: '🤖 赛博朋克', en: 'Cyberpunk' },
   { id: 'Acoustic', zh: '🎸 木质原声', en: 'Acoustic' }
 ];
+
+function parseMinutesDuration(str?: string): number {
+  if (!str) return 210;
+  const parts = str.split(':').map(Number);
+  if (parts.length === 2) return (parts[0] || 0) * 60 + (parts[1] || 0);
+  if (parts.length === 3) return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0);
+  return 210;
+}
 
 export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }) => {
   const isZh = lang === 'zh';
@@ -74,14 +82,14 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   const [volume, setVolume] = useState(0.85);
   const [isMuted, setIsMuted] = useState(false);
   const [isLoop, setIsLoop] = useState(false);
+  const [showEmbedPlayer, setShowEmbedPlayer] = useState(true);
 
   // Crawler state
-  const [crawlerSource, setCrawlerSource] = useState('freemusicarchive.org');
-  const [crawlerKeyword, setCrawlerKeyword] = useState('space ambient');
+  const [crawlerSource, setCrawlerSource] = useState('bilibili.com');
+  const [crawlerKeyword, setCrawlerKeyword] = useState('宇宙 氛围 音乐');
   const [isCrawling, setIsCrawling] = useState(false);
   const [crawlNotice, setCrawlNotice] = useState<string | null>(null);
   const [ytSearching, setYtSearching] = useState(false);
-  const [ytTracks, setYtTracks] = useState<MusicTrack[]>([]);
 
   // Audio & Visualizer refs
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -101,7 +109,10 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       const res = await fetch(endpoint);
       const data = await res.json();
       if (data.success && Array.isArray(data.tracks)) {
-        setTracks(data.tracks.map((t: any) => ({ ...t, playable: t.playable === 'embed' || t.playable === 'youtube-embed' || t.embedUrl ? 'embed' : 'audio' })));
+        setTracks(data.tracks.map((t: any) => ({
+          ...t,
+          playable: t.playable === 'embed' || t.playable === 'youtube-embed' || t.embedUrl ? 'embed' : 'audio'
+        })));
       }
     } catch {
       // offline fallback tracks if fetch fails
@@ -129,37 +140,153 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     }
   };
 
+  // 1. YouTube 音乐检索
   const searchYouTubeMusic = async (queryOverride?: string) => {
     const q = (queryOverride ?? searchQuery).trim();
     if (!q) return;
     setYtSearching(true);
-    setCrawlNotice(isZh ? `正在检索 YouTube 音乐：${q}` : `Searching YouTube music: ${q}`);
+    setCrawlNotice(isZh ? `正在抓取 YouTube 开放音乐：${q}...` : `Crawling YouTube music: ${q}...`);
     try {
       const res = await fetch(`/api/music/youtube-search?q=${encodeURIComponent(q)}&limit=12`);
       const data = await res.json();
       if (data.success && Array.isArray(data.tracks)) {
-        const mapped = data.tracks.map((t: any) => ({ ...t, playable: t.playable === 'embed' || t.playable === 'youtube-embed' || t.embedUrl ? 'embed' : 'audio' }));
-        setYtTracks(mapped);
+        const mapped = data.tracks.map((t: any) => ({
+          ...t,
+          playable: t.playable === 'embed' || t.playable === 'youtube-embed' || t.embedUrl ? 'embed' : 'audio'
+        }));
         if (mapped.length) {
           setTracks(mapped);
           setCurrentTrackIndex(0);
-          setCrawlNotice(isZh ? `已找到 ${mapped.length} 条可嵌入音乐（官方嵌入：YouTube/SoundCloud/链接等；版权与可用性由来源控制）` : `Found ${mapped.length} embeddable tracks (official embeds; rights controlled by source).`);
+          setShowEmbedPlayer(true);
+          setCrawlNotice(isZh ? `已从 YouTube 抓取到 ${mapped.length} 条高保真音乐流。` : `Found ${mapped.length} YouTube music tracks.`);
         } else {
-          setCrawlNotice(isZh ? '未找到可用的嵌入音乐结果。' : 'No embeddable music results found.');
+          setCrawlNotice(isZh ? '未找到相关 YouTube 音乐。' : 'No YouTube tracks found.');
         }
       } else {
         setCrawlNotice(isZh ? 'YouTube 音乐检索暂不可用。' : 'YouTube music search unavailable.');
       }
     } catch {
-      setCrawlNotice(isZh ? 'YouTube 音乐检索失败，请稍后重试。' : 'YouTube music search failed.');
+      setCrawlNotice(isZh ? 'YouTube 音乐检索超时。' : 'YouTube music search error.');
     } finally {
       setYtSearching(false);
       setTimeout(() => setCrawlNotice(null), 4500);
     }
   };
 
+  // 2. B站 音乐爬虫检索
+  const searchBilibiliMusic = async (queryOverride?: string) => {
+    const rawQ = (queryOverride ?? searchQuery).trim();
+    if (!rawQ) return;
+    const q = rawQ.includes('音乐') || rawQ.includes('现场') || rawQ.includes('MV') ? rawQ : `${rawQ} 音乐现场`;
+    setYtSearching(true);
+    setCrawlNotice(isZh ? `正在爬取 B站 (Bilibili) 音乐与现场：${q}...` : `Crawling Bilibili music: ${q}...`);
+    try {
+      const res = await fetch(`/api/bilibili/search?q=${encodeURIComponent(q)}&limit=14`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.videos) && data.videos.length > 0) {
+        const mapped: MusicTrack[] = data.videos.map((bv: any) => ({
+          id: `bili_${bv.bvid}`,
+          title: bv.title || 'Bilibili Music Track',
+          artist: bv.author || 'B站UP主',
+          album: 'Bilibili 音乐现场',
+          genre: 'B站音乐',
+          durationSeconds: parseMinutesDuration(bv.duration),
+          coverUrl: bv.pic || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
+          embedUrl: bv.embedUrl || `https://player.bilibili.com/player.html?bvid=${bv.bvid}&page=1&autoplay=1`,
+          playable: 'embed',
+          source: 'Bilibili',
+          sourceUrl: bv.arcurl || `https://www.bilibili.com/video/${bv.bvid}`,
+          license: 'Bilibili 官方嵌入流',
+          crawledAt: new Date().toISOString(),
+          bpm: 86,
+          description: bv.description || '来自哔哩哔哩开放平台的原声音乐与现场音频流。'
+        }));
+        setTracks(mapped);
+        setCurrentTrackIndex(0);
+        setShowEmbedPlayer(true);
+        setCrawlNotice(isZh ? `成功爬取并收录 ${mapped.length} 条 B站 音乐与现场，点击即播！` : `Crawled ${mapped.length} Bilibili music tracks!`);
+      } else {
+        setCrawlNotice(isZh ? 'B站未返回对应音乐结果。' : 'No Bilibili music found.');
+      }
+    } catch {
+      setCrawlNotice(isZh ? 'B站音乐爬虫连接超时。' : 'Bilibili music crawl timeout.');
+    } finally {
+      setYtSearching(false);
+      setTimeout(() => setCrawlNotice(null), 4500);
+    }
+  };
+
+  // 3. 双端合并爬取
+  const searchDualMusic = async (queryOverride?: string) => {
+    const q = (queryOverride ?? searchQuery).trim();
+    if (!q) return;
+    setYtSearching(true);
+    setCrawlNotice(isZh ? `正在并发爬取 B站与 YouTube 音乐：${q}...` : `Crawling both Bilibili & YouTube for: ${q}...`);
+    try {
+      const [biliRes, ytRes] = await Promise.allSettled([
+        fetch(`/api/bilibili/search?q=${encodeURIComponent(q + ' 音乐')}&limit=10`).then(r => r.json()),
+        fetch(`/api/music/youtube-search?q=${encodeURIComponent(q)}&limit=10`).then(r => r.json())
+      ]);
+
+      const merged: MusicTrack[] = [];
+
+      // Bilibili tracks
+      if (biliRes.status === 'fulfilled' && biliRes.value.success && Array.isArray(biliRes.value.videos)) {
+        for (const bv of biliRes.value.videos) {
+          merged.push({
+            id: `bili_${bv.bvid}`,
+            title: bv.title || 'Bilibili Music Track',
+            artist: bv.author || 'B站UP主',
+            album: 'Bilibili 音乐现场',
+            genre: 'B站音乐',
+            durationSeconds: parseMinutesDuration(bv.duration),
+            coverUrl: bv.pic || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
+            embedUrl: bv.embedUrl || `https://player.bilibili.com/player.html?bvid=${bv.bvid}&page=1&autoplay=1`,
+            playable: 'embed',
+            source: 'Bilibili',
+            sourceUrl: bv.arcurl || `https://www.bilibili.com/video/${bv.bvid}`,
+            license: 'Bilibili 官方嵌入',
+            crawledAt: new Date().toISOString(),
+            bpm: 88,
+            description: bv.description
+          });
+        }
+      }
+
+      // YouTube tracks
+      if (ytRes.status === 'fulfilled' && ytRes.value.success && Array.isArray(ytRes.value.tracks)) {
+        for (const t of ytRes.value.tracks) {
+          merged.push({
+            ...t,
+            playable: t.playable === 'embed' || t.playable === 'youtube-embed' || t.embedUrl ? 'embed' : 'audio'
+          });
+        }
+      }
+
+      if (merged.length > 0) {
+        setTracks(merged);
+        setCurrentTrackIndex(0);
+        setShowEmbedPlayer(true);
+        setCrawlNotice(isZh ? `双端爬取完成！已汇聚 ${merged.length} 首 B站 & YouTube 音乐流。` : `Dual crawl finished: ${merged.length} tracks.`);
+      } else {
+        setCrawlNotice(isZh ? '双端均未返回结果，请尝试其他关键词。' : 'No tracks found.');
+      }
+    } catch {
+      setCrawlNotice(isZh ? '网络并发爬取失败。' : 'Dual crawl failed.');
+    } finally {
+      setYtSearching(false);
+      setTimeout(() => setCrawlNotice(null), 5000);
+    }
+  };
+
   useEffect(() => {
-    loadTracks(selectedGenre, searchQuery);
+    if (selectedGenre === 'bilibili_live') {
+      searchBilibiliMusic('宇宙 氛围 音乐');
+    } else if (selectedGenre === 'youtube_music') {
+      searchYouTubeMusic('space ambient relaxing music');
+    } else {
+      loadTracks(selectedGenre, searchQuery);
+    }
   }, [selectedGenre]);
 
   const activeTrack = tracks[currentTrackIndex] || tracks[0];
@@ -182,7 +309,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       analyserRef.current = analyser;
       sourceNodeRef.current = source;
     } catch {
-      // Browsers may block auto-creation until user gesture
+      /* ignore */
     }
   };
 
@@ -212,7 +339,6 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           const x = i * (barWidth + 2);
           const y = canvas.height - barHeight;
 
-          // Venus glowing golden-pink gradient
           const grad = ctx.createLinearGradient(0, y, 0, canvas.height);
           grad.addColorStop(0, '#f43f5e');
           grad.addColorStop(0.5, '#ec4899');
@@ -224,7 +350,6 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           ctx.fill();
         }
       } else {
-        // Idle gentle wave animation
         const time = Date.now() * 0.003;
         for (let i = 0; i < barCount; i++) {
           const barHeight = 8 + 14 * Math.sin(time + i * 0.35);
@@ -248,7 +373,8 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   // Handle Play/Pause
   const togglePlay = () => {
     if (activeTrack?.playable === 'embed' || activeTrack?.embedUrl) {
-      setCrawlNotice(isZh ? '当前为官方嵌入播放器，请使用嵌入控件播放（不下载音频）。' : 'Use the official embed player controls.');
+      setShowEmbedPlayer(true);
+      setCrawlNotice(isZh ? '当前为官方嵌入播放器，请在上方嵌入窗口中点击播放/暂停。' : 'Use the embedded player controls.');
       setTimeout(() => setCrawlNotice(null), 2500);
       return;
     }
@@ -269,6 +395,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     const track = tracks[index];
     setCurrentTrackIndex(index);
     setCurrentTime(0);
+    setShowEmbedPlayer(true);
     if (track?.playable === 'embed' || track?.embedUrl) {
       if (audioRef.current) audioRef.current.pause();
       setIsPlaying(true);
@@ -296,6 +423,15 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
   // Run Fixed Crawler
   const handleTriggerCrawl = async () => {
+    if (crawlerSource === 'bilibili.com') {
+      await searchBilibiliMusic(crawlerKeyword);
+      return;
+    }
+    if (crawlerSource === 'youtube.com/music') {
+      await searchYouTubeMusic(crawlerKeyword);
+      return;
+    }
+
     setIsCrawling(true);
     setCrawlNotice(isZh ? `正在定向爬取 ${crawlerSource} 开源音频...` : `Crawling ${crawlerSource}...`);
     try {
@@ -311,7 +447,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       if (data.success) {
         setCrawlNotice(
           isZh
-            ? `爬取成功！已自动收录 ${data.crawledCount || 2} 首新音轨并完成大模型结构化打标。`
+            ? `爬取成功！已自动收录 ${data.crawledCount || 2} 首新音轨并完成结构化打标。`
             : `Crawl successful! Ingested ${data.crawledCount || 2} new tracks.`
         );
         loadTracks(selectedGenre, searchQuery);
@@ -319,7 +455,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         setCrawlNotice(isZh ? '爬取完成，已同步本地缓存库。' : 'Sync completed.');
       }
     } catch {
-      setCrawlNotice(isZh ? '离线模式：已从金星本地离线库载入音频。' : 'Loaded offline tracks.');
+      setCrawlNotice(isZh ? '已从金星本地库载入高保真音轨。' : 'Loaded offline tracks.');
     } finally {
       setIsCrawling(false);
       setTimeout(() => setCrawlNotice(null), 5000);
@@ -341,40 +477,66 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         <div className="absolute bottom-0 left-[20%] w-[60vw] h-[30vw] rounded-full bg-purple-700/10 blur-[160px]" />
       </div>
 
-      {/* Audio / YouTube embed player */}
-      {(activeTrack?.playable === 'embed' || activeTrack?.embedUrl) ? (
-        <div className="fixed bottom-[120px] left-4 right-4 z-30 mx-auto max-w-xl rounded-2xl border border-rose-500/30 bg-black/80 p-2 backdrop-blur-xl shadow-2xl">
+      {/* Floating Embedded Player (Bilibili / YouTube / SoundCloud) */}
+      {(activeTrack?.playable === 'embed' || activeTrack?.embedUrl) && showEmbedPlayer && (
+        <div className="fixed bottom-[115px] left-4 right-4 z-40 mx-auto max-w-xl rounded-2xl border border-rose-500/40 bg-black/95 p-3 backdrop-blur-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-4">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-rose-900/40 text-xs">
+            <div className="flex items-center gap-2">
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                activeTrack.source === 'Bilibili' ? 'bg-sky-500 text-white' : 'bg-red-600 text-white'
+              }`}>
+                {activeTrack.source}
+              </span>
+              <span className="font-bold text-white truncate max-w-[280px]">{activeTrack.title}</span>
+            </div>
+            <button
+              onClick={() => setShowEmbedPlayer(false)}
+              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              title="收起播放器"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
           <iframe
-            title={activeTrack?.title || 'Embedded music'}
-            src={activeTrack?.embedUrl}
-            className="aspect-video w-full rounded-xl border-0"
+            title={activeTrack.title}
+            src={activeTrack.embedUrl}
+            className="aspect-video w-full rounded-xl border-0 bg-black"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
             referrerPolicy="strict-origin-when-cross-origin"
           />
-          <p className="mt-1 px-1 text-[10px] text-slate-400">官方嵌入播放（YouTube/SoundCloud/Mixcloud/Bandcamp 等）；不下载音频，版权/可用性由来源控制。</p>
+          <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 px-1">
+            <span>{activeTrack.artist}</span>
+            {activeTrack.sourceUrl && (
+              <a href={activeTrack.sourceUrl} target="_blank" rel="noopener noreferrer" className="hover:text-rose-300 inline-flex items-center gap-1">
+                <span>来源链接</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
         </div>
-      ) : (
-        <audio
-          ref={audioRef}
-          src={activeTrack?.audioUrl}
-          crossOrigin="anonymous"
-          onTimeUpdate={() => {
-            if (audioRef.current) {
-              setCurrentTime(audioRef.current.currentTime);
-              setDuration(audioRef.current.duration || 0);
-            }
-          }}
-          onEnded={() => {
-            if (isLoop && audioRef.current) {
-              audioRef.current.currentTime = 0;
-              audioRef.current.play();
-            } else {
-              handleNext();
-            }
-          }}
-        />
       )}
+
+      {/* Native HTML5 Audio for Free Music Archive / Jamendo */}
+      <audio
+        ref={audioRef}
+        src={activeTrack?.audioUrl}
+        crossOrigin="anonymous"
+        onTimeUpdate={() => {
+          if (audioRef.current) {
+            setCurrentTime(audioRef.current.currentTime);
+            setDuration(audioRef.current.duration || 0);
+          }
+        }}
+        onEnded={() => {
+          if (isLoop && audioRef.current) {
+            audioRef.current.currentTime = 0;
+            audioRef.current.play();
+          } else {
+            handleNext();
+          }
+        }}
+      />
 
       {/* 1. Header Navigation Bar */}
       <header className="sticky top-0 z-30 border-b border-rose-900/30 bg-[#07040d]/85 backdrop-blur-2xl px-4 sm:px-8 py-3.5 flex items-center justify-between">
@@ -397,14 +559,14 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
             <div>
               <div className="flex items-center space-x-2">
                 <h1 className="text-base sm:text-lg font-bold text-white tracking-wide">
-                  {isZh ? '金星音乐馆' : 'Venus Sonic Universe'}
+                  {isZh ? '金星音乐馆 · 开放音频宇宙' : 'Venus Music Universe'}
                 </h1>
                 <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-mono">
-                  LIVE STEREO
+                  B站 & YouTube 双轨爬虫
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
-                {isZh ? '全球开源音乐网络 · 定向电台爬虫 · 实时音频声波图' : 'Open Music Universe & Live Visualizer'}
+                {isZh ? '汇聚 Bilibili 音乐现场、YouTube 开放音源与全球开源公版曲库' : 'Aggregating Bilibili Live, YouTube Music & Open Commons Audio'}
               </p>
             </div>
           </div>
@@ -414,7 +576,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         <div className="flex items-center space-x-3">
           <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-rose-950/40 border border-rose-800/40 text-xs text-rose-200">
             <Radio className="w-3.5 h-3.5 text-rose-400 animate-spin" />
-            <span className="font-mono text-[11px]">80亿人开源音频节点 · 在线即听</span>
+            <span className="font-mono text-[11px]">全网开放音频节点 · 即搜即播</span>
           </div>
         </div>
       </header>
@@ -436,11 +598,11 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
               <Waves className="w-3.5 h-3.5" />
               <span>{isZh ? '金星云顶声波原声带' : 'Venusian Sound Sanctuary'}</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight line-clamp-2">
               {activeTrack ? activeTrack.title : '探索星际原声与全景声音'}
             </h2>
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              {activeTrack?.description || '融合太阳系等离子体射电电波、古典印象派大师公版杰作与宇宙空间站环境音，完全在您的网页内即点即听。'}
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed line-clamp-2">
+              {activeTrack?.description || '融合太阳系等离子体射电电波、B站现场音乐与 YouTube 宇宙空间站环境音，完全在您的网页内即点即听。'}
             </p>
 
             {/* Visualizer Canvas */}
@@ -461,7 +623,6 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           {/* Right: Spinning Planet Vinyl */}
           <div className="relative shrink-0 flex items-center justify-center">
             <div className={`w-48 h-48 sm:w-56 sm:h-56 rounded-full bg-[#12081d] border-4 border-rose-900/60 shadow-[0_0_50px_rgba(244,63,94,0.3)] flex items-center justify-center relative overflow-hidden ${isPlaying ? 'animate-[spin_12s_linear_infinite]' : ''}`}>
-              {/* Vinyl grooves */}
               <div className="absolute inset-2 rounded-full border border-white/5" />
               <div className="absolute inset-6 rounded-full border border-white/5" />
               <div className="absolute inset-10 rounded-full border border-white/5" />
@@ -486,7 +647,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           </div>
         </div>
 
-        {/* 3. Fixed Audio Crawler Control Panel */}
+        {/* 3. Multi-source Music Crawler Control Center */}
         <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center space-x-3 w-full md:w-auto">
             <div className="w-8 h-8 rounded-xl bg-rose-950/80 border border-rose-600/40 flex items-center justify-center text-rose-400 shrink-0">
@@ -494,13 +655,13 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
             </div>
             <div>
               <div className="text-xs font-bold text-white flex items-center space-x-1.5">
-                <span>金星定向音乐爬虫中枢</span>
+                <span>全域开放音乐爬虫中枢</span>
                 <span className="px-1.5 py-0.2 rounded bg-rose-950 text-rose-300 font-mono text-[9px] border border-rose-800/60">
-                  AUTO CRAWLER
+                  REAL-TIME HARVESTER
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                固定定向抓取 Free Music Archive / Jamendo / Musopen 开源曲库，自动结构化打标并入库。
+                支持 B站 (Bilibili) 音乐现场、YouTube 开放音频、Free Music Archive 及 Jamendo 多源并发爬取。
               </p>
             </div>
           </div>
@@ -511,9 +672,10 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
               onChange={e => setCrawlerSource(e.target.value)}
               className="bg-slate-900 border border-slate-700/80 text-slate-200 text-xs rounded-xl px-2.5 py-2 outline-none focus:border-rose-500"
             >
+              <option value="bilibili.com">哔哩哔哩 (Bilibili 爬虫)</option>
+              <option value="youtube.com/music">YouTube 开放流</option>
               <option value="freemusicarchive.org">Free Music Archive</option>
               <option value="jamendo.com">Jamendo Open Commons</option>
-              <option value="musopen.org">Musopen Classical</option>
               <option value="archive.org/details/audio">Internet Archive Audio</option>
             </select>
 
@@ -527,39 +689,64 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
             <button
               onClick={handleTriggerCrawl}
-              disabled={isCrawling}
+              disabled={isCrawling || ytSearching}
               className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-semibold shadow-lg shadow-rose-900/40 flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
             >
-              {isCrawling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-              <span>{isCrawling ? '正在爬取中...' : '启动爬虫收录'}</span>
+              {isCrawling || ytSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              <span>{isCrawling || ytSearching ? '爬取中...' : '启动爬虫收录'}</span>
             </button>
           </div>
         </div>
 
-        {/* 4. Search & Genre Filters */}
+        {/* 4. Search & Multi-Engine Trigger */}
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-            {/* Search Input Bar */}
-            <div className="flex w-full sm:max-w-xl items-center gap-2">
-              <div className="relative flex-1">
+            <div className="flex w-full sm:max-w-2xl items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[200px]">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') void searchYouTubeMusic(); }}
-                  placeholder="搜索金星曲库 / 粘贴 YouTube·SoundCloud·Mixcloud·Bandcamp 链接或关键词后点嵌入搜索..."
+                  onKeyDown={e => { if (e.key === 'Enter') void searchDualMusic(); }}
+                  placeholder="搜索音乐、歌手、原声带、B站MV或粘贴链接..."
                   className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500 transition-all shadow-inner"
                 />
               </div>
-              <button type="button" onClick={() => void searchYouTubeMusic()} disabled={ytSearching || !searchQuery.trim()} className="shrink-0 rounded-2xl bg-rose-600 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">
-                {ytSearching ? '检索中…' : '嵌入搜索'}
+              <button
+                type="button"
+                onClick={() => void searchDualMusic()}
+                disabled={ytSearching || !searchQuery.trim()}
+                className="shrink-0 rounded-2xl bg-gradient-to-r from-rose-600 to-amber-600 px-3.5 py-2.5 text-xs font-bold text-white disabled:opacity-40 shadow-lg shadow-rose-900/30 cursor-pointer"
+              >
+                {ytSearching ? '爬取中…' : '双端爬取 (B站+油管)'}
               </button>
-              <button type="button" onClick={() => void loadTracks(selectedGenre, searchQuery)} className="shrink-0 rounded-2xl border border-slate-700 px-3 py-2.5 text-xs text-slate-200">本地库</button>
+              <button
+                type="button"
+                onClick={() => void searchBilibiliMusic()}
+                disabled={ytSearching || !searchQuery.trim()}
+                className="shrink-0 rounded-2xl border border-sky-600/50 bg-sky-950/40 px-3 py-2.5 text-xs font-semibold text-sky-200 hover:bg-sky-900/50 cursor-pointer"
+              >
+                <span className="flex items-center gap-1">
+                  <Tv className="w-3.5 h-3.5 text-sky-400" />
+                  <span>B站专搜</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void searchYouTubeMusic()}
+                disabled={ytSearching || !searchQuery.trim()}
+                className="shrink-0 rounded-2xl border border-red-600/50 bg-red-950/40 px-3 py-2.5 text-xs font-semibold text-red-200 hover:bg-red-900/50 cursor-pointer"
+              >
+                <span className="flex items-center gap-1">
+                  <Youtube className="w-3.5 h-3.5 text-red-400" />
+                  <span>YouTube</span>
+                </span>
+              </button>
             </div>
 
             <div className="text-xs text-slate-400 font-mono self-end sm:self-center">
-              {isZh ? `已收录 ${tracks.length} 首高保真音轨` : `${tracks.length} Tracks Indexed`}
+              {isZh ? `曲库实时索引: ${tracks.length} 首` : `${tracks.length} Tracks Indexed`}
             </div>
           </div>
 
@@ -611,13 +798,15 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
                         )}
                       </div>
                     </div>
-                    <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md text-[10px] text-rose-300 font-mono">
-                      {track.genre}
+                    <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/70 backdrop-blur-md text-[10px] text-rose-300 font-mono flex items-center gap-1">
+                      {track.source === 'Bilibili' && <Tv className="w-2.5 h-2.5 text-sky-400" />}
+                      {track.source === 'YouTube' && <Youtube className="w-2.5 h-2.5 text-red-400" />}
+                      <span>{track.genre || track.source}</span>
                     </div>
                   </div>
 
                   <div>
-                    <h3 className="text-xs font-bold text-white line-clamp-1 group-hover:text-rose-300 transition-colors">
+                    <h3 className="text-xs font-bold text-white line-clamp-1 group-hover:text-rose-300 transition-colors" title={track.title}>
                       {track.title}
                     </h3>
                     <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
@@ -628,7 +817,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
                 <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500">
                   <span>{formatSeconds(track.durationSeconds)}</span>
-                  <span className="truncate max-w-[120px]">{track.license}</span>
+                  <span className="truncate max-w-[120px]">{track.license || track.source}</span>
                 </div>
               </div>
             );
@@ -636,7 +825,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         </div>
       </main>
 
-      {/* 6. Sticky Bottom Floating Music Player Bar (Continuous Listening) */}
+      {/* 6. Sticky Bottom Floating Music Player Bar */}
       <footer className="fixed bottom-0 left-0 right-0 z-40 bg-[#0c0516]/95 border-t border-rose-900/40 backdrop-blur-2xl px-4 sm:px-8 py-3 shadow-2xl">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           {/* Active Track Info */}
@@ -651,7 +840,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
                 {activeTrack?.title || '未选择播放曲目'}
               </div>
               <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                {activeTrack?.artist} · {activeTrack?.album}
+                {activeTrack?.artist} · {activeTrack?.album || activeTrack?.source}
               </div>
             </div>
           </div>
@@ -713,6 +902,19 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
           {/* Volume Control & Direct Source Link */}
           <div className="hidden sm:flex items-center justify-end space-x-3 w-1/3">
+            {(activeTrack?.playable === 'embed' || activeTrack?.embedUrl) && (
+              <button
+                onClick={() => setShowEmbedPlayer(!showEmbedPlayer)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                  showEmbedPlayer ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-slate-800 text-slate-400 hover:text-white'
+                }`}
+                title={showEmbedPlayer ? '隐藏嵌入视窗' : '显示嵌入视窗'}
+              >
+                <Maximize2 className="w-3 h-3" />
+                <span>{showEmbedPlayer ? '隐藏画面' : '显示画面'}</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 if (audioRef.current) {

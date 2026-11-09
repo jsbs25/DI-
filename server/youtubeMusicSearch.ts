@@ -154,27 +154,86 @@ async function searchYouTubeKeyword(query: string, limit = 8): Promise<Embeddabl
   return [];
 }
 
+async function searchYouTubeMusicDirect(query: string, limit = 8): Promise<EmbeddableMusicTrack[]> {
+  try {
+    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' music')}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+      },
+      signal: AbortSignal.timeout(7000)
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const start = html.indexOf('ytInitialData = ');
+    if (start === -1) return [];
+    const jsonStart = start + 'ytInitialData = '.length;
+    const end = html.indexOf(';</script>', jsonStart);
+    if (end === -1) return [];
+    const data = JSON.parse(html.slice(jsonStart, end));
+    const sectionList = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+    const out: EmbeddableMusicTrack[] = [];
+    for (const section of sectionList) {
+      const items = section.itemSectionRenderer?.contents || [];
+      for (const item of items) {
+        const v = item.videoRenderer;
+        if (!v || !v.videoId) continue;
+        const videoId = v.videoId;
+        const durationText = v.lengthText?.simpleText || '3:30';
+        let durationSeconds = 210;
+        const parts = durationText.split(':').map(Number);
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          durationSeconds = parts[0] * 60 + parts[1];
+        }
+        out.push({
+          id: `yt_${videoId}`,
+          title: String(v.title?.runs?.[0]?.text || 'YouTube Music'),
+          artist: String(v.ownerText?.runs?.[0]?.text || 'YouTube Artist'),
+          album: 'YouTube Music Stream',
+          genre: 'Streaming Music',
+          durationSeconds,
+          embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`,
+          coverUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          source: 'YouTube Music',
+          sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
+          license: 'YouTube Standard Terms',
+          crawledAt: new Date().toISOString(),
+          description: v.viewCountText?.simpleText || 'YouTube 音乐流媒体',
+          playable: 'embed'
+        });
+        if (out.length >= limit) break;
+      }
+      if (out.length >= limit) break;
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 export async function searchYouTubeMusic(query: string, limit = 12): Promise<EmbeddableMusicTrack[]> {
   const q = query.trim();
   if (!q) return [];
   const direct = trackFromUrl(q);
   if (direct) return [direct];
 
-  // Multi-source, no-key where possible: Internet Archive public audio + YouTube official embeds.
-  // SoundCloud/Mixcloud/Bandcamp do not provide stable no-key global search APIs; paste a direct link to embed.
-  const [ia, yt] = await Promise.all([
-    searchInternetArchiveAudio(q, Math.max(4, Math.floor(limit / 2))).catch(() => []),
-    searchYouTubeKeyword(q, Math.max(4, Math.ceil(limit / 2))).catch(() => [])
+  // Parallel multi-source: YouTube direct, Internet Archive, and Piped fallback
+  const [ia, ytDirect, ytPiped] = await Promise.all([
+    searchInternetArchiveAudio(q, Math.max(3, Math.floor(limit / 3))).catch(() => []),
+    searchYouTubeMusicDirect(q, Math.max(6, Math.floor(limit / 2))).catch(() => []),
+    searchYouTubeKeyword(q, Math.max(4, Math.floor(limit / 3))).catch(() => [])
   ]);
+
   const seen = new Set<string>();
-  const merged = [...ia, ...yt].filter(t => {
+  const merged = [...ytDirect, ...ia, ...ytPiped].filter(t => {
     const k = t.sourceUrl || t.id;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
   });
+
   if (merged.length) return merged.slice(0, limit);
-  return searchYouTubeKeyword(q, limit);
+  return searchYouTubeMusicDirect(q, limit);
 }
 
 export function resolveMusicEmbedUrl(input: string): EmbeddableMusicTrack | null {

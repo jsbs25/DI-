@@ -24,6 +24,13 @@ import {
 } from './server/knowledgeGraph.ts';
 import { musicStore } from './server/musicStore.ts';
 import { resolveMusicEmbedUrl, searchYouTubeMusic } from './server/youtubeMusicSearch.ts';
+import { searchBilibiliVideos } from './server/bilibiliCrawler.ts';
+import { searchOpenImages } from './server/openImageCrawler.ts';
+import { discoveryDb } from './server/discovery/database/db.ts';
+import { executeUnifiedSearch } from './server/discovery/search/unifiedSearchEngine.ts';
+import { startDiscoveryScheduler, runLinkHealthCheck, runRssSync } from './server/discovery/scheduler/taskScheduler.ts';
+import { harvestPublicWebUrl } from './server/discovery/connectors/webMetadataConnector.ts';
+import { harvestRssFeed } from './server/discovery/connectors/rssConnector.ts';
 
 dotenv.config();
 
@@ -627,12 +634,102 @@ app.get('/api/music/tracks', (req, res) => {
   res.json({ success: true, tracks });
 });
 
-app.get('/api/music/search', (req, res) => {
+async function searchOnlineMusicStreams(query: string): Promise<any[]> {
+  if (!query || !query.trim()) return [];
+  try {
+    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim())}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+      },
+      signal: AbortSignal.timeout(6000)
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const start = html.indexOf('ytInitialData = ');
+    if (start === -1) return [];
+    const jsonStart = start + 'ytInitialData = '.length;
+    const end = html.indexOf(';</script>', jsonStart);
+    if (end === -1) return [];
+    const jsonStr = html.slice(jsonStart, end);
+    const data = JSON.parse(jsonStr);
+    const sectionList = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+    const tracks: any[] = [];
+    for (const section of sectionList) {
+      const items = section.itemSectionRenderer?.contents || [];
+      for (const item of items) {
+        const v = item.videoRenderer;
+        if (!v || !v.videoId) continue;
+        const videoId = v.videoId;
+        const title = v.title?.runs?.[0]?.text || 'Untitled Track';
+        const artist = v.ownerText?.runs?.[0]?.text || 'YouTube Music';
+        const durationText = v.lengthText?.simpleText || '3:30';
+        let durationSeconds = 210;
+        const parts = durationText.split(':').map(Number);
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          durationSeconds = parts[0] * 60 + parts[1];
+        } else if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+          durationSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+        }
+        tracks.push({
+          id: `yt_${videoId}`,
+          videoId,
+          title,
+          artist,
+          album: 'Cosmic Music Stream',
+          genre: 'Stream',
+          durationSeconds,
+          durationFormatted: durationText,
+          coverUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          source: 'YouTube Music',
+          sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
+          license: 'Standard YouTube License (In-Page Stream)',
+          views: v.viewCountText?.simpleText || '0 views',
+          bpm: 90
+        });
+        if (tracks.length >= 20) break;
+      }
+      if (tracks.length >= 20) break;
+    }
+    return tracks;
+  } catch (err) {
+    console.warn('Online music search error:', err);
+    return [];
+  }
+}
+
+app.get('/api/music/search', async (req, res) => {
   const { q, genre } = req.query;
-  const queryStr = typeof q === 'string' ? q : '';
+  const queryStr = typeof q === 'string' ? q.trim() : '';
   const genreStr = typeof genre === 'string' ? genre : undefined;
-  const results = musicStore.searchTracks(queryStr, genreStr);
-  res.json({ success: true, query: queryStr, count: results.length, tracks: results });
+
+  if (!queryStr) {
+    const results = musicStore.searchTracks('', genreStr);
+    return res.json({ success: true, query: '', count: results.length, tracks: results });
+  }
+
+  try {
+    const onlineTracks = await searchOnlineMusicStreams(queryStr);
+    const localResults = musicStore.searchTracks(queryStr, genreStr);
+    const merged = [...onlineTracks, ...localResults];
+    const uniqueTracks = merged.filter((t, idx, self) =>
+      idx === self.findIndex(s => s.id === t.id || (s.videoId && s.videoId === t.videoId))
+    );
+    res.json({
+      success: true,
+      query: queryStr,
+      count: uniqueTracks.length,
+      tracks: uniqueTracks
+    });
+  } catch (err: any) {
+    const fallbackResults = musicStore.searchTracks(queryStr, genreStr);
+    res.json({
+      success: true,
+      query: queryStr,
+      count: fallbackResults.length,
+      tracks: fallbackResults
+    });
+  }
 });
 
 app.get('/api/music/youtube-search', async (req, res) => {
@@ -646,6 +743,18 @@ app.get('/api/music/youtube-search', async (req, res) => {
     res.json({ success: true, query: q, tracks, mode: direct ? 'embed-url' : 'search' });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Music search failed' });
+  }
+});
+
+app.get('/api/bilibili/search', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
+  const limit = Math.max(1, Math.min(30, Number(req.query.limit) || 20));
+  try {
+    const results = await searchBilibiliVideos(q, limit);
+    res.json({ success: true, query: q, count: results.length, results, videos: results });
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err.message || 'Bilibili search failed' });
   }
 });
 
@@ -810,13 +919,21 @@ app.post('/api/library/ingest', async (req, res) => {
 // EPUB proxy: download an EPUB from a legal source and stream it back
 // (same-origin) so the browser epub.js reader is not blocked by CORS.
 app.get('/api/library/epub-proxy', async (req, res) => {
-  const { url } = req.query;
-  if (!url || typeof url !== 'string') {
+  const { url, bookId } = req.query;
+  if (!bookId || typeof bookId !== 'string') {
+    return res.status(400).json({ success: false, code: 'EPUB_BOOK_REQUIRED', error: 'bookId is required' });
+  }
+  const book = store.books.find(b => b.id === bookId);
+  if (!book) {
+    return res.status(404).json({ success: false, code: 'EPUB_BOOK_NOT_FOUND', error: 'Book not found' });
+  }
+  const targetUrl = typeof url === 'string' && url ? url : book.epubUrl;
+  if (!targetUrl || typeof targetUrl !== 'string') {
     return res.status(400).json({ success: false, error: 'url required' });
   }
   // Restrict transport to known library hosts; item-level rights are a separate check.
   let parsedUrl: URL;
-  try { parsedUrl = new URL(url); } catch { return res.status(400).json({ success: false, error: 'Invalid URL' }); }
+  try { parsedUrl = new URL(targetUrl); } catch { return res.status(400).json({ success: false, error: 'Invalid URL' }); }
   if (parsedUrl.protocol !== 'https:' || parsedUrl.username || parsedUrl.password) {
     return res.status(403).json({ success: false, error: 'Only credential-free HTTPS EPUB sources are allowed' });
   }
@@ -1134,13 +1251,112 @@ app.post('/api/browser/fetch-preview', async (req, res) => {
   }
 });
 
+// Interactive Web Content Proxy for Browser Viewport
+app.get('/api/browser/proxy', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl || typeof targetUrl !== 'string') {
+    return res.status(400).send('URL query parameter required');
+  }
+
+  try {
+    let parsed: URL;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      return res.status(400).send('Invalid URL format');
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return res.status(400).send('Only HTTP and HTTPS URLs are supported');
+    }
+
+    // Block private/loopback/cloud metadata IP ranges
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname.startsWith('10.') ||
+      hostname.startsWith('192.168.') ||
+      hostname.startsWith('172.16.') ||
+      hostname === '169.254.169.254'
+    ) {
+      return res.status(403).send('Forbidden destination');
+    }
+
+    const response = await fetch(parsed.toString(), {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+      },
+      signal: AbortSignal.timeout(12000)
+    });
+
+    const contentType = response.headers.get('content-type') || 'text/html';
+    
+    // Non-HTML assets (images, fonts, stylesheets) are streamed as-is
+    if (!contentType.includes('text/html')) {
+      res.setHeader('Content-Type', contentType);
+      const buffer = await response.arrayBuffer();
+      return res.send(Buffer.from(buffer));
+    }
+
+    let html = await response.text();
+
+    // Inject base href so relative resources, CSS, scripts, and images load correctly
+    const baseHref = `${parsed.protocol}//${parsed.host}${parsed.pathname.substring(0, parsed.pathname.lastIndexOf('/') + 1)}`;
+    const baseTag = `<base href="${baseHref}">`;
+
+    if (html.includes('<head>')) {
+      html = html.replace('<head>', `<head>${baseTag}`);
+    } else if (html.includes('<HEAD>')) {
+      html = html.replace('<HEAD>', `<HEAD>${baseTag}`);
+    } else {
+      html = `${baseTag}${html}`;
+    }
+
+    // Strip frame busters and restrictive meta tags
+    html = html.replace(/<meta[^>]+http-equiv=["']?X-Frame-Options["']?[^>]*>/gi, '');
+    html = html.replace(/<meta[^>]+http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi, '');
+
+    res.removeHeader('X-Frame-Options');
+    res.removeHeader('Content-Security-Policy');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err: any) {
+    res.status(502).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>页面加载提示</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #080d13; color: #cbd5e1; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+          .card { background: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 32px; max-width: 520px; text-align: center; }
+          h2 { color: #f87171; margin-top: 0; font-size: 20px; }
+          p { font-size: 14px; line-height: 1.6; color: #94a3b8; }
+          a { display: inline-block; margin-top: 16px; padding: 10px 20px; background: #0284c7; color: white; border-radius: 9999px; text-decoration: none; font-size: 13px; font-weight: 600; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2>🌐 页面加载状态</h2>
+          <p>当前站点可能需要直接在独立标签页中开启访问，或远程目标响应超时（${err?.message || '网络连接超时'}）。</p>
+          <a href="${req.query.url}" target="_blank" rel="noopener noreferrer">在新标签页中直接开启 ↗</a>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+});
+
 // Live web search (Bing / DuckDuckGo / Wikipedia)
 app.get('/api/browser/search', async (req, res) => {
   const { q, engine, lang } = req.query;
   if (!q || typeof q !== 'string' || !q.trim()) {
     return res.status(400).json({ success: false, error: 'Search query required' });
   }
-  const engineParam = engine === 'google' || engine === 'bing' || engine === 'duckduckgo' || engine === 'wikipedia' ? engine : 'auto';
+  const engineParam = engine === 'bing' || engine === 'duckduckgo' || engine === 'wikipedia' ? engine : 'auto';
   const langParam = lang === 'zh' || lang === 'ar' || lang === 'es' || lang === 'fr' || lang === 'ru' ? lang : 'en';
   try {
     const results = await searchWeb(q, 10, engineParam, langParam);
@@ -1165,19 +1381,149 @@ app.get('/api/library/crawl', async (req, res) => {
   }
 });
 
-// Book discovery (safe web search fallback for book queries; returns external links only)
-app.get('/api/library/discover', async (req, res) => {
+// Multi-source open image crawler (NASA, Wikimedia Commons, Met Museum)
+app.get('/api/images/search', async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
-  if (q.length > 200) return res.status(400).json({ success: false, error: 'Search query must be 200 characters or fewer' });
-  const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 10;
-  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(20, Math.floor(rawLimit))) : 10;
-  const lang = req.query.lang === 'zh' || req.query.lang === 'ar' || req.query.lang === 'es' || req.query.lang === 'fr' || req.query.lang === 'ru' ? req.query.lang : 'en';
+  const rawLimit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 16;
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(30, Math.floor(rawLimit))) : 16;
+  const source = req.query.source === 'nasa' || req.query.source === 'wikimedia' || req.query.source === 'met' ? req.query.source : 'all';
   try {
-    const results = await searchZLibraryDiscovery(q, limit, lang);
-    res.json({ success: true, query: q, results, source: 'web-discovery' });
+    const data = await searchOpenImages(q, limit, source);
+    res.json({ success: true, query: q, ...data });
   } catch (err: any) {
-    res.status(502).json({ success: false, error: err.message || 'Book discovery failed' });
+    res.status(502).json({ success: false, error: err.message || 'Image search failed' });
+  }
+});
+
+// -------------------------------------------------------------
+// UNIFIED DISCOVERY ENGINE ENDPOINTS (Phase 2, 3, 5)
+// -------------------------------------------------------------
+app.get('/api/discovery/search', async (req, res) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    const planet = typeof req.query.planet === 'string' ? (req.query.planet as any) : undefined;
+    const category = typeof req.query.category === 'string' ? req.query.category : undefined;
+    const resourceType = typeof req.query.resourceType === 'string' ? (req.query.resourceType as any) : undefined;
+    const accessType = typeof req.query.accessType === 'string' ? (req.query.accessType as any) : undefined;
+    const language = typeof req.query.language === 'string' ? req.query.language : undefined;
+    const page = typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
+    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 20;
+    const includeExternal = req.query.includeExternal === 'true' || req.query.includeExternal === '1';
+    const useAiIntent = req.query.useAiIntent === 'true' || req.query.useAiIntent === '1';
+
+    const result = await executeUnifiedSearch({
+      q,
+      planet,
+      category,
+      resourceType,
+      accessType,
+      language,
+      page,
+      limit,
+      includeExternal,
+      useAiIntent
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Search execution failed' });
+  }
+});
+
+app.get('/api/discovery/stats', (_req, res) => {
+  try {
+    const planetStats = discoveryDb.getPlanetStats();
+    const total = discoveryDb.getTotalResourceCount();
+    const sources = discoveryDb.getAllSources();
+    res.json({ success: true, total, planetStats, sourcesCount: sources.length });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/discovery/resources', (req, res) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    const planet = typeof req.query.planet === 'string' ? (req.query.planet as any) : undefined;
+    const category = typeof req.query.category === 'string' ? req.query.category : undefined;
+    const resourceType = typeof req.query.resourceType === 'string' ? (req.query.resourceType as any) : undefined;
+    const page = typeof req.query.page === 'string' ? parseInt(req.query.page, 10) : 1;
+    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 20;
+
+    const result = discoveryDb.searchResources({
+      q,
+      planet,
+      category,
+      resourceType,
+      page,
+      limit
+    });
+    res.json({ success: true, ...result, page, limit });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/discovery/resources/add', (req, res) => {
+  const { url, name, description, primaryPlanet, category, tags, resourceType, accessType } = req.body;
+  if (!url || !primaryPlanet) {
+    return res.status(400).json({ success: false, error: 'url and primaryPlanet are required.' });
+  }
+  try {
+    const result = discoveryDb.insertOrUpdateResource({
+      url,
+      name: name || new URL(url).hostname,
+      description,
+      primaryPlanet,
+      category,
+      tags: Array.isArray(tags) ? tags : [],
+      resourceType,
+      accessType,
+      source: 'user_submission'
+    });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/discovery/crawl-url', async (req, res) => {
+  const { url, planet, category, tags } = req.body;
+  if (!url || !planet) {
+    return res.status(400).json({ success: false, error: 'url and planet are required.' });
+  }
+  try {
+    const result = await harvestPublicWebUrl(url, { planet, category, tags });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/discovery/sources', (_req, res) => {
+  try {
+    const sources = discoveryDb.getAllSources();
+    res.json({ success: true, sources });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/discovery/tasks/run-health', async (_req, res) => {
+  try {
+    const result = await runLinkHealthCheck(20);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/discovery/tasks/run-rss', async (_req, res) => {
+  try {
+    const result = await runRssSync();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -1220,50 +1566,46 @@ app.get('/api/jupiter/search', async (req, res) => {
         : engine === 'auto'
           ? await searchWebProviders(q, 10, lang)
           : await searchWeb(q, 10, engine, lang);
-    } else {
+    } else if (category === 'news' || category === 'pdf' || category === 'academic') {
       const verticalSearch = await searchGoogleCategory(q, category as JupiterExternalSearchCategory, 20, lang);
-      if (!verticalSearch.configured && category !== 'books' && category !== 'audio' && category !== 'videos') {
+      if (!verticalSearch.configured) {
         return res.status(503).json({
           success: false,
           error: `${category} 搜索尚未配置。请在服务端设置 SERPER_API_KEY；不会用普通网页结果冒充该分类结果。`
         });
       }
+      internalResults = searchEarthIndex(q, store, 50);
+      externalResults = verticalSearch.results;
+    } else if (category === 'videos') {
+      // Aggregate public video discovery (Saturn-style): YouTube metadata + open web providers.
+      // Shows results that can be found; playable sources open in JUPITER when embed/direct playback is allowed.
       const indexedResults = searchEarthIndex(q, store, 50);
-      internalResults = category === 'videos'
-        ? indexedResults.filter(result => result.kind === 'video').slice(0, 10)
-        : category === 'books'
-          ? indexedResults.filter(result => result.kind === 'book').slice(0, 10)
-          : category === 'audio'
-            ? searchEarthAudio(q, store, 10)
-            : [];
-      if (verticalSearch.configured) {
-        externalResults = verticalSearch.results;
-      } else if (category === 'videos') {
-        // Aggregate public video discovery (Saturn-style): YouTube metadata + open web providers.
-        // Shows results that can be found; playable sources open in JUPITER when embed/direct playback is allowed.
-        const [yt, web] = await Promise.all([
-          searchYouTubeVideos(q, 16).catch(() => []),
-          searchWebProviders(`${q} 8K 4K video site:youtube.com OR site:vimeo.com OR site:dailymotion.com OR site:bilibili.com OR site:twitch.tv`, 16, lang).catch(() => [])
-        ]);
-        const seen = new Set<string>();
-        externalResults = [...yt, ...web].filter(r => {
-          const u = String(r?.url || '');
-          if (!/^https?:\/\//i.test(u) || seen.has(u)) return false;
-          seen.add(u);
-          return true;
-        }).map(r => ({ ...r, category: 'videos' as const })).slice(0, 24);
-      } else if (category === 'books') {
-        // Safe discovery fallback: web search for book-related pages (external links only, no scraping).
-        const discovery = await searchZLibraryDiscovery(q, 20, lang);
-        externalResults = discovery;
-      } else {
-        externalResults = await searchWebProviders(`${q} ${category === 'audio' ? 'audio music' : 'book'}`, 20, lang);
-      }
+      internalResults = indexedResults.filter(result => result.kind === 'video').slice(0, 10);
+      const [yt, web] = await Promise.all([
+        searchYouTubeVideos(q, 16).catch(() => []),
+        searchWebProviders(`${q} 8K 4K video site:youtube.com OR site:vimeo.com OR site:dailymotion.com OR site:bilibili.com OR site:twitch.tv`, 16, lang).catch(() => [])
+      ]);
+      const seen = new Set<string>();
+      externalResults = [...yt, ...web].filter(r => {
+        const u = String(r?.url || '');
+        if (!u || seen.has(u)) return false;
+        seen.add(u);
+        return true;
+      });
+    } else if (category === 'books') {
+      const indexedResults = searchEarthIndex(q, store, 50);
+      internalResults = indexedResults.filter(result => result.kind === 'book').slice(0, 10);
+      // Safe discovery fallback: web search for book-related pages (external links only, no scraping).
+      const discovery = await searchZLibraryDiscovery(q, 20, lang);
+      externalResults = discovery;
+    } else {
+      internalResults = searchEarthAudio(q, store, 10);
+      externalResults = await searchWebProviders(`${q} audio music`, 20, lang);
     }
     const enrichedExternal = externalResults.map((result, index) => {
       let domain = '';
       try { domain = new URL(result.sourceUrl || result.url).hostname.replace(/^www\./, ''); } catch { /* Invalid provider links are removed below. */ }
-      const playable = /youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com|dailymotion\.com|bilibili\.com|facebook\.com|x\.com|twitter\.com|douyin\.com|kuaishou\.com/i.test(domain) || /\.(?:m4v|mov|mp4|ogv|webm)$/i.test(new URL(result.url).pathname);
+      const playable = /youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com|dailymotion\.com|bilibili\.com|twitch\.tv/i.test(domain) || /\.(?:m4v|mov|mp4|ogv|webm)$/i.test(new URL(result.url).pathname);
       return {
         ...result,
         id: `web:${domain}:${index}:${result.url}`,
@@ -1273,7 +1615,7 @@ app.get('/api/jupiter/search', async (req, res) => {
         domain
       };
     }).filter(result => Boolean(result.domain));
-    let results = mergeAndRankJupiterResults(q, [...internalResults, ...enrichedExternal], 30);
+    let results = mergeAndRankJupiterResults(q, [...internalResults, ...enrichedExternal], 20);
     if (category === 'videos') {
       results = results
         .map(r => ({ ...r, kind: r.source === 'earth' ? r.kind : 'video' as const, category: 'videos' as const }))
@@ -1385,11 +1727,12 @@ app.get('/api/search/global', (req, res) => {
     .slice(0, 5);
 
   const knowledge = searchKnowledge(q, 5);
+  const discovery = discoveryDb.searchResources({ q, limit: 6 }).items;
 
   res.json({
     success: true,
     query: q,
-    results: { users: users.map(toPublicUser), posts, books, communities, knowledge }
+    results: { users: users.map(toPublicUser), posts, books, communities, knowledge, resources: discovery }
   });
 });
 
@@ -1422,6 +1765,9 @@ async function startServer() {
     // Prevent the interval from keeping the process alive in tests/edge cases
     harvestInterval.unref?.();
   }
+
+  // Start Discovery background maintenance daemon
+  startDiscoveryScheduler();
 }
 
 startServer().catch(err => {

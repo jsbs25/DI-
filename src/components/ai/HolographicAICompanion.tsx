@@ -505,8 +505,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       {!isOpen && showLauncher && (
         <button
           onClick={() => setIsOpen(true)}
+          aria-label="打开地球计划 AI 对话"
           className="group relative flex items-center space-x-3 px-4 py-2.5 rounded-full bg-slate-950/95 hover:bg-slate-900 border border-cyan-400/60 hover:border-cyan-300 backdrop-blur-2xl shadow-2xl shadow-cyan-500/25 cursor-pointer transition-all hover:scale-105 active:scale-95"
-          title={isZh ? "唤醒宇宙智能体 D" : "Awaken Celestial Intelligence D"} aria-label={isZh ? "打开地球计划 AI 对话" : "Open Earth One AI Chat"}
+          title={isZh ? "唤醒宇宙智能体 D" : "Awaken Celestial Intelligence D"}
         >
           <div className="relative w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-cyan-950/80 border border-cyan-400/50 shadow-inner">
             <canvas ref={canvasRef} className="w-8 h-8" />

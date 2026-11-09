@@ -76,6 +76,11 @@ for (const lang of languages) {
       !openHtml.includes('id="globe-local-nav" style="display:none"'),
     `${lang}: opening the disclosure restores live telemetry and local navigation`
   );
+  check(
+    [t.globeTab, t.feedTab, t.universeTab, t.communityTab, t.knowledgeTab, t.digitalLibrary, t.apps]
+      .every(label => openHtml.includes(escaped(label))),
+    `${lang}: existing navigation destinations remain available on demand`
+  );
 }
 
 const aiLauncherHidden = renderToStaticMarkup(

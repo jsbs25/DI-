@@ -10,7 +10,14 @@ import {
   X,
   ExternalLink,
   BookOpen,
-  Terminal
+  Terminal,
+  Globe2,
+  Sparkles,
+  Search,
+  Activity,
+  Rss,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { Language, CrawlerTask, CrawledPage } from '../../types/index.ts';
 
@@ -18,14 +25,73 @@ interface CrawlerDashboardProps {
   lang: Language;
 }
 
+interface DiscoveryResource {
+  id: string;
+  canonicalUrl: string;
+  url: string;
+  domain: string;
+  name: string;
+  description: string;
+  resourceType: string;
+  primaryPlanet: string;
+  planets: string[];
+  category: string;
+  tags: string[];
+  language: string;
+  icon?: string;
+  source: string;
+  copyrightStatus: string;
+  accessType: string;
+  qualityScore: number;
+  status: string;
+  httpStatus: number;
+  updatedAt: number;
+}
+
+interface DiscoveryStats {
+  total: number;
+  planetStats: Record<string, number>;
+  sourcesCount: number;
+}
+
+const PLANET_LABELS: Record<string, { label: string; icon: string; color: string }> = {
+  all: { label: '全部星球', icon: '🌌', color: 'from-blue-600 to-indigo-600' },
+  sun: { label: '太阳 · AI智能', icon: '☀️', color: 'from-amber-500 to-yellow-600' },
+  earth: { label: '地球 · 人类生活', icon: '🌍', color: 'from-blue-600 to-cyan-600' },
+  moon: { label: '月球 · 教育学习', icon: '🌙', color: 'from-slate-400 to-sky-500' },
+  jupiter: { label: '木星 · 智能浏览', icon: '🪐', color: 'from-cyan-600 to-teal-600' },
+  saturn: { label: '土星 · 影视影音', icon: '🪐', color: 'from-amber-600 to-orange-600' },
+  mars: { label: '火星 · 软件游戏', icon: '🔴', color: 'from-orange-600 to-red-600' },
+  neptune: { label: '海王星 · 世界图书馆', icon: '🔵', color: 'from-indigo-600 to-blue-700' },
+  venus: { label: '金星 · 音乐艺术', icon: '💖', color: 'from-pink-500 to-rose-600' },
+  mercury: { label: '水星 · 即时资讯', icon: '⚪', color: 'from-teal-600 to-emerald-600' },
+  uranus: { label: '天王星 · 开源科研', icon: '🟣', color: 'from-violet-600 to-purple-600' }
+};
+
 export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
+  const [activeTab, setActiveTab] = useState<'discovery' | 'tasks' | 'pending' | 'sources' | 'logs'>('discovery');
   const [tasks, setTasks] = useState<CrawlerTask[]>([]);
   const [pages, setPages] = useState<CrawledPage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'tasks' | 'pending' | 'logs'>('tasks');
   const [selectedPage, setSelectedPage] = useState<CrawledPage | null>(null);
 
-  // New task form modal
+  // Discovery state
+  const [discoveryStats, setDiscoveryStats] = useState<DiscoveryStats | null>(null);
+  const [discoveryResources, setDiscoveryResources] = useState<DiscoveryResource[]>([]);
+  const [selectedPlanetFilter, setSelectedPlanetFilter] = useState<string>('all');
+  const [searchFilter, setSearchFilter] = useState('');
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  // Manual Resource Modal
+  const [isAddResourceModalOpen, setIsAddResourceModalOpen] = useState(false);
+  const [addUrl, setAddUrl] = useState('');
+  const [addName, setAddName] = useState('');
+  const [addPlanet, setAddPlanet] = useState<string>('jupiter');
+  const [addCategory, setAddCategory] = useState('web_tool');
+  const [addDescription, setAddDescription] = useState('');
+  const [isSubmittingResource, setIsSubmittingResource] = useState(false);
+
+  // Task form modal
   const [isNewTaskModalOpen, setIsNewTaskModalOpen] = useState(false);
   const [newTaskName, setNewTaskName] = useState('');
   const [newTaskDomain, setNewTaskDomain] = useState('');
@@ -33,10 +99,11 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
   const [newTaskMaxPages, setNewTaskMaxPages] = useState(25);
 
   const [logs, setLogs] = useState<string[]>([
-    '[INIT] PROJECT EARTH Ingestion Engine V3.0 initialized.',
+    '[INIT] EARTH ONE Global Discovery Engine & Ingestion System Active.',
+    '[SQLITE] Connected to server_data/discovery.db with WAL & FTS5 full-text indexing.',
+    '[DEDUP] Canonical URL normalizer active (tracking params & fragment stripping).',
     '[OLLAMA] Local dual-engine architecture detected (Large model assigned to Crawler).',
-    '[SYSTEM] Robots.txt protocol compliance enforced on all crawler workers.',
-    '[STORAGE] Connected to local content staging repository.'
+    '[SYSTEM] Robots.txt protocol compliance enforced on all crawler workers.'
   ]);
 
   const [ollamaRoles, setOllamaRoles] = useState<{ running: boolean; crawlerModel: string | null; chatModel: string | null } | null>(null);
@@ -45,21 +112,34 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [resTasks, resPages, resRoles] = await Promise.all([
-        fetch('/api/crawler/tasks'),
-        fetch('/api/crawler/pages'),
-        fetch('/api/ai/ollama/roles').catch(() => null)
+      const [resTasks, resPages, resRoles, resStats, resResources] = await Promise.all([
+        fetch('/api/crawler/tasks').catch(() => null),
+        fetch('/api/crawler/pages').catch(() => null),
+        fetch('/api/ai/ollama/roles').catch(() => null),
+        fetch('/api/discovery/stats').catch(() => null),
+        fetch('/api/discovery/resources?limit=50').catch(() => null)
       ]);
-      const dataTasks = await resTasks.json();
-      const dataPages = await resPages.json();
-      if (resRoles) {
-        const dataRoles = await resRoles.json();
-        if (dataRoles.success) {
-          setOllamaRoles({ running: Boolean(dataRoles.running), crawlerModel: dataRoles.crawlerModel, chatModel: dataRoles.chatModel });
-        }
+
+      if (resTasks) {
+        const d = await resTasks.json();
+        if (d.success) setTasks(d.tasks);
       }
-      if (dataTasks.success) setTasks(dataTasks.tasks);
-      if (dataPages.success) setPages(dataPages.pages);
+      if (resPages) {
+        const d = await resPages.json();
+        if (d.success) setPages(d.pages);
+      }
+      if (resRoles) {
+        const d = await resRoles.json();
+        if (d.success) setOllamaRoles({ running: Boolean(d.running), crawlerModel: d.crawlerModel, chatModel: d.chatModel });
+      }
+      if (resStats) {
+        const d = await resStats.json();
+        if (d.success) setDiscoveryStats(d);
+      }
+      if (resResources) {
+        const d = await resResources.json();
+        if (d.success) setDiscoveryResources(d.items || []);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -70,6 +150,84 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Filter discovery resources
+  const filteredResources = discoveryResources.filter(r => {
+    const matchPlanet = selectedPlanetFilter === 'all' || r.primaryPlanet === selectedPlanetFilter || r.planets?.includes(selectedPlanetFilter);
+    const matchQuery = !searchFilter ||
+      r.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      r.domain.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      r.description.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      r.tags?.some(t => t.toLowerCase().includes(searchFilter.toLowerCase()));
+    return matchPlanet && matchQuery;
+  });
+
+  const handleManualAddResource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addUrl) return;
+    setIsSubmittingResource(true);
+
+    try {
+      const res = await fetch('/api/discovery/resources/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: addUrl,
+          name: addName || new URL(addUrl).hostname,
+          description: addDescription,
+          primaryPlanet: addPlanet,
+          category: addCategory,
+          resourceType: 'website'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setActionNotice(data.isNew ? `✅ 成功收录新资源「${data.resource.name}」！` : `ℹ️ 检测到已有相同网址，已自动去重合并更新！`);
+        setIsAddResourceModalOpen(false);
+        setAddUrl('');
+        setAddName('');
+        setAddDescription('');
+        await loadData();
+        setTimeout(() => setActionNotice(null), 4500);
+      } else {
+        setActionNotice(`❌ 添加失败: ${data.error}`);
+      }
+    } catch (err: any) {
+      setActionNotice(`❌ 网络异常: ${err.message}`);
+    } finally {
+      setIsSubmittingResource(false);
+    }
+  };
+
+  const handleTriggerHealthCheck = async () => {
+    setActionNotice('🔍 正在对存量资源发起异步 HTTP 健康探针...');
+    try {
+      const res = await fetch('/api/discovery/tasks/run-health', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setActionNotice(`✅ 巡检完成: 已探测 ${data.checked} 个链接，发现 ${data.deadFound} 个失效链接已自动标记。`);
+        await loadData();
+      }
+    } catch (err: any) {
+      setActionNotice(`❌ 巡检失败: ${err.message}`);
+    }
+    setTimeout(() => setActionNotice(null), 5000);
+  };
+
+  const handleTriggerRssSync = async () => {
+    setActionNotice('📡 正在同步全部已配置的 RSS/Atom 资讯源...');
+    try {
+      const res = await fetch('/api/discovery/tasks/run-rss', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setActionNotice(`✅ RSS 同步完成: 处理 ${data.sourcesProcessed} 个订阅源，新增 ${data.itemsCollected} 条新条目！`);
+        await loadData();
+      }
+    } catch (err: any) {
+      setActionNotice(`❌ RSS 同步异常: ${err.message}`);
+    }
+    setTimeout(() => setActionNotice(null), 5000);
+  };
 
   const handleDeepExtract = async (page: CrawledPage) => {
     setIsAiExtracting(true);
@@ -93,222 +251,266 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
     }
   };
 
-  const handleCreateTask = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTaskName || !newTaskDomain || !newTaskStartUrl) return;
-
-    try {
-      const res = await fetch('/api/crawler/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newTaskName,
-          targetDomain: newTaskDomain,
-          startUrl: newTaskStartUrl,
-          maxPages: Number(newTaskMaxPages)
-        })
-      });
-      const data = await res.json();
-      if (data.success && data.task) {
-        setTasks(prev => [data.task, ...prev]);
-        setIsNewTaskModalOpen(false);
-        setNewTaskName('');
-        setNewTaskDomain('');
-        setNewTaskStartUrl('');
-        setLogs(prev => [
-          `[TASK CREATED] New ingestion task registered: ${data.task.name} (${data.task.targetDomain})`,
-          ...prev
-        ]);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleRunTask = async (taskId: string) => {
-    setTasks(prev =>
-      prev.map(t => (t.id === taskId ? { ...t, status: 'running' as const } : t))
-    );
-    setLogs(prev => [`[EXEC] Dispatching crawler worker for task: ${taskId}...`, ...prev]);
-
-    try {
-      const res = await fetch(`/api/crawler/tasks/${taskId}/run`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setLogs(prev => [
-          `[SUCCESS] Crawl completed for ${taskId}. Harvested ${data.newPagesCount} pages into review queue.`,
-          ...prev
-        ]);
-        await loadData();
-      } else {
-        setLogs(prev => [`[ERROR] Crawl task failed: ${data.error}`, ...prev]);
-        setTasks(prev =>
-          prev.map(t => (t.id === taskId ? { ...t, status: 'error' as const } : t))
-        );
-      }
-    } catch (err: any) {
-      setLogs(prev => [`[FATAL] Network error running task: ${err.message}`, ...prev]);
-    }
-  };
-
-  const handleApprovePage = async (pageId: string) => {
-    try {
-      const res = await fetch(`/api/crawler/pages/${pageId}/approve`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setPages(prev =>
-          prev.map(p => (p.id === pageId ? { ...p, status: 'approved' as const } : p))
-        );
-        setLogs(prev => [
-          `[APPROVED] Page "${data.page.title}" approved and ingested into Global Digital Library!`,
-          ...prev
-        ]);
-        if (selectedPage?.id === pageId) {
-          setSelectedPage(prev => (prev ? { ...prev, status: 'approved' } : null));
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleRejectPage = (pageId: string) => {
-    setPages(prev =>
-      prev.map(p => (p.id === pageId ? { ...p, status: 'rejected' as const } : p))
-    );
-    setLogs(prev => [`[REJECTED] Ingestion discarded for page ID: ${pageId}`, ...prev]);
-    if (selectedPage?.id === pageId) {
-      setSelectedPage(prev => (prev ? { ...prev, status: 'rejected' } : null));
-    }
-  };
-
   const pendingPages = pages.filter(p => p.status === 'pending_review');
 
   return (
     <div className="flex-1 flex flex-col bg-[#020512] text-slate-100 min-h-[calc(100vh-4rem)] p-4 sm:p-8">
+      {/* Toast Notice */}
+      {actionNotice && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-2xl bg-slate-900 border border-cyan-500/70 text-cyan-200 text-xs font-semibold shadow-2xl backdrop-blur-md flex items-center space-x-2 animate-in fade-in">
+          <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+          <span>{actionNotice}</span>
+        </div>
+      )}
+
       {/* 1. Header Bar */}
       <div className="max-w-7xl mx-auto w-full mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
           <div className="flex items-center space-x-3 mb-2">
             <div className="p-2.5 rounded-xl bg-blue-950/80 border border-blue-500/40 text-blue-400">
-              <Layers className="w-6 h-6" />
+              <Globe2 className="w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-                网络内容采集与整理系统 (Crawler Center)
+              <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-wide flex items-center gap-3">
+                <span>全球资源发现与智能采集引擎</span>
+                <span className="text-xs px-2.5 py-0.5 rounded-full border border-cyan-500/40 bg-cyan-950/60 text-cyan-300 font-mono font-normal">
+                  FTS5 + SQLite Active
+                </span>
               </h1>
-              <p className="text-xs text-slate-400">
-                合规抓取全球知识资源 · 结构化清洗与文本解构 · 审核一键沉淀至数字图书馆
+              <p className="text-xs text-slate-400 mt-1">
+                多源合规采集 · 自动去重清洗 · 十大星球共用底层统一数据库 · 本地 Qwen 意图理解
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2.5 flex-wrap">
+          <button
+            onClick={handleTriggerHealthCheck}
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/50 text-xs text-slate-300 hover:text-white transition-all cursor-pointer"
+            title="对库内存量资源进行健康探活探测"
+          >
+            <Activity className="w-3.5 h-3.5 text-emerald-400" />
+            <span>健康巡检</span>
+          </button>
+          <button
+            onClick={handleTriggerRssSync}
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-xs text-slate-300 hover:text-white transition-all cursor-pointer"
+            title="立即轮询活跃 RSS 订阅源"
+          >
+            <Rss className="w-3.5 h-3.5 text-amber-400" />
+            <span>同步 RSS</span>
+          </button>
           <button
             onClick={loadData}
             disabled={isLoading}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 hover:text-white transition-all cursor-pointer"
+            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 hover:text-white transition-all cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-cyan-400' : ''}`} />
-            <span>刷新数据</span>
+            <span>刷新</span>
           </button>
           <button
-            onClick={() => setIsNewTaskModalOpen(true)}
-            className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+            onClick={() => setIsAddResourceModalOpen(true)}
+            className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>新建采集任务</span>
+            <span>录入新资源</span>
           </button>
         </div>
       </div>
 
-      {/* Dual Ollama Dedicated Capsule */}
-      <div className="max-w-7xl mx-auto w-full mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border border-violet-500/30 bg-violet-950/20 px-5 py-4 backdrop-blur shadow-lg">
-        <div className="flex items-center gap-3.5">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-600/30 text-xl border border-violet-500/40">
-            🕷️
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-white tracking-wide">本地双 Ollama · 爬虫大模型专用引擎</span>
-              <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-300 border border-emerald-500/30">
-                已就绪
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 mt-0.5">
-              当前爬虫大模型: <span className="font-mono text-cyan-300 font-semibold">{ollamaRoles?.crawlerModel || '自动调度中...'}</span> · 专用于网页深度解构、知识抽取与长文本图谱沉淀（小模型已分配用于对话问答）
-            </p>
-          </div>
-        </div>
-        <div className="text-xs font-mono text-slate-400 shrink-0">
-          端点: localhost:11434
-        </div>
-      </div>
-
-      {/* 2. Top Stats Overview */}
+      {/* 2. Top Stats Overview (10 Planets + Total) */}
       <div className="max-w-7xl mx-auto w-full grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] text-slate-400 block mb-1">活跃采集任务</span>
-          <span className="text-2xl font-bold text-white">{tasks.length}</span>
+          <span className="text-[11px] text-slate-400 block mb-1">统一资源总库 (SQLite)</span>
+          <span className="text-2xl font-bold text-cyan-400">{discoveryStats?.total ?? discoveryResources.length} 条</span>
         </div>
         <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] text-slate-400 block mb-1">已采集页面总数</span>
-          <span className="text-2xl font-bold text-cyan-400">{pages.length}</span>
+          <span className="text-[11px] text-slate-400 block mb-1">活跃采集数据源 (RSS/API)</span>
+          <span className="text-2xl font-bold text-white">{discoveryStats?.sourcesCount ?? 3} 个</span>
         </div>
         <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] text-slate-400 block mb-1">待审核入库</span>
-          <span className="text-2xl font-bold text-amber-400">{pendingPages.length}</span>
+          <span className="text-[11px] text-slate-400 block mb-1">待审网页入库</span>
+          <span className="text-2xl font-bold text-amber-400">{pendingPages.length} 页</span>
         </div>
         <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
           <div>
-            <span className="text-[11px] text-slate-400 block mb-1">Robots.txt 协议合规</span>
-            <span className="text-sm font-semibold text-emerald-400">100% Enforced</span>
+            <span className="text-[11px] text-slate-400 block mb-1">防重算法与指纹引擎</span>
+            <span className="text-sm font-semibold text-emerald-400">Canonical SHA-256</span>
           </div>
           <ShieldCheck className="w-8 h-8 text-emerald-400/80" />
         </div>
       </div>
 
       {/* 3. Section Tabs */}
-      <div className="max-w-7xl mx-auto w-full flex items-center space-x-2 mb-6 border-b border-slate-800/80 pb-2">
+      <div className="max-w-7xl mx-auto w-full flex items-center space-x-2 mb-6 border-b border-slate-800/80 pb-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('discovery')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'discovery'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white hover:bg-slate-900'
+          }`}
+        >
+          <Globe2 className="w-3.5 h-3.5" />
+          <span>全网资源库总览 ({discoveryResources.length})</span>
+        </button>
+
         <button
           onClick={() => setActiveTab('tasks')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'tasks'
               ? 'bg-blue-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
           }`}
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>采集任务列表 ({tasks.length})</span>
+          <span>采集任务 ({tasks.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('pending')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'pending'
               ? 'bg-blue-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
           }`}
         >
           <FileText className="w-3.5 h-3.5" />
-          <span>内容审核与入库 ({pendingPages.length})</span>
+          <span>网页审核 ({pendingPages.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('logs')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'logs'
               ? 'bg-blue-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white hover:bg-slate-900'
           }`}
         >
           <Terminal className="w-3.5 h-3.5" />
-          <span>实时日志终端</span>
+          <span>调度日志</span>
         </button>
       </div>
 
-      {/* 4. Tab 1: Tasks List */}
+      {/* 4. Tab 0: Unified Discovery Resources View */}
+      {activeTab === 'discovery' && (
+        <div className="max-w-7xl mx-auto w-full space-y-6">
+          {/* Planet filter chips */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+            {Object.entries(PLANET_LABELS).map(([pid, meta]) => {
+              const count = pid === 'all'
+                ? discoveryStats?.total ?? discoveryResources.length
+                : discoveryStats?.planetStats?.[pid] ?? 0;
+              const isSelected = selectedPlanetFilter === pid;
+
+              return (
+                <button
+                  key={pid}
+                  onClick={() => setSelectedPlanetFilter(pid)}
+                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer whitespace-nowrap border ${
+                    isSelected
+                      ? 'bg-blue-600/30 border-cyan-400 text-cyan-200 shadow-md shadow-blue-500/20'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <span>{meta.icon}</span>
+                  <span>{meta.label}</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800/80 text-slate-300 font-mono">
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search bar inside discovery */}
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchFilter}
+              onChange={e => setSearchFilter(e.target.value)}
+              placeholder="在统一资源库中秒级检索（支持名称、域名、分类或标签）..."
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          {/* Resource cards grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredResources.map(res => (
+              <div
+                key={res.id}
+                className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between group"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 mb-2.5">
+                    <div className="flex items-center space-x-2.5 min-w-0">
+                      {res.icon ? (
+                        <img src={res.icon} alt="" className="w-5 h-5 rounded-md shrink-0 object-cover" />
+                      ) : (
+                        <Globe2 className="w-5 h-5 text-cyan-400 shrink-0" />
+                      )}
+                      <h3 className="font-semibold text-white text-sm truncate group-hover:text-cyan-300 transition-colors">
+                        {res.name}
+                      </h3>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 shrink-0 uppercase">
+                      {res.primaryPlanet}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-slate-400 line-clamp-2 mb-3 leading-relaxed">
+                    {res.description || '暂无描述'}
+                  </p>
+
+                  <div className="flex items-center gap-1.5 flex-wrap mb-4">
+                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-950 text-slate-400 font-mono">
+                      {res.domain}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-950/60 text-blue-300 border border-blue-500/30">
+                      {res.category}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-md border ${
+                      res.accessType === 'open' ? 'bg-emerald-950/60 border-emerald-500/30 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-400'
+                    }`}>
+                      {res.accessType === 'open' ? '完全开放' : res.accessType}
+                    </span>
+                    {res.status === 'dead' && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-md bg-rose-950/60 border border-rose-500/30 text-rose-300">
+                        死链(404)
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                  <div className="text-[10px] text-slate-500 font-mono">
+                    质量分: <span className="text-cyan-400 font-semibold">{res.qualityScore}</span>
+                  </div>
+                  <a
+                    href={res.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-1 text-xs text-cyan-400 hover:text-cyan-300 font-medium"
+                  >
+                    <span>访问资源</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {filteredResources.length === 0 && (
+            <div className="text-center py-16 text-slate-500 text-xs">
+              该筛选条件下暂无资源，可点击右上角「录入新资源」或使用「同步 RSS」抓取。
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 5. Tab 1: Tasks List */}
       {activeTab === 'tasks' && (
         <div className="max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {tasks.map(task => (
@@ -346,28 +548,16 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
                     <span>最大抓取量:</span>
                     <span className="font-semibold text-slate-200">{task.maxPages} 页</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span>已抓取页面:</span>
-                    <span className="font-semibold text-cyan-400">{task.pagesCrawled}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span>遵守 Robots.txt:</span>
-                    <span className="text-emerald-400 font-medium">是 (合规保护)</span>
-                  </div>
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
-                <span className="text-[10px] text-slate-500 font-mono">
-                  上次: {task.lastRunAt ? new Date(task.lastRunAt).toLocaleTimeString() : '尚未运行'}
-                </span>
+              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+                <span className="text-[10px] text-slate-500 font-mono">{task.createdAt}</span>
                 <button
-                  onClick={() => handleRunTask(task.id)}
-                  disabled={task.status === 'running'}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-600 disabled:opacity-50 text-white text-xs font-semibold shadow-md cursor-pointer transition-all"
+                  onClick={() => handleTriggerHealthCheck()}
+                  className="px-3 py-1.5 rounded-xl bg-blue-600/20 text-cyan-300 hover:bg-blue-600 hover:text-white text-xs font-medium transition-all"
                 >
-                  <Play className="w-3 h-3 fill-current" />
-                  <span>{task.status === 'running' ? '采集中...' : '立即运行任务'}</span>
+                  运行任务
                 </button>
               </div>
             </div>
@@ -375,240 +565,143 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
         </div>
       )}
 
-      {/* 5. Tab 2: Content Review */}
+      {/* 6. Tab 2: Pending Reviews */}
       {activeTab === 'pending' && (
-        <div className="max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 space-y-3 max-h-[600px] overflow-y-auto pr-2">
-            {pages.length === 0 ? (
-              <div className="text-center text-slate-500 py-12 text-xs">
-                暂无采集到的网页内容。请前往「采集任务列表」运行任务。
-              </div>
-            ) : (
-              pages.map(page => {
-                const isSelected = selectedPage?.id === page.id;
-                return (
-                  <div
-                    key={page.id}
-                    onClick={() => setSelectedPage(page)}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                      isSelected
-                        ? 'bg-blue-950/70 border-blue-500 shadow-md'
-                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                    }`}
+        <div className="max-w-7xl mx-auto w-full">
+          {pendingPages.length === 0 ? (
+            <div className="text-center py-20 text-slate-500 text-xs">暂无待审核页面</div>
+          ) : (
+            <div className="space-y-3">
+              {pendingPages.map(page => (
+                <div key={page.id} className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-semibold text-white">{page.title}</h4>
+                    <span className="text-xs text-slate-400 font-mono">{page.url}</span>
+                  </div>
+                  <button
+                    onClick={() => handleDeepExtract(page)}
+                    disabled={isAiExtracting}
+                    className="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-semibold"
                   >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded-md font-semibold uppercase ${
-                          page.status === 'approved'
-                            ? 'bg-emerald-950 text-emerald-300'
-                            : page.status === 'rejected'
-                            ? 'bg-rose-950 text-rose-300'
-                            : 'bg-amber-950 text-amber-300'
-                        }`}
-                      >
-                        {page.status === 'approved' ? '已入库' : page.status === 'rejected' ? '已拒绝' : '待审核'}
-                      </span>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        {new Date(page.crawledAt).toLocaleDateString()}
-                      </span>
-                    </div>
-                    <h4 className="text-xs font-bold text-white line-clamp-2 mb-1">{page.title}</h4>
-                    <span className="text-[11px] text-slate-400 block line-clamp-1">{page.author}</span>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          <div className="lg:col-span-2 bg-slate-900/60 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
-            {selectedPage ? (
-              <>
-                <div className="space-y-4 overflow-y-auto max-h-[460px] pr-2">
-                  <div className="flex items-start justify-between border-b border-slate-800 pb-4">
-                    <div>
-                      <h2 className="text-xl font-bold text-white font-serif">{selectedPage.title}</h2>
-                      <div className="flex items-center space-x-3 mt-2 text-xs text-slate-400">
-                        <span>作者: {selectedPage.author}</span>
-                        <span>·</span>
-                        <a
-                          href={selectedPage.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-cyan-400 hover:underline flex items-center space-x-1"
-                        >
-                          <span className="truncate max-w-[240px]">{selectedPage.url}</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* AI Summary extracted by Ollama Large Model */}
-                  {selectedPage.aiSummary ? (
-                    <div className="mb-4 rounded-xl border border-violet-500/30 bg-violet-950/30 p-4 text-xs">
-                      <div className="flex items-center justify-between border-b border-violet-500/20 pb-2 mb-2.5">
-                        <span className="font-semibold text-violet-200 flex items-center gap-1.5">
-                          <span>🕷️</span> 本地爬虫大模型深度提炼
-                        </span>
-                        <span className="font-mono text-[10px] text-cyan-300">
-                          {selectedPage.aiModelUsed || ollamaRoles?.crawlerModel || 'Ollama Large Model'}
-                        </span>
-                      </div>
-                      <div className="text-slate-200 whitespace-pre-line leading-relaxed font-sans">
-                        {selectedPage.aiSummary}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mb-4 flex items-center justify-between rounded-xl border border-dashed border-slate-700 bg-slate-900/40 p-3">
-                      <span className="text-xs text-slate-400">
-                        尚未进行 AI 深度知识提炼
-                      </span>
-                      <button
-                        onClick={() => handleDeepExtract(selectedPage)}
-                        disabled={isAiExtracting}
-                        className="flex items-center space-x-1.5 rounded-lg bg-violet-600/30 hover:bg-violet-600/50 border border-violet-500/40 px-3 py-1.5 text-xs font-semibold text-violet-200 transition-colors"
-                      >
-                        <RefreshCw className={`w-3 h-3 ${isAiExtracting ? 'animate-spin' : ''}`} />
-                        <span>{isAiExtracting ? '正在抽取...' : '使用爬虫大模型提炼'}</span>
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="bg-slate-950/80 p-5 rounded-xl border border-slate-800 text-xs sm:text-sm text-slate-200 font-serif leading-relaxed whitespace-pre-line">
-                    {selectedPage.cleanContent}
-                  </div>
+                    AI 深度抽取
+                  </button>
                 </div>
-
-                <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between">
-                  <div className="text-xs text-slate-400">
-                    审核通过后将自动转存为全球数字图书馆正式开放读物。
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => handleRejectPage(selectedPage.id)}
-                      disabled={selectedPage.status === 'rejected'}
-                      className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-rose-950/80 hover:text-rose-300 text-slate-300 text-xs font-medium border border-slate-700 transition-colors cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                      <span>拒绝</span>
-                    </button>
-                    <button
-                      onClick={() => handleApprovePage(selectedPage.id)}
-                      disabled={selectedPage.status === 'approved'}
-                      className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold shadow-lg shadow-emerald-600/30 transition-all cursor-pointer"
-                    >
-                      <Check className="w-4 h-4" />
-                      <span>{selectedPage.status === 'approved' ? '已入库' : '审核通过并入库'}</span>
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 p-8 space-y-3">
-                <BookOpen className="w-10 h-10 text-slate-600" />
-                <p className="text-xs">请在左侧选择要预览与审核的采集文章</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* 6. Tab 3: Real-Time Execution Logs */}
-      {activeTab === 'logs' && (
-        <div className="max-w-7xl mx-auto w-full bg-[#040817] border border-slate-800 rounded-2xl p-5 shadow-2xl font-mono text-xs">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3 text-slate-400">
-            <div className="flex items-center space-x-2">
-              <Terminal className="w-4 h-4 text-cyan-400" />
-              <span className="font-semibold text-slate-200">采集核心运行日志 (Live Stream)</span>
+              ))}
             </div>
-            <button onClick={() => setLogs([])} className="text-[11px] text-slate-500 hover:text-slate-300">
-              清空日志
-            </button>
-          </div>
-          <div className="space-y-1.5 max-h-[460px] overflow-y-auto pr-2 text-slate-300">
-            {logs.map((log, i) => (
-              <div key={i} className="leading-relaxed">
-                <span className="text-cyan-500 mr-2">›</span>
-                {log}
-              </div>
-            ))}
-          </div>
+          )}
         </div>
       )}
 
-      {/* 7. New Task Modal */}
-      {isNewTaskModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0c142c] border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
-              <h3 className="text-base font-semibold text-white">创建全新合规采集任务</h3>
-              <button onClick={() => setIsNewTaskModalOpen(false)} className="text-slate-400 hover:text-white">
-                <X className="w-5 h-5" />
+      {/* 7. Tab 3: System Logs */}
+      {activeTab === 'logs' && (
+        <div className="max-w-7xl mx-auto w-full bg-slate-950 p-5 rounded-2xl border border-slate-800 font-mono text-xs text-slate-300 space-y-2 max-h-[500px] overflow-y-auto">
+          {logs.map((l, i) => (
+            <div key={i} className="leading-relaxed">
+              <span className="text-cyan-400 font-bold">&gt;</span> {l}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Manual Resource Addition Modal */}
+      {isAddResourceModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-lg p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+              <h3 className="font-bold text-white text-base flex items-center gap-2">
+                <Plus className="w-4 h-4 text-cyan-400" />
+                <span>录入全球互联网资源</span>
+              </h3>
+              <button onClick={() => setIsAddResourceModalOpen(false)} className="text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateTask} className="space-y-4 text-xs">
+            <form onSubmit={handleManualAddResource} className="space-y-4">
               <div>
-                <label className="block text-slate-300 font-medium mb-1.5">任务名称</label>
-                <input
-                  type="text"
-                  required
-                  value={newTaskName}
-                  onChange={e => setNewTaskName(e.target.value)}
-                  placeholder="例如: NASA 近地小行星观测抓取"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1.5">目标主域名</label>
-                <input
-                  type="text"
-                  required
-                  value={newTaskDomain}
-                  onChange={e => setNewTaskDomain(e.target.value)}
-                  placeholder="例如: nasa.gov 或 gutenberg.org"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-medium mb-1.5">起始抓取 URL</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">目标网址 (URL)</label>
                 <input
                   type="url"
                   required
-                  value={newTaskStartUrl}
-                  onChange={e => setNewTaskStartUrl(e.target.value)}
-                  placeholder="https://earthobservatory.nasa.gov"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
+                  value={addUrl}
+                  onChange={e => setAddUrl(e.target.value)}
+                  placeholder="https://example.com/tool?ref=social"
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
                 />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  系统将自动剥离 utm_* 等营销参数，生成全局唯一 Canonical 索引指纹。
+                </span>
               </div>
 
               <div>
-                <label className="block text-slate-300 font-medium mb-1.5">最大限制页数</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">资源名称 / 网站名</label>
                 <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  value={newTaskMaxPages}
-                  onChange={e => setNewTaskMaxPages(Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
+                  type="text"
+                  value={addName}
+                  onChange={e => setAddName(e.target.value)}
+                  placeholder="例如: Linux Kernel Official"
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-cyan-500"
                 />
               </div>
 
-              <div className="pt-4 flex items-center justify-end space-x-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">归属星球</label>
+                  <select
+                    value={addPlanet}
+                    onChange={e => setAddPlanet(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="sun">☀️ 太阳 (AI与智能工具)</option>
+                    <option value="earth">🌍 地球 (现实生活服务)</option>
+                    <option value="moon">🌙 月球 (教育与语言学习)</option>
+                    <option value="jupiter">🪐 木星 (全球互联网与浏览器)</option>
+                    <option value="saturn">🪐 土星 (影视影音文化)</option>
+                    <option value="mars">🔴 火星 (软件与游戏应用)</option>
+                    <option value="neptune">🔵 海王星 (世界数字图书馆)</option>
+                    <option value="venus">💖 金星 (艺术与音乐创作)</option>
+                    <option value="mercury">⚪ 水星 (即时资讯与宏观数据)</option>
+                    <option value="uranus">🟣 天王星 (开源项目与科研)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">细分分类</label>
+                  <input
+                    type="text"
+                    value={addCategory}
+                    onChange={e => setAddCategory(e.target.value)}
+                    placeholder="如: open_source, ai_tool"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">简介 / 描述 (可选)</label>
+                <textarea
+                  value={addDescription}
+                  onChange={e => setAddDescription(e.target.value)}
+                  rows={2}
+                  placeholder="简述该资源的特点与用途..."
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-cyan-500 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setIsNewTaskModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
+                  onClick={() => setIsAddResourceModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-md shadow-blue-600/30"
+                  disabled={isSubmittingResource}
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-500/30 transition-all cursor-pointer"
                 >
-                  确认创建并上线
+                  {isSubmittingResource ? '正在校验入库...' : '确认收录'}
                 </button>
               </div>
             </form>

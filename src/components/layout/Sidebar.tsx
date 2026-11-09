@@ -18,7 +18,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Globe2,
-  Music2
+  Music2,
+  Moon
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 
@@ -47,17 +48,14 @@ const NAV_ITEMS: NavItem[] = [
   { tab: 'saturn', icon: Film, label: { zh: '土星 · 影视宇宙', en: 'SATURN · CINEMA' } },
   { tab: 'venus', icon: Music2, label: { zh: '金星 · 音乐馆', en: 'VENUS · MUSIC' } },
   { tab: 'library', icon: BookOpen, label: { zh: '太阳 · 世界图书馆', en: 'SUN · LIBRARY' } },
-  { tab: 'academy', icon: GraduationCap, label: { zh: '月球 · 太空学院', en: 'MOON · ACADEMY' } },
-  { tab: 'mercury', icon: SearchCheck, label: { zh: '水星 · 全球搜索', en: 'MERCURY · SEARCH' } },
+  { tab: 'moon', icon: Moon, label: { zh: '月球 · 宇宙天文图库', en: 'MOON · ASTRO IMAGERY' } },
   { tab: 'aihub', icon: Sparkles, label: { zh: '天王星 · AI中枢', en: 'URANUS · AI HUB' } },
   { tab: 'creator', icon: PenTool, label: { zh: '海王星 · 创作者', en: 'NEPTUNE · CREATOR' } },
-
   { tab: 'crawler', icon: Radar, label: { zh: '采集网络中枢', en: 'CRAWLER HUB' } },
   { tab: 'arabic-learning', icon: GraduationCap, label: { zh: '阿语沉浸学习', en: 'ARABIC LEARNING' } },
   { tab: 'knowledge', icon: Network, label: { zh: '全域知识图谱', en: 'KNOWLEDGE' } },
   { tab: 'feed', icon: Compass, label: { zh: '全球社群动态', en: 'COMMUNITY FEED' } },
   { tab: 'chat', icon: MessageSquare, label: { zh: '全球即时通信', en: 'MESSENGER' } },
-  { tab: 'video', icon: Film, label: { zh: '全球视频流', en: 'GLOBAL VIDEO' } },
   { tab: 'community', icon: Users2, label: { zh: '数字聚落社区', en: 'COMMUNITIES' } }
 ];
 

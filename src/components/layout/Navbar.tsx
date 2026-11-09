@@ -47,6 +47,7 @@ interface NavbarProps {
   onSearchChange: (q: string) => void;
   onOpenBook?: (bookId: string) => void;
   onOpenKnowledge?: (nodeId: string) => void;
+  onReplayIntro?: () => void;
 }
 
 function Group({ label, children }: { label: string; children: React.ReactNode }) {
@@ -97,7 +98,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   searchQuery,
   onSearchChange,
   onOpenBook,
-  onOpenKnowledge
+  onOpenKnowledge,
+  onReplayIntro
 }) => {
   const t = translations[lang] || translations.zh;
   const [langMenuOpen, setLangMenuOpen] = useState(false);
@@ -113,6 +115,16 @@ export const Navbar: React.FC<NavbarProps> = ({
     books: Book[];
     communities: Community[];
     knowledge: KnowledgeNode[];
+    resources?: Array<{
+      id: string;
+      name: string;
+      description: string;
+      url: string;
+      domain: string;
+      primaryPlanet: string;
+      resourceType: string;
+      accessType: string;
+    }>;
   } | null>(null);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearching, setGlobalSearching] = useState(false);
@@ -141,7 +153,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, [searchQuery]);
 
   const totalResultCount = globalResults
-    ? globalResults.users.length + globalResults.posts.length + globalResults.books.length + globalResults.communities.length + globalResults.knowledge.length
+    ? globalResults.users.length + globalResults.posts.length + globalResults.books.length + globalResults.communities.length + globalResults.knowledge.length + (globalResults.resources?.length || 0)
     : 0;
 
   const closeGlobalSearch = () => {
@@ -214,6 +226,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
                 {!globalSearching && globalResults && totalResultCount > 0 && (
                   <>
+                    {globalResults.resources && globalResults.resources.length > 0 && (
+                      <Group label={lang === 'zh' ? '全网发现资源 · 10大星球' : 'Discovered Resources'}>
+                        {globalResults.resources.map(r => (
+                          <ResultRow
+                            key={r.id}
+                            icon={<Sparkles className="w-3.5 h-3.5 text-cyan-400" />}
+                            title={r.name}
+                            subtitle={`[${r.primaryPlanet.toUpperCase()}] ${r.domain} · ${r.description.slice(0, 50)}`}
+                            onClick={() => {
+                              window.open(r.url, '_blank', 'noopener,noreferrer');
+                              closeGlobalSearch();
+                            }}
+                          />
+                        ))}
+                      </Group>
+                    )}
                     {globalResults.knowledge.length > 0 && (
                       <Group label={t.knowledgeTab}>
                         {globalResults.knowledge.map(n => (
@@ -365,19 +393,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>{lang === 'zh' ? '世界图书馆' : 'Library'}</span>
             </button>
 
-            {/* Moon Academy */}
-            <button
-              onClick={() => onSelectTab('academy')}
-              className={`hidden 2xl:flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                currentTab === 'academy'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/35 border border-indigo-400/50'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <GraduationCap className="w-3.5 h-3.5 text-indigo-300" />
-              <span>{lang === 'zh' ? '太空学院' : 'Academy'}</span>
-            </button>
-
             {/* Ecosystem Apps Dropdown */}
             <div className="relative">
               <button
@@ -488,6 +503,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               {isDarkMode ? <Sun className="w-4 h-4 text-amber-300" /> : <Moon className="w-4 h-4 text-cyan-300" />}
             </button>
+
+            {/* Cinematic Intro Button */}
+            {onReplayIntro && (
+              <button
+                onClick={onReplayIntro}
+                title={lang === 'zh' ? '播放电影级入场动画' : 'Play Cinematic Intro'}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full border border-cyan-500/40 bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 text-xs font-medium transition-all shadow-[0_0_12px_rgba(6,182,212,0.15)] hover:shadow-[0_0_16px_rgba(6,182,212,0.35)] cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                <span className="hidden sm:inline">{lang === 'zh' ? '入场动画' : 'Intro'}</span>
+              </button>
+            )}
 
             {/* Language Selector Dropdown */}
             <div className="relative">

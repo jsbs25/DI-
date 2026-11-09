@@ -37,8 +37,8 @@ import { MercurySearch } from './components/search/MercurySearch.tsx';
 import { getPlanetEcosystem } from './universe/planetEcosystems.ts';
 import { HolographicAICompanion } from './components/ai/HolographicAICompanion.tsx';
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
-import { SolarSystemDirectory } from './universe/SolarSystemDirectory.tsx';
 import { MoonAcademy } from './universe/MoonAcademy.tsx';
+import { MoonSpaceObservatory } from './universe/MoonSpaceObservatory.tsx';
 import { VenusCreativeStudio } from './universe/VenusCreativeStudio.tsx';
 import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 
@@ -418,6 +418,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100 flex font-sans">
+      {/* Cinematic Intro (Hyperspace, Digital Earth, Cosmic Civilization) */}
       {showIntro && (
         <CinematicIntro
           onComplete={() => {
@@ -430,6 +431,7 @@ export default function App() {
           }}
         />
       )}
+
       {/* Welcome Banner Toast */}
       {welcomeToast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-950/95 border border-cyan-500/60 text-cyan-200 text-xs shadow-2xl backdrop-blur-md flex items-center space-x-2 animate-in fade-in slide-in-from-top-2">
@@ -438,12 +440,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Navigation */}
+      {/* Left sidebar navigation (desktop) */}
       <Sidebar
-        lang={lang}
-        onSelectLang={setLang}
         currentTab={currentTab}
         onSelectTab={(tab) => { setCurrentTab(tab); if (tab !== 'browser') setBrowserInitialQuery(null); }}
+        lang={lang}
+        onSelectLang={setLang}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
       />
@@ -496,12 +498,6 @@ export default function App() {
               onExploreUniverse={() => setCurrentTab('universe')}
               onExploreCommunity={() => setCurrentTab('community')}
               lang={lang}
-            />
-            <SolarSystemDirectory
-              onSelectPlanet={planetId => {
-                setSelectedSolarBodyId(planetId || undefined);
-                setCurrentTab('universe');
-              }}
             />
           </div>
         )}
@@ -571,14 +567,12 @@ export default function App() {
 
         {currentTab === 'aihub' && <AIHub lang={lang} />}
 
-        {currentTab === 'library' && <DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} />}
+        {currentTab === 'library' && (
+          <DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} />
+        )}
 
-        {currentTab === 'academy' && (
-          <MoonAcademy
-            lang={lang}
-            currentUser={currentUser}
-            onBack={() => setCurrentTab('universe')}
-          />
+        {currentTab === 'moon' && (
+          <MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} />
         )}
 
         {currentTab === 'arabic-learning' && (
@@ -621,7 +615,7 @@ export default function App() {
 
         {currentTab === 'video' && <VideoCenter videos={videos} lang={lang} />}
 
-
+        {currentTab === 'game' && <GameCenter currentUser={currentUser} lang={lang} />}
 
         {currentTab === 'community' && (
           <CommunityList

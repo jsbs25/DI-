@@ -231,7 +231,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   // =========================================================================
   // Search & ingest
   // =========================================================================
-  const handleCrawlBooks = async (overrideQuery?: string) => {
+  const handleCrawlBooks = async (overrideQuery?: string, preserveOnline = false) => {
     const q = (typeof overrideQuery === 'string' ? overrideQuery : searchQuery).trim();
     if (!q) return;
     if (typeof overrideQuery === 'string') setSearchQuery(overrideQuery);
@@ -239,20 +239,22 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     setIngestError(null);
     setCrawlResults([]);
     setCrawlSources([]);
-    setOnlineResults([]);
-    setOnlineSourceStatuses([]);
+    if (!preserveOnline) {
+      setOnlineResults([]);
+      setOnlineSourceStatuses([]);
+    }
     try {
-      const res = await fetch(`/api/library/crawl?q=${encodeURIComponent(q)}&limit=12`);
+      const res = await fetch(`/api/library/crawl?q=${encodeURIComponent(q)}&limit=16`);
       const data = await res.json();
       if (data.success) {
         setCrawlResults(Array.isArray(data.results) ? data.results : []);
         setCrawlSources(Array.isArray(data.sources) ? data.sources : []);
-        if (!data.results?.length) setIngestError('未从开放图书来源检索到结果，请尝试其他关键词。');
+        if (!data.results?.length && !preserveOnline) setIngestError('未从开放图书来源检索到结果，请尝试其他关键词。');
       } else {
-        setIngestError(data.error || '开放图书爬取/检索失败，请稍后重试。');
+        if (!preserveOnline) setIngestError(data.error || '开放图书爬取/检索失败，请稍后重试。');
       }
     } catch (err: any) {
-      setIngestError(`爬取异常: ${err.message}`);
+      if (!preserveOnline) setIngestError(`爬取异常: ${err.message}`);
     } finally {
       setIsCrawling(false);
     }
@@ -298,7 +300,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
   };
 
-  const handleOnlineSearch = async (overrideQuery?: string) => {
+  const handleOnlineSearch = async (overrideQuery?: string, preserveCrawl = false) => {
     const q = (typeof overrideQuery === 'string' ? overrideQuery : searchQuery).trim();
     if (!q) return;
     if (typeof overrideQuery === 'string') {
@@ -312,8 +314,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     setOnlineYearFilter('all');
     setOnlineResults([]);
     setOnlineSourceStatuses([]);
-    setCrawlResults([]);
-    setCrawlSources([]);
+    if (!preserveCrawl) {
+      setCrawlResults([]);
+      setCrawlSources([]);
+    }
 
     try {
       const res = await fetch(`/api/library/search?q=${encodeURIComponent(q)}`);
@@ -321,17 +325,25 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       if (data.success && data.results) {
         setOnlineResults(data.results);
         setOnlineSourceStatuses(Array.isArray(data.sources) ? data.sources : []);
-        if (data.results.length === 0) {
+        if (data.results.length === 0 && !preserveCrawl) {
           setIngestError('未找到匹配的全球馆藏，请尝试其他书名、作者、ISBN 或 DOI。');
         }
       } else {
-        setIngestError(data.error || '在线搜索失败，请稍后重试。');
+        if (!preserveCrawl) setIngestError(data.error || '在线搜索失败，请稍后重试。');
       }
     } catch (err: any) {
-      setIngestError(`搜索异常: ${err.message}`);
+      if (!preserveCrawl) setIngestError(`搜索异常: ${err.message}`);
     } finally {
       setIsSearchingOnline(false);
     }
+  };
+
+  const handleUnifiedSearch = async (overrideQuery?: string) => {
+    const q = (typeof overrideQuery === 'string' ? overrideQuery : searchQuery).trim();
+    if (!q) return;
+    if (typeof overrideQuery === 'string') setSearchQuery(overrideQuery);
+    void handleCrawlBooks(q, true);
+    void handleOnlineSearch(q, true);
   };
 
   const handleIngestBook = async (r: OnlineLibraryResult) => {
@@ -834,7 +846,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     type="text"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleOnlineSearch()}
+                    onKeyDown={e => e.key === 'Enter' && handleUnifiedSearch()}
                     placeholder="输入书名、作者、哲学、科学、文学或 ISBN..."
                     aria-describedby="world-library-search-help"
                     className="w-full bg-slate-900/90 border border-amber-500/40 focus:border-amber-400 rounded-2xl pl-11 pr-[13rem] py-3.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none transition-all shadow-inner"
@@ -852,12 +864,12 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleOnlineSearch()}
-                      disabled={isSearchingOnline || !searchQuery.trim()}
+                      onClick={() => handleUnifiedSearch()}
+                      disabled={(isSearchingOnline && isCrawling) || !searchQuery.trim()}
                       className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-xs font-semibold transition-all cursor-pointer shadow-md"
                     >
                       <Search className="w-3.5 h-3.5" />
-                      <span>{isSearchingOnline ? '检索中...' : '搜索'}</span>
+                      <span>{isSearchingOnline || isCrawling ? '检索中...' : '搜索'}</span>
                     </button>
                   </div>
                 </div>
@@ -878,7 +890,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     <button
                       key={chip.label}
                       type="button"
-                      onClick={() => handleOnlineSearch(chip.q)}
+                      onClick={() => handleUnifiedSearch(chip.q)}
                       className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-amber-950/70 text-slate-300 hover:text-amber-200 border border-slate-700 hover:border-amber-600/50 text-[11px] transition-all cursor-pointer"
                     >
                       {chip.label}
