@@ -3,7 +3,8 @@ import type { Conversation, ChatMessage, User, Language, ChannelIntegration } fr
 import {
   Send, Languages, Sparkles, MessageCircle, Globe, Search, Plug, ShieldAlert,
   Users, UserPlus, Check, X, ImagePlus, Paperclip, Reply, Trash2, Undo2, MoreVertical,
-  Wifi, WifiOff, RefreshCw, Info, Crown, Shield, LogOut, UserMinus, Settings2
+  Wifi, WifiOff, RefreshCw, Info, Crown, Shield, LogOut, UserMinus, Settings2,
+  Download, ChevronLeft, ChevronRight, FileText, AlertTriangle, Loader2, Eye
 } from 'lucide-react';
 
 interface GlobalMessengerProps {
@@ -71,9 +72,68 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const typingSentRef = useRef(0);
   const lastSyncRef = useRef<string>(new Date().toISOString());
   const lastSyncCursorRef = useRef<{ since?: string; sinceId?: string } | null>(null);
+
+  type PendingUpload = { id: string; file: File; name: string; size: number; mimeType: string; kind: 'image' | 'file'; previewUrl?: string; progress: number; status: 'queued' | 'uploading' | 'sending' | 'error' | 'done'; error?: string; uploadedAttachment?: any };
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [lightbox, setLightbox] = useState<{ items: { url: string; name: string }[]; index: number } | null>(null);
+  const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
+  const [dlState, setDlState] = useState<Record<string, 'downloading' | 'error' | 'done'>>({});
+  const pendingUploadsRef = useRef<PendingUpload[]>([]);
+  useEffect(() => { pendingUploadsRef.current = pendingUploads; }, [pendingUploads]);
+  useEffect(() => () => { for (const p of pendingUploadsRef.current) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); }, []);
+
+  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+  const ALLOWED_MIME = new Set(['image/png','image/jpeg','image/gif','image/webp','application/pdf','text/plain','application/zip','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
+  const BLOCKED_EXTS = new Set(['.html','.htm','.svg','.xml','.js','.mjs','.cjs','.sh','.bat','.cmd','.ps1','.exe','.msi','.apk','.php','.jsp','.asp','.aspx']);
+  const formatBytes = (n?: number) => {
+    if (!n && n !== 0) return '';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  };
+  const fileExt = (name: string) => { const m = /\.([a-zA-Z0-9]{1,10})$/.exec(name || ''); return m ? `.${m[1].toLowerCase()}` : ''; };
+  const validateLocalFile = (file: File): string | null => {
+    const ext = fileExt(file.name);
+    if (ext && BLOCKED_EXTS.has(ext)) return '文件类型不允许';
+    const mime = (file.type || '').toLowerCase();
+    const allowedByMime = ALLOWED_MIME.has(mime) || (ext === '.docx' && mime === 'application/zip');
+    const allowedByExt = ['.png','.jpg','.jpeg','.gif','.webp','.pdf','.txt','.zip','.doc','.docx'].includes(ext);
+    if (!allowedByMime && !allowedByExt) return '文件类型不允许';
+    if (file.size > MAX_UPLOAD_BYTES) return '文件过大（最大 10MB）';
+    if (file.size <= 0) return '空文件';
+    return null;
+  };
+  const authFileUrl = (url: string) => {
+    if (!url) return url;
+    try {
+      const u = new URL(url, window.location.origin);
+      const t = token();
+      if (t) u.searchParams.set('token', t);
+      return u.toString();
+    } catch { return url; }
+  };
+  const downloadAttachment = async (a: any) => {
+    if (!a?.url) return;
+    setDlState(s => ({ ...s, [a.id]: 'downloading' }));
+    try {
+      const res = await fetch(authFileUrl(`${a.url}?download=1`), { headers: token() ? { Authorization: `Bearer ${token()}` } : {} });
+      if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || '下载失败');
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href; link.download = a.name || 'file'; document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 1000);
+      setDlState(s => ({ ...s, [a.id]: 'done' }));
+    } catch {
+      setDlState(s => ({ ...s, [a.id]: 'error' }));
+      setConnError('下载失败，可重试');
+    }
+  };
 
   const token = () => localStorage.getItem('earth_one_token') || '';
   const authed = !!token();
@@ -326,19 +386,108 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     }
   };
 
-  const uploadAndSend = async (file: File) => {
-    if (!activeConv || !authed) return;
-    if (file.size > 10 * 1024 * 1024) { setConnError('文件过大（最大 10MB）'); return; }
-    try {
-      const dataBase64 = await new Promise<string>((resolve, reject) => { const r = new FileReader(); r.onload = () => { const s = String(r.result||''); resolve(s.includes(',') ? s.split(',')[1] : s); }; r.onerror = () => reject(new Error('read failed')); r.readAsDataURL(file); });
-      const up = await api('/api/messenger/upload', { method: 'POST', body: JSON.stringify({ name: file.name, mimeType: file.type || 'application/octet-stream', dataBase64, conversationId: activeConv.id }) });
-      if (up.success && up.attachment) {
-        const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '', attachments: [up.attachment] }) });
-        if (data.success && data.message) { setMessages(prev => [...prev, data.message]); await onRefreshConversations?.(); }
-      }
-    } catch (err: any) {
-      setConnError(err?.message || '上传失败');
+  const uploadOne = (file: File, convId: string, onProgress: (p: number) => void): Promise<any> => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/messenger/upload/stream');
+    const t = token();
+    if (t) xhr.setRequestHeader('Authorization', `Bearer ${t}`);
+    xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
+    xhr.setRequestHeader('x-mime-type', encodeURIComponent(file.type || 'application/octet-stream'));
+    xhr.setRequestHeader('x-conversation-id', encodeURIComponent(convId));
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.max(1, Math.round((e.loaded / e.total) * 100))); };
+    xhr.onerror = () => reject(new Error('上传失败，请检查网络'));
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText || '{}');
+        if (xhr.status >= 200 && xhr.status < 300 && data.success && data.attachment) resolve(data.attachment);
+        else reject(new Error(data.error || '上传失败'));
+      } catch { reject(new Error('上传失败')); }
+    };
+    xhr.send(file);
+  });
+
+  const queueFiles = (files: FileList | File[]) => {
+    if (!activeConv) return;
+    const list = Array.from(files);
+    const next: PendingUpload[] = [];
+    for (const file of list) {
+      const err = validateLocalFile(file);
+      const mime = (file.type || '').toLowerCase();
+      const isImg = mime.startsWith('image/') || ['.png','.jpg','.jpeg','.gif','.webp'].includes(fileExt(file.name));
+      next.push({
+        id: `pend_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+        file, name: file.name, size: file.size, mimeType: file.type || 'application/octet-stream',
+        kind: isImg ? 'image' : 'file',
+        previewUrl: isImg ? URL.createObjectURL(file) : undefined,
+        progress: 0,
+        status: err ? 'error' : 'queued',
+        error: err || undefined,
+      });
     }
+    if (next.length) setPendingUploads(prev => [...prev, ...next]);
+  };
+
+  const removePending = (id: string) => {
+    setPendingUploads(prev => {
+      const p = prev.find(x => x.id === id);
+      if (p?.previewUrl) URL.revokeObjectURL(p.previewUrl);
+      return prev.filter(x => x.id !== id);
+    });
+  };
+
+  const sendPendingUploads = async () => {
+    if (!activeConv || !authed || isUploading) return;
+    const items = pendingUploads.filter(p => p.status !== 'done');
+    if (!items.length) return;
+    setIsUploading(true);
+    try {
+      for (const item of items) {
+        if (item.status === 'error' && !item.uploadedAttachment) continue;
+        try {
+          let att = item.uploadedAttachment;
+          if (!att) {
+            setPendingUploads(prev => prev.map(p => p.id === item.id ? { ...p, status: 'uploading', progress: 1, error: undefined } : p));
+            att = await uploadOne(item.file, activeConv.id, (p) => setPendingUploads(prev => prev.map(x => x.id === item.id ? { ...x, progress: p } : x)));
+            setPendingUploads(prev => prev.map(p => p.id === item.id ? { ...p, uploadedAttachment: att, progress: 100 } : p));
+          }
+          setPendingUploads(prev => prev.map(p => p.id === item.id ? { ...p, status: 'sending', error: undefined } : p));
+          const clientId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+          const optimistic: ChatMessage = {
+            id: clientId, conversationId: activeConv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
+            senderAvatar: currentUser?.avatar || '', senderCountry: currentUser?.location?.countryCode || 'UN', content: '',
+            createdAt: new Date().toISOString(), status: 'sending', readBy: [currentUser?.id || ''], deliveredTo: [], attachments: [att]
+          } as any;
+          pendingClientIds.current.add(clientId);
+          setMessages(prev => [...prev, optimistic].sort((a,b)=>{ const ta=new Date(a.createdAt).getTime(), tb=new Date(b.createdAt).getTime(); if(ta!==tb) return ta-tb; return String(a.id).localeCompare(String(b.id)); }));
+          const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '', attachments: [att], clientMsgId: clientId }) });
+          pendingClientIds.current.delete(clientId);
+          if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
+          await onRefreshConversations?.();
+          setPendingUploads(prev => prev.map(p => p.id === item.id ? { ...p, status: 'done', progress: 100 } : p));
+        } catch (e: any) {
+          setPendingUploads(prev => prev.map(p => p.id === item.id ? { ...p, status: 'error', error: e?.message || '发送失败' } : p));
+          setConnError(e?.message || '上传/发送失败');
+        }
+      }
+    } finally {
+      setIsUploading(false);
+      setPendingUploads(prev => {
+        const keep = prev.filter(p => p.status !== 'done');
+        const done = prev.filter(p => p.status === 'done');
+        for (const p of done) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+        return keep;
+      });
+    }
+  };
+
+  const retryPending = (id: string) => {
+    setPendingUploads(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      // if upload already succeeded, retry only message send
+      if (p.uploadedAttachment) return { ...p, status: 'queued', error: undefined };
+      return { ...p, status: 'queued', error: undefined, progress: 0 };
+    }));
+    setTimeout(() => { void sendPendingUploads(); }, 0);
   };
 
   const doSearchUsers = async () => {
@@ -697,15 +846,39 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <div className={`flex items-center gap-1.5 text-[11px] text-slate-400 mb-1 ${isMe?'justify-end':''}`}><span className="font-semibold text-slate-300">{msg.senderName}</span><span>{new Date(msg.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span></div>
                   <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-md space-y-2 ${isMe?'bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-tr-none':'bg-slate-800/90 text-slate-200 border border-slate-700/60 rounded-tl-none'}`}>
                     {msg.replyToId && <div className="text-[11px] opacity-80 border-l-2 border-white/30 pl-2">回复消息</div>}
-                    {msg.attachments && msg.attachments.length>0 && (
-                      <div className="space-y-2">
-                        {msg.attachments.map(a => a.type==='image' ? (
-                          <a key={a.id} href={a.url} target="_blank" rel="noreferrer"><img src={a.url} alt={a.name} className="max-h-56 rounded-lg border border-white/10"/></a>
-                        ) : (
-                          <a key={a.id} href={a.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs underline"><Paperclip className="w-3.5 h-3.5"/>{a.name}</a>
-                        ))}
-                      </div>
-                    )}
+                    {msg.attachments && msg.attachments.length>0 && (() => {
+                      const imgs = (msg.attachments || []).filter(a => a.type === 'image');
+                      return (
+                        <div className="space-y-2">
+                          {msg.attachments.map((a, idx) => a.type === 'image' ? (
+                            <div key={a.id} className="space-y-1">
+                              {imgErrors[a.id] ? (
+                                <div className="text-xs rounded-lg border border-rose-400/40 bg-rose-950/30 px-3 py-2 flex items-center justify-between gap-2"><span className="inline-flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5"/>图片加载失败</span><button onClick={()=>setImgErrors(m=>{const n={...m}; delete n[a.id]; return n;})} className="underline">重试</button></div>
+                              ) : (
+                                <button type="button" onClick={()=>setLightbox({ items: imgs.map(i=>({url: authFileUrl(i.url), name: i.name})), index: Math.max(0, imgs.findIndex(i=>i.id===a.id)) })} className="block">
+                                  <img src={authFileUrl(a.url)} alt={a.name} loading="lazy" onError={()=>setImgErrors(m=>({...m,[a.id]:true}))} className="max-h-56 rounded-lg border border-white/10 cursor-zoom-in"/>
+                                </button>
+                              )}
+                              <div className="flex items-center justify-between gap-2 text-[10px] opacity-80"><span className="truncate">{a.name}</span><button onClick={()=>void downloadAttachment(a)} className="inline-flex items-center gap-1 underline shrink-0"><Download className="w-3 h-3"/>{dlState[a.id]==='downloading'?'下载中…':dlState[a.id]==='error'?'重试下载':'下载'}</button></div>
+                            </div>
+                          ) : (
+                            <div key={a.id} className="rounded-xl border border-white/15 bg-black/10 p-2.5 space-y-2">
+                              <div className="flex items-start gap-2 min-w-0">
+                                <FileText className="w-4 h-4 mt-0.5 shrink-0"/>
+                                <div className="min-w-0 flex-1"><p className="text-xs font-semibold truncate">{a.name}</p><p className="text-[10px] opacity-80">{a.mimeType || 'file'} · {formatBytes(a.size)}</p></div>
+                              </div>
+                              {(a.mimeType === 'application/pdf' || a.mimeType === 'text/plain') && (
+                                <button type="button" onClick={()=>setLightbox({ items: [{ url: authFileUrl(a.url), name: a.name, type: a.mimeType } as any], index: 0 })} className="text-[11px] underline inline-flex items-center gap-1"><Eye className="w-3 h-3"/>预览</button>
+                              )}
+                              <div className="flex items-center gap-2 text-[11px]">
+                                <button onClick={()=>void downloadAttachment(a)} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-white/10 hover:bg-white/20"><Download className="w-3 h-3"/>{dlState[a.id]==='downloading'?'下载中…':dlState[a.id]==='error'?'下载失败·重试':'下载'}</button>
+                                {dlState[a.id]==='done' && <span className="opacity-80">已下载</span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     {msg.translatedContent && !showOrig ? (
                       <div><p className="whitespace-pre-wrap break-words">{msg.translatedContent}</p><div className="mt-1 text-[10px] opacity-80 flex items-center justify-between"><span className="inline-flex items-center gap-1"><Sparkles className="w-3 h-3"/>译文</span><button onClick={()=>setShowOriginalMap(p=>({...p,[msg.id]:!p[msg.id]}))} className="underline">原文</button></div></div>
                     ) : (
@@ -728,9 +901,32 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
         <form onSubmit={handleSendMessage} className="p-3 bg-slate-950/60 border-t border-slate-800 space-y-2">
           {replyTo && <div className="text-[11px] text-slate-300 flex items-center justify-between bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5"><span className="truncate">回复：{replyTo.content || '[附件]'}</span><button type="button" onClick={()=>setReplyTo(null)}><X className="w-3.5 h-3.5"/></button></div>}
+          {pendingUploads.length > 0 && (
+            <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-2.5 space-y-2">
+              <div className="flex items-center justify-between text-[11px] text-slate-300"><span>待发送附件 ({pendingUploads.length})</span><button type="button" onClick={()=>void sendPendingUploads()} disabled={isUploading || pendingUploads.every(p=>p.status==='error')} className="px-2.5 py-1 rounded-lg bg-cyan-500 text-slate-950 font-semibold disabled:opacity-40">上传并发送</button></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                {pendingUploads.map(p => (
+                  <div key={p.id} className="rounded-lg border border-slate-700 bg-slate-950/60 p-2 space-y-1.5">
+                    <div className="flex items-start gap-2">
+                      {p.kind === 'image' && p.previewUrl ? <img src={p.previewUrl} alt={p.name} className="w-14 h-14 object-cover rounded-md border border-slate-700"/> : <div className="w-10 h-10 rounded-md bg-slate-800 flex items-center justify-center"><FileText className="w-4 h-4 text-slate-300"/></div>}
+                      <div className="min-w-0 flex-1"><p className="text-xs text-slate-200 truncate">{p.name}</p><p className="text-[10px] text-slate-500">{formatBytes(p.size)} · {p.mimeType || 'file'}</p></div>
+                      <button type="button" onClick={()=>removePending(p.id)} className="p-1 rounded hover:bg-slate-800 text-slate-400"><X className="w-3.5 h-3.5"/></button>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div className={`h-full ${p.status==='error'?'bg-rose-500':'bg-cyan-500'}`} style={{ width: `${p.progress}%` }} /></div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span>{p.status==='error' ? `失败：${p.error || '失败'}` : p.status==='uploading' ? `上传中 ${p.progress}%` : p.status==='sending' ? '发送中…' : p.status==='done' ? '已发送' : (p.uploadedAttachment ? '待发送' : '待上传')}</span>
+                      {p.status==='error' && <button type="button" onClick={()=>retryPending(p.id)} className="text-cyan-300 underline">重新上传</button>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex items-end gap-2">
-            <input ref={fileInputRef} type="file" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(f) void uploadAndSend(f); e.currentTarget.value=''; }} />
-            <button type="button" onClick={()=>fileInputRef.current?.click()} className="p-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800"><ImagePlus className="w-4 h-4"/></button>
+            <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
+            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
+            <button type="button" onClick={()=>imageInputRef.current?.click()} title="发送图片" className="p-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800"><ImagePlus className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>fileInputRef.current?.click()} title="发送文件" className="p-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800"><Paperclip className="w-4 h-4"/></button>
             <textarea
               value={inputText}
               onChange={e=>{ setInputText(e.target.value); sendTyping(true); }}
@@ -740,10 +936,29 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               rows={1}
               className="flex-1 min-h-[42px] max-h-32 resize-y px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-sm text-slate-100"
             />
-            <button type="submit" disabled={!inputText.trim() || isSending || !activeConv} className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-semibold text-xs flex items-center gap-1.5 h-[42px]"><Send className="w-3.5 h-3.5"/><span>{isSending?'...':'发送'}</span></button>
+            <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-semibold text-xs flex items-center gap-1.5 h-[42px]"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
           </div>
         </form>
       </div>
+
+      {lightbox && (
+        <div className="fixed inset-0 z-[60] bg-black/90 flex flex-col" onClick={()=>setLightbox(null)}>
+          <div className="flex items-center justify-between p-3 text-slate-200" onClick={e=>e.stopPropagation()}>
+            <div className="text-xs truncate max-w-[70vw]">{lightbox.items[lightbox.index]?.name || ''}</div>
+            <div className="flex items-center gap-2">
+              {lightbox.items.length > 1 && <span className="text-xs text-slate-400">{lightbox.index + 1}/{lightbox.items.length}</span>}
+              <button onClick={()=>setLightbox(null)} className="p-1.5 rounded bg-slate-800 hover:bg-slate-700"><X className="w-4 h-4"/></button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 flex items-center justify-center gap-3 px-3 pb-4" onClick={e=>e.stopPropagation()}>
+            {lightbox.items.length > 1 && <button onClick={()=>setLightbox(l=>l?{...l,index:(l.index-1+l.items.length)%l.items.length}:l)} className="p-2 rounded-full bg-slate-800/80 hover:bg-slate-700 text-white"><ChevronLeft className="w-5 h-5"/></button>}
+            <div className="flex-1 min-h-0 flex items-center justify-center">
+              {(() => { const it: any = lightbox.items[lightbox.index]; if (!it) return null; if (it.type === 'application/pdf' || /\.pdf$/i.test(it.name||'')) return <iframe src={it.url} title={it.name||'PDF'} className="w-full h-[80vh] rounded-lg bg-white" />; if (it.type === 'text/plain' || /\.txt$/i.test(it.name||'')) return <iframe src={it.url} title={it.name||'Text'} className="w-full max-w-4xl h-[80vh] rounded-lg bg-slate-950 border border-slate-700" />; return <img src={it.url} alt={it.name||''} className="max-w-full max-h-[80vh] object-contain rounded-lg" />; })()}
+            </div>
+            {lightbox.items.length > 1 && <button onClick={()=>setLightbox(l=>l?{...l,index:(l.index+1)%l.items.length}:l)} className="p-2 rounded-full bg-slate-800/80 hover:bg-slate-700 text-white"><ChevronRight className="w-5 h-5"/></button>}
+          </div>
+        </div>
+      )}
 
       {selectedProfile && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={()=>setSelectedProfile(null)}>

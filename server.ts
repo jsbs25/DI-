@@ -56,7 +56,10 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-app.use(express.json({ limit: '20mb' }));
+app.use((req, res, next) => {
+  if (req.path === '/api/messenger/upload/stream') return next();
+  return express.json({ limit: '20mb' })(req, res, next);
+});
 
 // Initialize Gemini client if API key is provided
 let aiClient: GoogleGenAI | null = null;
@@ -704,9 +707,128 @@ app.post('/api/users/:id/follow', (req, res) => {
 // -------------------------------------------------------------
 const UPLOAD_DIR = path.resolve(process.cwd(), 'server_data', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const ATT_ID_RE = /^att_[a-zA-Z0-9_-]{6,80}$/;
+
+const ALLOWED_ATTACHMENT_TYPES = new Map<string, { kind: 'image' | 'file'; exts: string[] }>([
+  ['image/png', { kind: 'image', exts: ['.png'] }],
+  ['image/jpeg', { kind: 'image', exts: ['.jpg', '.jpeg'] }],
+  ['image/gif', { kind: 'image', exts: ['.gif'] }],
+  ['image/webp', { kind: 'image', exts: ['.webp'] }],
+  ['application/pdf', { kind: 'file', exts: ['.pdf'] }],
+  ['text/plain', { kind: 'file', exts: ['.txt'] }],
+  ['application/zip', { kind: 'file', exts: ['.zip'] }],
+  ['application/msword', { kind: 'file', exts: ['.doc'] }],
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', { kind: 'file', exts: ['.docx'] }],
+]);
+const BLOCKED_EXTS = new Set(['.html', '.htm', '.svg', '.xml', '.js', '.mjs', '.cjs', '.sh', '.bat', '.cmd', '.ps1', '.exe', '.msi', '.apk', '.php', '.jsp', '.asp', '.aspx']);
 
 function safeFileName(name: string) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file';
+  const base = String(name || 'file').replace(/[\u0000-\u001f\u007f]/g, '').replace(/[/\\]/g, '_').replace(/[^a-zA-Z0-9._ -]/g, '_').trim();
+  return (base.slice(0, 120) || 'file');
+}
+
+function extOf(name: string) {
+  const m = /\.([a-zA-Z0-9]{1,10})$/.exec(String(name || '').trim());
+  return m ? `.${m[1].toLowerCase()}` : '';
+}
+
+function sniffMime(buf: Buffer): string | null {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length >= 6 && buf.slice(0, 6).toString('ascii') === 'GIF87a') return 'image/gif';
+  if (buf.length >= 6 && buf.slice(0, 6).toString('ascii') === 'GIF89a') return 'image/gif';
+  if (buf.length >= 12 && buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  if (buf.length >= 5 && buf.slice(0, 5).toString('ascii') === '%PDF-') return 'application/pdf';
+  if (buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04) return 'application/zip'; // zip/docx containers share signature
+  return null;
+}
+
+function resolveAllowedAttachment(name: string, claimedMime: string, buf: Buffer): { ok: true; mimeType: string; kind: 'image' | 'file' } | { ok: false; error: string } {
+  const safeName = safeFileName(name);
+  const ext = extOf(safeName);
+  if (ext && BLOCKED_EXTS.has(ext)) return { ok: false, error: 'File type not allowed' };
+  let mime = String(claimedMime || '').toLowerCase().split(';')[0].trim();
+  if (mime === 'image/jpg') mime = 'image/jpeg';
+  const sniff = sniffMime(buf);
+  if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && sniff === 'application/zip') {
+    // docx is a zip container; allow only with correct extension
+  } else if (sniff === 'application/zip' && mime === 'application/zip') {
+    // ok
+  } else if (sniff && sniff !== 'application/zip') {
+    mime = sniff; // trust server-detected type for common binary formats
+  }
+  if (mime === 'application/zip' && ext === '.docx') mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const rule = ALLOWED_ATTACHMENT_TYPES.get(mime);
+  if (!rule) return { ok: false, error: 'File type not allowed' };
+  if (rule.exts.length && ext && !rule.exts.includes(ext)) {
+    // for sniffed binary types prefer detected mime; otherwise reject mismatch
+    if (!sniff) return { ok: false, error: 'File type not allowed' };
+  }
+  if (mime === 'text/plain') {
+    // reject obvious binary/HTML script content masquerading as text
+    const head = buf.slice(0, 512).toString('utf8').toLowerCase();
+    if (head.includes('<script') || head.includes('<html') || head.includes('javascript:')) return { ok: false, error: 'File type not allowed' };
+  }
+  return { ok: true, mimeType: mime, kind: rule.kind };
+}
+
+function findAttachmentMeta(id: string): { owner: string; metaPath: string; meta: any } | null {
+  if (!ATT_ID_RE.test(id)) return null;
+  try {
+    const owners = fs.readdirSync(UPLOAD_DIR, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
+    for (const owner of owners) {
+      if (!/^[a-zA-Z0-9_-]{1,120}$/.test(owner)) continue;
+      const metaPath = path.join(UPLOAD_DIR, owner, `${id}.json`);
+      if (!fs.existsSync(metaPath)) continue;
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      return { owner, metaPath, meta };
+    }
+  } catch {}
+  return null;
+}
+
+function canReadAttachmentMeta(userId: string, meta: any): boolean {
+  const convId = meta?.conversationId;
+  if (convId) {
+    const conv = store.conversations.find(c => c.id === convId);
+    return !!(conv && store.canAccessConversation(userId, conv));
+  }
+  return meta?.ownerId === userId;
+}
+
+function persistAttachment(user: any, name: string, mimeType: string, buf: Buffer, conversationId?: string) {
+  const id = `att_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  const checked = resolveAllowedAttachment(name, mimeType, buf);
+  if (!checked.ok) return { ok: false as const, error: checked.error };
+  const safeName = safeFileName(name);
+  const dir = path.join(UPLOAD_DIR, user.id);
+  fs.mkdirSync(dir, { recursive: true });
+  const fileName = `${id}_${safeName}`;
+  const filePath = path.join(dir, fileName);
+  const metaPath = path.join(dir, `${id}.json`);
+  try {
+    fs.writeFileSync(filePath, buf);
+  } catch (e: any) {
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+    return { ok: false as const, error: e?.message || 'Upload failed' };
+  }
+  const attachment = {
+    id,
+    type: checked.kind,
+    name: safeName,
+    url: `/api/messenger/files/${id}`,
+    size: buf.length,
+    mimeType: checked.mimeType,
+  };
+  try {
+    fs.writeFileSync(metaPath, JSON.stringify({ ...attachment, ownerId: user.id, path: filePath, conversationId: conversationId || null, createdAt: new Date().toISOString() }, null, 2));
+  } catch (e: any) {
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+    try { if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath); } catch {}
+    return { ok: false as const, error: e?.message || 'Upload failed' };
+  }
+  return { ok: true as const, attachment };
 }
 
 app.post('/api/messenger/upload', async (req, res) => {
@@ -720,54 +842,98 @@ app.post('/api/messenger/upload', async (req, res) => {
     const conv = store.conversations.find(c => c.id === conversationId);
     if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
   }
-  const allowed = /^(image\/(png|jpeg|jpg|gif|webp)|application\/pdf|text\/plain|application\/zip|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document)$/i.test(mimeType) || mimeType.startsWith('image/');
-  if (!allowed) return res.status(400).json({ success: false, error: 'File type not allowed' });
-  const buf = Buffer.from(dataBase64, 'base64');
-  if (!buf.length || buf.length > 10 * 1024 * 1024) return res.status(400).json({ success: false, error: 'File too large (max 10MB)' });
+  let buf: Buffer;
+  try { buf = Buffer.from(dataBase64, 'base64'); } catch { return res.status(400).json({ success: false, error: 'Invalid file data' }); }
+  if (!buf.length || buf.length > MAX_UPLOAD_BYTES) return res.status(400).json({ success: false, error: 'File too large (max 10MB)' });
+  const saved = persistAttachment(user, name, mimeType, buf, typeof conversationId === 'string' ? conversationId : undefined);
+  if (!saved.ok) return res.status(400).json({ success: false, error: saved.error });
+  res.json({ success: true, attachment: saved.attachment });
+});
+
+app.post('/api/messenger/upload/stream', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const name = typeof req.headers['x-file-name'] === 'string' ? decodeURIComponent(req.headers['x-file-name']) : '';
+  const mimeType = typeof req.headers['x-mime-type'] === 'string' ? decodeURIComponent(req.headers['x-mime-type']) : '';
+  const conversationId = typeof req.headers['x-conversation-id'] === 'string' ? decodeURIComponent(req.headers['x-conversation-id']) : '';
+  if (!name || !mimeType) return res.status(400).json({ success: false, error: 'x-file-name and x-mime-type headers are required' });
+  if (conversationId) {
+    const conv = store.conversations.find(c => c.id === conversationId);
+    if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  }
   const id = `att_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-  const ext = safeFileName(name).includes('.') ? '' : '';
-  const fileName = `${id}_${safeFileName(name)}`;
+  const safeName = safeFileName(name);
   const dir = path.join(UPLOAD_DIR, user.id);
   fs.mkdirSync(dir, { recursive: true });
-  const filePath = path.join(dir, fileName);
-  try {
-    fs.writeFileSync(filePath, buf);
-  } catch (e:any) {
-    return res.status(500).json({ success: false, error: e?.message || 'Upload failed' });
-  }
-  const attachment = { id, type: mimeType.startsWith('image/') ? 'image' : 'file', name: safeFileName(name), url: `/api/messenger/files/${id}`, size: buf.length, mimeType, ownerId: user.id };
-  // store attachment index in a simple map on disk? lightweight: keep sidecar json
-  try {
-    const metaPath = path.join(dir, `${id}.json`);
-    fs.writeFileSync(metaPath, JSON.stringify({ ...attachment, path: filePath, conversationId: conversationId || null, createdAt: new Date().toISOString() }, null, 2));
-  } catch {}
-  res.json({ success: true, attachment: { id: attachment.id, type: attachment.type, name: attachment.name, url: attachment.url, size: attachment.size, mimeType: attachment.mimeType } });
+  const filePath = path.join(dir, `${id}_${safeName}`);
+  const metaPath = path.join(dir, `${id}.json`);
+  const ws = fs.createWriteStream(filePath);
+  let size = 0;
+  let aborted = false;
+  const cleanup = () => { try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {} try { if (fs.existsSync(metaPath)) fs.unlinkSync(metaPath); } catch {} };
+  req.on('aborted', () => { aborted = true; ws.destroy(); cleanup(); });
+  req.on('data', (chunk: Buffer) => {
+    size += chunk.length;
+    if (size > MAX_UPLOAD_BYTES) {
+      aborted = true;
+      ws.destroy();
+      cleanup();
+      if (!res.headersSent) res.status(400).json({ success: false, error: 'File too large (max 10MB)' });
+      req.destroy();
+    }
+  });
+  ws.on('error', () => {
+    if (aborted) return;
+    aborted = true;
+    cleanup();
+    if (!res.headersSent) res.status(500).json({ success: false, error: 'Upload failed' });
+  });
+  ws.on('finish', () => {
+    if (aborted) return;
+    try {
+      const fd = fs.openSync(filePath, 'r');
+      const head = Buffer.alloc(512);
+      const n = fs.readSync(fd, head, 0, 512, 0);
+      fs.closeSync(fd);
+      const checked = resolveAllowedAttachment(safeName, mimeType, head.slice(0, n));
+      if (!checked.ok || !size) {
+        cleanup();
+        return res.status(400).json({ success: false, error: checked.ok ? 'Empty file' : checked.error });
+      }
+      const attachment = { id, type: checked.kind, name: safeName, url: `/api/messenger/files/${id}`, size, mimeType: checked.mimeType };
+      fs.writeFileSync(metaPath, JSON.stringify({ ...attachment, ownerId: user.id, path: filePath, conversationId: conversationId || null, createdAt: new Date().toISOString() }, null, 2));
+      return res.json({ success: true, attachment });
+    } catch (e: any) {
+      cleanup();
+      return res.status(500).json({ success: false, error: e?.message || 'Upload failed' });
+    }
+  });
+  req.pipe(ws);
 });
 
 app.get('/api/messenger/files/:id', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
   const id = req.params.id;
-  // locate meta by scanning user dirs of conversation participants? simpler: search all upload dirs for meta
+  if (!ATT_ID_RE.test(id)) return res.status(400).json({ success: false, error: 'Invalid file id' });
   try {
-    const owners = fs.readdirSync(UPLOAD_DIR, { withFileTypes: true }).filter(d=>d.isDirectory()).map(d=>d.name);
-    for (const owner of owners) {
-      const metaPath = path.join(UPLOAD_DIR, owner, `${id}.json`);
-      if (!fs.existsSync(metaPath)) continue;
-      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-      const convId = meta.conversationId;
-      if (convId) {
-        const conv = store.conversations.find(c => c.id === convId);
-        if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
-      } else {
-        // no conversation bound: only owner
-        if (owner !== user.id) return res.status(403).json({ success: false, error: 'Forbidden' });
-      }
-      if (!meta.path || !fs.existsSync(meta.path)) return res.status(404).json({ success: false, error: 'File not found' });
-      res.setHeader('Content-Type', meta.mimeType || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `${meta.type === 'image' ? 'inline' : 'attachment'}; filename="${encodeURIComponent(meta.name || 'file')}"`);
-      return fs.createReadStream(meta.path).pipe(res);
-    }
+    const found = findAttachmentMeta(id);
+    if (!found) return res.status(404).json({ success: false, error: 'File not found' });
+    const { meta, owner } = found;
+    if (!canReadAttachmentMeta(user.id, meta)) return res.status(403).json({ success: false, error: 'Forbidden' });
+    const resolved = path.resolve(String(meta.path || ''));
+    const ownerDir = path.resolve(UPLOAD_DIR, owner);
+    if (!resolved.startsWith(ownerDir + path.sep)) return res.status(403).json({ success: false, error: 'Forbidden' });
+    if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: 'File not found' });
+    const wantDownload = req.query.download === '1' || req.query.download === 'true';
+    const mime = typeof meta.mimeType === 'string' ? meta.mimeType : 'application/octet-stream';
+    const inline = !wantDownload && (meta.type === 'image' || mime === 'application/pdf' || mime === 'text/plain');
+    res.setHeader('Content-Type', mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=0, no-store');
+    const fname = encodeURIComponent(String(meta.name || 'file'));
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${fname}`);
+    return fs.createReadStream(resolved).pipe(res);
   } catch {}
   return res.status(404).json({ success: false, error: 'File not found' });
 });
