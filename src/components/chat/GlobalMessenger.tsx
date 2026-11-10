@@ -162,7 +162,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${proto}://${window.location.host}/ws?token=${encodeURIComponent(tkn)}`);
       wsRef.current = ws;
-      ws.onopen = () => { reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); void syncSince(); void onRefreshConversations?.(); };
+      ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); };
       ws.onmessage = (ev) => {
         let data: any; try { data = JSON.parse(String(ev.data)); } catch { return; }
         if (data.type === 'message' && data.message) {
@@ -197,6 +197,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       ws.onclose = () => {
         if (stopped) return;
         setWsStatus('closed');
+        setConnError('实时连接已断开，正在自动重连…');
         const attempt = ++reconnectAttemptRef.current;
         const delay = Math.min(15000, 1000 * Math.pow(1.6, attempt));
         reconnectRef.current = setTimeout(connect, delay);
@@ -314,6 +315,51 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const unblockUser = async (id: string) => { try { await api('/api/messenger/unblock', { method: 'POST', body: JSON.stringify({ userId: id }) }); await loadBlocked(); } catch (e:any) { setConnError(e?.message || '操作失败'); } };
   const openDirect = async (uid: string) => { try { const d = await api('/api/conversations/direct', { method: 'POST', body: JSON.stringify({ targetUserId: uid }) }); await onRefreshConversations?.(); await loadRecent(); if (d.conversation?.id) onSelectConversation(d.conversation.id); setTab('chats'); } catch (e:any) { setConnError(e?.message || '无法创建会话'); } };
   const openProfile = async (uid: string) => { try { const d = await api(`/api/messenger/profile/${uid}`); setSelectedProfile(d); } catch (e:any) { setConnError(e?.message || '无法加载资料'); } };
+
+  const retrySend = async (msg: ChatMessage) => {
+    if (!activeConv || !authed) return;
+    const text = msg.content || '';
+    const attachments = msg.attachments;
+    const replyToId = msg.replyToId;
+    // remove failed bubble and resend
+    setMessages(prev => prev.filter(m => m.id !== msg.id));
+    const clientId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+    const optimistic: ChatMessage = {
+      id: clientId, conversationId: activeConv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
+      senderAvatar: currentUser?.avatar || '', senderCountry: currentUser?.location?.countryCode || 'UN', content: text,
+      createdAt: new Date().toISOString(), status: 'sending', readBy: [currentUser?.id || ''], deliveredTo: [], replyToId, attachments
+    } as any;
+    pendingClientIds.current.add(clientId);
+    setMessages(prev => [...prev, optimistic].sort((a,b)=> new Date(a.createdAt).getTime()-new Date(b.createdAt).getTime()));
+    try {
+      if (wsRef.current?.readyState === 1) {
+        wsRef.current.send(JSON.stringify({ type: 'send', conversationId: activeConv.id, content: text, clientMsgId: clientId, replyToId, attachments }));
+        setTimeout(async () => {
+          if (pendingClientIds.current.has(clientId)) {
+            try {
+              const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: text, replyToId, attachments, clientMsgId: clientId }) });
+              pendingClientIds.current.delete(clientId);
+              if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
+              await onRefreshConversations?.();
+            } catch {
+              pendingClientIds.current.delete(clientId);
+              setMessages(prev => prev.map(m => m.id === clientId ? { ...m, status: 'failed' } : m));
+              setConnError('重试失败，请检查网络后再试。');
+            }
+          }
+        }, 5000);
+      } else {
+        const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: text, replyToId, attachments, clientMsgId: clientId }) });
+        pendingClientIds.current.delete(clientId);
+        if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
+        await onRefreshConversations?.();
+      }
+    } catch {
+      pendingClientIds.current.delete(clientId);
+      setMessages(prev => prev.map(m => m.id === clientId ? { ...m, status: 'failed' } : m));
+      setConnError('重试失败，请检查网络后再试。');
+    }
+  };
 
   const recallMessage = async (msg: ChatMessage) => { try { await api(`/api/conversations/${msg.conversationId}/messages/${msg.id}/recall`, { method: 'POST' }); } catch (e:any) { setConnError(e?.message || '撤回失败'); } };
   const deleteForMe = async (msg: ChatMessage) => { try { await api(`/api/conversations/${msg.conversationId}/messages/${msg.id}/delete`, { method: 'POST' }); setMessages(prev => prev.filter(m => m.id !== msg.id)); } catch (e:any) { setConnError(e?.message || '删除失败'); } };
@@ -572,7 +618,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                       <div><p className="whitespace-pre-wrap break-words">{msg.content || (msg.attachments?.length?'':'')}</p>{msg.translatedContent && <div className="mt-1 text-[10px] opacity-80 text-right"><button onClick={()=>setShowOriginalMap(p=>({...p,[msg.id]:!p[msg.id]}))} className="underline">译文</button></div>}</div>
                     )}
                     <div className={`flex items-center gap-2 text-[10px] opacity-80 ${isMe?'justify-end':''}`}>
-                      {isMe && <span>{msg.status==='read'?'已读':msg.status==='delivered'?'已送达':msg.status==='failed'?'失败':msg.status==='sending'?'发送中':'已发送'}</span>}
+                      {isMe && <span>{msg.status==='read'?'已读':msg.status==='delivered'?'已送达':msg.status==='failed'?<button onClick={()=>void retrySend(msg)} className="underline text-amber-200 hover:text-amber-100">失败·重试</button>:msg.status==='sending'?'发送中':'已发送'}</span>}
                       <button onClick={()=>setReplyTo(msg)} className="hover:underline inline-flex items-center gap-0.5"><Reply className="w-3 h-3"/>回复</button>
                       {isMe && !msg.recalled && <button onClick={()=>void recallMessage(msg)} className="hover:underline inline-flex items-center gap-0.5"><Undo2 className="w-3 h-3"/>撤回</button>}
                       <button onClick={()=>void deleteForMe(msg)} className="hover:underline inline-flex items-center gap-0.5"><Trash2 className="w-3 h-3"/>删除</button>
