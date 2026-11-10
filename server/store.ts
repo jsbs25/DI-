@@ -564,6 +564,11 @@ class DataStore {
   securityAudit: SecurityAuditEvent[] = [];
   loginFailures: Record<string, { count: number; lockedUntil?: number; lastAt: number }> = {};
 
+  // Notifications & preferences
+  notifications: any[] = [];
+  notificationPrefs: Record<string, any> = {};
+  privacySettings: Record<string, any> = {};
+
   constructor() {
     const loaded = this.loadFromDisk();
     if (!loaded) {
@@ -672,6 +677,9 @@ class DataStore {
       blockedBy: this.blockedBy,
       securityAudit: this.securityAudit,
       loginFailures: this.loginFailures,
+      notifications: this.notifications,
+      notificationPrefs: this.notificationPrefs,
+      privacySettings: this.privacySettings,
       currentUser: this.currentUser,
       accounts: serializableAccounts,
       sessions: serializableSessions,
@@ -727,6 +735,9 @@ class DataStore {
       this.blockedBy = data.blockedBy || {};
       this.securityAudit = data.securityAudit || [];
       this.loginFailures = data.loginFailures || {};
+      this.notifications = Array.isArray(data.notifications) ? data.notifications : [];
+      this.notificationPrefs = data.notificationPrefs && typeof data.notificationPrefs === 'object' ? data.notificationPrefs : {};
+      this.privacySettings = data.privacySettings && typeof data.privacySettings === 'object' ? data.privacySettings : {};
       this.currentUser = data.currentUser || this.users[0];
 
       // Persist the now-stripped (metadata-only) main store once after migrating
@@ -2042,6 +2053,106 @@ class DataStore {
     }
     return false;
   }
+  // -------------------------------------------------------------------------
+  // Notifications
+  // -------------------------------------------------------------------------
+  getDefaultNotificationPrefs() {
+    return {
+      friendRequests: true,
+      groupEvents: true,
+      messages: true,
+      desktop: true,
+      sound: false,
+      dndEnabled: false,
+      dndStart: '22:00',
+      dndEnd: '08:00',
+    };
+  }
+
+  getNotificationPrefs(userId: string) {
+    const base = this.getDefaultNotificationPrefs();
+    const cur = this.notificationPrefs[userId] || {};
+    return { ...base, ...cur };
+  }
+
+  setNotificationPrefs(userId: string, patch: any) {
+    const cur = this.getNotificationPrefs(userId);
+    const next = { ...cur };
+    const boolKeys = ['friendRequests','groupEvents','messages','desktop','sound','dndEnabled'];
+    for (const k of boolKeys) if (typeof patch?.[k] === 'boolean') next[k] = patch[k];
+    if (typeof patch?.dndStart === 'string') next.dndStart = patch.dndStart.slice(0,5);
+    if (typeof patch?.dndEnd === 'string') next.dndEnd = patch.dndEnd.slice(0,5);
+    this.notificationPrefs[userId] = next;
+    return next;
+  }
+
+  getUnreadNotificationCount(userId: string) {
+    return this.notifications.filter(n => n.userId === userId && !n.read).length;
+  }
+
+  getNotificationsForUser(userId: string, opts?: { limit?: number; before?: string }) {
+    const limit = Math.max(1, Math.min(100, opts?.limit || 30));
+    let list = this.notifications.filter(n => n.userId === userId).sort((a,b)=> new Date(b.createdAt||0).getTime() - new Date(a.createdAt||0).getTime());
+    if (opts?.before) {
+      const t = new Date(opts.before).getTime();
+      list = list.filter(n => new Date(n.createdAt||0).getTime() < t);
+    }
+    const slice = list.slice(0, limit);
+    const hasMore = list.length > limit;
+    const nextBefore = slice.length ? slice[slice.length - 1].createdAt : null;
+    return { notifications: slice, unreadCount: this.getUnreadNotificationCount(userId), hasMore, nextBefore };
+  }
+
+  createNotification(input: any) {
+    if (!input?.userId || !input?.type) return null;
+    const n = {
+      id: `ntf_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+      userId: String(input.userId),
+      type: String(input.type),
+      title: String(input.title || '').slice(0, 200),
+      body: input.body ? String(input.body).slice(0, 500) : undefined,
+      read: false,
+      createdAt: new Date().toISOString(),
+      actorId: input.actorId,
+      actorName: input.actorName,
+      actorAvatar: input.actorAvatar,
+      conversationId: input.conversationId,
+      requestId: input.requestId,
+      targetUserId: input.targetUserId,
+      data: input.data && typeof input.data === 'object' ? input.data : undefined,
+    };
+    this.notifications.push(n);
+    // cap per user to prevent unbounded growth
+    const perUser = this.notifications.filter(x => x.userId === n.userId).sort((a,b)=> new Date(b.createdAt||0).getTime()-new Date(a.createdAt||0).getTime());
+    if (perUser.length > 500) {
+      const drop = new Set(perUser.slice(500).map(x => x.id));
+      this.notifications = this.notifications.filter(x => !(x.userId === n.userId && drop.has(x.id)));
+    }
+    return n;
+  }
+
+  markNotificationRead(userId: string, id: string) {
+    const n = this.notifications.find(x => x.id === id && x.userId === userId);
+    if (!n) return null;
+    if (!n.read) { n.read = true; n.readAt = new Date().toISOString(); }
+    return n;
+  }
+
+  markAllNotificationsRead(userId: string) {
+    const now = new Date().toISOString();
+    let count = 0;
+    for (const n of this.notifications) {
+      if (n.userId === userId && !n.read) { n.read = true; n.readAt = now; count++; }
+    }
+    return count;
+  }
+
+  deleteNotification(userId: string, id: string) {
+    const before = this.notifications.length;
+    this.notifications = this.notifications.filter(x => !(x.id === id && x.userId === userId));
+    return this.notifications.length !== before;
+  }
+
 }
 
 export const store = new DataStore();

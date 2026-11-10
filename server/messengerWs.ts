@@ -112,7 +112,16 @@ export function attachMessengerWs(wss: WebSocketServer) {
         if (!content.trim() && !(attachments && attachments.length)) { safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: 'empty' }); return; }
         try {
           let saved: any;
-          await store.mutate(async () => { saved = store.sendMessage(convId, content.trim(), user, undefined, undefined, { attachments, replyToId: msg.replyToId, clientMsgId }); });
+          await store.mutate(async () => {
+            saved = store.sendMessage(convId, content.trim(), user, undefined, undefined, { attachments, replyToId: msg.replyToId, clientMsgId });
+            const preview = (content.trim() || (attachments?.length ? '[attachment]' : '')).slice(0, 80);
+            for (const uid of (conv.participantIds || [])) {
+              if (uid === user.id) continue;
+              const n = store.createNotification({ userId: uid, type: 'message_new', title: conv.name || user.displayName, body: `${user.displayName}: ${preview}`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: convId, data: { messageId: saved.id } });
+              if (n) broadcastToUsers([uid], { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+            }
+            store.persist();
+          });
           // ack to sender device and sync to sender's other devices
           broadcastToUsers([user.id], { type: 'send_ack', clientMsgId, ok: true, message: saved, fromDeviceId: deviceId });
           broadcastToUsers((conv.participantIds||[]).filter(id => id !== user.id), { type: 'message', conversationId: convId, message: saved });

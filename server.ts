@@ -955,7 +955,19 @@ app.post('/api/conversations/:id/admins', async (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
   const adminIds = Array.isArray(req.body?.adminIds) ? req.body.adminIds.filter((x:any)=>typeof x==='string') : [];
   try {
-    let conv:any; await store.mutate(async () => { conv = store.setGroupAdmins(user.id, req.params.id, adminIds); store.addAudit(user.id,'group_admins_updated',req.params.id,req.ip); });
+    let conv:any;
+    await store.mutate(async () => {
+      conv = store.setGroupAdmins(user.id, req.params.id, adminIds);
+      store.addAudit(user.id,'group_admins_updated',req.params.id,req.ip);
+      if (conv) {
+        for (const uid of (conv.participantIds||[])) {
+          if (uid === user.id) continue;
+          const n = store.createNotification({ userId: uid, type: 'group_admin_changed', title: 'Group admin updated', body: `${user.displayName} updated admin roles in "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
+          if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+        }
+        store.persist();
+      }
+    });
     wsBroadcastConversationEvent(req.params.id, { type:'conversation_updated', conversation: conv });
     res.json({ success:true, conversation: conv });
   } catch(e:any){ const m=e?.message||'Failed'; res.status(m==='Forbidden'?403:400).json({ success:false, error:m }); }
@@ -995,6 +1007,67 @@ app.post('/api/auth/email/change/confirm', async (req, res) => {
 // -------------------------------------------------------------
 // 1b. MESSENGER: USERS, FRIENDS, BLOCKS (auth required where sensitive)
 // -------------------------------------------------------------
+
+function emitNotification(userId: string, input: any) {
+  let created: any = null;
+  // must be called inside store.mutate or we persist separately; caller controls
+  created = store.createNotification({ userId, ...input });
+  if (created) {
+    try { wsBroadcastToUser(userId, { type: 'notification', notification: created, unreadCount: store.getUnreadNotificationCount(userId) }); } catch {}
+  }
+  return created;
+}
+
+function emitNotifications(userIds: string[], input: any) {
+  const out: any[] = [];
+  for (const uid of new Set(userIds.filter(Boolean))) {
+    const n = emitNotification(uid, input);
+    if (n) out.push(n);
+  }
+  return out;
+}
+
+app.get('/api/notifications', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 20));
+  const before = typeof req.query.before === 'string' ? req.query.before : undefined;
+  const data = store.getNotificationsForUser(user.id, { limit, before });
+  res.json({ success: true, ...data });
+});
+
+app.get('/api/notifications/unread-count', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  res.json({ success: true, unreadCount: store.getUnreadNotificationCount(user.id) });
+});
+
+app.post('/api/notifications/:id/read', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  let n: any = null;
+  await store.mutate(async () => { n = store.markNotificationRead(user.id, req.params.id); if (n) store.persist(); });
+  if (!n) return res.status(404).json({ success: false, error: 'Notification not found' });
+  res.json({ success: true, notification: n, unreadCount: store.getUnreadNotificationCount(user.id) });
+});
+
+app.post('/api/notifications/read-all', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  let count = 0;
+  await store.mutate(async () => { count = store.markAllNotificationsRead(user.id); if (count) store.persist(); });
+  res.json({ success: true, marked: count, unreadCount: store.getUnreadNotificationCount(user.id) });
+});
+
+app.delete('/api/notifications/:id', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  let ok = false;
+  await store.mutate(async () => { ok = store.deleteNotification(user.id, req.params.id); if (ok) store.persist(); });
+  if (!ok) return res.status(404).json({ success: false, error: 'Notification not found' });
+  res.json({ success: true, unreadCount: store.getUnreadNotificationCount(user.id) });
+});
+
 app.get('/api/messenger/users/search', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
@@ -1025,9 +1098,35 @@ app.post('/api/messenger/friend-requests', async (req, res) => {
   const toUserId = typeof req.body?.toUserId === 'string' ? req.body.toUserId : '';
   const message = typeof req.body?.message === 'string' ? req.body.message.slice(0,300) : undefined;
   try {
-    let fr: any;
-    await store.mutate(async () => { fr = store.sendFriendRequest(user.id, toUserId, message); });
-    wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
+    let fr: any; let ntf: any = null;
+    await store.mutate(async () => {
+      fr = store.sendFriendRequest(user.id, toUserId, message);
+      // auto-accept reverse case returns accepted request; notify accordingly
+      if (fr?.status === 'accepted') {
+        const fromUser = store.users.find(u => u.id === fr.fromUserId);
+        ntf = { type: 'accepted_pair', targetId: fr.toUserId, fromUser };
+      } else if (fr?.status === 'pending' && fr.toUserId === toUserId) {
+        ntf = store.createNotification({ userId: toUserId, type: 'friend_request', title: 'New friend request', body: `${user.displayName} sent you a friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
+      }
+      store.persist();
+    });
+    if (ntf && ntf.type === 'friend_request') {
+      wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
+      wsBroadcastToUser(toUserId, { type: 'notification', notification: ntf, unreadCount: store.getUnreadNotificationCount(toUserId) });
+    } else if (ntf && ntf.type === 'accepted_pair') {
+      // reverse auto-accepted: notify both
+      wsBroadcastToUser(fr.fromUserId, { type: 'friend_request_updated', request: fr });
+      wsBroadcastToUser(fr.toUserId, { type: 'friend_request_updated', request: fr });
+      await store.mutate(async () => {
+        const n1 = store.createNotification({ userId: fr.fromUserId, type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
+        const n2 = store.createNotification({ userId: fr.toUserId, type: 'friend_accepted', title: 'You are now friends', body: `You and ${ntf.fromUser?.displayName || 'user'} are now friends.`, actorId: fr.fromUserId, actorName: ntf.fromUser?.displayName, actorAvatar: ntf.fromUser?.avatar, requestId: fr.id, targetUserId: fr.fromUserId });
+        store.persist();
+        if (n1) wsBroadcastToUser(fr.fromUserId, { type: 'notification', notification: n1, unreadCount: store.getUnreadNotificationCount(fr.fromUserId) });
+        if (n2) wsBroadcastToUser(fr.toUserId, { type: 'notification', notification: n2, unreadCount: store.getUnreadNotificationCount(fr.toUserId) });
+      });
+    } else {
+      wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
+    }
     res.json({ success: true, request: fr });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to send friend request' });
@@ -1040,7 +1139,16 @@ app.post('/api/messenger/friend-requests/:id/respond', async (req, res) => {
   const accept = !!req.body?.accept;
   try {
     let fr: any;
-    await store.mutate(async () => { fr = store.respondFriendRequest(req.params.id, user.id, accept); });
+    await store.mutate(async () => {
+      fr = store.respondFriendRequest(req.params.id, user.id, accept);
+      if (accept && fr?.status === 'accepted') {
+        const n = store.createNotification({ userId: fr.fromUserId, type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
+        store.persist();
+        if (n) wsBroadcastToUser(fr.fromUserId, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(fr.fromUserId) });
+      } else {
+        store.persist();
+      }
+    });
     const otherId = fr.fromUserId === user.id ? fr.toUserId : fr.fromUserId;
     wsBroadcastToUser(otherId, { type: 'friend_request_updated', request: fr });
     wsBroadcastToUser(user.id, { type: 'friend_request_updated', request: fr });
@@ -1350,7 +1458,17 @@ app.post('/api/conversations/group', async (req, res) => {
   const avatar = typeof req.body?.avatar === 'string' ? req.body.avatar : undefined;
   try {
     let conv: any;
-    await store.mutate(async () => { conv = store.createGroupConversation(user.id, name || 'New Group', memberIds, avatar); });
+    await store.mutate(async () => {
+      conv = store.createGroupConversation(user.id, name || 'New Group', memberIds, avatar);
+      if (conv) {
+        for (const uid of (conv.participantIds || [])) {
+          if (uid === user.id) continue;
+          const n = store.createNotification({ userId: uid, type: 'group_invite', title: 'Group invitation', body: `${user.displayName} added you to group "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
+          if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+        }
+        store.persist();
+      }
+    });
     if (!conv) return res.status(400).json({ success: false, error: 'Failed to create group' });
     wsBroadcastConversationEvent(conv.id, { type: 'conversation_created', conversation: conv });
     res.json({ success: true, conversation: conv, conversations: store.getConversationsForUser(user.id) });
@@ -1367,7 +1485,35 @@ app.post('/api/conversations/:id/members', async (req, res) => {
   const removeIds = Array.isArray(req.body?.removeIds) ? req.body.removeIds.filter((x:any)=>typeof x==='string') : [];
   try {
     let conv: any;
-    await store.mutate(async () => { conv = store.updateGroupMembers(user.id, id, addIds, removeIds); });
+    await store.mutate(async () => {
+      const before = store.conversations.find(c => c.id === id);
+      const beforeSet = new Set<string>((before?.participantIds || []) as string[]);
+      conv = store.updateGroupMembers(user.id, id, addIds, removeIds);
+      if (conv) {
+        const afterSet = new Set<string>((conv.participantIds || []) as string[]);
+        for (const uid of Array.from(afterSet)) {
+          if (!beforeSet.has(uid) && uid !== user.id) {
+            const n = store.createNotification({ userId: uid, type: 'group_member_joined', title: 'Added to group', body: `${user.displayName} added you to "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
+            if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+          }
+        }
+        for (const uid of Array.from(beforeSet)) {
+          if (!afterSet.has(uid) && uid !== user.id) {
+            const n = store.createNotification({ userId: uid, type: 'group_member_left', title: 'Removed from group', body: `You were removed from "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
+            if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+          }
+        }
+        // notify remaining members about joins/leaves
+        for (const uid of Array.from(afterSet)) {
+          if (uid === user.id) continue;
+          const joinedNames = Array.from(afterSet).filter(x=>!beforeSet.has(x)&&x!==uid).map(x=>store.users.find(u=>u.id===x)?.displayName||x);
+          const leftNames = Array.from(beforeSet).filter(x=>!afterSet.has(x)&&x!==uid&&x!==user.id).map(x=>store.users.find(u=>u.id===x)?.displayName||x);
+          if (joinedNames.length) { const n = store.createNotification({ userId: uid, type: 'group_member_joined', title: 'Group members joined', body: `${joinedNames.join(', ')} joined "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id }); if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) }); }
+          if (leftNames.length) { const n = store.createNotification({ userId: uid, type: 'group_member_left', title: 'Group members left', body: `${leftNames.join(', ')} left "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id }); if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) }); }
+        }
+        store.persist();
+      }
+    });
     wsBroadcastConversationEvent(id, { type: 'conversation_updated', conversation: conv });
     res.json({ success: true, conversation: conv });
   } catch (e:any) {
@@ -1383,7 +1529,19 @@ app.post('/api/conversations/:id/transfer-owner', async (req, res) => {
   const newOwnerId = typeof req.body?.newOwnerId === 'string' ? req.body.newOwnerId : '';
   try {
     let conv: any;
-    await store.mutate(async () => { conv = store.transferGroupOwner(user.id, id, newOwnerId); store.addAudit(user.id,'group_owner_transferred',`${id}:${newOwnerId}`,req.ip); });
+    await store.mutate(async () => {
+      conv = store.transferGroupOwner(user.id, id, newOwnerId);
+      store.addAudit(user.id,'group_owner_transferred',`${id}:${newOwnerId}`,req.ip);
+      if (conv) {
+        const target = store.users.find(u=>u.id===newOwnerId);
+        for (const uid of (conv.participantIds||[])) {
+          if (uid === user.id) continue;
+          const n = store.createNotification({ userId: uid, type: 'group_owner_transferred', title: 'Group owner transferred', body: `${user.displayName} transferred ownership of "${conv.name}" to ${target?.displayName || newOwnerId}.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id, targetUserId: newOwnerId });
+          if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+        }
+        store.persist();
+      }
+    });
     wsBroadcastConversationEvent(id, { type: 'conversation_updated', conversation: conv });
     res.json({ success: true, conversation: conv });
   } catch (e:any) {
@@ -1398,7 +1556,19 @@ app.post('/api/conversations/:id/leave', async (req, res) => {
   const id = req.params.id;
   try {
     let conv: any;
-    await store.mutate(async () => { conv = store.leaveGroup(user.id, id); });
+    const recipients: string[] = [];
+    await store.mutate(async () => {
+      const before = store.conversations.find(c => c.id === id);
+      recipients.push(...((before?.participantIds || []).filter((uid:string)=>uid!==user.id)));
+      conv = store.leaveGroup(user.id, id);
+      if (conv) {
+        for (const uid of recipients) {
+          const n = store.createNotification({ userId: uid, type: 'group_member_left', title: 'Member left group', body: `${user.displayName} left "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
+          if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+        }
+        store.persist();
+      }
+    });
     wsBroadcastConversationEvent(id, { type: 'conversation_updated', conversation: conv, leftUserId: user.id });
     res.json({ success: true, conversation: conv });
   } catch (e:any) {
@@ -1502,7 +1672,17 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
   try {
     let msg: any;
     const cmid = typeof clientMsgId === 'string' && clientMsgId ? clientMsgId : undefined;
-    await store.mutate(async () => { msg = store.sendMessage(id, text, authUser, translatedContent, translatedTo, { attachments: atts, replyToId: typeof replyToId === 'string' ? replyToId : undefined, clientMsgId: cmid }); });
+    await store.mutate(async () => {
+      msg = store.sendMessage(id, text, authUser, translatedContent, translatedTo, { attachments: atts, replyToId: typeof replyToId === 'string' ? replyToId : undefined, clientMsgId: cmid });
+      const convNow = store.conversations.find(c => c.id === id);
+      const preview = (text || (atts?.length ? '[attachment]' : '')).slice(0, 80);
+      for (const uid of (convNow?.participantIds || [])) {
+        if (uid === authUser.id) continue;
+        const n = store.createNotification({ userId: uid, type: 'message_new', title: convNow?.name || authUser.displayName, body: `${authUser.displayName}: ${preview}`, actorId: authUser.id, actorName: authUser.displayName, actorAvatar: authUser.avatar, conversationId: id, data: { messageId: msg.id } });
+        if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+      }
+      store.persist();
+    });
     wsBroadcastConversationEvent(id, { type: 'message', conversationId: id, message: msg, clientMsgId });
     res.json({ success: true, message: msg, conversation: store.conversations.find(c => c.id === id) });
   } catch (e:any) {

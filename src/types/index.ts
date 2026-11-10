@@ -477,3 +477,54 @@ export interface SecurityAuditEvent {
   ip?: string;
   createdAt: string;
 }
+
+
+export type AppNotificationType =
+  | 'message_new'
+  | 'friend_request'
+  | 'friend_accepted'
+  | 'group_invite'
+  | 'group_member_joined'
+  | 'group_member_left'
+  | 'group_admin_changed'
+  | 'group_owner_transferred'
+  | 'account_security';
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: AppNotificationType;
+  title: string;
+  body?: string;
+  read: boolean;
+  createdAt: string;
+  readAt?: string;
+  actorId?: string;
+  actorName?: string;
+  actorAvatar?: string;
+  conversationId?: string;
+  requestId?: string;
+  targetUserId?: string;
+  data?: Record<string, any>;
+}
+
+export interface NotificationPreferences {
+  friendRequests: boolean;
+  groupEvents: boolean;
+  messages: boolean;
+  desktop: boolean;
+  sound: boolean;
+  dndEnabled: boolean;
+  dndStart?: string; // HH:mm
+  dndEnd?: string;   // HH:mm
+}
+
+export type PrivacyAudience = 'everyone' | 'friends' | 'nobody';
+
+export interface UserPrivacySettings {
+  discoverableBy: PrivacyAudience;
+  friendRequestsFrom: PrivacyAudience;
+  onlineStatusVisibleTo: PrivacyAudience;
+  lastActiveVisibleTo: PrivacyAudience;
+  allowStrangerMessages: boolean;
+}
