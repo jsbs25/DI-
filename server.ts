@@ -123,27 +123,47 @@ function parseCookies(req: express.Request): Record<string, string> {
   return out;
 }
 
+function isDevLoginEnabledConfig() {
+  const v = String(process.env.DEV_LOGIN_ENABLED || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function isLoopbackIp(raw: string) {
+  const ip = String(raw || '').trim().replace(/^\[|\]$/g, '').replace(/^::ffff:/i, '');
+  return ip === '127.0.0.1' || ip === '::1' || ip === 'localhost';
+}
+
 function isTrustedLocalRequest(req: express.Request) {
-  const ip = String(req.ip || req.socket?.remoteAddress || '').replace('::ffff:', '');
-  const ips = new Set([ip]);
-  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim().replace('::ffff:', '');
-  if (xff) ips.add(xff);
-  const host = String(req.hostname || req.headers.host || '').split(':')[0].toLowerCase();
-  const localIps = new Set(['127.0.0.1', '::1', 'localhost']);
-  const localHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
-  for (const v of ips) { if (v && !localIps.has(v)) return false; }
-  if (!localHosts.has(host) && !localIps.has(host)) return false;
-  // require direct local connection when reverse-proxy headers absent; allow typical localhost dev
+  // Must be direct loopback connection; reject proxied/forwarded requests to avoid remote access.
+  const remote = String(req.socket?.remoteAddress || req.ip || '').replace(/^::ffff:/i, '');
+  if (!isLoopbackIp(remote)) return false;
+  if (String(req.headers['x-forwarded-for'] || '').trim()) return false;
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').trim();
+  if (forwardedHost) return false;
+  // Strict Host check to mitigate DNS rebinding: only localhost loopback hosts with optional port.
+  const hostHeader = String(req.headers.host || '').trim().toLowerCase();
+  const m = /^(\[::1\]|localhost|127\.0\.0\.1)(:\d+)?$/i.exec(hostHeader);
+  if (!m) return false;
+  const origin = String(req.headers.origin || '').trim();
+  if (origin) {
+    try {
+      const u = new URL(origin);
+      const h = u.hostname.toLowerCase();
+      if (!(h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]')) return false;
+    } catch { return false; }
+  }
   return true;
 }
 
 function isDevQuickLoginAllowed(req: express.Request) {
-  return process.env.NODE_ENV === 'development' && isTrustedLocalRequest(req);
+  // Fixed dev account only (li_wei), no client-supplied userId. Independent config gate required.
+  return process.env.NODE_ENV === 'development' && isDevLoginEnabledConfig() && isTrustedLocalRequest(req);
 }
 
 function getAuthRuntimeStatus() {
   const wechatConfigured = !!(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET);
   const googleConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  const devEnabled = isDevLoginEnabledConfig();
   return {
     env: process.env.NODE_ENV || 'development',
     wechat: {
@@ -154,7 +174,10 @@ function getAuthRuntimeStatus() {
       appUrlIsPlaceholder: /MY_APP_URL/i.test(String(process.env.APP_URL || '')),
     },
     google: { configured: googleConfigured },
-    devQuickLogin: { availableInDevelopment: true },
+    devQuickLogin: {
+      configEnabled: devEnabled,
+      availableInDevelopment: devEnabled,
+    },
   };
 }
 
@@ -246,14 +269,22 @@ app.get('/api/auth/me', (req, res) => {
 });
 
 app.get('/api/auth/status', (req, res) => {
+  const devEnabled = isDevLoginEnabledConfig();
   const devAllowed = isDevQuickLoginAllowed(req);
   const st = getAuthRuntimeStatus();
+  let reason: string | null = null;
+  if (!devAllowed) {
+    if (process.env.NODE_ENV !== 'development') reason = '仅开发环境可用 / Development only';
+    else if (!devEnabled) reason = '未启用 DEV_LOGIN_ENABLED / DEV_LOGIN_ENABLED is not enabled';
+    else reason = '仅限本机受信任开发环境（回环地址与 Host 校验）/ Trusted local loopback request only';
+  }
   res.json({
     success: true,
     env: st.env,
     devQuickLogin: {
+      enabled: devEnabled,
       available: devAllowed,
-      reason: devAllowed ? null : (process.env.NODE_ENV !== 'development' ? '仅开发环境可用 / Development only' : '仅限本机受信任开发环境 / Trusted local dev environment only'),
+      reason,
       demoUser: devAllowed ? { username: 'li_wei', displayName: 'Li Wei (李伟)', id: 'user_cn_1' } : null,
     },
     wechat: {
@@ -266,12 +297,14 @@ app.get('/api/auth/status', (req, res) => {
 });
 
 app.post('/api/auth/dev-login', async (req, res) => {
+  // Strict gates: NODE_ENV=development + DEV_LOGIN_ENABLED + trusted local loopback request + fixed demo account only.
+  // Never accept client-supplied userId/account; never modify existing account credentials.
   if (!isDevQuickLoginAllowed(req)) {
-    store.addAudit(undefined, 'dev_login_blocked', `ip=${req.ip || ''}`, req.ip);
-    return res.status(403).json({ success: false, error: 'Developer quick login is disabled. It is only available in trusted local development environments.' });
+    try { store.addAudit(undefined, 'dev_login_blocked', `ip=${req.ip || ''} host=${String(req.headers.host||'')}`, req.ip); } catch {}
+    return res.status(403).json({ success: false, error: 'Developer quick login is disabled. It is only available in trusted local development environments with DEV_LOGIN_ENABLED.' });
   }
   const username = 'li_wei';
-  const user = store.users.find(u => u.username === username);
+  const user = store.users.find(u => u.username === username && u.id === 'user_cn_1') || store.users.find(u => u.username === username);
   if (!user) return res.status(404).json({ success: false, error: 'Demo account not found.' });
   try {
     await store.mutate(async () => {

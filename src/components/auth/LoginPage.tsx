@@ -56,6 +56,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
   const wechat = integrations.find(i => i.id === 'wechat');
   const wechatConfigured = !!(authStatus?.wechat?.configured ?? wechat?.status === 'available');
   const devQuick = authStatus?.devQuickLogin;
+  const devEnabled = !!devQuick?.enabled;
   const devAvailable = !!devQuick?.available;
 
   const submit = async (e: React.FormEvent) => {
@@ -148,7 +149,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
               <div className="space-y-2 text-[11px]">
                 <div className="flex items-center justify-between gap-2"><span className="text-slate-400">WeChat OAuth</span><span className={wechatConfigured?'text-emerald-300':'text-amber-300'}>{wechatConfigured ? L('已配置','Configured','مُهيأ') : L('未配置','Not configured','غير مُهيأ')}</span></div>
                 <div className="flex items-center justify-between gap-2"><span className="text-slate-400">Google OAuth</span><span className={google?.status==='available'?'text-emerald-300':'text-amber-300'}>{google?.status==='available'?L('已配置','Configured','مُهيأ'):L('未配置','Not configured','غير مُهيأ')}</span></div>
-                <div className="flex items-center justify-between gap-2"><span className="text-slate-400">{L('开发者快速登录','Developer quick login','تسجيل دخول المطور السريع')}</span><span className={devAvailable?'text-emerald-300':'text-slate-500'}>{statusLoading?L('检测中…','Checking…','جارٍ التحقق…'):devAvailable?L('可用（本地开发）','Available (local dev)','متاح (تطوير محلي)'):L('不可用','Unavailable','غير متاح')}</span></div>
+                <div className="flex items-center justify-between gap-2"><span className="text-slate-400">{L('开发者登录','Developer login','تسجيل دخول المطور')}</span><span className={devAvailable?'text-emerald-300':(devEnabled?'text-amber-300':'text-slate-500')}>{statusLoading?L('检测中…','Checking…','جارٍ التحقق…'):devAvailable?L('可用（本地开发）','Available (local dev)','متاح (تطوير محلي)'):(devEnabled?L('受信任环境校验未通过','Blocked by trusted-env check','مقيّد بفحص البيئة') : L('未启用','Disabled','معطّل'))}</span></div>
                 <div className="flex items-center justify-between gap-2"><span className="text-slate-400">APP_URL</span><span className={authStatus?.wechat?.appUrlIsPlaceholder?'text-amber-300':'text-slate-300'}>{authStatus?.wechat?.appUrlIsPlaceholder?L('占位值（需配置）','Placeholder (needs config)','قيمة مؤقتة (تحتاج إعداد)'):(authStatus?.wechat ? L('已设置/读取中','Set/checked','مُعيّن/تم التحقق') : L('读取中','Checking','جارٍ التحقق'))}</span></div>
               </div>
               {!wechatConfigured && <p className="text-[11px] text-amber-200 bg-amber-950/30 border border-amber-800/40 rounded-lg p-2">{L('微信登录尚未配置，请使用开发者登录。','WeChat login not configured. Please use Developer Quick Login.','تسجيل الدخول عبر WeChat غير مُهيأ. يرجى استخدام تسجيل دخول المطور.')}</p>}
@@ -173,17 +174,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
           </div>
           <p className="text-[10px] text-slate-500">{L('微信登录使用开放平台官方网页授权流程；未配置时明确显示不可用。新微信账号不会自动绑定到他人账户。','WeChat login uses official Open Platform web OAuth flow; unavailable when unconfigured. New WeChat accounts are never auto-bound to others.','يستخدم تسجيل دخول WeChat تدفق OAuth الرسمي؛ وغير متاح عند عدم الإعداد. لا يتم ربط حسابات WeChat الجديدة تلقائيًا بالآخرين.')}</p>
 
-          <div className="rounded-xl border border-cyan-800/40 bg-cyan-950/20 p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-cyan-200">{L('开发者快速登录','Developer Quick Login','تسجيل دخول المطور السريع')}</p>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full border ${devAvailable?'text-emerald-300 border-emerald-700/50 bg-emerald-500/10':'text-slate-400 border-slate-700'}`}>{devAvailable?L('开发环境可用','Dev available','متاح للتطوير'):L('已关闭','Disabled','معطّل')}</span>
+          {devAvailable && (
+            <div className="rounded-xl border border-cyan-800/40 bg-cyan-950/20 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-cyan-200">{L('开发者登录','Developer Login','تسجيل دخول المطور')}</p>
+                <span className="text-[10px] px-2 py-0.5 rounded-full border text-emerald-300 border-emerald-700/50 bg-emerald-500/10">{L('开发环境可用','Dev available','متاح للتطوير')}</span>
+              </div>
+              <p className="text-[11px] text-slate-300">{L('复用现有测试账户 li_wei（固定），经服务端认证创建真实会话并进入当前产品。仅 NODE_ENV=development、DEV_LOGIN_ENABLED 且受信任本机环境可用。','Reuses fixed demo account li_wei, creates a real server session, and enters the current product. Only when NODE_ENV=development, DEV_LOGIN_ENABLED, and trusted local request.','يعيد استخدام حساب li_wei التجريبي الثابت وينشئ جلسة خادم حقيقية. متاح فقط عند التطوير المحلي الموثوق مع تفعيل DEV_LOGIN_ENABLED.')}</p>
+              <button type="button" onClick={devLogin} disabled={loading} className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold text-sm flex items-center justify-center gap-2">
+                <span>{loading ? '...' : L('开发者登录（li_wei）','Developer Login (li_wei)','تسجيل دخول المطور (li_wei)')}</span><ArrowRight className="w-4 h-4"/>
+              </button>
             </div>
-            <p className="text-[11px] text-slate-300">{L('复用现有测试账户 li_wei，创建真实服务端会话，直接进入当前开发产品。仅 NODE_ENV=development 且受信任本机环境可用，生产环境禁用。','Reuses existing demo account li_wei, creates a real server session, and enters the current product. Available only in trusted local NODE_ENV=development; disabled in production.','يعيد استخدام حساب li_wei التجريبي وينشئ جلسة خادم حقيقية. متاح فقط في بيئة تطوير محلية موثوقة ومعطّل في الإنتاج.')}</p>
-            <button type="button" onClick={devLogin} disabled={!devAvailable || loading} className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold text-sm flex items-center justify-center gap-2">
-              <span>{loading ? '...' : L('以 li_wei 开发者身份进入','Enter as developer (li_wei)','الدخول كمطور (li_wei)')}</span><ArrowRight className="w-4 h-4"/>
-            </button>
-            {!devAvailable && <p className="text-[10px] text-slate-500">{devQuick?.reason || L('仅在受信任的本地开发环境启用。','Enabled only in trusted local development environment.','مفعّل فقط في بيئة تطوير محلية موثوقة.')}</p>}
-          </div>
+          )}
 
           <div className="grid grid-cols-3 p-1 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-medium">
             <button type="button" onClick={()=>{setMode('login'); setErrorMsg(null);}} className={`py-2 rounded-lg ${mode==='login'?'bg-slate-800 text-slate-100':'text-slate-400'}`}>{L('邮箱/用户名','Email/User','البريد/المستخدم')}</button>
