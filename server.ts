@@ -1106,6 +1106,23 @@ app.put('/api/notifications/preferences', async (req, res) => {
   res.json({ success: true, preferences: prefs });
 });
 
+app.get('/api/messenger/privacy', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const privacy = store.getPrivacySettings(user.id);
+  res.json({ success: true, privacy });
+});
+
+app.put('/api/messenger/privacy', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  let privacy: any;
+  await store.mutate(async () => { privacy = store.setPrivacySettings(user.id, req.body || {}); store.persist(); });
+  try { wsBroadcastToUser(user.id, { type: 'privacy_sync', privacy, updatedAt: new Date().toISOString() }); } catch {}
+  try { broadcastToUsers([user.id], { type: 'privacy_sync', privacy, updatedAt: new Date().toISOString() }); } catch {}
+  res.json({ success: true, privacy });
+});
+
 app.get('/api/messenger/users/search', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;

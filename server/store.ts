@@ -43,6 +43,7 @@ import {
   SecurityAuditEvent
 } from '../src/types/index.ts';
 import { resolveCoordinates } from '../src/utils/geoData.ts';
+import { normalizePrivacySettings, DEFAULT_PRIVACY_SETTINGS } from './privacyPolicy.ts';
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
 import { crawlWebsite } from './webFetcher.ts';
 
@@ -1663,11 +1664,8 @@ class DataStore {
   }
 
   sendFriendRequest(fromUserId: string, toUserId: string, message?: string): FriendRequest {
-    if (fromUserId === toUserId) throw new Error('Cannot add yourself.');
-    const to = this.users.find(u => u.id === toUserId);
-    if (!to) throw new Error('User not found');
-    if ((this.blockedBy[toUserId]||[]).includes(fromUserId) || (this.blockedBy[fromUserId]||[]).includes(toUserId)) throw new Error('Cannot send friend request.');
-    if (this.getFriendIds(fromUserId).includes(toUserId)) throw new Error('Already friends.');
+    const perm = this.canSendFriendRequestFrom(fromUserId, toUserId);
+    if (!perm.ok) throw new Error(perm.error || 'Cannot send friend request.');
     const existing = this.friendRequests.find(r => r.fromUserId === fromUserId && r.toUserId === toUserId && r.status === 'pending');
     if (existing) return existing;
     const reverse = this.friendRequests.find(r => r.fromUserId === toUserId && r.toUserId === fromUserId && r.status === 'pending');
@@ -2274,6 +2272,67 @@ class DataStore {
     this.notificationPrefs[userId] = next;
     return next;
   }
+
+
+  // -------------------------------------------------------------------------
+  // Privacy settings (server-authoritative)
+  // -------------------------------------------------------------------------
+  getDefaultPrivacySettings() {
+    return { ...DEFAULT_PRIVACY_SETTINGS };
+  }
+
+  getPrivacySettings(userId: string) {
+    const cur = this.privacySettings[userId] || {};
+    const norm = normalizePrivacySettings(cur);
+    this.privacySettings[userId] = norm;
+    return norm;
+  }
+
+  setPrivacySettings(userId: string, patch: any) {
+    const cur = this.getPrivacySettings(userId);
+    const next = normalizePrivacySettings({ ...cur, ...(patch && typeof patch === 'object' ? patch : {}) });
+    this.privacySettings[userId] = next;
+    return next;
+  }
+
+  hasMutualGroup(userA: string, userB: string): boolean {
+    if (!userA || !userB || userA === userB) return false;
+    return this.conversations.some(c => c.type === 'group' && Array.isArray(c.participantIds) && c.participantIds.includes(userA) && c.participantIds.includes(userB));
+  }
+
+  canSendDirectMessageBetween(fromUserId: string, toUserId: string) {
+    const to = this.users.find(u => u.id === toUserId);
+    if (!to) return { ok: false, error: 'User not found' };
+    const blockedEither = (this.blockedBy[toUserId]||[]).includes(fromUserId) || (this.blockedBy[fromUserId]||[]).includes(toUserId);
+    if (blockedEither) return { ok: false, error: 'Messaging is not allowed due to block settings.' };
+    const isFriend = this.getFriendIds(toUserId).includes(fromUserId) || this.getFriendIds(fromUserId).includes(toUserId);
+    const hasMutualGroup = this.hasMutualGroup(fromUserId, toUserId);
+    const targetPrivacy = this.getPrivacySettings(toUserId);
+    if (targetPrivacy.strangerMessagePolicy === 'everyone') return { ok: true };
+    if (targetPrivacy.strangerMessagePolicy === 'friends') return isFriend ? { ok: true } : { ok: false, error: 'This user only accepts messages from friends.' };
+    return (isFriend || hasMutualGroup) ? { ok: true } : { ok: false, error: 'This user only accepts messages from friends or mutual group members.' };
+  }
+
+  canSendFriendRequestFrom(fromUserId: string, toUserId: string) {
+    if (fromUserId === toUserId) return { ok: false, error: 'Cannot add yourself.' };
+    const to = this.users.find(u => u.id === toUserId);
+    if (!to) return { ok: false, error: 'User not found' };
+    const blockedEither = (this.blockedBy[toUserId]||[]).includes(fromUserId) || (this.blockedBy[fromUserId]||[]).includes(toUserId);
+    if (blockedEither) return { ok: false, error: 'Cannot send friend request due to block settings.' };
+    const isFriend = this.getFriendIds(fromUserId).includes(toUserId);
+    if (isFriend) return { ok: false, error: 'Already friends.' };
+    const targetPrivacy = this.getPrivacySettings(toUserId);
+    if (targetPrivacy.friendRequestPolicy === 'everyone') return { ok: true };
+    if (targetPrivacy.friendRequestPolicy === 'mutual_group') {
+      return this.hasMutualGroup(fromUserId, toUserId) ? { ok: true } : { ok: false, error: 'This user only accepts friend requests from people in mutual groups.' };
+    }
+    return { ok: false, error: 'This user does not accept friend requests.' };
+  }
+
+  shouldSendReadReceipt(userId: string) {
+    return !!this.getPrivacySettings(userId).readReceipts;
+  }
+
 
   getUnreadNotificationCount(userId: string) {
     return this.notifications.filter(n => n.userId === userId && !n.read).length;
