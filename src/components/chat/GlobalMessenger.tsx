@@ -4,7 +4,8 @@ import {
   Send, Languages, Sparkles, MessageCircle, Globe, Search, Plug, ShieldAlert,
   Users, UserPlus, Check, X, ImagePlus, Paperclip, Reply, Trash2, Undo2, MoreVertical,
   Wifi, WifiOff, RefreshCw, Info, Crown, Shield, LogOut, UserMinus, Settings2,
-  Download, ChevronLeft, ChevronRight, FileText, AlertTriangle, Loader2, Eye
+  Download, ChevronLeft, ChevronRight, FileText, AlertTriangle, Loader2, Eye,
+  Bell, CheckCheck, User as UserIcon
 } from 'lucide-react';
 
 interface GlobalMessengerProps {
@@ -46,7 +47,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [showIntegrations, setShowIntegrations] = useState(false);
   const [connError, setConnError] = useState<string | null>(null);
   const [wsStatus, setWsStatus] = useState<'off' | 'connecting' | 'open' | 'closed'>('off');
-  const [tab, setTab] = useState<'chats' | 'friends' | 'requests' | 'search' | 'msgsearch'>('chats');
+  const [tab, setTab] = useState<'chats' | 'friends' | 'requests' | 'search' | 'msgsearch' | 'notifs'>('chats');
   const [userSearch, setUserSearch] = useState('');
   const [searchResults, setSearchResults] = useState<FriendUser[]>([]);
   const [msgQuery, setMsgQuery] = useState('');
@@ -54,6 +55,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [msgConvId, setMsgConvId] = useState('');
   const [msgResults, setMsgResults] = useState<(ChatMessage & { conversationName?: string; conversationType?: string })[]>([]);
   const [msgSearching, setMsgSearching] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifUnread, setNotifUnread] = useState(0);
+  const [notifHasMore, setNotifHasMore] = useState(false);
+  const [notifNextBefore, setNotifNextBefore] = useState<string | null>(null);
+  const [notifLoading, setNotifLoading] = useState(false);
   const [friends, setFriends] = useState<FriendUser[]>([]);
   const [incomingReqs, setIncomingReqs] = useState<FriendRequest[]>([]);
   const [outgoingReqs, setOutgoingReqs] = useState<FriendRequest[]>([]);
@@ -230,8 +236,24 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const loadRequests = async () => { try { const d = await api('/api/messenger/friend-requests'); setIncomingReqs(d.incoming||[]); setOutgoingReqs(d.outgoing||[]); } catch {} };
   const loadBlocked = async () => { try { const d = await api('/api/messenger/blocked'); setBlocked(d.blocked || []); } catch {} };
   const loadRecent = async () => { try { const d = await api('/api/messenger/recent'); setRecentConvs(d.conversations || []); } catch {} };
+  const loadNotifications = async (opts?: { append?: boolean; before?: string }) => {
+    if (notifLoading) return;
+    setNotifLoading(true);
+    try {
+      const qs = new URLSearchParams({ limit: '20' });
+      const before = opts?.before;
+      if (before) qs.set('before', before);
+      const d = await api(`/api/notifications?${qs.toString()}`);
+      const list = Array.isArray(d.notifications) ? d.notifications : [];
+      setNotifications(prev => opts?.append ? [...prev, ...list.filter((n:any)=>!prev.some(p=>p.id===n.id))] : list);
+      setNotifUnread(typeof d.unreadCount === 'number' ? d.unreadCount : 0);
+      setNotifHasMore(!!d.hasMore);
+      setNotifNextBefore(d.nextBefore || null);
+    } catch {}
+    finally { setNotifLoading(false); }
+  };
 
-  useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); } }, [authed, currentUser?.id]);
+  useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); void loadNotifications(); } }, [authed, currentUser?.id]);
 
   // WebSocket realtime
   useEffect(() => {
@@ -244,7 +266,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${proto}://${window.location.host}/ws?token=${encodeURIComponent(tkn)}`);
       wsRef.current = ws;
-      ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); };
+      ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); void loadNotifications(); };
       ws.onmessage = (ev) => {
         let data: any; try { data = JSON.parse(String(ev.data)); } catch { return; }
         if (data.type === 'message' && data.message) {
@@ -288,6 +310,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             setMessages(prev => prev.map(m => m.id === data.message.id ? data.message : m));
           }
           if (data.type === 'conversation_updated' && data.conversation?.id === activeConv?.id && showGroupPanel) void loadGroupDetail(activeConv.id);
+        } else if (data.type === 'notification' && data.notification) {
+          setNotifications(prev => prev.some(n => n.id === data.notification.id) ? prev : [data.notification, ...prev].slice(0, 200));
+          if (typeof data.unreadCount === 'number') setNotifUnread(data.unreadCount); else setNotifUnread(u => u + (data.notification.read ? 0 : 1));
+        } else if (data.type === 'notification_sync') {
+          if (typeof data.unreadCount === 'number') setNotifUnread(data.unreadCount);
+          if (data.readAll) setNotifications(prev => prev.map(n => ({ ...n, read: true, readAt: n.readAt || new Date().toISOString() })));
+          if (data.readId) setNotifications(prev => prev.map(n => n.id === data.readId ? { ...n, read: true, readAt: data.readAt || n.readAt } : n));
+          if (data.deletedId) setNotifications(prev => prev.filter(n => n.id !== data.deletedId));
         } else if (data.type === 'hello') {
           // multi-device hello ok
         }
@@ -633,6 +663,35 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     try { await api(`/api/conversations/${activeConv.id}/leave`, { method: 'POST' }); setShowGroupPanel(false); setGroupDetail(null); await onRefreshConversations?.(); setNotice('已退出群聊'); } catch (e:any) { setConnError(e?.message || '退出失败'); }
   };
 
+
+  const markNotifRead = async (id: string) => {
+    try {
+      const d = await api(`/api/notifications/${id}/read`, { method: 'POST' });
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true, readAt: d.notification?.readAt || new Date().toISOString() } : n));
+      if (typeof d.unreadCount === 'number') setNotifUnread(d.unreadCount);
+    } catch {}
+  };
+  const markAllNotifsRead = async () => {
+    try { const d = await api('/api/notifications/read-all', { method: 'POST' }); setNotifications(prev => prev.map(n => ({ ...n, read: true, readAt: n.readAt || new Date().toISOString() }))); if (typeof d.unreadCount === 'number') setNotifUnread(d.unreadCount); } catch {}
+  };
+  const deleteNotif = async (id: string) => {
+    try { const d = await api(`/api/notifications/${id}`, { method: 'DELETE' }); setNotifications(prev => prev.filter(n => n.id !== id)); if (typeof d.unreadCount === 'number') setNotifUnread(d.unreadCount); } catch {}
+  };
+  const openNotification = async (n: any) => {
+    if (!n.read) void markNotifRead(n.id);
+    if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); return; }
+    if (n.type === 'friend_request') { setTab('requests'); void loadRequests(); return; }
+    if (n.type === 'friend_accepted' || n.type === 'account_security') {
+      if (n.actorId || n.targetUserId) { await openProfile(n.actorId || n.targetUserId); }
+      return;
+    }
+    if (n.type === 'group_invite' || n.type === 'group_member_joined' || n.type === 'group_member_left' || n.type === 'group_admin_changed' || n.type === 'group_owner_transferred') {
+      if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); }
+      return;
+    }
+    if (n.actorId) { await openProfile(n.actorId); }
+  };
+
   const connectGoogle = () => { window.location.href = '/api/auth/google/start'; };
   const connectWechat = () => { window.location.href = '/api/auth/wechat/start'; };
 
@@ -667,10 +726,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         </div>
 
         {notice && <div className="mb-2 rounded-lg border border-cyan-700/40 bg-cyan-950/40 px-2.5 py-1.5 text-[11px] text-cyan-200 flex items-center justify-between gap-2"><span>{notice}</span><button onClick={()=>setNotice(null)} className="text-cyan-300">×</button></div>}
-        <div className="grid grid-cols-5 gap-1 mb-2 text-[11px]">
-          {(['chats','friends','requests','search','msgsearch'] as const).map(k => (
-            <button key={k} onClick={()=>setTab(k)} className={`px-1.5 py-1.5 rounded-lg border ${tab===k?'bg-cyan-500/15 border-cyan-500/40 text-cyan-200':'bg-slate-950 border-slate-800 text-slate-400'}`}>
-              {k==='chats'?'会话':k==='friends'?'好友':k==='requests'?'申请':k==='search'?'找人':'搜消息'}
+        <div className="grid grid-cols-6 gap-1 mb-2 text-[11px]">
+          {(['chats','friends','requests','search','msgsearch','notifs'] as const).map(k => (
+            <button key={k} onClick={()=>{ setTab(k); if (k==='notifs') void loadNotifications(); }} className={`relative px-1 py-1.5 rounded-lg border ${tab===k?'bg-cyan-500/15 border-cyan-500/40 text-cyan-200':'bg-slate-950 border-slate-800 text-slate-400'}`}>
+              {k==='chats'?'会话':k==='friends'?'好友':k==='requests'?'申请':k==='search'?'找人':k==='msgsearch'?'搜消息':'通知'}
+              {k==='notifs' && notifUnread>0 && <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] leading-4">{notifUnread>99?'99+':notifUnread}</span>}
             </button>
           ))}
         </div>
@@ -812,6 +872,39 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               </button>
             ))}
             {msgResults.length===0 && (msgQuery.trim()||msgSender||msgConvId) && !msgSearching && <div className="text-xs text-slate-500 text-center py-4">无匹配消息</div>}
+          </div>
+        )}
+        {tab === 'notifs' && (
+          <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-slate-400">通知中心 · 未读 {notifUnread}</p>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>void loadNotifications()} className="text-[11px] text-cyan-300">刷新</button>
+                <button onClick={()=>void markAllNotifsRead()} className="text-[11px] text-cyan-300 inline-flex items-center gap-1"><CheckCheck className="w-3 h-3"/>全部已读</button>
+              </div>
+            </div>
+            {notifications.map(n => (
+              <div key={n.id} className={`p-2.5 rounded-xl border text-left space-y-1 ${n.read ? 'border-slate-800 bg-slate-950/40' : 'border-cyan-700/40 bg-cyan-950/20'}`}>
+                <button onClick={()=>void openNotification(n)} className="w-full text-left space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {n.actorAvatar ? <img src={n.actorAvatar} className="w-6 h-6 rounded-full object-cover"/> : <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center"><Bell className="w-3 h-3 text-slate-300"/></div>}
+                      <p className="text-xs font-semibold text-slate-200 truncate">{n.title || '通知'}</p>
+                    </div>
+                    {!n.read && <span className="w-2 h-2 rounded-full bg-cyan-400 mt-1 shrink-0"/>}
+                  </div>
+                  {n.body && <p className="text-[11px] text-slate-400 line-clamp-2">{n.body}</p>}
+                  <p className="text-[10px] text-slate-500">{new Date(n.createdAt).toLocaleString()}</p>
+                </button>
+                <div className="flex items-center gap-2 pt-1">
+                  {!n.read && <button onClick={()=>void markNotifRead(n.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-200">标记已读</button>}
+                  <button onClick={()=>void deleteNotif(n.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-rose-300 inline-flex items-center gap-1"><Trash2 className="w-3 h-3"/>删除</button>
+                </div>
+              </div>
+            ))}
+            {notifHasMore && <button onClick={()=>void loadNotifications({ append: true, before: notifNextBefore || undefined })} disabled={notifLoading} className="w-full text-[11px] px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-40">{notifLoading?'加载中…':'加载更多'}</button>}
+            {notifications.length===0 && !notifLoading && <div className="text-xs text-slate-500 text-center py-8">暂无通知</div>}
+            {notifLoading && notifications.length===0 && <div className="text-xs text-slate-500 text-center py-8">加载中…</div>}
           </div>
         )}
       </div>
