@@ -1186,6 +1186,22 @@ app.post('/api/conversations/:id/members', async (req, res) => {
   }
 });
 
+app.post('/api/conversations/:id/transfer-owner', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const id = req.params.id;
+  const newOwnerId = typeof req.body?.newOwnerId === 'string' ? req.body.newOwnerId : '';
+  try {
+    let conv: any;
+    await store.mutate(async () => { conv = store.transferGroupOwner(user.id, id, newOwnerId); store.addAudit(user.id,'group_owner_transferred',`${id}:${newOwnerId}`,req.ip); });
+    wsBroadcastConversationEvent(id, { type: 'conversation_updated', conversation: conv });
+    res.json({ success: true, conversation: conv });
+  } catch (e:any) {
+    const msg = e?.message || 'Failed';
+    res.status(msg === 'Forbidden' ? 403 : msg === 'Group not found' ? 404 : 400).json({ success: false, error: msg });
+  }
+});
+
 app.post('/api/conversations/:id/leave', async (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
@@ -1199,6 +1215,19 @@ app.post('/api/conversations/:id/leave', async (req, res) => {
     const msg = e?.message || 'Failed';
     res.status(msg === 'Group not found' ? 404 : 400).json({ success: false, error: msg });
   }
+});
+
+app.get('/api/conversations/:id', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const conv = store.conversations.find(c => c.id === req.params.id);
+  if (!conv) return res.status(404).json({ success: false, error: 'Conversation not found' });
+  if (!store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  const members = (conv.participantIds || []).map(id => {
+    const u = store.users.find(x => x.id === id);
+    return u ? { id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, isOnline: (u as any).isOnline, lastActiveAt: (u as any).lastActiveAt } : { id, username: id, displayName: id, avatar: '' };
+  });
+  res.json({ success: true, conversation: { ...conv, members } });
 });
 
 app.get('/api/conversations/:id/messages', (req, res) => {

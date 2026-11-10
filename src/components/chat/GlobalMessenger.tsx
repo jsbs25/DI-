@@ -3,7 +3,7 @@ import type { Conversation, ChatMessage, User, Language, ChannelIntegration } fr
 import {
   Send, Languages, Sparkles, MessageCircle, Globe, Search, Plug, ShieldAlert,
   Users, UserPlus, Check, X, ImagePlus, Paperclip, Reply, Trash2, Undo2, MoreVertical,
-  Wifi, WifiOff, RefreshCw
+  Wifi, WifiOff, RefreshCw, Info, Crown, Shield, LogOut, UserMinus, Settings2
 } from 'lucide-react';
 
 interface GlobalMessengerProps {
@@ -57,6 +57,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [recentConvs, setRecentConvs] = useState<Conversation[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingRequestIds, setPendingRequestIds] = useState<Set<string>>(new Set());
+  const [showGroupPanel, setShowGroupPanel] = useState(false);
+  const [groupDetail, setGroupDetail] = useState<any>(null);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupMembers, setNewGroupMembers] = useState<string[]>([]);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -208,6 +213,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   useEffect(() => { if (activeConv?.id && authed) { setMessages([]); setHasMore(false); void fetchMessages(); } }, [activeConv?.id, authed]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length, activeConv?.id]);
 
+  const loadGroupDetail = async (id: string) => {
+    try { const d = await api(`/api/conversations/${id}`); setGroupDetail(d.conversation || null); } catch { setGroupDetail(null); }
+  };
+  useEffect(() => { if (showGroupPanel && activeConv?.type === 'group') void loadGroupDetail(activeConv.id); }, [showGroupPanel, activeConv?.id]);
+
   // clear stale typing indicators
   useEffect(() => {
     const t = setInterval(() => {
@@ -308,11 +318,13 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const recallMessage = async (msg: ChatMessage) => { try { await api(`/api/conversations/${msg.conversationId}/messages/${msg.id}/recall`, { method: 'POST' }); } catch (e:any) { setConnError(e?.message || '撤回失败'); } };
   const deleteForMe = async (msg: ChatMessage) => { try { await api(`/api/conversations/${msg.conversationId}/messages/${msg.id}/delete`, { method: 'POST' }); setMessages(prev => prev.filter(m => m.id !== msg.id)); } catch (e:any) { setConnError(e?.message || '删除失败'); } };
   const createGroup = async () => {
-    const name = window.prompt('群名称 / Group name');
-    if (!name) return;
-    const ids = window.prompt('成员用户ID，逗号分隔（可先在“查找用户”复制ID）');
-    const memberIds = (ids || '').split(',').map(s=>s.trim()).filter(Boolean);
-    try { const d = await api('/api/conversations/group', { method: 'POST', body: JSON.stringify({ name, memberIds }) }); await onRefreshConversations?.(); if (d.conversation?.id) onSelectConversation(d.conversation.id); } catch (e:any) { setConnError(e?.message || '创建群聊失败'); }
+    if (!newGroupName.trim() || newGroupMembers.length === 0) { setConnError('请填写群名称并选择至少1位成员'); return; }
+    try {
+      const d = await api('/api/conversations/group', { method: 'POST', body: JSON.stringify({ name: newGroupName.trim(), memberIds: newGroupMembers }) });
+      await onRefreshConversations?.();
+      if (d.conversation?.id) { onSelectConversation(d.conversation.id); setTab('chats'); }
+      setShowCreateGroup(false); setNewGroupName(''); setNewGroupMembers([]); setNotice('群聊已创建');
+    } catch (e:any) { setConnError(e?.message || '创建群聊失败'); }
   };
 
   const typingNames = useMemo(() => {
@@ -327,6 +339,48 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     const c = conversations.find(c => c.otherUser?.id === id);
     return c?.otherUser?.displayName || c?.name || 'Someone';
   }
+
+
+  const renameGroupAction = async () => {
+    if (!activeConv || activeConv.type !== 'group') return;
+    const name = window.prompt('新群名称 / New group name', activeConv.name);
+    if (!name || !name.trim()) return;
+    try { const d = await api(`/api/conversations/${activeConv.id}/rename`, { method: 'POST', body: JSON.stringify({ name: name.trim() }) }); await onRefreshConversations?.(); await loadGroupDetail(activeConv.id); setNotice('群名称已更新'); } catch (e:any) { setConnError(e?.message || '修改失败'); }
+  };
+  const changeGroupAvatar = async () => {
+    if (!activeConv || activeConv.type !== 'group') return;
+    const avatar = window.prompt('群头像 URL', (activeConv as any).avatar || '');
+    if (avatar === null) return;
+    try { await api(`/api/conversations/${activeConv.id}/rename`, { method: 'POST', body: JSON.stringify({ avatar }) }); await onRefreshConversations?.(); await loadGroupDetail(activeConv.id); setNotice('群头像已更新'); } catch (e:any) { setConnError(e?.message || '修改失败'); }
+  };
+  const inviteMembers = async () => {
+    if (!activeConv || activeConv.type !== 'group') return;
+    const ids = window.prompt('邀请成员用户ID（逗号分隔）');
+    const addIds = (ids||'').split(',').map(s=>s.trim()).filter(Boolean);
+    if (!addIds.length) return;
+    try { await api(`/api/conversations/${activeConv.id}/members`, { method: 'POST', body: JSON.stringify({ addIds }) }); await onRefreshConversations?.(); await loadGroupDetail(activeConv.id); setNotice('已邀请成员'); } catch (e:any) { setConnError(e?.message || '邀请失败'); }
+  };
+  const removeMember = async (uid: string) => {
+    if (!activeConv || activeConv.type !== 'group') return;
+    if (!window.confirm('移除该成员？')) return;
+    try { await api(`/api/conversations/${activeConv.id}/members`, { method: 'POST', body: JSON.stringify({ removeIds: [uid] }) }); await onRefreshConversations?.(); await loadGroupDetail(activeConv.id); setNotice('成员已移除'); } catch (e:any) { setConnError(e?.message || '移除失败'); }
+  };
+  const toggleAdmin = async (uid: string, makeAdmin: boolean) => {
+    if (!activeConv || activeConv.type !== 'group' || !groupDetail) return;
+    const current: string[] = groupDetail.adminIds || [];
+    const next = makeAdmin ? Array.from(new Set([...current, uid])) : current.filter(x => x !== uid);
+    try { await api(`/api/conversations/${activeConv.id}/admins`, { method: 'POST', body: JSON.stringify({ adminIds: next }) }); await loadGroupDetail(activeConv.id); await onRefreshConversations?.(); setNotice('管理员权限已更新'); } catch (e:any) { setConnError(e?.message || '更新失败'); }
+  };
+  const transferOwner = async (uid: string) => {
+    if (!activeConv || activeConv.type !== 'group') return;
+    if (!window.confirm('确认转让群主？此操作将变更管理权限。')) return;
+    try { await api(`/api/conversations/${activeConv.id}/transfer-owner`, { method: 'POST', body: JSON.stringify({ newOwnerId: uid }) }); await loadGroupDetail(activeConv.id); await onRefreshConversations?.(); setNotice('群主已转让'); } catch (e:any) { setConnError(e?.message || '转让失败'); }
+  };
+  const leaveGroupAction = async () => {
+    if (!activeConv || activeConv.type !== 'group') return;
+    if (!window.confirm('确认退出该群聊？')) return;
+    try { await api(`/api/conversations/${activeConv.id}/leave`, { method: 'POST' }); setShowGroupPanel(false); setGroupDetail(null); await onRefreshConversations?.(); setNotice('已退出群聊'); } catch (e:any) { setConnError(e?.message || '退出失败'); }
+  };
 
   const connectGoogle = () => { window.location.href = '/api/auth/google/start'; };
   const connectWechat = () => { window.location.href = '/api/auth/wechat/start'; };
@@ -356,7 +410,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             </span>
           </div>
           <div className="flex gap-1">
-            <button onClick={createGroup} title="创建群聊" className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"><Users className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>{ setShowCreateGroup(true); void loadFriends(); }} title="创建群聊" className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"><Users className="w-3.5 h-3.5"/></button>
             <button onClick={() => setShowIntegrations(v=>!v)} className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"><Plug className="w-3.5 h-3.5"/></button>
           </div>
         </div>
@@ -481,6 +535,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             <p className="text-[11px] text-slate-400 truncate">{typingNames ? `${typingNames} 正在输入…` : (activeConv?.otherUser?.isOnline || activeConv?.isOnline ? '在线' : 'Earth One Messenger')}</p>
           </div>
           <div className="flex items-center gap-2 text-xs">
+            {activeConv?.type === 'group' && <button onClick={()=>{ setShowGroupPanel(v=>!v); if (!showGroupPanel) void loadGroupDetail(activeConv.id); }} className="p-1.5 rounded border border-slate-700 text-slate-300" title="群信息"><Info className="w-3.5 h-3.5"/></button>}
             <Languages className="w-4 h-4 text-cyan-400" />
             <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-xs"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
             <button onClick={()=>setAutoTranslate(v=>!v)} className={`px-2 py-1 rounded text-[11px] border ${autoTranslate?'bg-cyan-500/20 text-cyan-300 border-cyan-500/50':'bg-slate-800 text-slate-400 border-slate-700'}`}>{autoTranslate?'AUTO':'OFF'}</button>

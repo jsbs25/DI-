@@ -1614,6 +1614,18 @@ class DataStore {
 
 
 
+  transferGroupOwner(actorId: string, conversationId: string, newOwnerId: string) {
+    const conv = this.conversations.find(c => c.id === conversationId && c.type === 'group');
+    if (!conv) throw new Error('Group not found');
+    if (conv.ownerId !== actorId) throw new Error('Forbidden');
+    if (!(conv.participantIds||[]).includes(newOwnerId)) throw new Error('New owner must be a group member');
+    conv.ownerId = newOwnerId;
+    conv.adminIds = Array.from(new Set([newOwnerId, ...(conv.adminIds||[])]));
+    conv.updatedAt = new Date().toISOString();
+    this.saveToDisk();
+    return conv;
+  }
+
   renameGroup(actorId: string, conversationId: string, name?: string, avatar?: string) {
     const conv = this.conversations.find(c => c.id === conversationId && c.type === 'group');
     if (!conv) throw new Error('Group not found');
