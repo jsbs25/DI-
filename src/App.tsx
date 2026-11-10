@@ -42,6 +42,8 @@ import { MoonAcademy } from './universe/MoonAcademy.tsx';
 import { MoonSpaceObservatory } from './universe/MoonSpaceObservatory.tsx';
 import { VenusCreativeStudio } from './universe/VenusCreativeStudio.tsx';
 import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
+import { LoginPage } from './components/auth/LoginPage.tsx';
+import { DevStatusPanel } from './components/dev/DevStatusPanel.tsx';
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -137,8 +139,22 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const authErr = params.get('auth_error');
     if (authErr) {
-      setWelcomeToast(`Login failed: ${authErr}`);
-      setTimeout(() => setWelcomeToast(null), 5000);
+      const map: Record<string,string> = {
+        wechat_unbound: '该微信账号尚未绑定 EARTH ONE 账户，请先使用已有账户登录后绑定，或使用开发者登录。',
+        wechat_state: '微信登录验证失败（state 校验失败），请重试。',
+        wechat_config: '微信登录尚未配置，请使用开发者登录。',
+        wechat_token: '微信授权失败，请检查配置后重试。',
+        wechat_profile: '未获取到微信身份信息。',
+        wechat_failed: '微信登录失败，请稍后重试。',
+        google_unbound: '该 Google 账号尚未绑定 EARTH ONE 账户，请先绑定后再登录。',
+        google_state: 'Google 登录验证失败，请重试。',
+        google_config: 'Google 登录尚未配置。',
+        google_token: 'Google 授权失败。',
+        google_profile: '未获取到 Google 资料。',
+        google_failed: 'Google 登录失败。',
+      };
+      setWelcomeToast(map[authErr] || `Login failed: ${authErr}`);
+      setTimeout(() => setWelcomeToast(null), 6000);
       window.history.replaceState({}, '', window.location.pathname);
     }
     const hash = window.location.hash || '';
@@ -497,6 +513,22 @@ export default function App() {
     setBrowserInitialQuery(null);
   };
 
+  // Primary login gate: let project owner enter real product without hidden modal flow.
+  if (!currentUser) {
+    return (
+      <>
+        {welcomeToast && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-950/95 border border-cyan-500/60 text-cyan-200 text-xs shadow-2xl backdrop-blur-md flex items-center space-x-2">
+            <Sparkles className="w-4 h-4 text-cyan-400" />
+            <span className="font-semibold">{welcomeToast}</span>
+          </div>
+        )}
+        <LoginPage lang={lang} onAuthSuccess={handleAuthSuccess} />
+        <DevStatusPanel />
+      </>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100 flex font-sans">
       {/* Cinematic Intro (Hyperspace, Digital Earth, Cosmic Civilization) */}
@@ -753,6 +785,8 @@ export default function App() {
           lang={lang}
         />
       )}
+
+      <DevStatusPanel />
 
       {/* 7. 3D Holographic AI Companion (Intelligence D) */}
       <HolographicAICompanion

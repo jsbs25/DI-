@@ -123,6 +123,42 @@ function parseCookies(req: express.Request): Record<string, string> {
   return out;
 }
 
+function isTrustedLocalRequest(req: express.Request) {
+  const ip = String(req.ip || req.socket?.remoteAddress || '').replace('::ffff:', '');
+  const ips = new Set([ip]);
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim().replace('::ffff:', '');
+  if (xff) ips.add(xff);
+  const host = String(req.hostname || req.headers.host || '').split(':')[0].toLowerCase();
+  const localIps = new Set(['127.0.0.1', '::1', 'localhost']);
+  const localHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+  for (const v of ips) { if (v && !localIps.has(v)) return false; }
+  if (!localHosts.has(host) && !localIps.has(host)) return false;
+  // require direct local connection when reverse-proxy headers absent; allow typical localhost dev
+  return true;
+}
+
+function isDevQuickLoginAllowed(req: express.Request) {
+  return process.env.NODE_ENV === 'development' && isTrustedLocalRequest(req);
+}
+
+function getAuthRuntimeStatus() {
+  const wechatConfigured = !!(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET);
+  const googleConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  return {
+    env: process.env.NODE_ENV || 'development',
+    wechat: {
+      configured: wechatConfigured,
+      appIdSet: !!process.env.WECHAT_APP_ID,
+      appSecretSet: !!process.env.WECHAT_APP_SECRET,
+      appUrl: (process.env.APP_URL || '').trim() || null,
+      appUrlIsPlaceholder: /MY_APP_URL/i.test(String(process.env.APP_URL || '')),
+    },
+    google: { configured: googleConfigured },
+    devQuickLogin: { availableInDevelopment: true },
+  };
+}
+
+
 const oauthStates = new Map<string, number>(); // state -> expiresAt
 function pruneOauthStates() {
   const now = Date.now();
@@ -208,6 +244,51 @@ app.get('/api/auth/me', (req, res) => {
   const user = getSessionUser(req);
   res.json({ success: true, user: user || null });
 });
+
+app.get('/api/auth/status', (req, res) => {
+  const devAllowed = isDevQuickLoginAllowed(req);
+  const st = getAuthRuntimeStatus();
+  res.json({
+    success: true,
+    env: st.env,
+    devQuickLogin: {
+      available: devAllowed,
+      reason: devAllowed ? null : (process.env.NODE_ENV !== 'development' ? '仅开发环境可用 / Development only' : '仅限本机受信任开发环境 / Trusted local dev environment only'),
+      demoUser: devAllowed ? { username: 'li_wei', displayName: 'Li Wei (李伟)', id: 'user_cn_1' } : null,
+    },
+    wechat: {
+      configured: st.wechat.configured,
+      appUrlIsPlaceholder: st.wechat.appUrlIsPlaceholder,
+      message: st.wechat.configured ? (st.wechat.appUrlIsPlaceholder ? 'APP_URL 仍为占位值，需配置真实回调地址后才能完成生产可用登录。' : '微信登录已具备配置条件。') : '微信登录尚未配置，请使用开发者登录。',
+    },
+    google: { configured: st.google.configured },
+  });
+});
+
+app.post('/api/auth/dev-login', async (req, res) => {
+  if (!isDevQuickLoginAllowed(req)) {
+    store.addAudit(undefined, 'dev_login_blocked', `ip=${req.ip || ''}`, req.ip);
+    return res.status(403).json({ success: false, error: 'Developer quick login is disabled. It is only available in trusted local development environments.' });
+  }
+  const username = 'li_wei';
+  const user = store.users.find(u => u.username === username);
+  if (!user) return res.status(404).json({ success: false, error: 'Demo account not found.' });
+  try {
+    await store.mutate(async () => {
+      const token = randomBytes(32).toString('hex');
+      (store as any).sessions.set(token, user.id);
+      user.isOnline = true;
+      (user as any).lastActiveAt = new Date().toISOString();
+      (store as any).currentUser = user;
+      store.addAudit(user.id, 'dev_login_success', 'li_wei', req.ip);
+      store.persist();
+      res.json({ success: true, user: store.getSelfProfileView(user.id) || user, token, dev: true });
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Dev login failed' });
+  }
+});
+
 
 
 // ---------------- Phone OTP auth (provider-pluggable, never faked) ----------------
@@ -306,7 +387,7 @@ app.get('/api/auth/wechat/start', (req, res) => {
   const appId = process.env.WECHAT_APP_ID;
   const appSecret = process.env.WECHAT_APP_SECRET;
   const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
-  if (!appId || !appSecret) return res.status(501).json({ success: false, blocked: true, error: 'WeChat login not configured. Set WECHAT_APP_ID and WECHAT_APP_SECRET (WeChat Open Platform website app). No login was performed.' });
+  if (!appId || !appSecret) return res.status(501).json({ success: false, blocked: true, error: '微信登录尚未配置，请使用开发者登录。', message: '微信登录尚未配置，请使用开发者登录。' });
   const redirectUri = encodeURIComponent(`${appUrl}/api/auth/wechat/callback`);
   const state = (randomBytes(24)).toString('hex');
   pruneWechatStates(); wechatStates.set(state, Date.now() + 10*60*1000);
@@ -338,12 +419,23 @@ app.get('/api/auth/wechat/callback', async (req, res) => {
       const infoRes = await fetch(`https://api.weixin.qq.com/sns/userinfo?access_token=${encodeURIComponent(tokenJson.access_token)}&openid=${encodeURIComponent(tokenJson.openid)}`);
       profile = await infoRes.json().catch(()=> ({}));
     } catch {}
+    const providerUserId = String(tokenJson.openid || tokenJson.unionid || '');
+    if (!providerUserId) return res.redirect(`${appUrl}/?auth_error=wechat_profile`);
     await store.mutate(async () => {
-      const r = store.createOrLoginOAuthUser({ provider: 'wechat' as any, providerUserId: String(tokenJson.openid || tokenJson.unionid || ''), displayName: profile?.nickname, avatar: profile?.headimgurl });
-      const payload = Buffer.from(JSON.stringify({ token: r.token, user: r.user })).toString('base64url');
-      store.addAudit(r.user.id, 'wechat_login_success', 'openid_login', req.ip);
-      store.persist();
-      res.redirect(`${appUrl}/#auth=${payload}`);
+      try {
+        const r = store.createOrLoginOAuthUser({ provider: 'wechat' as any, providerUserId, displayName: profile?.nickname, avatar: profile?.headimgurl });
+        const payload = Buffer.from(JSON.stringify({ token: r.token, user: r.user })).toString('base64url');
+        store.addAudit(r.user.id, 'wechat_login_success', 'openid_login', req.ip);
+        store.persist();
+        res.redirect(`${appUrl}/#auth=${payload}`);
+      } catch (e: any) {
+        if (String(e?.message || '') === 'UNBOUND_EXTERNAL_IDENTITY') {
+          store.addAudit(undefined, 'wechat_login_unbound', `openid=${providerUserId}`, req.ip);
+          store.persist();
+          return res.redirect(`${appUrl}/?auth_error=wechat_unbound`);
+        }
+        throw e;
+      }
     });
   } catch (e) {
     console.error('WeChat OAuth callback error', e);
@@ -597,14 +689,22 @@ app.get('/api/auth/google/callback', async (req, res) => {
     if (!infoRes.ok || !info.sub) {
       return res.redirect(`${appUrl}/?auth_error=google_profile`);
     }
-    const { user, token } = store.createOrLoginOAuthUser({
-      provider: 'google',
-      providerUserId: String(info.sub),
-      email: info.email,
-      displayName: info.name || info.email,
-      avatar: info.picture
-    });
-    const payload = Buffer.from(JSON.stringify({ token, user })).toString('base64url');
+    let r;
+    try {
+      r = await store.mutate(async () => store.createOrLoginOAuthUser({
+        provider: 'google',
+        providerUserId: String(info.sub),
+        email: info.email,
+        displayName: info.name || info.email,
+        avatar: info.picture
+      }));
+    } catch (e: any) {
+      if (String(e?.message || '') === 'UNBOUND_EXTERNAL_IDENTITY') {
+        return res.redirect(`${appUrl}/?auth_error=google_unbound`);
+      }
+      throw e;
+    }
+    const payload = Buffer.from(JSON.stringify({ token: r.token, user: r.user })).toString('base64url');
     // pass via hash so SPA can pick it up without server-rendered template change
     return res.redirect(`${appUrl}/#auth=${payload}`);
   } catch (e) {
@@ -629,6 +729,68 @@ app.post('/api/auth/onboarding', (req, res) => {
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
   }
+});
+
+
+
+app.get('/api/dev/status', async (req, res) => {
+  if (process.env.NODE_ENV !== 'development' || !isTrustedLocalRequest(req)) {
+    return res.status(404).json({ success: false, error: 'Not found' });
+  }
+  const { execFile } = await import('node:child_process');
+  const exec = (cmd: string, args: string[]) => new Promise<{ok:boolean,out:string}>(resolve => {
+    execFile(cmd, args, { cwd: process.cwd(), timeout: 3000 }, (err, stdout) => resolve({ ok: !err, out: String(stdout||'').trim() }));
+  });
+  const [branch, head, short, status, remote] = await Promise.all([
+    exec('git', ['rev-parse', '--abbrev-ref', 'HEAD']),
+    exec('git', ['rev-parse', 'HEAD']),
+    exec('git', ['log', '-1', '--pretty=%h %s']),
+    exec('git', ['status', '--short', '--branch']),
+    exec('git', ['rev-parse', 'origin/main']),
+  ]);
+  const integrations = getChannelIntegrations(process.env);
+  const wechat = integrations.find(i => i.id === 'wechat');
+  const google = integrations.find(i => i.id === 'google');
+  const sms = smsStatus();
+  const mail = mailStatus();
+  res.json({
+    success: true,
+    git: {
+      branch: branch.ok ? branch.out : null,
+      head: head.ok ? head.out : null,
+      short: short.ok ? short.out : null,
+      originMain: remote.ok ? remote.out : null,
+      worktree: status.ok ? status.out : null,
+      inSync: head.ok && remote.ok ? head.out === remote.out : null,
+    },
+    modules: {
+      completed: [
+        'Global Messenger（好友/私聊/群聊/实时消息）',
+        '通知中心与通知设置（服务端过滤、桌面/声音/DND）',
+        '个人资料系统（头像上传、资料同步）',
+        '隐私与安全控制（服务端强制、搜索/资料/在线状态/已读回执/屏蔽/陌生人策略）',
+        '多设备同步与离线补齐（消息/通知/隐私等）',
+        '登录入口与开发者快速登录（开发环境）',
+      ],
+      inProgress: [
+        '微信开放平台官方扫码登录（代码与配置检测已实现，待真实凭据与回调配置）',
+      ],
+      pending: [
+        '短信验证码真实投递（需 SMS_PROVIDER 配置）',
+        '邮件验证码/重置真实投递（需邮件服务配置）',
+        '微信/Google 生产可用 OAuth 配置与真实绑定流程完善',
+      ],
+    },
+    oauth: {
+      wechat: { configured: !!(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET), status: wechat?.status, appUrl: process.env.APP_URL || null, appUrlIsPlaceholder: /MY_APP_URL/i.test(String(process.env.APP_URL || '')) },
+      google: { configured: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET), status: google?.status },
+    },
+    services: {
+      sms: { configured: !!sms?.configured, provider: sms?.provider || null },
+      mail: { configured: !!mail?.configured, provider: mail?.provider || null },
+      server: { running: true, now: new Date().toISOString(), pid: process.pid, nodeEnv: process.env.NODE_ENV || 'development' },
+    },
+  });
 });
 
 app.post('/api/auth/logout', (req, res) => {

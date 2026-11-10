@@ -1596,8 +1596,8 @@ class DataStore {
     return this.users.find(u => (u.linkedIdentities || []).some(i => i.provider === provider && i.providerUserId === providerUserId)) || null;
   }
 
-  createOrLoginOAuthUser(params: { provider: any; providerUserId: string; email?: string; displayName?: string; avatar?: string; bindToUserId?: string }): { user: User; token: string; linkedExisting?: boolean } {
-    const { provider, providerUserId, email, displayName, avatar, bindToUserId } = params;
+  createOrLoginOAuthUser(params: { provider: any; providerUserId: string; email?: string; displayName?: string; avatar?: string; bindToUserId?: string; allowCreate?: boolean }): { user: User; token: string; linkedExisting?: boolean } {
+    const { provider, providerUserId, email, displayName, avatar, bindToUserId, allowCreate } = params;
     if (bindToUserId) {
       const target = this.users.find(u => u.id === bindToUserId);
       if (!target) throw new Error('User not found');
@@ -1614,7 +1614,12 @@ class DataStore {
 
     let user: User | null = this.findUserByLinkedIdentity(provider, providerUserId) || null;
     if (!user) {
-      // Do NOT auto-merge accounts by matching email/phone; create a separate account.
+      // Security: never auto-bind unknown external identity to someone else's account and
+      // never auto-create/login unbound external accounts for direct OAuth login.
+      if (!allowCreate) {
+        throw new Error('UNBOUND_EXTERNAL_IDENTITY');
+      }
+      // Explicit creation path only (not used for direct public OAuth login callbacks).
       const base = (displayName || email?.split('@')[0] || `${provider}_user`).toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 18) || provider;
       let username = base; let n = 1;
       while (this.accounts.has(username) || this.users.some(u => u.username === username)) { username = `${base}_${n++}`; }
