@@ -2059,6 +2059,7 @@ class DataStore {
   getDefaultNotificationPrefs() {
     return {
       friendRequests: true,
+      friendAccepted: true,
       groupEvents: true,
       messages: true,
       desktop: true,
@@ -2072,16 +2073,25 @@ class DataStore {
   getNotificationPrefs(userId: string) {
     const base = this.getDefaultNotificationPrefs();
     const cur = this.notificationPrefs[userId] || {};
-    return { ...base, ...cur };
+    const next: any = { ...base, ...cur };
+    if (typeof next.friendAccepted !== 'boolean') next.friendAccepted = typeof cur.friendRequests === 'boolean' ? cur.friendRequests : base.friendAccepted;
+    const boolKeys = ['friendRequests','friendAccepted','groupEvents','messages','desktop','sound','dndEnabled'];
+    for (const k of boolKeys) if (typeof (next as any)[k] !== 'boolean') (next as any)[k] = (base as any)[k];
+    const timeRe = /^([01]\d|2[0-3]):([0-5]\d)$/;
+    next.dndStart = typeof next.dndStart === 'string' && timeRe.test(next.dndStart.slice(0,5)) ? next.dndStart.slice(0,5) : base.dndStart;
+    next.dndEnd = typeof next.dndEnd === 'string' && timeRe.test(next.dndEnd.slice(0,5)) ? next.dndEnd.slice(0,5) : base.dndEnd;
+    return next;
   }
 
   setNotificationPrefs(userId: string, patch: any) {
     const cur = this.getNotificationPrefs(userId);
     const next = { ...cur };
-    const boolKeys = ['friendRequests','groupEvents','messages','desktop','sound','dndEnabled'];
+    const boolKeys = ['friendRequests','friendAccepted','groupEvents','messages','desktop','sound','dndEnabled'];
     for (const k of boolKeys) if (typeof patch?.[k] === 'boolean') next[k] = patch[k];
-    if (typeof patch?.dndStart === 'string') next.dndStart = patch.dndStart.slice(0,5);
-    if (typeof patch?.dndEnd === 'string') next.dndEnd = patch.dndEnd.slice(0,5);
+    const timeRe = /^([01]\d|2[0-3]):([0-5]\d)$/;
+    if (typeof patch?.dndStart === 'string' && timeRe.test(patch.dndStart.slice(0,5))) next.dndStart = patch.dndStart.slice(0,5);
+    if (typeof patch?.dndEnd === 'string' && timeRe.test(patch.dndEnd.slice(0,5))) next.dndEnd = patch.dndEnd.slice(0,5);
+    // Backward compat: if client sends legacy friendRequests only, do not force friendAccepted off/on unexpectedly.
     this.notificationPrefs[userId] = next;
     return next;
   }

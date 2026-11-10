@@ -2,6 +2,7 @@
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'http';
 import { store } from './store.ts';
+import { decideNotification } from './notificationPolicy.ts';
 
 type Client = { ws: WebSocket; userId: string; deviceId: string };
 
@@ -117,8 +118,10 @@ export function attachMessengerWs(wss: WebSocketServer) {
             const preview = (content.trim() || (attachments?.length ? '[attachment]' : '')).slice(0, 80);
             for (const uid of (conv.participantIds || [])) {
               if (uid === user.id) continue;
+              const prefs = store.getNotificationPrefs(uid);
+              const decision = decideNotification(prefs, 'message_new');
               const n = store.createNotification({ userId: uid, type: 'message_new', title: conv.name || user.displayName, body: `${user.displayName}: ${preview}`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: convId, data: { messageId: saved.id } });
-              if (n) broadcastToUsers([uid], { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+              if (n && decision.pushRealtime) broadcastToUsers([uid], { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid), alert: { desktop: decision.alertDesktop, sound: decision.alertSound, dndActive: decision.dndActive, categoryEnabled: decision.categoryEnabled } });
             }
             store.persist();
           });

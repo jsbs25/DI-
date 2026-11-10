@@ -34,6 +34,7 @@ import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
 import { getMailProvider, mailStatus } from './server/mailProvider.ts';
 import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE164 } from './server/otp.ts';
 import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser } from './server/messengerWs.ts';
+import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { searchBilibiliVideos } from './server/bilibiliCrawler.ts';
@@ -962,8 +963,7 @@ app.post('/api/conversations/:id/admins', async (req, res) => {
       if (conv) {
         for (const uid of (conv.participantIds||[])) {
           if (uid === user.id) continue;
-          const n = store.createNotification({ userId: uid, type: 'group_admin_changed', title: 'Group admin updated', body: `${user.displayName} updated admin roles in "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
-          if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+          emitNotification(uid, { type: 'group_admin_changed', title: 'Group admin updated', body: `${user.displayName} updated admin roles in "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
         }
         store.persist();
       }
@@ -1008,21 +1008,30 @@ app.post('/api/auth/email/change/confirm', async (req, res) => {
 // 1b. MESSENGER: USERS, FRIENDS, BLOCKS (auth required where sensitive)
 // -------------------------------------------------------------
 
-function emitNotification(userId: string, input: any) {
+function emitNotification(userId: string, input: any, opts?: { dndActive?: boolean; localMinutes?: number | null }) {
   let created: any = null;
+  const prefs = store.getNotificationPrefs(userId);
+  const decision = decideNotification(prefs, String(input?.type || ''), opts);
   // must be called inside store.mutate or we persist separately; caller controls
   created = store.createNotification({ userId, ...input });
-  if (created) {
-    try { wsBroadcastToUser(userId, { type: 'notification', notification: created, unreadCount: store.getUnreadNotificationCount(userId) }); } catch {}
+  if (created && decision.pushRealtime) {
+    try {
+      wsBroadcastToUser(userId, {
+        type: 'notification',
+        notification: created,
+        unreadCount: store.getUnreadNotificationCount(userId),
+        alert: { desktop: decision.alertDesktop, sound: decision.alertSound, dndActive: decision.dndActive, categoryEnabled: decision.categoryEnabled },
+      });
+    } catch {}
   }
-  return created;
+  return created ? { notification: created, decision } : null;
 }
 
-function emitNotifications(userIds: string[], input: any) {
+function emitNotifications(userIds: string[], input: any, opts?: { dndActive?: boolean; localMinutes?: number | null }) {
   const out: any[] = [];
   for (const uid of new Set(userIds.filter(Boolean))) {
-    const n = emitNotification(uid, input);
-    if (n) out.push(n);
+    const r = emitNotification(uid, input, opts);
+    if (r) out.push(r);
   }
   return out;
 }
@@ -1082,6 +1091,7 @@ app.put('/api/notifications/preferences', async (req, res) => {
   if (!user) return;
   let prefs: any;
   await store.mutate(async () => { prefs = store.setNotificationPrefs(user.id, req.body || {}); store.persist(); });
+  try { wsBroadcastToUser(user.id, { type: 'notification_prefs_sync', preferences: prefs, updatedAt: new Date().toISOString() }); } catch {}
   res.json({ success: true, preferences: prefs });
 });
 
@@ -1123,23 +1133,20 @@ app.post('/api/messenger/friend-requests', async (req, res) => {
         const fromUser = store.users.find(u => u.id === fr.fromUserId);
         ntf = { type: 'accepted_pair', targetId: fr.toUserId, fromUser };
       } else if (fr?.status === 'pending' && fr.toUserId === toUserId) {
-        ntf = store.createNotification({ userId: toUserId, type: 'friend_request', title: 'New friend request', body: `${user.displayName} sent you a friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
+        ntf = emitNotification(toUserId, { type: 'friend_request', title: 'New friend request', body: `${user.displayName} sent you a friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
       }
       store.persist();
     });
-    if (ntf && ntf.type === 'friend_request') {
+    if (ntf && ntf.notification && ntf.notification.type === 'friend_request') {
       wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
-      wsBroadcastToUser(toUserId, { type: 'notification', notification: ntf, unreadCount: store.getUnreadNotificationCount(toUserId) });
     } else if (ntf && ntf.type === 'accepted_pair') {
       // reverse auto-accepted: notify both
       wsBroadcastToUser(fr.fromUserId, { type: 'friend_request_updated', request: fr });
       wsBroadcastToUser(fr.toUserId, { type: 'friend_request_updated', request: fr });
       await store.mutate(async () => {
-        const n1 = store.createNotification({ userId: fr.fromUserId, type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
-        const n2 = store.createNotification({ userId: fr.toUserId, type: 'friend_accepted', title: 'You are now friends', body: `You and ${ntf.fromUser?.displayName || 'user'} are now friends.`, actorId: fr.fromUserId, actorName: ntf.fromUser?.displayName, actorAvatar: ntf.fromUser?.avatar, requestId: fr.id, targetUserId: fr.fromUserId });
+        emitNotification(fr.fromUserId, { type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
+        emitNotification(fr.toUserId, { type: 'friend_accepted', title: 'You are now friends', body: `You and ${ntf.fromUser?.displayName || 'user'} are now friends.`, actorId: fr.fromUserId, actorName: ntf.fromUser?.displayName, actorAvatar: ntf.fromUser?.avatar, requestId: fr.id, targetUserId: fr.fromUserId });
         store.persist();
-        if (n1) wsBroadcastToUser(fr.fromUserId, { type: 'notification', notification: n1, unreadCount: store.getUnreadNotificationCount(fr.fromUserId) });
-        if (n2) wsBroadcastToUser(fr.toUserId, { type: 'notification', notification: n2, unreadCount: store.getUnreadNotificationCount(fr.toUserId) });
       });
     } else {
       wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
@@ -1159,9 +1166,8 @@ app.post('/api/messenger/friend-requests/:id/respond', async (req, res) => {
     await store.mutate(async () => {
       fr = store.respondFriendRequest(req.params.id, user.id, accept);
       if (accept && fr?.status === 'accepted') {
-        const n = store.createNotification({ userId: fr.fromUserId, type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
+        emitNotification(fr.fromUserId, { type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
         store.persist();
-        if (n) wsBroadcastToUser(fr.fromUserId, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(fr.fromUserId) });
       } else {
         store.persist();
       }
@@ -1480,8 +1486,7 @@ app.post('/api/conversations/group', async (req, res) => {
       if (conv) {
         for (const uid of (conv.participantIds || [])) {
           if (uid === user.id) continue;
-          const n = store.createNotification({ userId: uid, type: 'group_invite', title: 'Group invitation', body: `${user.displayName} added you to group "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
-          if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+          emitNotification(uid, { type: 'group_invite', title: 'Group invitation', body: `${user.displayName} added you to group "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
         }
         store.persist();
       }
@@ -1508,25 +1513,23 @@ app.post('/api/conversations/:id/members', async (req, res) => {
       conv = store.updateGroupMembers(user.id, id, addIds, removeIds);
       if (conv) {
         const afterSet = new Set<string>((conv.participantIds || []) as string[]);
-        for (const uid of Array.from(afterSet)) {
-          if (!beforeSet.has(uid) && uid !== user.id) {
-            const n = store.createNotification({ userId: uid, type: 'group_member_joined', title: 'Added to group', body: `${user.displayName} added you to "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
-            if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
-          }
+        const joined = Array.from(afterSet).filter(x => !beforeSet.has(x));
+        const left = Array.from(beforeSet).filter(x => !afterSet.has(x));
+        for (const uid of joined) {
+          if (uid === user.id) continue;
+          emitNotification(uid, { type: 'group_member_joined', title: 'Added to group', body: `${user.displayName} added you to "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
         }
-        for (const uid of Array.from(beforeSet)) {
-          if (!afterSet.has(uid) && uid !== user.id) {
-            const n = store.createNotification({ userId: uid, type: 'group_member_left', title: 'Removed from group', body: `You were removed from "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
-            if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
-          }
+        for (const uid of left) {
+          if (uid === user.id) continue;
+          emitNotification(uid, { type: 'group_member_left', title: 'Removed from group', body: `You were removed from "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
         }
-        // notify remaining members about joins/leaves
+        // notify remaining members about joins/leaves (aggregate, excluding direct targets/self)
         for (const uid of Array.from(afterSet)) {
           if (uid === user.id) continue;
-          const joinedNames = Array.from(afterSet).filter(x=>!beforeSet.has(x)&&x!==uid).map(x=>store.users.find(u=>u.id===x)?.displayName||x);
-          const leftNames = Array.from(beforeSet).filter(x=>!afterSet.has(x)&&x!==uid&&x!==user.id).map(x=>store.users.find(u=>u.id===x)?.displayName||x);
-          if (joinedNames.length) { const n = store.createNotification({ userId: uid, type: 'group_member_joined', title: 'Group members joined', body: `${joinedNames.join(', ')} joined "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id }); if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) }); }
-          if (leftNames.length) { const n = store.createNotification({ userId: uid, type: 'group_member_left', title: 'Group members left', body: `${leftNames.join(', ')} left "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id }); if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) }); }
+          const joinedNames = joined.filter(x => x !== uid).map(x => store.users.find(u => u.id === x)?.displayName || x);
+          const leftNames = left.filter(x => x !== uid && x !== user.id).map(x => store.users.find(u => u.id === x)?.displayName || x);
+          if (joinedNames.length) emitNotification(uid, { type: 'group_member_joined', title: 'Group members joined', body: `${joinedNames.join(', ')} joined "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
+          if (leftNames.length) emitNotification(uid, { type: 'group_member_left', title: 'Group members left', body: `${leftNames.join(', ')} left "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
         }
         store.persist();
       }
@@ -1553,8 +1556,7 @@ app.post('/api/conversations/:id/transfer-owner', async (req, res) => {
         const target = store.users.find(u=>u.id===newOwnerId);
         for (const uid of (conv.participantIds||[])) {
           if (uid === user.id) continue;
-          const n = store.createNotification({ userId: uid, type: 'group_owner_transferred', title: 'Group owner transferred', body: `${user.displayName} transferred ownership of "${conv.name}" to ${target?.displayName || newOwnerId}.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id, targetUserId: newOwnerId });
-          if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+          emitNotification(uid, { type: 'group_owner_transferred', title: 'Group owner transferred', body: `${user.displayName} transferred ownership of "${conv.name}" to ${target?.displayName || newOwnerId}.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id, targetUserId: newOwnerId });
         }
         store.persist();
       }
@@ -1580,8 +1582,7 @@ app.post('/api/conversations/:id/leave', async (req, res) => {
       conv = store.leaveGroup(user.id, id);
       if (conv) {
         for (const uid of recipients) {
-          const n = store.createNotification({ userId: uid, type: 'group_member_left', title: 'Member left group', body: `${user.displayName} left "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
-          if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+          emitNotification(uid, { type: 'group_member_left', title: 'Member left group', body: `${user.displayName} left "${conv.name}".`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: conv.id });
         }
         store.persist();
       }
@@ -1695,8 +1696,7 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
       const preview = (text || (atts?.length ? '[attachment]' : '')).slice(0, 80);
       for (const uid of (convNow?.participantIds || [])) {
         if (uid === authUser.id) continue;
-        const n = store.createNotification({ userId: uid, type: 'message_new', title: convNow?.name || authUser.displayName, body: `${authUser.displayName}: ${preview}`, actorId: authUser.id, actorName: authUser.displayName, actorAvatar: authUser.avatar, conversationId: id, data: { messageId: msg.id } });
-        if (n) wsBroadcastToUser(uid, { type: 'notification', notification: n, unreadCount: store.getUnreadNotificationCount(uid) });
+        emitNotification(uid, { type: 'message_new', title: convNow?.name || authUser.displayName, body: `${authUser.displayName}: ${preview}`, actorId: authUser.id, actorName: authUser.displayName, actorAvatar: authUser.avatar, conversationId: id, data: { messageId: msg.id } });
       }
       store.persist();
     });
