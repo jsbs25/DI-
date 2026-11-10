@@ -1,6 +1,23 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+
+/**
+ * Simple in-process async mutex/queue used to serialize state-mutating
+ * operations that include async gaps (e.g. crawling) so their read-modify-write
+ * sequences cannot interleave with other writers.
+ */
+class WriteMutex {
+  private queue: Promise<void> = Promise.resolve();
+
+  async runExclusive<T>(fn: () => Promise<T> | T): Promise<T> {
+    const run = async () => await fn();
+    const resultPromise = this.queue.then(run, run);
+    // Keep queue alive even if this task fails.
+    this.queue = resultPromise.then(() => undefined, () => undefined);
+    return resultPromise;
+  }
+}
 import {
   User,
   Post,
@@ -509,6 +526,13 @@ export function stripBookContent(book: Book): Book {
 }
 
 class DataStore {
+  private readonly writeMutex = new WriteMutex();
+
+  /** Serialize an async state mutation (read-modify-write with awaits). */
+  async mutate<T>(fn: () => Promise<T> | T): Promise<T> {
+    return this.writeMutex.runExclusive(fn);
+  }
+
   users: User[] = [];
   posts: Post[] = [];
   articles: CreatorArticle[] = [];
@@ -533,8 +557,14 @@ class DataStore {
   savedArticles: SavedArticle[] = [];
 
   constructor() {
-    if (!this.loadFromDisk()) {
+    const loaded = this.loadFromDisk();
+    if (!loaded) {
       this.initSeedData();
+      this.saveToDisk();
+    }
+    // If for any reason books are empty, always seed them
+    if (this.books.length === 0) {
+      this.books = [...SEED_BOOKS];
       this.saveToDisk();
     }
   }
@@ -579,58 +609,68 @@ class DataStore {
 
   saveToDisk(): void {
     try {
-      const serializableAccounts: Record<string, AuthAccount> = {};
-      this.accounts.forEach((acc, key) => {
-        serializableAccounts[key] = acc;
-      });
-
-      const serializableSessions: Record<string, string> = {};
-      this.sessions.forEach((userId, token) => {
-        serializableSessions[token] = userId;
-      });
-
-      // Ensure any book that still carries inline full text (seed data or a
-      // legacy server_data.json) is persisted to its own content file before
-      // we strip it from the main store.
-      for (const book of this.books) {
-        if (this.hasInlineContent(book) && !fs.existsSync(this.bookContentFile(book.id))) {
-          this.writeBookContent(book);
-        }
-      }
-
-      // Serialize books as metadata only — chapter bodies live in per-book files.
-      const booksMeta = this.books.map(stripBookContent);
-
-      const payload = {
-        users: this.users,
-        posts: this.posts,
-        articles: this.articles,
-        videos: this.videos,
-        communities: this.communities,
-        conversations: this.conversations,
-        messages: this.messages,
-        gameRooms: this.gameRooms,
-        ads: this.ads,
-        countries: this.countries,
-        books: booksMeta,
-        bookAnnotations: this.bookAnnotations,
-        bookShelf: this.bookShelf,
-        crawlerTasks: this.crawlerTasks,
-        crawledPages: this.crawledPages,
-        browserBookmarks: this.browserBookmarks,
-        savedArticles: this.savedArticles,
-        currentUser: this.currentUser,
-        accounts: serializableAccounts,
-        sessions: serializableSessions,
-        lastSavedAt: new Date().toISOString()
-      };
-
-      const tmpFile = `${DATA_FILE}.tmp`;
-      fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf-8');
-      fs.renameSync(tmpFile, DATA_FILE);
+      this.persist();
     } catch (err) {
       console.error('Failed to save store to disk:', err);
     }
+  }
+
+  /**
+   * Persist and surface errors to callers. Use for request-path writes where
+   * failure must be reported.
+   */
+  persist(): void {
+    const serializableAccounts: Record<string, AuthAccount> = {};
+    this.accounts.forEach((acc, key) => {
+      serializableAccounts[key] = acc;
+    });
+
+    const serializableSessions: Record<string, string> = {};
+    this.sessions.forEach((userId, token) => {
+      serializableSessions[token] = userId;
+    });
+
+    // Ensure any book that still carries inline full text (seed data or a
+    // legacy server_data.json) is persisted to its own content file before
+    // we strip it from the main store.
+    for (const book of this.books) {
+      if (this.hasInlineContent(book) && !fs.existsSync(this.bookContentFile(book.id))) {
+        this.writeBookContent(book);
+      }
+    }
+
+    // Serialize books as metadata only — chapter bodies live in per-book files.
+    const booksMeta = this.books.map(stripBookContent);
+
+    const payload = {
+      users: this.users,
+      posts: this.posts,
+      articles: this.articles,
+      videos: this.videos,
+      communities: this.communities,
+      conversations: this.conversations,
+      messages: this.messages,
+      gameRooms: this.gameRooms,
+      ads: this.ads,
+      countries: this.countries,
+      books: booksMeta,
+      bookAnnotations: this.bookAnnotations,
+      bookShelf: this.bookShelf,
+      crawlerTasks: this.crawlerTasks,
+      crawledPages: this.crawledPages,
+      browserBookmarks: this.browserBookmarks,
+      savedArticles: this.savedArticles,
+      currentUser: this.currentUser,
+      accounts: serializableAccounts,
+      sessions: serializableSessions,
+      lastSavedAt: new Date().toISOString()
+    };
+
+    const dir = path.dirname(DATA_FILE);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmpFile = `${DATA_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf-8');
+    fs.renameSync(tmpFile, DATA_FILE);
   }
 
   loadFromDisk(): boolean {
@@ -1529,44 +1569,48 @@ class DataStore {
   }
 
   async executeCrawl(taskId: string): Promise<{ success: boolean; newPagesCount: number; error?: string }> {
-    const task = this.crawlerTasks.find(t => t.id === taskId);
-    if (!task) return { success: false, newPagesCount: 0, error: 'Task not found' };
+    // Serialize the full async crawl lifecycle to avoid read-modify-write
+    // interleaving with other mutations during the awaited network crawl.
+    return this.mutate(async () => {
+      const task = this.crawlerTasks.find(t => t.id === taskId);
+      if (!task) return { success: false, newPagesCount: 0, error: 'Task not found' };
 
-    task.status = 'running';
-    task.lastRunAt = new Date().toISOString();
-    this.saveToDisk();
+      task.status = 'running';
+      task.lastRunAt = new Date().toISOString();
+      this.saveToDisk();
 
-    try {
-      const results = await crawlWebsite(task.startUrl, task.maxPages, task.respectsRobotsTxt);
+      try {
+        const results = await crawlWebsite(task.startUrl, task.maxPages, task.respectsRobotsTxt);
 
-      const newPages: CrawledPage[] = results.map((r, i) => ({
-        id: `crawled_${Date.now()}_${i}`,
-        taskId: task.id,
-        url: r.url,
-        title: r.title,
-        author: r.author,
-        cleanContent: r.cleanContent,
-        crawledAt: new Date().toISOString(),
-        status: 'pending_review' as const
-      }));
+        const newPages: CrawledPage[] = results.map((r, i) => ({
+          id: `crawled_${Date.now()}_${i}`,
+          taskId: task.id,
+          url: r.url,
+          title: r.title,
+          author: r.author,
+          cleanContent: r.cleanContent,
+          crawledAt: new Date().toISOString(),
+          status: 'pending_review' as const
+        }));
 
-      if (newPages.length > 0) {
-        this.crawledPages.unshift(...newPages);
+        if (newPages.length > 0) {
+          this.crawledPages.unshift(...newPages);
+        }
+        task.pagesCrawled += newPages.length;
+        task.status = newPages.length > 0 ? 'completed' : 'error';
+        this.saveToDisk();
+
+        return {
+          success: newPages.length > 0,
+          newPagesCount: newPages.length,
+          error: newPages.length === 0 ? 'No pages could be extracted from this site (blocked, empty, or unreachable).' : undefined
+        };
+      } catch (err: any) {
+        task.status = 'error';
+        try { this.saveToDisk(); } catch { /* best effort on error path */ }
+        return { success: false, newPagesCount: 0, error: err.message || 'Crawl failed' };
       }
-      task.pagesCrawled += newPages.length;
-      task.status = newPages.length > 0 ? 'completed' : 'error';
-      this.saveToDisk();
-
-      return {
-        success: newPages.length > 0,
-        newPagesCount: newPages.length,
-        error: newPages.length === 0 ? 'No pages could be extracted from this site (blocked, empty, or unreachable).' : undefined
-      };
-    } catch (err: any) {
-      task.status = 'error';
-      this.saveToDisk();
-      return { success: false, newPagesCount: 0, error: err.message || 'Crawl failed' };
-    }
+    });
   }
 
   approveCrawledPage(pageId: string): CrawledPage | null {
