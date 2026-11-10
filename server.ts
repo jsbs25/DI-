@@ -33,7 +33,7 @@ import { getChannelIntegrations } from './server/channelIntegrations.ts';
 import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
 import { getMailProvider, mailStatus } from './server/mailProvider.ts';
 import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE164 } from './server/otp.ts';
-import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser } from './server/messengerWs.ts';
+import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers } from './server/messengerWs.ts';
 import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -615,7 +615,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
 
 app.get('/api/auth/current', (req, res) => {
   const user = getSessionUser(req);
-  res.json({ success: true, user: user || null });
+  res.json({ success: true, user: user ? (store.getSelfProfileView(user.id) || user) : null });
 });
 
 app.post('/api/auth/onboarding', (req, res) => {
@@ -640,14 +640,25 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true, message: 'Logged out successfully.' });
 });
 
-app.post('/api/auth/update-profile', (req, res) => {
+app.post('/api/auth/update-profile', async (req, res) => {
   const authUser = getSessionUser(req);
   if (!authUser) {
     return res.status(401).json({ success: false, error: 'Unauthorized.' });
   }
   try {
-    const updated = store.updateProfile(req.body, authUser.id);
-    res.json({ success: true, user: updated });
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    // whitelist safe editable fields; do not trust client for id/permissions/verification/online state
+    const patch: any = {};
+    for (const k of ['displayName','bio','username','avatar','location','interests','banner']) {
+      if (Object.prototype.hasOwnProperty.call(body, k)) patch[k] = body[k];
+    }
+    let updated: any;
+    await store.mutate(async () => {
+      updated = store.updateProfile(patch, authUser.id);
+      store.persist();
+    });
+    try { broadcastProfileUpdated(authUser.id); } catch {}
+    res.json({ success: true, user: store.getSelfProfileView(authUser.id) || updated });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
   }
@@ -1259,13 +1270,161 @@ app.get('/api/messenger/sync', (req, res) => {
 app.get('/api/messenger/profile/:id', (req, res) => {
   const viewer = requireSessionUser(req, res);
   if (!viewer) return;
-  const u = store.users.find(x=>x.id===req.params.id);
-  if (!u) return res.status(404).json({ success: false, error: 'User not found' });
-  const blocked = (store.blockedBy[viewer.id]||[]).includes(u.id) || (store.blockedBy[u.id]||[]).includes(viewer.id);
-  const isFriend = store.getFriendIds(viewer.id).includes(u.id);
-  const pending = store.friendRequests.find(r => r.status==='pending' && ((r.fromUserId===viewer.id && r.toUserId===u.id) || (r.fromUserId===u.id && r.toUserId===viewer.id)));
-  res.json({ success: true, user: { id:u.id, username:u.username, displayName:u.displayName, avatar:u.avatar, bio:u.bio, location:u.location, isOnline:(u as any).isOnline, lastActiveAt:(u as any).lastActiveAt, verified:u.verified, joinedAt:u.joinedAt, interests:u.interests }, isFriend, blocked, pendingRequest: pending || null });
+  const view = store.getPublicProfileView(viewer.id, req.params.id);
+  if (!view) return res.status(404).json({ success: false, error: 'User not found' });
+  if ((view as any).isSelf) {
+    return res.json({ success: true, user: view, isSelf: true, isFriend: false, blocked: false, pendingRequest: null });
+  }
+  return res.json({ success: true, ...view });
 });
+
+
+function sanitizeSelfUser(u: any) {
+  // ensure sensitive account internals not leaked beyond self view contract
+  return store.getSelfProfileView(u.id) || u;
+}
+
+function broadcastProfileUpdated(userId: string) {
+  const recipients = store.getProfileUpdateRecipients(userId);
+  const selfView = store.getSelfProfileView(userId);
+  const pub = store.getPublicProfileView(userId, userId) as any;
+  const publicUser = pub?.user || { id: selfView?.id, username: selfView?.username, displayName: selfView?.displayName, avatar: selfView?.avatar, bio: selfView?.bio, isOnline: selfView?.isOnline, lastActiveAt: selfView?.lastActiveAt, joinedAt: selfView?.joinedAt, verified: selfView?.verified };
+  for (const uid of recipients) {
+    const payload = uid === userId ? selfView : publicUser;
+    try { broadcastToUsers([uid], { type: 'profile_updated', userId, user: payload }); } catch {}
+  }
+  try { wsBroadcastToUser(userId, { type: 'profile_sync', user: selfView }); } catch {}
+}
+
+app.get('/api/messenger/profile/me', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const view = store.getSelfProfileView(user.id);
+  res.json({ success: true, user: view });
+});
+
+app.get('/api/messenger/username/check', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const raw = typeof req.query.username === 'string' ? req.query.username : '';
+  const v = store.validateUsername(raw);
+  if (!v.ok) return res.json({ success: true, valid: false, available: false, error: v.error });
+  const taken = store.isUsernameTaken(v.username, user.id);
+  res.json({ success: true, valid: true, available: !taken, username: v.username, error: taken ? 'Username is already taken.' : undefined });
+});
+
+app.post('/api/messenger/profile/update', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  // Only allow safe editable fields
+  const patch: any = {};
+  if (Object.prototype.hasOwnProperty.call(body, 'displayName')) patch.displayName = body.displayName;
+  if (Object.prototype.hasOwnProperty.call(body, 'bio')) patch.bio = body.bio;
+  if (Object.prototype.hasOwnProperty.call(body, 'username')) patch.username = body.username;
+  try {
+    let updated: any;
+    await store.mutate(async () => {
+      updated = store.updateProfile(patch, user.id);
+      store.addAudit(user.id, 'profile_updated', JSON.stringify({ fields: Object.keys(patch) }), req.ip);
+      store.persist();
+    });
+    broadcastProfileUpdated(user.id);
+    res.json({ success: true, user: store.getSelfProfileView(user.id), conversations: store.getConversationsForUser(user.id) });
+  } catch (e: any) {
+    const msg = e?.message || 'Failed to update profile';
+    const code = /taken/i.test(msg) ? 409 : 400;
+    res.status(code).json({ success: false, error: msg });
+  }
+});
+
+// Avatar upload (image only, reuse upload security primitives)
+app.post('/api/messenger/profile/avatar', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const { name, mimeType, dataBase64 } = req.body || {};
+  if (typeof name !== 'string' || typeof mimeType !== 'string' || typeof dataBase64 !== 'string') {
+    return res.status(400).json({ success: false, error: 'name, mimeType, dataBase64 are required' });
+  }
+  let buf: Buffer;
+  try { buf = Buffer.from(dataBase64, 'base64'); } catch { return res.status(400).json({ success: false, error: 'Invalid file data' }); }
+  if (!buf.length || buf.length > 2 * 1024 * 1024) return res.status(400).json({ success: false, error: 'Avatar too large (max 2MB)' });
+  const checked = resolveAllowedAttachment(name, mimeType, buf);
+  if (!checked.ok || checked.kind !== 'image') return res.status(400).json({ success: false, error: 'Only JPG, PNG, WebP images are allowed.' });
+  const allowedAvatarMimes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+  if (!allowedAvatarMimes.has(checked.mimeType)) return res.status(400).json({ success: false, error: 'Only JPG, PNG, WebP images are allowed.' });
+  const ext = checked.mimeType === 'image/png' ? '.png' : checked.mimeType === 'image/webp' ? '.webp' : '.jpg';
+  const dir = store.getAvatarStorageDir(user.id);
+  const fileName = `av_${Date.now()}_${randomBytes(6).toString('hex')}${ext}`;
+  const filePath = path.join(dir, fileName);
+  try {
+    fs.writeFileSync(filePath, buf);
+  } catch (e: any) {
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+    return res.status(500).json({ success: false, error: 'Failed to save avatar' });
+  }
+  const avatarUrl = `/api/messenger/avatar/${user.id}/${fileName}`;
+  try {
+    await store.mutate(async () => {
+      // remove previous custom avatar files to avoid orphan accumulation/overwrite issues
+      const prevDir = path.join(process.cwd(), 'server_data', 'uploads', 'avatars', user.id);
+      try {
+        if (fs.existsSync(prevDir)) {
+          for (const f of fs.readdirSync(prevDir)) {
+            if (f !== fileName && /^av_[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(f)) {
+              try { fs.unlinkSync(path.join(prevDir, f)); } catch {}
+            }
+          }
+        }
+      } catch {}
+      store.updateProfile({ avatar: avatarUrl }, user.id);
+      store.addAudit(user.id, 'avatar_updated', fileName, req.ip);
+      store.persist();
+    });
+    broadcastProfileUpdated(user.id);
+    return res.json({ success: true, user: store.getSelfProfileView(user.id), avatar: avatarUrl });
+  } catch (e: any) {
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+    return res.status(500).json({ success: false, error: e?.message || 'Failed to update avatar' });
+  }
+});
+
+app.delete('/api/messenger/profile/avatar', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  try {
+    await store.mutate(async () => {
+      store.clearCustomAvatarFiles(user.id);
+      store.updateProfile({ avatar: (store.constructor as any).DEFAULT_AVATAR || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80' }, user.id);
+      store.addAudit(user.id, 'avatar_reset', undefined, req.ip);
+      store.persist();
+    });
+    broadcastProfileUpdated(user.id);
+    res.json({ success: true, user: store.getSelfProfileView(user.id) });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to reset avatar' });
+  }
+});
+
+// Serve avatar files (publicly readable for profile display; path-safe)
+app.get('/api/messenger/avatar/:userId/:file', (req, res) => {
+  const userId = String(req.params.userId || '');
+  const file = String(req.params.file || '');
+  if (!/^[a-zA-Z0-9_-]{1,120}$/.test(userId) || !/^av_[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(file)) {
+    return res.status(400).json({ success: false, error: 'Invalid avatar path' });
+  }
+  const dir = path.resolve(process.cwd(), 'server_data', 'uploads', 'avatars', userId);
+  const resolved = path.resolve(dir, file);
+  if (!resolved.startsWith(dir + path.sep)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: 'Avatar not found' });
+  const ext = path.extname(file).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  res.setHeader('Content-Type', mime);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  return fs.createReadStream(resolved).pipe(res);
+});
+
 
 
 

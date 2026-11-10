@@ -644,6 +644,7 @@ export default function App() {
             lang={lang}
             integrations={integrations}
             onRefreshConversations={refreshConversations}
+            onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }}
           />
         </div>
 

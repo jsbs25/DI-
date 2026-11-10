@@ -23,12 +23,13 @@ export function toPublicUser(user: User): PublicUser {
       lat: user.location.isPublic ? user.location.lat : 0,
       lng: user.location.isPublic ? user.location.lng : 0
     },
-    interests: [...user.interests],
+    interests: [...(user.interests || [])],
     followersCount: user.followersCount,
     followingCount: user.followingCount,
     tipsReceived: user.tipsReceived,
-    isOnline: user.isOnline,
+    isOnline: (user as any).isOnline,
+    lastActiveAt: (user as any).lastActiveAt,
     verified: user.verified,
     joinedAt: user.joinedAt
-  };
+  } as any;
 }

@@ -16,6 +16,7 @@ interface GlobalMessengerProps {
   lang: Language;
   integrations?: ChannelIntegration[];
   onRefreshConversations?: () => Promise<void> | void;
+  onUserUpdate?: (user: User) => void;
 }
 
 type FriendUser = { id: string; username: string; displayName: string; avatar: string; isOnline?: boolean; bio?: string; lastActiveAt?: string };
@@ -28,7 +29,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   currentUser,
   lang,
   integrations = [],
-  onRefreshConversations
+  onRefreshConversations,
+  onUserUpdate
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -81,6 +83,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [blocked, setBlocked] = useState<FriendUser[]>([]);
   const [typingUsers, setTypingUsers] = useState<Record<string, number>>({});
   const [selectedProfile, setSelectedProfile] = useState<any>(null);
+  const [profileMode, setProfileMode] = useState<'view'|'edit'>('view');
+  const [profileDraft, setProfileDraft] = useState<{ displayName: string; username: string; bio: string }>({ displayName: '', username: '', bio: '' });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileSaveState, setProfileSaveState] = useState<'idle'|'saving'|'saved'|'error'>('idle');
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const [recentConvs, setRecentConvs] = useState<Conversation[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingRequestIds, setPendingRequestIds] = useState<Set<string>>(new Set());
@@ -467,9 +477,26 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           void onRefreshConversations?.(); // sync unread counts across devices
         } else if (data.type === 'typing' && data.conversationId === activeConv?.id && data.userId !== currentUser?.id) {
           setTypingUsers(prev => ({ ...prev, [data.userId]: data.on ? Date.now() : 0 }));
+        } else if (data.type === 'profile_updated' || data.type === 'profile_sync') {
+          const u = data.user;
+          if (u) {
+            if (u.id && currentUser?.id && u.id === currentUser.id && onUserUpdate) onUserUpdate(u as any);
+            if (selectedProfile?.user?.id === u.id || selectedProfile?.isSelf) {
+              setSelectedProfile((prev: any) => prev ? ({ ...prev, user: u.id === prev.user?.id ? u : (prev.isSelf && u.id === currentUser?.id ? u : prev.user) }) : prev);
+            }
+            setFriends(prev => prev.map(f => f.id === u.id ? { ...f, displayName: u.displayName || f.displayName, username: u.username || f.username, avatar: u.avatar || f.avatar, isOnline: u.isOnline ?? f.isOnline, lastActiveAt: u.lastActiveAt || f.lastActiveAt, bio: u.bio ?? f.bio } : f));
+            setMessages(prev => prev.map(m => m.senderId === u.id ? { ...m, senderName: u.displayName || m.senderName, senderAvatar: u.avatar || m.senderAvatar } : m));
+          }
+          void onRefreshConversations?.();
+          void loadFriends(); void loadRecent();
         } else if (data.type === 'presence' || data.type === 'friend_request' || data.type === 'friend_request_updated' || data.type === 'conversation_created' || data.type === 'conversation_updated' || data.type === 'message_recalled') {
           if (data.type === 'friend_request') setNotice('收到新的好友申请 / New friend request');
           if (data.type === 'friend_request_updated') setNotice('好友申请状态已更新');
+          if (data.type === 'presence' && data.userId) {
+            setFriends(prev => prev.map(f => f.id === data.userId ? { ...f, isOnline: !!data.online, lastActiveAt: data.lastActiveAt || f.lastActiveAt } : f));
+            setMessages(prev => prev.map(m => m.senderId === data.userId ? { ...m } : m));
+            if (selectedProfile?.user?.id === data.userId) setSelectedProfile((p:any)=> p ? ({...p, user: { ...p.user, isOnline: !!data.online, lastActiveAt: data.lastActiveAt || p.user?.lastActiveAt }}) : p);
+          }
           void onRefreshConversations?.();
           void loadFriends(); void loadRequests(); void loadRecent();
           if (data.type === 'message_recalled' && data.message?.conversationId === activeConv?.id) {
@@ -742,7 +769,90 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const blockUser = async (id: string) => { try { await api('/api/messenger/block', { method: 'POST', body: JSON.stringify({ userId: id }) }); await loadFriends(); await loadBlocked(); await onRefreshConversations?.(); } catch (e:any) { setConnError(e?.message || '操作失败'); } };
   const unblockUser = async (id: string) => { try { await api('/api/messenger/unblock', { method: 'POST', body: JSON.stringify({ userId: id }) }); await loadBlocked(); } catch (e:any) { setConnError(e?.message || '操作失败'); } };
   const openDirect = async (uid: string) => { try { const d = await api('/api/conversations/direct', { method: 'POST', body: JSON.stringify({ targetUserId: uid }) }); await onRefreshConversations?.(); await loadRecent(); if (d.conversation?.id) onSelectConversation(d.conversation.id); setTab('chats'); } catch (e:any) { setConnError(e?.message || '无法创建会话'); } };
-  const openProfile = async (uid: string) => { try { const d = await api(`/api/messenger/profile/${uid}`); setSelectedProfile(d); } catch (e:any) { setConnError(e?.message || '无法加载资料'); } };
+  const openProfile = async (uid: string) => {
+    try {
+      const d = await api(`/api/messenger/profile/${uid}`);
+      setSelectedProfile(d);
+      const u = d.user || {};
+      setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' });
+      setProfileMode('view');
+      setProfileSaveState('idle'); setProfileError(null); setAvatarPreview(null);
+    } catch (e:any) { setConnError(e?.message || '无法加载资料'); }
+  };
+
+  const openMyProfile = async () => {
+    try {
+      const d = await api('/api/messenger/profile/me');
+      const profile = { user: d.user, isSelf: true, isFriend: false, blocked: false, pendingRequest: null };
+      setSelectedProfile(profile);
+      setProfileDraft({ displayName: d.user?.displayName || '', username: d.user?.username || '', bio: d.user?.bio || '' });
+      setProfileMode('view');
+      setProfileSaveState('idle'); setProfileError(null); setAvatarPreview(null);
+    } catch (e:any) { setConnError(e?.message || '无法加载资料'); }
+  };
+
+  const saveMyProfile = async () => {
+    if (!selectedProfile?.isSelf) return;
+    setProfileSaving(true); setProfileSaveState('saving'); setProfileError(null);
+    try {
+      const payload = { displayName: profileDraft.displayName.trim(), username: profileDraft.username.trim(), bio: profileDraft.bio };
+      const d = await api('/api/messenger/profile/update', { method: 'POST', body: JSON.stringify(payload) });
+      const u = d.user;
+      setSelectedProfile((p:any)=> p ? ({...p, user: u, isSelf: true}) : p);
+      setProfileDraft({ displayName: u?.displayName || '', username: u?.username || '', bio: u?.bio || '' });
+      setProfileMode('view');
+      setProfileSaveState('saved');
+      if (onUserUpdate && u) onUserUpdate(u);
+      setNotice(lang==='ar'?'تم حفظ الملف الشخصي':lang==='en'?'Profile saved':'资料已保存');
+      void onRefreshConversations?.(); void loadFriends(); void loadRecent();
+      // update local message sender snapshots for self
+      if (currentUser?.id) setMessages(prev => prev.map(m => m.senderId === currentUser.id ? { ...m, senderName: u?.displayName || m.senderName, senderAvatar: u?.avatar || m.senderAvatar } : m));
+      setTimeout(()=>setProfileSaveState('idle'), 1500);
+    } catch (e:any) {
+      setProfileSaveState('error'); setProfileError(e?.message || 'Save failed');
+    } finally { setProfileSaving(false); }
+  };
+
+  const onPickAvatar = async (file?: File | null) => {
+    if (!file || !selectedProfile?.isSelf) return;
+    if (!['image/jpeg','image/png','image/webp'].includes(file.type)) { setProfileError(lang==='ar'?'يسمح فقط JPG/PNG/WebP':lang==='en'?'Only JPG, PNG, WebP allowed':'仅支持 JPG/PNG/WebP'); setProfileSaveState('error'); return; }
+    if (file.size > 2*1024*1024) { setProfileError(lang==='ar'?'الحد الأقصى للصورة 2MB':lang==='en'?'Avatar max 2MB':'头像最大 2MB'); setProfileSaveState('error'); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || '');
+      setAvatarPreview(dataUrl);
+      setAvatarUploading(true); setProfileError(null);
+      try {
+        const b64 = dataUrl.split(',')[1] || '';
+        const d = await api('/api/messenger/profile/avatar', { method: 'POST', body: JSON.stringify({ name: file.name, mimeType: file.type, dataBase64: b64 }) });
+        const u = d.user;
+        setSelectedProfile((p:any)=> p ? ({...p, user: u, isSelf: true}) : p);
+        if (onUserUpdate && u) onUserUpdate(u);
+        setNotice(lang==='ar'?'تم تحديث الصورة':lang==='en'?'Avatar updated':'头像已更新');
+        void onRefreshConversations?.(); void loadFriends();
+        if (currentUser?.id) setMessages(prev => prev.map(m => m.senderId === currentUser.id ? { ...m, senderAvatar: u?.avatar || m.senderAvatar, senderName: u?.displayName || m.senderName } : m));
+      } catch (e:any) {
+        setProfileError(e?.message || 'Upload failed'); setProfileSaveState('error');
+      } finally { setAvatarUploading(false); }
+    };
+    reader.onerror = () => { setProfileError('Failed to read image'); setProfileSaveState('error'); };
+    reader.readAsDataURL(file);
+  };
+
+  const resetAvatar = async () => {
+    if (!selectedProfile?.isSelf) return;
+    setAvatarUploading(true); setProfileError(null);
+    try {
+      const d = await api('/api/messenger/profile/avatar', { method: 'DELETE' });
+      const u = d.user;
+      setSelectedProfile((p:any)=> p ? ({...p, user: u, isSelf: true}) : p);
+      setAvatarPreview(null);
+      if (onUserUpdate && u) onUserUpdate(u);
+      void onRefreshConversations?.(); void loadFriends();
+      if (currentUser?.id) setMessages(prev => prev.map(m => m.senderId === currentUser.id ? { ...m, senderAvatar: u?.avatar || m.senderAvatar } : m));
+    } catch (e:any) { setProfileError(e?.message || 'Failed'); setProfileSaveState('error'); }
+    finally { setAvatarUploading(false); }
+  };
 
   const retrySend = async (msg: ChatMessage) => {
     if (!activeConv || !authed) return;
@@ -913,6 +1023,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             </span>
           </div>
           <div className="flex gap-1">
+            <button onClick={()=>void openMyProfile()} title={lang==='ar'?'ملفي الشخصي':lang==='en'?'My profile':'我的资料'} className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"><UserIcon className="w-3.5 h-3.5"/></button>
             <button onClick={()=>{ setShowCreateGroup(true); void loadFriends(); }} title="创建群聊" className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"><Users className="w-3.5 h-3.5"/></button>
             <button onClick={() => setShowIntegrations(v=>!v)} className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"><Plug className="w-3.5 h-3.5"/></button>
           </div>
@@ -1311,21 +1422,94 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       )}
 
       {selectedProfile && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={()=>setSelectedProfile(null)}>
-          <div className="w-full max-w-sm rounded-2xl bg-slate-900 border border-slate-800 p-5 space-y-3" onClick={e=>e.stopPropagation()}>
-            <div className="flex items-center gap-3"><img src={selectedProfile.user?.avatar} className="w-14 h-14 rounded-full object-cover"/><div className="min-w-0"><p className="font-semibold text-slate-100 truncate">{selectedProfile.user?.displayName}</p><p className="text-xs text-slate-400 truncate">@{selectedProfile.user?.username}</p><p className="text-[11px] text-slate-500">{selectedProfile.user?.isOnline?'在线':(selectedProfile.user?.lastActiveAt?`最近活跃 ${new Date(selectedProfile.user.lastActiveAt).toLocaleString()}`:'离线')}</p></div></div>
-            {selectedProfile.user?.bio && <p className="text-xs text-slate-300">{selectedProfile.user.bio}</p>}
-            <div className="text-[11px] text-slate-400">{selectedProfile.user?.location?.cityName}, {selectedProfile.user?.location?.countryName}</div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              {selectedProfile.user?.id && selectedProfile.user.id !== currentUser?.id && <>
-                <button onClick={()=>{ void openDirect(selectedProfile.user.id); setSelectedProfile(null); }} className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs">发消息</button>
-                {!selectedProfile.isFriend && !selectedProfile.blocked && <button onClick={()=>{ void sendFriendRequest(selectedProfile.user.id); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs">加好友</button>}
-                {selectedProfile.isFriend && <button onClick={()=>{ void removeFriend(selectedProfile.user.id); setSelectedProfile(null); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-rose-300 text-xs">删除好友</button>}
-                {!selectedProfile.blocked ? <button onClick={()=>{ void blockUser(selectedProfile.user.id); setSelectedProfile(null); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs">屏蔽</button> : <span className="text-[11px] text-amber-300">已屏蔽</span>}
-              </>}
-              <button onClick={()=>setSelectedProfile(null)} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">关闭</button>
-            </div>
-            {selectedProfile.pendingRequest && <p className="text-[11px] text-amber-300">存在待处理好友申请</p>}
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }}>
+          <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-800 p-5 space-y-4" dir={lang==='ar'?'rtl':'ltr'} onClick={e=>e.stopPropagation()}>
+            {(() => {
+              const u = selectedProfile.user || {};
+              const isSelf = !!selectedProfile.isSelf || u.id === currentUser?.id;
+              const editing = isSelf && profileMode === 'edit';
+              const bindings = u.bindingStatus || {};
+              const linked = Array.isArray(u.linkedIdentities) ? u.linkedIdentities : [];
+              const fmtDate = (v?: string) => v ? new Date(v).toLocaleString() : (lang==='ar'?'غير متوفر':lang==='en'?'N/A':'暂无');
+              const L = (zh:string,en:string,ar:string) => lang==='ar'?ar:lang==='en'?en:zh;
+              return (<>
+                <div className="flex items-start gap-4">
+                  <div className="relative shrink-0">
+                    <img src={avatarPreview || u.avatar} alt={u.displayName} className="w-20 h-20 rounded-full object-cover border border-slate-700" />
+                    {u.isOnline && <span className="absolute bottom-1 right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 ring-2 ring-slate-900" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-lg font-semibold text-slate-100 truncate">{u.displayName || '-'}</p>
+                    <p className="text-xs text-cyan-300 truncate">@{u.username || '-'}</p>
+                    <p className="text-[11px] text-slate-400 mt-1">{u.isOnline ? L('在线','Online','متصل') : L('离线','Offline','غير متصل')} · {L('最近活跃','Last active','آخر نشاط')}: {fmtDate(u.lastActiveAt)}</p>
+                    {isSelf && !editing && <button onClick={()=>{ setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); setProfileMode('edit'); setProfileSaveState('idle'); setProfileError(null); }} className="mt-2 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-semibold">{L('编辑资料','Edit profile','تعديل الملف')}</button>}
+                  </div>
+                  <button onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }} className="p-1.5 rounded-lg border border-slate-700 text-slate-300"><X className="w-4 h-4"/></button>
+                </div>
+
+                {isSelf && editing ? (
+                  <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+                    <p className="text-xs font-semibold text-slate-200">{L('编辑个人资料','Edit your profile','تعديل ملفك الشخصي')}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input ref={profileAvatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(f) void onPickAvatar(f); e.currentTarget.value=''; }} />
+                      <button onClick={()=>profileAvatarInputRef.current?.click()} disabled={avatarUploading} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs disabled:opacity-40">{avatarUploading ? L('上传中…','Uploading…','جارٍ الرفع…') : L('上传头像','Upload avatar','رفع صورة')}</button>
+                      <button onClick={()=>void resetAvatar()} disabled={avatarUploading} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs disabled:opacity-40">{L('恢复默认头像','Reset avatar','استعادة الصورة الافتراضية')}</button>
+                      <span className="text-[10px] text-slate-500">JPG/PNG/WebP · ≤2MB</span>
+                    </div>
+                    <label className="block space-y-1"><span className="text-[11px] text-slate-400">{L('昵称','Display name','الاسم المعروض')}</span><input value={profileDraft.displayName} onChange={e=>{ setProfileDraft(p=>({...p, displayName:e.target.value})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-100" maxLength={40} /></label>
+                    <label className="block space-y-1"><span className="text-[11px] text-slate-400">{L('用户名 (唯一)','Username (unique)','اسم المستخدم (فريد)')}</span><input value={profileDraft.username} onChange={e=>{ setProfileDraft(p=>({...p, username:e.target.value.toLowerCase()})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-100" maxLength={30} placeholder="a-z 0-9 _ (3-30)" /><span className="text-[10px] text-slate-500">{L('3-30 位，小写字母/数字/下划线，修改后需全局唯一','3-30 chars: lowercase letters, numbers, underscore. Must be unique.','3-30 حرفًا: أحرف صغيرة/أرقام/شرطة سفلية، يجب أن يكون فريدًا.')}</span></label>
+                    <label className="block space-y-1"><span className="text-[11px] text-slate-400">{L('个人简介','Bio','نبذة شخصية')}</span><textarea value={profileDraft.bio} onChange={e=>{ setProfileDraft(p=>({...p, bio:e.target.value})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-100 min-h-[72px]" maxLength={300} /></label>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[11px] min-h-[16px]">
+                        {profileSaveState==='saving' && <span className="text-cyan-300">{L('保存中…','Saving…','جارٍ الحفظ…')}</span>}
+                        {profileSaveState==='saved' && <span className="text-emerald-300">{L('保存成功','Saved','تم الحفظ')}</span>}
+                        {(profileSaveState==='error' || profileError) && <span className="text-rose-300">{profileError || L('保存失败','Save failed','فشل الحفظ')}</span>}
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={()=>{ setProfileMode('view'); setProfileError(null); setAvatarPreview(null); setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); }} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">{L('取消','Cancel','إلغاء')}</button>
+                        <button onClick={()=>void saveMyProfile()} disabled={profileSaving} className="px-3 py-1.5 rounded-lg bg-cyan-500 text-slate-950 font-semibold text-xs disabled:opacity-40">{L('保存','Save','حفظ')}</button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {u.bio && <div><p className="text-[11px] text-slate-400 mb-1">{L('个人简介','Bio','نبذة')}</p><p className="text-sm text-slate-200 whitespace-pre-wrap break-words">{u.bio}</p></div>}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5"><p className="text-slate-500">{L('唯一用户 ID','Unique User ID','معرّف المستخدم')}</p><p className="text-slate-200 break-all mt-0.5">{u.id}</p></div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5"><p className="text-slate-500">{L('注册时间','Joined','تاريخ التسجيل')}</p><p className="text-slate-200 mt-0.5">{fmtDate(u.joinedAt)}</p></div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5"><p className="text-slate-500">{L('最近活跃','Last active','آخر نشاط')}</p><p className="text-slate-200 mt-0.5">{fmtDate(u.lastActiveAt)}</p></div>
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5"><p className="text-slate-500">{L('在线状态','Status','الحالة')}</p><p className={`${u.isOnline?'text-emerald-300':'text-slate-300'} mt-0.5`}>{u.isOnline ? L('在线','Online','متصل') : L('离线','Offline','غير متصل')}</p></div>
+                    </div>
+                    {isSelf && (
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 space-y-2">
+                        <p className="text-xs font-semibold text-slate-200">{L('账户绑定状态','Account binding status','حالة ربط الحساب')}</p>
+                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                          <div className="text-slate-300">Email: <span className={bindings.email?.bound?'text-emerald-300':'text-slate-500'}>{bindings.email?.bound ? (bindings.email?.value || L('已绑定','Bound','مرتبط')) : L('未绑定','Not bound','غير مرتبط')}</span>{bindings.email?.bound && <span className="text-slate-500"> ({bindings.email?.verified?L('已验证','verified','موثّق'):L('未验证','unverified','غير موثّق')})</span>}</div>
+                          <div className="text-slate-300">{L('手机','Phone','الهاتف')}: <span className={bindings.phone?.bound?'text-emerald-300':'text-slate-500'}>{bindings.phone?.bound ? (bindings.phone?.value || L('已绑定','Bound','مرتبط')) : L('未绑定','Not bound','غير مرتبط')}</span></div>
+                          <div className="text-slate-300">Google: <span className={bindings.google?.bound?'text-emerald-300':'text-slate-500'}>{bindings.google?.bound?L('已绑定','Bound','مرتبط'):L('未绑定','Not bound','غير مرتبط')}</span></div>
+                          <div className="text-slate-300">WeChat: <span className={bindings.wechat?.bound?'text-emerald-300':'text-slate-500'}>{bindings.wechat?.bound?L('已绑定','Bound','مرتبط'):L('未绑定','Not bound','غير مرتبط')}</span></div>
+                        </div>
+                        {Array.isArray(linked) && linked.length > 0 && <p className="text-[10px] text-slate-500">{L('已关联身份','Linked identities','الهويات المرتبطة')}: {linked.map((i:any)=>i.provider).join(', ')}</p>}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {!editing && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {!isSelf && u.id && <>
+                      <button onClick={()=>{ void openDirect(u.id); setSelectedProfile(null); }} className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs">{L('发消息','Message','رسالة')}</button>
+                      {!selectedProfile.isFriend && !selectedProfile.blocked && <button onClick={()=>{ void sendFriendRequest(u.id); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs">{L('加好友','Add friend','إضافة صديق')}</button>}
+                      {selectedProfile.isFriend && <button onClick={()=>{ void removeFriend(u.id); setSelectedProfile(null); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-rose-300 text-xs">{L('删除好友','Remove friend','إزالة صديق')}</button>}
+                      {!selectedProfile.blocked ? <button onClick={()=>{ void blockUser(u.id); setSelectedProfile(null); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs">{L('屏蔽','Block','حظر')}</button> : <span className="text-[11px] text-amber-300">{L('已屏蔽','Blocked','محظور')}</span>}
+                    </>}
+                    {isSelf && profileMode==='view' && <button onClick={()=>{ setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); setProfileMode('edit'); }} className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs">{L('编辑资料','Edit profile','تعديل الملف')}</button>}
+                    <button onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">{L('关闭','Close','إغلاق')}</button>
+                  </div>
+                )}
+                {selectedProfile.pendingRequest && <p className="text-[11px] text-amber-300">{L('存在待处理好友申请','Pending friend request','يوجد طلب صداقة قيد الانتظار')}</p>}
+              </>);
+            })()}
           </div>
         </div>
       )}

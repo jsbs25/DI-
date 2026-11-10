@@ -51,6 +51,7 @@ const DATA_FILE = path.resolve(process.env.EARTH_ONE_DATA_FILE || path.resolve(p
 // bloating server_data.json with every chapter's body. This keeps the main
 // store small and makes the atomic whole-file rewrite cheap.
 const BOOKS_DIR = path.resolve(process.cwd(), 'server_data', 'books');
+const AVATARS_DIR = path.resolve(process.cwd(), 'server_data', 'uploads', 'avatars');
 
 export interface AuthAccount {
   userId: string;
@@ -1109,32 +1110,210 @@ class DataStore {
     return msg;
   }
 
-  // Update current or target user profile
-  updateProfile(data: Partial<User>, userId?: string): User {
-    const targetId = userId || this.currentUser.id;
-    let target = this.users.find(u => u.id === targetId);
-    if (!target) {
-      target = this.currentUser;
-    }
+  static DEFAULT_AVATAR = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
 
-    Object.assign(target, data);
-    if (data.location) {
-      target.location = {
-        ...target.location,
-        ...data.location
-      };
-      if (data.location.cityName && data.location.countryCode) {
-        const coords = resolveCoordinates(data.location.countryCode, data.location.cityName);
-        target.location.lat = coords.lat;
-        target.location.lng = coords.lng;
+  validateUsername(raw: string): { ok: true; username: string } | { ok: false; error: string } {
+    const username = String(raw || '').trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,30}$/.test(username)) return { ok: false, error: 'Username must be 3-30 characters: letters, numbers, underscore.' };
+    return { ok: true, username };
+  }
+
+  isUsernameTaken(username: string, excludeUserId?: string): boolean {
+    const u = username.toLowerCase();
+    if (this.users.some(x => x.id !== excludeUserId && String(x.username || '').toLowerCase() === u)) return true;
+    const acc = this.accounts.get(u);
+    if (acc && acc.userId !== excludeUserId) return true;
+    return false;
+  }
+
+  getAvatarStorageDir(userId: string): string {
+    const dir = path.join(AVATARS_DIR, userId);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  clearCustomAvatarFiles(userId: string) {
+    try {
+      const dir = path.join(AVATARS_DIR, userId);
+      if (!fs.existsSync(dir)) return;
+      for (const f of fs.readdirSync(dir)) {
+        if (/^av_[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(f)) {
+          try { fs.unlinkSync(path.join(dir, f)); } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  // Update current or target user profile (safe fields only). Never trust client for id/permissions.
+  updateProfile(data: any, userId?: string): User {
+    const targetId = userId || this.currentUser.id;
+    const target = this.users.find(u => u.id === targetId);
+    if (!target) throw new Error('User not found.');
+
+    if (data && typeof data === 'object') {
+      // display name
+      if (Object.prototype.hasOwnProperty.call(data, 'displayName')) {
+        const dn = String(data.displayName ?? '').trim();
+        if (!dn) throw new Error('Display name cannot be empty.');
+        if (dn.length > 40) throw new Error('Display name is too long (max 40).');
+        target.displayName = dn;
+      }
+      // bio
+      if (Object.prototype.hasOwnProperty.call(data, 'bio')) {
+        const bio = String(data.bio ?? '').trim();
+        if (bio.length > 300) throw new Error('Bio is too long (max 300).');
+        target.bio = bio;
+      }
+      // username (unique, server-validated)
+      if (Object.prototype.hasOwnProperty.call(data, 'username') && data.username !== undefined && data.username !== null) {
+        const v = this.validateUsername(String(data.username));
+        if (!v.ok) throw new Error(v.error);
+        if (v.username !== String(target.username || '').toLowerCase()) {
+          if (this.isUsernameTaken(v.username, target.id)) throw new Error('Username is already taken.');
+          const oldUsername = String(target.username || '').toLowerCase();
+          const acc = this.accounts.get(target.id) || (oldUsername ? this.accounts.get(oldUsername) : undefined);
+          if (acc) {
+            // remove old username key if it pointed to same account
+            if (oldUsername && this.accounts.get(oldUsername)?.userId === target.id) this.accounts.delete(oldUsername);
+            this.accounts.set(v.username, acc);
+            // keep by userId and email/phone keys intact
+            this.accounts.set(target.id, acc);
+          }
+          target.username = v.username;
+        }
+      }
+      // location merge (existing behavior) but do not allow id/ownership changes
+      if (data.location && typeof data.location === 'object') {
+        const loc = { ...target.location, ...data.location };
+        // never trust arbitrary coords unless resolved
+        if (data.location.cityName || data.location.countryCode) {
+          const coords = resolveCoordinates(loc.countryCode, loc.cityName);
+          loc.lat = coords.lat;
+          loc.lng = coords.lng;
+        }
+        target.location = loc;
+      }
+      // Explicitly ignore immutable/sensitive fields from client: id, email, phone, linkedIdentities, friendIds, blockedUserIds, verified, joinedAt, followers/following/tips, isOnline/lastActiveAt managed by server, etc.
+      if (Object.prototype.hasOwnProperty.call(data, 'avatar') && typeof data.avatar === 'string') {
+        // allow server/internal callers to set avatar URL; basic guard
+        const av = data.avatar.trim();
+        if (av) target.avatar = av;
       }
     }
 
-    if (this.currentUser.id === target.id) {
-      this.currentUser = target;
-    }
+    this.propagateUserProfile(target.id);
+    if (this.currentUser.id === target.id) this.currentUser = target;
     this.saveToDisk();
     return target;
+  }
+
+  propagateUserProfile(userId: string) {
+    const u = this.users.find(x => x.id === userId);
+    if (!u) return;
+    // update message sender snapshots
+    for (const m of this.messages) {
+      if (m.senderId === userId) {
+        m.senderName = u.displayName;
+        m.senderAvatar = u.avatar;
+        (m as any).senderCountry = u.location?.countryCode || (m as any).senderCountry;
+      }
+    }
+    // update direct conversation snapshots
+    for (const c of this.conversations) {
+      if (c.type === 'direct' && Array.isArray(c.participantIds) && c.participantIds.includes(userId)) {
+        // otherUser/name/isOnline are viewer-relative in getConversationsForUser; keep base updated where safe
+        if (c.otherUser && c.otherUser.id === userId) {
+          c.otherUser = { ...c.otherUser, id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, bio: u.bio, location: u.location, isOnline: (u as any).isOnline, lastActiveAt: (u as any).lastActiveAt, verified: u.verified, joinedAt: u.joinedAt } as any;
+          c.name = u.displayName;
+          c.isOnline = (u as any).isOnline;
+        }
+      }
+    }
+  }
+
+  getSelfProfileView(userId: string) {
+    const u = this.users.find(x => x.id === userId);
+    if (!u) return null;
+    const acc = this.accounts.get(userId);
+    const linked = Array.isArray(u.linkedIdentities) ? u.linkedIdentities.map(i => ({ provider: i.provider, providerUserId: i.providerUserId ? 'linked' : undefined, displayName: i.displayName, email: i.email, phone: i.phone, linkedAt: i.linkedAt })) : [];
+    return {
+      id: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      avatar: u.avatar,
+      banner: u.banner,
+      bio: u.bio,
+      location: u.location,
+      interests: u.interests || [],
+      followersCount: u.followersCount,
+      followingCount: u.followingCount,
+      tipsReceived: u.tipsReceived,
+      isOnline: !!(u as any).isOnline,
+      lastActiveAt: (u as any).lastActiveAt,
+      verified: !!u.verified,
+      joinedAt: u.joinedAt,
+      email: u.email,
+      phone: (u as any).phone,
+      emailVerified: !!(u as any).emailVerified,
+      phoneVerified: !!(u as any).phoneVerified,
+      linkedIdentities: linked,
+      hasPassword: !!acc,
+      bindingStatus: {
+        email: { bound: !!u.email, verified: !!(u as any).emailVerified, value: u.email || null },
+        phone: { bound: !!(u as any).phone, verified: !!(u as any).phoneVerified, value: (u as any).phone || null },
+        google: { bound: linked.some(i => i.provider === 'google') },
+        wechat: { bound: linked.some(i => i.provider === 'wechat') },
+      }
+    };
+  }
+
+  getPublicProfileView(viewerId: string, targetId: string) {
+    const u = this.users.find(x => x.id === targetId);
+    if (!u) return null;
+    const isSelf = viewerId === targetId;
+    if (isSelf) return this.getSelfProfileView(targetId);
+    const isFriend = this.getFriendIds(viewerId).includes(targetId);
+    const blocked = (this.blockedBy[viewerId]||[]).includes(targetId) || (this.blockedBy[targetId]||[]).includes(viewerId);
+    const pending = this.friendRequests.find(r => r.status==='pending' && ((r.fromUserId===viewerId && r.toUserId===targetId) || (r.fromUserId===targetId && r.toUserId===viewerId))) || null;
+    // public-safe: never expose email/phone/linkedIdentities details; location respects isPublic
+    const loc = u.location ? {
+      countryCode: u.location.countryCode,
+      countryName: u.location.countryName,
+      cityName: u.location.cityName,
+      isPublic: u.location.isPublic,
+      lat: u.location.isPublic ? u.location.lat : 0,
+      lng: u.location.isPublic ? u.location.lng : 0,
+    } : null;
+    return {
+      user: {
+        id: u.id,
+        username: u.username,
+        displayName: u.displayName,
+        avatar: u.avatar,
+        banner: u.banner,
+        bio: u.bio,
+        location: loc,
+        interests: u.interests || [],
+        followersCount: u.followersCount,
+        followingCount: u.followingCount,
+        isOnline: !!(u as any).isOnline,
+        lastActiveAt: (u as any).lastActiveAt,
+        verified: !!u.verified,
+        joinedAt: u.joinedAt,
+      },
+      isSelf, isFriend, blocked, pendingRequest: pending,
+    };
+  }
+
+  getProfileUpdateRecipients(userId: string): string[] {
+    const set = new Set<string>([userId]);
+    for (const fid of this.getFriendIds(userId)) set.add(fid);
+    for (const c of this.conversations) {
+      if (Array.isArray(c.participantIds) && c.participantIds.includes(userId)) {
+        for (const pid of c.participantIds) set.add(pid);
+      }
+    }
+    return Array.from(set);
   }
 
   // Password hashing — scrypt (memory-hard), stored as a self-contained
@@ -1370,7 +1549,7 @@ class DataStore {
           const otherId = c.participantIds.find(id => id !== userId);
           const other = otherId ? this.users.find(u => u.id === otherId) : undefined;
           const unread = this.getUnreadCountForUser(c.id, userId);
-          return { ...c, name: other?.displayName || c.name, otherUser: other, isOnline: other?.isOnline, unreadCount: unread };
+          return { ...c, name: other?.displayName || c.name, avatar: other?.avatar || c.avatar, otherUser: other, isOnline: !!(other as any)?.isOnline, unreadCount: unread };
         }
         if (c.type === 'group') {
           const unread = this.getUnreadCountForUser(c.id, userId);

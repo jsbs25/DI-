@@ -15,7 +15,7 @@ function safeSend(ws: WebSocket, data: any) {
   }
 }
 
-function broadcastToUsers(userIds: string[], data: any, exceptDevice?: string) {
+export function broadcastToUsers(userIds: string[], data: any, exceptDevice?: string) {
   for (const uid of new Set(userIds)) {
     const set = clientsByUser.get(uid);
     if (!set) continue;
@@ -65,8 +65,11 @@ export function attachMessengerWs(wss: WebSocketServer) {
     const client: Client = { ws, userId: user.id, deviceId };
     if (!clientsByUser.has(user.id)) clientsByUser.set(user.id, new Set());
     clientsByUser.get(user.id)!.add(client);
+    // update server-side last active on connect
+    try { (user as any).lastActiveAt = new Date().toISOString(); } catch {}
     safeSend(ws, { type: 'hello', userId: user.id, deviceId, serverTime: new Date().toISOString() });
     broadcastPresence(user.id);
+    try { store.saveToDisk(); } catch {}
 
     ws.on('message', async (raw: any) => {
       let msg: any;
@@ -139,6 +142,7 @@ export function attachMessengerWs(wss: WebSocketServer) {
       const set = clientsByUser.get(user.id);
       if (set) { set.delete(client); if (set.size === 0) clientsByUser.delete(user.id); }
       broadcastPresence(user.id);
+      try { store.saveToDisk(); } catch {}
     });
     ws.on('error', () => {});
   });
