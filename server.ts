@@ -263,6 +263,14 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 
+app.get('/api/account/me', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const me = store.getAccountMe(user.id);
+  if (!me) return res.status(404).json({ success: false, error: 'User not found' });
+  res.json({ success: true, account: me, user: me });
+});
+
 app.get('/api/auth/me', (req, res) => {
   const user = getSessionUser(req);
   res.json({ success: true, user: user || null });
@@ -1324,7 +1332,7 @@ app.get('/api/messenger/users/search', (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q : '';
   const users = store.searchUsers(q, user.id, 40).map(u => {
     const pres = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(user.id, u.id) : { isOnline: !!(u as any).isOnline, lastActiveAt: (u as any).lastActiveAt };
-    return { id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, bio: u.bio, location: (u as any).location?.isPublic ? u.location : (u.location ? { countryCode: u.location.countryCode, countryName: u.location.countryName, cityName: u.location.cityName, isPublic: false, lat: 0, lng: 0 } : null), isOnline: !!pres.isOnline, lastActiveAt: pres.lastActiveAt, verified: !!u.verified };
+    return { id: u.id, earthId: (u as any).earthId, username: u.username, displayName: u.displayName, avatar: u.avatar, bio: u.bio, location: (u as any).location?.isPublic ? u.location : (u.location ? { countryCode: u.location.countryCode, countryName: u.location.countryName, cityName: u.location.cityName, isPublic: false, lat: 0, lng: 0 } : null), isOnline: !!pres.isOnline, lastActiveAt: pres.lastActiveAt, verified: !!u.verified, accountStatus: (store as any).getAccountStatus ? (store as any).getAccountStatus(u) : ((u as any).accountStatus || 'active') };
   });
   res.json({ success: true, users });
 });

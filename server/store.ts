@@ -571,6 +571,11 @@ class DataStore {
   notificationPrefs: Record<string, any> = {};
   privacySettings: Record<string, any> = {};
 
+  // EARTH ONE native identity (permanent public ID). Sequence is monotonic and never reused.
+  nextEarthSequence: number = 100001;
+  /** Historical internal id -> permanent earthId mapping (compatibility). */
+  earthIdMap: Record<string, string> = {};
+
   constructor() {
     const loaded = this.loadFromDisk();
     if (!loaded) {
@@ -682,6 +687,8 @@ class DataStore {
       notifications: this.notifications,
       notificationPrefs: this.notificationPrefs,
       privacySettings: this.privacySettings,
+      nextEarthSequence: this.nextEarthSequence,
+      earthIdMap: this.earthIdMap,
       currentUser: this.currentUser,
       accounts: serializableAccounts,
       sessions: serializableSessions,
@@ -740,11 +747,17 @@ class DataStore {
       this.notifications = Array.isArray(data.notifications) ? data.notifications : [];
       this.notificationPrefs = data.notificationPrefs && typeof data.notificationPrefs === 'object' ? data.notificationPrefs : {};
       this.privacySettings = data.privacySettings && typeof data.privacySettings === 'object' ? data.privacySettings : {};
+      this.nextEarthSequence = Number.isFinite(data.nextEarthSequence) ? Math.max(100001, Math.floor(data.nextEarthSequence)) : 100001;
+      this.earthIdMap = data.earthIdMap && typeof data.earthIdMap === 'object' ? data.earthIdMap : {};
       this.currentUser = data.currentUser || this.users[0];
 
       // Persist the now-stripped (metadata-only) main store once after migrating
       // legacy inline content, so server_data.json stops carrying full text.
       if (migrated) this.saveToDisk();
+
+      // In-memory identity normalization for runtime safety (defaults only).
+      // Does NOT persist historical earthId assignment to real data here.
+      try { this.ensureAccountIdentityDefaults({ persist: false, assignMissingEarthIds: false }); } catch (e) { console.warn('Identity defaults normalization failed:', e); }
 
       this.accounts.clear();
       if (data.accounts) {
@@ -1232,13 +1245,207 @@ class DataStore {
     }
   }
 
+
+  // -------------------------------------------------------------------------
+  // EARTH ONE native identity (permanent public ID) & account status
+  // -------------------------------------------------------------------------
+  private normalizeEarthId(value: any): string | null {
+    if (typeof value !== 'string') return null;
+    const v = value.trim().toLowerCase();
+    if (!/^earth_\d+$/.test(v)) return null;
+    return v;
+  }
+
+  private earthSequenceFromId(earthId: string): number | null {
+    const m = /^earth_(\d+)$/.exec(earthId);
+    if (!m) return null;
+    const n = parseInt(m[1], 10);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  getAccountStatus(user: any): 'active' | 'suspended' | 'restricted' | 'deleted' {
+    const s = user?.accountStatus;
+    if (s === 'active' || s === 'suspended' || s === 'restricted' || s === 'deleted') return s;
+    return 'active'; // legacy/default safety: do not lock out existing accounts
+  }
+
+  isAccountUsable(user: any): boolean {
+    return this.getAccountStatus(user) === 'active' || this.getAccountStatus(user) === 'restricted';
+  }
+
+  canLoginAccount(user: any): boolean {
+    return this.getAccountStatus(user) === 'active';
+  }
+
+  private rebuildEarthIdIndex() {
+    let maxSeq = 100000;
+    const used = new Set<string>();
+    for (const u of this.users) {
+      const eid = this.normalizeEarthId((u as any).earthId);
+      if (eid) {
+        (u as any).earthId = eid;
+        const seq = this.earthSequenceFromId(eid);
+        if (seq != null && seq > maxSeq) maxSeq = seq;
+        used.add(eid);
+        if (u.id) this.earthIdMap[u.id] = eid;
+      }
+    }
+    // also honor explicit map entries if consistent
+    if (this.earthIdMap && typeof this.earthIdMap === 'object') {
+      for (const [uid, val] of Object.entries(this.earthIdMap)) {
+        const eid = this.normalizeEarthId(val);
+        if (!eid || used.has(eid)) continue;
+        const u = this.users.find(x => x.id === uid);
+        if (u && !(u as any).earthId) {
+          (u as any).earthId = eid;
+          used.add(eid);
+          const seq = this.earthSequenceFromId(eid);
+          if (seq != null && seq > maxSeq) maxSeq = seq;
+        }
+      }
+    }
+    this.nextEarthSequence = Math.max(this.nextEarthSequence || 100001, maxSeq + 1, 100001);
+  }
+
+  /** Deterministic, idempotent assignment for users missing earthId. Never reuses IDs. */
+  ensureEarthIdsForAll(opts?: { persist?: boolean; backupPath?: string }) {
+    const persist = !!opts?.persist;
+    const backupPath = opts?.backupPath;
+    const before = JSON.stringify({ map: this.earthIdMap, next: this.nextEarthSequence, ids: this.users.map(u => ({ id: u.id, earthId: (u as any).earthId })) });
+    this.rebuildEarthIdIndex();
+    const used = new Set<string>(this.users.map(u => this.normalizeEarthId((u as any).earthId)).filter(Boolean) as string[]);
+    const missing = this.users.filter(u => !this.normalizeEarthId((u as any).earthId));
+    // deterministic: by joinedAt, then createdAt-like in id, then internal id
+    missing.sort((a,b) => {
+      const ta = new Date((a as any).joinedAt || 0).getTime();
+      const tb = new Date((b as any).joinedAt || 0).getTime();
+      if (ta !== tb) return ta - tb;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    let seq = Math.max(this.nextEarthSequence || 100001, 100001);
+    const assigned: Array<{ id: string; earthId: string }> = [];
+    for (const u of missing) {
+      let eid = `earth_${seq++}`;
+      while (used.has(eid)) eid = `earth_${seq++}`;
+      (u as any).earthId = eid;
+      used.add(eid);
+      this.earthIdMap[u.id] = eid;
+      assigned.push({ id: u.id, earthId: eid });
+    }
+    this.nextEarthSequence = Math.max(this.nextEarthSequence || 100001, seq);
+    // ensure map complete
+    for (const u of this.users) {
+      const eid = this.normalizeEarthId((u as any).earthId);
+      if (eid) this.earthIdMap[u.id] = eid;
+    }
+    const after = JSON.stringify({ map: this.earthIdMap, next: this.nextEarthSequence, ids: this.users.map(u => ({ id: u.id, earthId: (u as any).earthId })) });
+    const changed = before !== after;
+    if (changed && persist) {
+      // optional backup before mutating real data file
+      if (backupPath) {
+        try {
+          const dir = path.dirname(backupPath);
+          fs.mkdirSync(dir, { recursive: true });
+          if (fs.existsSync(DATA_FILE)) fs.copyFileSync(DATA_FILE, backupPath);
+        } catch (e) {
+          throw new Error(`Backup failed: ${(e as any)?.message || e}`);
+        }
+      }
+      this.saveToDisk();
+    }
+    return { changed, assignedCount: assigned.length, assigned, nextEarthSequence: this.nextEarthSequence };
+  }
+
+  /** Ensure defaults; earthId assignment can be done in-memory only unless persist requested. */
+  ensureAccountIdentityDefaults(opts?: { persist?: boolean; assignMissingEarthIds?: boolean; backupPath?: string }) {
+    const persist = !!opts?.persist;
+    const assignMissingEarthIds = opts?.assignMissingEarthIds !== false;
+    let changed = false;
+    for (const u of this.users) {
+      const st = this.getAccountStatus(u);
+      if ((u as any).accountStatus !== st) { (u as any).accountStatus = st; changed = true; }
+    }
+    this.rebuildEarthIdIndex();
+    let migration: any = { changed: false, assignedCount: 0 };
+    if (assignMissingEarthIds) {
+      migration = this.ensureEarthIdsForAll({ persist: false });
+      if (migration.changed) changed = true;
+    }
+    // keep currentUser in sync
+    if (this.currentUser?.id) {
+      const cu = this.users.find(u => u.id === this.currentUser.id);
+      if (cu) this.currentUser = { ...this.currentUser, earthId: (cu as any).earthId, accountStatus: this.getAccountStatus(cu) } as any;
+    }
+    if (changed && persist) this.saveToDisk();
+    return { changed, migration };
+  }
+
+  allocateEarthId(): string {
+    this.rebuildEarthIdIndex();
+    const used = new Set<string>(this.users.map(u => this.normalizeEarthId((u as any).earthId)).filter(Boolean) as string[]);
+    let seq = Math.max(this.nextEarthSequence || 100001, 100001);
+    let eid = `earth_${seq++}`;
+    while (used.has(eid)) eid = `earth_${seq++}`;
+    this.nextEarthSequence = seq;
+    return eid;
+  }
+
+  findUserByEarthId(earthId: string): User | null {
+    const eid = this.normalizeEarthId(earthId);
+    if (!eid) return null;
+    return this.users.find(u => this.normalizeEarthId((u as any).earthId) === eid) || null;
+  }
+
+  getPublicEarthProfile(userId: string) {
+    const u = this.users.find(x => x.id === userId);
+    if (!u) return null;
+    return { id: u.id, earthId: (u as any).earthId, username: u.username, displayName: u.displayName, avatar: u.avatar, accountStatus: this.getAccountStatus(u), joinedAt: u.joinedAt, verified: !!u.verified };
+  }
+
+  getAccountMe(userId: string) {
+    const u = this.users.find(x => x.id === userId);
+    if (!u) return null;
+    const linked = Array.isArray(u.linkedIdentities) ? u.linkedIdentities.map(i => ({
+      provider: i.provider,
+      linked: !!i.providerUserId,
+      displayName: i.displayName,
+      // safe summary only; do not expose raw external provider IDs/tokens
+      email: i.provider === 'email' ? i.email : undefined,
+      phone: i.provider === 'phone' ? i.phone : undefined,
+      linkedAt: i.linkedAt,
+    })) : [];
+    return {
+      id: u.id,
+      earthId: (u as any).earthId,
+      username: u.username,
+      displayName: u.displayName,
+      avatar: u.avatar,
+      accountStatus: this.getAccountStatus(u),
+      createdAt: u.joinedAt,
+      joinedAt: u.joinedAt,
+      email: u.email,
+      phone: (u as any).phone,
+      verified: !!u.verified,
+      linkedIdentities: linked,
+      hasCompletedOnboarding: !!u.hasCompletedOnboarding,
+    };
+  }
+
   getSelfProfileView(userId: string) {
     const u = this.users.find(x => x.id === userId);
     if (!u) return null;
     const acc = this.accounts.get(userId);
-    const linked = Array.isArray(u.linkedIdentities) ? u.linkedIdentities.map(i => ({ provider: i.provider, providerUserId: i.providerUserId ? 'linked' : undefined, displayName: i.displayName, email: i.email, phone: i.phone, linkedAt: i.linkedAt })) : [];
+    const linked = Array.isArray(u.linkedIdentities) ? u.linkedIdentities.map(i => ({
+      provider: i.provider,
+      linked: !!i.providerUserId,
+      displayName: i.displayName,
+      email: i.provider === 'email' ? i.email : undefined,
+      phone: i.provider === 'phone' ? i.phone : undefined,
+      linkedAt: i.linkedAt,
+    })) : [];
     return {
       id: u.id,
+      earthId: (u as any).earthId,
       username: u.username,
       displayName: u.displayName,
       avatar: u.avatar,
@@ -1253,6 +1460,8 @@ class DataStore {
       lastActiveAt: (u as any).lastActiveAt,
       verified: !!u.verified,
       joinedAt: u.joinedAt,
+      createdAt: u.joinedAt,
+      accountStatus: this.getAccountStatus(u),
       email: u.email,
       phone: (u as any).phone,
       emailVerified: !!(u as any).emailVerified,
@@ -1267,7 +1476,6 @@ class DataStore {
       }
     };
   }
-
   getPublicProfileView(viewerId: string, targetId: string) {
     const u = this.users.find(x => x.id === targetId);
     if (!u) return null;
@@ -1306,6 +1514,7 @@ class DataStore {
     return {
       user: {
         id: u.id,
+        earthId: (u as any).earthId,
         username: u.username,
         displayName: u.displayName,
         avatar: u.avatar,
@@ -1319,6 +1528,8 @@ class DataStore {
         lastActiveAt: priv.showLastActive ? (u as any).lastActiveAt : undefined,
         verified: !!u.verified,
         joinedAt: u.joinedAt,
+        createdAt: u.joinedAt,
+        accountStatus: this.getAccountStatus(u),
       },
       isSelf, isFriend, blocked: blockedEither, pendingRequest: pending, restricted: false,
     } as any;
@@ -1373,11 +1584,14 @@ class DataStore {
 
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = this.hashPassword(password, salt);
-    const userId = `user_${Date.now()}`;
+    const userId = `user_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     const token = crypto.randomBytes(32).toString('hex');
+    const earthId = this.allocateEarthId();
 
     const newUser: User = {
       id: userId,
+      earthId,
+      accountStatus: 'active',
       email: cleanEmail,
       username: cleanUsername,
       displayName: displayName || cleanUsername,
@@ -1400,7 +1614,7 @@ class DataStore {
       verified: false,
       joinedAt: new Date().toISOString(),
       hasCompletedOnboarding: false // Triggers onboarding flow!
-    };
+    } as any;
 
     const acc: AuthAccount = {
       userId,
@@ -1415,6 +1629,7 @@ class DataStore {
     this.accounts.set(cleanEmail, acc);
     this.accounts.set(cleanUsername, acc);
     this.sessions.set(token, userId);
+    if ((newUser as any).earthId) this.earthIdMap[userId] = (newUser as any).earthId;
 
     this.currentUser = newUser;
     this.saveToDisk();
@@ -1442,6 +1657,10 @@ class DataStore {
     if (!user) {
       throw new Error('User profile record not found.');
     }
+    const status = this.getAccountStatus(user);
+    if (status === 'suspended') throw new Error('Account is suspended.');
+    if (status === 'deleted') throw new Error('Account is not available.');
+    // restricted may login but features limited by server policies elsewhere
 
     const token = crypto.randomBytes(32).toString('hex');
     acc.token = token;
@@ -1457,7 +1676,11 @@ class DataStore {
   getUserByToken(token: string): User | null {
     const userId = this.sessions.get(token);
     if (!userId) return null;
-    return this.users.find(u => u.id === userId) || null;
+    const u = this.users.find(x => x.id === userId) || null;
+    if (!u) return null;
+    const st = this.getAccountStatus(u);
+    if (st === 'suspended' || st === 'deleted') return null;
+    return u;
   }
 
   // Complete profile onboarding wizard
@@ -1601,6 +1824,8 @@ class DataStore {
     if (bindToUserId) {
       const target = this.users.find(u => u.id === bindToUserId);
       if (!target) throw new Error('User not found');
+      const st = this.getAccountStatus(target);
+      if (st === 'suspended' || st === 'deleted') throw new Error('Account is not available.');
       const owner = this.findUserByLinkedIdentity(provider, providerUserId);
       if (owner && owner.id !== target.id) throw new Error('This external identity is already linked to another account.');
       const identity: any = { provider, providerUserId, displayName, email, avatar, linkedAt: new Date().toISOString() };
@@ -1624,8 +1849,11 @@ class DataStore {
       let username = base; let n = 1;
       while (this.accounts.has(username) || this.users.some(u => u.username === username)) { username = `${base}_${n++}`; }
       const userId = `user_${provider}_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+      const earthId = this.allocateEarthId();
       const created: User = {
         id: userId,
+        earthId,
+        accountStatus: 'active',
         username,
         displayName: displayName || username,
         email,
@@ -1643,9 +1871,13 @@ class DataStore {
       this.accounts.set(userId, acc);
       this.accounts.set(acc.email, acc);
       this.accounts.set(username, acc);
+      this.earthIdMap[userId] = earthId;
       user = created;
     }
     const ensured = user as User;
+    const st = this.getAccountStatus(ensured);
+    if (st === 'suspended') throw new Error('Account is suspended.');
+    if (st === 'deleted') throw new Error('Account is not available.');
     const identity: any = { provider, providerUserId, displayName, email, avatar, linkedAt: new Date().toISOString() };
     this.upsertLinkedIdentity(ensured, identity);
     const token = crypto.randomBytes(32).toString('hex');
@@ -1679,8 +1911,14 @@ class DataStore {
       if (blocked.includes(u.id)) return false;
       const theirs = this.blockedBy[u.id] || [];
       if (viewerId && theirs.includes(viewerId)) return false;
+      const st = this.getAccountStatus(u);
+      if (st === 'deleted') return false;
       const priv = this.getPrivacySettings(u.id);
-      if (!canSearchByField(q, { id: u.id, username: u.username, displayName: u.displayName }, priv)) return false;
+      const earthId = String((u as any).earthId || '').toLowerCase();
+      const byField = canSearchByField(q, { id: u.id, username: u.username, displayName: u.displayName }, priv);
+      // earthId search supported and follows existing search privacy discoverability (same visibility gate)
+      const byEarthId = !!earthId && earthId.includes(q);
+      if (!byField && !byEarthId) return false;
       // enforce profile visibility for discoverability via search (respect "仅自己可见" / "仅好友可见")
       const isFriend = viewerId ? this.getFriendIds(viewerId).includes(u.id) : false;
       if (!canViewProfileByPolicy(false, isFriend, false, priv)) return false;
@@ -1854,9 +2092,23 @@ class DataStore {
     return this.users.find(u => u.phone === phone) || null;
   }
   upsertLinkedIdentity(user: User, identity: LinkedIdentity) {
-    const list = user.linkedIdentities || [];
+    const provider = identity?.provider;
+    const providerUserId = identity?.providerUserId != null ? String((identity as any).providerUserId) : '';
+    if (provider && providerUserId) {
+      const owner = this.findUserByLinkedIdentity(provider as any, providerUserId);
+      if (owner && owner.id !== user.id) throw new Error('This external identity is already linked to another account.');
+    }
+    if (provider === 'phone' && (identity as any)?.phone) {
+      const owner = this.findUserByPhone(String((identity as any).phone));
+      if (owner && owner.id !== user.id) throw new Error('Phone number is already linked to another account.');
+    }
+    if (provider === 'email' && (identity as any)?.email) {
+      const owner = this.findUserByEmail(String((identity as any).email));
+      if (owner && owner.id !== user.id) throw new Error('Email is already linked to another account.');
+    }
+    const list = Array.isArray(user.linkedIdentities) ? user.linkedIdentities : [];
     const idx = list.findIndex(i => i.provider === identity.provider);
-    if (idx >= 0) list[idx] = identity; else list.push(identity);
+    if (idx >= 0) list[idx] = { ...list[idx], ...identity }; else list.push(identity);
     user.linkedIdentities = list;
   }
 
@@ -1901,7 +2153,7 @@ class DataStore {
     if (!u) return null;
     const blocked = (this.blockedBy[viewerId]||[]).includes(userId) || (this.blockedBy[userId]||[]).includes(viewerId);
     const isFriend = this.getFriendIds(viewerId).includes(userId);
-    return { user: { id:u.id, username:u.username, displayName:u.displayName, avatar:u.avatar, bio:u.bio, location:u.location, isOnline:(u as any).isOnline, lastActiveAt:(u as any).lastActiveAt, verified:u.verified, joinedAt:u.joinedAt, interests:u.interests, followersCount:u.followersCount, followingCount:u.followingCount }, isFriend, blocked };
+    return { user: { id:u.id, earthId:(u as any).earthId, username:u.username, displayName:u.displayName, avatar:u.avatar, bio:u.bio, location:u.location, isOnline:(u as any).isOnline, lastActiveAt:(u as any).lastActiveAt, verified:u.verified, joinedAt:u.joinedAt, accountStatus:this.getAccountStatus(u), interests:u.interests, followersCount:u.followersCount, followingCount:u.followingCount }, isFriend, blocked };
   }
 
   setPasswordForUser(userId: string, newPassword: string) {

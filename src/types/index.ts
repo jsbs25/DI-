@@ -21,8 +21,13 @@ export interface LinkedIdentity {
   linkedAt: string;
 }
 
+export type AccountStatus = 'active' | 'suspended' | 'restricted' | 'deleted';
+
 export interface User {
+  /** Internal user ID (legacy-compatible). Keep for existing data references. */
   id: string;
+  /** Permanent EARTH ONE public identity. Assigned once, never reused. */
+  earthId?: string;
   username: string;
   displayName: string;
   email?: string;
@@ -45,6 +50,8 @@ export interface User {
   linkedIdentities?: LinkedIdentity[];
   friendIds?: string[];
   blockedUserIds?: string[];
+  /** Server-authoritative account state. Defaults to active for legacy accounts. */
+  accountStatus?: AccountStatus;
 }
 
 export interface PostComment {
