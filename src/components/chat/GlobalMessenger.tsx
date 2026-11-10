@@ -68,6 +68,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingSentRef = useRef(0);
   const lastSyncRef = useRef<string>(new Date().toISOString());
+  const lastSyncCursorRef = useRef<{ since?: string; sinceId?: string } | null>(null);
 
   const token = () => localStorage.getItem('earth_one_token') || '';
   const authed = !!token();
@@ -104,15 +105,19 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       const incoming: ChatMessage[] = data.messages || [];
       setHasMore(!!data.hasMore);
       setMessages(prev => {
+        const byId = new Map<string, ChatMessage>();
         if (before) {
-          const ids = new Set(prev.map(m => m.id));
-          return [...incoming.filter(m => !ids.has(m.id)), ...prev].sort((a,b)=> new Date(a.createdAt).getTime()-new Date(b.createdAt).getTime());
+          for (const m of prev) byId.set(m.id, m);
+          for (const m of incoming) byId.set(m.id, m); // server authoritative
+        } else {
+          for (const m of incoming) byId.set(m.id, m);
+          // keep optimistic sending ones not yet acknowledged
+          for (const m of prev) if ((m.status === 'sending' || pendingClientIds.current.has(m.id)) && !byId.has(m.id)) byId.set(m.id, m);
         }
-        const map = new Map<string, ChatMessage>();
-        for (const m of incoming) map.set(m.id, m);
-        // keep optimistic sending ones
-        for (const m of prev) if (m.status === 'sending' || pendingClientIds.current.has(m.id)) map.set(m.id, m);
-        return Array.from(map.values()).sort((a,b)=> new Date(a.createdAt).getTime()-new Date(b.createdAt).getTime());
+        return Array.from(byId.values()).sort((a,b)=> {
+          const ta = new Date(a.createdAt).getTime(), tb = new Date(b.createdAt).getTime();
+          if (ta !== tb) return ta - tb; return String(a.id).localeCompare(String(b.id));
+        });
       });
       setConnError(null);
       lastSyncRef.current = new Date().toISOString();
@@ -129,18 +134,30 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const syncSince = async () => {
     if (!authed) return;
     try {
-      const data = await api(`/api/messenger/sync?since=${encodeURIComponent(lastSyncRef.current)}`);
-      if (Array.isArray(data.conversations)) await onRefreshConversations?.();
-      if (Array.isArray(data.messages) && data.messages.length) {
-        setMessages(prev => {
-          const map = new Map(prev.map(m => [m.id, m]));
-          for (const m of data.messages as ChatMessage[]) {
-            if (m.conversationId === activeConv?.id) map.set(m.id, m);
-          }
-          return Array.from(map.values()).sort((a,b)=> new Date(a.createdAt).getTime()-new Date(b.createdAt).getTime());
-        });
+      let cursor = lastSyncCursorRef.current || { since: lastSyncRef.current };
+      let guard = 0;
+      while (guard++ < 10) {
+        const qs = new URLSearchParams({ limit: '100' });
+        if (cursor.since) qs.set('since', cursor.since);
+        if (cursor.sinceId) qs.set('sinceId', cursor.sinceId);
+        const data = await api(`/api/messenger/sync?${qs.toString()}`);
+        if (Array.isArray(data.conversations)) await onRefreshConversations?.();
+        if (Array.isArray(data.messages) && data.messages.length) {
+          setMessages(prev => {
+            const map = new Map(prev.map(m => [m.id, m]));
+            for (const m of data.messages as ChatMessage[]) {
+              if (!activeConv?.id || m.conversationId === activeConv.id) map.set(m.id, m);
+            }
+            return Array.from(map.values()).sort((a,b)=> {
+              const ta = new Date(a.createdAt).getTime(), tb = new Date(b.createdAt).getTime();
+              if (ta !== tb) return ta - tb; return String(a.id).localeCompare(String(b.id));
+            });
+          });
+        }
+        if (data.cursor) { cursor = { since: data.cursor.since || cursor.since, sinceId: data.cursor.sinceId }; lastSyncCursorRef.current = cursor; if (data.cursor.since) lastSyncRef.current = data.cursor.since; }
+        else if (data.serverTime) { lastSyncRef.current = data.serverTime; lastSyncCursorRef.current = { since: data.serverTime }; }
+        if (!data.hasMore) break;
       }
-      if (data.serverTime) lastSyncRef.current = data.serverTime;
     } catch {}
   };
 
@@ -167,21 +184,34 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         let data: any; try { data = JSON.parse(String(ev.data)); } catch { return; }
         if (data.type === 'message' && data.message) {
           const m = data.message as ChatMessage;
-          if (m.conversationId === activeConv?.id) {
-            setMessages(prev => prev.some(x => x.id === m.id) ? prev : [...prev, m].sort((a,b)=> new Date(a.createdAt).getTime()-new Date(b.createdAt).getTime()));
+          if (activeConv?.id && m.conversationId === activeConv.id) {
+            setMessages(prev => {
+              if (prev.some(x => x.id === m.id)) return prev;
+              return [...prev, m].sort((a,b)=> { const ta=new Date(a.createdAt).getTime(), tb=new Date(b.createdAt).getTime(); if (ta!==tb) return ta-tb; return String(a.id).localeCompare(String(b.id)); });
+            });
             api(`/api/conversations/${m.conversationId}/read`, { method: 'POST' }).catch(()=>{});
           }
           void onRefreshConversations?.();
-        } else if (data.type === 'send_ack' && data.clientMsgId) {
-          pendingClientIds.current.delete(data.clientMsgId);
+          void loadRecent();
+        } else if (data.type === 'send_ack' && data.message) {
+          if (data.clientMsgId) pendingClientIds.current.delete(data.clientMsgId);
           if (data.ok && data.message) {
-            setMessages(prev => prev.map(m => m.id === data.clientMsgId ? data.message : (m.id === data.message.id ? data.message : m)));
-          } else if (!data.ok) {
+            setMessages(prev => {
+              const map = new Map(prev.map(x => [x.id, x]));
+              if (data.clientMsgId) map.delete(data.clientMsgId);
+              map.set(data.message.id, data.message);
+              return Array.from(map.values()).sort((a,b)=> { const ta=new Date(a.createdAt).getTime(), tb=new Date(b.createdAt).getTime(); if (ta!==tb) return ta-tb; return String(a.id).localeCompare(String(b.id)); });
+            });
+            void onRefreshConversations?.();
+          } else if (!data.ok && data.clientMsgId) {
             setMessages(prev => prev.map(m => m.id === data.clientMsgId ? { ...m, status: 'failed' } : m));
             setConnError(data.error === 'blocked' ? '消息被阻止（屏蔽关系）。' : '消息发送失败，请重试。');
           }
-        } else if (data.type === 'read' && data.conversationId === activeConv?.id) {
-          setMessages(prev => prev.map(m => m.senderId === currentUser?.id ? { ...m, status: 'read', readBy: Array.from(new Set([...(m.readBy||[]), data.userId])) } : m));
+        } else if (data.type === 'read' && data.conversationId) {
+          if (activeConv?.id && data.conversationId === activeConv.id) {
+            setMessages(prev => prev.map(m => m.senderId === currentUser?.id ? { ...m, status: 'read', readBy: Array.from(new Set([...(m.readBy||[]), data.userId])) } : m));
+          }
+          void onRefreshConversations?.(); // sync unread counts across devices
         } else if (data.type === 'typing' && data.conversationId === activeConv?.id && data.userId !== currentUser?.id) {
           setTypingUsers(prev => ({ ...prev, [data.userId]: data.on ? Date.now() : 0 }));
         } else if (data.type === 'presence' || data.type === 'friend_request' || data.type === 'friend_request_updated' || data.type === 'conversation_created' || data.type === 'conversation_updated' || data.type === 'message_recalled') {
@@ -192,6 +222,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           if (data.type === 'message_recalled' && data.message?.conversationId === activeConv?.id) {
             setMessages(prev => prev.map(m => m.id === data.message.id ? data.message : m));
           }
+          if (data.type === 'conversation_updated' && data.conversation?.id === activeConv?.id && showGroupPanel) void loadGroupDetail(activeConv.id);
+        } else if (data.type === 'hello') {
+          // multi-device hello ok
         }
       };
       ws.onclose = () => {

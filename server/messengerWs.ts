@@ -26,13 +26,17 @@ function broadcastToUsers(userIds: string[], data: any, exceptDevice?: string) {
 }
 
 function broadcastPresence(userId: string) {
-  const online = (clientsByUser.get(userId)?.size || 0) > 0;
+  const set = clientsByUser.get(userId);
+  const online = !!(set && set.size > 0);
   const user = store.users.find(u => u.id === userId);
-  if (user) { (user as any).isOnline = online; (user as any).lastActiveAt = new Date().toISOString(); }
-  // notify friends and conversation participants (lightweight: friends + direct conv others)
+  if (user) {
+    (user as any).isOnline = online;
+    (user as any).lastActiveAt = new Date().toISOString();
+  }
+  // notify friends and conversation participants
   const friendIds = store.getFriendIds(userId);
   const convIds = store.getConversationsForUser(userId).filter(c => c.type === 'direct' || c.type === 'group').flatMap(c => c.participantIds || []);
-  broadcastToUsers([...friendIds, ...convIds, userId], { type: 'presence', userId, online, lastActiveAt: (user as any)?.lastActiveAt });
+  broadcastToUsers([...friendIds, ...convIds, userId], { type: 'presence', userId, online, deviceCount: set?.size || 0, lastActiveAt: (user as any)?.lastActiveAt });
 }
 
 export function getTokenFromReq(req: IncomingMessage): string | null {
@@ -108,8 +112,9 @@ export function attachMessengerWs(wss: WebSocketServer) {
         if (!content.trim() && !(attachments && attachments.length)) { safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: 'empty' }); return; }
         try {
           let saved: any;
-          await store.mutate(async () => { saved = store.sendMessage(convId, content.trim(), user, undefined, undefined, { attachments, replyToId: msg.replyToId }); });
-          safeSend(ws, { type: 'send_ack', clientMsgId, ok: true, message: saved });
+          await store.mutate(async () => { saved = store.sendMessage(convId, content.trim(), user, undefined, undefined, { attachments, replyToId: msg.replyToId, clientMsgId }); });
+          // ack to sender device and sync to sender's other devices
+          broadcastToUsers([user.id], { type: 'send_ack', clientMsgId, ok: true, message: saved, fromDeviceId: deviceId });
           broadcastToUsers((conv.participantIds||[]).filter(id => id !== user.id), { type: 'message', conversationId: convId, message: saved });
         } catch (e: any) {
           safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: e?.message || 'failed' });

@@ -127,6 +127,7 @@ export interface ChatMessage {
   deletedFor?: string[];
   recalled?: boolean;
   recalledAt?: string;
+  clientMsgId?: string;
   channel?: 'earthone' | 'google' | 'wechat' | 'whatsapp' | 'telegram';
 }
 

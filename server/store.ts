@@ -1055,10 +1055,17 @@ class DataStore {
     authorUser?: User,
     translatedContent?: string,
     translatedTo?: string,
-    extra?: { attachments?: ChatMessage['attachments']; replyToId?: string; status?: ChatMessage['status'] }
+    extra?: { attachments?: ChatMessage['attachments']; replyToId?: string; status?: ChatMessage['status']; clientMsgId?: string }
   ): ChatMessage {
     const author = authorUser || this.currentUser;
     const now = new Date().toISOString();
+
+    // Idempotency: same sender+conversation+clientMsgId must not create duplicates
+    if (extra?.clientMsgId) {
+      const existing = this.messages.find(m => m.conversationId === conversationId && m.senderId === author.id && (m as any).clientMsgId === extra.clientMsgId);
+      if (existing) return existing;
+    }
+
     const msg: ChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
       conversationId,
@@ -1075,8 +1082,9 @@ class DataStore {
       readBy: [author.id],
       deletedFor: [],
       attachments: extra?.attachments,
-      replyToId: extra?.replyToId
-    };
+      replyToId: extra?.replyToId,
+      clientMsgId: extra?.clientMsgId,
+    } as any;
     this.messages.push(msg);
 
     const conv = this.conversations.find(c => c.id === conversationId);
@@ -1333,6 +1341,16 @@ class DataStore {
     return conv;
   }
 
+  getUnreadCountForUser(conversationId: string, userId: string): number {
+    return this.messages.filter(m =>
+      m.conversationId === conversationId &&
+      m.senderId !== userId &&
+      !m.recalled &&
+      !(m.deletedFor || []).includes(userId) &&
+      !(m.readBy || []).includes(userId)
+    ).length;
+  }
+
   getConversationsForUser(userId: string): Conversation[] {
     return this.conversations
       .filter(c => c.type === 'global_channel' || c.type === 'country_room' || (Array.isArray(c.participantIds) && c.participantIds.includes(userId)))
@@ -1340,11 +1358,11 @@ class DataStore {
         if (c.type === 'direct') {
           const otherId = c.participantIds.find(id => id !== userId);
           const other = otherId ? this.users.find(u => u.id === otherId) : undefined;
-          const unread = this.messages.filter(m => m.conversationId === c.id && m.senderId !== userId && !(m.readBy||[]).includes(userId) && !(m.deletedFor||[]).includes(userId)).length;
+          const unread = this.getUnreadCountForUser(c.id, userId);
           return { ...c, name: other?.displayName || c.name, otherUser: other, isOnline: other?.isOnline, unreadCount: unread };
         }
         if (c.type === 'group') {
-          const unread = this.messages.filter(m => m.conversationId === c.id && m.senderId !== userId && !(m.readBy||[]).includes(userId) && !(m.deletedFor||[]).includes(userId)).length;
+          const unread = this.getUnreadCountForUser(c.id, userId);
           return { ...c, unreadCount: unread };
         }
         return c;
@@ -1531,6 +1549,7 @@ class DataStore {
     for (const m of this.messages) {
       if (m.conversationId !== conversationId) continue;
       if (m.senderId === userId) continue;
+      if ((m as any).recalled) continue;
       if (!(m.readBy||[]).includes(userId)) { m.readBy = [...(m.readBy||[]), userId]; m.status = 'read'; changed = true; }
       if (!(m.deliveredTo||[]).includes(userId)) { m.deliveredTo = [...(m.deliveredTo||[]), userId]; changed = true; }
       if (!m.updatedAt) m.updatedAt = now;

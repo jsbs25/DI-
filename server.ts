@@ -928,11 +928,35 @@ app.get('/api/messenger/recent', (req, res) => {
 app.get('/api/messenger/sync', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
-  const since = typeof req.query.since === 'string' ? new Date(req.query.since).getTime() : 0;
+  const sinceRaw = typeof req.query.since === 'string' ? req.query.since : '';
+  const sinceTs = typeof req.query.sinceTs === 'string' ? new Date(req.query.sinceTs).getTime() : (sinceRaw ? new Date(sinceRaw).getTime() : 0);
+  const sinceId = typeof req.query.sinceId === 'string' ? req.query.sinceId : '';
+  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 100));
   const convs = store.getConversationsForUser(user.id);
   const convIds = new Set(convs.map(c=>c.id));
-  const messages = store.messages.filter(m => convIds.has(m.conversationId) && new Date(m.createdAt||0).getTime() > since && !(m.deletedFor||[]).includes(user.id));
-  res.json({ success: true, conversations: convs, messages, serverTime: new Date().toISOString() });
+  const all = store.messages
+    .filter(m => convIds.has(m.conversationId) && !(m.deletedFor||[]).includes(user.id))
+    .sort((a,b)=> {
+      const ta = new Date(a.createdAt||0).getTime(), tb = new Date(b.createdAt||0).getTime();
+      if (ta !== tb) return ta - tb;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  const filtered = all.filter(m => {
+    const t = new Date(m.createdAt||0).getTime();
+    if (t > sinceTs) return true;
+    if (t === sinceTs && sinceId) return String(m.id).localeCompare(sinceId) > 0;
+    return false;
+  });
+  const messages = filtered.slice(0, limit);
+  const last = messages[messages.length - 1] || null;
+  res.json({
+    success: true,
+    conversations: convs,
+    messages,
+    hasMore: filtered.length > messages.length,
+    cursor: last ? { since: last.createdAt, sinceTs: last.createdAt, sinceId: last.id } : (sinceRaw || sinceTs ? { since: sinceRaw || new Date(sinceTs).toISOString(), sinceTs: sinceRaw || new Date(sinceTs).toISOString(), sinceId } : null),
+    serverTime: new Date().toISOString(),
+  });
 });
 
 app.get('/api/messenger/profile/:id', (req, res) => {
@@ -1311,7 +1335,8 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
 
   try {
     let msg: any;
-    await store.mutate(async () => { msg = store.sendMessage(id, text, authUser, translatedContent, translatedTo, { attachments: atts, replyToId: typeof replyToId === 'string' ? replyToId : undefined }); });
+    const cmid = typeof clientMsgId === 'string' && clientMsgId ? clientMsgId : undefined;
+    await store.mutate(async () => { msg = store.sendMessage(id, text, authUser, translatedContent, translatedTo, { attachments: atts, replyToId: typeof replyToId === 'string' ? replyToId : undefined, clientMsgId: cmid }); });
     wsBroadcastConversationEvent(id, { type: 'message', conversationId: id, message: msg, clientMsgId });
     res.json({ success: true, message: msg, conversation: store.conversations.find(c => c.id === id) });
   } catch (e:any) {
