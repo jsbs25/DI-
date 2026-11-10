@@ -1,5 +1,10 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
+import http from 'node:http';
+// @ts-ignore - ws types may not resolve in this environment
+import { WebSocketServer } from 'ws';
+// @ts-ignore
+import type { WebSocket } from 'ws';
 import dotenv from 'dotenv';
 import { createHash, randomBytes } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
@@ -25,6 +30,12 @@ import {
 import { musicStore } from './server/musicStore.ts';
 import { resolveMusicEmbedUrl, searchYouTubeMusic } from './server/youtubeMusicSearch.ts';
 import { getChannelIntegrations } from './server/channelIntegrations.ts';
+import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
+import { getMailProvider, mailStatus } from './server/mailProvider.ts';
+import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE164 } from './server/otp.ts';
+import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser } from './server/messengerWs.ts';
+import fs from 'node:fs';
+import path from 'node:path';
 import { searchBilibiliVideos } from './server/bilibiliCrawler.ts';
 import { searchOpenImages } from './server/openImageCrawler.ts';
 import { discoveryDb } from './server/discovery/database/db.ts';
@@ -45,7 +56,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
 
 // Initialize Gemini client if API key is provided
 let aiClient: GoogleGenAI | null = null;
@@ -132,9 +143,11 @@ app.get('/api/integrations', (req, res) => {
   const user = getSessionUser(req);
   const integrations = getChannelIntegrations(process.env).map(i => {
     const linked = user?.linkedIdentities?.find(li => li.provider === i.id);
-    return { ...i, linked: !!linked, linkedLabel: linked?.displayName || linked?.email || linked?.providerUserId };
+    return { ...i, linked: !!linked, linkedLabel: linked?.displayName || linked?.email || linked?.phone || linked?.providerUserId };
   });
-  res.json({ success: true, integrations });
+  const sms = smsStatus();
+  const mail = mailStatus();
+  res.json({ success: true, integrations, sms, mail });
 });
 
 // -------------------------------------------------------------
@@ -166,14 +179,23 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ success: false, error: 'Please enter your email/username and password.' });
   }
   const clientKey = req.ip || req.socket.remoteAddress || 'unknown';
+  const lockKey = `${clientKey}:${String(identifier||'').trim().toLowerCase()}`;
+  const locked = store.isLoginLocked(lockKey);
+  if (locked.locked) {
+    return res.status(429).json({ success: false, error: 'Too many failed login attempts. Please try again later.', retryAfterMs: locked.retryAfterMs });
+  }
   if (!checkAuthRateLimit(`login:${clientKey}`)) {
-    return res.status(429).json({ success: false, error: '登录尝试过于频繁，请稍后再试。' });
+    return res.status(429).json({ success: false, error: 'Too many login attempts. Please try again later.' });
   }
   try {
     const { user, token } = store.loginUser(identifier, password);
+    store.clearLoginFailures(lockKey);
+    store.addAudit(user.id, 'login_success', String(identifier||''), req.ip);
     res.json({ success: true, user, token });
   } catch (err: any) {
-    res.status(401).json({ success: false, error: err.message });
+    store.recordLoginFailure(lockKey);
+    store.addAudit(undefined, 'login_failed', String(identifier||''), req.ip);
+    res.status(401).json({ success: false, error: err.message || 'Invalid credentials.' });
   }
 });
 
@@ -182,6 +204,330 @@ app.get('/api/auth/me', (req, res) => {
   const user = getSessionUser(req);
   res.json({ success: true, user: user || null });
 });
+
+
+// ---------------- Phone OTP auth (provider-pluggable, never faked) ----------------
+app.post('/api/auth/phone/send-code', async (req, res) => {
+  const phoneRaw = typeof req.body?.phone === 'string' ? req.body.phone : '';
+  const phone = normalizePhone(phoneRaw);
+  if (!isValidE164(phone)) return res.status(400).json({ success: false, error: 'Please provide a valid phone number in international E.164 format (e.g. +14155552671).' });
+  const clientKey = `${req.ip || 'ip'}:${phone}`;
+  if (!checkAuthRateLimit(`sms:${clientKey}`, 5, 15 * 60 * 1000)) {
+    return res.status(429).json({ success: false, error: 'Too many code requests. Please try again later.' });
+  }
+  const gate = canSendTo(phone, 60 * 1000, 1, 5);
+  if (!gate.ok) return res.status(429).json({ success: false, error: 'Please wait before requesting another code.', retryAfterMs: gate.retryAfterMs });
+  const provider = getSmsProvider();
+  if (!provider.isConfigured()) {
+    store.addAudit(undefined, 'phone_otp_blocked', `provider_unconfigured target=${phone}`, req.ip);
+    return res.status(503).json({ success: false, blocked: true, provider: provider.id, error: 'SMS service is not configured. No verification code was sent. Configure SMS_PROVIDER and provider credentials.' });
+  }
+  const { challenge, code } = createChallenge('phone_login', phone, { ttlMs: 10 * 60 * 1000, maxAttempts: 5 });
+  const text = `Your EARTH ONE verification code is ${code}. It expires in 10 minutes.`;
+  const result = await provider.send(phone, text);
+  if (!result.success) {
+    store.addAudit(undefined, 'phone_otp_send_failed', `target=${phone} err=${result.error||''}`, req.ip);
+    return res.status(502).json({ success: false, blocked: !!result.blocked, provider: result.provider, error: result.error || 'Failed to send SMS. No code was issued.' });
+  }
+  store.addAudit(undefined, 'phone_otp_sent', `target=${phone} provider=${result.provider}`, req.ip);
+  res.json({ success: true, challengeId: challenge.id, expiresAt: challenge.expiresAt, provider: result.provider, message: 'Verification code sent.' });
+});
+
+app.post('/api/auth/phone/verify', async (req, res) => {
+  const challengeId = typeof req.body?.challengeId === 'string' ? req.body.challengeId : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const phoneRaw = typeof req.body?.phone === 'string' ? req.body.phone : '';
+  const phone = normalizePhone(phoneRaw);
+  if (!challengeId || !code || !isValidE164(phone)) return res.status(400).json({ success: false, error: 'Phone, challengeId, and code are required.' });
+  const clientKey = `${req.ip || 'ip'}:${phone}`;
+  if (!checkAuthRateLimit(`sms-verify:${clientKey}`, 10, 15 * 60 * 1000)) {
+    return res.status(429).json({ success: false, error: 'Too many attempts. Please try again later.' });
+  }
+  const v = verifyChallenge(challengeId, code);
+  if (!v.ok || !v.challenge) return res.status(400).json({ success: false, error: v.error || 'Verification failed.' });
+  if (v.challenge.purpose !== 'phone_login' || v.challenge.target !== phone) {
+    return res.status(400).json({ success: false, error: 'Verification does not match this phone number.' });
+  }
+  try {
+    await store.mutate(async () => {
+      let user = store.findUserByPhone(phone);
+      if (!user) {
+        // create or attach unique phone account
+        const base = `user_${phone.replace(/[^0-9]/g,'').slice(-8) || Date.now()}`;
+        let username = base; let n=1;
+        while ((store as any).accounts?.has?.(username) || store.users.some(u=>u.username===username)) username = `${base}_${n++}`;
+        const userId = `user_phone_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+        const newUser: any = {
+          id: userId, username, displayName: `Citizen ${phone.slice(-4)}`,
+          phone, phoneVerified: true,
+          avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
+          bio: 'Citizen exploring Earth One.',
+          location: { countryCode: 'UN', countryName: 'Global', cityName: 'Earth', lat: 0, lng: 0, isPublic: true },
+          interests: ['Global Dialogue'],
+          followersCount: 1, followingCount: 1, tipsReceived: 0,
+          isOnline: true, verified: false, joinedAt: new Date().toISOString(), hasCompletedOnboarding: false,
+          linkedIdentities: []
+        };
+        store.upsertLinkedIdentity(newUser, { provider: 'phone', providerUserId: phone, phone, linkedAt: new Date().toISOString() });
+        store.users.unshift(newUser);
+        const salt = (await import('node:crypto')).randomBytes(16).toString('hex');
+        const acc = { userId, email: `${username}@earthone.local`, passwordHash: store.hashPassword((await import('node:crypto')).randomBytes(24).toString('hex'), salt), salt };
+        (store as any).accounts.set(userId, acc);
+        (store as any).accounts.set(acc.email, acc);
+        (store as any).accounts.set(username, acc);
+        user = newUser;
+      } else {
+        user.phone = phone; user.phoneVerified = true;
+        store.upsertLinkedIdentity(user, { provider: 'phone', providerUserId: phone, phone, linkedAt: new Date().toISOString() });
+      }
+      const token = (await import('node:crypto')).randomBytes(32).toString('hex');
+      (store as any).sessions.set(token, user!.id);
+      user!.isOnline = true; user!.lastActiveAt = new Date().toISOString();
+      (store as any).currentUser = user;
+      store.addAudit(user!.id, 'phone_login_success', `phone=${phone}`, req.ip);
+      store.persist();
+      res.json({ success: true, user, token });
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err?.message || 'Phone login failed.' });
+  }
+});
+
+// ---------------- WeChat Open Platform OAuth (official; config-gated) ----------------
+const wechatStates = new Map<string, number>();
+function pruneWechatStates() { const now=Date.now(); for (const [k,exp] of wechatStates) if (exp<=now) wechatStates.delete(k); }
+setInterval(pruneWechatStates, 5*60*1000).unref?.();
+
+app.get('/api/auth/wechat/start', (req, res) => {
+  const appId = process.env.WECHAT_APP_ID;
+  const appSecret = process.env.WECHAT_APP_SECRET;
+  const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  if (!appId || !appSecret) return res.status(501).json({ success: false, blocked: true, error: 'WeChat login not configured. Set WECHAT_APP_ID and WECHAT_APP_SECRET (WeChat Open Platform website app). No login was performed.' });
+  const redirectUri = encodeURIComponent(`${appUrl}/api/auth/wechat/callback`);
+  const state = (randomBytes(24)).toString('hex');
+  pruneWechatStates(); wechatStates.set(state, Date.now() + 10*60*1000);
+  const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `earth_wechat_state=${encodeURIComponent(state)}; HttpOnly; Path=/api/auth/wechat; SameSite=Lax; Max-Age=600${isSecure ? '; Secure' : ''}`);
+  // Official WeChat Open Platform website QR login endpoint
+  res.redirect(`https://open.weixin.qq.com/connect/qrconnect?appid=${encodeURIComponent(appId)}&redirect_uri=${redirectUri}&response_type=code&scope=snsapi_login&state=${state}#wechat_redirect`);
+});
+
+app.get('/api/auth/wechat/callback', async (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const cookies = parseCookies(req);
+  const cookieState = cookies.earth_wechat_state || '';
+  const exp = wechatStates.get(state);
+  const ok = !!state && !!cookieState && state===cookieState && !!exp && exp>Date.now();
+  if (state) wechatStates.delete(state);
+  const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `earth_wechat_state=; HttpOnly; Path=/api/auth/wechat; SameSite=Lax; Max-Age=0${isSecure ? '; Secure' : ''}`);
+  if (!ok) return res.redirect(`${appUrl}/?auth_error=wechat_state`);
+  if (!code || !process.env.WECHAT_APP_ID || !process.env.WECHAT_APP_SECRET) return res.redirect(`${appUrl}/?auth_error=wechat_config`);
+  try {
+    const tokenRes = await fetch(`https://api.weixin.qq.com/sns/oauth2/access_token?appid=${encodeURIComponent(process.env.WECHAT_APP_ID)}&secret=${encodeURIComponent(process.env.WECHAT_APP_SECRET)}&code=${encodeURIComponent(code)}&grant_type=authorization_code`);
+    const tokenJson: any = await tokenRes.json().catch(()=> ({}));
+    if (!tokenRes.ok || !tokenJson.access_token || !tokenJson.openid) return res.redirect(`${appUrl}/?auth_error=wechat_token`);
+    let profile: any = {};
+    try {
+      const infoRes = await fetch(`https://api.weixin.qq.com/sns/userinfo?access_token=${encodeURIComponent(tokenJson.access_token)}&openid=${encodeURIComponent(tokenJson.openid)}`);
+      profile = await infoRes.json().catch(()=> ({}));
+    } catch {}
+    await store.mutate(async () => {
+      const r = store.createOrLoginOAuthUser({ provider: 'wechat' as any, providerUserId: String(tokenJson.openid || tokenJson.unionid || ''), displayName: profile?.nickname, avatar: profile?.headimgurl });
+      const payload = Buffer.from(JSON.stringify({ token: r.token, user: r.user })).toString('base64url');
+      store.addAudit(r.user.id, 'wechat_login_success', 'openid_login', req.ip);
+      store.persist();
+      res.redirect(`${appUrl}/#auth=${payload}`);
+    });
+  } catch (e) {
+    console.error('WeChat OAuth callback error', e);
+    return res.redirect(`${appUrl}/?auth_error=wechat_failed`);
+  }
+});
+
+
+// ---------------- Email verification / password reset / account security ----------------
+function isValidEmail(email: string) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
+
+async function sendMailOrBlock(to: string, subject: string, text: string) {
+  const provider = getMailProvider();
+  if (!provider.isConfigured()) {
+    store.addAudit(undefined, 'mail_blocked', `to=${to} subject=${subject}`, undefined);
+    return { ok: false, blocked: true, provider: provider.id, error: 'Mail service is not configured. No email was sent. Configure MAIL_PROVIDER and credentials.' };
+  }
+  const result = await provider.send(to, subject, text);
+  if (!result.success) {
+    store.addAudit(undefined, 'mail_failed', `to=${to} err=${result.error||''}`, undefined);
+    return { ok: false, blocked: !!result.blocked, provider: result.provider, error: result.error || 'Failed to send email. No email was sent.' };
+  }
+  return { ok: true, provider: result.provider, messageId: result.messageId };
+}
+
+app.post('/api/auth/email/send-verification', async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!isValidEmail(email)) return res.status(400).json({ success: false, error: 'Valid email required.' });
+  if (!checkAuthRateLimit(`email-verify:${req.ip||'ip'}:${email}`, 5, 15*60*1000)) return res.status(429).json({ success:false, error:'Too many requests.' });
+  const gate = canSendTo(`email:${email}`, 60*1000, 1, 5);
+  if (!gate.ok) return res.status(429).json({ success:false, error:'Please wait before requesting another email.', retryAfterMs: gate.retryAfterMs });
+  const { challenge, code } = createChallenge('email_verify', email, { ttlMs: 30*60*1000, maxAttempts: 5 });
+  const mail = await sendMailOrBlock(email, 'EARTH ONE email verification', `Your EARTH ONE verification code is ${code}. It expires in 30 minutes.`);
+  if (!mail.ok) return res.status(503).json({ success:false, blocked:true, error: mail.error, provider: mail.provider });
+  store.addAudit(undefined, 'email_verify_sent', `email=${email}`, req.ip);
+  res.json({ success:true, challengeId: challenge.id, expiresAt: challenge.expiresAt, message:'Verification email sent.' });
+});
+
+app.post('/api/auth/email/verify', async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const challengeId = typeof req.body?.challengeId === 'string' ? req.body.challengeId : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!isValidEmail(email) || !challengeId || !code) return res.status(400).json({ success:false, error:'email, challengeId, code required.' });
+  const v = verifyChallenge(challengeId, code);
+  if (!v.ok || !v.challenge || v.challenge.purpose !== 'email_verify' || v.challenge.target !== email) return res.status(400).json({ success:false, error: v.error || 'Verification failed.' });
+  store.addAudit(undefined, 'email_verified', `email=${email}`, req.ip);
+  res.json({ success:true, email, verified:true });
+});
+
+app.post('/api/auth/password/forgot', async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!isValidEmail(email)) return res.status(400).json({ success:false, error:'Valid email required.' });
+  // always respond generically to avoid account enumeration, but only send if account exists
+  const user = store.findUserByEmail(email);
+  if (!user) return res.json({ success:true, message:'If an account exists for this email, reset instructions will be sent (if mail is configured).' });
+  if (!checkAuthRateLimit(`pwd-forgot:${req.ip||'ip'}:${email}`, 5, 15*60*1000)) return res.status(429).json({ success:false, error:'Too many requests.' });
+  const { challenge, code } = createChallenge('password_reset', email, { ttlMs: 30*60*1000, maxAttempts: 5, userId: user.id });
+  const mail = await sendMailOrBlock(email, 'EARTH ONE password reset', `Your EARTH ONE password reset code is ${code}. It expires in 30 minutes. If you did not request this, ignore this email.`);
+  if (!mail.ok) return res.status(503).json({ success:false, blocked:true, error: mail.error, provider: mail.provider });
+  store.addAudit(user.id, 'password_reset_requested', `email=${email}`, req.ip);
+  res.json({ success:true, challengeId: challenge.id, expiresAt: challenge.expiresAt, message:'Reset email sent (if configured).' });
+});
+
+app.post('/api/auth/password/reset', async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const challengeId = typeof req.body?.challengeId === 'string' ? req.body.challengeId : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  if (!isValidEmail(email) || !challengeId || !code || newPassword.length < 6) return res.status(400).json({ success:false, error:'Valid email, challengeId, code and new password (>=6) required.' });
+  const v = verifyChallenge(challengeId, code);
+  if (!v.ok || !v.challenge || v.challenge.purpose !== 'password_reset' || v.challenge.target !== email) return res.status(400).json({ success:false, error: v.error || 'Reset failed.' });
+  const user = store.findUserByEmail(email);
+  if (!user) return res.status(400).json({ success:false, error:'Reset failed.' });
+  try {
+    await store.mutate(async () => { store.setPasswordForUser(user.id, newPassword); store.addAudit(user.id, 'password_reset_success', undefined, req.ip); });
+    // revoke sessions for safety
+    const sessions: Map<string, string> = (store as any).sessions;
+    for (const [tok, uid] of Array.from(sessions.entries())) { if (uid === user.id) sessions.delete(tok); }
+    store.persist();
+    res.json({ success:true, message:'Password reset. Please sign in again.' });
+  } catch (e:any) {
+    res.status(400).json({ success:false, error: e?.message || 'Reset failed.' });
+  }
+});
+
+// Account security: list linked identities
+app.get('/api/auth/security', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  res.json({ success:true, user: { id:user.id, email:user.email, phone:(user as any).phone, emailVerified:(user as any).emailVerified, phoneVerified:(user as any).phoneVerified, linkedIdentities: user.linkedIdentities || [] }, sms: smsStatus(), mail: mailStatus() });
+});
+
+app.post('/api/auth/password/change', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  if (newPassword.length < 6) return res.status(400).json({ success:false, error:'New password must be at least 6 characters.' });
+  const acc = (store as any).accounts.get(user.id);
+  if (!acc || !store.verifyPassword(currentPassword, acc)) { store.addAudit(user.id,'password_change_failed',undefined,req.ip); return res.status(401).json({ success:false, error:'Current password incorrect.' }); }
+  await store.mutate(async () => { store.setPasswordForUser(user.id, newPassword); store.addAudit(user.id,'password_changed',undefined,req.ip); });
+  res.json({ success:true });
+});
+
+app.post('/api/auth/bind/email/request', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!isValidEmail(email)) return res.status(400).json({ success:false, error:'Valid email required.' });
+  const owner = store.findUserByEmail(email);
+  if (owner && owner.id !== user.id) return res.status(409).json({ success:false, error:'Email is already linked to another account.' });
+  const { challenge, code } = createChallenge('bind_email', email, { ttlMs: 30*60*1000, maxAttempts: 5, userId: user.id });
+  const mail = await sendMailOrBlock(email, 'EARTH ONE email binding', `Your EARTH ONE email binding code is ${code}. It expires in 30 minutes.`);
+  if (!mail.ok) return res.status(503).json({ success:false, blocked:true, error: mail.error, provider: mail.provider });
+  store.addAudit(user.id,'bind_email_requested',`email=${email}`,req.ip);
+  res.json({ success:true, challengeId: challenge.id, expiresAt: challenge.expiresAt });
+});
+
+app.post('/api/auth/bind/email/confirm', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const challengeId = typeof req.body?.challengeId === 'string' ? req.body.challengeId : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const v = verifyChallenge(challengeId, code);
+  if (!v.ok || !v.challenge || v.challenge.purpose !== 'bind_email' || v.challenge.target !== email || v.challenge.userId !== user.id) return res.status(400).json({ success:false, error: v.error || 'Verification failed.' });
+  try {
+    let updated: any;
+    await store.mutate(async () => { updated = store.bindEmail(user.id, email); store.addAudit(user.id,'email_bound',`email=${email}`,req.ip); });
+    res.json({ success:true, user: updated });
+  } catch (e:any) { res.status(400).json({ success:false, error: e?.message || 'Bind failed' }); }
+});
+
+app.post('/api/auth/bind/phone/request', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const phone = normalizePhone(typeof req.body?.phone === 'string' ? req.body.phone : '');
+  if (!isValidE164(phone)) return res.status(400).json({ success:false, error:'Valid E.164 phone required.' });
+  const owner = store.findUserByPhone(phone);
+  if (owner && owner.id !== user.id) return res.status(409).json({ success:false, error:'Phone number is already linked to another account.' });
+  const provider = getSmsProvider();
+  if (!provider.isConfigured()) return res.status(503).json({ success:false, blocked:true, error:'SMS service not configured. No code sent.' });
+  const { challenge, code } = createChallenge('bind_phone', phone, { ttlMs: 10*60*1000, maxAttempts: 5, userId: user.id });
+  const result = await provider.send(phone, `Your EARTH ONE phone binding code is ${code}. It expires in 10 minutes.`);
+  if (!result.success) return res.status(502).json({ success:false, blocked: !!result.blocked, error: result.error || 'Failed to send SMS.' });
+  store.addAudit(user.id,'bind_phone_requested',`phone=${phone}`,req.ip);
+  res.json({ success:true, challengeId: challenge.id, expiresAt: challenge.expiresAt });
+});
+
+app.post('/api/auth/bind/phone/confirm', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const phone = normalizePhone(typeof req.body?.phone === 'string' ? req.body.phone : '');
+  const challengeId = typeof req.body?.challengeId === 'string' ? req.body.challengeId : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const v = verifyChallenge(challengeId, code);
+  if (!v.ok || !v.challenge || v.challenge.purpose !== 'bind_phone' || v.challenge.target !== phone || v.challenge.userId !== user.id) return res.status(400).json({ success:false, error: v.error || 'Verification failed.' });
+  try {
+    let updated: any;
+    await store.mutate(async () => { updated = store.bindPhone(user.id, phone); store.addAudit(user.id,'phone_bound',`phone=${phone}`,req.ip); });
+    res.json({ success:true, user: updated });
+  } catch (e:any) { res.status(400).json({ success:false, error: e?.message || 'Bind failed' }); }
+});
+
+app.post('/api/auth/unlink', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const provider = typeof req.body?.provider === 'string' ? req.body.provider : '';
+  if (!provider) return res.status(400).json({ success:false, error:'provider required' });
+  const identities = user.linkedIdentities || [];
+  const hasPassword = !!(store as any).accounts.get(user.id);
+  // count usable login methods: password-capable email login + verified phone + linked oauths
+  const usable = identities.length + (hasPassword ? 1 : 0);
+  if (usable <= 1) return res.status(400).json({ success:false, error:'Cannot unlink the last available login method.' });
+  // require re-auth via password for safety when available
+  const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+  if (hasPassword) {
+    const acc = (store as any).accounts.get(user.id);
+    if (!currentPassword || !store.verifyPassword(currentPassword, acc)) return res.status(401).json({ success:false, error:'Current password required to unlink.' });
+  }
+  try {
+    let updated: any;
+    await store.mutate(async () => { updated = store.unlinkIdentity(user.id, provider); store.addAudit(user.id,'identity_unlinked',`provider=${provider}`,req.ip); });
+    res.json({ success:true, user: updated });
+  } catch (e:any) { res.status(400).json({ success:false, error: e?.message || 'Unlink failed' }); }
+});
+
+
 
 // Google OAuth 2.0 (official) - sign in / bind account
 app.get('/api/auth/google/start', (req, res) => {
@@ -352,6 +698,255 @@ app.post('/api/users/:id/follow', (req, res) => {
   store.currentUser.followingCount += 1;
   res.json({ success: true, followersCount: user.followersCount });
 });
+
+// -------------------------------------------------------------
+// 1c. MESSENGER ATTACHMENTS (authenticated, permission-checked)
+// -------------------------------------------------------------
+const UPLOAD_DIR = path.resolve(process.cwd(), 'server_data', 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+function safeFileName(name: string) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file';
+}
+
+app.post('/api/messenger/upload', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const { name, mimeType, dataBase64, conversationId } = req.body || {};
+  if (typeof name !== 'string' || typeof mimeType !== 'string' || typeof dataBase64 !== 'string') {
+    return res.status(400).json({ success: false, error: 'name, mimeType, dataBase64 are required' });
+  }
+  if (conversationId) {
+    const conv = store.conversations.find(c => c.id === conversationId);
+    if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  }
+  const allowed = /^(image\/(png|jpeg|jpg|gif|webp)|application\/pdf|text\/plain|application\/zip|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document)$/i.test(mimeType) || mimeType.startsWith('image/');
+  if (!allowed) return res.status(400).json({ success: false, error: 'File type not allowed' });
+  const buf = Buffer.from(dataBase64, 'base64');
+  if (!buf.length || buf.length > 10 * 1024 * 1024) return res.status(400).json({ success: false, error: 'File too large (max 10MB)' });
+  const id = `att_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  const ext = safeFileName(name).includes('.') ? '' : '';
+  const fileName = `${id}_${safeFileName(name)}`;
+  const dir = path.join(UPLOAD_DIR, user.id);
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = path.join(dir, fileName);
+  try {
+    fs.writeFileSync(filePath, buf);
+  } catch (e:any) {
+    return res.status(500).json({ success: false, error: e?.message || 'Upload failed' });
+  }
+  const attachment = { id, type: mimeType.startsWith('image/') ? 'image' : 'file', name: safeFileName(name), url: `/api/messenger/files/${id}`, size: buf.length, mimeType, ownerId: user.id };
+  // store attachment index in a simple map on disk? lightweight: keep sidecar json
+  try {
+    const metaPath = path.join(dir, `${id}.json`);
+    fs.writeFileSync(metaPath, JSON.stringify({ ...attachment, path: filePath, conversationId: conversationId || null, createdAt: new Date().toISOString() }, null, 2));
+  } catch {}
+  res.json({ success: true, attachment: { id: attachment.id, type: attachment.type, name: attachment.name, url: attachment.url, size: attachment.size, mimeType: attachment.mimeType } });
+});
+
+app.get('/api/messenger/files/:id', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const id = req.params.id;
+  // locate meta by scanning user dirs of conversation participants? simpler: search all upload dirs for meta
+  try {
+    const owners = fs.readdirSync(UPLOAD_DIR, { withFileTypes: true }).filter(d=>d.isDirectory()).map(d=>d.name);
+    for (const owner of owners) {
+      const metaPath = path.join(UPLOAD_DIR, owner, `${id}.json`);
+      if (!fs.existsSync(metaPath)) continue;
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+      const convId = meta.conversationId;
+      if (convId) {
+        const conv = store.conversations.find(c => c.id === convId);
+        if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
+      } else {
+        // no conversation bound: only owner
+        if (owner !== user.id) return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+      if (!meta.path || !fs.existsSync(meta.path)) return res.status(404).json({ success: false, error: 'File not found' });
+      res.setHeader('Content-Type', meta.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `${meta.type === 'image' ? 'inline' : 'attachment'}; filename="${encodeURIComponent(meta.name || 'file')}"`);
+      return fs.createReadStream(meta.path).pipe(res);
+    }
+  } catch {}
+  return res.status(404).json({ success: false, error: 'File not found' });
+});
+
+
+
+app.post('/api/conversations/:id/rename', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const name = typeof req.body?.name === 'string' ? req.body.name : undefined;
+  const avatar = typeof req.body?.avatar === 'string' ? req.body.avatar : undefined;
+  try {
+    let conv:any; await store.mutate(async () => { conv = store.renameGroup(user.id, req.params.id, name, avatar); store.addAudit(user.id,'group_updated',req.params.id,req.ip); });
+    wsBroadcastConversationEvent(req.params.id, { type:'conversation_updated', conversation: conv });
+    res.json({ success:true, conversation: conv });
+  } catch(e:any){ const m=e?.message||'Failed'; res.status(m==='Forbidden'?403:400).json({ success:false, error:m }); }
+});
+
+app.post('/api/conversations/:id/admins', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const adminIds = Array.isArray(req.body?.adminIds) ? req.body.adminIds.filter((x:any)=>typeof x==='string') : [];
+  try {
+    let conv:any; await store.mutate(async () => { conv = store.setGroupAdmins(user.id, req.params.id, adminIds); store.addAudit(user.id,'group_admins_updated',req.params.id,req.ip); });
+    wsBroadcastConversationEvent(req.params.id, { type:'conversation_updated', conversation: conv });
+    res.json({ success:true, conversation: conv });
+  } catch(e:any){ const m=e?.message||'Failed'; res.status(m==='Forbidden'?403:400).json({ success:false, error:m }); }
+});
+
+app.post('/api/auth/email/change/request', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const newEmail = typeof req.body?.newEmail === 'string' ? req.body.newEmail.trim().toLowerCase() : '';
+  const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+  if (!isValidEmail(newEmail)) return res.status(400).json({ success:false, error:'Valid new email required.' });
+  const acc = (store as any).accounts.get(user.id);
+  if (!acc || !store.verifyPassword(currentPassword, acc)) return res.status(401).json({ success:false, error:'Current password required to change email.' });
+  const owner = store.findUserByEmail(newEmail);
+  if (owner && owner.id !== user.id) return res.status(409).json({ success:false, error:'Email already linked to another account.' });
+  const { challenge, code } = createChallenge('bind_email', newEmail, { ttlMs: 30*60*1000, maxAttempts: 5, userId: user.id, meta:{ action:'change_email' } });
+  const mail = await sendMailOrBlock(newEmail, 'EARTH ONE email change verification', `Your EARTH ONE email change code is ${code}. It expires in 30 minutes.`);
+  if (!mail.ok) return res.status(503).json({ success:false, blocked:true, error: mail.error, provider: mail.provider });
+  store.addAudit(user.id,'email_change_requested',`to=${newEmail}`,req.ip);
+  res.json({ success:true, challengeId: challenge.id, expiresAt: challenge.expiresAt });
+});
+
+app.post('/api/auth/email/change/confirm', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const newEmail = typeof req.body?.newEmail === 'string' ? req.body.newEmail.trim().toLowerCase() : '';
+  const challengeId = typeof req.body?.challengeId === 'string' ? req.body.challengeId : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const v = verifyChallenge(challengeId, code);
+  if (!v.ok || !v.challenge || v.challenge.purpose !== 'bind_email' || v.challenge.target !== newEmail || v.challenge.userId !== user.id) return res.status(400).json({ success:false, error: v.error || 'Verification failed.' });
+  try {
+    let updated:any; await store.mutate(async () => { updated = store.bindEmail(user.id, newEmail); store.addAudit(user.id,'email_changed',`to=${newEmail}`,req.ip); });
+    res.json({ success:true, user: updated });
+  } catch (e:any) { res.status(400).json({ success:false, error: e?.message || 'Change failed' }); }
+});
+
+
+
+// -------------------------------------------------------------
+// 1b. MESSENGER: USERS, FRIENDS, BLOCKS (auth required where sensitive)
+// -------------------------------------------------------------
+app.get('/api/messenger/users/search', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  const users = store.searchUsers(q, user.id, 40).map(u => ({ id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, bio: u.bio, location: u.location, isOnline: (u as any).isOnline, lastActiveAt: (u as any).lastActiveAt, verified: u.verified }));
+  res.json({ success: true, users });
+});
+
+app.get('/api/messenger/friends', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const ids = store.getFriendIds(user.id);
+  const friends = ids.map(id => store.users.find(u=>u.id===id)).filter(Boolean).map((u:any)=>({ id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, isOnline: u.isOnline, lastActiveAt: u.lastActiveAt, location: u.location, bio: u.bio }));
+  res.json({ success: true, friends });
+});
+
+app.get('/api/messenger/friend-requests', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const incoming = store.friendRequests.filter(r => r.toUserId === user.id && r.status === 'pending').map(r => ({ ...r, fromUser: (()=>{const u=store.users.find(x=>x.id===r.fromUserId); return u?{id:u.id,username:u.username,displayName:u.displayName,avatar:u.avatar,isOnline:(u as any).isOnline}:null;})() }));
+  const outgoing = store.friendRequests.filter(r => r.fromUserId === user.id && r.status === 'pending').map(r => ({ ...r, toUser: (()=>{const u=store.users.find(x=>x.id===r.toUserId); return u?{id:u.id,username:u.username,displayName:u.displayName,avatar:u.avatar}:null;})() }));
+  res.json({ success: true, incoming, outgoing });
+});
+
+app.post('/api/messenger/friend-requests', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const toUserId = typeof req.body?.toUserId === 'string' ? req.body.toUserId : '';
+  const message = typeof req.body?.message === 'string' ? req.body.message.slice(0,300) : undefined;
+  try {
+    let fr: any;
+    await store.mutate(async () => { fr = store.sendFriendRequest(user.id, toUserId, message); });
+    wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
+    res.json({ success: true, request: fr });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to send friend request' });
+  }
+});
+
+app.post('/api/messenger/friend-requests/:id/respond', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const accept = !!req.body?.accept;
+  try {
+    let fr: any;
+    await store.mutate(async () => { fr = store.respondFriendRequest(req.params.id, user.id, accept); });
+    const otherId = fr.fromUserId === user.id ? fr.toUserId : fr.fromUserId;
+    wsBroadcastToUser(otherId, { type: 'friend_request_updated', request: fr });
+    wsBroadcastToUser(user.id, { type: 'friend_request_updated', request: fr });
+    res.json({ success: true, request: fr });
+  } catch (e:any) {
+    const m = e?.message || 'Failed';
+    res.status(m==='Forbidden'?403:m==='Friend request not found'?404:400).json({ success:false, error:m });
+  }
+});
+
+app.delete('/api/messenger/friends/:id', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const otherId = req.params.id;
+  await store.mutate(async () => { store.removeFriend(user.id, otherId); });
+  res.json({ success: true });
+});
+
+app.post('/api/messenger/block', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const targetUserId = typeof req.body?.userId === 'string' ? req.body.userId : '';
+  if (!targetUserId) return res.status(400).json({ success: false, error: 'userId required' });
+  await store.mutate(async () => { store.blockUser(user.id, targetUserId); });
+  res.json({ success: true, blocked: (store.blockedBy[user.id]||[]) });
+});
+
+app.post('/api/messenger/unblock', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const targetUserId = typeof req.body?.userId === 'string' ? req.body.userId : '';
+  await store.mutate(async () => { store.unblockUser(user.id, targetUserId); });
+  res.json({ success: true, blocked: (store.blockedBy[user.id]||[]) });
+});
+
+app.get('/api/messenger/blocked', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const ids = store.blockedBy[user.id] || [];
+  const users = ids.map(id => store.users.find(u=>u.id===id)).filter(Boolean).map((u:any)=>({ id:u.id, username:u.username, displayName:u.displayName, avatar:u.avatar }));
+  res.json({ success: true, blocked: users });
+});
+
+app.get('/api/messenger/recent', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const convs = store.getConversationsForUser(user.id).filter(c => c.type === 'direct' || c.type === 'group').slice(0, 30);
+  res.json({ success: true, conversations: convs });
+});
+
+app.get('/api/messenger/sync', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const since = typeof req.query.since === 'string' ? new Date(req.query.since).getTime() : 0;
+  const convs = store.getConversationsForUser(user.id);
+  const convIds = new Set(convs.map(c=>c.id));
+  const messages = store.messages.filter(m => convIds.has(m.conversationId) && new Date(m.createdAt||0).getTime() > since && !(m.deletedFor||[]).includes(user.id));
+  res.json({ success: true, conversations: convs, messages, serverTime: new Date().toISOString() });
+});
+
+app.get('/api/messenger/profile/:id', (req, res) => {
+  const viewer = requireSessionUser(req, res);
+  if (!viewer) return;
+  const u = store.users.find(x=>x.id===req.params.id);
+  if (!u) return res.status(404).json({ success: false, error: 'User not found' });
+  const blocked = (store.blockedBy[viewer.id]||[]).includes(u.id) || (store.blockedBy[u.id]||[]).includes(viewer.id);
+  const isFriend = store.getFriendIds(viewer.id).includes(u.id);
+  const pending = store.friendRequests.find(r => r.status==='pending' && ((r.fromUserId===viewer.id && r.toUserId===u.id) || (r.fromUserId===u.id && r.toUserId===viewer.id)));
+  res.json({ success: true, user: { id:u.id, username:u.username, displayName:u.displayName, avatar:u.avatar, bio:u.bio, location:u.location, isOnline:(u as any).isOnline, lastActiveAt:(u as any).lastActiveAt, verified:u.verified, joinedAt:u.joinedAt, interests:u.interests }, isFriend, blocked, pendingRequest: pending || null });
+});
+
+
 
 // -------------------------------------------------------------
 // 2. 3D DIGITAL GLOBE ENDPOINTS
@@ -539,14 +1134,71 @@ app.get('/api/conversations', (req, res) => {
   res.json({ success: true, conversations });
 });
 
-app.post('/api/conversations/direct', (req, res) => {
+app.post('/api/conversations/direct', async (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
   const targetUserId = typeof req.body?.targetUserId === 'string' ? req.body.targetUserId : '';
   if (!targetUserId) return res.status(400).json({ success: false, error: 'targetUserId is required' });
-  const conv = store.getOrCreateDirectConversation(user.id, targetUserId);
-  if (!conv) return res.status(404).json({ success: false, error: 'Target user not found' });
-  res.json({ success: true, conversation: conv, conversations: store.getConversationsForUser(user.id) });
+  if ((store.blockedBy[user.id]||[]).includes(targetUserId) || (store.blockedBy[targetUserId]||[]).includes(user.id)) {
+    return res.status(403).json({ success: false, error: 'Cannot start conversation with this user.' });
+  }
+  try {
+    let conv: any;
+    await store.mutate(async () => { conv = store.getOrCreateDirectConversation(user.id, targetUserId); });
+    if (!conv) return res.status(404).json({ success: false, error: 'Target user not found' });
+    res.json({ success: true, conversation: conv, conversations: store.getConversationsForUser(user.id) });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to create conversation' });
+  }
+});
+
+app.post('/api/conversations/group', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const memberIds = Array.isArray(req.body?.memberIds) ? req.body.memberIds.filter((x:any)=>typeof x==='string') : [];
+  const avatar = typeof req.body?.avatar === 'string' ? req.body.avatar : undefined;
+  try {
+    let conv: any;
+    await store.mutate(async () => { conv = store.createGroupConversation(user.id, name || 'New Group', memberIds, avatar); });
+    if (!conv) return res.status(400).json({ success: false, error: 'Failed to create group' });
+    wsBroadcastConversationEvent(conv.id, { type: 'conversation_created', conversation: conv });
+    res.json({ success: true, conversation: conv, conversations: store.getConversationsForUser(user.id) });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to create group' });
+  }
+});
+
+app.post('/api/conversations/:id/members', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const id = req.params.id;
+  const addIds = Array.isArray(req.body?.addIds) ? req.body.addIds.filter((x:any)=>typeof x==='string') : [];
+  const removeIds = Array.isArray(req.body?.removeIds) ? req.body.removeIds.filter((x:any)=>typeof x==='string') : [];
+  try {
+    let conv: any;
+    await store.mutate(async () => { conv = store.updateGroupMembers(user.id, id, addIds, removeIds); });
+    wsBroadcastConversationEvent(id, { type: 'conversation_updated', conversation: conv });
+    res.json({ success: true, conversation: conv });
+  } catch (e:any) {
+    const msg = e?.message || 'Failed';
+    res.status(msg === 'Forbidden' ? 403 : 400).json({ success: false, error: msg });
+  }
+});
+
+app.post('/api/conversations/:id/leave', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const id = req.params.id;
+  try {
+    let conv: any;
+    await store.mutate(async () => { conv = store.leaveGroup(user.id, id); });
+    wsBroadcastConversationEvent(id, { type: 'conversation_updated', conversation: conv, leftUserId: user.id });
+    res.json({ success: true, conversation: conv });
+  } catch (e:any) {
+    const msg = e?.message || 'Failed';
+    res.status(msg === 'Group not found' ? 404 : 400).json({ success: false, error: msg });
+  }
 });
 
 app.get('/api/conversations/:id/messages', (req, res) => {
@@ -555,49 +1207,137 @@ app.get('/api/conversations/:id/messages', (req, res) => {
   if (!user) return;
   const conv = store.conversations.find(c => c.id === id);
   if (!conv) return res.status(404).json({ success: false, error: 'Conversation not found' });
-  if (conv.type === 'direct' && !conv.participantIds.includes(user.id)) {
-    return res.status(403).json({ success: false, error: 'Forbidden' });
+  if (!store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  const before = typeof req.query.before === 'string' ? req.query.before : undefined;
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
+  const all = store.messages
+    .filter(m => m.conversationId === id && !(m.deletedFor||[]).includes(user.id))
+    .sort((a,b)=> new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  let slice: any[] = [];
+  let hasMore = false;
+  if (before) {
+    const idx = all.findIndex(m => m.id === before);
+    const end = idx >= 0 ? idx : all.length;
+    const start = Math.max(0, end - limit);
+    slice = all.slice(start, end);
+    hasMore = start > 0;
+  } else {
+    const start = Math.max(0, all.length - limit);
+    slice = all.slice(start);
+    hasMore = start > 0;
   }
-  const msgs = store.messages.filter(m => m.conversationId === id);
-  res.json({ success: true, messages: msgs });
+  // mark delivered for messages from others (persist best-effort)
+  try {
+    store.mutate(async () => {
+      let changed = false;
+      for (const m of slice) {
+        if (m.senderId === user.id) continue;
+        if (!(m.deliveredTo||[]).includes(user.id)) { m.deliveredTo = [...(m.deliveredTo||[]), user.id]; if (m.status === 'sent') m.status = 'delivered'; changed = true; }
+      }
+      if (changed) store.persist();
+    }).catch(()=>{});
+  } catch {}
+  res.json({ success: true, messages: slice, hasMore });
 });
 
 app.post('/api/conversations/:id/messages', async (req, res) => {
-  const { content, targetLanguage, autoTranslate } = req.body;
-  if (!content || !String(content).trim()) return res.status(400).json({ success: false, error: 'Message cannot be empty' });
+  const { content, targetLanguage, autoTranslate, attachments, replyToId, clientMsgId } = req.body || {};
   const id = req.params.id;
   const authUser = requireSessionUser(req, res);
   if (!authUser) return;
   const conv = store.conversations.find(c => c.id === id);
   if (!conv) return res.status(404).json({ success: false, error: 'Conversation not found' });
-  if (conv.type === 'direct' && !conv.participantIds.includes(authUser.id)) {
-    return res.status(403).json({ success: false, error: 'Forbidden' });
+  if (!store.canAccessConversation(authUser.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  // block checks for direct
+  if (conv.type === 'direct') {
+    const otherId = (conv.participantIds||[]).find((pid:string)=>pid!==authUser.id);
+    if (otherId && ((store.blockedBy[authUser.id]||[]).includes(otherId) || (store.blockedBy[otherId]||[]).includes(authUser.id))) {
+      return res.status(403).json({ success: false, error: 'Messaging blocked.' });
+    }
   }
+  const text = typeof content === 'string' ? content.trim() : '';
+  const atts = Array.isArray(attachments) ? attachments : undefined;
+  if (!text && !(atts && atts.length)) return res.status(400).json({ success: false, error: 'Message cannot be empty' });
 
   let translatedContent: string | undefined;
   let translatedTo: string | undefined;
-
-  if (autoTranslate && targetLanguage) {
+  if (autoTranslate && targetLanguage && text) {
     try {
       if (aiClient) {
         const response = await aiClient.models.generateContent({
           model: 'gemini-2.5-flash',
-          contents: `Translate the following chat message to ${targetLanguage}. Maintain conversational nuance, warmth, and friendly tone. Return ONLY the translated string without commentary:\n"${String(content)}"`
+          contents: `Translate the following chat message to ${targetLanguage}. Maintain conversational nuance, warmth, and friendly tone. Return ONLY the translated string without commentary:\n"${text}"`
         });
         translatedContent = response.text ? response.text.trim() : undefined;
         translatedTo = targetLanguage;
       } else {
-        translatedContent = `[Translated to ${targetLanguage}]: ${String(content)}`;
+        translatedContent = `[Translated to ${targetLanguage}]: ${text}`;
         translatedTo = targetLanguage;
       }
     } catch (err) {
       console.warn('AI translation fallback:', err);
-      translatedContent = String(content);
+      translatedContent = text;
     }
   }
 
-  const msg = store.sendMessage(id, String(content).trim(), authUser, translatedContent, translatedTo);
-  res.json({ success: true, message: msg, conversation: store.conversations.find(c => c.id === id) });
+  try {
+    let msg: any;
+    await store.mutate(async () => { msg = store.sendMessage(id, text, authUser, translatedContent, translatedTo, { attachments: atts, replyToId: typeof replyToId === 'string' ? replyToId : undefined }); });
+    wsBroadcastConversationEvent(id, { type: 'message', conversationId: id, message: msg, clientMsgId });
+    res.json({ success: true, message: msg, conversation: store.conversations.find(c => c.id === id) });
+  } catch (e:any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to send message' });
+  }
+});
+
+app.post('/api/conversations/:id/read', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const id = req.params.id;
+  const conv = store.conversations.find(c => c.id === id);
+  if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  await store.mutate(async () => { store.markConversationRead(id, user.id); });
+  wsBroadcastConversationEvent(id, { type: 'read', conversationId: id, userId: user.id, readAt: new Date().toISOString() });
+  res.json({ success: true });
+});
+
+app.post('/api/conversations/:id/messages/:messageId/recall', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const { id, messageId } = req.params as any;
+  try {
+    let msg: any;
+    await store.mutate(async () => { msg = store.recallMessage(user.id, id, messageId); });
+    wsBroadcastConversationEvent(id, { type: 'message_recalled', conversationId: id, message: msg });
+    res.json({ success: true, message: msg });
+  } catch (e:any) {
+    const m = e?.message || 'Failed'; res.status(m==='Forbidden'?403:m==='Message not found'?404:400).json({ success:false, error:m });
+  }
+});
+
+app.post('/api/conversations/:id/messages/:messageId/delete', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const { id, messageId } = req.params as any;
+  try {
+    let msg: any;
+    await store.mutate(async () => { msg = store.deleteMessageForUser(user.id, id, messageId); });
+    res.json({ success: true, message: msg });
+  } catch (e:any) {
+    const m = e?.message || 'Failed'; res.status(m==='Message not found'?404:400).json({ success:false, error:m });
+  }
+});
+
+app.get('/api/conversations/:id/search', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const id = req.params.id;
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const conv = store.conversations.find(c => c.id === id);
+  if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  if (!q) return res.json({ success: true, messages: [] });
+  const msgs = store.messages.filter(m => m.conversationId === id && !(m.deletedFor||[]).includes(user.id) && !m.recalled && (m.content||'').toLowerCase().includes(q)).slice(-50);
+  res.json({ success: true, messages: msgs });
 });
 
 // -------------------------------------------------------------
@@ -1955,7 +2695,11 @@ async function startServer() {
 
   app.use(vite.middlewares);
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  attachMessengerWs(wss as any);
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`🌍 地球计划 Server listening on http://0.0.0.0:${PORT}`);
   });
 

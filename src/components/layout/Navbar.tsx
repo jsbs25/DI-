@@ -40,6 +40,7 @@ interface NavbarProps {
   currentUser: User | null;
   onOpenProfile: () => void;
   onOpenAuth: () => void;
+  onOpenSecurity?: () => void;
   onLogout: () => void;
   onOpenOnboarding: () => void;
   onToggleLocationPrivacy: () => void;
@@ -92,6 +93,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onOpenProfile,
   onOpenAuth,
+  onOpenSecurity,
   onLogout,
   onOpenOnboarding,
   onToggleLocationPrivacy,
@@ -617,6 +619,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                     >
                       <MapPin className="w-3.5 h-3.5 text-cyan-400" />
                       <span>{t.editGlobeBeacon}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        onOpenSecurity?.();
+                      }}
+                      className="w-full text-left px-3.5 py-1.5 text-slate-300 hover:text-white hover:bg-slate-800/70 flex items-center space-x-2"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Account & Security</span>
                     </button>
 
                     <button

@@ -9,11 +9,14 @@ export interface UserLocation {
   isPublic: boolean;
 }
 
+export type AuthProvider = 'google' | 'wechat' | 'phone' | 'email';
+
 export interface LinkedIdentity {
-  provider: 'google' | 'wechat' | 'whatsapp' | 'telegram';
+  provider: AuthProvider;
   providerUserId: string;
   displayName?: string;
   email?: string;
+  phone?: string;
   avatar?: string;
   linkedAt: string;
 }
@@ -23,6 +26,9 @@ export interface User {
   username: string;
   displayName: string;
   email?: string;
+  phone?: string;
+  emailVerified?: boolean;
+  phoneVerified?: boolean;
   avatar: string;
   banner?: string;
   bio: string;
@@ -32,10 +38,13 @@ export interface User {
   followingCount: number;
   tipsReceived: number;
   isOnline: boolean;
+  lastActiveAt?: string;
   verified: boolean;
   joinedAt: string;
   hasCompletedOnboarding?: boolean;
   linkedIdentities?: LinkedIdentity[];
+  friendIds?: string[];
+  blockedUserIds?: string[];
 }
 
 export interface PostComment {
@@ -84,7 +93,16 @@ export interface Post {
   comments: PostComment[];
 }
 
-export type ChatMessageStatus = 'sending' | 'sent' | 'delivered' | 'read';
+export type ChatMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+
+export interface ChatAttachment {
+  id: string;
+  type: 'image' | 'file';
+  name: string;
+  url: string;
+  size?: number;
+  mimeType?: string;
+}
 
 export interface ChatMessage {
   id: string;
@@ -98,19 +116,29 @@ export interface ChatMessage {
   translatedContent?: string;
   translatedTo?: string;
   createdAt: string;
+  updatedAt?: string;
   mediaUrl?: string;
+  attachments?: ChatAttachment[];
   status?: ChatMessageStatus;
+  deliveredTo?: string[];
+  readBy?: string[];
   replyToId?: string;
   editedAt?: string;
+  deletedFor?: string[];
+  recalled?: boolean;
+  recalledAt?: string;
   channel?: 'earthone' | 'google' | 'wechat' | 'whatsapp' | 'telegram';
 }
 
 export interface Conversation {
   id: string;
-  type: 'direct' | 'country_room' | 'global_channel' | 'channel';
+  type: 'direct' | 'country_room' | 'global_channel' | 'channel' | 'group';
   name: string;
   countryCode?: string;
   participantIds: string[];
+  adminIds?: string[];
+  ownerId?: string;
+  avatar?: string;
   unreadCount?: number;
   lastMessage?: string;
   lastMessageTime?: string;
@@ -118,12 +146,15 @@ export interface Conversation {
   isOnline?: boolean;
   otherUser?: User;
   pinned?: boolean;
+  typingUserIds?: string[];
   channel?: 'earthone' | 'google' | 'wechat' | 'whatsapp' | 'telegram';
   externalRef?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ChannelIntegration {
-  id: 'google' | 'wechat' | 'whatsapp' | 'telegram';
+  id: 'google' | 'wechat' | 'whatsapp' | 'telegram' | 'phone' | 'email';
   name: string;
   category: 'identity' | 'messaging';
   status: 'available' | 'config_required' | 'planned';
@@ -420,4 +451,28 @@ export interface KnowledgeNode {
   countryCode?: string;
   /** Optional links to library books by store id (cross-module: LIBRARY). */
   bookIds?: string[];
+}
+
+
+export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled';
+
+export interface FriendRequest {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  status: FriendRequestStatus;
+  message?: string;
+  createdAt: string;
+  updatedAt: string;
+  fromUser?: User;
+  toUser?: User;
+}
+
+export interface SecurityAuditEvent {
+  id: string;
+  userId?: string;
+  type: string;
+  detail?: string;
+  ip?: string;
+  createdAt: string;
 }

@@ -3,7 +3,7 @@
  * IMPORTANT: We only model officially supported integrations.
  * - Personal WeChat/WhatsApp account takeover, scraping, or unofficial clients are NOT supported.
  */
-export type IntegrationProvider = 'google' | 'wechat' | 'whatsapp' | 'telegram';
+export type IntegrationProvider = 'google' | 'wechat' | 'whatsapp' | 'telegram' | 'phone' | 'email';
 
 export interface ChannelIntegrationInfo {
   id: IntegrationProvider;
@@ -70,12 +70,32 @@ export function getChannelIntegrations(env: NodeJS.ProcessEnv = process.env): Ch
       setupHint: hasTelegram
         ? 'TELEGRAM_BOT_TOKEN configured.'
         : 'Set TELEGRAM_BOT_TOKEN from @BotFather to enable bot channel bridge.'
+    },
+    {
+      id: 'phone',
+      name: 'Phone (SMS)',
+      category: 'identity',
+      status: (process.env.SMS_PROVIDER && process.env.SMS_PROVIDER !== '') ? 'available' : 'config_required',
+      official: true,
+      capabilities: ['Phone number login/registration via SMS verification code (provider-pluggable)'],
+      limitations: ['Requires a configured SMS provider (e.g. Twilio). Without configuration, SMS sending is BLOCKED and no fake codes are sent.'],
+      setupHint: process.env.SMS_PROVIDER ? `SMS_PROVIDER=${process.env.SMS_PROVIDER}` : 'Set SMS_PROVIDER and provider credentials (e.g. TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM).'
+    },
+    {
+      id: 'email',
+      name: 'Email',
+      category: 'identity',
+      status: 'available',
+      official: true,
+      capabilities: ['Email + password login/registration', 'Password reset flow (email delivery requires mail provider; token flow supported)'],
+      limitations: ['Transactional email delivery requires a configured mail provider; without it, email delivery is BLOCKED.'],
+      setupHint: process.env.MAIL_PROVIDER ? `MAIL_PROVIDER=${process.env.MAIL_PROVIDER}` : 'Optional: configure MAIL_PROVIDER/SMTP settings for verification/reset emails.'
     }
   ];
 }
 
 export interface LinkedIdentity {
-  provider: IntegrationProvider;
+  provider: IntegrationProvider | 'phone' | 'email';
   providerUserId: string;
   displayName?: string;
   email?: string;

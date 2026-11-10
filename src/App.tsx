@@ -25,6 +25,7 @@ import { UserProfileModal } from './components/profile/UserProfileModal.tsx';
 import { LuxuryAdBanner } from './components/commercial/LuxuryAdBanner.tsx';
 import { AuthModal } from './components/auth/AuthModal.tsx';
 import { OnboardingModal } from './components/auth/OnboardingModal.tsx';
+import { AccountSecurityModal } from './components/auth/AccountSecurityModal.tsx';
 import { DigitalLibrary } from './components/library/DigitalLibrary.tsx';
 import { ArabicLearningHub } from './components/learning/ArabicLearningHub.tsx';
 import { WebBrowser } from './components/browser/WebBrowser.tsx';
@@ -83,6 +84,7 @@ export default function App() {
 
   // Modals & Navigation triggers
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(false);
   const [activeCountry, setActiveCountry] = useState<string | null>(null);
   const [profileModalUser, setProfileModalUser] = useState<User | null>(null);
@@ -130,8 +132,33 @@ export default function App() {
     } catch {}
   };
 
-  // Initial Data Fetch & Auth Check
+  // Initial Data Fetch & Auth Check (+ OAuth callback hash)
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authErr = params.get('auth_error');
+    if (authErr) {
+      setWelcomeToast(`Login failed: ${authErr}`);
+      setTimeout(() => setWelcomeToast(null), 5000);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    const hash = window.location.hash || '';
+    if (hash.startsWith('#auth=')) {
+      try {
+        const payload = hash.slice(6);
+        const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+        if (decoded?.token && decoded?.user) {
+          localStorage.setItem('earth_one_token', decoded.token);
+          setSessionToken(decoded.token);
+          setCurrentUser(decoded.user);
+          if (decoded.user.hasCompletedOnboarding === false) setIsOnboardingModalOpen(true);
+        }
+      } catch (e) {
+        console.warn('Failed to parse OAuth auth payload', e);
+      } finally {
+        window.history.replaceState({}, '', window.location.pathname + window.location.search);
+      }
+    }
+
     const storedToken = localStorage.getItem('earth_one_token');
     const headers: Record<string, string> = {};
     if (storedToken) {
@@ -423,25 +450,43 @@ export default function App() {
     setProfileModalUser(fullUser);
   };
 
-  const handleOpenDirectChat = (targetUser: User) => {
-    const existing = conversations.find(c => c.participantIds?.includes(targetUser.id));
+  const handleOpenDirectChat = async (targetUser: User) => {
+    const existing = conversations.find(c => c.type === 'direct' && c.participantIds?.includes(targetUser.id));
     if (existing) {
       setActiveConversationId(existing.id);
-    } else {
-      const newConv: Conversation = {
-        id: `conv_${targetUser.id}`,
-        type: 'direct',
-        name: targetUser.displayName,
-        countryCode: targetUser.location.countryCode,
-        participantIds: ['current_user', targetUser.id],
-        otherUser: targetUser,
-        lastMessage: 'Conversation opened',
-        lastMessageTime: 'Just now',
-        isOnline: targetUser.isOnline
-      };
-      setConversations(prev => [newConv, ...prev]);
-      setActiveConversationId(newConv.id);
+      setCurrentTab('chat');
+      return;
     }
+    try {
+      const headers = authHeaders();
+      const res = await fetch('/api/conversations/direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(headers || {}) },
+        body: JSON.stringify({ targetUserId: targetUser.id })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.success) {
+        if (Array.isArray(data.conversations)) setConversations(data.conversations);
+        else await refreshConversations();
+        if (data.conversation?.id) setActiveConversationId(data.conversation.id);
+        setCurrentTab('chat');
+        return;
+      }
+    } catch {}
+    // fallback local placeholder (will be replaced on refresh if unauthorized)
+    const newConv: Conversation = {
+      id: `conv_${targetUser.id}`,
+      type: 'direct',
+      name: targetUser.displayName,
+      countryCode: targetUser.location?.countryCode,
+      participantIds: [currentUser?.id || 'current_user', targetUser.id],
+      otherUser: targetUser,
+      lastMessage: 'Conversation opened',
+      lastMessageTime: 'Just now',
+      isOnline: targetUser.isOnline
+    } as any;
+    setConversations(prev => [newConv, ...prev]);
+    setActiveConversationId(newConv.id);
     setCurrentTab('chat');
   };
 
@@ -493,6 +538,7 @@ export default function App() {
         currentUser={currentUser}
         onOpenProfile={() => currentUser && setProfileModalUser(currentUser)}
         onOpenAuth={() => setIsAuthModalOpen(true)}
+        onOpenSecurity={() => setIsSecurityModalOpen(true)}
         onLogout={handleLogout}
         onOpenOnboarding={() => setIsOnboardingModalOpen(true)}
         onToggleLocationPrivacy={handleToggleLocationPrivacy}
@@ -687,6 +733,15 @@ export default function App() {
         onAuthSuccess={handleAuthSuccess}
         lang={lang}
       />
+
+      {currentUser && (
+        <AccountSecurityModal
+          isOpen={isSecurityModalOpen}
+          onClose={() => setIsSecurityModalOpen(false)}
+          currentUser={currentUser}
+          onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }}
+        />
+      )}
 
       {/* 6. Post-Login Profile Onboarding Wizard */}
       {currentUser && (

@@ -38,7 +38,9 @@ import {
   CrawledPage,
   BrowserBookmark,
   SavedArticle,
-  LinkedIdentity
+  LinkedIdentity,
+  FriendRequest,
+  SecurityAuditEvent
 } from '../src/types/index.ts';
 import { resolveCoordinates } from '../src/utils/geoData.ts';
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
@@ -556,6 +558,12 @@ class DataStore {
   browserBookmarks: BrowserBookmark[] = [];
   savedArticles: SavedArticle[] = [];
 
+  // Social / messenger
+  friendRequests: FriendRequest[] = [];
+  blockedBy: Record<string, string[]> = {}; // userId -> blocked userIds
+  securityAudit: SecurityAuditEvent[] = [];
+  loginFailures: Record<string, { count: number; lockedUntil?: number; lastAt: number }> = {};
+
   constructor() {
     const loaded = this.loadFromDisk();
     if (!loaded) {
@@ -660,6 +668,10 @@ class DataStore {
       crawledPages: this.crawledPages,
       browserBookmarks: this.browserBookmarks,
       savedArticles: this.savedArticles,
+      friendRequests: this.friendRequests,
+      blockedBy: this.blockedBy,
+      securityAudit: this.securityAudit,
+      loginFailures: this.loginFailures,
       currentUser: this.currentUser,
       accounts: serializableAccounts,
       sessions: serializableSessions,
@@ -711,6 +723,10 @@ class DataStore {
       this.crawledPages = data.crawledPages && data.crawledPages.length > 0 ? data.crawledPages : [...SEED_CRAWLED_PAGES];
       this.browserBookmarks = data.browserBookmarks || [];
       this.savedArticles = data.savedArticles || [];
+      this.friendRequests = data.friendRequests || [];
+      this.blockedBy = data.blockedBy || {};
+      this.securityAudit = data.securityAudit || [];
+      this.loginFailures = data.loginFailures || {};
       this.currentUser = data.currentUser || this.users[0];
 
       // Persist the now-stripped (metadata-only) main store once after migrating
@@ -757,6 +773,10 @@ class DataStore {
       { id: 'bm_4', title: 'Stanford Encyclopedia of Philosophy', url: 'https://plato.stanford.edu', category: 'Philosophy', createdAt: new Date().toISOString() }
     ];
     this.savedArticles = [];
+    this.friendRequests = [];
+    this.blockedBy = {};
+    this.securityAudit = [];
+    this.loginFailures = {};
 
     // Seed authentication accounts with default password 'password123'
     const defaultSalt = 'earth_one_salt_2026';
@@ -1030,32 +1050,41 @@ class DataStore {
 
   // Send message
   sendMessage(
-    conversationId: string, 
-    content: string, 
-    authorUser?: User, 
-    translatedContent?: string, 
-    translatedTo?: string
+    conversationId: string,
+    content: string,
+    authorUser?: User,
+    translatedContent?: string,
+    translatedTo?: string,
+    extra?: { attachments?: ChatMessage['attachments']; replyToId?: string; status?: ChatMessage['status'] }
   ): ChatMessage {
     const author = authorUser || this.currentUser;
+    const now = new Date().toISOString();
     const msg: ChatMessage = {
-      id: `msg_${Date.now()}`,
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
       conversationId,
       senderId: author.id,
       senderName: author.displayName,
       senderAvatar: author.avatar,
-      senderCountry: author.location.countryCode,
+      senderCountry: author.location?.countryCode || 'UN',
       content,
       translatedContent,
       translatedTo,
-      createdAt: new Date().toISOString()
+      createdAt: now,
+      status: extra?.status || 'sent',
+      deliveredTo: [],
+      readBy: [author.id],
+      deletedFor: [],
+      attachments: extra?.attachments,
+      replyToId: extra?.replyToId
     };
     this.messages.push(msg);
 
     const conv = this.conversations.find(c => c.id === conversationId);
     if (conv) {
-      conv.lastMessage = content;
-      conv.lastMessageTime = new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      conv.lastMessageAt = msg.createdAt;
+      conv.lastMessage = msg.recalled ? 'Message recalled' : (content || (msg.attachments?.length ? '[attachment]' : ''));
+      conv.lastMessageTime = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      conv.lastMessageAt = now;
+      conv.updatedAt = now;
     }
     this.saveToDisk();
     return msg;
@@ -1306,16 +1335,21 @@ class DataStore {
 
   getConversationsForUser(userId: string): Conversation[] {
     return this.conversations
-      .filter(c => c.type === 'global_channel' || c.type === 'country_room' || c.participantIds.includes(userId))
+      .filter(c => c.type === 'global_channel' || c.type === 'country_room' || (Array.isArray(c.participantIds) && c.participantIds.includes(userId)))
       .map(c => {
         if (c.type === 'direct') {
           const otherId = c.participantIds.find(id => id !== userId);
           const other = otherId ? this.users.find(u => u.id === otherId) : undefined;
-          return { ...c, name: other?.displayName || c.name, otherUser: other, isOnline: other?.isOnline };
+          const unread = this.messages.filter(m => m.conversationId === c.id && m.senderId !== userId && !(m.readBy||[]).includes(userId) && !(m.deletedFor||[]).includes(userId)).length;
+          return { ...c, name: other?.displayName || c.name, otherUser: other, isOnline: other?.isOnline, unreadCount: unread };
+        }
+        if (c.type === 'group') {
+          const unread = this.messages.filter(m => m.conversationId === c.id && m.senderId !== userId && !(m.readBy||[]).includes(userId) && !(m.deletedFor||[]).includes(userId)).length;
+          return { ...c, unreadCount: unread };
         }
         return c;
       })
-      .sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime());
+      .sort((a, b) => new Date(b.lastMessageAt || b.updatedAt || 0).getTime() - new Date(a.lastMessageAt || a.updatedAt || 0).getTime());
   }
 
   linkIdentity(userId: string, identity: LinkedIdentity): User {
@@ -1333,50 +1367,344 @@ class DataStore {
     return this.users.find(u => (u.linkedIdentities || []).some(i => i.provider === provider && i.providerUserId === providerUserId)) || null;
   }
 
-  createOrLoginOAuthUser(params: { provider: LinkedIdentity['provider']; providerUserId: string; email?: string; displayName?: string; avatar?: string }): { user: User; token: string } {
-    const { provider, providerUserId, email, displayName, avatar } = params;
-    let user = this.findUserByLinkedIdentity(provider, providerUserId);
-    if (!user && email) {
-      user = this.users.find(u => (u.email || '').toLowerCase() === email.toLowerCase()) || null;
+  createOrLoginOAuthUser(params: { provider: any; providerUserId: string; email?: string; displayName?: string; avatar?: string; bindToUserId?: string }): { user: User; token: string; linkedExisting?: boolean } {
+    const { provider, providerUserId, email, displayName, avatar, bindToUserId } = params;
+    if (bindToUserId) {
+      const target = this.users.find(u => u.id === bindToUserId);
+      if (!target) throw new Error('User not found');
+      const owner = this.findUserByLinkedIdentity(provider, providerUserId);
+      if (owner && owner.id !== target.id) throw new Error('This external identity is already linked to another account.');
+      const identity: any = { provider, providerUserId, displayName, email, avatar, linkedAt: new Date().toISOString() };
+      this.upsertLinkedIdentity(target, identity);
+      const token = crypto.randomBytes(32).toString('hex');
+      this.sessions.set(token, target.id);
+      target.isOnline = true; (target as any).lastActiveAt = new Date().toISOString();
+      this.currentUser = target; this.saveToDisk();
+      return { user: target, token, linkedExisting: true };
     }
+
+    let user: User | null = this.findUserByLinkedIdentity(provider, providerUserId) || null;
     if (!user) {
+      // Do NOT auto-merge accounts by matching email/phone; create a separate account.
       const base = (displayName || email?.split('@')[0] || `${provider}_user`).toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 18) || provider;
-      let username = base;
-      let n = 1;
+      let username = base; let n = 1;
       while (this.accounts.has(username) || this.users.some(u => u.username === username)) { username = `${base}_${n++}`; }
       const userId = `user_${provider}_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
-      user = {
+      const created: User = {
         id: userId,
         username,
         displayName: displayName || username,
         email,
         avatar: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
         bio: 'Citizen exploring Earth One.',
-        location: { countryCode: 'CN', countryName: 'China', cityName: 'Beijing', lat: 39.9042, lng: 116.4074, isPublic: true },
+        location: { countryCode: 'UN', countryName: 'Global', cityName: 'Earth', lat: 0, lng: 0, isPublic: true },
         interests: ['Global Dialogue', 'Culture'],
         followersCount: 1, followingCount: 1, tipsReceived: 0,
         isOnline: true, verified: false, joinedAt: new Date().toISOString(), hasCompletedOnboarding: false,
         linkedIdentities: []
-      };
-      this.users.unshift(user);
+      } as any;
+      this.users.unshift(created);
       const salt = crypto.randomBytes(16).toString('hex');
       const acc: AuthAccount = { userId, email: (email || `${username}@earthone.local`).toLowerCase(), passwordHash: this.hashPassword(crypto.randomBytes(24).toString('hex'), salt), salt };
       this.accounts.set(userId, acc);
       this.accounts.set(acc.email, acc);
       this.accounts.set(username, acc);
+      user = created;
     }
-    const identity: LinkedIdentity = { provider, providerUserId, displayName, email, avatar, linkedAt: new Date().toISOString() };
+    const ensured = user as User;
+    const identity: any = { provider, providerUserId, displayName, email, avatar, linkedAt: new Date().toISOString() };
+    this.upsertLinkedIdentity(ensured, identity);
+    const token = crypto.randomBytes(32).toString('hex');
+    this.sessions.set(token, ensured.id);
+    ensured.isOnline = true; (ensured as any).lastActiveAt = new Date().toISOString();
+    this.currentUser = ensured;
+    this.saveToDisk();
+    return { user: ensured, token };
+  }
+
+
+  // ---------------- Social / Friends / Messaging helpers ----------------
+  addAudit(userId: string | undefined, type: string, detail?: string, ip?: string) {
+    const ev: SecurityAuditEvent = { id: `aud_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, userId, type, detail, ip, createdAt: new Date().toISOString() };
+    this.securityAudit.unshift(ev);
+    if (this.securityAudit.length > 500) this.securityAudit.length = 500;
+  }
+
+  publicUser(u: User): User {
+    // minimal public projection helper (store-level)
+    const { linkedIdentities, friendIds, blockedUserIds, email, phone, emailVerified, phoneVerified, ...rest } = u as any;
+    return { ...rest, email: undefined, phone: undefined } as User;
+  }
+
+  searchUsers(query: string, viewerId?: string, limit = 30): User[] {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const blocked = viewerId ? (this.blockedBy[viewerId] || []) : [];
+    return this.users.filter(u => {
+      if (viewerId && u.id === viewerId) return false;
+      if (blocked.includes(u.id)) return false;
+      const theirs = this.blockedBy[u.id] || [];
+      if (viewerId && theirs.includes(viewerId)) return false;
+      return u.displayName.toLowerCase().includes(q) || u.username.toLowerCase().includes(q) || (u.id || '').toLowerCase().includes(q);
+    }).slice(0, limit);
+  }
+
+  getFriendIds(userId: string): string[] {
+    const u = this.users.find(x => x.id === userId);
+    return Array.isArray(u?.friendIds) ? u!.friendIds! : [];
+  }
+
+  sendFriendRequest(fromUserId: string, toUserId: string, message?: string): FriendRequest {
+    if (fromUserId === toUserId) throw new Error('Cannot add yourself.');
+    const to = this.users.find(u => u.id === toUserId);
+    if (!to) throw new Error('User not found');
+    if ((this.blockedBy[toUserId]||[]).includes(fromUserId) || (this.blockedBy[fromUserId]||[]).includes(toUserId)) throw new Error('Cannot send friend request.');
+    if (this.getFriendIds(fromUserId).includes(toUserId)) throw new Error('Already friends.');
+    const existing = this.friendRequests.find(r => r.fromUserId === fromUserId && r.toUserId === toUserId && r.status === 'pending');
+    if (existing) return existing;
+    const reverse = this.friendRequests.find(r => r.fromUserId === toUserId && r.toUserId === fromUserId && r.status === 'pending');
+    if (reverse) { return this.respondFriendRequest(reverse.id, toUserId, true); }
+    const req: FriendRequest = { id: `fr_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, fromUserId, toUserId, status: 'pending', message, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    this.friendRequests.unshift(req);
+    this.saveToDisk();
+    return req;
+  }
+
+  respondFriendRequest(requestId: string, actorUserId: string, accept: boolean): FriendRequest {
+    const req = this.friendRequests.find(r => r.id === requestId);
+    if (!req) throw new Error('Friend request not found');
+    if (req.toUserId !== actorUserId) throw new Error('Forbidden');
+    if (req.status !== 'pending') return req;
+    req.status = accept ? 'accepted' : 'rejected';
+    req.updatedAt = new Date().toISOString();
+    if (accept) {
+      const a = this.users.find(u => u.id === req.fromUserId);
+      const b = this.users.find(u => u.id === req.toUserId);
+      if (a) { a.friendIds = Array.from(new Set([...(a.friendIds||[]), req.toUserId])); }
+      if (b) { b.friendIds = Array.from(new Set([...(b.friendIds||[]), req.fromUserId])); }
+    }
+    this.saveToDisk();
+    return req;
+  }
+
+  removeFriend(userId: string, otherUserId: string) {
+    const a = this.users.find(u => u.id === userId);
+    const b = this.users.find(u => u.id === otherUserId);
+    if (a) a.friendIds = (a.friendIds||[]).filter(id => id !== otherUserId);
+    if (b) b.friendIds = (b.friendIds||[]).filter(id => id !== userId);
+    this.saveToDisk();
+  }
+
+  blockUser(userId: string, otherUserId: string) {
+    if (userId === otherUserId) return;
+    const list = this.blockedBy[userId] || [];
+    if (!list.includes(otherUserId)) list.push(otherUserId);
+    this.blockedBy[userId] = list;
+    this.removeFriend(userId, otherUserId);
+    this.saveToDisk();
+  }
+
+  unblockUser(userId: string, otherUserId: string) {
+    this.blockedBy[userId] = (this.blockedBy[userId]||[]).filter(id => id !== otherUserId);
+    this.saveToDisk();
+  }
+
+  canAccessConversation(userId: string, conv: Conversation): boolean {
+    if (!conv) return false;
+    if (conv.type === 'global_channel' || conv.type === 'country_room') return true;
+    return Array.isArray(conv.participantIds) && conv.participantIds.includes(userId);
+  }
+
+  ensureMessageDefaults(msg: ChatMessage): ChatMessage {
+    if (!msg.status) msg.status = 'sent';
+    if (!Array.isArray(msg.deliveredTo)) msg.deliveredTo = [];
+    if (!Array.isArray(msg.readBy)) msg.readBy = [];
+    if (!Array.isArray(msg.deletedFor)) msg.deletedFor = [];
+    return msg;
+  }
+
+
+
+  markConversationRead(conversationId: string, userId: string) {
+    const now = new Date().toISOString();
+    let changed = false;
+    for (const m of this.messages) {
+      if (m.conversationId !== conversationId) continue;
+      if (m.senderId === userId) continue;
+      if (!(m.readBy||[]).includes(userId)) { m.readBy = [...(m.readBy||[]), userId]; m.status = 'read'; changed = true; }
+      if (!(m.deliveredTo||[]).includes(userId)) { m.deliveredTo = [...(m.deliveredTo||[]), userId]; changed = true; }
+      if (!m.updatedAt) m.updatedAt = now;
+    }
+    if (changed) this.saveToDisk();
+  }
+
+  createGroupConversation(ownerId: string, name: string, memberIds: string[], avatar?: string): Conversation | null {
+    const owner = this.users.find(u => u.id === ownerId);
+    if (!owner) return null;
+    const uniq = Array.from(new Set([ownerId, ...memberIds.filter(id => this.users.some(u=>u.id===id))]));
+    if (uniq.length < 2) throw new Error('Group requires at least 2 members.');
+    const now = new Date().toISOString();
+    const conv: Conversation = { id: `group_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, type: 'group', name: name || 'New Group', participantIds: uniq, adminIds: [ownerId], ownerId, avatar, createdAt: now, updatedAt: now, lastMessage: 'Group created', lastMessageAt: now, channel: 'earthone' };
+    this.conversations.unshift(conv);
+    this.saveToDisk();
+    return conv;
+  }
+
+  updateGroupMembers(actorId: string, conversationId: string, addIds: string[] = [], removeIds: string[] = []) {
+    const conv = this.conversations.find(c => c.id === conversationId && c.type === 'group');
+    if (!conv) throw new Error('Group not found');
+    const isAdmin = conv.ownerId === actorId || (conv.adminIds||[]).includes(actorId);
+    if (!isAdmin) throw new Error('Forbidden');
+    const set = new Set(conv.participantIds);
+    addIds.forEach(id => { if (this.users.some(u=>u.id===id)) set.add(id); });
+    removeIds.forEach(id => { if (id !== conv.ownerId) set.delete(id); });
+    conv.participantIds = Array.from(set);
+    conv.updatedAt = new Date().toISOString();
+    this.saveToDisk();
+    return conv;
+  }
+
+  leaveGroup(userId: string, conversationId: string) {
+    const conv = this.conversations.find(c => c.id === conversationId && c.type === 'group');
+    if (!conv) throw new Error('Group not found');
+    conv.participantIds = (conv.participantIds||[]).filter(id => id !== userId);
+    conv.adminIds = (conv.adminIds||[]).filter(id => id !== userId);
+    if (conv.ownerId === userId) {
+      conv.ownerId = conv.adminIds?.[0] || conv.participantIds[0];
+      if (conv.ownerId && !(conv.adminIds||[]).includes(conv.ownerId)) conv.adminIds = [conv.ownerId, ...(conv.adminIds||[])];
+    }
+    conv.updatedAt = new Date().toISOString();
+    this.saveToDisk();
+    return conv;
+  }
+
+  recallMessage(userId: string, conversationId: string, messageId: string) {
+    const msg = this.messages.find(m => m.id === messageId && m.conversationId === conversationId);
+    if (!msg) throw new Error('Message not found');
+    if (msg.senderId !== userId) throw new Error('Forbidden');
+    msg.recalled = true; msg.recalledAt = new Date().toISOString(); msg.content = ''; msg.translatedContent = undefined; msg.attachments = []; msg.updatedAt = msg.recalledAt;
+    const conv = this.conversations.find(c => c.id === conversationId);
+    if (conv) { conv.lastMessage = 'Message recalled'; conv.lastMessageAt = msg.recalledAt; }
+    this.saveToDisk();
+    return msg;
+  }
+
+  deleteMessageForUser(userId: string, conversationId: string, messageId: string) {
+    const msg = this.messages.find(m => m.id === messageId && m.conversationId === conversationId);
+    if (!msg) throw new Error('Message not found');
+    msg.deletedFor = Array.from(new Set([...(msg.deletedFor||[]), userId]));
+    this.saveToDisk();
+    return msg;
+  }
+
+  findUserByEmail(email: string) {
+    const e = email.trim().toLowerCase();
+    return this.users.find(u => (u.email||'').toLowerCase() === e) || null;
+  }
+  findUserByPhone(phone: string) {
+    return this.users.find(u => u.phone === phone) || null;
+  }
+  upsertLinkedIdentity(user: User, identity: LinkedIdentity) {
     const list = user.linkedIdentities || [];
-    const idx = list.findIndex(i => i.provider === provider);
+    const idx = list.findIndex(i => i.provider === identity.provider);
     if (idx >= 0) list[idx] = identity; else list.push(identity);
     user.linkedIdentities = list;
-    const token = crypto.randomBytes(32).toString('hex');
-    this.sessions.set(token, user.id);
-    user.isOnline = true;
-    this.currentUser = user;
-    this.saveToDisk();
-    return { user, token };
   }
+
+
+
+
+  renameGroup(actorId: string, conversationId: string, name?: string, avatar?: string) {
+    const conv = this.conversations.find(c => c.id === conversationId && c.type === 'group');
+    if (!conv) throw new Error('Group not found');
+    const isAdmin = conv.ownerId === actorId || (conv.adminIds||[]).includes(actorId);
+    if (!isAdmin) throw new Error('Forbidden');
+    if (typeof name === 'string' && name.trim()) conv.name = name.trim().slice(0, 80);
+    if (typeof avatar === 'string') conv.avatar = avatar;
+    conv.updatedAt = new Date().toISOString();
+    this.saveToDisk();
+    return conv;
+  }
+  setGroupAdmins(actorId: string, conversationId: string, adminIds: string[]) {
+    const conv = this.conversations.find(c => c.id === conversationId && c.type === 'group');
+    if (!conv) throw new Error('Group not found');
+    if (conv.ownerId !== actorId) throw new Error('Forbidden');
+    const valid = adminIds.filter(id => (conv.participantIds||[]).includes(id));
+    conv.adminIds = Array.from(new Set([conv.ownerId, ...valid]));
+    conv.updatedAt = new Date().toISOString();
+    this.saveToDisk();
+    return conv;
+  }
+  getPublicProfile(viewerId: string, userId: string) {
+    const u = this.users.find(x => x.id === userId);
+    if (!u) return null;
+    const blocked = (this.blockedBy[viewerId]||[]).includes(userId) || (this.blockedBy[userId]||[]).includes(viewerId);
+    const isFriend = this.getFriendIds(viewerId).includes(userId);
+    return { user: { id:u.id, username:u.username, displayName:u.displayName, avatar:u.avatar, bio:u.bio, location:u.location, isOnline:(u as any).isOnline, lastActiveAt:(u as any).lastActiveAt, verified:u.verified, joinedAt:u.joinedAt, interests:u.interests, followersCount:u.followersCount, followingCount:u.followingCount }, isFriend, blocked };
+  }
+
+  setPasswordForUser(userId: string, newPassword: string) {
+    const acc = this.accounts.get(userId);
+    if (!acc) throw new Error('Account not found');
+    const salt = crypto.randomBytes(16).toString('hex');
+    acc.salt = salt;
+    acc.passwordHash = this.hashPassword(newPassword, salt);
+    this.accounts.set(userId, acc);
+    if (acc.email) this.accounts.set(acc.email.toLowerCase(), acc);
+    const u = this.users.find(x=>x.id===userId);
+    if (u) this.accounts.set(u.username.toLowerCase(), acc);
+    this.saveToDisk();
+  }
+
+  bindEmail(userId: string, email: string) {
+    const u = this.users.find(x=>x.id===userId);
+    if (!u) throw new Error('User not found');
+    const e = email.trim().toLowerCase();
+    const owner = this.findUserByEmail(e);
+    if (owner && owner.id !== userId) throw new Error('Email is already linked to another account.');
+    u.email = e; (u as any).emailVerified = true;
+    this.upsertLinkedIdentity(u, { provider: 'email' as any, providerUserId: e, email: e, linkedAt: new Date().toISOString() } as any);
+    const acc = this.accounts.get(userId); if (acc) { acc.email = e; this.accounts.set(e, acc); }
+    this.saveToDisk(); return u;
+  }
+
+  bindPhone(userId: string, phone: string) {
+    const u = this.users.find(x=>x.id===userId);
+    if (!u) throw new Error('User not found');
+    const owner = this.findUserByPhone(phone);
+    if (owner && owner.id !== userId) throw new Error('Phone number is already linked to another account.');
+    u.phone = phone; (u as any).phoneVerified = true;
+    this.upsertLinkedIdentity(u, { provider: 'phone' as any, providerUserId: phone, phone, linkedAt: new Date().toISOString() } as any);
+    this.saveToDisk(); return u;
+  }
+
+  unlinkIdentity(userId: string, provider: string) {
+    const u = this.users.find(x=>x.id===userId);
+    if (!u) throw new Error('User not found');
+    const before = (u.linkedIdentities||[]).length;
+    u.linkedIdentities = (u.linkedIdentities||[]).filter(i => i.provider !== provider);
+    if ((u.linkedIdentities||[]).length === before) throw new Error('Identity not linked');
+    if (provider === 'phone') { delete (u as any).phone; (u as any).phoneVerified = false; }
+    if (provider === 'email') { /* keep primary email for account recovery */ (u as any).emailVerified = false; }
+    this.saveToDisk(); return u;
+  }
+
+
+
+  isLoginLocked(key: string): { locked: boolean; retryAfterMs?: number } {
+    const e = this.loginFailures[key];
+    if (!e?.lockedUntil) return { locked: false };
+    if (e.lockedUntil <= Date.now()) { delete this.loginFailures[key]; this.saveToDisk(); return { locked: false }; }
+    return { locked: true, retryAfterMs: e.lockedUntil - Date.now() };
+  }
+  recordLoginFailure(key: string, max = 5, windowMs = 15*60*1000, lockMs = 15*60*1000) {
+    const now = Date.now();
+    const e = this.loginFailures[key];
+    if (!e || (now - e.lastAt) > windowMs) this.loginFailures[key] = { count: 1, lastAt: now };
+    else { e.count += 1; e.lastAt = now; if (e.count >= max) e.lockedUntil = now + lockMs; }
+    this.saveToDisk();
+  }
+  clearLoginFailures(key: string) { if (this.loginFailures[key]) { delete this.loginFailures[key]; this.saveToDisk(); } }
 
   // Digital Library Methods
   addBook(book: Book): Book {
