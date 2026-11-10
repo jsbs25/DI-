@@ -324,30 +324,33 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const maybeAlertNotification = (n: any, alert?: any) => {
     if (!n || n.read) return;
     const prefs = notifPrefsRef.current || defaultNotifPrefs();
-    const desktopAllowed = typeof alert?.desktop === 'boolean' ? alert.desktop : (!!prefs.desktop && !isDndActiveLocal(prefs));
-    const soundAllowed = typeof alert?.sound === 'boolean' ? alert.sound : (!!prefs.sound && !isDndActiveLocal(prefs));
+    // Server decides category enablement/push; client enforces local DND/timezone for alerts.
+    if (alert && alert.categoryEnabled === false) return;
+    const dndActive = isDndActiveLocal(prefs);
+    const desktopAllowed = !!prefs.desktop && !dndActive && (alert ? alert.desktop !== false : true);
+    const soundAllowed = !!prefs.sound && !dndActive && (alert ? alert.sound !== false : true);
     if (!desktopAllowed && !soundAllowed) return;
-    // dedupe by notification id
+    // dedupe by notification id (prevents HTTP/WS or multi-path double alerts)
     const now = Date.now();
     const seen = notifAlertSeenRef.current;
     if (seen.has(n.id)) return;
     for (const [k, ts] of seen) if (now - ts > 120000) seen.delete(k);
     seen.set(n.id, now);
-    // avoid duplicate when user is in active conversation
-    if (n.conversationId && n.conversationId === activeConvIdRef.current) {
-      // still allow if window not focused/minimized? requirement says avoid duplicate when user viewing current conversation
-      if (document?.hasFocus?.()) return;
-    }
+    // avoid duplicate reminder when user is actively viewing current conversation
+    if (n.conversationId && n.conversationId === activeConvIdRef.current && document?.hasFocus?.()) return;
     if (desktopAllowed) {
       try {
         const bridge = (window as any).earthOneDesktop;
         if (bridge?.showNotification) {
-          bridge.showNotification({ id: n.id, title: n.title || 'EARTH ONE', body: n.body || '', conversationId: n.conversationId || null, type: n.type || '' });
+          const r = bridge.showNotification({ id: n.id, title: n.title || 'EARTH ONE', body: n.body || '', conversationId: n.conversationId || null, type: n.type || '' });
+          if (r && typeof r.then === 'function') r.then((res: any) => { if (res && res.ok === false && (res.error === 'unsupported' || res.error === 'denied')) setNotice(lang==='ar'?'إذن إشعارات سطح المكتب غير متاح.':lang==='en'?'Desktop notification permission unavailable.':'桌面通知权限不可用。'); }).catch(()=>{});
         } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
           const sys = new Notification(n.title || 'EARTH ONE', { body: n.body || '', tag: n.conversationId ? `conv:${n.conversationId}` : `ntf:${n.id}` });
-          sys.onclick = () => { try { window.focus(); } catch {}; if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); } };
+          sys.onclick = () => { try { window.focus(); } catch {}; if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); } else { setTab('notifs'); } };
         } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-          Notification.requestPermission().catch(()=>{});
+          Notification.requestPermission().then(p => { if (p === 'denied') setNotice(lang==='ar'?'تم رفض إذن إشعارات سطح المكتب.':lang==='en'?'Desktop notification permission denied.':'桌面通知权限被拒绝。'); }).catch(()=>{});
+        } else if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+          setNotice(lang==='ar'?'إذن إشعارات سطح المكتب غير متاح.':lang==='en'?'Desktop notification permission unavailable.':'桌面通知权限不可用。');
         }
       } catch {}
     }
@@ -507,6 +510,27 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     return () => { stopped = true; window.removeEventListener('online', onOnline); if (reconnectRef.current) clearTimeout(reconnectRef.current); try { wsRef.current?.close(); } catch {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authed, currentUser?.id, activeConv?.id]);
+
+
+
+  // Desktop (Electron) notification click -> navigate to conversation
+  useEffect(() => {
+    const bridge = (window as any).earthOneDesktop;
+    if (!bridge?.onNotificationClick) return;
+    const off = bridge.onNotificationClick((data: any) => {
+      try {
+        if (data?.conversationId) {
+          onSelectConversation(String(data.conversationId));
+          setTab('chats');
+        } else {
+          setTab('notifs');
+          void loadNotifications();
+        }
+      } catch {}
+    });
+    return () => { try { off && off(); } catch {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onSelectConversation]);
 
   useEffect(() => { if (activeConv?.id && authed) { setMessages([]); setHasMore(false); void fetchMessages(); } }, [activeConv?.id, authed]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length, activeConv?.id]);

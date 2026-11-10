@@ -211,7 +211,28 @@ declare global {
     onFindResult(listener: (result: EarthOneBrowserFindResult) => void): () => void;
   }
 
+  interface EarthOneDesktopNotificationPayload {
+    id?: string;
+    title?: string;
+    body?: string;
+    conversationId?: string | null;
+    type?: string;
+  }
+
+  interface EarthOneDesktopNotificationClick {
+    id?: string | null;
+    conversationId?: string | null;
+    type?: string | null;
+  }
+
+  interface EarthOneDesktopApi {
+    getNotificationPermission?: () => Promise<{ supported: boolean; permission: string; error?: string }>;
+    showNotification?: (payload: EarthOneDesktopNotificationPayload) => Promise<{ ok: boolean; error?: string }>;
+    onNotificationClick?: (listener: (data: EarthOneDesktopNotificationClick) => void) => () => void;
+  }
+
   interface Window {
     earthOneBrowser?: EarthOneBrowserApi;
+    earthOneDesktop?: EarthOneDesktopApi;
   }
 }

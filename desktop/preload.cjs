@@ -80,3 +80,13 @@ contextBridge.exposeInMainWorld('earthOneBrowser', {
     return () => ipcRenderer.removeListener('browser:find-result', wrapped);
   }
 });
+
+contextBridge.exposeInMainWorld('earthOneDesktop', {
+  getNotificationPermission: () => ipcRenderer.invoke('desktop-notification:permission'),
+  showNotification: payload => ipcRenderer.invoke('desktop-notification:show', payload),
+  onNotificationClick: listener => {
+    const wrapped = (_event, data) => listener(data);
+    ipcRenderer.on('desktop-notification:click', wrapped);
+    return () => ipcRenderer.removeListener('desktop-notification:click', wrapped);
+  }
+});

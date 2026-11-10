@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, WebContentsView, ipcMain, session, shell, dialog, Menu, clipboard } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, session, shell, dialog, Menu, clipboard, Notification } = require('electron');
 const { createBrowserEngine, isAllowedNavigation, DEFAULT_BROWSER_NEW_TAB_URL } = require('./browser-engine.cjs');
 const { createBrowserContextMenuTemplate } = require('./browser-context-menu.cjs');
 const { createBrowserSessionStore } = require('./session-store.cjs');
@@ -483,7 +483,48 @@ function registerBrowserIpc() {
     'browser:change-zoom': (_event, action) => browserEngine.changeZoom(action),
     'browser:find-in-page': (_event, query, direction) => browserEngine.findInPage(query, direction),
     'browser:stop-find-in-page': (_event, returnFocus) => browserEngine.stopFindInPage(Boolean(returnFocus)),
-    'browser:print-to-pdf': () => browserPdfExporter?.saveActiveTab() || { success: false, error: 'PDF 导出暂不可用。' }
+    'browser:print-to-pdf': () => browserPdfExporter?.saveActiveTab() || { success: false, error: 'PDF 导出暂不可用。' },
+    'desktop-notification:permission': () => {
+      try {
+        if (!Notification || typeof Notification.isSupported !== 'function' || !Notification.isSupported()) {
+          return { supported: false, permission: 'denied' };
+        }
+        // Electron main Notification doesn't expose a web permission string; report supported and let renderer also check.
+        return { supported: true, permission: 'granted' };
+      } catch (e) {
+        return { supported: false, permission: 'denied', error: String(e && e.message || e) };
+      }
+    },
+    'desktop-notification:show': (_event, payload) => {
+      try {
+        if (!Notification || typeof Notification.isSupported !== 'function' || !Notification.isSupported()) {
+          return { ok: false, error: 'unsupported' };
+        }
+        const data = payload && typeof payload === 'object' ? payload : {};
+        const title = String(data.title || 'EARTH ONE').slice(0, 120);
+        const body = String(data.body || '').slice(0, 500);
+        const tag = String(data.id || data.conversationId || Date.now());
+        const n = new Notification({ title, body, silent: true });
+        n.on('click', () => {
+          try {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              if (mainWindow.isMinimized()) mainWindow.restore();
+              mainWindow.show();
+              mainWindow.focus();
+              mainWindow.webContents.send('desktop-notification:click', {
+                id: data.id || null,
+                conversationId: data.conversationId || null,
+                type: data.type || null,
+              });
+            }
+          } catch {}
+        });
+        n.show();
+        return { ok: true, tag };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    }
   };
 
   for (const [channel, handler] of Object.entries(handlers)) {
