@@ -46,42 +46,19 @@ export function normalizePrivacySettings(raw: any): PrivacySettings {
   };
 }
 
-export function canViewProfile(viewerId: string | null, targetId: string, targetPrivacy: PrivacySettings, opts: { isFriend: boolean; blocked: boolean }) {
-  if (opts.blocked) return false;
-  if (viewerId && viewerId === targetId) return true;
+export function canViewProfileByPolicy(isSelf: boolean, isFriend: boolean, blockedEither: boolean, targetPrivacy: PrivacySettings) {
+  if (blockedEither) return false;
+  if (isSelf) return true;
   if (targetPrivacy.profileVisibility === 'everyone') return true;
-  if (targetPrivacy.profileVisibility === 'friends') return !!opts.isFriend;
-  return false; // self
+  if (targetPrivacy.profileVisibility === 'friends') return !!isFriend;
+  return false; // self only
 }
 
-export function maskPresenceForViewer(viewerId: string | null, targetId: string, targetPrivacy: PrivacySettings, isSelf: boolean) {
-  if (isSelf || (viewerId && viewerId === targetId)) return { showOnline: true, showLastActive: true };
-  return {
-    showOnline: !!targetPrivacy.showOnlineStatus,
-    showLastActive: !!targetPrivacy.showLastActive,
-  };
-}
-
-export function canSearchMatch(query: string, target: { id: string; username: string; displayName: string }, targetPrivacy: PrivacySettings) {
+export function canSearchByField(query: string, target: { id: string; username: string; displayName: string }, targetPrivacy: PrivacySettings) {
   const q = query.trim().toLowerCase();
   if (!q) return false;
   const byUsername = targetPrivacy.searchableByUsername && String(target.username || '').toLowerCase().includes(q);
   const byId = targetPrivacy.searchableById && String(target.id || '').toLowerCase().includes(q);
   const byName = targetPrivacy.searchableByDisplayName && String(target.displayName || '').toLowerCase().includes(q);
   return byUsername || byId || byName;
-}
-
-export function canSendFriendRequest(fromUserId: string, toUserId: string, targetPrivacy: PrivacySettings, ctx: { isFriend: boolean; blockedEither: boolean; hasMutualGroup: boolean }) {
-  if (ctx.blockedEither) return { ok: false, error: 'Cannot send friend request due to block settings.' };
-  if (ctx.isFriend) return { ok: false, error: 'Already friends.' };
-  if (targetPrivacy.friendRequestPolicy === 'everyone') return { ok: true as const };
-  if (targetPrivacy.friendRequestPolicy === 'mutual_group') return ctx.hasMutualGroup ? { ok: true as const } : { ok: false, error: 'This user only accepts friend requests from people in mutual groups.' };
-  return { ok: false, error: 'This user does not accept friend requests.' };
-}
-
-export function canSendDirectMessage(fromUserId: string, toUserId: string, targetPrivacy: PrivacySettings, ctx: { isFriend: boolean; blockedEither: boolean; hasMutualGroup: boolean }) {
-  if (ctx.blockedEither) return { ok: false, error: 'Messaging is not allowed due to block settings.' };
-  if (targetPrivacy.strangerMessagePolicy === 'everyone') return { ok: true as const };
-  if (targetPrivacy.strangerMessagePolicy === 'friends') return ctx.isFriend ? { ok: true as const } : { ok: false, error: 'This user only accepts messages from friends.' };
-  return (ctx.isFriend || ctx.hasMutualGroup) ? { ok: true as const } : { ok: false, error: 'This user only accepts messages from friends or mutual group members.' };
 }

@@ -1127,7 +1127,10 @@ app.get('/api/messenger/users/search', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
   const q = typeof req.query.q === 'string' ? req.query.q : '';
-  const users = store.searchUsers(q, user.id, 40).map(u => ({ id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, bio: u.bio, location: u.location, isOnline: (u as any).isOnline, lastActiveAt: (u as any).lastActiveAt, verified: u.verified }));
+  const users = store.searchUsers(q, user.id, 40).map(u => {
+    const pres = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(user.id, u.id) : { isOnline: !!(u as any).isOnline, lastActiveAt: (u as any).lastActiveAt };
+    return { id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, bio: u.bio, location: (u as any).location?.isPublic ? u.location : (u.location ? { countryCode: u.location.countryCode, countryName: u.location.countryName, cityName: u.location.cityName, isPublic: false, lat: 0, lng: 0 } : null), isOnline: !!pres.isOnline, lastActiveAt: pres.lastActiveAt, verified: !!u.verified };
+  });
   res.json({ success: true, users });
 });
 
@@ -1135,15 +1138,15 @@ app.get('/api/messenger/friends', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
   const ids = store.getFriendIds(user.id);
-  const friends = ids.map(id => store.users.find(u=>u.id===id)).filter(Boolean).map((u:any)=>({ id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, isOnline: u.isOnline, lastActiveAt: u.lastActiveAt, location: u.location, bio: u.bio }));
+  const friends = ids.map(id => store.users.find(u=>u.id===id)).filter(Boolean).map((u:any)=>{ const pres = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(user.id, u.id) : { isOnline: !!u.isOnline, lastActiveAt: u.lastActiveAt }; return { id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, isOnline: !!pres.isOnline, lastActiveAt: pres.lastActiveAt, location: u.location?.isPublic ? u.location : (u.location ? { countryCode: u.location.countryCode, countryName: u.location.countryName, cityName: u.location.cityName, isPublic: false, lat: 0, lng: 0 } : null), bio: u.bio }; });
   res.json({ success: true, friends });
 });
 
 app.get('/api/messenger/friend-requests', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
-  const incoming = store.friendRequests.filter(r => r.toUserId === user.id && r.status === 'pending').map(r => ({ ...r, fromUser: (()=>{const u=store.users.find(x=>x.id===r.fromUserId); return u?{id:u.id,username:u.username,displayName:u.displayName,avatar:u.avatar,isOnline:(u as any).isOnline}:null;})() }));
-  const outgoing = store.friendRequests.filter(r => r.fromUserId === user.id && r.status === 'pending').map(r => ({ ...r, toUser: (()=>{const u=store.users.find(x=>x.id===r.toUserId); return u?{id:u.id,username:u.username,displayName:u.displayName,avatar:u.avatar}:null;})() }));
+  const incoming = store.friendRequests.filter(r => r.toUserId === user.id && r.status === 'pending').map(r => ({ ...r, fromUser: (()=>{const u=store.users.find(x=>x.id===r.fromUserId); if(!u) return null; const pres=(store as any).getMaskedPresenceForViewer? (store as any).getMaskedPresenceForViewer(user.id,u.id):{isOnline:!!(u as any).isOnline,lastActiveAt:(u as any).lastActiveAt}; return {id:u.id,username:u.username,displayName:u.displayName,avatar:u.avatar,isOnline:!!pres.isOnline,lastActiveAt:pres.lastActiveAt};})() }));
+  const outgoing = store.friendRequests.filter(r => r.fromUserId === user.id && r.status === 'pending').map(r => ({ ...r, toUser: (()=>{const u=store.users.find(x=>x.id===r.toUserId); if(!u) return null; const pres=(store as any).getMaskedPresenceForViewer? (store as any).getMaskedPresenceForViewer(user.id,u.id):{isOnline:!!(u as any).isOnline,lastActiveAt:(u as any).lastActiveAt}; return {id:u.id,username:u.username,displayName:u.displayName,avatar:u.avatar,isOnline:!!pres.isOnline,lastActiveAt:pres.lastActiveAt};})() }));
   res.json({ success: true, incoming, outgoing });
 });
 
@@ -1223,7 +1226,8 @@ app.post('/api/messenger/block', async (req, res) => {
   if (!user) return;
   const targetUserId = typeof req.body?.userId === 'string' ? req.body.userId : '';
   if (!targetUserId) return res.status(400).json({ success: false, error: 'userId required' });
-  await store.mutate(async () => { store.blockUser(user.id, targetUserId); });
+  await store.mutate(async () => { store.blockUser(user.id, targetUserId); store.persist(); });
+  try { wsBroadcastToUser(user.id, { type: 'blocklist_sync', blocked: (store.blockedBy[user.id]||[]) }); } catch {}
   res.json({ success: true, blocked: (store.blockedBy[user.id]||[]) });
 });
 
@@ -1231,7 +1235,8 @@ app.post('/api/messenger/unblock', async (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
   const targetUserId = typeof req.body?.userId === 'string' ? req.body.userId : '';
-  await store.mutate(async () => { store.unblockUser(user.id, targetUserId); });
+  await store.mutate(async () => { store.unblockUser(user.id, targetUserId); store.persist(); });
+  try { wsBroadcastToUser(user.id, { type: 'blocklist_sync', blocked: (store.blockedBy[user.id]||[]) }); } catch {}
   res.json({ success: true, blocked: (store.blockedBy[user.id]||[]) });
 });
 
@@ -1239,7 +1244,7 @@ app.get('/api/messenger/blocked', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
   const ids = store.blockedBy[user.id] || [];
-  const users = ids.map(id => store.users.find(u=>u.id===id)).filter(Boolean).map((u:any)=>({ id:u.id, username:u.username, displayName:u.displayName, avatar:u.avatar }));
+  const users = ids.map(id => store.users.find(u=>u.id===id)).filter(Boolean).map((u:any)=>({ id:u.id, username:u.username, displayName:u.displayName, avatar:u.avatar, isOnline:false, lastActiveAt: undefined }));
   res.json({ success: true, blocked: users });
 });
 
@@ -1287,12 +1292,12 @@ app.get('/api/messenger/sync', (req, res) => {
 app.get('/api/messenger/profile/:id', (req, res) => {
   const viewer = requireSessionUser(req, res);
   if (!viewer) return;
-  const view = store.getPublicProfileView(viewer.id, req.params.id);
+  const view = store.getPublicProfileView(viewer.id, req.params.id) as any;
   if (!view) return res.status(404).json({ success: false, error: 'User not found' });
-  if ((view as any).isSelf) {
-    return res.json({ success: true, user: view, isSelf: true, isFriend: false, blocked: false, pendingRequest: null });
+  if (view.isSelf) {
+    return res.json({ success: true, user: view.user || view, isSelf: true, isFriend: false, blocked: false, pendingRequest: null });
   }
-  return res.json({ success: true, ...view });
+  return res.json({ success: true, user: view.user, isSelf: false, isFriend: !!view.isFriend, blocked: !!view.blocked, pendingRequest: view.pendingRequest || null, restricted: !!view.restricted });
 });
 
 
@@ -1636,14 +1641,16 @@ app.post('/api/conversations/direct', async (req, res) => {
   if (!user) return;
   const targetUserId = typeof req.body?.targetUserId === 'string' ? req.body.targetUserId : '';
   if (!targetUserId) return res.status(400).json({ success: false, error: 'targetUserId is required' });
-  if ((store.blockedBy[user.id]||[]).includes(targetUserId) || (store.blockedBy[targetUserId]||[]).includes(user.id)) {
-    return res.status(403).json({ success: false, error: 'Cannot start conversation with this user.' });
-  }
+  const perm = store.canSendDirectMessageBetween(user.id, targetUserId);
+  if (!perm.ok) return res.status(403).json({ success: false, error: perm.error || 'Cannot start conversation with this user.' });
   try {
     let conv: any;
     await store.mutate(async () => { conv = store.getOrCreateDirectConversation(user.id, targetUserId); });
     if (!conv) return res.status(404).json({ success: false, error: 'Target user not found' });
-    res.json({ success: true, conversation: conv, conversations: store.getConversationsForUser(user.id) });
+    // return masked view consistent with list
+    const convs = store.getConversationsForUser(user.id);
+    const masked = convs.find(c => c.id === conv.id) || conv;
+    res.json({ success: true, conversation: masked, conversations: convs });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to create conversation' });
   }
@@ -1831,11 +1838,12 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
   const conv = store.conversations.find(c => c.id === id);
   if (!conv) return res.status(404).json({ success: false, error: 'Conversation not found' });
   if (!store.canAccessConversation(authUser.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
-  // block checks for direct
+  // block/privacy checks for direct
   if (conv.type === 'direct') {
     const otherId = (conv.participantIds||[]).find((pid:string)=>pid!==authUser.id);
-    if (otherId && ((store.blockedBy[authUser.id]||[]).includes(otherId) || (store.blockedBy[otherId]||[]).includes(authUser.id))) {
-      return res.status(403).json({ success: false, error: 'Messaging blocked.' });
+    if (otherId) {
+      const perm = store.canSendDirectMessageBetween(authUser.id, otherId);
+      if (!perm.ok) return res.status(403).json({ success: false, error: perm.error || 'Messaging blocked.' });
     }
   }
   const text = typeof content === 'string' ? content.trim() : '';
@@ -1872,6 +1880,7 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
       const preview = (text || (atts?.length ? '[attachment]' : '')).slice(0, 80);
       for (const uid of (convNow?.participantIds || [])) {
         if (uid === authUser.id) continue;
+        if (store.isBlockedEither(uid, authUser.id)) continue;
         emitNotification(uid, { type: 'message_new', title: convNow?.name || authUser.displayName, body: `${authUser.displayName}: ${preview}`, actorId: authUser.id, actorName: authUser.displayName, actorAvatar: authUser.avatar, conversationId: id, data: { messageId: msg.id } });
       }
       store.persist();
@@ -1889,9 +1898,15 @@ app.post('/api/conversations/:id/read', async (req, res) => {
   const id = req.params.id;
   const conv = store.conversations.find(c => c.id === id);
   if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
-  await store.mutate(async () => { store.markConversationRead(id, user.id); });
-  wsBroadcastConversationEvent(id, { type: 'read', conversationId: id, userId: user.id, readAt: new Date().toISOString() });
-  res.json({ success: true });
+  const allowReceipt = store.shouldSendReadReceipt(user.id);
+  await store.mutate(async () => { store.markConversationRead(id, user.id, { allowReadReceipt: allowReceipt }); });
+  const readEvt = { type: 'read', conversationId: id, userId: user.id, readAt: new Date().toISOString() };
+  if (allowReceipt) {
+    wsBroadcastConversationEvent(id, readEvt);
+  } else {
+    try { wsBroadcastToUser(user.id, { ...readEvt, selfOnly: true }); } catch {}
+  }
+  res.json({ success: true, readReceiptSent: allowReceipt });
 });
 
 app.post('/api/conversations/:id/messages/:messageId/recall', async (req, res) => {
@@ -1918,6 +1933,22 @@ app.post('/api/conversations/:id/messages/:messageId/delete', async (req, res) =
     res.json({ success: true, message: msg });
   } catch (e:any) {
     const m = e?.message || 'Failed'; res.status(m==='Message not found'?404:400).json({ success:false, error:m });
+  }
+});
+
+app.post('/api/conversations/:id/clear', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const id = req.params.id;
+  try {
+    let result: any;
+    await store.mutate(async () => { result = store.clearConversationForUser(user.id, id); store.persist(); });
+    // keep own devices in sync
+    try { wsBroadcastToUser(user.id, { type: 'conversation_cleared', conversationId: id, forUserId: user.id, cleared: result?.cleared || 0 }); } catch {}
+    res.json({ success: true, conversationId: id, ...result });
+  } catch (e:any) {
+    const m = e?.message || 'Failed';
+    res.status(m==='Forbidden'?403:400).json({ success: false, error: m });
   }
 });
 

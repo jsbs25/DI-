@@ -34,10 +34,16 @@ function broadcastPresence(userId: string) {
     (user as any).isOnline = online;
     (user as any).lastActiveAt = new Date().toISOString();
   }
-  // notify friends and conversation participants
+  // notify self with true state
+  broadcastToUsers([userId], { type: 'presence', userId, online, lastActiveAt: (user as any)?.lastActiveAt, deviceCount: set?.size || 0 });
+  // notify related users with privacy-masked state
   const friendIds = store.getFriendIds(userId);
   const convIds = store.getConversationsForUser(userId).filter(c => c.type === 'direct' || c.type === 'group').flatMap(c => c.participantIds || []);
-  broadcastToUsers([...friendIds, ...convIds, userId], { type: 'presence', userId, online, deviceCount: set?.size || 0, lastActiveAt: (user as any)?.lastActiveAt });
+  const recipients = Array.from(new Set([...friendIds, ...convIds])).filter(id => id && id !== userId);
+  for (const rid of recipients) {
+    const masked = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(rid, userId) : { isOnline: online, lastActiveAt: (user as any)?.lastActiveAt };
+    broadcastToUsers([rid], { type: 'presence', userId, online: !!masked.isOnline, lastActiveAt: masked.lastActiveAt });
+  }
 }
 
 export function getTokenFromReq(req: IncomingMessage): string | null {
@@ -94,8 +100,14 @@ export function attachMessengerWs(wss: WebSocketServer) {
         const convId = String(msg.conversationId || '');
         const conv = store.conversations.find(c => c.id === convId);
         if (!conv || !store.canAccessConversation(user.id, conv)) return;
-        await store.mutate(async () => { store.markConversationRead(convId, user.id); });
-        broadcastToUsers(conv.participantIds||[], { type: 'read', conversationId: convId, userId: user.id, readAt: new Date().toISOString() });
+        const allowReceipt = store.shouldSendReadReceipt(user.id);
+        await store.mutate(async () => { store.markConversationRead(convId, user.id, { allowReadReceipt: allowReceipt }); });
+        if (allowReceipt) {
+          broadcastToUsers(conv.participantIds||[], { type: 'read', conversationId: convId, userId: user.id, readAt: new Date().toISOString() });
+        } else {
+          // keep own devices in sync without exposing read receipt to others
+          broadcastToUsers([user.id], { type: 'read', conversationId: convId, userId: user.id, readAt: new Date().toISOString(), selfOnly: true });
+        }
         return;
       }
 
@@ -105,11 +117,12 @@ export function attachMessengerWs(wss: WebSocketServer) {
         const clientMsgId = typeof msg.clientMsgId === 'string' ? msg.clientMsgId : undefined;
         const conv = store.conversations.find(c => c.id === convId);
         if (!conv || !store.canAccessConversation(user.id, conv)) { safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: 'forbidden' }); return; }
-        // block check for direct
+        // block/privacy check for direct
         if (conv.type === 'direct') {
           const otherId = conv.participantIds.find(id => id !== user.id);
-          if (otherId && ((store.blockedBy[user.id]||[]).includes(otherId) || (store.blockedBy[otherId]||[]).includes(user.id))) {
-            safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: 'blocked' }); return;
+          if (otherId) {
+            const perm = store.canSendDirectMessageBetween(user.id, otherId);
+            if (!perm.ok) { safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: perm.error || 'not_allowed' }); return; }
           }
         }
         const attachments = Array.isArray(msg.attachments) ? msg.attachments : undefined;
@@ -121,6 +134,7 @@ export function attachMessengerWs(wss: WebSocketServer) {
             const preview = (content.trim() || (attachments?.length ? '[attachment]' : '')).slice(0, 80);
             for (const uid of (conv.participantIds || [])) {
               if (uid === user.id) continue;
+              if (store.isBlockedEither(uid, user.id)) continue; // blocked: no notification from this actor
               const prefs = store.getNotificationPrefs(uid);
               const decision = decideNotification(prefs, 'message_new');
               const n = store.createNotification({ userId: uid, type: 'message_new', title: conv.name || user.displayName, body: `${user.displayName}: ${preview}`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: convId, data: { messageId: saved.id } });

@@ -43,7 +43,7 @@ import {
   SecurityAuditEvent
 } from '../src/types/index.ts';
 import { resolveCoordinates } from '../src/utils/geoData.ts';
-import { normalizePrivacySettings, DEFAULT_PRIVACY_SETTINGS } from './privacyPolicy.ts';
+import { normalizePrivacySettings, DEFAULT_PRIVACY_SETTINGS, canViewProfileByPolicy, canSearchByField } from './privacyPolicy.ts';
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
 import { crawlWebsite } from './webFetcher.ts';
 
@@ -1274,9 +1274,27 @@ class DataStore {
     const isSelf = viewerId === targetId;
     if (isSelf) return this.getSelfProfileView(targetId);
     const isFriend = this.getFriendIds(viewerId).includes(targetId);
-    const blocked = (this.blockedBy[viewerId]||[]).includes(targetId) || (this.blockedBy[targetId]||[]).includes(viewerId);
+    const blockedEither = (this.blockedBy[viewerId]||[]).includes(targetId) || (this.blockedBy[targetId]||[]).includes(viewerId);
+    const priv = this.getPrivacySettings(targetId);
+    const canView = canViewProfileByPolicy(false, isFriend, blockedEither, priv);
     const pending = this.friendRequests.find(r => r.status==='pending' && ((r.fromUserId===viewerId && r.toUserId===targetId) || (r.fromUserId===targetId && r.toUserId===viewerId))) || null;
-    // public-safe: never expose email/phone/linkedIdentities details; location respects isPublic
+    if (!canView) {
+      // minimal shell for existing friends/chat contexts handled elsewhere; do not leak hidden profile fields
+      return {
+        user: {
+          id: u.id,
+          username: u.username,
+          displayName: u.displayName,
+          avatar: u.avatar,
+          bio: '',
+          isOnline: false,
+          lastActiveAt: undefined,
+          joinedAt: undefined,
+          verified: !!u.verified,
+        },
+        isSelf, isFriend, blocked: blockedEither, pendingRequest: pending, restricted: true,
+      } as any;
+    }
     const loc = u.location ? {
       countryCode: u.location.countryCode,
       countryName: u.location.countryName,
@@ -1297,13 +1315,13 @@ class DataStore {
         interests: u.interests || [],
         followersCount: u.followersCount,
         followingCount: u.followingCount,
-        isOnline: !!(u as any).isOnline,
-        lastActiveAt: (u as any).lastActiveAt,
+        isOnline: priv.showOnlineStatus ? !!(u as any).isOnline : false,
+        lastActiveAt: priv.showLastActive ? (u as any).lastActiveAt : undefined,
         verified: !!u.verified,
         joinedAt: u.joinedAt,
       },
-      isSelf, isFriend, blocked, pendingRequest: pending,
-    };
+      isSelf, isFriend, blocked: blockedEither, pendingRequest: pending, restricted: false,
+    } as any;
   }
 
   getProfileUpdateRecipients(userId: string): string[] {
@@ -1550,7 +1568,9 @@ class DataStore {
           const otherId = c.participantIds.find(id => id !== userId);
           const other = otherId ? this.users.find(u => u.id === otherId) : undefined;
           const unread = this.getUnreadCountForUser(c.id, userId);
-          return { ...c, name: other?.displayName || c.name, avatar: other?.avatar || c.avatar, otherUser: other, isOnline: !!(other as any)?.isOnline, unreadCount: unread };
+          const oPriv = other ? this.getPrivacySettings(other.id) : null;
+          const otherMasked = other ? { ...other, isOnline: oPriv?.showOnlineStatus ? !!(other as any).isOnline : false, lastActiveAt: oPriv?.showLastActive ? (other as any).lastActiveAt : undefined } : undefined;
+          return { ...c, name: other?.displayName || c.name, avatar: other?.avatar || c.avatar, otherUser: otherMasked as any, isOnline: oPriv?.showOnlineStatus ? !!(other as any)?.isOnline : false, unreadCount: unread };
         }
         if (c.type === 'group') {
           const unread = this.getUnreadCountForUser(c.id, userId);
@@ -1654,7 +1674,12 @@ class DataStore {
       if (blocked.includes(u.id)) return false;
       const theirs = this.blockedBy[u.id] || [];
       if (viewerId && theirs.includes(viewerId)) return false;
-      return u.displayName.toLowerCase().includes(q) || u.username.toLowerCase().includes(q) || (u.id || '').toLowerCase().includes(q);
+      const priv = this.getPrivacySettings(u.id);
+      if (!canSearchByField(q, { id: u.id, username: u.username, displayName: u.displayName }, priv)) return false;
+      // enforce profile visibility for discoverability via search (respect "仅自己可见" / "仅好友可见")
+      const isFriend = viewerId ? this.getFriendIds(viewerId).includes(u.id) : false;
+      if (!canViewProfileByPolicy(false, isFriend, false, priv)) return false;
+      return true;
     }).slice(0, limit);
   }
 
@@ -1707,6 +1732,13 @@ class DataStore {
     if (!list.includes(otherUserId)) list.push(otherUserId);
     this.blockedBy[userId] = list;
     this.removeFriend(userId, otherUserId);
+    // cancel pending friend requests between them
+    for (const r of this.friendRequests) {
+      if (r.status !== 'pending') continue;
+      if ((r.fromUserId === userId && r.toUserId === otherUserId) || (r.fromUserId === otherUserId && r.toUserId === userId)) {
+        r.status = 'rejected'; r.updatedAt = new Date().toISOString();
+      }
+    }
     this.saveToDisk();
   }
 
@@ -1731,15 +1763,20 @@ class DataStore {
 
 
 
-  markConversationRead(conversationId: string, userId: string) {
+  markConversationRead(conversationId: string, userId: string, opts?: { allowReadReceipt?: boolean }) {
     const now = new Date().toISOString();
+    const allowReadReceipt = opts?.allowReadReceipt ?? this.shouldSendReadReceipt(userId);
     let changed = false;
     for (const m of this.messages) {
       if (m.conversationId !== conversationId) continue;
       if (m.senderId === userId) continue;
       if ((m as any).recalled) continue;
-      if (!(m.readBy||[]).includes(userId)) { m.readBy = [...(m.readBy||[]), userId]; m.status = 'read'; changed = true; }
+      // delivered can be tracked for transport; read receipt visibility controlled separately
       if (!(m.deliveredTo||[]).includes(userId)) { m.deliveredTo = [...(m.deliveredTo||[]), userId]; changed = true; }
+      if (allowReadReceipt) {
+        if (!(m.readBy||[]).includes(userId)) { m.readBy = [...(m.readBy||[]), userId]; changed = true; }
+        if (m.status !== 'read') { m.status = 'read'; changed = true; }
+      }
       if (!m.updatedAt) m.updatedAt = now;
     }
     if (changed) this.saveToDisk();
@@ -2331,6 +2368,38 @@ class DataStore {
 
   shouldSendReadReceipt(userId: string) {
     return !!this.getPrivacySettings(userId).readReceipts;
+  }
+
+  getMaskedPresenceForViewer(viewerId: string | null, targetId: string) {
+    const u = this.users.find(x => x.id === targetId);
+    if (!u) return { isOnline: false, lastActiveAt: undefined };
+    if (viewerId && viewerId === targetId) return { isOnline: !!(u as any).isOnline, lastActiveAt: (u as any).lastActiveAt };
+    const priv = this.getPrivacySettings(targetId);
+    const isFriend = viewerId ? this.getFriendIds(viewerId).includes(targetId) : false;
+    const blockedEither = viewerId ? ((this.blockedBy[viewerId]||[]).includes(targetId) || (this.blockedBy[targetId]||[]).includes(viewerId)) : false;
+    if (blockedEither) return { isOnline: false, lastActiveAt: undefined };
+    // if viewer cannot view profile as "friends" context still allow presence? but spec says "关闭后，其他用户不能通过 API 或 WebSocket 获得被隐藏的信息"
+    return { isOnline: priv.showOnlineStatus ? !!(u as any).isOnline : false, lastActiveAt: priv.showLastActive ? (u as any).lastActiveAt : undefined };
+  }
+
+  isBlockedEither(a: string, b: string) {
+    return !!((this.blockedBy[a]||[]).includes(b) || (this.blockedBy[b]||[]).includes(a));
+  }
+
+  getBlockedUserIds(userId: string) {
+    return Array.from(new Set(this.blockedBy[userId] || []));
+  }
+
+  clearConversationForUser(userId: string, conversationId: string) {
+    const conv = this.conversations.find(c => c.id === conversationId);
+    if (!conv || !this.canAccessConversation(userId, conv)) throw new Error('Forbidden');
+    let count = 0;
+    for (const m of this.messages) {
+      if (m.conversationId !== conversationId) continue;
+      if (!(m.deletedFor||[]).includes(userId)) { m.deletedFor = [...(m.deletedFor||[]), userId]; count++; }
+    }
+    if (count) this.saveToDisk();
+    return { cleared: count };
   }
 
 
