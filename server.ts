@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
@@ -24,6 +24,7 @@ import {
 } from './server/knowledgeGraph.ts';
 import { musicStore } from './server/musicStore.ts';
 import { resolveMusicEmbedUrl, searchYouTubeMusic } from './server/youtubeMusicSearch.ts';
+import { getChannelIntegrations } from './server/channelIntegrations.ts';
 import { searchBilibiliVideos } from './server/bilibiliCrawler.ts';
 import { searchOpenImages } from './server/openImageCrawler.ts';
 import { discoveryDb } from './server/discovery/database/db.ts';
@@ -94,6 +95,48 @@ function checkAuthRateLimit(key: string, limit = 10, windowMs = 15 * 60 * 1000):
   return true;
 }
 
+function parseCookies(req: express.Request): Record<string, string> {
+  const raw = req.headers.cookie || '';
+  const out: Record<string, string> = {};
+  raw.split(';').forEach(part => {
+    const idx = part.indexOf('=');
+    if (idx < 0) return;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (k) out[k] = decodeURIComponent(v || '');
+  });
+  return out;
+}
+
+const oauthStates = new Map<string, number>(); // state -> expiresAt
+function pruneOauthStates() {
+  const now = Date.now();
+  for (const [k, exp] of oauthStates) if (exp <= now) oauthStates.delete(k);
+}
+setInterval(pruneOauthStates, 5 * 60 * 1000).unref?.();
+
+function requireSessionUser(req: express.Request, res: express.Response) {
+  const user = getSessionUser(req);
+  if (!user) {
+    res.status(401).json({ success: false, error: 'Authentication required.' });
+    return null;
+  }
+  return user;
+}
+
+
+// -------------------------------------------------------------
+// CHANNEL INTEGRATIONS (official only; no personal account takeover)
+// -------------------------------------------------------------
+app.get('/api/integrations', (req, res) => {
+  const user = getSessionUser(req);
+  const integrations = getChannelIntegrations(process.env).map(i => {
+    const linked = user?.linkedIdentities?.find(li => li.provider === i.id);
+    return { ...i, linked: !!linked, linkedLabel: linked?.displayName || linked?.email || linked?.providerUserId };
+  });
+  res.json({ success: true, integrations });
+});
+
 // -------------------------------------------------------------
 // 1. AUTH & USER PROFILE ENDPOINTS
 // -------------------------------------------------------------
@@ -134,9 +177,90 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
+
 app.get('/api/auth/me', (req, res) => {
   const user = getSessionUser(req);
   res.json({ success: true, user: user || null });
+});
+
+// Google OAuth 2.0 (official) - sign in / bind account
+app.get('/api/auth/google/start', (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  if (!clientId) return res.status(501).json({ success: false, error: 'Google login not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.' });
+  const redirectUri = `${appUrl}/api/auth/google/callback`;
+  const state = randomBytes(24).toString('hex');
+  pruneOauthStates();
+  oauthStates.set(state, Date.now() + 10 * 60 * 1000);
+  const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `earth_oauth_state=${encodeURIComponent(state)}; HttpOnly; Path=/api/auth/google; SameSite=Lax; Max-Age=600${isSecure ? '; Secure' : ''}`);
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'openid email profile',
+    access_type: 'online',
+    prompt: 'select_account',
+    state
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+});
+
+app.get('/api/auth/google/callback', async (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const redirectUri = `${appUrl}/api/auth/google/callback`;
+  const cookies = parseCookies(req);
+  const cookieState = cookies.earth_oauth_state || '';
+  const stateExp = oauthStates.get(state);
+  const stateOk = !!state && !!cookieState && state === cookieState && !!stateExp && stateExp > Date.now();
+  if (state) oauthStates.delete(state);
+  const isSecure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `earth_oauth_state=; HttpOnly; Path=/api/auth/google; SameSite=Lax; Max-Age=0${isSecure ? '; Secure' : ''}`);
+  if (!stateOk) {
+    return res.redirect(`${appUrl}/?auth_error=google_state`);
+  }
+  if (!code || !process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.redirect(`${appUrl}/?auth_error=google_config`);
+  }
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      })
+    });
+    const tokenJson: any = await tokenRes.json();
+    if (!tokenRes.ok || !tokenJson.access_token) {
+      return res.redirect(`${appUrl}/?auth_error=google_token`);
+    }
+    const infoRes = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: `Bearer ${tokenJson.access_token}` }
+    });
+    const info: any = await infoRes.json();
+    if (!infoRes.ok || !info.sub) {
+      return res.redirect(`${appUrl}/?auth_error=google_profile`);
+    }
+    const { user, token } = store.createOrLoginOAuthUser({
+      provider: 'google',
+      providerUserId: String(info.sub),
+      email: info.email,
+      displayName: info.name || info.email,
+      avatar: info.picture
+    });
+    const payload = Buffer.from(JSON.stringify({ token, user })).toString('base64url');
+    // pass via hash so SPA can pick it up without server-rendered template change
+    return res.redirect(`${appUrl}/#auth=${payload}`);
+  } catch (e) {
+    console.error('Google OAuth callback error', e);
+    return res.redirect(`${appUrl}/?auth_error=google_failed`);
+  }
 });
 
 app.get('/api/auth/current', (req, res) => {
@@ -409,17 +533,46 @@ app.post('/api/posts/:id/comment', (req, res) => {
 // 4. INSTANT MESSAGING & AI REAL-TIME TRANSLATION
 // -------------------------------------------------------------
 app.get('/api/conversations', (req, res) => {
-  res.json({ success: true, conversations: store.conversations });
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const conversations = store.getConversationsForUser(user.id);
+  res.json({ success: true, conversations });
+});
+
+app.post('/api/conversations/direct', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const targetUserId = typeof req.body?.targetUserId === 'string' ? req.body.targetUserId : '';
+  if (!targetUserId) return res.status(400).json({ success: false, error: 'targetUserId is required' });
+  const conv = store.getOrCreateDirectConversation(user.id, targetUserId);
+  if (!conv) return res.status(404).json({ success: false, error: 'Target user not found' });
+  res.json({ success: true, conversation: conv, conversations: store.getConversationsForUser(user.id) });
 });
 
 app.get('/api/conversations/:id/messages', (req, res) => {
-  const msgs = store.messages.filter(m => m.conversationId === req.params.id);
+  const id = req.params.id;
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const conv = store.conversations.find(c => c.id === id);
+  if (!conv) return res.status(404).json({ success: false, error: 'Conversation not found' });
+  if (conv.type === 'direct' && !conv.participantIds.includes(user.id)) {
+    return res.status(403).json({ success: false, error: 'Forbidden' });
+  }
+  const msgs = store.messages.filter(m => m.conversationId === id);
   res.json({ success: true, messages: msgs });
 });
 
 app.post('/api/conversations/:id/messages', async (req, res) => {
   const { content, targetLanguage, autoTranslate } = req.body;
-  if (!content) return res.status(400).json({ success: false, error: 'Message cannot be empty' });
+  if (!content || !String(content).trim()) return res.status(400).json({ success: false, error: 'Message cannot be empty' });
+  const id = req.params.id;
+  const authUser = requireSessionUser(req, res);
+  if (!authUser) return;
+  const conv = store.conversations.find(c => c.id === id);
+  if (!conv) return res.status(404).json({ success: false, error: 'Conversation not found' });
+  if (conv.type === 'direct' && !conv.participantIds.includes(authUser.id)) {
+    return res.status(403).json({ success: false, error: 'Forbidden' });
+  }
 
   let translatedContent: string | undefined;
   let translatedTo: string | undefined;
@@ -429,23 +582,22 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
       if (aiClient) {
         const response = await aiClient.models.generateContent({
           model: 'gemini-2.5-flash',
-          contents: `Translate the following chat message to ${targetLanguage}. Maintain conversational nuance, warmth, and friendly tone. Return ONLY the translated string without commentary:\n"${content}"`
+          contents: `Translate the following chat message to ${targetLanguage}. Maintain conversational nuance, warmth, and friendly tone. Return ONLY the translated string without commentary:\n"${String(content)}"`
         });
         translatedContent = response.text ? response.text.trim() : undefined;
         translatedTo = targetLanguage;
       } else {
-        translatedContent = `[Translated to ${targetLanguage}]: ${content}`;
+        translatedContent = `[Translated to ${targetLanguage}]: ${String(content)}`;
         translatedTo = targetLanguage;
       }
     } catch (err) {
       console.warn('AI translation fallback:', err);
-      translatedContent = content;
+      translatedContent = String(content);
     }
   }
 
-  const authUser = getAuthUser(req);
-  const msg = store.sendMessage(req.params.id, content, authUser, translatedContent, translatedTo);
-  res.json({ success: true, message: msg });
+  const msg = store.sendMessage(id, String(content).trim(), authUser, translatedContent, translatedTo);
+  res.json({ success: true, message: msg, conversation: store.conversations.find(c => c.id === id) });
 });
 
 // -------------------------------------------------------------
@@ -965,9 +1117,11 @@ app.get('/api/library/epub-proxy', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// Admin library management
+// Admin library management (authenticated)
 // -------------------------------------------------------------
 app.put('/api/library/books/:id', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
   const { title, author, category, language, year, publisher, isbn, description, coverImage, copyrightStatus, source } = req.body;
   const updates: Partial<import('./src/types/index.ts').Book> = {};
   if (title !== undefined) updates.title = title;
@@ -987,15 +1141,18 @@ app.put('/api/library/books/:id', (req, res) => {
 });
 
 app.delete('/api/library/books/:id', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
   const removed = store.deleteBook(req.params.id);
   res.json({ success: removed });
 });
 
 // -------------------------------------------------------------
-// Personal bookshelf
+// Personal bookshelf (authenticated, per-user ownership)
 // -------------------------------------------------------------
 app.get('/api/library/shelf', (req, res) => {
-  const user = getAuthUser(req);
+  const user = requireSessionUser(req, res);
+  if (!user) return;
   const items = store.getBookShelf(user.id);
   const books = items
     .map(item => {
@@ -1007,7 +1164,8 @@ app.get('/api/library/shelf', (req, res) => {
 });
 
 app.post('/api/library/shelf', (req, res) => {
-  const user = getAuthUser(req);
+  const user = requireSessionUser(req, res);
+  if (!user) return;
   const { bookId, status } = req.body;
   if (!bookId) return res.status(400).json({ success: false, error: 'bookId required' });
   const item = store.addToBookShelf(user.id, bookId, status || 'want_to_read');
@@ -1015,20 +1173,23 @@ app.post('/api/library/shelf', (req, res) => {
 });
 
 app.delete('/api/library/shelf/:bookId', (req, res) => {
-  const user = getAuthUser(req);
+  const user = requireSessionUser(req, res);
+  if (!user) return;
   const removed = store.removeFromBookShelf(user.id, req.params.bookId);
   res.json({ success: removed });
 });
 
 app.post('/api/library/shelf/:bookId/progress', (req, res) => {
-  const user = getAuthUser(req);
+  const user = requireSessionUser(req, res);
+  if (!user) return;
   const { progress } = req.body;
   const item = store.updateBookShelfProgress(user.id, req.params.bookId, Number(progress) || 0);
   res.json({ success: !!item, item });
 });
 
 app.post('/api/library/shelf/:bookId/reading-state', (req, res) => {
-  const user = getAuthUser(req);
+  const user = requireSessionUser(req, res);
+  if (!user) return;
   const book = store.books.find(b => b.id === req.params.bookId);
   if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
   const { chapterId } = req.body;
@@ -1153,9 +1314,11 @@ app.post('/api/library/books/:id/progress', (req, res) => {
 });
 
 app.post('/api/library/books/:id/annotations', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
   const { chapterId, selectedText, note, aiExplanation } = req.body;
   if (!selectedText) return res.status(400).json({ success: false, error: 'Selected text required' });
-  const ann = store.addAnnotation(req.params.id, chapterId, selectedText, note || '', aiExplanation);
+  const ann = store.addAnnotation(req.params.id, chapterId, selectedText, note || '', aiExplanation, user.id);
   res.json({ success: true, annotation: ann });
 });
 

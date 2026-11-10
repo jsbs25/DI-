@@ -33,6 +33,7 @@ function getSafeSourceUrl(value?: string): string | null {
  */
 export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCfi, ownerId, onProgress }) => {
   const officialSourceUrl = getSafeSourceUrl(book.externalReadUrl) || getSafeSourceUrl(book.sourceUrl);
+  const isRtl = /^(ar|he|fa|ur|ps|sd|yi|ug|dv|ku)\b/i.test(book.language || '');
   const viewerRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -99,6 +100,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
       window.requestAnimationFrame(() => {
         if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
       });
@@ -179,8 +181,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
     return () => {
       cancelled = true;
       flushProgress();
+      if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
       try { activeRendition?.destroy?.(); } catch {}
-      try { bookInstance?.destroy?.(); } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book.epubUrl]);
@@ -277,7 +279,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
           </aside>
         )}
 
-        <div className="flex-1 bg-[#f5f1e8] flex items-center justify-center relative">
+        <div className="flex-1 bg-[#f5f1e8] flex items-center justify-center relative" dir={isRtl ? 'rtl' : 'ltr'} lang={book.language || undefined}>
           {loading && (
               <div role="status" aria-live="polite" className="text-slate-500 text-sm flex items-center space-x-2">
               <BookOpen className="w-5 h-5 animate-pulse" />

@@ -20,7 +20,8 @@ import {
   CrawlerTask,
   CrawledPage,
   BrowserBookmark,
-  SavedArticle
+  SavedArticle,
+  LinkedIdentity
 } from '../src/types/index.ts';
 import { resolveCoordinates } from '../src/utils/geoData.ts';
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
@@ -1013,7 +1014,8 @@ class DataStore {
     const conv = this.conversations.find(c => c.id === conversationId);
     if (conv) {
       conv.lastMessage = content;
-      conv.lastMessageTime = 'Just now';
+      conv.lastMessageTime = new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      conv.lastMessageAt = msg.createdAt;
     }
     this.saveToDisk();
     return msg;
@@ -1233,6 +1235,109 @@ class DataStore {
     return user;
   }
 
+
+  getOrCreateDirectConversation(currentUserId: string, targetUserId: string): Conversation | null {
+    if (!targetUserId || currentUserId === targetUserId) return null;
+    const target = this.users.find(u => u.id === targetUserId);
+    if (!target) return null;
+    let conv = this.conversations.find(c => c.type === 'direct' && c.participantIds.includes(currentUserId) && c.participantIds.includes(targetUserId));
+    if (!conv) {
+      conv = {
+        id: `conv_direct_${[currentUserId, targetUserId].sort().join('_')}`,
+        type: 'direct',
+        name: target.displayName,
+        countryCode: target.location.countryCode,
+        participantIds: [currentUserId, targetUserId],
+        otherUser: target,
+        lastMessage: 'Conversation opened',
+        lastMessageTime: new Date().toISOString(),
+        isOnline: target.isOnline,
+        channel: 'earthone'
+      };
+      this.conversations.unshift(conv);
+      this.saveToDisk();
+    } else {
+      conv.otherUser = target;
+      conv.isOnline = target.isOnline;
+      conv.name = target.displayName;
+    }
+    return conv;
+  }
+
+  getConversationsForUser(userId: string): Conversation[] {
+    return this.conversations
+      .filter(c => c.type === 'global_channel' || c.type === 'country_room' || c.participantIds.includes(userId))
+      .map(c => {
+        if (c.type === 'direct') {
+          const otherId = c.participantIds.find(id => id !== userId);
+          const other = otherId ? this.users.find(u => u.id === otherId) : undefined;
+          return { ...c, name: other?.displayName || c.name, otherUser: other, isOnline: other?.isOnline };
+        }
+        return c;
+      })
+      .sort((a, b) => new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime());
+  }
+
+  linkIdentity(userId: string, identity: LinkedIdentity): User {
+    const user = this.users.find(u => u.id === userId);
+    if (!user) throw new Error('User not found');
+    const list = user.linkedIdentities || [];
+    const idx = list.findIndex(i => i.provider === identity.provider);
+    if (idx >= 0) list[idx] = identity; else list.push(identity);
+    user.linkedIdentities = list;
+    this.saveToDisk();
+    return user;
+  }
+
+  findUserByLinkedIdentity(provider: LinkedIdentity['provider'], providerUserId: string): User | null {
+    return this.users.find(u => (u.linkedIdentities || []).some(i => i.provider === provider && i.providerUserId === providerUserId)) || null;
+  }
+
+  createOrLoginOAuthUser(params: { provider: LinkedIdentity['provider']; providerUserId: string; email?: string; displayName?: string; avatar?: string }): { user: User; token: string } {
+    const { provider, providerUserId, email, displayName, avatar } = params;
+    let user = this.findUserByLinkedIdentity(provider, providerUserId);
+    if (!user && email) {
+      user = this.users.find(u => (u.email || '').toLowerCase() === email.toLowerCase()) || null;
+    }
+    if (!user) {
+      const base = (displayName || email?.split('@')[0] || `${provider}_user`).toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 18) || provider;
+      let username = base;
+      let n = 1;
+      while (this.accounts.has(username) || this.users.some(u => u.username === username)) { username = `${base}_${n++}`; }
+      const userId = `user_${provider}_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+      user = {
+        id: userId,
+        username,
+        displayName: displayName || username,
+        email,
+        avatar: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
+        bio: 'Citizen exploring Earth One.',
+        location: { countryCode: 'CN', countryName: 'China', cityName: 'Beijing', lat: 39.9042, lng: 116.4074, isPublic: true },
+        interests: ['Global Dialogue', 'Culture'],
+        followersCount: 1, followingCount: 1, tipsReceived: 0,
+        isOnline: true, verified: false, joinedAt: new Date().toISOString(), hasCompletedOnboarding: false,
+        linkedIdentities: []
+      };
+      this.users.unshift(user);
+      const salt = crypto.randomBytes(16).toString('hex');
+      const acc: AuthAccount = { userId, email: (email || `${username}@earthone.local`).toLowerCase(), passwordHash: this.hashPassword(crypto.randomBytes(24).toString('hex'), salt), salt };
+      this.accounts.set(userId, acc);
+      this.accounts.set(acc.email, acc);
+      this.accounts.set(username, acc);
+    }
+    const identity: LinkedIdentity = { provider, providerUserId, displayName, email, avatar, linkedAt: new Date().toISOString() };
+    const list = user.linkedIdentities || [];
+    const idx = list.findIndex(i => i.provider === provider);
+    if (idx >= 0) list[idx] = identity; else list.push(identity);
+    user.linkedIdentities = list;
+    const token = crypto.randomBytes(32).toString('hex');
+    this.sessions.set(token, user.id);
+    user.isOnline = true;
+    this.currentUser = user;
+    this.saveToDisk();
+    return { user, token };
+  }
+
   // Digital Library Methods
   addBook(book: Book): Book {
     this.writeBookContent(book);
@@ -1361,7 +1466,7 @@ class DataStore {
     return item;
   }
 
-  addAnnotation(bookId: string, chapterId: string, selectedText: string, note: string, aiExplanation?: string): BookAnnotation {
+  addAnnotation(bookId: string, chapterId: string, selectedText: string, note: string, aiExplanation?: string, userId?: string): BookAnnotation {
     const ann: BookAnnotation = {
       id: `ann_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       bookId,
@@ -1369,6 +1474,7 @@ class DataStore {
       selectedText,
       note,
       aiExplanation,
+      ...(userId ? { userId } : {}),
       createdAt: new Date().toISOString()
     };
     this.bookAnnotations.push(ann);

@@ -29,7 +29,8 @@ import {
 } from 'lucide-react';
 import { Book, Chapter, BookAnnotation, BookShelfItem, BookshelfStatus, Language } from '../../types/index.ts';
 import { EpubReader } from './EpubReader.tsx';
-import { getBookEmbedUrl } from './bookEmbedUrl.ts';
+import { PdfDocumentViewer } from '../browser/PdfDocumentViewer.tsx';
+import { getBookEmbedUrl, getBookPdfUrl, isRtlLanguage } from './bookEmbedUrl.ts';
 import { AdminLibrary } from './AdminLibrary.tsx';
 import { filterLibrarySearchResults, getLibrarySearchFilterOptions, LIBRARY_RIGHTS_FILTER_LABELS } from './searchFilters.ts';
 
@@ -136,6 +137,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [crawlResults, setCrawlResults] = useState<any[]>([]);
   const [crawlSources, setCrawlSources] = useState<any[]>([]);
   const [crawlReader, setCrawlReader] = useState<any | null>(null);
+  const [pdfReader, setPdfReader] = useState<{ url: string; title: string; sourceUrl?: string } | null>(null);
+  const [webReader, setWebReader] = useState<{ url: string; title: string; sourceUrl?: string; label: string } | null>(null);
+  const [readerNotice, setReaderNotice] = useState<string | null>(null);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
   const onlineFilterOptions = useMemo(() => getLibrarySearchFilterOptions(onlineResults), [onlineResults]);
@@ -175,8 +179,13 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const readerDialogRef = useRef<HTMLDivElement>(null);
   const readerReturnFocusRef = useRef<HTMLElement | null>(null);
+  const savingProgressRef = useRef(false);
+  const savingAnnotationRef = useRef(false);
+  const mountedRef = useRef(true);
 
   // =========================================================================
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+
   // Data loading
   // =========================================================================
   const loadBooks = async () => {
@@ -390,30 +399,63 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   // =========================================================================
   // Reader
   // =========================================================================
+  const getOnlineReaderReason = (ref: any): string => {
+    if (!ref) return '未提供可用的阅读资源。';
+    if (ref.canReadOnline === false) return ref.rightsNote || ref.availability === 'official-source-only' ? `该资源按来源标注仅提供官方页面访问：${ref.rightsNote || '请在来源站点阅读'}。` : (ref.rightsNote || '来源未提供可直接在线阅读的公开副本。');
+    const embed = getBookEmbedUrl(ref);
+    if (embed) return '';
+    const pdf = getBookPdfUrl(ref);
+    if (pdf) return '';
+    if (ref.sourceUrl || ref.externalReadUrl) return '该来源暂不支持站内嵌入或内置阅读器打开（可能受跨域/嵌入策略、登录或版权限制），请通过“官方来源/前往来源平台”在原站阅读。';
+    return '未找到可在线阅读的公开链接；如有版权或访问限制，请通过合法来源获取。';
+  };
+
+  const openExternalReadable = (ref: any) => {
+    setReaderNotice(null);
+    const pdf = getBookPdfUrl(ref);
+    if (pdf) { setPdfReader({ url: pdf, title: ref.title || 'PDF', sourceUrl: ref.sourceUrl || ref.externalReadUrl || pdf }); return; }
+    const embed = getBookEmbedUrl(ref);
+    if (embed) { setWebReader({ url: embed.url, title: ref.title || '在线阅读', sourceUrl: ref.sourceUrl || ref.externalReadUrl, label: embed.label }); return; }
+    const reason = getOnlineReaderReason(ref);
+    setReaderNotice(reason);
+    if (ref.sourceUrl || ref.externalReadUrl) window.open(ref.sourceUrl || ref.externalReadUrl, '_blank', 'noopener,noreferrer');
+  };
+
   const openReader = (book: Book) => {
     // EPUB books use the epub.js reader; text books use the chapter reader
     if (book.epubUrl) {
       setReadingEpub(book);
       return;
     }
-    readerReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const shelfItem = shelf.find(item => item.bookId === book.id);
-    const savedChapterIndex = shelfItem?.lastReadChapterId
-      ? book.chapters.findIndex(chapter => chapter.id === shelfItem.lastReadChapterId)
-      : -1;
-    const legacyProgressIndex = shelfItem?.progress
-      ? Math.min(book.chapters.length - 1, Math.max(0, Math.round((shelfItem.progress / 100) * book.chapters.length) - 1))
-      : 0;
-    setReadingBook(book);
-    setActiveChapterIndex(savedChapterIndex >= 0 ? savedChapterIndex : legacyProgressIndex);
-    setAiExplanation(null);
-    setAiCitation(null);
-    setAiReadingNotice(null);
-    setAiAnswerReady(false);
-    setAiNoteSaved(false);
-    setAiSaveMessage(null);
-    setSelectedText('');
-    setAnnotationNote('');
+    const pdf = getBookPdfUrl(book as any) || (book.formatType === 'pdf' ? (book as any).textUrl || book.externalReadUrl : null);
+    if (pdf) {
+      setPdfReader({ url: pdf, title: book.title, sourceUrl: book.sourceUrl || book.externalReadUrl || pdf });
+      return;
+    }
+    if (book.chapters && book.chapters.length > 0 && book.chapters.some(ch => ch.content && ch.content.trim().length > 0)) {
+      readerReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const shelfItem = shelf.find(item => item.bookId === book.id);
+      const savedChapterIndex = shelfItem?.lastReadChapterId
+        ? book.chapters.findIndex(chapter => chapter.id === shelfItem.lastReadChapterId)
+        : -1;
+      const legacyProgressIndex = shelfItem?.progress
+        ? Math.min(book.chapters.length - 1, Math.max(0, Math.round((shelfItem.progress / 100) * book.chapters.length) - 1))
+        : 0;
+      setReadingBook(book);
+      setActiveChapterIndex(savedChapterIndex >= 0 ? savedChapterIndex : legacyProgressIndex);
+      setAiExplanation(null);
+      setAiCitation(null);
+      setAiReadingNotice(null);
+      setAiAnswerReady(false);
+      setAiNoteSaved(false);
+      setAiSaveMessage(null);
+      setSelectedText('');
+      setAnnotationNote('');
+      return;
+    }
+    const embed = getBookEmbedUrl(book as any);
+    if (embed) { setWebReader({ url: embed.url, title: book.title, sourceUrl: book.sourceUrl || book.externalReadUrl, label: embed.label }); return; }
+    setReaderNotice('该书籍当前没有可在站内阅读的全文（可能仅有元数据/受版权限制/需在来源站点借阅或登录）。请使用“资源来源/官方来源”在合法来源查看。');
   };
 
   // List/shelf endpoints return metadata only, so fetch the full book
@@ -577,7 +619,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   };
 
   const handleSaveAnnotation = async () => {
-    if (!readingBook || !selectedText) return;
+    if (!readingBook || !selectedText || savingAnnotationRef.current) return;
+    savingAnnotationRef.current = true;
     const currentChapter = readingBook.chapters[activeChapterIndex];
     const saveAiKnowledgeNote = !!(aiCitation && aiExplanation && aiAnswerReady && !aiNoteSaved);
     const token = localStorage.getItem('earth_one_token');
@@ -586,18 +629,26 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       return;
     }
     try {
-      const res = await fetch(saveAiKnowledgeNote
-        ? `/api/library/books/${readingBook.id}/knowledge-notes`
-        : `/api/library/books/${readingBook.id}/annotations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(saveAiKnowledgeNote ? libraryAuthHeaders() : {}) },
-        body: JSON.stringify({
-          chapterId: currentChapter?.id || 'ch1',
-          selectedText,
-          note: annotationNote,
-          aiExplanation: aiExplanation || undefined
-        })
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      let res: Response;
+      try {
+        res = await fetch(saveAiKnowledgeNote
+          ? `/api/library/books/${readingBook.id}/knowledge-notes`
+          : `/api/library/books/${readingBook.id}/annotations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(saveAiKnowledgeNote ? libraryAuthHeaders() : {}) },
+          body: JSON.stringify({
+            chapterId: currentChapter?.id || 'ch1',
+            selectedText,
+            note: annotationNote,
+            aiExplanation: aiExplanation || undefined
+          }),
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
       const data = await res.json();
       if (data.success && data.annotation) {
         setAnnotations(prev => [data.annotation, ...prev]);
@@ -617,6 +668,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       }
     } catch (e) {
       setAiSaveMessage(`保存笔记失败: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      savingAnnotationRef.current = false;
     }
   };
 
@@ -701,8 +754,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   }, [readingBook, activeChapterIndex, shelf.some(item => item.bookId === readingBook?.id)]);
 
   const saveProgress = async (progress: number) => {
-    if (!readingBook) return;
+    if (!readingBook || savingProgressRef.current) return;
+    savingProgressRef.current = true;
     const chapter = readingBook.chapters[activeChapterIndex];
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       if (chapter) {
         await saveShelfReadingState(readingBook, activeChapterIndex, progress);
@@ -710,10 +766,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       await fetch(`/api/library/books/${readingBook.id}/progress`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ progress })
+        body: JSON.stringify({ progress }),
+        signal: controller.signal
       });
     } catch (e) {
       console.error(e);
+    } finally {
+      clearTimeout(timeout);
+      savingProgressRef.current = false;
     }
   };
 
@@ -817,6 +877,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         </div>
       </header>
 
+      {readerNotice && (
+        <div role="status" className="mx-auto mt-3 w-full max-w-7xl px-4 sm:px-8">
+          <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-700/40 bg-amber-950/30 p-3 text-xs text-amber-200">
+            <p className="leading-relaxed"><span className="font-semibold">无法在站内完整阅读：</span>{readerNotice}</p>
+            <button type="button" onClick={()=>setReaderNotice(null)} className="shrink-0 rounded p-1 text-amber-300 hover:bg-amber-900/40"><X className="w-4 h-4" /></button>
+          </div>
+        </div>
+      )}
       {/* ===================================================================== */}
       {/* HOME VIEW                                                            */}
       {/* ===================================================================== */}
@@ -999,10 +1067,13 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                               {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="w-3 h-3" /><span>保存并诵读</span></>}
                             </button>
                           )}
-                          {(r.canReadOnline || embedInfo) && (
-                            <button type="button" onClick={() => setCrawlReader(r)} className="min-h-11 inline-flex items-center space-x-1 px-3 py-2 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white text-[11px] font-semibold transition-colors">
+                          {(r.canReadOnline || embedInfo || getBookPdfUrl(r) || r.sourceUrl) && (
+                            <button type="button" onClick={() => { const pdf=getBookPdfUrl(r); if(pdf){setPdfReader({url:pdf,title:r.title,sourceUrl:r.sourceUrl}); return;} if(embedInfo){setWebReader({url:embedInfo.url,title:r.title,sourceUrl:r.sourceUrl,label:embedInfo.label}); return;} setReaderNotice(getOnlineReaderReason(r)); if(r.sourceUrl) window.open(r.sourceUrl,'_blank','noopener,noreferrer'); }} className="min-h-11 inline-flex items-center space-x-1 px-3 py-2 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white text-[11px] font-semibold transition-colors">
                               <BookOpen className="w-3 h-3" /><span>在线阅读</span>
                             </button>
+                          )}
+                          {r.canReadOnline === false && !embedInfo && !getBookPdfUrl(r) && (
+                            <span className="text-[10px] text-amber-300/90">无法站内阅读：{r.rightsNote || r.availability || '来源受限/需官方页面'}</span>
                           )}
                           {r.sourceUrl && (
                             <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center space-x-1 px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors">
@@ -1294,20 +1365,18 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 />
               </div>
               <div className="mt-4 space-y-2">
-                {selectedBook.chapters.length > 0 || selectedBook.epubUrl ? (
+                {(selectedBook.chapters?.some(c=>c.content?.trim()) || selectedBook.epubUrl || getBookPdfUrl(selectedBook as any) || getBookEmbedUrl(selectedBook as any) || selectedBook.sourceUrl || selectedBook.externalReadUrl) ? (
                   <button
                     onClick={() => openReader(selectedBook)}
                     className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-all cursor-pointer"
                   >
                     <BookOpen className="w-4 h-4" />
-                    <span>立即阅读</span>
+                    <span>{selectedBook.chapters?.some(c=>c.content?.trim()) || selectedBook.epubUrl || getBookPdfUrl(selectedBook as any) || getBookEmbedUrl(selectedBook as any) ? '立即阅读' : '查看阅读方式'}</span>
                   </button>
-                ) : (selectedBook.sourceUrl || selectedBook.externalReadUrl) ? (
-                  <a href={selectedBook.sourceUrl || selectedBook.externalReadUrl} target="_blank" rel="noreferrer" className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-all">
-                    <ExternalLink className="w-4 h-4" />
-                    <span>前往来源平台查看</span>
-                  </a>
-                ) : null}
+                ) : (
+                  <div className="w-full text-center text-xs text-slate-400 py-3 rounded-xl bg-slate-900 border border-slate-800">该记录无可用阅读入口（仅元数据或受限）。</div>
+                )}
+                {readerNotice && view === 'detail' && <p className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-800/40 rounded-lg p-2 leading-relaxed">{readerNotice}</p>}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -1536,6 +1605,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 <button type="button" onClick={() => setReaderTheme('focus')} aria-label="专注模式" aria-pressed={readerTheme === 'focus'} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'focus' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="专注"><Menu className="w-3.5 h-3.5" /></button>
               </div>
 
+              {/* Bookmark */}
+              <button type="button" onClick={async()=>{ if(!readingBook) return; const ch=readingBook.chapters[activeChapterIndex]; try{ const res=await fetch(`/api/library/books/${readingBook.id}/annotations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chapterId:ch?.id||'ch1',selectedText:`书签：${ch?.title||''}`,note:`阅读进度书签（第 ${activeChapterIndex+1}/${readingBook.chapters.length} 章）`})}); const data=await res.json(); if(data.success&&data.annotation){setAnnotations(p=>[data.annotation,...p]); setIsAnnotationDrawerOpen(true);} }catch{} }} aria-label="添加书签" className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-amber-300 cursor-pointer" title="添加书签">
+                <Bookmark className="w-3.5 h-3.5" />
+              </button>
               {/* Fullscreen */}
               <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? '退出全屏' : '全屏'} className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white cursor-pointer" title={isFullscreen ? '退出全屏' : '全屏'}>
                 <Maximize2 className="w-3.5 h-3.5" />
@@ -1556,6 +1629,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 <button type="button" onClick={() => setReaderTheme('dark')} aria-label="夜间背景" aria-pressed={readerTheme === 'dark'} className={`min-h-11 min-w-11 rounded-lg cursor-pointer ${readerTheme === 'dark' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="夜间"><Moon className="w-4 h-4 mx-auto" /></button>
                 <button type="button" onClick={() => setReaderTheme('focus')} aria-label="专注模式" aria-pressed={readerTheme === 'focus'} className={`min-h-11 min-w-11 rounded-lg cursor-pointer ${readerTheme === 'focus' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="专注"><Menu className="w-4 h-4 mx-auto" /></button>
               </div>
+              <button type="button" onClick={async()=>{ if(!readingBook) return; const ch=readingBook.chapters[activeChapterIndex]; try{ const res=await fetch(`/api/library/books/${readingBook.id}/annotations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chapterId:ch?.id||'ch1',selectedText:`书签：${ch?.title||''}`,note:`阅读进度书签（第 ${activeChapterIndex+1}/${readingBook.chapters.length} 章）`})}); const data=await res.json(); if(data.success&&data.annotation){setAnnotations(p=>[data.annotation,...p]); setIsAnnotationDrawerOpen(true);} }catch{} }} aria-label="添加书签" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-amber-300 cursor-pointer" title="添加书签"><Bookmark className="w-4 h-4" /></button>
             </div>
           </header>
 
@@ -1584,6 +1658,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             {/* Main reading canvas */}
             <main
               onPointerUp={handleTextSelection}
+              dir={isRtlLanguage(readingBook.language) ? 'rtl' : 'ltr'}
+              lang={readingBook.language || undefined}
               className={`flex-1 overflow-y-auto p-6 sm:p-12 lg:px-24 flex justify-center transition-colors ${readerBg}`}
             >
               <div className="max-w-3xl w-full">
@@ -1764,7 +1840,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads"
                 />
                 <p className="flex items-start gap-1.5 border-t border-slate-800 px-4 py-2 text-[10px] leading-relaxed text-slate-500">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 通过官方/公开阅读页面嵌入显示；内容版权、可用性与是否允许嵌入由来源站点控制。若空白或受限，请点击“官方来源”打开。
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 通过官方/公开阅读页面嵌入显示；内容版权、可用性与是否允许嵌入由来源站点控制。若空白或受限，请点击“官方来源”打开。网页嵌入阅读暂不支持精确进度保存与站内批注。
                 </p>
               </>
             ) : (
@@ -1776,6 +1852,50 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           </div>
         );
       })()}
+      {webReader && (
+        <div role="dialog" aria-modal="true" aria-label="网页原文阅读" className="fixed inset-0 z-50 flex flex-col bg-[#030712]/98 backdrop-blur-2xl">
+          <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-bold text-white">{webReader.title}</h2>
+              <p className="truncate text-[11px] text-slate-400">{webReader.label} · 官方/公开来源</p>
+            </div>
+            <div className="ml-3 flex shrink-0 items-center gap-2">
+              {webReader.sourceUrl && (
+                <a href={webReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-slate-700 px-3 text-[11px] text-slate-300 hover:text-white">
+                  <ExternalLink className="h-3.5 w-3.5" /> 官方来源
+                </a>
+              )}
+              <button type="button" onClick={() => setWebReader(null)} aria-label="关闭阅读器" className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>
+            </div>
+          </div>
+          <iframe src={webReader.url} title={webReader.title} className="min-h-0 flex-1 border-0 bg-white" referrerPolicy="strict-origin-when-cross-origin" sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads" />
+          <p className="flex items-start gap-1.5 border-t border-slate-800 px-4 py-2 text-[10px] leading-relaxed text-slate-500">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 网页/官方阅读页按来源站点权限嵌入显示；若被站点禁止嵌入或需登录/付费/借阅，将无法在站内加载，请使用“官方来源”打开。嵌入网页阅读不支持跨站精确进度、书签与批注保存。
+          </p>
+        </div>
+      )}
+      {pdfReader && (
+        <div role="dialog" aria-modal="true" aria-label="PDF 在线阅读" className="fixed inset-0 z-50 flex flex-col bg-[#030712]/98 backdrop-blur-2xl">
+          <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-bold text-white">{pdfReader.title}</h2>
+              <p className="truncate text-[11px] text-slate-400">PDF 在线阅读（来源站点权限/CORS 可能影响加载）</p>
+            </div>
+            <div className="ml-3 flex shrink-0 items-center gap-2">
+              {pdfReader.sourceUrl && (
+                <a href={pdfReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-slate-700 px-3 text-[11px] text-slate-300 hover:text-white">
+                  <ExternalLink className="h-3.5 w-3.5" /> 官方来源
+                </a>
+              )}
+              <button type="button" onClick={() => setPdfReader(null)} aria-label="关闭阅读器" className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-auto p-4">
+            <PdfDocumentViewer sourceUrl={pdfReader.url} title={pdfReader.title} lang={lang} />
+            <p className="mx-auto mt-3 max-w-5xl text-[10px] text-slate-500">PDF 阅读进度/书签暂不自动保存到书架（受跨来源文件与客户端渲染限制）；如需持续阅读请在来源页面或保存后使用支持的阅读器。</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

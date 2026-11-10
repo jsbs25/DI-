@@ -98,16 +98,45 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadAbortRef = useRef<AbortController | null>(null);
+
+  const showNotice = (msg: string, ms = 4500) => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    setCrawlNotice(msg);
+    noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, ms);
+  };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+      loadAbortRef.current?.abort();
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      try { audioRef.current?.pause(); } catch {}
+      try { audioCtxRef.current?.close(); } catch {}
+      audioCtxRef.current = null;
+      analyserRef.current = null;
+      sourceNodeRef.current = null;
+    };
+  }, []);
 
   // Fetch initial tracks
   const loadTracks = async (genre = 'all', query = '') => {
-    setLoading(true);
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    if (mountedRef.current) setLoading(true);
     try {
       const endpoint = query.trim()
         ? `/api/music/search?q=${encodeURIComponent(query)}&genre=${genre}`
         : `/api/music/tracks?genre=${genre}`;
-      const res = await fetch(endpoint);
+      const res = await fetch(endpoint, { signal: controller.signal });
       const data = await res.json();
+      if (!mountedRef.current) return;
       if (data.success && Array.isArray(data.tracks)) {
         setTracks(data.tracks.map((t: any) => ({
           ...t,
@@ -115,6 +144,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         })));
       }
     } catch {
+      if (!mountedRef.current) return;
       // offline fallback tracks if fetch fails
       setTracks([
         {
@@ -136,7 +166,8 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         }
       ]);
     } finally {
-      setLoading(false);
+      clearTimeout(timeout);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -168,8 +199,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     } catch {
       setCrawlNotice(isZh ? 'YouTube 音乐检索超时。' : 'YouTube music search error.');
     } finally {
-      setYtSearching(false);
-      setTimeout(() => setCrawlNotice(null), 4500);
+      if (mountedRef.current) setYtSearching(false);
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 4500);
     }
   };
 
@@ -211,8 +243,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     } catch {
       setCrawlNotice(isZh ? 'B站音乐爬虫连接超时。' : 'Bilibili music crawl timeout.');
     } finally {
-      setYtSearching(false);
-      setTimeout(() => setCrawlNotice(null), 4500);
+      if (mountedRef.current) setYtSearching(false);
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 4500);
     }
   };
 
@@ -274,8 +307,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     } catch {
       setCrawlNotice(isZh ? '网络并发爬取失败。' : 'Dual crawl failed.');
     } finally {
-      setYtSearching(false);
-      setTimeout(() => setCrawlNotice(null), 5000);
+      if (mountedRef.current) setYtSearching(false);
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 5000);
     }
   };
 
@@ -374,8 +408,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   const togglePlay = () => {
     if (activeTrack?.playable === 'embed' || activeTrack?.embedUrl) {
       setShowEmbedPlayer(true);
-      setCrawlNotice(isZh ? '当前为官方嵌入播放器，请在上方嵌入窗口中点击播放/暂停。' : 'Use the embedded player controls.');
-      setTimeout(() => setCrawlNotice(null), 2500);
+      showNotice(isZh ? '当前为官方嵌入播放器，请在上方嵌入窗口中点击播放/暂停。' : 'Use the embedded player controls.', 2500);
       return;
     }
     if (!audioRef.current) return;
@@ -457,8 +490,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     } catch {
       setCrawlNotice(isZh ? '已从金星本地库载入高保真音轨。' : 'Loaded offline tracks.');
     } finally {
-      setIsCrawling(false);
-      setTimeout(() => setCrawlNotice(null), 5000);
+      if (mountedRef.current) setIsCrawling(false);
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 5000);
     }
   };
 

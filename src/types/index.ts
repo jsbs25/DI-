@@ -9,6 +9,15 @@ export interface UserLocation {
   isPublic: boolean;
 }
 
+export interface LinkedIdentity {
+  provider: 'google' | 'wechat' | 'whatsapp' | 'telegram';
+  providerUserId: string;
+  displayName?: string;
+  email?: string;
+  avatar?: string;
+  linkedAt: string;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -26,6 +35,7 @@ export interface User {
   verified: boolean;
   joinedAt: string;
   hasCompletedOnboarding?: boolean;
+  linkedIdentities?: LinkedIdentity[];
 }
 
 export interface PostComment {
@@ -74,6 +84,8 @@ export interface Post {
   comments: PostComment[];
 }
 
+export type ChatMessageStatus = 'sending' | 'sent' | 'delivered' | 'read';
+
 export interface ChatMessage {
   id: string;
   conversationId: string;
@@ -87,19 +99,40 @@ export interface ChatMessage {
   translatedTo?: string;
   createdAt: string;
   mediaUrl?: string;
+  status?: ChatMessageStatus;
+  replyToId?: string;
+  editedAt?: string;
+  channel?: 'earthone' | 'google' | 'wechat' | 'whatsapp' | 'telegram';
 }
 
 export interface Conversation {
   id: string;
-  type: 'direct' | 'country_room' | 'global_channel';
+  type: 'direct' | 'country_room' | 'global_channel' | 'channel';
   name: string;
   countryCode?: string;
   participantIds: string[];
   unreadCount?: number;
   lastMessage?: string;
   lastMessageTime?: string;
+  lastMessageAt?: string;
   isOnline?: boolean;
   otherUser?: User;
+  pinned?: boolean;
+  channel?: 'earthone' | 'google' | 'wechat' | 'whatsapp' | 'telegram';
+  externalRef?: string;
+}
+
+export interface ChannelIntegration {
+  id: 'google' | 'wechat' | 'whatsapp' | 'telegram';
+  name: string;
+  category: 'identity' | 'messaging';
+  status: 'available' | 'config_required' | 'planned';
+  official: boolean;
+  capabilities: string[];
+  limitations: string[];
+  setupHint: string;
+  linked?: boolean;
+  linkedLabel?: string;
 }
 
 export interface CreatorArticle {

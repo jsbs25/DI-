@@ -91,6 +91,7 @@ export default function App() {
   const [welcomeToast, setWelcomeToast] = useState<string | null>(null);
   const [libraryFocusBookId, setLibraryFocusBookId] = useState<string | null>(null);
   const [knowledgeFocusNodeId, setKnowledgeFocusNodeId] = useState<string | null>(null);
+  const [integrations, setIntegrations] = useState<any[]>([]);
 
   // Handle RTL layout adaptation for Arabic
   useEffect(() => {
@@ -105,6 +106,29 @@ export default function App() {
       setSidebarCollapsed(true);
     }
   }, [currentTab]);
+
+  const authHeaders = () => {
+    const token = localStorage.getItem('earth_one_token');
+    return token ? { Authorization: `Bearer ${token}` } : undefined;
+  };
+
+  const refreshConversations = async () => {
+    try {
+      const headers = authHeaders();
+      const res = await fetch('/api/conversations', headers ? { headers } : undefined);
+      const data = await res.json();
+      if (data.success) setConversations(data.conversations || []);
+    } catch {}
+  };
+
+  const refreshIntegrations = async () => {
+    try {
+      const headers = authHeaders();
+      const res = await fetch('/api/integrations', headers ? { headers } : undefined);
+      const data = await res.json();
+      if (data.success) setIntegrations(data.integrations || []);
+    } catch {}
+  };
 
   // Initial Data Fetch & Auth Check
   useEffect(() => {
@@ -148,10 +172,16 @@ export default function App() {
       .catch(console.error);
 
     // Conversations
-    fetch('/api/conversations')
+    fetch('/api/conversations', headers.Authorization ? { headers } : undefined)
       .then(r => r.json())
-      .then(d => { if (d.success) setConversations(d.conversations); })
-      .catch(console.error);
+      .then(d => { if (d.success) setConversations(d.conversations || []); })
+      .catch(() => {});
+
+    // Integrations
+    fetch('/api/integrations', headers.Authorization ? { headers } : undefined)
+      .then(r => r.json())
+      .then(d => { if (d.success) setIntegrations(d.integrations || []); })
+      .catch(() => {});
 
     // Articles
     fetch('/api/articles')
@@ -346,11 +376,12 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    const token = sessionToken || localStorage.getItem('earth_one_token');
     try {
-      if (sessionToken) {
+      if (token) {
         await fetch('/api/auth/logout', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${sessionToken}` }
+          headers: { Authorization: `Bearer ${token}` }
         });
       }
     } catch (err) {
@@ -359,8 +390,11 @@ export default function App() {
     localStorage.removeItem('earth_one_token');
     setSessionToken(null);
     setCurrentUser(null);
+    setConversations([]);
+    setIntegrations([]);
+    setActiveConversationId('conv_global');
     setWelcomeToast('Logged out of Earth One.');
-    setTimeout(() => setWelcomeToast(null), 3000);
+    window.setTimeout(() => setWelcomeToast(current => current === 'Logged out of Earth One.' ? null : current), 3000);
   };
 
   const handleSelectGlobeUser = (node: GlobeUserNode) => {
@@ -516,9 +550,9 @@ export default function App() {
           <SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} />
         )}
 
-        {currentTab === 'venus' && (
+        <div className={currentTab === 'venus' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'venus'}>
           <VenusMusicSpace lang={lang} onBack={() => setCurrentTab('universe')} />
-        )}
+        </div>
 
         {currentTab === 'mercury' && (
           <MercurySearch
@@ -555,21 +589,23 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'chat' && (
+        <div className={currentTab === 'chat' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'chat'}>
           <GlobalMessenger
             conversations={conversations}
             activeConversationId={activeConversationId}
             onSelectConversation={setActiveConversationId}
             currentUser={currentUser}
             lang={lang}
+            integrations={integrations}
+            onRefreshConversations={refreshConversations}
           />
-        )}
+        </div>
 
         {currentTab === 'aihub' && <AIHub lang={lang} />}
 
-        {currentTab === 'library' && (
+        <div className={currentTab === 'library' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'library'}>
           <DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} />
-        )}
+        </div>
 
         {currentTab === 'moon' && (
           <MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} />
@@ -594,14 +630,14 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'browser' && (
+        <div className={currentTab === 'browser' ? 'contents h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}>
           <WebBrowser
             lang={lang}
             initialQuery={browserInitialQuery ?? undefined}
             onBackToUniverse={() => setCurrentTab('universe')}
             onBackToGlobe={() => setCurrentTab('globe')}
           />
-        )}
+        </div>
 
         {currentTab === 'crawler' && <CrawlerDashboard lang={lang} />}
 
