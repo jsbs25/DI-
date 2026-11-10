@@ -49,7 +49,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [showIntegrations, setShowIntegrations] = useState(false);
   const [connError, setConnError] = useState<string | null>(null);
   const [wsStatus, setWsStatus] = useState<'off' | 'connecting' | 'open' | 'closed'>('off');
-  const [tab, setTab] = useState<'chats' | 'friends' | 'requests' | 'search' | 'msgsearch' | 'notifs'>('chats');
+  const [tab, setTab] = useState<'chats' | 'friends' | 'requests' | 'search' | 'msgsearch' | 'notifs' | 'privacy'>('chats');
   const [userSearch, setUserSearch] = useState('');
   const [searchResults, setSearchResults] = useState<FriendUser[]>([]);
   const [msgQuery, setMsgQuery] = useState('');
@@ -81,6 +81,15 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [incomingReqs, setIncomingReqs] = useState<FriendRequest[]>([]);
   const [outgoingReqs, setOutgoingReqs] = useState<FriendRequest[]>([]);
   const [blocked, setBlocked] = useState<FriendUser[]>([]);
+  const [privacy, setPrivacy] = useState<any>(null);
+  const [privacyDraft, setPrivacyDraft] = useState<any>(null);
+  const [privacyLoading, setPrivacyLoading] = useState(false);
+  const [privacySaving, setPrivacySaving] = useState(false);
+  const [privacyStatus, setPrivacyStatus] = useState<'idle'|'saving'|'saved'|'error'>('idle');
+  const [privacyError, setPrivacyError] = useState<string | null>(null);
+  const privacySaveSeq = useRef(0);
+  const privacyRef = useRef<any>(null);
+  useEffect(() => { privacyRef.current = privacy; }, [privacy]);
   const [typingUsers, setTypingUsers] = useState<Record<string, number>>({});
   const [selectedProfile, setSelectedProfile] = useState<any>(null);
   const [profileMode, setProfileMode] = useState<'view'|'edit'>('view');
@@ -260,6 +269,65 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const loadFriends = async () => { try { const d = await api('/api/messenger/friends'); setFriends(d.friends || []); } catch {} };
   const loadRequests = async () => { try { const d = await api('/api/messenger/friend-requests'); setIncomingReqs(d.incoming||[]); setOutgoingReqs(d.outgoing||[]); } catch {} };
   const loadBlocked = async () => { try { const d = await api('/api/messenger/blocked'); setBlocked(d.blocked || []); } catch {} };
+
+  const defaultPrivacy = () => ({
+    profileVisibility: 'everyone',
+    searchableByUsername: true,
+    searchableById: true,
+    searchableByDisplayName: true,
+    friendRequestPolicy: 'everyone',
+    showOnlineStatus: true,
+    showLastActive: true,
+    strangerMessagePolicy: 'everyone',
+    readReceipts: true,
+  });
+  const normalizePrivacy = (p: any) => {
+    const base = defaultPrivacy();
+    const cur = p && typeof p === 'object' ? p : {};
+    const out: any = { ...base, ...cur };
+    const pv = ['everyone','friends','self'];
+    const fr = ['everyone','mutual_group','none'];
+    const sm = ['everyone','friends','mutual_group'];
+    if (!pv.includes(out.profileVisibility)) out.profileVisibility = base.profileVisibility;
+    if (!fr.includes(out.friendRequestPolicy)) out.friendRequestPolicy = base.friendRequestPolicy;
+    if (!sm.includes(out.strangerMessagePolicy)) out.strangerMessagePolicy = base.strangerMessagePolicy;
+    for (const k of ['searchableByUsername','searchableById','searchableByDisplayName','showOnlineStatus','showLastActive','readReceipts'] as const) out[k] = typeof out[k] === 'boolean' ? out[k] : (base as any)[k];
+    return out;
+  };
+  const loadPrivacy = async () => {
+    if (!authed) return;
+    setPrivacyLoading(true);
+    try {
+      const d = await api('/api/messenger/privacy');
+      const p = normalizePrivacy(d.privacy || d);
+      setPrivacy(p);
+      if (!privacySaving) setPrivacyDraft(p);
+      setPrivacyError(null);
+    } catch (e: any) {
+      setPrivacyError(e?.message || 'Failed to load privacy settings');
+    } finally { setPrivacyLoading(false); }
+  };
+  const savePrivacy = async (nextDraft?: any) => {
+    const draft = normalizePrivacy(nextDraft || privacyDraft || privacy || defaultPrivacy());
+    const seq = ++privacySaveSeq.current;
+    setPrivacySaving(true); setPrivacyStatus('saving'); setPrivacyError(null);
+    try {
+      const d = await api('/api/messenger/privacy', { method: 'PUT', body: JSON.stringify(draft) });
+      const saved = normalizePrivacy(d.privacy || d);
+      if (seq !== privacySaveSeq.current) return;
+      setPrivacy(saved); setPrivacyDraft(saved); setPrivacyStatus('saved');
+      setTimeout(() => { if (privacySaveSeq.current === seq) setPrivacyStatus('idle'); }, 1500);
+      void loadFriends(); void loadRequests(); void onRefreshConversations?.();
+    } catch (e: any) {
+      if (seq !== privacySaveSeq.current) return;
+      setPrivacyStatus('error'); setPrivacyError(e?.message || 'Save failed');
+    } finally { if (seq === privacySaveSeq.current) setPrivacySaving(false); }
+  };
+  const updatePrivacy = (patch: any) => {
+    setPrivacyDraft((prev: any) => normalizePrivacy({ ...(prev || privacy || defaultPrivacy()), ...patch }));
+    setPrivacyStatus('idle');
+  };
+
   const loadRecent = async () => { try { const d = await api('/api/messenger/recent'); setRecentConvs(d.conversations || []); } catch {} };
   const defaultNotifPrefs = () => ({
     friendRequests: true,
@@ -429,7 +497,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     finally { setNotifLoading(false); }
   };
 
-  useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); void loadNotifications(); void loadNotifPrefs(); } }, [authed, currentUser?.id]);
+  useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); void loadNotifications(); void loadNotifPrefs(); void loadPrivacy(); } }, [authed, currentUser?.id]);
 
   // WebSocket realtime
   useEffect(() => {
@@ -442,7 +510,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${proto}://${window.location.host}/ws?token=${encodeURIComponent(tkn)}`);
       wsRef.current = ws;
-      ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); void loadNotifications(); void loadNotifPrefs(); };
+      ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); void loadNotifications(); void loadNotifPrefs(); void loadPrivacy(); void loadBlocked(); void loadFriends(); void loadRequests(); };
       ws.onmessage = (ev) => {
         let data: any; try { data = JSON.parse(String(ev.data)); } catch { return; }
         if (data.type === 'message' && data.message) {
@@ -517,6 +585,17 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           if (!notifPrefsSaving) setNotifPrefsDraft(data.preferences);
           setNotifPrefsStatus('idle');
           setNotifPrefsError(null);
+        } else if (data.type === 'privacy_sync' && data.privacy) {
+          const p = normalizePrivacy(data.privacy);
+          setPrivacy(p);
+          if (!privacySaving) setPrivacyDraft(p);
+          setPrivacyStatus('idle');
+          setPrivacyError(null);
+        } else if (data.type === 'blocklist_sync') {
+          void loadBlocked(); void loadFriends(); void loadRequests(); void onRefreshConversations?.();
+        } else if (data.type === 'conversation_cleared' && data.conversationId) {
+          if (activeConvIdRef.current === data.conversationId) setMessages([]);
+          void onRefreshConversations?.();
         } else if (data.type === 'hello') {
           // multi-device hello ok
         }
@@ -901,6 +980,16 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   const recallMessage = async (msg: ChatMessage) => { try { await api(`/api/conversations/${msg.conversationId}/messages/${msg.id}/recall`, { method: 'POST' }); } catch (e:any) { setConnError(e?.message || '撤回失败'); } };
   const deleteForMe = async (msg: ChatMessage) => { try { await api(`/api/conversations/${msg.conversationId}/messages/${msg.id}/delete`, { method: 'POST' }); setMessages(prev => prev.filter(m => m.id !== msg.id)); } catch (e:any) { setConnError(e?.message || '删除失败'); } };
+  const clearConversationForMe = async () => {
+    if (!activeConv) return;
+    if (!window.confirm(lang==='ar'?'سيؤدي هذا إلى إزالة سجل هذه المحادثة من عرضك فقط (وليس للطرف الآخر). هل تريد المتابعة؟':lang==='en'?'This will remove this conversation history from your view only (not for others). Continue?':'这将仅从你的视图中清除此会话记录（不会删除对方记录）。继续吗？')) return;
+    try {
+      await api(`/api/conversations/${activeConv.id}/clear`, { method: 'POST' });
+      setMessages([]);
+      setNotice(lang==='ar'?'تم مسح سجلك لهذه المحادثة':lang==='en'?'Cleared your view of this conversation':'已清除你对此会话的记录');
+      void onRefreshConversations?.();
+    } catch (e:any) { setConnError(e?.message || '清除失败'); }
+  };
   const createGroup = async () => {
     if (!newGroupName.trim() || newGroupMembers.length === 0) { setConnError('请填写群名称并选择至少1位成员'); return; }
     try {
@@ -1030,10 +1119,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         </div>
 
         {notice && <div className="mb-2 rounded-lg border border-cyan-700/40 bg-cyan-950/40 px-2.5 py-1.5 text-[11px] text-cyan-200 flex items-center justify-between gap-2"><span>{notice}</span><button onClick={()=>setNotice(null)} className="text-cyan-300">×</button></div>}
-        <div className="grid grid-cols-6 gap-1 mb-2 text-[11px]">
-          {(['chats','friends','requests','search','msgsearch','notifs'] as const).map(k => (
-            <button key={k} onClick={()=>{ setTab(k); if (k==='notifs') void loadNotifications(); }} className={`relative px-1 py-1.5 rounded-lg border ${tab===k?'bg-cyan-500/15 border-cyan-500/40 text-cyan-200':'bg-slate-950 border-slate-800 text-slate-400'}`}>
-              {k==='chats'?'会话':k==='friends'?'好友':k==='requests'?'申请':k==='search'?'找人':k==='msgsearch'?'搜消息':'通知'}
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 mb-2 text-[11px]">
+          {(['chats','friends','requests','search','msgsearch','notifs','privacy'] as const).map(k => (
+            <button key={k} onClick={()=>{ setTab(k); if (k==='notifs') void loadNotifications(); if (k==='privacy') { void loadPrivacy(); void loadBlocked(); void openMyProfile(); } }} className={`relative px-1 py-1.5 rounded-lg border ${tab===k?'bg-cyan-500/15 border-cyan-500/40 text-cyan-200':'bg-slate-950 border-slate-800 text-slate-400'}`}>
+              {k==='chats'?(lang==='ar'?'المحادثات':lang==='en'?'Chats':'会话'):k==='friends'?(lang==='ar'?'الأصدقاء':lang==='en'?'Friends':'好友'):k==='requests'?(lang==='ar'?'الطلبات':lang==='en'?'Requests':'申请'):k==='search'?(lang==='ar'?'بحث':lang==='en'?'Search':'找人'):k==='msgsearch'?(lang==='ar'?'الرسائل':lang==='en'?'Msgs':'搜消息'):k==='notifs'?(lang==='ar'?'الإشعارات':lang==='en'?'Notifs':'通知'):(lang==='ar'?'الخصوصية':lang==='en'?'Privacy':'隐私')}
               {k==='notifs' && notifUnread>0 && <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] leading-4">{notifUnread>99?'99+':notifUnread}</span>}
             </button>
           ))}
@@ -1178,6 +1267,125 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             {msgResults.length===0 && (msgQuery.trim()||msgSender||msgConvId) && !msgSearching && <div className="text-xs text-slate-500 text-center py-4">无匹配消息</div>}
           </div>
         )}
+        {tab === 'privacy' && (
+          <div className="flex-1 overflow-y-auto space-y-3 min-h-0" dir={lang==='ar'?'rtl':'ltr'}>
+            {(() => {
+              const L = (zh:string,en:string,ar:string) => lang==='ar'?ar:lang==='en'?en:zh;
+              const draft = normalizePrivacy(privacyDraft || privacy || defaultPrivacy());
+              const self = (selectedProfile?.isSelf ? selectedProfile.user : (currentUser as any)) || {};
+              const bindings = self.bindingStatus || {};
+              const linked = Array.isArray(self.linkedIdentities) ? self.linkedIdentities : [];
+              const Section = ({title, children}: any) => (<div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 space-y-2"><p className="text-xs font-semibold text-slate-200">{title}</p>{children}</div>);
+              const Radio = ({name, value, label, desc}: any) => (
+                <label className="flex items-start gap-2 py-1 cursor-pointer">
+                  <input type="radio" name={name} checked={draft[name]===value} onChange={()=>updatePrivacy({ [name]: value })} className="mt-0.5 accent-cyan-500" />
+                  <span className="min-w-0"><span className="block text-[11px] text-slate-200">{label}</span>{desc && <span className="block text-[10px] text-slate-500">{desc}</span>}</span>
+                </label>
+              );
+              const Toggle = ({k, label, desc}: any) => (
+                <label className="flex items-center justify-between gap-3 py-1.5">
+                  <span className="min-w-0"><span className="block text-[11px] text-slate-200">{label}</span>{desc && <span className="block text-[10px] text-slate-500">{desc}</span>}</span>
+                  <input type="checkbox" checked={!!draft[k]} onChange={e=>updatePrivacy({ [k]: e.target.checked })} className="h-4 w-4 accent-cyan-500" />
+                </label>
+              );
+              return (<>
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-100">{L('隐私与安全','Privacy & Security','الخصوصية والأمان')}</p>
+                    <p className="text-[10px] text-slate-500">{L('设置保存在服务器并跨设备同步；服务器始终强制执行。','Settings are saved on server, synced across devices, and enforced by server.','يتم حفظ الإعدادات على الخادم ومزامنتها عبر الأجهزة ويفرضها الخادم.')}</p>
+                  </div>
+                  <button onClick={()=>{ void loadPrivacy(); void loadBlocked(); }} disabled={privacyLoading} className="text-[10px] px-2 py-1 rounded border border-slate-700 text-slate-300 disabled:opacity-40">{privacyLoading ? L('加载中…','Loading…','جارٍ التحميل…') : L('刷新','Reload','تحديث')}</button>
+                </div>
+
+                <Section title={L('个人资料可见性','Profile visibility','ظهور الملف الشخصي')}>
+                  <Radio name="profileVisibility" value="everyone" label={L('所有人可见','Everyone','الجميع')} />
+                  <Radio name="profileVisibility" value="friends" label={L('仅好友可见','Friends only','الأصدقاء فقط')} />
+                  <Radio name="profileVisibility" value="self" label={L('仅自己可见','Only me','أنا فقط')} />
+                </Section>
+
+                <Section title={L('搜索可见性','Search visibility','ظهور البحث')}>
+                  <Toggle k="searchableByUsername" label={L('允许通过用户名搜索','Searchable by username','قابل للبحث باسم المستخدم')} />
+                  <Toggle k="searchableById" label={L('允许通过唯一 ID 搜索','Searchable by unique ID','قابل للبحث بالمعرّف الفريد')} />
+                  <Toggle k="searchableByDisplayName" label={L('允许通过昵称搜索','Searchable by display name','قابل للبحث بالاسم المعروض')} />
+                  <p className="text-[10px] text-slate-500">{L('关闭全部选项将使他人无法通过搜索找到你。','Disabling all options prevents others from finding you via search.','تعطيل جميع الخيارات يمنع الآخرين من العثور عليك عبر البحث.')}</p>
+                </Section>
+
+                <Section title={L('好友申请权限','Friend request permissions','أذونات طلبات الصداقة')}>
+                  <Radio name="friendRequestPolicy" value="everyone" label={L('所有人','Everyone','الجميع')} />
+                  <Radio name="friendRequestPolicy" value="mutual_group" label={L('仅共同群组用户','Mutual group members only','أعضاء المجموعات المشتركة فقط')} />
+                  <Radio name="friendRequestPolicy" value="none" label={L('禁止陌生人申请','Do not accept requests','عدم قبول الطلبات')} />
+                </Section>
+
+                <Section title={L('在线状态与活跃时间','Online status & activity','حالة الاتصال والنشاط')}>
+                  <Toggle k="showOnlineStatus" label={L('展示在线状态','Show online status','إظهار حالة الاتصال')} />
+                  <Toggle k="showLastActive" label={L('展示最近活跃时间','Show last active time','إظهار آخر وقت نشاط')} />
+                  <p className="text-[10px] text-slate-500">{L('关闭后，其他用户无法通过界面或接口获取被隐藏的信息。','When off, others cannot obtain hidden info via UI or APIs.','عند الإيقاف، لا يمكن للآخرين الحصول على المعلومات المخفية عبر الواجهة أو الواجهات البرمجية.')}</p>
+                </Section>
+
+                <Section title={L('陌生人消息','Messages from strangers','رسائل الغرباء')}>
+                  <Radio name="strangerMessagePolicy" value="everyone" label={L('所有人可以发送','Everyone can message','يمكن للجميع الإرسال')} />
+                  <Radio name="strangerMessagePolicy" value="friends" label={L('仅好友可以发送','Friends only','الأصدقاء فقط')} />
+                  <Radio name="strangerMessagePolicy" value="mutual_group" label={L('仅共同群组用户可以发送','Friends or mutual group members','الأصدقاء أو أعضاء المجموعات المشتركة')} />
+                </Section>
+
+                <Section title={L('已读回执','Read receipts','إيصالات القراءة')}>
+                  <Toggle k="readReceipts" label={L('发送已读回执','Send read receipts','إرسال إيصالات القراءة')} desc={L('关闭后，你仍可正常阅读消息，但不会向对方发送新的已读状态。','When off, you can still read messages but won’t send new read status to others.','عند الإيقاف، يمكنك قراءة الرسائل لكن لن ترسل حالة القراءة للآخرين.')} />
+                </Section>
+
+                <Section title={L('屏蔽名单','Blocked users','المستخدمون المحظورون')}>
+                  <p className="text-[10px] text-slate-500">{L('屏蔽会阻止新的好友申请和受限的私聊互动，抑制对方通知，并隐藏相应在线状态；不会自动删除历史记录或移除共同群组。','Blocking prevents new friend requests and restricted direct interactions, suppresses notifications, and hides presence; it does not auto-delete history or remove mutual groups.','يمنع الحظر طلبات الصداقة الجديدة والتفاعلات المباشرة المقيدة ويخفي الحالة؛ ولا يحذف السجل تلقائيًا ولا يزيل المجموعات المشتركة.')}</p>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {blocked.map(b => (
+                      <div key={b.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
+                        <button onClick={()=>void openProfile(b.id)} className="flex items-center gap-2 min-w-0 text-left">
+                          <img src={b.avatar} className="w-7 h-7 rounded-full object-cover" />
+                          <span className="text-slate-200 truncate">{b.displayName}</span>
+                        </button>
+                        <button onClick={()=>void unblockUser(b.id)} className="text-cyan-300 shrink-0">{L('解除屏蔽','Unblock','إلغاء الحظر')}</button>
+                      </div>
+                    ))}
+                    {blocked.length===0 && <div className="text-xs text-slate-500 py-2">{L('暂无屏蔽用户','No blocked users','لا يوجد مستخدمون محظورون')}</div>}
+                  </div>
+                </Section>
+
+                <Section title={L('聊天记录管理','Chat history management','إدارة سجل الدردشة')}>
+                  <div className="space-y-1.5 text-[11px] text-slate-300">
+                    <p>• {L('清除当前设备本地缓存：仅清理本设备内存中的会话视图，不影响服务器或其他设备。','Clear local cache on this device: clears in-memory view only; does not affect server or other devices.','مسح ذاكرة التخزين المؤقت المحلية: يمسح العرض المحلي فقط.')}</p>
+                    <p>• {L('删除自己视图中的聊天记录：在会话中使用“清除记录”，仅对你隐藏，不删除对方记录。','Delete chat history in your view: use “Clear” in a conversation to hide for you only.','حذف السجل من عرضك: استخدم "مسح" داخل المحادثة لإخفائه لك فقط.')}</p>
+                    <p>• {L('删除单条消息：对你删除单条消息，不影响对方。','Delete a single message: removes it for you only.','حذف رسالة واحدة: يزيلها لك فقط.')}</p>
+                    <p>• {L('双方撤回消息：撤回对双方生效（按现有撤回机制与时效）。','Recall for both sides: follows existing recall behavior/timing.','سحب الرسالة للطرفين: وفق آلية السحب الحالية.')}</p>
+                    <button onClick={()=>{ setMessages([]); setNotice(L('已清除本设备会话缓存视图','Cleared local conversation cache view','تم مسح عرض ذاكرة المحادثات المحلية')); }} className="mt-1 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800">{L('清除当前设备本地缓存','Clear local device cache','مسح ذاكرة الجهاز المحلية')}</button>
+                  </div>
+                </Section>
+
+                <Section title={L('账户安全信息','Account security','أمان الحساب')}>
+                  <div className="grid grid-cols-1 gap-2 text-[11px]">
+                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">{L('唯一用户 ID','Unique User ID','معرّف المستخدم الفريد')}</p><p className="text-slate-200 break-all mt-0.5">{self.id || '-'}</p></div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">Email</p><p className="text-slate-200 mt-0.5">{bindings.email?.bound ? `${bindings.email?.value || L('已绑定','Bound','مرتبط')} (${bindings.email?.verified?L('已验证','verified','موثّق'):L('未验证','unverified','غير موثّق')})` : L('未绑定','Not bound','غير مرتبط')}</p></div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">{L('手机','Phone','الهاتف')}</p><p className="text-slate-200 mt-0.5">{bindings.phone?.bound ? `${bindings.phone?.value || L('已绑定','Bound','مرتبط')} (${bindings.phone?.verified?L('已验证','verified','موثّق'):L('未验证','unverified','غير موثّق')})` : L('未绑定','Not bound','غير مرتبط')}</p></div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">Google</p><p className="text-slate-200 mt-0.5">{bindings.google?.bound ? L('已绑定','Bound','مرتبط') : L('未绑定 (config required)','Not bound (config required)','غير مرتبط (يتطلب إعدادًا)')}</p></div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">WeChat</p><p className="text-slate-200 mt-0.5">{bindings.wechat?.bound ? L('已绑定','Bound','مرتبط') : L('未绑定 (config required)','Not bound (config required)','غير مرتبط (يتطلب إعدادًا)')}</p></div>
+                    {Array.isArray(linked) && linked.length > 0 && <p className="text-[10px] text-slate-500">{L('已关联身份','Linked identities','الهويات المرتبطة')}: {linked.map((i:any)=>i.provider).join(', ')}</p>}
+                  </div>
+                </Section>
+
+                <div className="sticky bottom-0 bg-slate-900/95 backdrop-blur py-2 border-t border-slate-800 flex items-center justify-between gap-2">
+                  <div className="text-[10px] min-h-[16px]">
+                    {privacyStatus==='saving' && <span className="text-cyan-300">{L('保存中…','Saving…','جارٍ الحفظ…')}</span>}
+                    {privacyStatus==='saved' && <span className="text-emerald-300">{L('已保存并同步','Saved & synced','تم الحفظ والمزامنة')}</span>}
+                    {privacyStatus==='error' && <span className="text-rose-300">{L('保存失败','Save failed','فشل الحفظ')}{privacyError?`: ${privacyError}`:''}</span>}
+                    {privacyStatus==='idle' && privacyError && <span className="text-rose-300">{privacyError}</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={()=>void loadPrivacy()} className="text-[10px] px-3 py-1.5 rounded border border-slate-700 text-slate-300">{L('重置','Reset','إعادة تعيين')}</button>
+                    <button onClick={()=>void savePrivacy()} disabled={privacySaving || !privacyDraft} className="text-[10px] px-3 py-1.5 rounded bg-cyan-500 text-slate-950 font-semibold disabled:opacity-40">{L('保存设置','Save settings','حفظ الإعدادات')}</button>
+                  </div>
+                </div>
+              </>);
+            })()}
+          </div>
+        )}
+
         {tab === 'notifs' && (
           <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
             <div className="flex items-center justify-between gap-2">
