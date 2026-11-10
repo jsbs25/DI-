@@ -5,7 +5,7 @@ import {
   Users, UserPlus, Check, X, ImagePlus, Paperclip, Reply, Trash2, Undo2, MoreVertical,
   Wifi, WifiOff, RefreshCw, Info, Crown, Shield, LogOut, UserMinus, Settings2,
   Download, ChevronLeft, ChevronRight, FileText, AlertTriangle, Loader2, Eye,
-  Bell, CheckCheck, User as UserIcon
+  Bell, CheckCheck, User as UserIcon, Settings, Volume2
 } from 'lucide-react';
 
 interface GlobalMessengerProps {
@@ -60,6 +60,21 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [notifHasMore, setNotifHasMore] = useState(false);
   const [notifNextBefore, setNotifNextBefore] = useState<string | null>(null);
   const [notifLoading, setNotifLoading] = useState(false);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<any>(null);
+  const [notifPrefsDraft, setNotifPrefsDraft] = useState<any>(null);
+  const [notifPrefsLoading, setNotifPrefsLoading] = useState(false);
+  const [notifPrefsSaving, setNotifPrefsSaving] = useState(false);
+  const [notifPrefsStatus, setNotifPrefsStatus] = useState<'idle'|'saving'|'saved'|'error'>('idle');
+  const [notifPrefsError, setNotifPrefsError] = useState<string | null>(null);
+  const notifPrefsSaveSeq = useRef(0);
+  const notifAlertSeenRef = useRef<Map<string, number>>(new Map());
+  const activeConvIdRef = useRef<string>(activeConversationId);
+  const notifPrefsRef = useRef<any>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const notifSoundRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => { activeConvIdRef.current = activeConversationId; }, [activeConversationId]);
+  useEffect(() => { notifPrefsRef.current = notifPrefs; }, [notifPrefs]);
   const [friends, setFriends] = useState<FriendUser[]>([]);
   const [incomingReqs, setIncomingReqs] = useState<FriendRequest[]>([]);
   const [outgoingReqs, setOutgoingReqs] = useState<FriendRequest[]>([]);
@@ -236,6 +251,154 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const loadRequests = async () => { try { const d = await api('/api/messenger/friend-requests'); setIncomingReqs(d.incoming||[]); setOutgoingReqs(d.outgoing||[]); } catch {} };
   const loadBlocked = async () => { try { const d = await api('/api/messenger/blocked'); setBlocked(d.blocked || []); } catch {} };
   const loadRecent = async () => { try { const d = await api('/api/messenger/recent'); setRecentConvs(d.conversations || []); } catch {} };
+  const defaultNotifPrefs = () => ({
+    friendRequests: true,
+    friendAccepted: true,
+    groupEvents: true,
+    messages: true,
+    desktop: true,
+    sound: false,
+    dndEnabled: false,
+    dndStart: '22:00',
+    dndEnd: '08:00',
+  });
+
+  const normalizeNotifPrefs = (p: any) => {
+    const base = defaultNotifPrefs();
+    const cur = p && typeof p === 'object' ? p : {};
+    const out: any = { ...base, ...cur };
+    if (typeof out.friendAccepted !== 'boolean') out.friendAccepted = typeof cur.friendRequests === 'boolean' ? cur.friendRequests : base.friendAccepted;
+    const timeRe = /^([01]\d|2[0-3]):([0-5]\d)$/;
+    out.dndStart = typeof out.dndStart === 'string' && timeRe.test(out.dndStart.slice(0,5)) ? out.dndStart.slice(0,5) : base.dndStart;
+    out.dndEnd = typeof out.dndEnd === 'string' && timeRe.test(out.dndEnd.slice(0,5)) ? out.dndEnd.slice(0,5) : base.dndEnd;
+    return out;
+  };
+
+  const isDndActiveLocal = (prefs: any, now = new Date()) => {
+    if (!prefs?.dndEnabled) return false;
+    const parse = (v: string) => { const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(v || ''); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+    const start = parse(String(prefs.dndStart || '22:00'));
+    const end = parse(String(prefs.dndEnd || '08:00'));
+    if (start == null || end == null || start === end) return false;
+    const cur = now.getHours() * 60 + now.getMinutes();
+    return start < end ? (cur >= start && cur < end) : (cur >= start || cur < end);
+  };
+
+  const ensureAudioUnlocked = async () => {
+    try {
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioCtx();
+      const ctx = audioCtxRef.current;
+      if (ctx && ctx.state === 'suspended') await ctx.resume();
+    } catch {}
+  };
+
+  const playNotifSound = async () => {
+    try {
+      if (!notifSoundRef.current) {
+        const a = new Audio('/assets/notification.wav');
+        a.preload = 'auto';
+        a.volume = 0.6;
+        notifSoundRef.current = a;
+      }
+      await notifSoundRef.current.play();
+      return;
+    } catch {}
+    try {
+      await ensureAudioUnlocked();
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = 880;
+      const now = ctx.currentTime;
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(0.08, now + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(now); o.stop(now + 0.19);
+    } catch {}
+  };
+
+  const maybeAlertNotification = (n: any, alert?: any) => {
+    if (!n || n.read) return;
+    const prefs = notifPrefsRef.current || defaultNotifPrefs();
+    const desktopAllowed = typeof alert?.desktop === 'boolean' ? alert.desktop : (!!prefs.desktop && !isDndActiveLocal(prefs));
+    const soundAllowed = typeof alert?.sound === 'boolean' ? alert.sound : (!!prefs.sound && !isDndActiveLocal(prefs));
+    if (!desktopAllowed && !soundAllowed) return;
+    // dedupe by notification id
+    const now = Date.now();
+    const seen = notifAlertSeenRef.current;
+    if (seen.has(n.id)) return;
+    for (const [k, ts] of seen) if (now - ts > 120000) seen.delete(k);
+    seen.set(n.id, now);
+    // avoid duplicate when user is in active conversation
+    if (n.conversationId && n.conversationId === activeConvIdRef.current) {
+      // still allow if window not focused/minimized? requirement says avoid duplicate when user viewing current conversation
+      if (document?.hasFocus?.()) return;
+    }
+    if (desktopAllowed) {
+      try {
+        const bridge = (window as any).earthOneDesktop;
+        if (bridge?.showNotification) {
+          bridge.showNotification({ id: n.id, title: n.title || 'EARTH ONE', body: n.body || '', conversationId: n.conversationId || null, type: n.type || '' });
+        } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          const sys = new Notification(n.title || 'EARTH ONE', { body: n.body || '', tag: n.conversationId ? `conv:${n.conversationId}` : `ntf:${n.id}` });
+          sys.onclick = () => { try { window.focus(); } catch {}; if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); } };
+        } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+          Notification.requestPermission().catch(()=>{});
+        }
+      } catch {}
+    }
+    if (soundAllowed) void playNotifSound();
+  };
+
+  const loadNotifPrefs = async () => {
+    if (!authed) return;
+    setNotifPrefsLoading(true);
+    try {
+      const d = await api('/api/notifications/preferences');
+      const p = normalizeNotifPrefs(d.preferences || d);
+      setNotifPrefs(p);
+      setNotifPrefsDraft((prev: any) => notifPrefsSaving ? prev : p);
+      setNotifPrefsError(null);
+    } catch (e: any) {
+      setNotifPrefsError(e?.message || 'Failed to load preferences');
+    } finally {
+      setNotifPrefsLoading(false);
+    }
+  };
+
+  const saveNotifPrefs = async (nextDraft?: any) => {
+    const draft = normalizeNotifPrefs(nextDraft || notifPrefsDraft || notifPrefs || defaultNotifPrefs());
+    const seq = ++notifPrefsSaveSeq.current;
+    setNotifPrefsSaving(true);
+    setNotifPrefsStatus('saving');
+    setNotifPrefsError(null);
+    try {
+      const d = await api('/api/notifications/preferences', { method: 'PUT', body: JSON.stringify(draft) });
+      const saved = normalizeNotifPrefs(d.preferences || d);
+      // ignore stale responses
+      if (seq !== notifPrefsSaveSeq.current) return;
+      setNotifPrefs(saved);
+      setNotifPrefsDraft(saved);
+      setNotifPrefsStatus('saved');
+      setTimeout(() => { if (notifPrefsSaveSeq.current === seq) setNotifPrefsStatus('idle'); }, 1500);
+    } catch (e: any) {
+      if (seq !== notifPrefsSaveSeq.current) return;
+      setNotifPrefsStatus('error');
+      setNotifPrefsError(e?.message || 'Save failed');
+    } finally {
+      if (seq === notifPrefsSaveSeq.current) setNotifPrefsSaving(false);
+    }
+  };
+
+  const updateNotifPref = (patch: any) => {
+    setNotifPrefsDraft((prev: any) => normalizeNotifPrefs({ ...(prev || notifPrefs || defaultNotifPrefs()), ...patch }));
+    setNotifPrefsStatus('idle');
+  };
+
   const loadNotifications = async (opts?: { append?: boolean; before?: string }) => {
     if (notifLoading) return;
     setNotifLoading(true);
@@ -253,7 +416,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     finally { setNotifLoading(false); }
   };
 
-  useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); void loadNotifications(); } }, [authed, currentUser?.id]);
+  useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); void loadNotifications(); void loadNotifPrefs(); } }, [authed, currentUser?.id]);
 
   // WebSocket realtime
   useEffect(() => {
@@ -266,7 +429,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${proto}://${window.location.host}/ws?token=${encodeURIComponent(tkn)}`);
       wsRef.current = ws;
-      ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); void loadNotifications(); };
+      ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); void loadNotifications(); void loadNotifPrefs(); };
       ws.onmessage = (ev) => {
         let data: any; try { data = JSON.parse(String(ev.data)); } catch { return; }
         if (data.type === 'message' && data.message) {
@@ -313,11 +476,17 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         } else if (data.type === 'notification' && data.notification) {
           setNotifications(prev => prev.some(n => n.id === data.notification.id) ? prev : [data.notification, ...prev].slice(0, 200));
           if (typeof data.unreadCount === 'number') setNotifUnread(data.unreadCount); else setNotifUnread(u => u + (data.notification.read ? 0 : 1));
+          try { maybeAlertNotification(data.notification, data.alert); } catch {}
         } else if (data.type === 'notification_sync') {
           if (typeof data.unreadCount === 'number') setNotifUnread(data.unreadCount);
           if (data.readAll) setNotifications(prev => prev.map(n => ({ ...n, read: true, readAt: n.readAt || new Date().toISOString() })));
           if (data.readId) setNotifications(prev => prev.map(n => n.id === data.readId ? { ...n, read: true, readAt: data.readAt || n.readAt } : n));
           if (data.deletedId) setNotifications(prev => prev.filter(n => n.id !== data.deletedId));
+        } else if (data.type === 'notification_prefs_sync' && data.preferences) {
+          setNotifPrefs(data.preferences);
+          if (!notifPrefsSaving) setNotifPrefsDraft(data.preferences);
+          setNotifPrefsStatus('idle');
+          setNotifPrefsError(null);
         } else if (data.type === 'hello') {
           // multi-device hello ok
         }
@@ -876,20 +1045,84 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         )}
         {tab === 'notifs' && (
           <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] text-slate-400">通知中心 · 未读 {notifUnread}</p>
-              <div className="flex items-center gap-2">
-                <button onClick={()=>void loadNotifications()} className="text-[11px] text-cyan-300">刷新</button>
-                <button onClick={()=>void markAllNotifsRead()} className="text-[11px] text-cyan-300 inline-flex items-center gap-1"><CheckCheck className="w-3 h-3"/>全部已读</button>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[11px] text-slate-400">{lang==='ar' ? 'مركز الإشعارات' : lang==='en' ? 'Notification Center' : '通知中心'} · {lang==='ar' ? 'غير مقروء' : lang==='en' ? 'Unread' : '未读'} {notifUnread}</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button onClick={()=>{ setShowNotifSettings((v:boolean)=>!v); if (!notifPrefs) void loadNotifPrefs(); }} className={`p-1.5 rounded border ${showNotifSettings?'border-cyan-500/50 text-cyan-300 bg-cyan-500/10':'border-slate-700 text-slate-300 hover:bg-slate-800'}`} title={lang==='ar'?'الإعدادات':lang==='en'?'Settings':'设置'}><Settings className="w-3.5 h-3.5"/></button>
+                <button onClick={()=>void loadNotifications()} className="text-[11px] text-cyan-300">{lang==='ar'?'تحديث':lang==='en'?'Refresh':'刷新'}</button>
+                <button onClick={()=>void markAllNotifsRead()} className="text-[11px] text-cyan-300 inline-flex items-center gap-1"><CheckCheck className="w-3 h-3"/>{lang==='ar'?'قراءة الكل':lang==='en'?'Read all':'全部已读'}</button>
               </div>
             </div>
+
+            {showNotifSettings && (
+              <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 space-y-3" dir={lang==='ar'?'rtl':'ltr'}>
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-100">{lang==='ar'?'إعدادات الإشعارات':lang==='en'?'Notification Settings':'通知设置'}</p>
+                    <p className="text-[10px] text-slate-500">{lang==='ar'?'تُحفظ على الخادم وتُزامن عبر الأجهزة.':lang==='en'?'Saved on server and synced across devices.':'保存在服务器并跨设备同步。'}</p>
+                  </div>
+                  <button onClick={()=>void loadNotifPrefs()} disabled={notifPrefsLoading} className="text-[10px] px-2 py-1 rounded border border-slate-700 text-slate-300 disabled:opacity-40">{notifPrefsLoading ? (lang==='ar'?'جارٍ التحميل…':lang==='en'?'Loading…':'加载中…') : (lang==='ar'?'إعادة تحميل':lang==='en'?'Reload':'重载')}</button>
+                </div>
+                {(() => {
+                  const draft = notifPrefsDraft || notifPrefs || defaultNotifPrefs();
+                  const row = (key: string, label: string, desc?: string) => (
+                    <label key={key} className="flex items-center justify-between gap-3 py-1.5">
+                      <span className="min-w-0">
+                        <span className="block text-[11px] text-slate-200">{label}</span>
+                        {desc && <span className="block text-[10px] text-slate-500">{desc}</span>}
+                      </span>
+                      <input type="checkbox" checked={!!draft[key]} onChange={e=>updateNotifPref({ [key]: e.target.checked })} className="h-4 w-4 accent-cyan-500" />
+                    </label>
+                  );
+                  return (
+                    <div className="space-y-1">
+                      {row('messages', lang==='ar'?'إشعارات الرسائل الجديدة':lang==='en'?'New message notifications':'新消息通知')}
+                      {row('friendRequests', lang==='ar'?'إشعارات طلبات الصداقة':lang==='en'?'Friend request notifications':'好友申请通知')}
+                      {row('friendAccepted', lang==='ar'?'إشعارات قبول الصداقة':lang==='en'?'Friend accepted notifications':'好友通过通知')}
+                      {row('groupEvents', lang==='ar'?'إشعارات المجموعة والإدارة':lang==='en'?'Group & admin event notifications':'群聊/群邀请/群管理通知')}
+                      <div className="h-px bg-slate-800 my-1" />
+                      {row('desktop', lang==='ar'?'إشعارات سطح المكتب':lang==='en'?'Desktop system notifications':'桌面系统通知', lang==='ar'?'يتطلب إذن النظام/إلكترون.':lang==='en'?'Requires system/Electron permission.':'需系统/Electron 权限。')}
+                      {row('sound', lang==='ar'?'صوت الإشعار':lang==='en'?'Notification sound':'通知声音')}
+                      <div className="h-px bg-slate-800 my-1" />
+                      {row('dndEnabled', lang==='ar'?'وضع عدم الإزعاج':lang==='en'?'Do Not Disturb':'免打扰模式', lang==='ar'?'يُكتم الصوت والتنبيهات مع استمرار حفظ الرسائل والإشعارات.':lang==='en'?'Mutes alerts/sound; messages and notifications are still saved.':'静音并关闭提醒；消息和通知仍正常接收保存。')}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <label className="text-[10px] text-slate-400 space-y-1">
+                          <span>{lang==='ar'?'وقت البدء':lang==='en'?'Start time':'开始时间'}</span>
+                          <input type="time" value={draft.dndStart || '22:00'} onChange={e=>updateNotifPref({ dndStart: e.target.value })} disabled={!draft.dndEnabled} className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200 disabled:opacity-50" />
+                        </label>
+                        <label className="text-[10px] text-slate-400 space-y-1">
+                          <span>{lang==='ar'?'وقت الانتهاء':lang==='en'?'End time':'结束时间'}</span>
+                          <input type="time" value={draft.dndEnd || '08:00'} onChange={e=>updateNotifPref({ dndEnd: e.target.value })} disabled={!draft.dndEnabled} className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200 disabled:opacity-50" />
+                        </label>
+                      </div>
+                      {draft.dndEnabled && draft.dndStart === draft.dndEnd && <p className="text-[10px] text-amber-300">{lang==='ar'?'وقت البدء والانتهاء متطابقان — لن يتم تفعيل عدم الإزعاج.':lang==='en'?'Start and end are equal — DND will not activate.':'开始与结束时间相同 — 免打扰不会生效。'}</p>}
+                    </div>
+                  );
+                })()}
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <div className="text-[10px] min-h-[16px]">
+                    {notifPrefsStatus==='saving' && <span className="text-cyan-300">{lang==='ar'?'جارٍ الحفظ…':lang==='en'?'Saving…':'保存中…'}</span>}
+                    {notifPrefsStatus==='saved' && <span className="text-emerald-300">{lang==='ar'?'تم الحفظ':lang==='en'?'Saved':'保存成功'}</span>}
+                    {notifPrefsStatus==='error' && <span className="text-rose-300">{lang==='ar'?'فشل الحفظ':lang==='en'?'Save failed':'保存失败'}{notifPrefsError?`: ${notifPrefsError}`:''}</span>}
+                    {notifPrefsStatus==='idle' && notifPrefsError && <span className="text-rose-300">{notifPrefsError}</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={()=>{ void ensureAudioUnlocked(); void playNotifSound(); }} className="text-[10px] px-2 py-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 inline-flex items-center gap-1"><Volume2 className="w-3 h-3"/>{lang==='ar'?'اختبار':lang==='en'?'Test':'测试'}</button>
+                    <button onClick={()=>void saveNotifPrefs()} disabled={notifPrefsSaving || !notifPrefsDraft} className="text-[10px] px-3 py-1.5 rounded bg-cyan-500 text-slate-950 font-semibold disabled:opacity-40">{lang==='ar'?'حفظ':lang==='en'?'Save':'保存'}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {notifications.map(n => (
               <div key={n.id} className={`p-2.5 rounded-xl border text-left space-y-1 ${n.read ? 'border-slate-800 bg-slate-950/40' : 'border-cyan-700/40 bg-cyan-950/20'}`}>
                 <button onClick={()=>void openNotification(n)} className="w-full text-left space-y-1">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       {n.actorAvatar ? <img src={n.actorAvatar} className="w-6 h-6 rounded-full object-cover"/> : <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center"><Bell className="w-3 h-3 text-slate-300"/></div>}
-                      <p className="text-xs font-semibold text-slate-200 truncate">{n.title || '通知'}</p>
+                      <p className="text-xs font-semibold text-slate-200 truncate">{n.title || (lang==='ar'?'إشعار':lang==='en'?'Notification':'通知')}</p>
                     </div>
                     {!n.read && <span className="w-2 h-2 rounded-full bg-cyan-400 mt-1 shrink-0"/>}
                   </div>
@@ -897,14 +1130,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <p className="text-[10px] text-slate-500">{new Date(n.createdAt).toLocaleString()}</p>
                 </button>
                 <div className="flex items-center gap-2 pt-1">
-                  {!n.read && <button onClick={()=>void markNotifRead(n.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-200">标记已读</button>}
-                  <button onClick={()=>void deleteNotif(n.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-rose-300 inline-flex items-center gap-1"><Trash2 className="w-3 h-3"/>删除</button>
+                  {!n.read && <button onClick={()=>void markNotifRead(n.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-200">{lang==='ar'?'وضع علامة مقروء':lang==='en'?'Mark read':'标记已读'}</button>}
+                  <button onClick={()=>void deleteNotif(n.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-rose-300 inline-flex items-center gap-1"><Trash2 className="w-3 h-3"/>{lang==='ar'?'حذف':lang==='en'?'Delete':'删除'}</button>
                 </div>
               </div>
             ))}
-            {notifHasMore && <button onClick={()=>void loadNotifications({ append: true, before: notifNextBefore || undefined })} disabled={notifLoading} className="w-full text-[11px] px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-40">{notifLoading?'加载中…':'加载更多'}</button>}
-            {notifications.length===0 && !notifLoading && <div className="text-xs text-slate-500 text-center py-8">暂无通知</div>}
-            {notifLoading && notifications.length===0 && <div className="text-xs text-slate-500 text-center py-8">加载中…</div>}
+            {notifHasMore && <button onClick={()=>void loadNotifications({ append: true, before: notifNextBefore || undefined })} disabled={notifLoading} className="w-full text-[11px] px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-40">{notifLoading?(lang==='ar'?'جارٍ التحميل…':lang==='en'?'Loading…':'加载中…'):(lang==='ar'?'تحميل المزيد':lang==='en'?'Load more':'加载更多')}</button>}
+            {notifications.length===0 && !notifLoading && <div className="text-xs text-slate-500 text-center py-8">{lang==='ar'?'لا توجد إشعارات':lang==='en'?'No notifications':'暂无通知'}</div>}
+            {notifLoading && notifications.length===0 && <div className="text-xs text-slate-500 text-center py-8">{lang==='ar'?'جارٍ التحميل…':lang==='en'?'Loading…':'加载中…'}</div>}
           </div>
         )}
       </div>
