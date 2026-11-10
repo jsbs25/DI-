@@ -1786,7 +1786,9 @@ app.get('/api/conversations/:id', (req, res) => {
   if (!store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
   const members = (conv.participantIds || []).map(id => {
     const u = store.users.find(x => x.id === id);
-    return u ? { id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, isOnline: (u as any).isOnline, lastActiveAt: (u as any).lastActiveAt } : { id, username: id, displayName: id, avatar: '' };
+    if (!u) return { id, username: id, displayName: id, avatar: '' };
+    const pres = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(user.id, u.id) : { isOnline: !!(u as any).isOnline, lastActiveAt: (u as any).lastActiveAt };
+    return { id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, isOnline: !!pres.isOnline, lastActiveAt: pres.lastActiveAt };
   });
   res.json({ success: true, conversation: { ...conv, members } });
 });
