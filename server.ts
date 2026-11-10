@@ -1387,11 +1387,42 @@ app.get('/api/conversations/:id/search', (req, res) => {
   if (!user) return;
   const id = req.params.id;
   const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const senderId = typeof req.query.senderId === 'string' ? req.query.senderId.trim() : '';
   const conv = store.conversations.find(c => c.id === id);
   if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
-  if (!q) return res.json({ success: true, messages: [] });
-  const msgs = store.messages.filter(m => m.conversationId === id && !(m.deletedFor||[]).includes(user.id) && !m.recalled && (m.content||'').toLowerCase().includes(q)).slice(-50);
+  if (!q && !senderId) return res.json({ success: true, messages: [] });
+  const msgs = store.messages
+    .filter(m => m.conversationId === id && !(m.deletedFor||[]).includes(user.id) && !m.recalled)
+    .filter(m => !q || (m.content || '').toLowerCase().includes(q) || (m.attachments || []).some((a: any) => String(a?.name || '').toLowerCase().includes(q)))
+    .filter(m => !senderId || m.senderId === senderId)
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+    .slice(0, 80);
   res.json({ success: true, messages: msgs });
+});
+
+app.get('/api/messenger/messages/search', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const conversationId = typeof req.query.conversationId === 'string' ? req.query.conversationId.trim() : '';
+  const senderId = typeof req.query.senderId === 'string' ? req.query.senderId.trim() : '';
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
+  if (!q && !senderId && !conversationId) return res.json({ success: true, messages: [] });
+  const accessible = store.getConversationsForUser(user.id);
+  const convMap = new Map(accessible.map(c => [c.id, c]));
+  if (conversationId && !convMap.has(conversationId)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  const scopeIds = conversationId ? new Set([conversationId]) : new Set(accessible.map(c => c.id));
+  const messages = store.messages
+    .filter(m => scopeIds.has(m.conversationId) && !(m.deletedFor || []).includes(user.id) && !m.recalled)
+    .filter(m => !senderId || m.senderId === senderId)
+    .filter(m => !q || (m.content || '').toLowerCase().includes(q) || (m.attachments || []).some((a: any) => String(a?.name || '').toLowerCase().includes(q)))
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+    .slice(0, limit)
+    .map(m => {
+      const c = convMap.get(m.conversationId);
+      return { ...m, conversationName: c?.name || '', conversationType: c?.type || '', conversationAvatar: c?.otherUser?.avatar || c?.avatar || '' };
+    });
+  res.json({ success: true, messages });
 });
 
 // -------------------------------------------------------------

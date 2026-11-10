@@ -45,9 +45,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [showIntegrations, setShowIntegrations] = useState(false);
   const [connError, setConnError] = useState<string | null>(null);
   const [wsStatus, setWsStatus] = useState<'off' | 'connecting' | 'open' | 'closed'>('off');
-  const [tab, setTab] = useState<'chats' | 'friends' | 'requests' | 'search'>('chats');
+  const [tab, setTab] = useState<'chats' | 'friends' | 'requests' | 'search' | 'msgsearch'>('chats');
   const [userSearch, setUserSearch] = useState('');
   const [searchResults, setSearchResults] = useState<FriendUser[]>([]);
+  const [msgQuery, setMsgQuery] = useState('');
+  const [msgSender, setMsgSender] = useState('');
+  const [msgConvId, setMsgConvId] = useState('');
+  const [msgResults, setMsgResults] = useState<(ChatMessage & { conversationName?: string; conversationType?: string })[]>([]);
+  const [msgSearching, setMsgSearching] = useState(false);
   const [friends, setFriends] = useState<FriendUser[]>([]);
   const [incomingReqs, setIncomingReqs] = useState<FriendRequest[]>([]);
   const [outgoingReqs, setOutgoingReqs] = useState<FriendRequest[]>([]);
@@ -341,6 +346,24 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     try { const d = await api(`/api/messenger/users/search?q=${encodeURIComponent(userSearch.trim())}`); setSearchResults(d.users || []); } catch (e:any) { setConnError(e?.message || '搜索失败'); }
   };
 
+  const doSearchMessages = async () => {
+    if (!msgQuery.trim() && !msgSender && !msgConvId) { setMsgResults([]); return; }
+    setMsgSearching(true);
+    try {
+      const qs = new URLSearchParams();
+      if (msgQuery.trim()) qs.set('q', msgQuery.trim());
+      if (msgSender) qs.set('senderId', msgSender);
+      if (msgConvId) qs.set('conversationId', msgConvId);
+      qs.set('limit', '50');
+      const d = await api(`/api/messenger/messages/search?${qs.toString()}`);
+      setMsgResults(d.messages || []);
+    } catch (e: any) {
+      setConnError(e?.message || '消息搜索失败');
+    } finally {
+      setMsgSearching(false);
+    }
+  };
+
   const sendFriendRequest = async (toUserId: string) => { if (pendingRequestIds.has(toUserId)) return; setPendingRequestIds(s=>new Set(s).add(toUserId)); try { await api('/api/messenger/friend-requests', { method: 'POST', body: JSON.stringify({ toUserId }) }); setNotice('好友申请已发送'); await loadRequests(); } catch (e:any) { setConnError(e?.message || '发送失败'); } finally { setPendingRequestIds(s=>{const n=new Set(s); n.delete(toUserId); return n;}); } };
   const respondRequest = async (id: string, accept: boolean) => { if (pendingRequestIds.has(id)) return; setPendingRequestIds(s=>new Set(s).add(id)); try { await api(`/api/messenger/friend-requests/${id}/respond`, { method: 'POST', body: JSON.stringify({ accept }) }); setNotice(accept?'已接受好友申请':'已拒绝好友申请'); await loadRequests(); await loadFriends(); await onRefreshConversations?.(); await loadRecent(); } catch (e:any) { setConnError(e?.message || '操作失败'); } finally { setPendingRequestIds(s=>{const n=new Set(s); n.delete(id); return n;}); } };
   const removeFriend = async (id: string) => { if(!window.confirm('确认删除好友？')) return; try { await api(`/api/messenger/friends/${id}`, { method: 'DELETE' }); setNotice('已删除好友'); await loadFriends(); await loadBlocked(); await loadRecent(); } catch (e:any) { setConnError(e?.message || '操作失败'); } };
@@ -495,10 +518,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         </div>
 
         {notice && <div className="mb-2 rounded-lg border border-cyan-700/40 bg-cyan-950/40 px-2.5 py-1.5 text-[11px] text-cyan-200 flex items-center justify-between gap-2"><span>{notice}</span><button onClick={()=>setNotice(null)} className="text-cyan-300">×</button></div>}
-        <div className="grid grid-cols-4 gap-1 mb-2 text-[11px]">
-          {(['chats','friends','requests','search'] as const).map(k => (
-            <button key={k} onClick={()=>setTab(k)} className={`px-2 py-1.5 rounded-lg border ${tab===k?'bg-cyan-500/15 border-cyan-500/40 text-cyan-200':'bg-slate-950 border-slate-800 text-slate-400'}`}>
-              {k==='chats'?'会话':k==='friends'?'好友':k==='requests'?'申请':'查找'}
+        <div className="grid grid-cols-5 gap-1 mb-2 text-[11px]">
+          {(['chats','friends','requests','search','msgsearch'] as const).map(k => (
+            <button key={k} onClick={()=>setTab(k)} className={`px-1.5 py-1.5 rounded-lg border ${tab===k?'bg-cyan-500/15 border-cyan-500/40 text-cyan-200':'bg-slate-950 border-slate-800 text-slate-400'}`}>
+              {k==='chats'?'会话':k==='friends'?'好友':k==='requests'?'申请':k==='search'?'找人':'搜消息'}
             </button>
           ))}
         </div>
@@ -602,6 +625,44 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               </div>
             );})}
             {searchResults.length===0 && userSearch.trim() && <div className="text-xs text-slate-500 text-center py-4">无匹配用户</div>}
+          </div>
+        )}
+
+        {tab === 'msgsearch' && (
+          <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+            <input value={msgQuery} onChange={e=>setMsgQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void doSearchMessages();}} placeholder="关键词（消息内容/附件名）" className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200"/>
+            <div className="grid grid-cols-2 gap-2">
+              <select value={msgConvId} onChange={e=>{setMsgConvId(e.target.value); setMsgSender('');}} className="px-2 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200">
+                <option value="">全部会话</option>
+                {conversations.filter(c=>c.type!=='country_room').map(c => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
+              </select>
+              <select value={msgSender} onChange={e=>setMsgSender(e.target.value)} className="px-2 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200">
+                <option value="">全部发送者</option>
+                {(() => {
+                  const opts: {id:string; name:string}[] = [];
+                  const seen = new Set<string>();
+                  const add = (id?:string,name?:string)=>{ if(!id||seen.has(id)) return; seen.add(id); opts.push({id,name:name||id}); };
+                  add(currentUser?.id, currentUser?.displayName || '我');
+                  for (const c of conversations) {
+                    if (msgConvId && c.id !== msgConvId) continue;
+                    if (c.otherUser) add(c.otherUser.id, c.otherUser.displayName);
+                    for (const p of (c as any).members || []) add(p.id, p.displayName);
+                    for (const pid of c.participantIds || []) add(pid, pid);
+                  }
+                  for (const f of friends) add(f.id, f.displayName);
+                  return opts.map(o => <option key={o.id} value={o.id}>{o.name}</option>);
+                })()}
+              </select>
+            </div>
+            <button onClick={()=>void doSearchMessages()} disabled={msgSearching} className="w-full px-3 py-2 rounded-xl bg-cyan-500 text-slate-950 text-xs font-semibold disabled:opacity-40">{msgSearching?'搜索中…':'搜索消息'}</button>
+            <div className="text-[10px] text-slate-500">支持关键词、发送者、会话筛选（真实后端搜索）</div>
+            {msgResults.map(m => (
+              <button key={m.id} onClick={()=>{ onSelectConversation(m.conversationId); setTab('chats'); }} className="w-full text-left p-2.5 rounded-xl border border-slate-800 bg-slate-950/50 hover:bg-slate-800/60 space-y-1">
+                <div className="flex items-center justify-between gap-2"><span className="text-[11px] font-semibold text-slate-200 truncate">{(m as any).conversationName || m.conversationId}</span><span className="text-[10px] text-slate-500 shrink-0">{new Date(m.createdAt).toLocaleString()}</span></div>
+                <p className="text-[11px] text-slate-300 truncate">{m.senderName}: {m.content || (m.attachments?.length ? `[附件] ${m.attachments.map(a=>a.name).join(', ')}` : '')}</p>
+              </button>
+            ))}
+            {msgResults.length===0 && (msgQuery.trim()||msgSender||msgConvId) && !msgSearching && <div className="text-xs text-slate-500 text-center py-4">无匹配消息</div>}
           </div>
         )}
       </div>
