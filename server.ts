@@ -1048,6 +1048,7 @@ app.post('/api/notifications/:id/read', async (req, res) => {
   let n: any = null;
   await store.mutate(async () => { n = store.markNotificationRead(user.id, req.params.id); if (n) store.persist(); });
   if (!n) return res.status(404).json({ success: false, error: 'Notification not found' });
+  try { wsBroadcastToUser(user.id, { type: 'notification_sync', unreadCount: store.getUnreadNotificationCount(user.id), readId: req.params.id, readAt: n.readAt }); } catch {}
   res.json({ success: true, notification: n, unreadCount: store.getUnreadNotificationCount(user.id) });
 });
 
@@ -1056,6 +1057,7 @@ app.post('/api/notifications/read-all', async (req, res) => {
   if (!user) return;
   let count = 0;
   await store.mutate(async () => { count = store.markAllNotificationsRead(user.id); if (count) store.persist(); });
+  try { wsBroadcastToUser(user.id, { type: 'notification_sync', unreadCount: 0, readAll: true }); } catch {}
   res.json({ success: true, marked: count, unreadCount: store.getUnreadNotificationCount(user.id) });
 });
 
@@ -1065,7 +1067,22 @@ app.delete('/api/notifications/:id', async (req, res) => {
   let ok = false;
   await store.mutate(async () => { ok = store.deleteNotification(user.id, req.params.id); if (ok) store.persist(); });
   if (!ok) return res.status(404).json({ success: false, error: 'Notification not found' });
+  try { wsBroadcastToUser(user.id, { type: 'notification_sync', unreadCount: store.getUnreadNotificationCount(user.id), deletedId: req.params.id }); } catch {}
   res.json({ success: true, unreadCount: store.getUnreadNotificationCount(user.id) });
+});
+
+app.get('/api/notifications/preferences', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  res.json({ success: true, preferences: store.getNotificationPrefs(user.id) });
+});
+
+app.put('/api/notifications/preferences', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  let prefs: any;
+  await store.mutate(async () => { prefs = store.setNotificationPrefs(user.id, req.body || {}); store.persist(); });
+  res.json({ success: true, preferences: prefs });
 });
 
 app.get('/api/messenger/users/search', (req, res) => {
