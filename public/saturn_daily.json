@@ -1,6 +1,6 @@
 {
-  "date": "2026-11-10",
-  "generatedAt": "2026-11-10",
+  "date": "2026-11-11",
+  "generatedAt": "2026-11-11",
   "source": "Piped/Invidious mirrors",
   "count": 12,
   "videos": [
@@ -8,9 +8,9 @@
       "videoId": "QeD40Zp7q6I",
       "title": "Journey to the Largest Stars in the Universe | Space Documentary 2026",
       "author": "Actual Space",
-      "publishedText": "1 day ago",
+      "publishedText": "2 days ago",
       "durationSeconds": 5675,
-      "views": 18551
+      "views": 28089
     },
     {
       "videoId": "oz-Y1Xzx5iQ",
@@ -18,31 +18,7 @@
       "author": "BBC Earth Science",
       "publishedText": "1 year ago",
       "durationSeconds": 2395,
-      "views": 2648174
-    },
-    {
-      "videoId": "ZR1HI21eSM0",
-      "title": "8 Hours Of Space & Our Extraordinary Universe | BBC Earth Science",
-      "author": "BBC Earth Science",
-      "publishedText": "2 months ago",
-      "durationSeconds": 29371,
-      "views": 900509
-    },
-    {
-      "videoId": "2kpGx9ho02g",
-      "title": "The Search For Elusive Planets is Over | Space Documentary | 3 Decades of Research of X File Mystery",
-      "author": "TV - Quantum Universe",
-      "publishedText": "5 years ago",
-      "durationSeconds": 12060,
-      "views": 12150258
-    },
-    {
-      "videoId": "mO3Q4bRQZ3k",
-      "title": "Journey Through The Universe - HD Documentary",
-      "author": "Advexon Science Network",
-      "publishedText": "10 years ago",
-      "durationSeconds": 5291,
-      "views": 6408984
+      "views": 2650455
     },
     {
       "videoId": "eSg7TREgNTA",
@@ -50,31 +26,23 @@
       "author": "TV - Quantum Universe",
       "publishedText": "5 years ago",
       "durationSeconds": 12953,
-      "views": 20105717
+      "views": 20106009
+    },
+    {
+      "videoId": "ZR1HI21eSM0",
+      "title": "8 Hours Of Space & Our Extraordinary Universe | BBC Earth Science",
+      "author": "BBC Earth Science",
+      "publishedText": "2 months ago",
+      "durationSeconds": 29371,
+      "views": 903941
     },
     {
       "videoId": "dZBBcfvXutg",
       "title": "Invisible Forces that Shape Our Reality ⚛️ How the Universe Works | Science Channel",
       "author": "Science Channel",
-      "publishedText": "12 days ago",
+      "publishedText": "13 days ago",
       "durationSeconds": 3795,
-      "views": 312692
-    },
-    {
-      "videoId": "PxZDBTogSy8",
-      "title": "Five Wonders Of Our Cosmos | BBC Earth Science | BBC Studios",
-      "author": "BBC Studios",
-      "publishedText": "9 days ago",
-      "durationSeconds": 2395,
-      "views": 518806
-    },
-    {
-      "videoId": "9ePywE1RX34",
-      "title": "Our Universe A Journey into Mystery - Space Documentary 2025",
-      "author": "Astro Horizons",
-      "publishedText": null,
-      "durationSeconds": -1,
-      "views": 32
+      "views": 327172
     },
     {
       "videoId": "pe5DHvTFTI4",
@@ -82,7 +50,39 @@
       "author": "Science Channel",
       "publishedText": "2 weeks ago",
       "durationSeconds": 30163,
-      "views": 207882
+      "views": 217380
+    },
+    {
+      "videoId": "ImIr0CiwJyA",
+      "title": "The Most Relaxing Facts About Rare Stars to Fall Asleep To — No Adverts",
+      "author": "Sleepy Science Channel",
+      "publishedText": "6 months ago",
+      "durationSeconds": 8661,
+      "views": 191376
+    },
+    {
+      "videoId": "PxZDBTogSy8",
+      "title": "Five Wonders Of Our Cosmos | BBC Earth Science | BBC Studios",
+      "author": "BBC Studios",
+      "publishedText": "10 days ago",
+      "durationSeconds": 2395,
+      "views": 547423
+    },
+    {
+      "videoId": "FNR7a8joCGs",
+      "title": "Chaos in Space 💥 | How the Universe Works | Science Channel",
+      "author": "Science Channel",
+      "publishedText": "5 months ago",
+      "durationSeconds": 4605,
+      "views": 413324
+    },
+    {
+      "videoId": "egDIqKLt2L4",
+      "title": "Mysteries of the Universe | Space Documentary 2023",
+      "author": "Now Next",
+      "publishedText": "3 years ago",
+      "durationSeconds": 5512,
+      "views": 2588099
     },
     {
       "videoId": "t06aTX9jM34",
@@ -90,15 +90,15 @@
       "author": "NOVA PBS Official",
       "publishedText": "2 years ago",
       "durationSeconds": 3238,
-      "views": 8982028
+      "views": 8985828
     },
     {
-      "videoId": "HNF4ZL7Qzyw",
-      "title": "Sir David Attenborough:  The True Scale of the Universe From Earth | Full Documentary Movie",
-      "author": "Paleora",
-      "publishedText": "3 months ago",
-      "durationSeconds": 8378,
-      "views": 504058
+      "videoId": "GdeCxgNp11o",
+      "title": "Experience the Universe's VIOLENT Extremes | How the Universe Works | Science Channel",
+      "author": "Science Channel",
+      "publishedText": "1 year ago",
+      "durationSeconds": 3845,
+      "views": 955583
     }
   ]
 }
