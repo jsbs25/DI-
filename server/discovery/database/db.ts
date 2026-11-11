@@ -20,7 +20,7 @@ import {
 import { normalizeCanonicalUrl, generateResourceId } from '../deduplication/urlNormalizer.ts';
 
 const DB_DIR = path.resolve(process.cwd(), 'server_data');
-const DB_PATH = path.join(DB_DIR, 'discovery.db');
+const DB_PATH = process.env.EARTH_ONE_DISCOVERY_DB_FILE || path.join(DB_DIR, 'discovery.db');
 
 export class DiscoveryDatabase {
   private db: DatabaseSync;

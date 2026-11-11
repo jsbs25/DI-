@@ -10,6 +10,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
+import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { buildConversationPrompt, normalizeConversationHistory } from './server/aiConversation.ts';
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
@@ -884,31 +885,51 @@ app.post('/api/auth/toggle-location', (req, res) => {
 });
 
 app.get('/api/users', (req, res) => {
+  const viewer = getSessionUser(req);
   const { query, country } = req.query;
-  let list = store.users;
-  if (country) {
-    list = list.filter(u => u.location.countryCode.toLowerCase() === String(country).toLowerCase());
-  }
-  if (query) {
-    const q = String(query).toLowerCase();
-    list = list.filter(u =>
-      u.displayName.toLowerCase().includes(q) ||
-      u.username.toLowerCase().includes(q) ||
-      u.bio.toLowerCase().includes(q) ||
-      u.location.countryName.toLowerCase().includes(q) ||
-      u.location.cityName.toLowerCase().includes(q)
-    );
-  }
-  res.json({ success: true, users: list.map(toPublicUser) });
+  const q = query ? String(query).toLowerCase().trim() : '';
+  let list = store.users.filter(u => {
+    // respect account status/search/profile visibility (server-enforced)
+    if (store.getAccountStatus(u) === 'deleted') return false;
+    if (viewer && u.id === viewer.id) return false;
+    const isFriend = viewer ? store.getFriendIds(viewer.id).includes(u.id) : false;
+    const blockedEither = viewer ? store.isBlockedEither(viewer.id, u.id) : false;
+    const priv = store.getPrivacySettings(u.id);
+    if (!canViewProfileByPolicy(false, isFriend, blockedEither, priv)) return false;
+    if (country && String(u.location?.countryCode || '').toLowerCase() !== String(country).toLowerCase()) return false;
+    if (q) {
+      const byField = canSearchByField(q, { id: u.id, username: u.username, displayName: u.displayName }, priv) || String((u as any).earthId || '').toLowerCase().includes(q);
+      const labelMatch = String(u.location?.countryName || '').toLowerCase().includes(q) || String(u.location?.cityName || '').toLowerCase().includes(q);
+      // location labels are part of public directory context when profile is visible; searchable-field toggles still govern identity fields
+      if (!byField && !labelMatch) return false;
+    }
+    return true;
+  });
+  const users = list.map(u => {
+    const view = viewer ? (store.getPublicProfileView(viewer.id, u.id) as any)?.user : null;
+    return view || toPublicUser(u, { privacy: store.getPrivacySettings(u.id) });
+  });
+  res.json({ success: true, users });
 });
 
 app.get('/api/users/:id', (req, res) => {
-  const user = store.users.find(u => u.id === req.params.id);
-  if (!user) {
+  const viewer = getSessionUser(req);
+  const target = store.users.find(u => u.id === req.params.id);
+  if (!target || store.getAccountStatus(target) === 'deleted') {
     return res.status(404).json({ success: false, error: 'User not found' });
   }
+  const view = viewer ? (store.getPublicProfileView(viewer.id, target.id) as any) : null;
+  if (viewer && view && view.restricted) {
+    // do not leak existence details beyond minimal shell; respond as not found for non-visible profiles
+    return res.status(404).json({ success: false, error: 'User not found' });
+  }
+  if (!viewer) {
+    const isVisible = canViewProfileByPolicy(false, false, false, store.getPrivacySettings(target.id));
+    if (!isVisible) return res.status(404).json({ success: false, error: 'User not found' });
+  }
+  const user = view?.user || toPublicUser(target, { privacy: store.getPrivacySettings(target.id) });
   const userPosts = store.posts.filter(p => p.userId === req.params.id);
-  res.json({ success: true, user: toPublicUser(user), posts: userPosts });
+  res.json({ success: true, user, posts: userPosts });
 });
 
 app.post('/api/users/:id/follow', (req, res) => {
@@ -1561,10 +1582,16 @@ function sanitizeSelfUser(u: any) {
 function broadcastProfileUpdated(userId: string) {
   const recipients = store.getProfileUpdateRecipients(userId);
   const selfView = store.getSelfProfileView(userId);
-  const pub = store.getPublicProfileView(userId, userId) as any;
-  const publicUser = pub?.user || { id: selfView?.id, username: selfView?.username, displayName: selfView?.displayName, avatar: selfView?.avatar, bio: selfView?.bio, isOnline: selfView?.isOnline, lastActiveAt: selfView?.lastActiveAt, joinedAt: selfView?.joinedAt, verified: selfView?.verified };
+  const pubSelf = store.getPublicProfileView(userId, userId) as any;
+  const fallbackPublic = pubSelf?.user || { id: selfView?.id, username: selfView?.username, displayName: selfView?.displayName, avatar: selfView?.avatar, bio: selfView?.bio, isOnline: selfView?.isOnline, lastActiveAt: selfView?.lastActiveAt, joinedAt: selfView?.joinedAt, verified: selfView?.verified };
   for (const uid of recipients) {
-    const payload = uid === userId ? selfView : publicUser;
+    if (uid === userId) {
+      try { broadcastToUsers([uid], { type: 'profile_updated', userId, user: selfView }); } catch {}
+      continue;
+    }
+    const view = store.getPublicProfileView(uid, userId) as any;
+    const payload = view?.user || fallbackPublic;
+    // Per-recipient masking (privacy/blocked) enforced by store view
     try { broadcastToUsers([uid], { type: 'profile_updated', userId, user: payload }); } catch {}
   }
   try { wsBroadcastToUser(userId, { type: 'profile_sync', user: selfView }); } catch {}
@@ -3757,15 +3784,26 @@ app.post('/api/learning/arabic/islamic-libraries/crawl', async (req, res) => {
 app.get('/api/search/global', (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
+  const viewer = getSessionUser(req);
   const lower = q.toLowerCase();
 
-  const users = store.users
-    .filter(u =>
-      u.displayName.toLowerCase().includes(lower) ||
-      u.username.toLowerCase().includes(lower) ||
-      (u.location?.countryName || '').toLowerCase().includes(lower)
-    )
-    .slice(0, 5);
+  const users = store.users.filter(u => {
+    if (store.getAccountStatus(u) === 'deleted') return false;
+    if (viewer && u.id === viewer.id) {
+      // keep self out of global people results like legacy behavior
+    }
+    const isFriend = viewer ? store.getFriendIds(viewer.id).includes(u.id) : false;
+    const blockedEither = viewer ? store.isBlockedEither(viewer.id, u.id) : false;
+    const priv = store.getPrivacySettings(u.id);
+    if (!canViewProfileByPolicy(false, isFriend, blockedEither, priv)) return false;
+    const byField = canSearchByField(q, { id: u.id, username: u.username, displayName: u.displayName }, priv) || String((u as any).earthId || '').toLowerCase().includes(lower);
+    const labelMatch = String(u.location?.countryName || '').toLowerCase().includes(lower) || String(u.location?.cityName || '').toLowerCase().includes(lower);
+    if (!byField && !labelMatch) return false;
+    return true;
+  }).map(u => {
+    const view = viewer ? (store.getPublicProfileView(viewer.id, u.id) as any)?.user : null;
+    return view || toPublicUser(u, { privacy: store.getPrivacySettings(u.id) });
+  }).slice(0, 5);
 
   const posts = store.posts
     .filter(p => p.content.toLowerCase().includes(lower))
@@ -3785,7 +3823,7 @@ app.get('/api/search/global', (req, res) => {
   res.json({
     success: true,
     query: q,
-    results: { users: users.map(toPublicUser), posts, books, communities, knowledge, resources: discovery }
+    results: { users, posts, books, communities, knowledge, resources: discovery }
   });
 });
 

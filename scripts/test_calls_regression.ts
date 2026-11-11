@@ -6,6 +6,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
+// @ts-ignore ws types available at runtime
 import WebSocket from 'ws';
 
 type Result = { name: string; status: 'PASS'|'FAIL'|'NOT TESTED'|'BLOCKED'; detail?: string };
@@ -31,10 +32,10 @@ async function main() {
   let spawnError: Error | undefined;
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: String(port), EARTH_ONE_DATA_FILE: dataFile, EARTH_ONE_SKIP_BOOK_HARVEST: 'true', NODE_ENV: 'development' },
+    env: { ...process.env, PORT: String(port), EARTH_ONE_DATA_FILE: dataFile, EARTH_ONE_DISCOVERY_DB_FILE: path.join(testDir, 'discovery.db'), EARTH_ONE_SKIP_BOOK_HARVEST: 'true', NODE_ENV: 'development' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
-  child.on('error', e => { spawnError = e; });
+  child.on('error', (e: Error) => { spawnError = e; });
   child.stdout?.on('data', c => { childOutput = (childOutput + c.toString()).slice(-16000); });
   child.stderr?.on('data', c => { childOutput = (childOutput + c.toString()).slice(-16000); });
 
@@ -61,14 +62,14 @@ async function main() {
       const ws = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token)}`);
       const t = setTimeout(() => { try { ws.terminate(); } catch {} reject(new Error('ws connect timeout')); }, 6000);
       ws.on('open', () => { clearTimeout(t); resolve(ws); });
-      ws.on('error', (e) => { clearTimeout(t); reject(e); });
+      ws.on('error', (e: Error) => { clearTimeout(t); reject(e); });
     });
   }
   function wsWait(ws: WebSocket, pred: (d:any)=>boolean, ms=6000): Promise<any> {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => { cleanup(); reject(new Error('ws wait timeout')); }, ms);
       const onMsg = (raw: any) => { try { const d = JSON.parse(String(raw)); if (pred(d)) { cleanup(); resolve(d); } } catch {} };
-      const onErr = (e:any) => { cleanup(); reject(e); };
+      const onErr = (e: Error) => { cleanup(); reject(e); };
       const cleanup = () => { clearTimeout(t); ws.off('message', onMsg); ws.off('error', onErr); };
       ws.on('message', onMsg); ws.on('error', onErr);
     });

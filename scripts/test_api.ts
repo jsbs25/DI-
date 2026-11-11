@@ -32,6 +32,7 @@ async function main() {
       ...process.env,
       PORT: String(port),
       EARTH_ONE_DATA_FILE: dataFile,
+      EARTH_ONE_DISCOVERY_DB_FILE: path.join(testDir, 'discovery.db'),
       EARTH_ONE_SKIP_BOOK_HARVEST: 'true'
     },
     stdio: ['ignore', 'pipe', 'pipe']

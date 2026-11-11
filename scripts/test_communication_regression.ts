@@ -7,6 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
+// @ts-ignore ws types available at runtime
 import WebSocket from 'ws';
 
 type Result = { name: string; status: 'PASS'|'FAIL'|'NOT TESTED'|'BLOCKED'; detail?: string };
@@ -32,10 +33,10 @@ async function main() {
   let spawnError: Error | undefined;
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     cwd: process.cwd(),
-    env: { ...process.env, PORT: String(port), EARTH_ONE_DATA_FILE: dataFile, EARTH_ONE_SKIP_BOOK_HARVEST: 'true', NODE_ENV: 'development', DEV_LOGIN_ENABLED: 'true' },
+    env: { ...process.env, PORT: String(port), EARTH_ONE_DATA_FILE: dataFile, EARTH_ONE_DISCOVERY_DB_FILE: path.join(testDir, 'discovery.db'), EARTH_ONE_SKIP_BOOK_HARVEST: 'true', NODE_ENV: 'development', DEV_LOGIN_ENABLED: 'true' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
-  child.on('error', e => { spawnError = e; });
+  child.on('error', (e: Error) => { spawnError = e; });
   child.stdout?.on('data', c => { childOutput = (childOutput + c.toString()).slice(-16000); });
   child.stderr?.on('data', c => { childOutput = (childOutput + c.toString()).slice(-16000); });
 
@@ -68,14 +69,14 @@ async function main() {
       const ws = new WebSocket(url);
       const t = setTimeout(() => { try { ws.terminate(); } catch {} reject(new Error('ws connect timeout')); }, 6000);
       ws.on('open', () => { clearTimeout(t); resolve(ws); });
-      ws.on('error', (e) => { clearTimeout(t); reject(e); });
+      ws.on('error', (e: Error) => { clearTimeout(t); reject(e); });
     });
   }
   function wsWait(ws: WebSocket, pred: (d:any)=>boolean, ms=6000): Promise<any> {
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => { cleanup(); reject(new Error('ws wait timeout')); }, ms);
       const onMsg = (raw: any) => { try { const d = JSON.parse(String(raw)); if (pred(d)) { cleanup(); resolve(d); } } catch {} };
-      const onErr = (e:any) => { cleanup(); reject(e); };
+      const onErr = (e: Error) => { cleanup(); reject(e); };
       const cleanup = () => { clearTimeout(t); ws.off('message', onMsg); ws.off('error', onErr); };
       ws.on('message', onMsg); ws.on('error', onErr);
     });
@@ -302,8 +303,8 @@ async function main() {
         const wsBad = new WebSocket(`${wsUrl}?token=badtoken`);
         let done = false;
         const finish = (ok:boolean, d?:string) => { if(done) return; done=true; try{wsBad.terminate()}catch{}; if(ok) rec('WebSocket auth rejects invalid token', 'PASS'); else rec('WebSocket auth rejects invalid token', 'FAIL', d); resolve(); };
-        wsBad.on('close', (code) => finish(code === 4401 || code >= 4000, `code=${code}`));
-        wsBad.on('message', (raw) => { try { const d=JSON.parse(String(raw)); if (d.type==='error') finish(true); } catch{} });
+        wsBad.on('close', (code: number) => finish(code === 4401 || code >= 4000, `code=${code}`));
+        wsBad.on('message', (raw: WebSocket.RawData) => { try { const d=JSON.parse(String(raw)); if (d.type==='error') finish(true); } catch{} });
         wsBad.on('open', () => { /* may close shortly */ setTimeout(()=>finish(false,'opened without auth close/error'), 1500); });
         wsBad.on('error', () => {});
         setTimeout(()=>finish(false,'no auth rejection'), 3000);

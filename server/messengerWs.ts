@@ -165,7 +165,21 @@ export function attachMessengerWs(wss: WebSocketServer) {
 export function wsBroadcastConversationEvent(conversationId: string, event: any) {
   const conv = store.conversations.find(c => c.id === conversationId);
   if (!conv) return;
-  broadcastToUsers(conv.participantIds || [], event);
+  const baseIds: string[] = (conv.participantIds || []);
+  // Re-check membership at delivery time (permissions may change while sockets stay open)
+  for (const uid of baseIds) {
+    try {
+      const latest = store.conversations.find(c => c.id === conversationId);
+      if (!latest || !store.canAccessConversation(uid, latest)) continue;
+      let payload = event;
+      if (event && event.conversation) {
+        const maskedList = store.getConversationsForUser(uid);
+        const masked = maskedList.find(c => c.id === conversationId) || event.conversation;
+        payload = { ...event, conversation: masked };
+      }
+      broadcastToUsers([uid], payload);
+    } catch {}
+  }
 }
 
 export function wsBroadcastToUser(userId: string, event: any) {

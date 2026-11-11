@@ -73,6 +73,7 @@ async function getAvailablePort(): Promise<number> {
 async function main() {
   const testDir = fs.mkdtempSync(path.join(tmpdir(), 'earth-one-public-users-api-test-'));
   const dataFile = path.join(testDir, 'server_data.json');
+  const discoveryDbFile = path.join(testDir, 'discovery.db');
   fs.writeFileSync(dataFile, JSON.stringify({
     users: [privateTestUser],
     posts: [testPost],
@@ -105,6 +106,7 @@ async function main() {
       ...process.env,
       PORT: String(port),
       EARTH_ONE_DATA_FILE: dataFile,
+      EARTH_ONE_DISCOVERY_DB_FILE: discoveryDbFile,
       EARTH_ONE_SKIP_BOOK_HARVEST: 'true',
       GEMINI_API_KEY: '',
       OPENAI_API_KEY: '',
