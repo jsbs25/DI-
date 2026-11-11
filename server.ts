@@ -177,7 +177,7 @@ function isTrustedLocalRequest(req: express.Request) {
 
 function isDevQuickLoginAllowed(req: express.Request) {
   // Fixed dev account only (li_wei), no client-supplied userId. Independent config gate required.
-  return process.env.NODE_ENV === 'development' && isDevLoginEnabledConfig() && isTrustedLocalRequest(req);
+  return process.env.NODE_ENV !== 'production' && isDevLoginEnabledConfig() && isTrustedLocalRequest(req);
 }
 
 function getAuthRuntimeStatus() {
@@ -303,7 +303,7 @@ app.get('/api/auth/status', (req, res) => {
   const st = getAuthRuntimeStatus();
   let reason: string | null = null;
   if (!devAllowed) {
-    if (process.env.NODE_ENV !== 'development') reason = '仅开发环境可用 / Development only';
+    if (process.env.NODE_ENV === 'production') reason = '仅开发环境可用 / Development only';
     else if (!devEnabled) reason = '未启用 DEV_LOGIN_ENABLED / DEV_LOGIN_ENABLED is not enabled';
     else reason = '仅限本机受信任开发环境（回环地址与 Host 校验）/ Trusted local loopback request only';
   }

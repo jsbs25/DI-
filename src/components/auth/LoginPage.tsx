@@ -176,18 +176,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
           </div>
           <p className="text-[10px] text-slate-500">{L('微信登录使用开放平台官方网页授权流程；未配置时明确显示不可用。新微信账号不会自动绑定到他人账户。','WeChat login uses official Open Platform web OAuth flow; unavailable when unconfigured. New WeChat accounts are never auto-bound to others.','يستخدم تسجيل دخول WeChat تدفق OAuth الرسمي؛ وغير متاح عند عدم الإعداد. لا يتم ربط حسابات WeChat الجديدة تلقائيًا بالآخرين.')}</p>
 
-          {devAvailable && (
-            <div className="rounded-xl border border-cyan-800/40 bg-cyan-950/20 p-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold text-cyan-200">{L('开发者登录','Developer Login','تسجيل دخول المطور')}</p>
-                <span className="text-[10px] px-2 py-0.5 rounded-full border text-emerald-300 border-emerald-700/50 bg-emerald-500/10">{L('开发环境可用','Dev available','متاح للتطوير')}</span>
-              </div>
-              <p className="text-[11px] text-slate-300">{L('复用现有测试账户 li_wei（固定），经服务端认证创建真实会话并进入当前产品。仅 NODE_ENV=development、DEV_LOGIN_ENABLED 且受信任本机环境可用。','Reuses fixed demo account li_wei, creates a real server session, and enters the current product. Only when NODE_ENV=development, DEV_LOGIN_ENABLED, and trusted local request.','يعيد استخدام حساب li_wei التجريبي الثابت وينشئ جلسة خادم حقيقية. متاح فقط عند التطوير المحلي الموثوق مع تفعيل DEV_LOGIN_ENABLED.')}</p>
-              <button type="button" onClick={devLogin} disabled={loading} className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold text-sm flex items-center justify-center gap-2">
-                <span>{loading ? '...' : L('开发者登录（li_wei）','Developer Login (li_wei)','تسجيل دخول المطور (li_wei)')}</span><ArrowRight className="w-4 h-4"/>
-              </button>
+          <div className="rounded-xl border border-cyan-700/50 bg-cyan-950/30 p-3 space-y-2 ring-1 ring-cyan-500/20">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-cyan-200">{L('开发者模式（免密进入）','Developer mode (no password)','وضع المطور (بدون كلمة مرور)')}</p>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full border ${devAvailable ? 'text-emerald-300 border-emerald-700/50 bg-emerald-500/10' : 'text-amber-300 border-amber-700/50 bg-amber-500/10'}`}>
+                {statusLoading ? L('检测中…','Checking…','جارٍ التحقق…') : devAvailable ? L('服务端可用','Server ready','الخادم جاهز') : L('点击尝试','Try to enter','انقر للدخول')}
+              </span>
             </div>
-          )}
+            <p className="text-[11px] text-slate-300">{L('无需账号密码，一键进入（使用固定开发者账号 li_wei，经服务端创建真实会话）。需本地开发服务已启用 DEV_LOGIN_ENABLED 且为受信任回环访问。','No credentials needed: one-click entry (fixed dev account li_wei, real server session). Requires local dev with DEV_LOGIN_ENABLED and trusted loopback access.','بدون بيانات اعتماد: دخول بنقرة واحدة (حساب المطور li_wei، جلسة خادم حقيقية). يتطلب DEV_LOGIN_ENABLED ووصول loopback موثوق.')}</p>
+            <button type="button" onClick={devLogin} disabled={loading} className="w-full py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/30">
+              <span>{loading ? '...' : L('一键进入（开发者/免密）','Enter now (Developer, no password)','الدخول الآن (مطور، بدون كلمة مرور)')}</span><ArrowRight className="w-4 h-4"/>
+            </button>
+            {!devAvailable && !statusLoading && devQuick?.reason && <p className="text-[10px] text-amber-300">{devQuick.reason}</p>}
+          </div>
 
           <div className="grid grid-cols-3 p-1 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-medium">
             <button type="button" onClick={()=>{setMode('login'); setErrorMsg(null);}} className={`py-2 rounded-lg ${mode==='login'?'bg-slate-800 text-slate-100':'text-slate-400'}`}>{L('邮箱/用户名','Email/User','البريد/المستخدم')}</button>
