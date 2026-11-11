@@ -1786,6 +1786,41 @@ class DataStore {
     ).length;
   }
 
+  private getConversationOtherUserView(viewerId: string, other: any) {
+    if (!other) return undefined;
+    const view = this.getPublicProfileView(viewerId, other.id) as any;
+    const base = view?.user || {};
+    const priv = this.getPrivacySettings(other.id);
+    const pres = this.getMaskedPresenceForViewer(viewerId, other.id);
+    const loc = base.location || (other.location ? {
+      countryCode: other.location.countryCode,
+      countryName: other.location.countryName,
+      cityName: other.location.cityName,
+      isPublic: !!other.location.isPublic,
+      lat: other.location.isPublic ? other.location.lat : 0,
+      lng: other.location.isPublic ? other.location.lng : 0,
+    } : undefined);
+    // Minimal safe shape for conversation list/detail consumers (no email/phone/linkedIdentities/friendIds/internal fields)
+    return {
+      id: base.id || other.id,
+      earthId: base.earthId || (other as any).earthId,
+      username: base.username || other.username,
+      displayName: base.displayName || other.displayName,
+      avatar: base.avatar || other.avatar,
+      bio: typeof base.bio === 'string' ? base.bio : '',
+      location: loc,
+      interests: Array.isArray(base.interests) ? base.interests : [],
+      followersCount: typeof base.followersCount === 'number' ? base.followersCount : (other.followersCount || 0),
+      followingCount: typeof base.followingCount === 'number' ? base.followingCount : (other.followingCount || 0),
+      tipsReceived: typeof base.tipsReceived === 'number' ? base.tipsReceived : (other.tipsReceived || 0),
+      isOnline: !!pres.isOnline,
+      lastActiveAt: pres.lastActiveAt,
+      verified: !!(base.verified ?? other.verified),
+      joinedAt: base.joinedAt || other.joinedAt,
+      accountStatus: base.accountStatus || this.getAccountStatus(other),
+    } as any;
+  }
+
   getConversationsForUser(userId: string): Conversation[] {
     return this.conversations
       .filter(c => c.type === 'global_channel' || c.type === 'country_room' || (Array.isArray(c.participantIds) && c.participantIds.includes(userId)))
@@ -1794,9 +1829,8 @@ class DataStore {
           const otherId = c.participantIds.find(id => id !== userId);
           const other = otherId ? this.users.find(u => u.id === otherId) : undefined;
           const unread = this.getUnreadCountForUser(c.id, userId);
-          const oPriv = other ? this.getPrivacySettings(other.id) : null;
-          const otherMasked = other ? { ...other, isOnline: oPriv?.showOnlineStatus ? !!(other as any).isOnline : false, lastActiveAt: oPriv?.showLastActive ? (other as any).lastActiveAt : undefined } : undefined;
-          return { ...c, name: other?.displayName || c.name, avatar: other?.avatar || c.avatar, otherUser: otherMasked as any, isOnline: oPriv?.showOnlineStatus ? !!(other as any)?.isOnline : false, unreadCount: unread };
+          const otherMasked = this.getConversationOtherUserView(userId, other);
+          return { ...c, name: otherMasked?.displayName || c.name, avatar: otherMasked?.avatar || c.avatar, otherUser: otherMasked as any, isOnline: !!otherMasked?.isOnline, unreadCount: unread };
         }
         if (c.type === 'group') {
           const unread = this.getUnreadCountForUser(c.id, userId);
@@ -2152,11 +2186,12 @@ class DataStore {
     return conv;
   }
   getPublicProfile(viewerId: string, userId: string) {
-    const u = this.users.find(x => x.id === userId);
-    if (!u) return null;
-    const blocked = (this.blockedBy[viewerId]||[]).includes(userId) || (this.blockedBy[userId]||[]).includes(viewerId);
-    const isFriend = this.getFriendIds(viewerId).includes(userId);
-    return { user: { id:u.id, earthId:(u as any).earthId, username:u.username, displayName:u.displayName, avatar:u.avatar, bio:u.bio, location:u.location, isOnline:(u as any).isOnline, lastActiveAt:(u as any).lastActiveAt, verified:u.verified, joinedAt:u.joinedAt, accountStatus:this.getAccountStatus(u), interests:u.interests, followersCount:u.followersCount, followingCount:u.followingCount }, isFriend, blocked };
+    // Legacy helper: delegate to privacy-enforced view to avoid unmasked leaks
+    const view = this.getPublicProfileView(viewerId, userId) as any;
+    if (!view) return null;
+    if (view.isSelf) return view; // caller expecting self/public shape should handle; kept for compat
+    if (view.restricted) return null;
+    return { user: view.user, isFriend: !!view.isFriend, blocked: !!view.blocked, pendingRequest: view.pendingRequest || null };
   }
 
   setPasswordForUser(userId: string, newPassword: string) {

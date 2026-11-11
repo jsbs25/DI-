@@ -89,3 +89,16 @@
 - **NOT TESTED**: real Electron/GUI/multi-device E2E, real OAuth flows. **BLOCKED**: LiveKit media/bidirectional A/V/resource-release and cross-border tests (no runtime/credentials).
 - **Audit doc**: `docs/security/PRIVACY_ENFORCEMENT_AUDIT.md`.
 - **Commit/push**: recorded below after push (HEAD must equal origin/main).
+
+## 2026-11-11 - Full-chain Privacy & Account-Control Audit (this run)
+- **Baseline**: `main @ 360466c6bb02c57daa02290c51f880dce676ba04 == origin/main`, clean worktree; `server_data.json` SHA256 `66cd7ad3…` unchanged throughout.
+- **Audit scope**: HTTP/WS/notification/event user-data outlets (profiles, search, friends/requests, groups/members, conversations/messages/sync, presence/status, profile broadcasts, file routes, calls, notifications) against `privacy.ts`/`privacyPolicy.ts`/store helpers; account states `active/suspended/restricted/deleted`; `/api/messenger/profile/me` root-cause.
+- **Findings & fixes (evidenced, minimal)**:
+  - **F1 `/api/messenger/profile/me` 404 root cause**: route shadowed by `GET /api/messenger/profile/:id` defined earlier → `/me` matched as `:id='me'`. **Fix**: reordered `/profile/me` and `/username/check` before `/:id` + null-guard; client endpoint restored (`messenger` 200, `auth` 200). No response-shape change.
+  - **F2 Direct conversation `otherUser` leakage**: `getConversationsForUser` spread full user (contact/internal fields). **Fix**: viewer-aware minimal safe `otherUser` via `getPublicProfileView`/masked presence (no email/phone/linkedIdentities/friendIds/block/internal).
+  - **F3 Messenger/social endpoint masking gaps**: `/api/messenger/users/search`, `/friends`, `/friend-requests`, conversation detail members used ad-hoc user fields. **Fix**: routed through `getPublicProfileView`/masked-presence minimal fields, filtered restricted/deleted/unviewable.
+  - **F4 Legacy `store.getPublicProfile`** (unused) returned raw data. **Fix**: delegated to enforced `getPublicProfileView`.
+- **Automated results (isolated temp data+DB)**: `npm run lint` PASS; `npm run build` PASS; `scripts/test_api.ts` PASS 85/0; `scripts/test_public_users_api.ts` PASS 24/0; `scripts/tests-security/test_privacy_enforcement.ts` PASS 34/0/0/0 (visibility/masking/search non-leak/WS delivery+post-removal re-check/per-recipient broadcast/compat incl. `/messenger/profile/me` 200); `scripts/test_communication_regression.ts` PASS 17/0/1 NT/0 BLK; `scripts/test_calls_regression.ts` PASS 11/0/2 NT/2 BLK.
+- **Not fully automated / gaps**: comprehensive suspended/restricted/deleted & old-token/socket invalidation across all outlets, blocked/unfriend live eviction edge cases, multi-device physical/GUI E2E **NOT TESTED**; LiveKit media/A-V/cross-border **BLOCKED/NOT TESTED**.
+- **Docs**: `docs/security/PRIVACY_ENFORCEMENT_AUDIT.md` updated with audited scope, findings, fixes, root cause, account-state notes, coverage gaps, residual risks.
+- **Commit/push**: see delivery commit below (HEAD == origin/main, clean worktree).

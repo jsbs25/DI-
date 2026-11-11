@@ -1401,8 +1401,9 @@ app.get('/api/messenger/users/search', (req, res) => {
   if (!user) return;
   const q = typeof req.query.q === 'string' ? req.query.q : '';
   const users = store.searchUsers(q, user.id, 40).map(u => {
-    const pres = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(user.id, u.id) : { isOnline: !!(u as any).isOnline, lastActiveAt: (u as any).lastActiveAt };
-    return { id: u.id, earthId: (u as any).earthId, username: u.username, displayName: u.displayName, avatar: u.avatar, bio: u.bio, location: (u as any).location?.isPublic ? u.location : (u.location ? { countryCode: u.location.countryCode, countryName: u.location.countryName, cityName: u.location.cityName, isPublic: false, lat: 0, lng: 0 } : null), isOnline: !!pres.isOnline, lastActiveAt: pres.lastActiveAt, verified: !!u.verified, accountStatus: (store as any).getAccountStatus ? (store as any).getAccountStatus(u) : ((u as any).accountStatus || 'active') };
+    const view = (store.getPublicProfileView(user.id, u.id) as any)?.user;
+    if (view) return view;
+    return toPublicUser(u, { privacy: store.getPrivacySettings(u.id) });
   });
   res.json({ success: true, users });
 });
@@ -1411,15 +1412,35 @@ app.get('/api/messenger/friends', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
   const ids = store.getFriendIds(user.id);
-  const friends = ids.map(id => store.users.find(u=>u.id===id)).filter(Boolean).map((u:any)=>{ const pres = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(user.id, u.id) : { isOnline: !!u.isOnline, lastActiveAt: u.lastActiveAt }; return { id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, isOnline: !!pres.isOnline, lastActiveAt: pres.lastActiveAt, location: u.location?.isPublic ? u.location : (u.location ? { countryCode: u.location.countryCode, countryName: u.location.countryName, cityName: u.location.cityName, isPublic: false, lat: 0, lng: 0 } : null), bio: u.bio }; });
+  const friends = ids.map(id => {
+    const u = store.users.find(x=>x.id===id);
+    if (!u || store.getAccountStatus(u) === 'deleted') return null;
+    const view = (store.getPublicProfileView(user.id, id) as any);
+    if (!view || view.restricted) return null; // blocked/unviewable
+    return view.user;
+  }).filter(Boolean);
   res.json({ success: true, friends });
 });
 
 app.get('/api/messenger/friend-requests', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
-  const incoming = store.friendRequests.filter(r => r.toUserId === user.id && r.status === 'pending').map(r => ({ ...r, fromUser: (()=>{const u=store.users.find(x=>x.id===r.fromUserId); if(!u) return null; const pres=(store as any).getMaskedPresenceForViewer? (store as any).getMaskedPresenceForViewer(user.id,u.id):{isOnline:!!(u as any).isOnline,lastActiveAt:(u as any).lastActiveAt}; return {id:u.id,username:u.username,displayName:u.displayName,avatar:u.avatar,isOnline:!!pres.isOnline,lastActiveAt:pres.lastActiveAt};})() }));
-  const outgoing = store.friendRequests.filter(r => r.fromUserId === user.id && r.status === 'pending').map(r => ({ ...r, toUser: (()=>{const u=store.users.find(x=>x.id===r.toUserId); if(!u) return null; const pres=(store as any).getMaskedPresenceForViewer? (store as any).getMaskedPresenceForViewer(user.id,u.id):{isOnline:!!(u as any).isOnline,lastActiveAt:(u as any).lastActiveAt}; return {id:u.id,username:u.username,displayName:u.displayName,avatar:u.avatar,isOnline:!!pres.isOnline,lastActiveAt:pres.lastActiveAt};})() }));
+  const safeMini = (otherId: string) => {
+    const u = store.users.find(x => x.id === otherId);
+    if (!u || store.getAccountStatus(u) === 'deleted') return null;
+    const v = (store.getPublicProfileView(user.id, otherId) as any);
+    const base = (v && !v.restricted && v.user) ? v.user : null;
+    const pres = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(user.id, otherId) : { isOnline: false, lastActiveAt: undefined };
+    return {
+      id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar,
+      isOnline: base ? !!base.isOnline : !!pres.isOnline,
+      lastActiveAt: base ? base.lastActiveAt : pres.lastActiveAt,
+      verified: !!u.verified,
+      earthId: (u as any).earthId,
+    };
+  };
+  const incoming = store.friendRequests.filter(r => r.toUserId === user.id && r.status === 'pending').map(r => ({ ...r, fromUser: safeMini(r.fromUserId) }));
+  const outgoing = store.friendRequests.filter(r => r.fromUserId === user.id && r.status === 'pending').map(r => ({ ...r, toUser: safeMini(r.toUserId) }));
   res.json({ success: true, incoming, outgoing });
 });
 
@@ -1562,6 +1583,25 @@ app.get('/api/messenger/sync', (req, res) => {
   });
 });
 
+app.get('/api/messenger/profile/me', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const view = store.getSelfProfileView(user.id);
+  if (!view) return res.status(404).json({ success: false, error: 'User not found' });
+  res.json({ success: true, user: view });
+});
+
+app.get('/api/messenger/username/check', (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const raw = typeof req.query.username === 'string' ? req.query.username : '';
+  const v = store.validateUsername(raw);
+  if (!v.ok) return res.json({ success: true, valid: false, available: false, error: v.error });
+  const taken = store.isUsernameTaken(v.username, user.id);
+  res.json({ success: true, valid: true, available: !taken, username: v.username, error: taken ? 'Username is already taken.' : undefined });
+});
+
+
 app.get('/api/messenger/profile/:id', (req, res) => {
   const viewer = requireSessionUser(req, res);
   if (!viewer) return;
@@ -1596,23 +1636,6 @@ function broadcastProfileUpdated(userId: string) {
   }
   try { wsBroadcastToUser(userId, { type: 'profile_sync', user: selfView }); } catch {}
 }
-
-app.get('/api/messenger/profile/me', (req, res) => {
-  const user = requireSessionUser(req, res);
-  if (!user) return;
-  const view = store.getSelfProfileView(user.id);
-  res.json({ success: true, user: view });
-});
-
-app.get('/api/messenger/username/check', (req, res) => {
-  const user = requireSessionUser(req, res);
-  if (!user) return;
-  const raw = typeof req.query.username === 'string' ? req.query.username : '';
-  const v = store.validateUsername(raw);
-  if (!v.ok) return res.json({ success: true, valid: false, available: false, error: v.error });
-  const taken = store.isUsernameTaken(v.username, user.id);
-  res.json({ success: true, valid: true, available: !taken, username: v.username, error: taken ? 'Username is already taken.' : undefined });
-});
 
 app.post('/api/messenger/profile/update', async (req, res) => {
   const user = requireSessionUser(req, res);
@@ -2261,9 +2284,17 @@ app.get('/api/conversations/:id', (req, res) => {
   if (!store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
   const members = (conv.participantIds || []).map(id => {
     const u = store.users.find(x => x.id === id);
-    if (!u) return { id, username: id, displayName: id, avatar: '' };
-    const pres = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(user.id, u.id) : { isOnline: !!(u as any).isOnline, lastActiveAt: (u as any).lastActiveAt };
-    return { id: u.id, username: u.username, displayName: u.displayName, avatar: u.avatar, isOnline: !!pres.isOnline, lastActiveAt: pres.lastActiveAt };
+    if (!u || store.getAccountStatus(u) === 'deleted') return { id, username: id, displayName: id, avatar: '', isOnline: false };
+    const v = (store.getPublicProfileView(user.id, id) as any);
+    const base = (v && !v.restricted && v.user) ? v.user : null;
+    const pres = (store as any).getMaskedPresenceForViewer ? (store as any).getMaskedPresenceForViewer(user.id, id) : { isOnline: false, lastActiveAt: undefined };
+    return {
+      id: u.id, earthId: (u as any).earthId, username: u.username, displayName: u.displayName, avatar: u.avatar,
+      isOnline: base ? !!base.isOnline : !!pres.isOnline,
+      lastActiveAt: base ? base.lastActiveAt : pres.lastActiveAt,
+      verified: !!u.verified,
+      bio: base ? base.bio : undefined,
+    };
   });
   res.json({ success: true, conversation: { ...conv, members } });
 });
