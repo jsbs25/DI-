@@ -186,16 +186,41 @@ export function markReconnecting(call: CallRecord) {
   }
 }
 
-export function canIssueMediaToken(call: CallRecord, userId: string): { ok: true } | { ok: false; error: string } {
+export function canIssueMediaToken(call: CallRecord, userId: string, store?: any): { ok: true } | { ok: false; error: string } {
   if (!call.participantIds.includes(userId)) return { ok: false, error: 'Forbidden' };
   if (!(call.status === 'ringing' || call.status === 'connecting' || call.status === 'active' || call.status === 'reconnecting')) return { ok: false, error: 'Call not joinable' };
   const p = call.participants[userId];
   if (p && (p.status === 'rejected' || p.status === 'left' || p.status === 'missed' || p.status === 'busy')) return { ok: false, error: 'Participant not eligible' };
+
+  // Re-validate EARTH ONE permissions at token time (prevents stale/removed participants from joining media).
+  if (store) {
+    const user = store.users?.find((u: any) => u.id === userId);
+    if (!user) return { ok: false, error: 'Forbidden' };
+    const st = typeof store.getAccountStatus === 'function' ? store.getAccountStatus(user) : (user.accountStatus || 'active');
+    if (st === 'suspended' || st === 'deleted' || st === 'banned' || st === 'deactivated') return { ok: false, error: 'Forbidden' };
+
+    if (call.scope === 'group' && call.conversationId) {
+      const conv = store.conversations?.find((c: any) => c.id === call.conversationId);
+      if (!conv) return { ok: false, error: 'Forbidden' };
+      if (!(conv.participantIds || []).includes(userId)) return { ok: false, error: 'Forbidden' };
+      if (typeof store.canAccessConversation === 'function' && !store.canAccessConversation(userId, conv)) return { ok: false, error: 'Forbidden' };
+    } else if (call.scope === 'direct') {
+      const otherId = (call.participantIds || []).find((id: string) => id !== userId);
+      if (otherId) {
+        if (typeof store.isBlockedEither === 'function' && store.isBlockedEither(userId, otherId)) return { ok: false, error: 'Forbidden' };
+        if (call.conversationId) {
+          const conv = store.conversations?.find((c: any) => c.id === call.conversationId);
+          if (conv && typeof store.canAccessConversation === 'function' && !store.canAccessConversation(userId, conv)) return { ok: false, error: 'Forbidden' };
+        }
+      }
+    }
+  }
+
   return { ok: true };
 }
 
-export async function issueMediaToken(call: CallRecord, userId: string, opts?: { canPublish?: boolean; canSubscribe?: boolean }): Promise<import('./types.ts').CallTokenResponse> {
-  const perm = canIssueMediaToken(call, userId);
+export async function issueMediaToken(call: CallRecord, userId: string, opts?: { canPublish?: boolean; canSubscribe?: boolean; store?: any }): Promise<import('./types.ts').CallTokenResponse> {
+  const perm = canIssueMediaToken(call, userId, opts?.store);
   if (!perm.ok) return { ok: false, reason: perm.error, provider: 'none' };
   const apiKey = process.env.LIVEKIT_API_KEY || '';
   const apiSecret = process.env.LIVEKIT_API_SECRET || '';
@@ -207,8 +232,10 @@ export async function issueMediaToken(call: CallRecord, userId: string, opts?: {
     // @ts-ignore - optional dependency
     const mod: any = await import('livekit-server-sdk');
     const AccessToken = mod.AccessToken || mod.default?.AccessToken;
+    const VideoGrant = mod.VideoGrant; // type-only in some builds
     if (!AccessToken) throw new Error('livekit-server-sdk AccessToken unavailable');
-    const at = new AccessToken(apiKey, apiSecret, { identity: userId, ttl: '10m' });
+    const at = new AccessToken(apiKey, apiSecret, { identity: String(userId), ttl: '10m' });
+    // Grant is bound to this EARTH ONE user identity and this specific call room.
     at.addGrant({ roomJoin: true, room: call.roomName, canPublish: opts?.canPublish ?? true, canSubscribe: opts?.canSubscribe ?? true });
     const token = await at.toJwt();
     return { ok: true, callId: call.id, roomName: call.roomName, token, url, expiresInSec: 600, provider: 'livekit' };

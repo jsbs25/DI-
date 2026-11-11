@@ -1796,7 +1796,7 @@ app.post('/api/calls/invite', async (req, res) => {
     }
     try { emitCallInviteDelivery(call, user); } catch {}
     try { emitCallEvent(call, 'call_invite', { fromUserId: user.id }); } catch {}
-    const tok = await issueMediaToken(call, user.id);
+    const tok = await issueMediaToken(call, user.id, { store });
     res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to create call' });
@@ -1817,7 +1817,7 @@ app.post('/api/calls/:id/accept', async (req, res) => {
     });
     if (out) return res.status(out.code).json(out.body);
     try { emitCallEvent(call, 'call_accept', { userId: user.id }); } catch {}
-    const tok = await issueMediaToken(call, user.id);
+    const tok = await issueMediaToken(call, user.id, { store });
     res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to accept call' });
@@ -1909,7 +1909,7 @@ app.post('/api/calls/:id/token', async (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
   const call = getCallById(store, req.params.id);
   if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
-  const tok = await issueMediaToken(call, user.id);
+  const tok = await issueMediaToken(call, user.id, { store });
   if (!tok.ok) return res.status(tok.blocked ? 503 : 403).json({ success: false, ...tok });
   res.json({ success: true, ...tok });
 });

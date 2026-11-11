@@ -8,6 +8,28 @@ import {
   Bell, CheckCheck, User as UserIcon, Settings, Volume2, Phone, PhoneOff, Video, Mic, MicOff, VideoOff, Monitor, MonitorOff
 } from 'lucide-react';
 import { callApi } from '../../services/calls/api.ts';
+import { LiveKitCallSession, type CallMediaState, friendlyMediaError } from '../../services/calls/media.ts';
+
+const CallTrackView: React.FC<{ track?: MediaStreamTrack | null; kind: 'video' | 'audio'; muted?: boolean; className?: string; mirror?: boolean }> = ({ track, kind, muted, className, mirror }) => {
+  const ref = React.useRef<HTMLVideoElement & HTMLAudioElement | null>(null);
+  React.useEffect(() => {
+    const el = ref.current as any;
+    if (!el) return;
+    if (track) {
+      try {
+        const stream = new MediaStream([track]);
+        if (el.srcObject !== stream) el.srcObject = stream;
+        const p = el.play?.();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch {}
+    } else {
+      try { el.srcObject = null; } catch {}
+    }
+    return () => { try { if (el) el.srcObject = null; } catch {} };
+  }, [track]);
+  if (kind === 'audio') return <audio ref={ref as any} autoPlay playsInline muted={!!muted} />;
+  return <video ref={ref as any} autoPlay playsInline muted={!!muted} className={className} style={mirror ? { transform: 'scaleX(-1)' } : undefined} />;
+};
 
 interface GlobalMessengerProps {
   conversations: Conversation[];
@@ -126,6 +148,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [callDevices, setCallDevices] = useState<{ micEnabled: boolean; cameraEnabled: boolean; screenSharing: boolean }>({ micEnabled: true, cameraEnabled: true, screenSharing: false });
   const activeCallRef = useRef<any>(null);
   useEffect(() => { activeCallRef.current = activeCall; }, [activeCall]);
+  const mediaSessionRef = useRef<LiveKitCallSession | null>(null);
+  const mediaJoinedCallIdRef = useRef<string | null>(null);
+  const mediaTokenRef = useRef<string | null>(null);
+  const [mediaState, setMediaState] = useState<CallMediaState>({ phase: 'idle', canPlaybackAudio: false, participants: {} });
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localScreenRef = useRef<HTMLVideoElement | null>(null);
 
   type PendingUpload = { id: string; file: File; name: string; size: number; mimeType: string; kind: 'image' | 'file'; previewUrl?: string; progress: number; status: 'queued' | 'uploading' | 'sending' | 'error' | 'done'; error?: string; uploadedAttachment?: any };
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
@@ -1126,9 +1154,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     if (n.actorId) { await openProfile(n.actorId); }
   };
 
-  // ---- Calls (signaling/UI; real media transport gated server-side) ----
+  // ---- Calls (EARTH ONE signaling + LiveKit media when configured) ----
   const callErrorText = (e: any) => {
-    const msg = String(e?.body?.error || e?.message || '');
+    const msg = String(e?.body?.error || e?.message || e || '');
     if (msg === 'BUSY') return lang==='ar'?'أنت في مكالمة حالياً':lang==='en'?'You are already in a call':'你当前正在通话中';
     if (msg === 'TARGET_BUSY') return lang==='ar'?'المستخدم مشغول':lang==='en'?'User is busy':'对方正在通话中';
     if (msg === 'MEDIA_NOT_CONFIGURED') return lang==='ar'?'خادم الوسائط غير مُعد (محظور)':lang==='en'?'Media server not configured (blocked)':'媒体服务未配置（BLOCKED）';
@@ -1140,25 +1168,97 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     return m[st || ''] || (st || '');
   };
   const canStartCallHere = !!activeConv && authed && (activeConv.type === 'direct' || activeConv.type === 'group') && !!activeConv.id && activeConv.id !== 'conv_global';
+
+  const cleanupCallMedia = async (reason = 'ended') => {
+    mediaJoinedCallIdRef.current = null;
+    mediaTokenRef.current = null;
+    const s = mediaSessionRef.current;
+    mediaSessionRef.current = null;
+    try { await s?.disconnect(reason); } catch {}
+    setMediaState({ phase: 'idle', canPlaybackAudio: false, participants: {} });
+  };
+
+  const syncCallStateToServer = async (callId: string, patch: any) => {
+    try { await callApi.state(token(), callId, patch); } catch {}
+  };
+
+  const joinCallMedia = async (call: any, media?: any) => {
+    if (!call?.id) return;
+    // avoid duplicate joins for same call/token
+    const isTerminal = ['ended','rejected','missed','busy','failed','canceled'].includes(call.status);
+    if (isTerminal) return;
+    if (mediaJoinedCallIdRef.current === call.id && mediaSessionRef.current) return;
+    let info = media;
+    if (!info || (!info.ok && !info.token)) {
+      try { info = await callApi.token(token(), call.id); } catch (e:any) { info = e?.body || { ok:false, reason: e?.message || 'MEDIA_ERROR' }; }
+    }
+    if (!info || info.ok === false || info.blocked || !info.token || !info.url) {
+      const reason = info?.reason || (info?.blocked ? 'MEDIA_NOT_CONFIGURED' : 'MEDIA_UNAVAILABLE');
+      setCallMediaNote(reason === 'MEDIA_NOT_CONFIGURED' || reason === 'MEDIA_SDK_UNAVAILABLE'
+        ? (lang==='ar'?'وسائط الصوت/الفيديو الحقيقية غير متاحة: الخادم غير مُعد (تم الاحتفاظ بالإشارة فقط).':lang==='en'?'Real audio/video media unavailable: server not configured (signaling only).':'真实音视频不可用：媒体服务未配置（仅保留信令）。')
+        : (lang==='ar'?`تعذر الانضمام للوسائط: ${String(reason)}`:lang==='en'?`Cannot join media: ${String(reason)}`:`无法加入媒体：${String(reason)}`));
+      setMediaState(s => ({ ...s, phase: 'blocked', reason: String(reason) }));
+      return;
+    }
+    // if switching calls, cleanup previous
+    if (mediaSessionRef.current && mediaJoinedCallIdRef.current && mediaJoinedCallIdRef.current !== call.id) {
+      await cleanupCallMedia('replace');
+    }
+    mediaTokenRef.current = info.token;
+    mediaJoinedCallIdRef.current = call.id;
+    const session = new LiveKitCallSession();
+    mediaSessionRef.current = session;
+    setCallMediaNote(lang==='ar'?'جارٍ الاتصال بوسائط المكالمة…':lang==='en'?'Connecting to call media…':'正在连接通话媒体…');
+    try {
+      await session.connect({
+        url: info.url,
+        token: info.token,
+        roomName: info.roomName || call.roomName,
+        kind: call.kind || 'audio',
+        initialMicEnabled: callDevices.micEnabled !== false,
+        initialCameraEnabled: call.kind === 'video' ? (callDevices.cameraEnabled !== false) : false,
+        onState: (st) => {
+          setMediaState(st);
+          if (st.phase === 'connected') {
+            setCallMediaNote(null);
+            void syncCallStateToServer(call.id, { status: 'active', micEnabled: callDevices.micEnabled, cameraEnabled: callDevices.cameraEnabled, screenSharing: callDevices.screenSharing });
+          } else if (st.phase === 'reconnecting') {
+            setCallMediaNote(lang==='ar'?'جارٍ إعادة الاتصال بالوسائط…':lang==='en'?'Reconnecting media…':'媒体重连中…');
+            void syncCallStateToServer(call.id, { status: 'reconnecting' });
+          } else if (st.phase === 'failed') {
+            setCallMediaNote(st.error || (lang==='ar'?'فشل اتصال الوسائط':lang==='en'?'Media connection failed':'媒体连接失败'));
+          }
+          if (st.error) setCallMediaNote(st.error);
+        }
+      });
+    } catch (e: any) {
+      const msg = friendlyMediaError(e);
+      setCallMediaNote(msg);
+      setMediaState(s => ({ ...s, phase: 'failed', error: msg }));
+      // keep signaling alive; do not fake success
+    }
+  };
+
   const startCall = async (kind: 'audio'|'video') => {
     if (!activeConv || !authed || callAction) return;
     if (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status)) { setConnError(callErrorText({ message: 'BUSY' })); return; }
-    setCallAction('start'); setCallMediaNote(null);
+    setCallAction('start'); setCallMediaNote(null); await cleanupCallMedia('replace');
     try {
       const payload: any = activeConv.type === 'direct'
         ? { scope: 'direct', kind, targetUserId: activeConv.otherUser?.id, conversationId: activeConv.id }
         : { scope: 'group', kind, conversationId: activeConv.id };
       const d = await callApi.invite(token(), payload);
-      if (d?.call) setActiveCall(d.call);
-      setCallDevices({ micEnabled: true, cameraEnabled: kind === 'video', screenSharing: false });
+      if (d?.call) {
+        setActiveCall(d.call);
+        setCallDevices({ micEnabled: true, cameraEnabled: kind === 'video', screenSharing: false });
+        await joinCallMedia(d.call, d.media);
+      }
       if (d?.media?.blocked || d?.media?.ok === false) {
         setCallMediaNote(d.media.reason === 'MEDIA_NOT_CONFIGURED' || d.media.reason === 'MEDIA_SDK_UNAVAILABLE'
           ? (lang==='ar'?'تم إنشاء إشارة المكالمة. وسائط الصوت/الفيديو الحقيقية غير متاحة (الخادم غير مُعد).':lang==='en'?'Call signaling created. Real audio/video media unavailable (server not configured/blocked).':'已创建通话信令。真实音视频媒体不可用（服务端未配置/BLOCKED）。')
           : (d.media.reason || ''));
-      } else if (d?.media?.ok) {
-        setCallMediaNote(lang==='ar'?'تم إصدار رمز وسائط قصير الأمد (تكامل العميل غير مكتمل).':lang==='en'?'Short-lived media token issued (client media integration not completed).':'已签发短期媒体令牌（客户端媒体集成未完成）。');
       }
-      setNotice(kind==='video' ? (lang==='ar'?'بدء مكالمة فيديو (إشارة)':lang==='en'?'Video call started (signaling)':'已发起视频通话（信令）') : (lang==='ar'?'بدء مكالمة صوتية (إشارة)':lang==='en'?'Audio call started (signaling)':'已发起语音通话（信令）'));
+      setNotice(kind==='video' ? (lang==='ar'?'بدء مكالمة فيديو':lang==='en'?'Video call started':'已发起视频通话') : (lang==='ar'?'بدء مكالمة صوتية':lang==='en'?'Audio call started':'已发起语音通话'));
     } catch (e: any) { setConnError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
@@ -1167,9 +1267,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     setCallAction('accept'); setCallMediaNote(null);
     try {
       const d = await callApi.accept(token(), incomingCall.id);
-      if (d?.call) { setActiveCall(d.call); setIncomingCall(null); setCallDevices({ micEnabled: d.call.self?.micEnabled ?? true, cameraEnabled: d.call.self?.cameraEnabled ?? (d.call.kind==='video'), screenSharing: !!d.call.self?.screenSharing }); }
+      if (d?.call) {
+        setActiveCall(d.call); setIncomingCall(null);
+        setCallDevices({ micEnabled: d.call.self?.micEnabled ?? true, cameraEnabled: d.call.self?.cameraEnabled ?? (d.call.kind==='video'), screenSharing: !!d.call.self?.screenSharing });
+        await joinCallMedia(d.call, d.media);
+      }
       if (d?.media?.blocked || d?.media?.ok === false) setCallMediaNote(lang==='ar'?'تم قبول المكالمة (إشارة). وسائط حقيقية غير متاحة/محظورة.':lang==='en'?'Call accepted (signaling). Real media unavailable/blocked.':'已接听（信令）。真实媒体不可用/BLOCKED。');
-      else if (d?.media?.ok) setCallMediaNote(lang==='ar'?'تم قبول المكالمة وتم إصدار رمز وسائط.':lang==='en'?'Call accepted and media token issued.':'已接听并签发媒体令牌。');
     } catch (e: any) { setConnError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
@@ -1184,6 +1287,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     const c = activeCall; if (!c?.id || callAction) return;
     setCallAction('end');
     try {
+      await cleanupCallMedia('hangup');
       if (c.status === 'ringing' && c.initiatorId === currentUser?.id) await callApi.cancel(token(), c.id);
       else await callApi.end(token(), c.id);
       setActiveCall((prev: any) => prev?.id === c.id ? { ...prev, status: 'ended' } : prev);
@@ -1195,27 +1299,63 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const leaveActiveGroupCall = async () => {
     const c = activeCall; if (!c?.id || c.scope !== 'group' || callAction) return;
     setCallAction('leave');
-    try { await callApi.leave(token(), c.id); setActiveCall(null); setNotice(lang==='ar'?'غادرت المكالمة':lang==='en'?'Left call':'已离开通话'); }
+    try { await cleanupCallMedia('leave'); await callApi.leave(token(), c.id); setActiveCall(null); setNotice(lang==='ar'?'غادرت المكالمة':lang==='en'?'Left call':'已离开通话'); }
     catch (e: any) { setConnError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
   const toggleCallDevice = async (field: 'micEnabled'|'cameraEnabled'|'screenSharing') => {
-    const c = activeCall; if (!c?.id || !['connecting','active','reconnecting'].includes(c.status)) return;
+    const c = activeCall; if (!c?.id) return;
     const next = { ...callDevices, [field]: !callDevices[field] };
     setCallDevices(next);
-    try { await callApi.state(token(), c.id, next); }
-    catch (e: any) { setConnError(callErrorText(e)); }
+    try {
+      const session = mediaSessionRef.current;
+      if (session && ['connecting','connected','reconnecting'].includes(mediaState.phase)) {
+        if (field === 'micEnabled') await session.setMicrophoneEnabled(next.micEnabled);
+        if (field === 'cameraEnabled') await session.setCameraEnabled(next.cameraEnabled);
+        if (field === 'screenSharing') await session.setScreenShareEnabled(next.screenSharing);
+      }
+    } catch (e:any) { setCallMediaNote(friendlyMediaError(e)); }
+    try { if (['connecting','active','reconnecting'].includes(c.status)) await callApi.state(token(), c.id, next); } catch {}
+  };
+  const switchCallCamera = async () => {
+    const session = mediaSessionRef.current; if (!session) { setCallMediaNote(lang==='ar'?'لا يوجد اتصال وسائط نشط':lang==='en'?'No active media connection':'无活动媒体连接'); return; }
+    try { await session.switchCamera(); } catch (e:any) { setCallMediaNote(friendlyMediaError(e)); }
   };
   const requestCallMediaToken = async () => {
     const c = activeCall; if (!c?.id || callAction) return;
     setCallAction('token');
     try {
       const d = await callApi.token(token(), c.id);
-      if (d?.ok && d.token) setCallMediaNote(lang==='ar'?'تم إصدار رمز وسائط قصير الأمد. نقل الوسائط الحقيقي يتطلب عميل وسائط مُهيأ.':lang==='en'?'Short-lived media token issued. Real media transport requires configured media client/runtime.':'已签发短期媒体令牌。真实媒体传输需已配置的媒体客户端/运行时。');
-      else setCallMediaNote(d?.reason === 'MEDIA_NOT_CONFIGURED' || d?.reason === 'MEDIA_SDK_UNAVAILABLE' ? (lang==='ar'?'وسائط حقيقية غير متاحة (محظور/غير مُعد).':lang==='en'?'Real media unavailable (blocked/not configured).':'真实媒体不可用（BLOCKED/未配置）。') : (d?.reason || 'blocked'));
-    } catch (e: any) { const msg = callErrorText(e); setCallMediaNote(msg); if (e?.body?.reason) setCallMediaNote(String(e.body.reason)); }
+      if (d?.ok && d.token) {
+        setCallMediaNote(lang==='ar'?'تم إصدار رمز وسائط، جارٍ الانضمام…':lang==='en'?'Media token issued, joining…':'已签发媒体令牌，正在加入…');
+        await joinCallMedia(c, d);
+      } else {
+        setCallMediaNote(d?.reason === 'MEDIA_NOT_CONFIGURED' || d?.reason === 'MEDIA_SDK_UNAVAILABLE' ? (lang==='ar'?'وسائط حقيقية غير متاحة (محظور/غير مُعد).':lang==='en'?'Real media unavailable (blocked/not configured).':'真实媒体不可用（BLOCKED/未配置）。') : (d?.reason || 'blocked'));
+      }
+    } catch (e: any) { const msg = callErrorText(e); setCallMediaNote(msg); }
     finally { setCallAction(null); }
   };
+  const startCallMediaPlayback = async () => { try { await mediaSessionRef.current?.startAudioPlayback(); } catch {} };
+
+  // Auto-manage media session lifecycle based on call state
+  useEffect(() => {
+    const c = activeCall;
+    const terminal = c && ['ended','rejected','missed','busy','failed','canceled'].includes(c.status);
+    if (!c || terminal) {
+      void cleanupCallMedia(terminal ? 'ended' : 'clear');
+      return;
+    }
+    // join when we are in a joinable call and have no media session yet (e.g. caller sees callee accepted via WS)
+    if (['connecting','active','reconnecting'].includes(c.status)) {
+      if (!mediaSessionRef.current && mediaJoinedCallIdRef.current !== c.id) {
+        void joinCallMedia(c);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCall?.id, activeCall?.status]);
+
+  // Cleanup on unmount
+  useEffect(() => { return () => { void cleanupCallMedia('unmount'); }; }, []);
 
   const connectGoogle = () => { window.location.href = '/api/auth/google/start'; };
   const connectWechat = () => { window.location.href = '/api/auth/wechat/start'; };
@@ -1657,32 +1797,101 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               <p className="text-[10px] text-cyan-200/70">{lang==='ar'?'طبقة الإشارة من EARTH ONE؛ الوسائط الحقيقية تتطلب خادم وسائط مُهيأ.':lang==='en'?'EARTH ONE signaling only; real media requires configured media runtime.':'EARTH ONE 信令层；真实音视频需已配置媒体运行时。'}</p>
             </div>
           )}
-          {activeCall && (
-            <div className="rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2.5 space-y-2">
+          {activeCall && (() => {
+            const mediaPhase = mediaState.phase || 'idle';
+            const mediaParticipants = Object.values(mediaState.participants || {});
+            const remoteAudioParticipants = mediaParticipants.filter((p: any) => !p.isLocal && (p.audioTrack || p.audioEnabled));
+            const remoteVideoTiles = mediaParticipants.filter((p: any) => !p.isLocal);
+            const localP: any = mediaParticipants.find((p: any) => p.isLocal) || null;
+            const participantUsers: any[] = Array.isArray(activeCall.users) ? activeCall.users : [];
+            const nameFor = (id: string) => {
+              const fromState = mediaParticipants.find((p:any)=>p.identity===id);
+              if (fromState?.name) return fromState.name;
+              const u = participantUsers.find((x:any)=>x.id===id); if (u?.displayName) return u.displayName;
+              if (id === currentUser?.id) return currentUser?.displayName || 'Me';
+              return id?.slice(0,8) || 'participant';
+            };
+            const qualityLabel = (q?: string) => {
+              const v = String(q||'').toLowerCase();
+              if (v.includes('excellent')) return lang==='ar'?'ممتازة':lang==='en'?'Excellent':'优秀';
+              if (v.includes('good')) return lang==='ar'?'جيدة':lang==='en'?'Good':'良好';
+              if (v.includes('poor')) return lang==='ar'?'ضعيفة':lang==='en'?'Poor':'较差';
+              if (v.includes('lost')) return lang==='ar'?'مفقودة':lang==='en'?'Lost':'丢失';
+              return lang==='ar'?'غير معروف':lang==='en'?'Unknown':'未知';
+            };
+            const mediaPhaseLabel = ({ idle: lang==='ar'?'خامل':lang==='en'?'Idle':'空闲', acquiring: lang==='ar'?'جارٍ الحصول على الأجهزة':lang==='en'?'Acquiring devices':'获取设备中', connecting: lang==='ar'?'جارٍ اتصال الوسائط':lang==='en'?'Connecting media':'媒体连接中', connected: lang==='ar'?'الوسائط متصلة':lang==='en'?'Media connected':'媒体已连接', reconnecting: lang==='ar'?'إعادة اتصال الوسائط':lang==='en'?'Reconnecting media':'媒体重连中', disconnected: lang==='ar'?'انقطع اتصال الوسائط':lang==='en'?'Media disconnected':'媒体已断开', failed: lang==='ar'?'فشل الوسائط':lang==='en'?'Media failed':'媒体失败', blocked: lang==='ar'?'الوسائط محظورة/غير مُعدة':lang==='en'?'Media blocked/unconfigured':'媒体被阻止/未配置' } as any)[mediaPhase] || mediaPhase;
+            return (
+            <div className="rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2.5 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-slate-100 inline-flex items-center gap-1.5">{activeCall.kind === 'video' ? <Video className="w-3.5 h-3.5 text-cyan-300"/> : <Phone className="w-3.5 h-3.5 text-emerald-300"/>}{activeCall.kind === 'video' ? (lang==='ar'?'مكالمة فيديو':lang==='en'?'Video call':'视频通话') : (lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话')} · {callStatusLabel(activeCall.status)}</p>
-                  <p className="text-[11px] text-slate-400 truncate">{activeCall.scope === 'group' ? (lang==='ar'?'جماعية':lang==='en'?'Group':'群组') : (lang==='ar'?'مباشرة':lang==='en'?'Direct':'一对一')} · {(activeCall.participantIds || []).length} {lang==='ar'?'مشاركين':lang==='en'?'participants':'参与者'}{activeCall.roomName ? ` · ${activeCall.roomName}` : ''}</p>
+                  <p className="text-[11px] text-slate-400 truncate">{activeCall.scope === 'group' ? (lang==='ar'?'جماعية':lang==='en'?'Group':'群组') : (lang==='ar'?'مباشرة':lang==='en'?'Direct':'一对一')} · {(activeCall.participantIds || []).length} {lang==='ar'?'مشاركين':lang==='en'?'participants':'参与者'} · {mediaPhaseLabel}{activeCall.roomName ? ` · ${activeCall.roomName}` : ''}</p>
                 </div>
                 <span className="text-[10px] text-slate-500">{activeCall.id?.slice(-8)}</span>
               </div>
+
+              {!mediaState.canPlaybackAudio && ['connected','reconnecting','connecting'].includes(mediaPhase) && remoteAudioParticipants.length > 0 && (
+                <button onClick={()=>void startCallMediaPlayback()} className="w-full text-[11px] px-2.5 py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 inline-flex items-center justify-center gap-2"><Volume2 className="w-3.5 h-3.5"/>{lang==='ar'?'انقر لتشغيل الصوت الوارد':lang==='en'?'Click to enable incoming audio playback':'点击启用来电音频播放'}</button>
+              )}
+
+              {['connecting','active','reconnecting','ringing'].includes(activeCall.status) && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {(remoteVideoTiles.length ? remoteVideoTiles : (activeCall.participantIds||[]).filter((id:string)=>id!==currentUser?.id).map((id:string)=>({ identity:id, isLocal:false, audioEnabled: !!activeCall.participants?.[id]?.micEnabled, videoEnabled: !!activeCall.participants?.[id]?.cameraEnabled, screenShareEnabled: !!activeCall.participants?.[id]?.screenSharing, speaking:false, connectionQuality: mediaState.connectionQuality, audioTrack:null, videoTrack:null, screenTrack:null }))).map((p:any) => (
+                    <div key={p.identity} className="rounded-lg border border-slate-800 bg-slate-900/70 overflow-hidden">
+                      <div className="aspect-video bg-slate-950 flex items-center justify-center relative">
+                        {p.videoTrack ? <CallTrackView track={p.videoTrack} kind="video" className="w-full h-full object-cover" /> : p.screenTrack ? <CallTrackView track={p.screenTrack} kind="video" className="w-full h-full object-contain bg-black" /> : <div className="flex flex-col items-center gap-2 text-slate-500"><UserIcon className="w-8 h-8"/><span className="text-[11px]">{activeCall.kind==='video' ? (lang==='ar'?'لا يوجد فيديو':lang==='en'?'No video':'无视频画面') : (lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话')}</span></div>}
+                        {p.speaking && <span className="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40">{lang==='ar'?'يتحدث':lang==='en'?'Speaking':'正在说话'}</span>}
+                      </div>
+                      <div className="px-2.5 py-2 space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-[11px]"><span className="text-slate-200 truncate">{nameFor(p.identity)}</span><span className="text-slate-500">{p.isLocal ? (lang==='ar'?'أنت':lang==='en'?'You':'我') : (lang==='ar'?'مشارك':lang==='en'?'Participant':'参与者')}</span></div>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                          <span className="inline-flex items-center gap-1">{p.audioEnabled ? <Mic className="w-3 h-3 text-emerald-300"/> : <MicOff className="w-3 h-3 text-rose-300"/>}{p.audioEnabled ? (lang==='ar'?'ميكروفون':lang==='en'?'Mic':'麦克风') : (lang==='ar'?'كتم':lang==='en'?'Muted':'静音')}</span>
+                          <span className="inline-flex items-center gap-1">{p.videoEnabled ? <Video className="w-3 h-3 text-cyan-300"/> : <VideoOff className="w-3 h-3 text-slate-500"/>}{p.videoEnabled ? (lang==='ar'?'كاميرا':lang==='en'?'Cam':'摄像头') : (lang==='ar'?'بلا كاميرا':lang==='en'?'Cam off':'关摄像头')}</span>
+                          {p.screenShareEnabled && <span className="inline-flex items-center gap-1"><Monitor className="w-3 h-3 text-cyan-300"/>{lang==='ar'?'مشاركة':lang==='en'?'Share':'共享'}</span>}
+                        </div>
+                        <div className="text-[10px] text-slate-500">{lang==='ar'?'جودة الشبكة':lang==='en'?'Network':'网络质量'}: {qualityLabel(p.connectionQuality || mediaState.connectionQuality)}</div>
+                      </div>
+                      {p.audioTrack && <CallTrackView track={p.audioTrack} kind="audio" />}
+                      {p.screenTrack && p.videoTrack && <div className="px-2.5 pb-2 text-[10px] text-cyan-300 inline-flex items-center gap-1"><Monitor className="w-3 h-3"/>{lang==='ar'?'مشاركة شاشة نشطة':lang==='en'?'Screen sharing active':'屏幕共享中'}</div>}
+                    </div>
+                  ))}
+                  <div className="rounded-lg border border-slate-800 bg-slate-900/70 overflow-hidden">
+                    <div className="aspect-video bg-slate-950 flex items-center justify-center relative">
+                      {localP?.videoTrack || localP?.screenTrack ? <CallTrackView track={localP.screenTrack || localP.videoTrack} kind="video" muted className="w-full h-full object-cover" mirror={!localP?.screenTrack} /> : <div className="flex flex-col items-center gap-2 text-slate-500"><UserIcon className="w-8 h-8"/><span className="text-[11px]">{lang==='ar'?'معاينة محلية':lang==='en'?'Local preview':'本地预览'}</span></div>}
+                    </div>
+                    <div className="px-2.5 py-2 space-y-1">
+                      <div className="flex items-center justify-between gap-2 text-[11px]"><span className="text-slate-200 truncate">{currentUser?.displayName || (lang==='ar'?'أنا':lang==='en'?'You':'我')}</span><span className="text-cyan-300">{lang==='ar'?'محلي':lang==='en'?'Local':'本地'}</span></div>
+                      <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                        <span className="inline-flex items-center gap-1">{callDevices.micEnabled ? <Mic className="w-3 h-3 text-emerald-300"/> : <MicOff className="w-3 h-3 text-rose-300"/>}{lang==='ar'?'ميكروفون':lang==='en'?'Mic':'麦克风'}</span>
+                        <span className="inline-flex items-center gap-1">{callDevices.cameraEnabled ? <Video className="w-3 h-3 text-cyan-300"/> : <VideoOff className="w-3 h-3 text-slate-500"/>}{lang==='ar'?'كاميرا':lang==='en'?'Camera':'摄像头'}</span>
+                        {callDevices.screenSharing && <span className="inline-flex items-center gap-1"><Monitor className="w-3 h-3 text-cyan-300"/>{lang==='ar'?'مشاركة':lang==='en'?'Sharing':'共享中'}</span>}
+                      </div>
+                      <div className="text-[10px] text-slate-500">{lang==='ar'?'حالة الصوت':lang==='en'?'Audio':'音频'}: {mediaPhase==='connected' ? (lang==='ar'?'متصل':lang==='en'?'Connected':'已连接') : mediaPhaseLabel}{!mediaState.canPlaybackAudio && remoteAudioParticipants.length>0 ? ` · ${lang==='ar'?'التشغيل يحتاج تفاعل':lang==='en'?'Playback needs interaction':'需交互启用播放'}` : ''}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center gap-2">
                 {['connecting','active','reconnecting'].includes(activeCall.status) && (
                   <>
                     <button onClick={()=>void toggleCallDevice('micEnabled')} className={`px-2.5 py-1.5 rounded-lg border text-xs inline-flex items-center gap-1 ${callDevices.micEnabled ? 'border-slate-700 text-slate-200 bg-slate-800/60' : 'border-rose-500/40 text-rose-200 bg-rose-500/10'}`}>{callDevices.micEnabled ? <Mic className="w-3.5 h-3.5"/> : <MicOff className="w-3.5 h-3.5"/>}{callDevices.micEnabled ? (lang==='ar'?'ميكروفون':lang==='en'?'Mic':'麦克风') : (lang==='ar'?'كتم':lang==='en'?'Muted':'静音')}</button>
                     <button onClick={()=>void toggleCallDevice('cameraEnabled')} disabled={activeCall.kind !== 'video'} className={`px-2.5 py-1.5 rounded-lg border text-xs inline-flex items-center gap-1 disabled:opacity-40 ${callDevices.cameraEnabled ? 'border-slate-700 text-slate-200 bg-slate-800/60' : 'border-rose-500/40 text-rose-200 bg-rose-500/10'}`}>{callDevices.cameraEnabled ? <Video className="w-3.5 h-3.5"/> : <VideoOff className="w-3.5 h-3.5"/>}{callDevices.cameraEnabled ? (lang==='ar'?'كاميرا':lang==='en'?'Camera':'摄像头') : (lang==='ar'?'إيقاف الكاميرا':lang==='en'?'Camera off':'关摄像头')}</button>
                     <button onClick={()=>void toggleCallDevice('screenSharing')} className={`px-2.5 py-1.5 rounded-lg border text-xs inline-flex items-center gap-1 ${!callDevices.screenSharing ? 'border-slate-700 text-slate-200 bg-slate-800/60' : 'border-cyan-500/40 text-cyan-200 bg-cyan-500/10'}`}>{callDevices.screenSharing ? <MonitorOff className="w-3.5 h-3.5"/> : <Monitor className="w-3.5 h-3.5"/>}{callDevices.screenSharing ? (lang==='ar'?'إيقاف المشاركة':lang==='en'?'Stop share':'停止共享') : (lang==='ar'?'مشاركة الشاشة':lang==='en'?'Share screen':'共享屏幕')}</button>
-                    <button onClick={()=>void requestCallMediaToken()} disabled={!!callAction} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs disabled:opacity-40">{lang==='ar'?'حالة الوسائط':lang==='en'?'Media status':'媒体状态'}</button>
+                    {activeCall.kind === 'video' && <button onClick={()=>void switchCallCamera()} disabled={!callDevices.cameraEnabled || !mediaSessionRef.current} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs inline-flex items-center gap-1 disabled:opacity-40"><RefreshCw className="w-3.5 h-3.5"/>{lang==='ar'?'تبديل الكاميرا':lang==='en'?'Switch camera':'切换摄像头'}</button>}
+                    <button onClick={()=>void requestCallMediaToken()} disabled={!!callAction} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs disabled:opacity-40">{lang==='ar'?'حالة/إعادة وسائط':lang==='en'?'Media retry/status':'媒体重试/状态'}</button>
                   </>
                 )}
                 {activeCall.scope === 'group' && ['connecting','active','reconnecting'].includes(activeCall.status) && <button onClick={()=>void leaveActiveGroupCall()} disabled={!!callAction} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs disabled:opacity-40">{lang==='ar'?'مغادرة':lang==='en'?'Leave':'离开'}</button>}
                 {['ringing','connecting','active','reconnecting'].includes(activeCall.status) && <button onClick={()=>void endOrCancelActiveCall()} disabled={!!callAction} className="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-200 border border-rose-500/40 text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-40"><PhoneOff className="w-3.5 h-3.5"/>{activeCall.status==='ringing' && activeCall.initiatorId===currentUser?.id ? (lang==='ar'?'إلغاء':lang==='en'?'Cancel':'取消') : (lang==='ar'?'إنهاء':lang==='en'?'End':'挂断')}</button>}
-                {['ended','rejected','missed','busy','failed','canceled'].includes(activeCall.status) && <button onClick={()=>{ setActiveCall(null); setCallMediaNote(null); }} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">{lang==='ar'?'إغلاق':lang==='en'?'Dismiss':'关闭'}</button>}
+                {['ended','rejected','missed','busy','failed','canceled'].includes(activeCall.status) && <button onClick={()=>{ void cleanupCallMedia('dismiss'); setActiveCall(null); setCallMediaNote(null); }} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">{lang==='ar'?'إغلاق':lang==='en'?'Dismiss':'关闭'}</button>}
               </div>
+
               {callMediaNote && <p className="text-[10px] text-amber-200/90">{callMediaNote}</p>}
-              <p className="text-[10px] text-slate-500">{lang==='ar'?'إشارات/حالة المكالمة محفوظة لدى EARTH ONE. أزرار الجهاز تسجّل الحالة؛ نقل الوسائط الحقيقي يتطلب تكامل عميل وسائط مُهيأ (بدون أسرار في الواجهة).':lang==='en'?'Call signaling/state is managed by EARTH ONE. Device controls record state; real media transport requires configured media client/runtime (no secrets in frontend).':'通话信令/状态由 EARTH ONE 管理；设备按钮记录状态，真实媒体传输需已配置的媒体客户端/运行时（前端无密钥）。'}</p>
+              {mediaState.error && !callMediaNote && <p className="text-[10px] text-amber-200/90">{mediaState.error}</p>}
+              <p className="text-[10px] text-slate-500">{lang==='ar'?'إشارات EARTH ONE مع طبقة وسائط LiveKit عند التهيئة. الرموز تصدر من الخادم فقط (هوية المستخدم + غرفة المكالمة) دون أسرار في الواجهة.':lang==='en'?'EARTH ONE signaling with LiveKit media layer when configured. Tokens issued server-side only (user identity + call room), no secrets in frontend.':'EARTH ONE 信令 + 已配置时的 LiveKit 媒体层；令牌仅服务端签发（绑定用户身份与通话房间），前端无密钥。'}</p>
             </div>
-          )}
+          ); })()}
           {hasMore && <div className="text-center"><button disabled={loadingMore} onClick={async()=>{ if(!messages[0]) return; setLoadingMore(true); await fetchMessages(true, messages[0].id); setLoadingMore(false); }} className="text-[11px] px-3 py-1 rounded-full border border-slate-700 text-slate-300 hover:bg-slate-800">加载更早消息</button></div>}
           {connError && <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200 flex items-center justify-between gap-2"><span>{connError}</span><button onClick={()=>{setConnError(null); void fetchMessages(false);}} className="px-2 py-1 rounded bg-amber-800/50">重试</button></div>}
           {messages.map(msg => {
