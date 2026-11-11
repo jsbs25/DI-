@@ -495,6 +495,8 @@ export type AppNotificationType =
   | 'group_member_left'
   | 'group_admin_changed'
   | 'group_owner_transferred'
+  | 'call_invite'
+  | 'call_missed'
   | 'account_security';
 
 export interface AppNotification {

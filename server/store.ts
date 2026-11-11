@@ -570,6 +570,7 @@ class DataStore {
   notifications: any[] = [];
   notificationPrefs: Record<string, any> = {};
   privacySettings: Record<string, any> = {};
+  calls: any[] = [];
 
   // EARTH ONE native identity (permanent public ID). Sequence is monotonic and never reused.
   nextEarthSequence: number = 100001;
@@ -687,6 +688,7 @@ class DataStore {
       notifications: this.notifications,
       notificationPrefs: this.notificationPrefs,
       privacySettings: this.privacySettings,
+      calls: (this as any).calls || [],
       nextEarthSequence: this.nextEarthSequence,
       earthIdMap: this.earthIdMap,
       currentUser: this.currentUser,
@@ -747,6 +749,7 @@ class DataStore {
       this.notifications = Array.isArray(data.notifications) ? data.notifications : [];
       this.notificationPrefs = data.notificationPrefs && typeof data.notificationPrefs === 'object' ? data.notificationPrefs : {};
       this.privacySettings = data.privacySettings && typeof data.privacySettings === 'object' ? data.privacySettings : {};
+      (this as any).calls = Array.isArray(data.calls) ? data.calls : [];
       this.nextEarthSequence = Number.isFinite(data.nextEarthSequence) ? Math.max(100001, Math.floor(data.nextEarthSequence)) : 100001;
       this.earthIdMap = data.earthIdMap && typeof data.earthIdMap === 'object' ? data.earthIdMap : {};
       this.currentUser = data.currentUser || this.users[0];

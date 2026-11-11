@@ -34,6 +34,8 @@ import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
 import { getMailProvider, mailStatus } from './server/mailProvider.ts';
 import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE164 } from './server/otp.ts';
 import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers } from './server/messengerWs.ts';
+import { addCall, getCallById, listCallsForUser, ensureCallsArray } from './server/calls/index.ts';
+import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus } from './server/calls/service.ts';
 import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -1217,6 +1219,53 @@ app.post('/api/auth/email/change/confirm', async (req, res) => {
 });
 
 
+function publicCallForUser(call: any, userId: string) {
+  if (!call) return null;
+  const users = (call.participantIds || []).map((id: string) => {
+    const u = store.users.find((x: any) => x.id === id);
+    return u ? { id: u.id, displayName: u.displayName, username: u.username, avatar: u.avatar } : { id, displayName: id, username: id, avatar: '' };
+  });
+  const p = call.participants?.[userId] || null;
+  return {
+    id: call.id,
+    roomName: call.roomName,
+    scope: call.scope,
+    kind: call.kind,
+    conversationId: call.conversationId || null,
+    initiatorId: call.initiatorId,
+    participantIds: call.participantIds || [],
+    participants: call.participants || {},
+    users,
+    status: call.status,
+    createdAt: call.createdAt,
+    updatedAt: call.updatedAt,
+    startedAt: call.startedAt || null,
+    endedAt: call.endedAt || null,
+    endedBy: call.endedBy || null,
+    endReason: call.endReason || null,
+    mediaProvider: call.mediaProvider || 'none',
+    capabilities: call.capabilities || {},
+    self: p,
+  };
+}
+
+function emitCallEvent(call: any, event: string, extra?: any) {
+  const payloadBase = { type: event, callId: call.id, at: new Date().toISOString(), ...(extra || {}) };
+  for (const uid of (call.participantIds || [])) {
+    try { wsBroadcastToUser(uid, { ...payloadBase, call: publicCallForUser(call, uid) }); } catch {}
+  }
+}
+
+function emitCallInviteDelivery(call: any, initiator: any) {
+  const title = call.scope === 'group' ? 'Incoming group call' : 'Incoming call';
+  const body = call.kind === 'video' ? `${initiator.displayName} invited you to a video call.` : `${initiator.displayName} invited you to an audio call.`;
+  for (const uid of (call.participantIds || [])) {
+    if (uid === initiator.id) continue;
+    try { emitNotification(uid, { type: 'call_invite', title, body, actorId: initiator.id, actorName: initiator.displayName, actorAvatar: initiator.avatar, conversationId: call.conversationId, data: { callId: call.id, kind: call.kind, scope: call.scope, roomName: call.roomName } }); } catch {}
+  }
+}
+
+
 
 // -------------------------------------------------------------
 // 1b. MESSENGER: USERS, FRIENDS, BLOCKS (auth required where sensitive)
@@ -1650,6 +1699,202 @@ app.get('/api/messenger/avatar/:userId/:file', (req, res) => {
   return fs.createReadStream(resolved).pipe(res);
 });
 
+
+
+
+// -------------------------------------------------------------
+// 1c. CALLS (EARTH ONE-owned signaling/business; media token boundary)
+// -------------------------------------------------------------
+app.get('/api/calls', (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
+  const calls = listCallsForUser(store, user.id, limit).map((c: any) => publicCallForUser(c, user.id));
+  res.json({ success: true, calls });
+});
+
+app.get('/api/calls/:id', (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const call = getCallById(store, req.params.id);
+  if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
+  res.json({ success: true, call: publicCallForUser(call, user.id) });
+});
+
+app.post('/api/calls/invite', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const body = req.body || {};
+  const input = {
+    scope: body.scope,
+    kind: body.kind,
+    conversationId: typeof body.conversationId === 'string' ? body.conversationId : undefined,
+    targetUserId: typeof body.targetUserId === 'string' ? body.targetUserId : undefined,
+    participantIds: Array.isArray(body.participantIds) ? body.participantIds.filter((x:any)=>typeof x==='string') : undefined,
+  };
+  try {
+    let call: any; let created: any;
+    await store.mutate(async () => {
+      created = createCallRecord(store, user.id, input as any);
+      if (!created.ok) return;
+      call = addCall(store, created.call);
+      store.addAudit(user.id, 'call_invite', `${call.id}:${call.scope}:${call.kind}`, req.ip);
+      store.persist();
+    });
+    if (!created?.ok) {
+      const err = created?.error || 'Failed to create call';
+      if (err === 'BUSY') return res.status(409).json({ success: false, error: 'You are already in a call.', code: 'BUSY' });
+      if (err === 'TARGET_BUSY') return res.status(409).json({ success: false, error: 'Target user is busy.', code: 'TARGET_BUSY' });
+      return res.status(403).json({ success: false, error: err });
+    }
+    try { emitCallInviteDelivery(call, user); } catch {}
+    try { emitCallEvent(call, 'call_invite', { fromUserId: user.id }); } catch {}
+    const tok = await issueMediaToken(call, user.id);
+    res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to create call' });
+  }
+});
+
+app.post('/api/calls/:id/accept', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    let call: any; let out: any;
+    await store.mutate(async () => {
+      call = getCallById(store, req.params.id);
+      if (!call) { out = { code: 404, body: { success:false, error:'Call not found' } }; return; }
+      const r = acceptCallRecord(call, user.id);
+      if (!r.ok) { out = { code: r.error === 'Forbidden' ? 403 : 400, body: { success:false, error:r.error } }; return; }
+      store.addAudit(user.id, 'call_accept', call.id, req.ip);
+      store.persist();
+    });
+    if (out) return res.status(out.code).json(out.body);
+    try { emitCallEvent(call, 'call_accept', { userId: user.id }); } catch {}
+    const tok = await issueMediaToken(call, user.id);
+    res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to accept call' });
+  }
+});
+
+app.post('/api/calls/:id/reject', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    let call: any; let out: any;
+    await store.mutate(async () => {
+      call = getCallById(store, req.params.id);
+      if (!call) { out = { code: 404, body: { success:false, error:'Call not found' } }; return; }
+      const r = rejectCallRecord(call, user.id);
+      if (!r.ok) { out = { code: r.error === 'Forbidden' ? 403 : 400, body: { success:false, error:r.error } }; return; }
+      store.addAudit(user.id, 'call_reject', call.id, req.ip);
+      store.persist();
+    });
+    if (out) return res.status(out.code).json(out.body);
+    try { emitCallEvent(call, 'call_reject', { userId: user.id }); } catch {}
+    res.json({ success: true, call: publicCallForUser(call, user.id) });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to reject call' });
+  }
+});
+
+app.post('/api/calls/:id/cancel', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    let call: any; let out: any;
+    await store.mutate(async () => {
+      call = getCallById(store, req.params.id);
+      if (!call) { out = { code: 404, body: { success:false, error:'Call not found' } }; return; }
+      const r = cancelCallRecord(call, user.id);
+      if (!r.ok) { out = { code: r.error === 'Forbidden' ? 403 : 400, body: { success:false, error:r.error } }; return; }
+      store.addAudit(user.id, 'call_cancel', call.id, req.ip);
+      store.persist();
+    });
+    if (out) return res.status(out.code).json(out.body);
+    try { emitCallEvent(call, 'call_cancel', { userId: user.id }); } catch {}
+    res.json({ success: true, call: publicCallForUser(call, user.id) });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to cancel call' });
+  }
+});
+
+app.post('/api/calls/:id/end', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason : 'hangup';
+  try {
+    let call: any; let out: any;
+    await store.mutate(async () => {
+      call = getCallById(store, req.params.id);
+      if (!call) { out = { code: 404, body: { success:false, error:'Call not found' } }; return; }
+      const r = endCallRecord(call, user.id, reason);
+      if (!r.ok) { out = { code: r.error === 'Forbidden' ? 403 : 400, body: { success:false, error:r.error } }; return; }
+      store.addAudit(user.id, 'call_end', `${call.id}:${reason}`, req.ip);
+      store.persist();
+    });
+    if (out) return res.status(out.code).json(out.body);
+    try { emitCallEvent(call, 'call_end', { userId: user.id, reason }); } catch {}
+    res.json({ success: true, call: publicCallForUser(call, user.id) });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to end call' });
+  }
+});
+
+app.post('/api/calls/:id/leave', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    let call: any; let out: any;
+    await store.mutate(async () => {
+      call = getCallById(store, req.params.id);
+      if (!call) { out = { code: 404, body: { success:false, error:'Call not found' } }; return; }
+      const r = leaveCallRecord(call, user.id);
+      if (!r.ok) { out = { code: r.error === 'Forbidden' ? 403 : 400, body: { success:false, error:r.error } }; return; }
+      store.addAudit(user.id, 'call_leave', call.id, req.ip);
+      store.persist();
+    });
+    if (out) return res.status(out.code).json(out.body);
+    try { emitCallEvent(call, 'call_leave', { userId: user.id }); } catch {}
+    res.json({ success: true, call: publicCallForUser(call, user.id) });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to leave call' });
+  }
+});
+
+app.post('/api/calls/:id/token', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const call = getCallById(store, req.params.id);
+  if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
+  const tok = await issueMediaToken(call, user.id);
+  if (!tok.ok) return res.status(tok.blocked ? 503 : 403).json({ success: false, ...tok });
+  res.json({ success: true, ...tok });
+});
+
+app.post('/api/calls/:id/state', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const status = typeof req.body?.status === 'string' ? req.body.status : undefined;
+  const micEnabled = typeof req.body?.micEnabled === 'boolean' ? req.body.micEnabled : undefined;
+  const cameraEnabled = typeof req.body?.cameraEnabled === 'boolean' ? req.body.cameraEnabled : undefined;
+  const screenSharing = typeof req.body?.screenSharing === 'boolean' ? req.body.screenSharing : undefined;
+  try {
+    let call: any; let out: any;
+    await store.mutate(async () => {
+      call = getCallById(store, req.params.id);
+      if (!call) { out = { code: 404, body: { success:false, error:'Call not found' } }; return; }
+      if (!(call.participantIds||[]).includes(user.id)) { out = { code: 403, body: { success:false, error:'Forbidden' } }; return; }
+      const p = call.participants[user.id] || { userId: user.id, status: 'joined' };
+      if (micEnabled !== undefined) p.micEnabled = micEnabled;
+      if (cameraEnabled !== undefined) p.cameraEnabled = cameraEnabled;
+      if (screenSharing !== undefined) p.screenSharing = screenSharing;
+      if (p.status === 'invited' || p.status === 'ringing') p.status = 'joined';
+      call.participants[user.id] = p;
+      if (status === 'active') markActive(call);
+      else if (status === 'reconnecting') markReconnecting(call);
+      else if (status === 'connecting' && call.status === 'ringing') call.status = 'connecting';
+      call.updatedAt = new Date().toISOString();
+      store.persist();
+    });
+    if (out) return res.status(out.code).json(out.body);
+    try { emitCallEvent(call, 'call_state', { userId: user.id, state: { micEnabled, cameraEnabled, screenSharing, status } }); } catch {}
+    res.json({ success: true, call: publicCallForUser(call, user.id) });
+  } catch (e:any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to update call state' });
+  }
+});
 
 
 
