@@ -98,6 +98,23 @@ function getAuthUser(req: express.Request) {
   return getSessionUser(req) || store.currentUser;
 }
 
+function isPlaceholderAppUrl(value: string | undefined | null): boolean {
+  const v = String(value || '').trim();
+  if (!v) return true;
+  return /^(MY_)?APP_URL$/i.test(v) || /^https?:\/\/(example\.com|localhost\/?$)/i.test(v) || v.includes('MY_APP_URL');
+}
+
+function resolveAppUrl(req?: express.Request): string {
+  const env = (process.env.APP_URL || '').trim();
+  if (!isPlaceholderAppUrl(env)) return env.replace(/\/$/, '');
+  if (req) {
+    const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'http';
+    const host = (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() || req.get('host');
+    if (host) return `${proto}://${host}`.replace(/\/$/, '');
+  }
+  return 'http://localhost:3000';
+}
+
 // Simple in-memory sliding-window rate limiter for auth endpoints (brute-force
 // mitigation). Keyed by client IP so repeated failed logins are throttled.
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -167,14 +184,15 @@ function getAuthRuntimeStatus() {
   const wechatConfigured = !!(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET);
   const googleConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
   const devEnabled = isDevLoginEnabledConfig();
+  const appUrlRaw = (process.env.APP_URL || '').trim() || null;
   return {
     env: process.env.NODE_ENV || 'development',
     wechat: {
       configured: wechatConfigured,
       appIdSet: !!process.env.WECHAT_APP_ID,
       appSecretSet: !!process.env.WECHAT_APP_SECRET,
-      appUrl: (process.env.APP_URL || '').trim() || null,
-      appUrlIsPlaceholder: /MY_APP_URL/i.test(String(process.env.APP_URL || '')),
+      appUrl: appUrlRaw,
+      appUrlIsPlaceholder: isPlaceholderAppUrl(appUrlRaw),
     },
     google: { configured: googleConfigured },
     devQuickLogin: {
@@ -430,7 +448,7 @@ setInterval(pruneWechatStates, 5*60*1000).unref?.();
 app.get('/api/auth/wechat/start', (req, res) => {
   const appId = process.env.WECHAT_APP_ID;
   const appSecret = process.env.WECHAT_APP_SECRET;
-  const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const appUrl = resolveAppUrl(req);
   if (!appId || !appSecret) return res.status(501).json({ success: false, blocked: true, error: '微信登录尚未配置，请使用开发者登录。', message: '微信登录尚未配置，请使用开发者登录。' });
   const redirectUri = encodeURIComponent(`${appUrl}/api/auth/wechat/callback`);
   const state = (randomBytes(24)).toString('hex');
@@ -444,7 +462,7 @@ app.get('/api/auth/wechat/start', (req, res) => {
 app.get('/api/auth/wechat/callback', async (req, res) => {
   const code = typeof req.query.code === 'string' ? req.query.code : '';
   const state = typeof req.query.state === 'string' ? req.query.state : '';
-  const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const appUrl = resolveAppUrl(req);
   const cookies = parseCookies(req);
   const cookieState = cookies.earth_wechat_state || '';
   const exp = wechatStates.get(state);
@@ -672,7 +690,7 @@ app.post('/api/auth/unlink', async (req, res) => {
 // Google OAuth 2.0 (official) - sign in / bind account
 app.get('/api/auth/google/start', (req, res) => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
-  const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const appUrl = resolveAppUrl(req);
   if (!clientId) return res.status(501).json({ success: false, error: 'Google login not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.' });
   const redirectUri = `${appUrl}/api/auth/google/callback`;
   const state = randomBytes(24).toString('hex');
@@ -695,7 +713,7 @@ app.get('/api/auth/google/start', (req, res) => {
 app.get('/api/auth/google/callback', async (req, res) => {
   const code = typeof req.query.code === 'string' ? req.query.code : '';
   const state = typeof req.query.state === 'string' ? req.query.state : '';
-  const appUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const appUrl = resolveAppUrl(req);
   const redirectUri = `${appUrl}/api/auth/google/callback`;
   const cookies = parseCookies(req);
   const cookieState = cookies.earth_oauth_state || '';
@@ -837,11 +855,18 @@ app.get('/api/dev/status', async (req, res) => {
   });
 });
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', async (req, res) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
-    store.sessions.delete(token);
+    try {
+      await store.mutate(async () => {
+        store.sessions.delete(token);
+        store.persist();
+      });
+    } catch {
+      // best-effort: token removal should not block client logout
+    }
   }
   res.json({ success: true, message: 'Logged out successfully.' });
 });

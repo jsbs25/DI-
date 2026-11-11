@@ -12,10 +12,11 @@ interface AuthModalProps {
 type Mode = 'login' | 'register' | 'phone' | 'forgot' | 'reset';
 
 const COUNTRIES = [
-  { code: '+86', label: 'CN +86' }, { code: '+1', label: 'US/CA +1' }, { code: '+44', label: 'UK +44' },
-  { code: '+81', label: 'JP +81' }, { code: '+82', label: 'KR +82' }, { code: '+33', label: 'FR +33' },
-  { code: '+49', label: 'DE +49' }, { code: '+971', label: 'AE +971' }, { code: '+966', label: 'SA +966' },
-  { code: '+7', label: 'RU +7' }, { code: '+61', label: 'AU +61' }, { code: '+91', label: 'IN +91' },
+  { code: '+86', label: 'CN +86' }, { code: '+962', label: 'JO +962' }, { code: '+1', label: 'US/CA +1' },
+  { code: '+44', label: 'UK +44' }, { code: '+81', label: 'JP +81' }, { code: '+82', label: 'KR +82' },
+  { code: '+33', label: 'FR +33' }, { code: '+49', label: 'DE +49' }, { code: '+971', label: 'AE +971' },
+  { code: '+966', label: 'SA +966' }, { code: '+20', label: 'EG +20' }, { code: '+7', label: 'RU +7' },
+  { code: '+61', label: 'AU +61' }, { code: '+91', label: 'IN +91' },
 ];
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, lang }) => {

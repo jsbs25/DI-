@@ -184,17 +184,25 @@ export default function App() {
 
     // Authenticated user check
     fetch('/api/auth/me', { headers })
-      .then(r => r.json())
-      .then(d => {
-        if (d.success && d.user) {
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d?.success && d?.user) {
           setCurrentUser(d.user);
           // If user hasn't finished onboarding, trigger the setup wizard
           if (d.user.hasCompletedOnboarding === false) {
             setIsOnboardingModalOpen(true);
           }
+        } else if (storedToken) {
+          // stale/invalid/revoked token: clear locally so login state is consistent
+          localStorage.removeItem('earth_one_token');
+          setSessionToken(null);
+          setCurrentUser(null);
         }
       })
-      .catch(console.error);
+      .catch((err) => {
+        console.error(err);
+        // do not drop token on transient network failure; keep session for retry
+      });
 
     // Globe nodes
     fetch('/api/globe/nodes')
