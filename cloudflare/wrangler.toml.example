@@ -1,0 +1,40 @@
+# EARTH ONE - Cloudflare Worker backend (compatibility/migration scaffold)
+# Copy to wrangler.toml and fill IDs after `wrangler login` / resource creation.
+# Do NOT commit real account IDs/tokens/secrets.
+
+name = "earthone-api"
+main = "worker/src/index.ts"
+compatibility_date = "2026-11-12"
+compatibility_flags = ["nodejs_compat"]
+
+# Serve static assets from Pages in production; this Worker targets /api + /ws.
+# workers_dev = true
+
+[vars]
+ENVIRONMENT = "development"
+# Comma-separated origins allowed for CORS (GitHub Pages, custom domain). Do not use * with credentials.
+CORS_ORIGINS = "https://jsbs25.github.io,http://localhost:5173,http://localhost:3000"
+# Set to "false" in production once real auth is enforced.
+DEV_LOGIN_ENABLED = "false"
+
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "earthone"
+# database_id = "<D1_DATABASE_ID>"
+# migrations_dir = "migrations"
+
+# [[r2_buckets]]
+# binding = "BUCKET"
+# bucket_name = "earthone-files"
+
+# [durable_objects]
+# bindings = [
+#   { name = "MESSENGER_ROOM", class_name = "MessengerRoom" },
+#   { name = "USER_PRESENCE", class_name = "UserPresence" }
+# ]
+
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["MessengerRoom", "UserPresence"]
+
+# Local dev: npx wrangler dev --config cloudflare/wrangler.toml.example --local --persist-to .wrangler/state
