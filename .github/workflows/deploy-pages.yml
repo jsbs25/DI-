@@ -37,6 +37,8 @@ jobs:
       - name: Build frontend
         run: npm run build
         env:
+          # GitHub Pages project site base path
+          VITE_BASE: /DI-/
           # Set VITE_API_BASE in repository Variables/Secrets for split deployment (e.g. https://api.example.com)
           VITE_API_BASE: ${{ vars.VITE_API_BASE || '' }}
 
