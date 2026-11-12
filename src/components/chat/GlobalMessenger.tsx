@@ -1,3 +1,4 @@
+import { getApiBase, wsUrl } from '../../apiBase.ts';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Conversation, ChatMessage, User, Language, ChannelIntegration } from '../../types/index.ts';
 import {
@@ -189,7 +190,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const authFileUrl = (url: string) => {
     if (!url) return url;
     try {
-      const u = new URL(url, window.location.origin);
+      const base = getApiBase();
+      const absolute = base && url.startsWith('/') ? (base + url) : url;
+      const u = new URL(absolute, base || window.location.origin);
       const t = token();
       if (t) u.searchParams.set('token', t);
       return u.toString();
@@ -545,8 +548,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       if (stopped) return;
       const tkn = token(); if (!tkn) return;
       setWsStatus('connecting');
-      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${proto}://${window.location.host}/ws?token=${encodeURIComponent(tkn)}`);
+      const ws = new WebSocket(`${wsUrl('/ws')}?token=${encodeURIComponent(tkn)}`);
       wsRef.current = ws;
       ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); void loadNotifications(); void loadNotifPrefs(); void loadPrivacy(); void loadBlocked(); void loadFriends(); void loadRequests(); };
       ws.onmessage = (ev) => {

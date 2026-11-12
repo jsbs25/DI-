@@ -60,6 +60,26 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
+
+// Optional CORS for split web deployment (Pages frontend + separate API). Set CORS_ORIGIN to frontend origin(s), comma-separated.
+app.use((req, res, next) => {
+  const origin = String(process.env.CORS_ORIGIN || '').trim();
+  if (origin) {
+    const allow = origin === '*' ? '*' : origin.split(',').map(s => s.trim()).filter(Boolean);
+    const reqOrigin = String(req.headers.origin || '');
+    if (allow === '*' || (reqOrigin && Array.isArray(allow) && allow.includes(reqOrigin))) {
+      res.setHeader('Access-Control-Allow-Origin', allow === '*' ? '*' : reqOrigin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      if (req.method === 'OPTIONS') return res.sendStatus(204);
+    } else if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+  }
+  next();
+});
+
 app.use((req, res, next) => {
   if (req.path === '/api/messenger/upload/stream') return next();
   return express.json({ limit: '20mb' })(req, res, next);
@@ -3884,22 +3904,34 @@ app.get('/api/search/global', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 9. VITE SPA MIDDLEWARE INTEGRATION
+// 9. VITE SPA MIDDLEWARE / PRODUCTION STATIC SERVING
 // -------------------------------------------------------------
 async function startServer() {
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa'
-  });
-
-  app.use(vite.middlewares);
-
   const httpServer = http.createServer(app);
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   attachMessengerWs(wss as any);
 
+  const isProd = process.env.NODE_ENV === 'production' || process.env.EARTH_ONE_SERVE_DIST === 'true';
+  if (isProd) {
+    const distDir = path.resolve(process.cwd(), 'dist');
+    app.use(express.static(distDir));
+    // SPA fallback for client routes (do not intercept API or websocket upgrade paths)
+    app.get(/^(?!\/api|\/ws).*/, (req, res, next) => {
+      if (req.method !== 'GET') return next();
+      const indexPath = path.join(distDir, 'index.html');
+      if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+      return next();
+    });
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa'
+    });
+    app.use(vite.middlewares);
+  }
+
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`🌍 地球计划 Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`🌍 地球计划 Server listening on http://0.0.0.0:${PORT} (${isProd ? 'production/dist' : 'vite-dev'})`);
   });
 
   if (process.env.EARTH_ONE_SKIP_BOOK_HARVEST !== 'true') {
