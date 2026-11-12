@@ -503,7 +503,7 @@ export default function App() {
       />
 
       {/* 2. Main View Content Switcher */}
-      <main className={`flex-1 relative flex flex-col ${isImmersiveSpace ? 'h-[calc(100vh-4rem)] overflow-hidden' : 'min-h-[calc(100vh-4rem)]'}`}>
+      <main className={`flex-1 relative flex flex-col ${isImmersiveSpace ? 'h-[calc(100dvh-4rem)] overflow-hidden' : 'min-h-[calc(100dvh-4rem)]'}`}>
         {currentTab === 'globe' && (
           <div className="flex-1 flex flex-col min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)]">
             <DigitalGlobe
@@ -530,7 +530,7 @@ export default function App() {
         )}
 
         {currentTab === 'universe' && (
-          <div className="flex-1 flex flex-col min-h-[calc(100vh-4rem)]">
+          <div className="flex-1 flex flex-col min-h-[calc(100dvh-4rem)]">
             <UniverseEngine
               onSwitchToEarthWorld={() => setCurrentTab('globe')}
               onEnterEcosystem={handleEnterPlanet}

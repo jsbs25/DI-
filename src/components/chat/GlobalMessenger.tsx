@@ -70,6 +70,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [isSending, setIsSending] = useState(false);
   const [showOriginalMap, setShowOriginalMap] = useState<Record<string, boolean>>({});
   const [convQuery, setConvQuery] = useState('');
+  const [mobileShowChat, setMobileShowChat] = useState(false);
   const [showIntegrations, setShowIntegrations] = useState(false);
   const [connError, setConnError] = useState<string | null>(null);
   const [wsStatus, setWsStatus] = useState<'off' | 'connecting' | 'open' | 'closed'>('off');
@@ -192,17 +193,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     try {
       const base = getApiBase();
       const absolute = base && url.startsWith('/') ? (base + url) : url;
-      const u = new URL(absolute, base || window.location.origin);
-      const t = token();
-      if (t) u.searchParams.set('token', t);
-      return u.toString();
+      return new URL(absolute, base || window.location.origin).toString();
     } catch { return url; }
   };
   const downloadAttachment = async (a: any) => {
     if (!a?.url) return;
     setDlState(s => ({ ...s, [a.id]: 'downloading' }));
     try {
-      const res = await fetch(authFileUrl(`${a.url}?download=1`));
+      const res = await fetch(authFileUrl(`${a.url}?download=1`), { credentials: 'include' });
       if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || '下载失败');
       const blob = await res.blob();
       const href = URL.createObjectURL(blob);
@@ -217,7 +215,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   };
 
   const token = () => '';
-  const authed = !!token();
+  const authed = !!currentUser;
 
   const sorted = useMemo(() => {
     const q = convQuery.trim().toLowerCase();
@@ -233,7 +231,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     const tkn = token();
     if (tkn) headers.Authorization = `Bearer ${tkn}`;
     if (init?.body && !(init.body instanceof FormData) && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-    const res = await fetch(path, { ...init, headers });
+    const res = await fetch(path, { ...init, headers, credentials: 'include' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: res.status, data });
     return data;
@@ -270,7 +268,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       // mark read
       api(`/api/conversations/${activeConv.id}/read`, { method: 'POST' }).catch(()=>{});
     } catch (err: any) {
-      if (!quiet) setConnError(err?.status === 401 ? '登录状态已失效，请重新登录。' : (err?.message || '消息加载失败'));
+      if (!quiet) setConnError(err?.status === 401 ? '登录状态已失效。' : (err?.message || '消息加载失败'));
     } finally {
       clearTimeout(timeout);
       inFlightRef.current = false;
@@ -540,149 +538,28 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); void loadNotifications(); void loadNotifPrefs(); void loadPrivacy(); } }, [authed, currentUser?.id]);
 
-  // WebSocket realtime
+  // WebSocket realtime (Worker runtime does not provide /ws; use session-cookie sync)
   useEffect(() => {
     if (!authed) { setWsStatus('off'); return; }
     let stopped = false;
+    setWsStatus('closed');
+    void syncSince();
+
+    // server-sent Events not available; poll sync as lightweight fallback in same-origin auth
+    const poll = setInterval(() => { if (!stopped) void syncSince(); }, 8000);
+    const onOnline = () => { if (!stopped) void syncSince(); };
+    window.addEventListener('online', onOnline);
+    return () => { stopped = true; clearInterval(poll); window.removeEventListener('online', onOnline); if (reconnectRef.current) clearTimeout(reconnectRef.current); try { wsRef.current?.close(); } catch {}; };
+
+    /* WS path disabled for current Worker deployment (no /ws upgrade handler)
     const connect = () => {
       if (stopped) return;
-      const tkn = token(); if (!tkn) return;
       setWsStatus('connecting');
-      const ws = new WebSocket(`${wsUrl('/ws')}?token=${encodeURIComponent(tkn)}`);
+      const ws = new WebSocket(wsUrl('/ws'));
       wsRef.current = ws;
       ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); void loadNotifications(); void loadNotifPrefs(); void loadPrivacy(); void loadBlocked(); void loadFriends(); void loadRequests(); };
-      ws.onmessage = (ev) => {
-        let data: any; try { data = JSON.parse(String(ev.data)); } catch { return; }
-        if (data.type === 'message' && data.message) {
-          const m = data.message as ChatMessage;
-          if (activeConv?.id && m.conversationId === activeConv.id) {
-            setMessages(prev => {
-              if (prev.some(x => x.id === m.id)) return prev;
-              return [...prev, m].sort((a,b)=> { const ta=new Date(a.createdAt).getTime(), tb=new Date(b.createdAt).getTime(); if (ta!==tb) return ta-tb; return String(a.id).localeCompare(String(b.id)); });
-            });
-            api(`/api/conversations/${m.conversationId}/read`, { method: 'POST' }).catch(()=>{});
-          }
-          void onRefreshConversations?.();
-          void loadRecent();
-        } else if (data.type === 'send_ack' && data.message) {
-          if (data.clientMsgId) pendingClientIds.current.delete(data.clientMsgId);
-          if (data.ok && data.message) {
-            setMessages(prev => {
-              const map = new Map(prev.map(x => [x.id, x]));
-              if (data.clientMsgId) map.delete(data.clientMsgId);
-              map.set(data.message.id, data.message);
-              return Array.from(map.values()).sort((a,b)=> { const ta=new Date(a.createdAt).getTime(), tb=new Date(b.createdAt).getTime(); if (ta!==tb) return ta-tb; return String(a.id).localeCompare(String(b.id)); });
-            });
-            void onRefreshConversations?.();
-          } else if (!data.ok && data.clientMsgId) {
-            setMessages(prev => prev.map(m => m.id === data.clientMsgId ? { ...m, status: 'failed' } : m));
-            setConnError(data.error === 'blocked' ? '消息被阻止（屏蔽关系）。' : '消息发送失败，请重试。');
-          }
-        } else if (data.type === 'read' && data.conversationId) {
-          if (activeConv?.id && data.conversationId === activeConv.id) {
-            setMessages(prev => prev.map(m => m.senderId === currentUser?.id ? { ...m, status: 'read', readBy: Array.from(new Set([...(m.readBy||[]), data.userId])) } : m));
-          }
-          void onRefreshConversations?.(); // sync unread counts across devices
-        } else if (data.type === 'typing' && data.conversationId === activeConv?.id && data.userId !== currentUser?.id) {
-          setTypingUsers(prev => ({ ...prev, [data.userId]: data.on ? Date.now() : 0 }));
-        } else if (data.type === 'profile_updated' || data.type === 'profile_sync') {
-          const u = data.user;
-          if (u) {
-            if (u.id && currentUser?.id && u.id === currentUser.id && onUserUpdate) onUserUpdate(u as any);
-            if (selectedProfile?.user?.id === u.id || selectedProfile?.isSelf) {
-              setSelectedProfile((prev: any) => prev ? ({ ...prev, user: u.id === prev.user?.id ? u : (prev.isSelf && u.id === currentUser?.id ? u : prev.user) }) : prev);
-            }
-            setFriends(prev => prev.map(f => f.id === u.id ? { ...f, displayName: u.displayName || f.displayName, username: u.username || f.username, avatar: u.avatar || f.avatar, isOnline: u.isOnline ?? f.isOnline, lastActiveAt: u.lastActiveAt || f.lastActiveAt, bio: u.bio ?? f.bio } : f));
-            setMessages(prev => prev.map(m => m.senderId === u.id ? { ...m, senderName: u.displayName || m.senderName, senderAvatar: u.avatar || m.senderAvatar } : m));
-          }
-          void onRefreshConversations?.();
-          void loadFriends(); void loadRecent();
-        } else if (data.type === 'presence' || data.type === 'friend_request' || data.type === 'friend_request_updated' || data.type === 'conversation_created' || data.type === 'conversation_updated' || data.type === 'message_recalled') {
-          if (data.type === 'friend_request') setNotice('收到新的好友申请 / New friend request');
-          if (data.type === 'friend_request_updated') setNotice('好友申请状态已更新');
-          if (data.type === 'presence' && data.userId) {
-            setFriends(prev => prev.map(f => f.id === data.userId ? { ...f, isOnline: !!data.online, lastActiveAt: data.lastActiveAt || f.lastActiveAt } : f));
-            setMessages(prev => prev.map(m => m.senderId === data.userId ? { ...m } : m));
-            if (selectedProfile?.user?.id === data.userId) setSelectedProfile((p:any)=> p ? ({...p, user: { ...p.user, isOnline: !!data.online, lastActiveAt: data.lastActiveAt || p.user?.lastActiveAt }}) : p);
-          }
-          void onRefreshConversations?.();
-          void loadFriends(); void loadRequests(); void loadRecent();
-          if (data.type === 'message_recalled' && data.message?.conversationId === activeConv?.id) {
-            setMessages(prev => prev.map(m => m.id === data.message.id ? data.message : m));
-          }
-          if (data.type === 'conversation_updated' && data.conversation?.id === activeConv?.id && showGroupPanel) void loadGroupDetail(activeConv.id);
-        } else if (typeof data.type === 'string' && data.type.startsWith('call_')) {
-          if (data.call) {
-            const c = data.call;
-            const mine = (c.participantIds || []).includes(currentUser?.id);
-            if (data.type === 'call_invite') {
-              if (c.initiatorId !== currentUser?.id && (c.status === 'ringing' || c.status === 'connecting')) { setIncomingCall(c); if (c.conversationId) { /* keep chat usable */ } }
-              else if (c.initiatorId === currentUser?.id) { setActiveCall(c); setCallDevices({ micEnabled: c.self?.micEnabled ?? true, cameraEnabled: c.self?.cameraEnabled ?? (c.kind==='video'), screenSharing: !!c.self?.screenSharing }); }
-            } else {
-              if (mine) {
-                if (activeCallRef.current?.id === c.id || incomingCall?.id === c.id || ['ended','rejected','missed','busy','failed','canceled'].includes(c.status) || c.status === 'active' || c.status === 'connecting' || c.status === 'reconnecting') {
-                  if (['ended','rejected','missed','busy','failed','canceled'].includes(c.status)) {
-                    setActiveCall((prev: any) => prev?.id === c.id ? c : prev);
-                    setIncomingCall((prev: any) => prev?.id === c.id ? null : prev);
-                    if (activeCallRef.current?.id === c.id || incomingCall?.id === c.id) {
-                      setNotice(c.status==='missed' ? (lang==='ar'?'مكالمة فائتة':lang==='en'?'Missed call':'未接来电') : c.status==='busy' ? (lang==='ar'?'المستخدم مشغول':lang==='en'?'User busy':'对方忙线') : c.status==='rejected' ? (lang==='ar'?'تم رفض المكالمة':lang==='en'?'Call rejected':'通话已拒绝') : c.status==='canceled' ? (lang==='ar'?'تم إلغاء المكالمة':lang==='en'?'Call canceled':'通话已取消') : (lang==='ar'?'انتهت المكالمة':lang==='en'?'Call ended':'通话已结束'));
-                      setCallMediaNote(null);
-                    }
-                  } else {
-                    setActiveCall(c);
-                    if (incomingCall?.id === c.id) setIncomingCall(null);
-                    if (c.self) setCallDevices((d: any) => ({ ...d, micEnabled: c.self.micEnabled ?? d.micEnabled, cameraEnabled: c.self.cameraEnabled ?? d.cameraEnabled, screenSharing: !!c.self.screenSharing }));
-                  }
-                }
-              }
-            }
-          }
-        } else if (data.type === 'notification' && data.notification) {
-          setNotifications(prev => prev.some(n => n.id === data.notification.id) ? prev : [data.notification, ...prev].slice(0, 200));
-          if (typeof data.unreadCount === 'number') setNotifUnread(data.unreadCount); else setNotifUnread(u => u + (data.notification.read ? 0 : 1));
-          try { maybeAlertNotification(data.notification, data.alert); } catch {}
-        } else if (data.type === 'notification_sync') {
-          if (typeof data.unreadCount === 'number') setNotifUnread(data.unreadCount);
-          if (data.readAll) setNotifications(prev => prev.map(n => ({ ...n, read: true, readAt: n.readAt || new Date().toISOString() })));
-          if (data.readId) setNotifications(prev => prev.map(n => n.id === data.readId ? { ...n, read: true, readAt: data.readAt || n.readAt } : n));
-          if (data.deletedId) setNotifications(prev => prev.filter(n => n.id !== data.deletedId));
-        } else if (data.type === 'notification_prefs_sync' && data.preferences) {
-          setNotifPrefs(data.preferences);
-          if (!notifPrefsSaving) setNotifPrefsDraft(data.preferences);
-          setNotifPrefsStatus('idle');
-          setNotifPrefsError(null);
-        } else if (data.type === 'privacy_sync' && data.privacy) {
-          const p = normalizePrivacy(data.privacy);
-          setPrivacy(p);
-          if (!privacySaving) setPrivacyDraft(p);
-          setPrivacyStatus('idle');
-          setPrivacyError(null);
-        } else if (data.type === 'blocklist_sync') {
-          void loadBlocked(); void loadFriends(); void loadRequests(); void onRefreshConversations?.();
-        } else if (data.type === 'conversation_cleared' && data.conversationId) {
-          if (activeConvIdRef.current === data.conversationId) setMessages([]);
-          void onRefreshConversations?.();
-        } else if (data.type === 'hello') {
-          // multi-device hello ok
-        }
-      };
-      ws.onclose = () => {
-        if (stopped) return;
-        setWsStatus('closed');
-        setConnError('实时连接已断开，正在自动重连…');
-        const attempt = ++reconnectAttemptRef.current;
-        const delay = Math.min(15000, 1000 * Math.pow(1.6, attempt));
-        reconnectRef.current = setTimeout(connect, delay);
-      };
-      ws.onerror = () => { try { ws.close(); } catch {} };
-    };
-    connect();
-    const onOnline = () => { if (wsRef.current?.readyState !== 1) { try { wsRef.current?.close(); } catch {}; connect(); } else { void syncSince(); } };
-    window.addEventListener('online', onOnline);
-    return () => { stopped = true; window.removeEventListener('online', onOnline); if (reconnectRef.current) clearTimeout(reconnectRef.current); try { wsRef.current?.close(); } catch {} };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    */
   }, [authed, currentUser?.id, activeConv?.id]);
-
 
 
   // Desktop (Electron) notification click -> navigate to conversation
@@ -784,8 +661,6 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const uploadOne = (file: File, convId: string, onProgress: (p: number) => void): Promise<any> => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/messenger/upload/stream');
-    const t = token();
-    if (t) xhr.setRequestHeader('Authorization', `Bearer ${t}`);
     xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
     xhr.setRequestHeader('x-mime-type', encodeURIComponent(file.type || 'application/octet-stream'));
     xhr.setRequestHeader('x-conversation-id', encodeURIComponent(convId));
@@ -1139,7 +1014,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     if (!n.read) void markNotifRead(n.id);
     if (n.type === 'call_invite') {
       const cid = n.data?.callId;
-      if (cid) { try { const d = await callApi.get(token(), cid); if (d?.call) setIncomingCall(d.call); } catch { setIncomingCall({ id: cid, kind: n.data?.kind, scope: n.data?.scope, status: 'ringing', conversationId: n.conversationId || n.data?.conversationId }); } }
+      if (cid) { try { const d = await callApi.get(cid); if (d?.call) setIncomingCall(d.call); } catch { setIncomingCall({ id: cid, kind: n.data?.kind, scope: n.data?.scope, status: 'ringing', conversationId: n.conversationId || n.data?.conversationId }); } }
       else if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); }
       return;
     }
@@ -1181,7 +1056,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   };
 
   const syncCallStateToServer = async (callId: string, patch: any) => {
-    try { await callApi.state(token(), callId, patch); } catch {}
+    try { await callApi.state(callId, patch); } catch {}
   };
 
   const joinCallMedia = async (call: any, media?: any) => {
@@ -1192,7 +1067,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     if (mediaJoinedCallIdRef.current === call.id && mediaSessionRef.current) return;
     let info = media;
     if (!info || (!info.ok && !info.token)) {
-      try { info = await callApi.token(token(), call.id); } catch (e:any) { info = e?.body || { ok:false, reason: e?.message || 'MEDIA_ERROR' }; }
+      try { info = await callApi.token(call.id); } catch (e:any) { info = e?.body || { ok:false, reason: e?.message || 'MEDIA_ERROR' }; }
     }
     if (!info || info.ok === false || info.blocked || !info.token || !info.url) {
       const reason = info?.reason || (info?.blocked ? 'MEDIA_NOT_CONFIGURED' : 'MEDIA_UNAVAILABLE');
@@ -1249,7 +1124,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       const payload: any = activeConv.type === 'direct'
         ? { scope: 'direct', kind, targetUserId: activeConv.otherUser?.id, conversationId: activeConv.id }
         : { scope: 'group', kind, conversationId: activeConv.id };
-      const d = await callApi.invite(token(), payload);
+      const d = await callApi.invite(payload);
       if (d?.call) {
         setActiveCall(d.call);
         setCallDevices({ micEnabled: true, cameraEnabled: kind === 'video', screenSharing: false });
@@ -1268,7 +1143,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     if (!incomingCall?.id || callAction) return;
     setCallAction('accept'); setCallMediaNote(null);
     try {
-      const d = await callApi.accept(token(), incomingCall.id);
+      const d = await callApi.accept(incomingCall.id);
       if (d?.call) {
         setActiveCall(d.call); setIncomingCall(null);
         setCallDevices({ micEnabled: d.call.self?.micEnabled ?? true, cameraEnabled: d.call.self?.cameraEnabled ?? (d.call.kind==='video'), screenSharing: !!d.call.self?.screenSharing });
@@ -1281,7 +1156,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const rejectIncomingCall = async () => {
     if (!incomingCall?.id || callAction) return;
     setCallAction('reject');
-    try { await callApi.reject(token(), incomingCall.id); setIncomingCall(null); setNotice(lang==='ar'?'تم رفض المكالمة':lang==='en'?'Call rejected':'已拒绝通话'); }
+    try { await callApi.reject(incomingCall.id); setIncomingCall(null); setNotice(lang==='ar'?'تم رفض المكالمة':lang==='en'?'Call rejected':'已拒绝通话'); }
     catch (e: any) { setConnError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
@@ -1290,8 +1165,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     setCallAction('end');
     try {
       await cleanupCallMedia('hangup');
-      if (c.status === 'ringing' && c.initiatorId === currentUser?.id) await callApi.cancel(token(), c.id);
-      else await callApi.end(token(), c.id);
+      if (c.status === 'ringing' && c.initiatorId === currentUser?.id) await callApi.cancel(c.id);
+      else await callApi.end(c.id);
       setActiveCall((prev: any) => prev?.id === c.id ? { ...prev, status: 'ended' } : prev);
       setNotice(lang==='ar'?'انتهت المكالمة':lang==='en'?'Call ended':'通话已结束');
       setTimeout(()=>setActiveCall((prev: any) => (prev?.id === c.id && ['ended','rejected','missed','busy','failed','canceled'].includes(prev.status)) ? null : prev), 1500);
@@ -1301,7 +1176,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const leaveActiveGroupCall = async () => {
     const c = activeCall; if (!c?.id || c.scope !== 'group' || callAction) return;
     setCallAction('leave');
-    try { await cleanupCallMedia('leave'); await callApi.leave(token(), c.id); setActiveCall(null); setNotice(lang==='ar'?'غادرت المكالمة':lang==='en'?'Left call':'已离开通话'); }
+    try { await cleanupCallMedia('leave'); await callApi.leave(c.id); setActiveCall(null); setNotice(lang==='ar'?'غادرت المكالمة':lang==='en'?'Left call':'已离开通话'); }
     catch (e: any) { setConnError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
@@ -1317,7 +1192,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         if (field === 'screenSharing') await session.setScreenShareEnabled(next.screenSharing);
       }
     } catch (e:any) { setCallMediaNote(friendlyMediaError(e)); }
-    try { if (['connecting','active','reconnecting'].includes(c.status)) await callApi.state(token(), c.id, next); } catch {}
+    try { if (['connecting','active','reconnecting'].includes(c.status)) await callApi.state(c.id, next); } catch {}
   };
   const switchCallCamera = async () => {
     const session = mediaSessionRef.current; if (!session) { setCallMediaNote(lang==='ar'?'لا يوجد اتصال وسائط نشط':lang==='en'?'No active media connection':'无活动媒体连接'); return; }
@@ -1327,7 +1202,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     const c = activeCall; if (!c?.id || callAction) return;
     setCallAction('token');
     try {
-      const d = await callApi.token(token(), c.id);
+      const d = await callApi.token(c.id);
       if (d?.ok && d.token) {
         setCallMediaNote(lang==='ar'?'تم إصدار رمز وسائط، جارٍ الانضمام…':lang==='en'?'Media token issued, joining…':'已签发媒体令牌，正在加入…');
         await joinCallMedia(c, d);
@@ -1368,22 +1243,22 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 text-center space-y-3">
           <MessageCircle className="w-10 h-10 text-cyan-400 mx-auto" />
           <h2 className="text-lg font-semibold text-slate-100">Global Messenger</h2>
-          <p className="text-sm text-slate-400">请先登录以使用好友、私聊、群聊与实时消息。</p>
+          <p className="text-sm text-slate-400">正在同步登录状态…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full max-w-7xl mx-auto h-[calc(100vh-8rem)] min-h-[620px] p-3 sm:p-4 flex flex-col lg:flex-row gap-4">
+    <div className="w-full max-w-7xl mx-auto h-[calc(100dvh-7.5rem)] min-h-[420px] sm:min-h-[620px] p-2 sm:p-4 flex flex-col lg:flex-row gap-3 sm:gap-4">
       {/* Left panel */}
-      <div className="w-full lg:w-[360px] rounded-2xl bg-slate-900/80 border border-slate-800 p-3.5 flex flex-col shrink-0 shadow-xl backdrop-blur-md min-h-0">
+      <div className={`w-full lg:w-[360px] rounded-2xl bg-slate-900/80 border border-slate-800 p-3 sm:p-3.5 flex-col shrink-0 shadow-xl backdrop-blur-md min-h-0 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
         <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-2">
           <div className="flex items-center gap-2">
             <MessageCircle className="w-4 h-4 text-cyan-400" />
             <h2 className="font-bold text-sm text-slate-100">Messenger</h2>
             <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${wsStatus==='open'?'text-emerald-300 border-emerald-700/50 bg-emerald-500/10':'text-amber-300 border-amber-700/50 bg-amber-500/10'}`}>
-              {wsStatus==='open' ? <Wifi className="w-3 h-3"/> : <WifiOff className="w-3 h-3"/>}{wsStatus}
+              {wsStatus==='open' ? <Wifi className="w-3 h-3"/> : <WifiOff className="w-3 h-3"/>}{wsStatus==='closed'?'sync':wsStatus}
             </span>
           </div>
           <div className="flex gap-1">
@@ -1426,7 +1301,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             <div className="relative mb-2"><Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500" /><input value={convQuery} onChange={e=>setConvQuery(e.target.value)} placeholder="搜索会话…" className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200" /></div>
             <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
               {sorted.map(conv => (
-                <button key={conv.id} onClick={()=>onSelectConversation(conv.id)} className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-left ${conv.id===activeConv?.id?'bg-cyan-500/15 border border-cyan-500/40':'bg-slate-950/40 border border-slate-800/60 hover:bg-slate-800/60'}`}>
+                <button key={conv.id} onClick={()=>{onSelectConversation(conv.id); setMobileShowChat(true);}} className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-left ${conv.id===activeConv?.id?'bg-cyan-500/15 border border-cyan-500/40':'bg-slate-950/40 border border-slate-800/60 hover:bg-slate-800/60'}`}>
                   {conv.type==='global_channel' ? <div className="w-10 h-10 rounded-full bg-cyan-950 border border-cyan-500/40 flex items-center justify-center text-cyan-300"><Globe className="w-5 h-5"/></div>
                   : <div className="relative"><img src={conv.otherUser?.avatar || conv.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-10 h-10 rounded-full object-cover border border-slate-700"/>{(conv.isOnline || conv.otherUser?.isOnline) && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950"/>}</div>}
                   <div className="flex-1 min-w-0">
@@ -1456,7 +1331,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               </div>
             ))}
             {recentConvs.length>0 && <div className="pt-2 border-t border-slate-800 space-y-1.5"><p className="text-[11px] text-slate-400">最近联系人</p>{recentConvs.slice(0,8).map(c => (
-              <button key={c.id} onClick={()=>{ onSelectConversation(c.id); setTab('chats'); }} className="w-full flex items-center gap-2 p-2 rounded-lg bg-slate-950/40 border border-slate-800 text-left">
+              <button key={c.id} onClick={()=>{ onSelectConversation(c.id); setTab('chats'); setMobileShowChat(true); }} className="w-full flex items-center gap-2 p-2 rounded-lg bg-slate-950/40 border border-slate-800 text-left">
                 <img src={c.otherUser?.avatar || c.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-7 h-7 rounded-full object-cover"/>
                 <div className="flex-1 min-w-0"><p className="text-[11px] text-slate-200 truncate">{c.name}</p><p className="text-[10px] text-slate-500 truncate">{c.lastMessage || ''}</p></div>
                 {(c.unreadCount||0)>0 && <span className="text-[10px] px-1.5 rounded-full bg-cyan-500 text-slate-950 font-bold">{c.unreadCount}</span>}
@@ -1761,13 +1636,16 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       </div>
 
       {/* Right: chat */}
-      <div className="flex-1 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col shadow-xl backdrop-blur-md overflow-hidden min-h-0">
-        <div className="p-3.5 border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-3 bg-slate-950/40">
-          <div className="min-w-0">
-            <h3 className="font-bold text-sm text-slate-100 truncate flex items-center gap-2">{activeConv?.name || 'Chat'} {activeConv?.type==='group' && <span className="text-[10px] px-1.5 rounded bg-slate-800 text-slate-300">群聊</span>}</h3>
-            <p className="text-[11px] text-slate-400 truncate">{typingNames ? `${typingNames} 正在输入…` : (activeConv?.otherUser?.isOnline || activeConv?.isOnline ? '在线' : 'Earth One Messenger')}</p>
+      <div className={`flex-1 rounded-2xl bg-slate-900/80 border border-slate-800 flex-col shadow-xl backdrop-blur-md overflow-hidden min-h-0 ${mobileShowChat ? "flex" : "hidden lg:flex"}`}>
+        <div className="p-3 sm:p-3.5 border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-2 sm:gap-3 bg-slate-950/40">
+          <div className="min-w-0 flex items-center gap-2">
+            <button type="button" onClick={()=>setMobileShowChat(false)} className="lg:hidden p-1.5 -ml-0.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800 shrink-0 min-h-[36px] min-w-[36px] inline-flex items-center justify-center" aria-label="Back"><ChevronLeft className="w-4 h-4"/></button>
+            <div className="min-w-0">
+              <h3 className="font-bold text-sm text-slate-100 truncate flex items-center gap-2">{activeConv?.name || 'Chat'} {activeConv?.type==='group' && <span className="text-[10px] px-1.5 rounded bg-slate-800 text-slate-300">群聊</span>}</h3>
+              <p className="text-[11px] text-slate-400 truncate">{typingNames ? `${typingNames} 正在输入…` : (activeConv?.otherUser?.isOnline || activeConv?.isOnline ? '在线' : 'Earth One Messenger')}</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-1.5 sm:gap-2 text-xs flex-wrap justify-end">
             {canStartCallHere && (
               <div className="flex items-center gap-1">
                 <button onClick={()=>void startCall('audio')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="p-1.5 rounded border border-slate-700 text-emerald-300 hover:bg-slate-800 disabled:opacity-40" title={lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话'}><Phone className="w-3.5 h-3.5"/></button>
@@ -1903,7 +1781,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             return (
               <div key={msg.id} className={`flex items-start gap-2.5 ${isMe?'flex-row-reverse':''}`}>
                 <img src={msg.senderAvatar} className="w-8 h-8 rounded-full object-cover border border-slate-700 mt-1"/>
-                <div className={`max-w-[min(42rem,85%)] ${isMe?'items-end':'items-start'}`}>
+                <div className={`max-w-[min(42rem,88%)] sm:max-w-[min(42rem,85%)] ${isMe?'items-end':'items-start'}`}>
                   <div className={`flex items-center gap-1.5 text-[11px] text-slate-400 mb-1 ${isMe?'justify-end':''}`}><span className="font-semibold text-slate-300">{msg.senderName}</span><span>{new Date(msg.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span></div>
                   <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-md space-y-2 ${isMe?'bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-tr-none':'bg-slate-800/90 text-slate-200 border border-slate-700/60 rounded-tl-none'}`}>
                     {msg.replyToId && <div className="text-[11px] opacity-80 border-l-2 border-white/30 pl-2">回复消息</div>}
@@ -1960,7 +1838,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           <div ref={messagesEndRef} />
         </div>
 
-        <form onSubmit={handleSendMessage} className="p-3 bg-slate-950/60 border-t border-slate-800 space-y-2">
+        <form onSubmit={handleSendMessage} className="p-2.5 sm:p-3 bg-slate-950/60 border-t border-slate-800 space-y-2 pb-[calc(0.625rem+env(safe-area-inset-bottom))]">
           {replyTo && <div className="text-[11px] text-slate-300 flex items-center justify-between bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5"><span className="truncate">回复：{replyTo.content || '[附件]'}</span><button type="button" onClick={()=>setReplyTo(null)}><X className="w-3.5 h-3.5"/></button></div>}
           {pendingUploads.length > 0 && (
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-2.5 space-y-2">
@@ -1995,9 +1873,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); void handleSendMessage(); } }}
               placeholder="输入消息… (Enter 发送)"
               rows={1}
-              className="flex-1 min-h-[42px] max-h-32 resize-y px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-sm text-slate-100"
+              className="flex-1 min-h-[44px] max-h-32 resize-y px-3.5 sm:px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-sm text-slate-100"
             />
-            <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-semibold text-xs flex items-center gap-1.5 h-[42px]"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
+            <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-semibold text-xs flex items-center gap-1.5 h-[44px]"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
           </div>
         </form>
       </div>

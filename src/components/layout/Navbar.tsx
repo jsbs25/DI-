@@ -666,19 +666,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        <nav aria-label="Primary navigation" className="md:hidden -mx-1 flex items-center gap-1 overflow-x-auto border-t border-slate-800/60 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <nav aria-label="Primary navigation" className="md:hidden -mx-1 flex items-center gap-1.5 overflow-x-auto border-t border-slate-800/60 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {[
             { id: 'globe', label: t.globeTab, icon: <Home className="w-3.5 h-3.5" /> },
+            { id: 'chat', label: t.globalMessenger || (lang === 'zh' ? '通信' : 'Chat'), icon: <MessageSquare className="w-3.5 h-3.5" /> },
             { id: 'feed', label: t.feedTab, icon: <Compass className="w-3.5 h-3.5" /> },
-            { id: 'universe', label: t.universeTab, icon: <Orbit className="w-3.5 h-3.5" /> },
-            { id: 'community', label: t.communityTab, icon: <Users2 className="w-3.5 h-3.5" /> }
+            { id: 'browser', label: lang === 'zh' ? '浏览' : 'Browser', icon: <Search className="w-3.5 h-3.5" /> },
+            { id: 'universe', label: t.universeTab, icon: <Orbit className="w-3.5 h-3.5" /> }
           ].map(item => (
             <button
               key={item.id}
               type="button"
               onClick={() => { onSelectTab(item.id); setMobileMenuOpen(false); }}
               aria-current={currentTab === item.id ? 'page' : undefined}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-2 text-[11px] font-semibold transition-colors ${currentTab === item.id ? 'bg-blue-600 text-white' : item.id === 'community' ? 'text-emerald-200 hover:bg-emerald-950/50' : 'text-slate-300 hover:bg-slate-800'}`}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-2 min-h-[36px] text-[11px] font-semibold transition-colors border ${currentTab === item.id ? 'bg-cyan-600 text-white border-cyan-500' : 'border-slate-800 bg-slate-900/60 text-slate-300 hover:bg-slate-800'}`}
             >
               {item.icon}<span>{item.label}</span>
             </button>
@@ -686,10 +687,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={() => setMobileMenuOpen(open => !open)}
-            className="flex shrink-0 items-center gap-1 rounded-full px-3 py-2 text-[11px] font-semibold text-slate-400 hover:bg-slate-800"
+            className="flex shrink-0 items-center gap-1 rounded-full border border-slate-700 bg-slate-900/70 px-3 py-2 min-h-[36px] text-[11px] font-semibold text-slate-300 hover:bg-slate-800"
             aria-expanded={mobileMenuOpen}
           >
-            <Menu className="w-3.5 h-3.5" /><span>{t.apps}</span>
+            <Menu className="w-3.5 h-3.5" /><span>{lang === 'zh' ? '更多' : 'More'}</span>
           </button>
         </nav>
       </div>
