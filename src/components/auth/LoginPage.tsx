@@ -68,12 +68,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
       if (mode === 'login') {
         const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: emailOrUsername.trim(), password }) });
         const data = await res.json();
-        if (data.success && data.user) onAuthSuccess(data.user, data.token, !data.user.hasCompletedOnboarding);
+        if (data.success && data.user) onAuthSuccess(data.user, data.token || '', !data.user.hasCompletedOnboarding);
         else setErrorMsg(data.error || L('登录失败','Authentication failed.','فشل تسجيل الدخول'));
       } else if (mode === 'register') {
         const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: registerEmail.trim(), password, displayName: displayName.trim() || undefined, username: registerUsername.trim() || undefined }) });
         const data = await res.json();
-        if (data.success && data.user) onAuthSuccess(data.user, data.token, true);
+        if (data.success && data.user) onAuthSuccess(data.user, data.token || '', true);
         else setErrorMsg(data.error || L('注册失败','Registration failed.','فشل التسجيل'));
       } else if (mode === 'phone') {
         if (!phoneChallengeId) setErrorMsg(L('请先获取验证码','Request code first.','اطلب الرمز أولاً'));
@@ -81,7 +81,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
           const fullPhone = `${dial}${phoneLocal.replace(/[^\d]/g, '')}`;
           const res = await fetch('/api/auth/phone/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: fullPhone, challengeId: phoneChallengeId, code: phoneCode.trim() }) });
           const data = await res.json();
-          if (data.success && data.user) onAuthSuccess(data.user, data.token, !data.user.hasCompletedOnboarding);
+          if (data.success && data.user) onAuthSuccess(data.user, data.token || '', !data.user.hasCompletedOnboarding);
           else setErrorMsg(data.error || L('验证失败','Verification failed.','فشل التحقق'));
         }
       }
@@ -94,8 +94,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
     try {
       const res = await fetch('/api/auth/dev-login', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
       const data = await res.json();
-      if (data.success && data.user && data.token) {
-        onAuthSuccess(data.user, data.token, false);
+      if (data.success && data.user) {
+        onAuthSuccess(data.user, data.token || '', false);
       } else {
         setErrorMsg(data.error || L('开发者登录不可用','Developer login unavailable.','تسجيل دخول المطور غير متاح'));
       }

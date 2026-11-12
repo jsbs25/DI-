@@ -75,7 +75,6 @@ export default function App() {
 
   // Core Data State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [nodes, setNodes] = useState<GlobeUserNode[]>([]);
   const [countries, setCountries] = useState<GlobeCountryStat[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -111,15 +110,9 @@ export default function App() {
     }
   }, [currentTab]);
 
-  const authHeaders = () => {
-    const token = localStorage.getItem('earth_one_token');
-    return token ? { Authorization: `Bearer ${token}` } : undefined;
-  };
-
   const refreshConversations = async () => {
     try {
-      const headers = authHeaders();
-      const res = await fetch('/api/conversations', headers ? { headers } : undefined);
+      const res = await fetch('/api/conversations');
       const data = await res.json();
       if (data.success) setConversations(data.conversations || []);
     } catch {}
@@ -127,8 +120,7 @@ export default function App() {
 
   const refreshIntegrations = async () => {
     try {
-      const headers = authHeaders();
-      const res = await fetch('/api/integrations', headers ? { headers } : undefined);
+      const res = await fetch('/api/integrations');
       const data = await res.json();
       if (data.success) setIntegrations(data.integrations || []);
     } catch {}
@@ -136,6 +128,8 @@ export default function App() {
 
   // Initial Data Fetch & Auth Check (+ OAuth callback hash)
   useEffect(() => {
+    try { localStorage.removeItem('earth_one_token'); } catch {}
+
     const params = new URLSearchParams(window.location.search);
     const authErr = params.get('auth_error');
     if (authErr) {
@@ -157,100 +151,36 @@ export default function App() {
       setTimeout(() => setWelcomeToast(null), 6000);
       window.history.replaceState({}, '', window.location.pathname);
     }
-    const hash = window.location.hash || '';
-    if (hash.startsWith('#auth=')) {
-      try {
-        const payload = hash.slice(6);
-        const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
-        if (decoded?.token && decoded?.user) {
-          localStorage.setItem('earth_one_token', decoded.token);
-          setSessionToken(decoded.token);
-          setCurrentUser(decoded.user);
-          if (decoded.user.hasCompletedOnboarding === false) setIsOnboardingModalOpen(true);
-        }
-      } catch (e) {
-        console.warn('Failed to parse OAuth auth payload', e);
-      } finally {
-        window.history.replaceState({}, '', window.location.pathname + window.location.search);
-      }
+    // Legacy hash token payloads are not trusted/stored; rely on secure session cookie.
+    if ((window.location.hash || '').startsWith('#auth=')) {
+      window.history.replaceState({}, '', window.location.pathname + window.location.search);
     }
 
-    const storedToken = localStorage.getItem('earth_one_token');
-    const headers: Record<string, string> = {};
-    if (storedToken) {
-      headers['Authorization'] = `Bearer ${storedToken}`;
-      setSessionToken(storedToken);
-    }
-
-    // Authenticated user check
-    fetch('/api/auth/me', { headers })
+    // Authenticated user check (server session cookie)
+    fetch('/api/auth/me')
       .then(async (r) => {
         const d = await r.json().catch(() => ({}));
         if (r.ok && d?.success && d?.user) {
           setCurrentUser(d.user);
-          // If user hasn't finished onboarding, trigger the setup wizard
           if (d.user.hasCompletedOnboarding === false) {
             setIsOnboardingModalOpen(true);
           }
-        } else if (storedToken) {
-          // stale/invalid/revoked token: clear locally so login state is consistent
-          localStorage.removeItem('earth_one_token');
-          setSessionToken(null);
+        } else {
           setCurrentUser(null);
         }
       })
       .catch((err) => {
         console.error(err);
-        // do not drop token on transient network failure; keep session for retry
       });
 
-    // Globe nodes
-    fetch('/api/globe/nodes')
-      .then(r => r.json())
-      .then(d => { if (d.success) setNodes(d.nodes); })
-      .catch(console.error);
-
-    // Countries
-    fetch('/api/globe/countries')
-      .then(r => r.json())
-      .then(d => { if (d.success) setCountries(d.countries); })
-      .catch(console.error);
-
-    // Posts
-    fetch('/api/posts')
-      .then(r => r.json())
-      .then(d => { if (d.success) setPosts(d.posts); })
-      .catch(console.error);
-
-    // Conversations
-    fetch('/api/conversations', headers.Authorization ? { headers } : undefined)
-      .then(r => r.json())
-      .then(d => { if (d.success) setConversations(d.conversations || []); })
-      .catch(() => {});
-
-    // Integrations
-    fetch('/api/integrations', headers.Authorization ? { headers } : undefined)
-      .then(r => r.json())
-      .then(d => { if (d.success) setIntegrations(d.integrations || []); })
-      .catch(() => {});
-
-    // Articles
-    fetch('/api/articles')
-      .then(r => r.json())
-      .then(d => { if (d.success) setArticles(d.articles); })
-      .catch(console.error);
-
-    // Videos
-    fetch('/api/videos')
-      .then(r => r.json())
-      .then(d => { if (d.success) setVideos(d.videos); })
-      .catch(console.error);
-
-    // Communities
-    fetch('/api/communities')
-      .then(r => r.json())
-      .then(d => { if (d.success) setCommunities(d.communities); })
-      .catch(console.error);
+    fetch('/api/globe/nodes').then(r => r.json()).then(d => { if (d.success) setNodes(d.nodes); }).catch(console.error);
+    fetch('/api/globe/countries').then(r => r.json()).then(d => { if (d.success) setCountries(d.countries); }).catch(console.error);
+    fetch('/api/posts').then(r => r.json()).then(d => { if (d.success) setPosts(d.posts); }).catch(console.error);
+    fetch('/api/conversations').then(r => r.json()).then(d => { if (d.success) setConversations(d.conversations || []); }).catch(() => {});
+    fetch('/api/integrations').then(r => r.json()).then(d => { if (d.success) setIntegrations(d.integrations || []); }).catch(() => {});
+    fetch('/api/articles').then(r => r.json()).then(d => { if (d.success) setArticles(d.articles); }).catch(console.error);
+    fetch('/api/videos').then(r => r.json()).then(d => { if (d.success) setVideos(d.videos); }).catch(console.error);
+    fetch('/api/communities').then(r => r.json()).then(d => { if (d.success) setCommunities(d.communities); }).catch(console.error);
   }, []);
 
   // Post Actions
@@ -273,8 +203,6 @@ export default function App() {
   const handleAddComment = async (postId: string, content: string) => {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (sessionToken) headers['Authorization'] = `Bearer ${sessionToken}`;
-
       const res = await fetch(`/api/posts/${postId}/comment`, {
         method: 'POST',
         headers,
@@ -292,8 +220,6 @@ export default function App() {
   const handleCreatePost = async (postData: { content: string; mediaUrl?: string; category: any }) => {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (sessionToken) headers['Authorization'] = `Bearer ${sessionToken}`;
-
       const res = await fetch('/api/posts', {
         method: 'POST',
         headers,
@@ -344,14 +270,10 @@ export default function App() {
 
   const handleToggleLocationPrivacy = async () => {
     try {
-      const headers: Record<string, string> = {};
-      if (sessionToken) headers['Authorization'] = `Bearer ${sessionToken}`;
-
-      const res = await fetch('/api/auth/toggle-location', { method: 'POST', headers });
+      const res = await fetch('/api/auth/toggle-location', { method: 'POST' });
       const data = await res.json();
       if (data.success && data.user) {
         setCurrentUser(data.user);
-        // Refresh globe nodes immediately
         const nodesRes = await fetch('/api/globe/nodes');
         const nodesData = await nodesRes.json();
         if (nodesData.success) setNodes(nodesData.nodes);
@@ -364,8 +286,6 @@ export default function App() {
   const handleUpdateProfile = async (userData: Partial<User>) => {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (sessionToken) headers['Authorization'] = `Bearer ${sessionToken}`;
-
       const res = await fetch('/api/auth/update-profile', {
         method: 'POST',
         headers,
@@ -381,10 +301,9 @@ export default function App() {
   };
 
   // Auth & Onboarding Handlers
-  const handleAuthSuccess = (user: User, token: string, isNewRegistration: boolean) => {
+  const handleAuthSuccess = (user: User, _token: string, isNewRegistration: boolean) => {
+    try { localStorage.removeItem('earth_one_token'); } catch {}
     setCurrentUser(user);
-    setSessionToken(token);
-    localStorage.setItem('earth_one_token', token);
 
     if (isNewRegistration || user.hasCompletedOnboarding === false) {
       setIsOnboardingModalOpen(true);
@@ -407,7 +326,6 @@ export default function App() {
     setCurrentUser(updatedUser);
     setIsOnboardingModalOpen(false);
 
-    // Refresh nodes so the user's beacon is immediately visible on Earth!
     const nodesRes = await fetch('/api/globe/nodes');
     const nodesData = await nodesRes.json();
     if (nodesData.success) {
@@ -417,7 +335,6 @@ export default function App() {
     setWelcomeToast(`Your beacon is active in ${updatedUser.location.cityName}, ${updatedUser.location.countryName}!`);
     setTimeout(() => setWelcomeToast(null), 5000);
 
-    // Transition to 3D Earth and smoothly fly camera to their location
     setCurrentTab('globe');
     setFocusCoordinates({
       lat: updatedUser.location.lat,
@@ -427,19 +344,12 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    const token = sessionToken || localStorage.getItem('earth_one_token');
     try {
-      if (token) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` }
-        });
-      }
+      await fetch('/api/auth/logout', { method: 'POST' });
     } catch (err) {
       console.warn(err);
     }
-    localStorage.removeItem('earth_one_token');
-    setSessionToken(null);
+    try { localStorage.removeItem('earth_one_token'); } catch {}
     setCurrentUser(null);
     setConversations([]);
     setIntegrations([]);
@@ -482,10 +392,9 @@ export default function App() {
       return;
     }
     try {
-      const headers = authHeaders();
       const res = await fetch('/api/conversations/direct', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(headers || {}) },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targetUserId: targetUser.id })
       });
       const data = await res.json().catch(() => ({}));
@@ -497,7 +406,6 @@ export default function App() {
         return;
       }
     } catch {}
-    // fallback local placeholder (will be replaced on refresh if unauthorized)
     const newConv: Conversation = {
       id: `conv_${targetUser.id}`,
       type: 'direct',

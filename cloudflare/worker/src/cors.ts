@@ -1,23 +1,33 @@
 import type { Env } from './env';
 
-export function getCorsHeaders(request: Request, env: Env): Record<string, string> {
-  const origin = request.headers.get('Origin') || '';
-  const allowed = (env.CORS_ORIGINS || '')
+function parseAllowed(env: Env): string[] {
+  return (env.CORS_ORIGINS || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  const allowOrigin = allowed.includes('*')
-    ? '*'
-    : allowed.includes(origin)
-      ? origin
-      : allowed[0] || '';
+}
+
+export function isOriginAllowed(request: Request, env: Env): boolean {
+  const origin = request.headers.get('Origin') || '';
+  if (!origin) return true; // non-browser / same-origin
+  const allowed = parseAllowed(env);
+  return allowed.includes(origin);
+}
+
+export function getCorsHeaders(request: Request, env: Env): Record<string, string> {
+  const origin = request.headers.get('Origin') || '';
+  const allowed = parseAllowed(env);
+  const allowOrigin = origin && allowed.includes(origin) ? origin : '';
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-File-Name, X-Mime-Type, X-Conversation-Id',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-File-Name, X-Mime-Type, X-Conversation-Id, X-Earth-One-CSRF',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
-  if (allowOrigin) headers['Access-Control-Allow-Origin'] = allowOrigin;
+  if (allowOrigin) {
+    headers['Access-Control-Allow-Origin'] = allowOrigin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+  }
   return headers;
 }
 

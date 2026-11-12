@@ -202,7 +202,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     if (!a?.url) return;
     setDlState(s => ({ ...s, [a.id]: 'downloading' }));
     try {
-      const res = await fetch(authFileUrl(`${a.url}?download=1`), { headers: token() ? { Authorization: `Bearer ${token()}` } : {} });
+      const res = await fetch(authFileUrl(`${a.url}?download=1`));
       if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || '下载失败');
       const blob = await res.blob();
       const href = URL.createObjectURL(blob);
@@ -216,7 +216,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     }
   };
 
-  const token = () => localStorage.getItem('earth_one_token') || '';
+  const token = () => '';
   const authed = !!token();
 
   const sorted = useMemo(() => {

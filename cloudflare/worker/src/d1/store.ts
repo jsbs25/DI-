@@ -1,5 +1,5 @@
 import { qAll, qFirst, exec } from '../lib/db';
-import { getBearerToken } from '../lib/http';
+import { getSessionToken, SESSION_MAX_AGE_SEC } from '../lib/http';
 import { hashPassword, verifyPassword, randomHex } from '../lib/crypto';
 import { nowIso, rid } from '../lib/ids';
 import { parseJsonMaybe, selfUserView, publicProfileView, hasPassword, getFriendIds, isBlockedEither, getPrivacy } from '../lib/user-shape';
@@ -12,13 +12,19 @@ export async function getUserById(db: D1Database, id: string): Promise<UserRow |
 }
 
 export async function getUserByToken(db: D1Database, token: string): Promise<UserRow | null> {
-  const s = await qFirst<{ user_id: string }>(db, 'SELECT user_id FROM sessions WHERE token = ?', token);
+  const s = await qFirst<{ user_id: string; created_at: string | null; expires_at: string | null }>(db, 'SELECT user_id, created_at, expires_at FROM sessions WHERE token = ?', token);
   if (!s?.user_id) return null;
+  const createdMs = s.created_at ? Date.parse(s.created_at) : 0;
+  const expiresMs = s.expires_at ? Date.parse(s.expires_at) : (createdMs ? createdMs + SESSION_MAX_AGE_SEC * 1000 : 0);
+  if (expiresMs && Date.now() > expiresMs) {
+    await exec(db, 'DELETE FROM sessions WHERE token = ?', token).catch(() => {});
+    return null;
+  }
   return getUserById(db, s.user_id);
 }
 
 export async function getSessionUser(db: D1Database, request: Request): Promise<UserRow | null> {
-  const token = getBearerToken(request);
+  const token = getSessionToken(request);
   if (!token) return null;
   return getUserByToken(db, token);
 }
@@ -75,8 +81,10 @@ export async function findAccountByIdentifier(db: D1Database, identifier: string
 
 export async function createSession(db: D1Database, userId: string): Promise<string> {
   const token = randomHex(32);
-  await exec(db, 'INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)', token, userId, nowIso());
-  await exec(db, 'UPDATE users SET is_online = 1, last_active_at = ? WHERE id = ?', nowIso(), userId);
+  const created = nowIso();
+  const expires = new Date(Date.now() + SESSION_MAX_AGE_SEC * 1000).toISOString();
+  await exec(db, 'INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)', token, userId, created, expires);
+  await exec(db, 'UPDATE users SET is_online = 1, last_active_at = ? WHERE id = ?', created, userId);
   return token;
 }
 

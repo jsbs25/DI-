@@ -55,7 +55,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
   if (!isOpen) return null;
   const google = integrations.find(i => i.id === 'google');
   const wechat = integrations.find(i => i.id === 'wechat');
-  const phoneIntegration = integrations.find(i => i.id === 'phone');
 
   const fullPhone = () => `${dial}${phoneLocal.replace(/[^\d]/g, '')}`;
 
@@ -66,19 +65,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
       if (mode === 'login') {
         const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: emailOrUsername.trim(), password }) });
         const data = await res.json();
-        if (data.success && data.user) { onAuthSuccess(data.user, data.token, !data.user.hasCompletedOnboarding); onClose(); }
+        if (data.success && data.user) { onAuthSuccess(data.user, data.token || '', !data.user.hasCompletedOnboarding); onClose(); }
         else setErrorMsg(data.error || 'Authentication failed.');
       } else if (mode === 'register') {
         const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: registerEmail.trim(), password, displayName: displayName.trim() || undefined, username: registerUsername.trim() || undefined }) });
         const data = await res.json();
-        if (data.success && data.user) { onAuthSuccess(data.user, data.token, true); onClose(); }
+        if (data.success && data.user) { onAuthSuccess(data.user, data.token || '', true); onClose(); }
         else setErrorMsg(data.error || 'Registration failed.');
       } else if (mode === 'phone') {
         if (!phoneChallengeId) { setErrorMsg('请先获取验证码 / Request code first.'); }
         else {
           const res = await fetch('/api/auth/phone/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: fullPhone(), challengeId: phoneChallengeId, code: phoneCode.trim() }) });
           const data = await res.json();
-          if (data.success && data.user) { onAuthSuccess(data.user, data.token, !data.user.hasCompletedOnboarding); onClose(); }
+          if (data.success && data.user) { onAuthSuccess(data.user, data.token || '', !data.user.hasCompletedOnboarding); onClose(); }
           else setErrorMsg(data.error || 'Verification failed.');
         }
       } else if (mode === 'forgot') {
@@ -112,7 +111,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
     try {
       const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: username, password: 'password123' }) });
       const data = await res.json();
-      if (data.success && data.user) { onAuthSuccess(data.user, data.token, false); onClose(); }
+      if (data.success && data.user) { onAuthSuccess(data.user, data.token || '', false); onClose(); }
       else setErrorMsg(data.error || 'Quick login failed.');
     } catch { setErrorMsg('Failed to log in demo account.'); }
     finally { setIsLoading(false); }

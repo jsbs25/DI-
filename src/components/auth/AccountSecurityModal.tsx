@@ -19,9 +19,8 @@ export const AccountSecurityModal: React.FC<Props> = ({ isOpen, onClose, current
   const [emailChange, setEmailChange] = useState({ newEmail: '', currentPassword: '', code: '', challengeId: '' });
   const [unlinkPw, setUnlinkPw] = useState('');
 
-  const token = () => localStorage.getItem('earth_one_token') || '';
   const api = async (path: string, init?: RequestInit) => {
-    const res = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}`, ...(init?.headers as any || {}) } });
+    const res = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers as any || {}) } });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Request failed');
     return data;

@@ -88,8 +88,7 @@ function safeHttpsUrl(raw?: string): string | undefined {
 }
 
 function libraryAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem('earth_one_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return {};
 }
 
 // ---------------------------------------------------------------------------
@@ -623,11 +622,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     savingAnnotationRef.current = true;
     const currentChapter = readingBook.chapters[activeChapterIndex];
     const saveAiKnowledgeNote = !!(aiCitation && aiExplanation && aiAnswerReady && !aiNoteSaved);
-    const token = localStorage.getItem('earth_one_token');
-    if (saveAiKnowledgeNote && !token) {
-      setAiSaveMessage('登录后才能将带来源的 AI 解读保存为仅自己可见的知识笔记；当前解读尚未保存。');
-      return;
-    }
+      if (saveAiKnowledgeNote && !currentUser) {
+        setAiSaveMessage('登录后才能将带来源的 AI 解读保存为仅自己可见的知识笔记；当前解读尚未保存。');
+        return;
+      }
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 12000);
