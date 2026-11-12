@@ -43,7 +43,7 @@ import { MoonSpaceObservatory } from './universe/MoonSpaceObservatory.tsx';
 import { VenusCreativeStudio } from './universe/VenusCreativeStudio.tsx';
 import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 import { LoginPage } from './components/auth/LoginPage.tsx';
-import { DevStatusPanel } from './components/dev/DevStatusPanel.tsx';
+// DevStatusPanel removed from ordinary user UI
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -440,7 +440,6 @@ export default function App() {
           </div>
         )}
         <LoginPage lang={lang} onAuthSuccess={handleAuthSuccess} />
-        <DevStatusPanel />
       </>
     );
   }
@@ -701,8 +700,6 @@ export default function App() {
           lang={lang}
         />
       )}
-
-      <DevStatusPanel />
 
       {/* 7. 3D Holographic AI Companion (Intelligence D) */}
       <HolographicAICompanion

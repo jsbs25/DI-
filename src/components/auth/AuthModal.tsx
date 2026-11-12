@@ -106,16 +106,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
     finally { setIsLoading(false); }
   };
 
-  const handleQuickDemoLogin = async (username: string) => {
-    setIsLoading(true); setErrorMsg(null);
-    try {
-      const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: username, password: 'password123' }) });
-      const data = await res.json();
-      if (data.success && data.user) { onAuthSuccess(data.user, data.token || '', false); onClose(); }
-      else setErrorMsg(data.error || 'Quick login failed.');
-    } catch { setErrorMsg('Failed to log in demo account.'); }
-    finally { setIsLoading(false); }
-  };
 
   const title = mode === 'login' ? 'Citizen Sign In' : mode === 'register' ? 'Join EARTH ONE' : mode === 'phone' ? 'Phone Login / 手机登录' : mode === 'forgot' ? 'Forgot Password' : 'Reset Password';
 
@@ -206,14 +196,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
 
         {(mode === 'forgot' || mode === 'reset') && <button onClick={()=>setMode('login')} className="text-[11px] text-slate-400 hover:text-slate-200">Back to sign in</button>}
 
-        <div className="pt-3 border-t border-slate-800 space-y-2">
-          <div className="flex items-center justify-between text-[11px] text-slate-400"><span>Demo Sign-In:</span></div>
-          <div className="flex flex-wrap gap-1.5">
-            {[{ id: 'li_wei', label: 'Li Wei (CN)' },{ id: 'sarah_sky', label: 'Sarah (US)' },{ id: 'tariq_amman', label: 'Tariq (JO)' },{ id: 'noura_riyadh', label: 'Noura (SA)' }].map(demo => (
-              <button key={demo.id} type="button" onClick={() => handleQuickDemoLogin(demo.id)} className="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[11px] text-cyan-300">{demo.label}</button>
-            ))}
-          </div>
-        </div>
         <div className="text-center text-[11px] text-slate-500 flex items-center justify-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /><span>Server-side auth · no secrets in frontend · config-gated external services</span></div>
       </div>
     </div>

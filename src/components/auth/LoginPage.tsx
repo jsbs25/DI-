@@ -1,236 +1,284 @@
-import React, { useEffect, useState } from 'react';
-import type { Language, User, ChannelIntegration } from '../../types/index.ts';
-import { Globe2, ShieldCheck, Lock, Mail, Phone, ArrowRight, AlertCircle, QrCode, Info, Wifi, WifiOff } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import type { Language, User } from '../../types/index.ts';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
   lang: Language;
   onAuthSuccess: (user: User, token: string, isNewRegistration: boolean) => void;
 }
 
-type Mode = 'login' | 'register' | 'phone';
-
-const COUNTRIES = [
-  { code: '+86', label: 'CN +86' }, { code: '+962', label: 'JO +962' }, { code: '+1', label: 'US/CA +1' },
-  { code: '+44', label: 'UK +44' }, { code: '+81', label: 'JP +81' }, { code: '+82', label: 'KR +82' },
-  { code: '+971', label: 'AE +971' }, { code: '+966', label: 'SA +966' }, { code: '+20', label: 'EG +20' },
-  { code: '+33', label: 'FR +33' }, { code: '+49', label: 'DE +49' }, { code: '+7', label: 'RU +7' },
-  { code: '+91', label: 'IN +91' }, { code: '+61', label: 'AU +61' },
-];
+type Mode = 'login' | 'register';
 
 export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => {
   const L = (zh: string, en: string, ar?: string) => (lang === 'ar' ? (ar || en) : lang === 'en' ? en : zh);
   const [mode, setMode] = useState<Mode>('login');
-  const [emailOrUsername, setEmailOrUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [registerEmail, setRegisterEmail] = useState('');
-  const [registerUsername, setRegisterUsername] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [dial, setDial] = useState('+86');
-  const [phoneLocal, setPhoneLocal] = useState('');
-  const [phoneCode, setPhoneCode] = useState('');
-  const [phoneChallengeId, setPhoneChallengeId] = useState<string | null>(null);
+  const [identifier, setIdentifier] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [integrations, setIntegrations] = useState<ChannelIntegration[]>([]);
-  const [authStatus, setAuthStatus] = useState<any>(null);
-  const [statusLoading, setStatusLoading] = useState(true);
-  const [smsStatus, setSmsStatus] = useState<any>(null);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setStatusLoading(true);
-      try {
-        const [s, i] = await Promise.all([
-          fetch('/api/auth/status').then(r => r.json()).catch(() => null),
-          fetch('/api/integrations').then(r => r.json()).catch(() => null),
-        ]);
-        if (!alive) return;
-        if (s?.success) setAuthStatus(s);
-        if (i?.success) { setIntegrations(i.integrations || []); setSmsStatus(i.sms || null); }
-      } finally { if (alive) setStatusLoading(false); }
-    })();
-    return () => { alive = false; };
-  }, []);
+  const title = useMemo(() => (mode === 'login' ? L('登录', 'Sign in', 'تسجيل الدخول') : L('创建账号', 'Create account', 'إنشاء حساب')), [mode, lang]);
 
-  const google = integrations.find(i => i.id === 'google');
-  const wechat = integrations.find(i => i.id === 'wechat');
-  const wechatConfigured = !!(authStatus?.wechat?.configured ?? wechat?.status === 'available');
-  const devQuick = authStatus?.devQuickLogin;
-  const devEnabled = !!devQuick?.enabled;
-  const devAvailable = !!devQuick?.available;
+  const switchMode = (next: Mode) => {
+    if (loading) return;
+    setMode(next);
+    setErrorMsg(null);
+    setInfoMsg(null);
+  };
+
+  const normalizeUsername = (v: string) => v.toLowerCase().replace(/[^a-z0-9_]/g, '');
+
+  const parseJsonSafe = async (res: Response) => {
+    try { return await res.json(); } catch { return {}; }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMsg(null); setInfoMsg(null); setLoading(true);
-    try {
-      if (mode === 'login') {
-        const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: emailOrUsername.trim(), password }) });
-        const data = await res.json();
-        if (data.success && data.user) onAuthSuccess(data.user, data.token || '', !data.user.hasCompletedOnboarding);
-        else setErrorMsg(data.error || L('登录失败','Authentication failed.','فشل تسجيل الدخول'));
-      } else if (mode === 'register') {
-        const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: registerEmail.trim(), password, displayName: displayName.trim() || undefined, username: registerUsername.trim() || undefined }) });
-        const data = await res.json();
-        if (data.success && data.user) onAuthSuccess(data.user, data.token || '', true);
-        else setErrorMsg(data.error || L('注册失败','Registration failed.','فشل التسجيل'));
-      } else if (mode === 'phone') {
-        if (!phoneChallengeId) setErrorMsg(L('请先获取验证码','Request code first.','اطلب الرمز أولاً'));
-        else {
-          const fullPhone = `${dial}${phoneLocal.replace(/[^\d]/g, '')}`;
-          const res = await fetch('/api/auth/phone/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: fullPhone, challengeId: phoneChallengeId, code: phoneCode.trim() }) });
-          const data = await res.json();
-          if (data.success && data.user) onAuthSuccess(data.user, data.token || '', !data.user.hasCompletedOnboarding);
-          else setErrorMsg(data.error || L('验证失败','Verification failed.','فشل التحقق'));
+    if (loading) return;
+    setErrorMsg(null);
+    setInfoMsg(null);
+
+    if (mode === 'login') {
+      const id = identifier.trim();
+      if (!id || !loginPassword) {
+        setErrorMsg(L('请输入邮箱或用户名和密码。', 'Enter your email or username and password.', 'أدخل البريد الإلكتروني أو اسم المستخدم وكلمة المرور.'));
+        return;
+      }
+      setLoading(true);
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ identifier: id, password: loginPassword }),
+        });
+        const data = await parseJsonSafe(res);
+        if (res.ok && data?.success && data?.user) {
+          onAuthSuccess(data.user, '', !data.user.hasCompletedOnboarding);
+        } else {
+          setErrorMsg(data?.error || L('登录失败，请检查账号和密码。', 'Sign-in failed. Check your credentials.', 'فشل تسجيل الدخول. تحقق من بياناتك.'));
         }
+      } catch {
+        setErrorMsg(L('网络连接失败，请稍后重试。', 'Network error. Please try again.', 'خطأ في الشبكة. حاول مرة أخرى.'));
+      } finally {
+        setLoading(false);
       }
-    } catch { setErrorMsg(L('网络错误','Network error.','خطأ في الشبكة')); }
-    finally { setLoading(false); }
-  };
+      return;
+    }
 
-  const devLogin = async () => {
-    setErrorMsg(null); setInfoMsg(null); setLoading(true);
+    const cleanUsername = normalizeUsername(username.trim());
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanUsername) { setErrorMsg(L('请输入用户名。', 'Please enter a username.', 'يرجى إدخال اسم مستخدم.')); return; }
+    if (cleanUsername.length < 3) { setErrorMsg(L('用户名至少 3 个字符（字母、数字或下划线）。', 'Username must be at least 3 characters (letters, numbers, underscore).', 'يجب أن يكون اسم المستخدم 3 أحرف على الأقل.')); return; }
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) { setErrorMsg(L('请输入有效的邮箱地址。', 'Please enter a valid email address.', 'يرجى إدخال بريد إلكتروني صالح.')); return; }
+    if (registerPassword.length < 6) { setErrorMsg(L('密码至少需要 6 个字符。', 'Password must be at least 6 characters.', 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.')); return; }
+    if (registerPassword !== confirmPassword) { setErrorMsg(L('两次输入的密码不一致。', 'Passwords do not match.', 'كلمتا المرور غير متطابقتين.')); return; }
+
+    setLoading(true);
     try {
-      const res = await fetch('/api/auth/dev-login', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-      const data = await res.json();
-      if (data.success && data.user) {
-        onAuthSuccess(data.user, data.token || '', false);
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          email: cleanEmail,
+          password: registerPassword,
+          username: cleanUsername,
+          displayName: cleanUsername,
+        }),
+      });
+      const data = await parseJsonSafe(res);
+      if (res.ok && data?.success && data?.user) {
+        onAuthSuccess(data.user, '', true);
       } else {
-        setErrorMsg(data.error || L('开发者登录不可用','Developer login unavailable.','تسجيل دخول المطور غير متاح'));
+        setErrorMsg(data?.error || L('注册失败，请稍后重试。', 'Registration failed. Please try again.', 'فشل إنشاء الحساب. حاول مرة أخرى.'));
       }
-    } catch { setErrorMsg(L('网络错误','Network error.','خطأ في الشبكة')); }
-    finally { setLoading(false); }
-  };
-
-  const sendPhoneCode = async () => {
-    setErrorMsg(null); setInfoMsg(null); setLoading(true);
-    try {
-      const fullPhone = `${dial}${phoneLocal.replace(/[^\d]/g, '')}`;
-      const res = await fetch('/api/auth/phone/send-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: fullPhone }) });
-      const data = await res.json();
-      if (data.success) { setPhoneChallengeId(data.challengeId); setInfoMsg(L('验证码已发送（若服务已配置）','Code sent (if provider configured).','تم إرسال الرمز (إن كان مزود الخدمة مُهيأ).')); }
-      else setErrorMsg(data.error || L('发送失败','Failed to send code.','فشل الإرسال'));
-    } catch { setErrorMsg(L('网络错误','Network error.','خطأ في الشبكة')); }
-    finally { setLoading(false); }
-  };
-
-  const startWechat = () => {
-    if (!wechatConfigured) {
-      setInfoMsg(null);
-      setErrorMsg(L('微信登录尚未配置，请使用开发者登录。','WeChat login not configured. Please use Developer Quick Login.','تسجيل الدخول عبر WeChat غير مُهيأ. يرجى استخدام تسجيل دخول المطور.'));
-      return;
+    } catch {
+      setErrorMsg(L('网络连接失败，请稍后重试。', 'Network error. Please try again.', 'خطأ في الشبكة. حاول مرة أخرى.'));
+    } finally {
+      setLoading(false);
     }
-    window.location.href = '/api/auth/wechat/start';
-  };
-
-  const startGoogle = () => {
-    if (google?.status !== 'available') {
-      setErrorMsg(L('Google 登录尚未配置','Google login not configured.','تسجيل الدخول عبر Google غير مُهيأ'));
-      return;
-    }
-    window.location.href = '/api/auth/google/start';
   };
 
   return (
-    <div className="min-h-screen bg-[#030712] text-slate-100 flex items-center justify-center p-4 sm:p-6" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-        <div className="rounded-3xl border border-slate-800 bg-gradient-to-b from-slate-900/90 to-slate-950/90 p-6 sm:p-8 flex flex-col justify-between shadow-2xl">
-          <div className="space-y-5">
-            <div className="flex items-center gap-3">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-600 p-0.5"><div className="w-full h-full bg-[#030712] rounded-[14px] flex items-center justify-center"><Globe2 className="w-7 h-7 text-cyan-400" /></div></div>
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-wide">EARTH ONE</h1>
-                <p className="text-xs text-slate-400 mt-0.5">ONE EARTH · ONE WORLD · ONE HUMANITY</p>
-              </div>
+    <div className="min-h-screen bg-[#07090f] text-slate-100 flex items-center justify-center px-4 py-10" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+      <div className="w-full max-w-[420px]">
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="h-9 w-9 rounded-full border border-slate-700 bg-slate-900/80 flex items-center justify-center">
+              <span className="text-[11px] font-semibold tracking-[0.08em] text-slate-200">EO</span>
             </div>
-            <p className="text-sm text-slate-300 leading-relaxed">{L('进入真实开发中的 EARTH ONE 产品，查看 Global Messenger、通知、资料、隐私设置与已实现模块。','Enter the real EARTH ONE product in development to view Global Messenger, notifications, profiles, privacy settings, and implemented modules.','ادخل إلى منتج EARTH ONE الحقيقي قيد التطوير لعرض المراسلة والإشعارات والملفات الشخصية وإعدادات الخصوصية والوحدات المنفذة.')}</p>
-
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
-              <p className="text-xs font-semibold text-slate-200 flex items-center gap-2"><Info className="w-4 h-4 text-cyan-400"/>{L('登录与配置状态','Login & configuration status','حالة تسجيل الدخول والإعداد')}</p>
-              <div className="space-y-2 text-[11px]">
-                <div className="flex items-center justify-between gap-2"><span className="text-slate-400">WeChat OAuth</span><span className={wechatConfigured?'text-emerald-300':'text-amber-300'}>{wechatConfigured ? L('已配置','Configured','مُهيأ') : L('未配置','Not configured','غير مُهيأ')}</span></div>
-                <div className="flex items-center justify-between gap-2"><span className="text-slate-400">Google OAuth</span><span className={google?.status==='available'?'text-emerald-300':'text-amber-300'}>{google?.status==='available'?L('已配置','Configured','مُهيأ'):L('未配置','Not configured','غير مُهيأ')}</span></div>
-                <div className="flex items-center justify-between gap-2"><span className="text-slate-400">{L('开发者登录','Developer login','تسجيل دخول المطور')}</span><span className={devAvailable?'text-emerald-300':(devEnabled?'text-amber-300':'text-slate-500')}>{statusLoading?L('检测中…','Checking…','جارٍ التحقق…'):devAvailable?L('可用（本地开发）','Available (local dev)','متاح (تطوير محلي)'):(devEnabled?L('受信任环境校验未通过','Blocked by trusted-env check','مقيّد بفحص البيئة') : L('未启用','Disabled','معطّل'))}</span></div>
-                <div className="flex items-center justify-between gap-2"><span className="text-slate-400">APP_URL</span><span className={authStatus?.wechat?.appUrlIsPlaceholder?'text-amber-300':'text-slate-300'}>{authStatus?.wechat?.appUrlIsPlaceholder?L('占位值（需配置）','Placeholder (needs config)','قيمة مؤقتة (تحتاج إعداد)'):(authStatus?.wechat ? L('已设置/读取中','Set/checked','مُعيّن/تم التحقق') : L('读取中','Checking','جارٍ التحقق'))}</span></div>
-              </div>
-              {!wechatConfigured && <p className="text-[11px] text-amber-200 bg-amber-950/30 border border-amber-800/40 rounded-lg p-2">{L('微信登录尚未配置，请使用开发者登录。','WeChat login not configured. Please use Developer Quick Login.','تسجيل الدخول عبر WeChat غير مُهيأ. يرجى استخدام تسجيل دخول المطور.')}</p>}
-            </div>
+            <span className="text-sm font-medium tracking-[0.18em] text-slate-300">EARTH ONE</span>
           </div>
-          <div className="text-[11px] text-slate-500 mt-6 flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-400"/> {L('服务端会话认证 · 不在前端暴露密钥 · 未配置服务不伪造成功','Server-side sessions · no secrets in frontend · unconfigured services do not fake success','جلسات على الخادم · بدون أسرار في الواجهة · الخدمات غير المُهيأة لا تُزيّف النجاح')}</div>
+          <h1 className="text-[28px] leading-tight font-semibold text-white tracking-tight">
+            {mode === 'login' ? L('欢迎回来', 'Welcome back', 'مرحبًا بعودتك') : L('加入 EARTH ONE', 'Join EARTH ONE', 'انضم إلى EARTH ONE')}
+          </h1>
+          <p className="mt-2 text-sm text-slate-400 leading-relaxed">
+            {mode === 'login'
+              ? L('使用你的账号登录，继续探索同一个地球。', 'Sign in to continue your journey on one Earth.', 'سجّل الدخول لمتابعة رحلتك على أرض واحدة.')
+              : L('创建你的真实账号，开始你的全球公民身份。', 'Create your account to begin as a global citizen.', 'أنشئ حسابك لتبدأ كمواطن عالمي.')}
+          </p>
         </div>
 
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 sm:p-7 shadow-2xl space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-xl font-semibold">{L('登录 EARTH ONE','Sign in to EARTH ONE','تسجيل الدخول إلى EARTH ONE')}</h2>
-            <p className="text-xs text-slate-400">{L('使用官方微信扫码、开发者快速登录或现有账户登录。','Use official WeChat QR, developer quick login, or existing account login.','استخدم رمز WeChat الرسمي أو تسجيل دخول المطور أو حسابًا موجودًا.')}</p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <button type="button" onClick={startWechat} className={`py-3 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 ${wechatConfigured ? 'bg-emerald-600/90 hover:bg-emerald-500 text-white border-emerald-500' : 'bg-slate-950 text-slate-300 border-slate-700'}`}>
-              <QrCode className="w-4 h-4"/> {L('微信扫码登录','WeChat QR Login','تسجيل الدخول برمز WeChat')}
+        <div className="rounded-2xl border border-slate-800/80 bg-[#0c1018] p-6 sm:p-7 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.8)]">
+          <div className="flex items-center gap-6 border-b border-slate-800/80 mb-6">
+            <button type="button" onClick={() => switchMode('login')} className={`pb-3 text-sm font-medium transition-colors ${mode === 'login' ? 'text-white border-b border-white -mb-px' : 'text-slate-500 hover:text-slate-300'}`}>
+              {L('登录', 'Sign in', 'تسجيل الدخول')}
             </button>
-            <button type="button" onClick={startGoogle} className={`py-3 rounded-xl border text-sm font-semibold ${google?.status==='available' ? 'bg-white text-slate-900 border-white hover:bg-slate-100' : 'bg-slate-950 text-slate-300 border-slate-700'}`}>
-              Google OAuth
+            <button type="button" onClick={() => switchMode('register')} className={`pb-3 text-sm font-medium transition-colors ${mode === 'register' ? 'text-white border-b border-white -mb-px' : 'text-slate-500 hover:text-slate-300'}`}>
+              {L('注册', 'Create account', 'إنشاء حساب')}
             </button>
           </div>
-          <p className="text-[10px] text-slate-500">{L('微信登录使用开放平台官方网页授权流程；未配置时明确显示不可用。新微信账号不会自动绑定到他人账户。','WeChat login uses official Open Platform web OAuth flow; unavailable when unconfigured. New WeChat accounts are never auto-bound to others.','يستخدم تسجيل دخول WeChat تدفق OAuth الرسمي؛ وغير متاح عند عدم الإعداد. لا يتم ربط حسابات WeChat الجديدة تلقائيًا بالآخرين.')}</p>
 
-          <div className="rounded-xl border border-cyan-700/50 bg-cyan-950/30 p-3 space-y-2 ring-1 ring-cyan-500/20">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-cyan-200">{L('开发者模式（免密进入）','Developer mode (no password)','وضع المطور (بدون كلمة مرور)')}</p>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full border ${devAvailable ? 'text-emerald-300 border-emerald-700/50 bg-emerald-500/10' : 'text-amber-300 border-amber-700/50 bg-amber-500/10'}`}>
-                {statusLoading ? L('检测中…','Checking…','جارٍ التحقق…') : devAvailable ? L('服务端可用','Server ready','الخادم جاهز') : L('点击尝试','Try to enter','انقر للدخول')}
-              </span>
+          {errorMsg && (
+            <div className="mb-4 rounded-lg border border-red-900/50 bg-red-950/30 px-3.5 py-2.5 text-sm text-red-200">
+              {errorMsg}
             </div>
-            <p className="text-[11px] text-slate-300">{L('无需账号密码，一键进入（使用固定开发者账号 li_wei，经服务端创建真实会话）。需本地开发服务已启用 DEV_LOGIN_ENABLED 且为受信任回环访问。','No credentials needed: one-click entry (fixed dev account li_wei, real server session). Requires local dev with DEV_LOGIN_ENABLED and trusted loopback access.','بدون بيانات اعتماد: دخول بنقرة واحدة (حساب المطور li_wei، جلسة خادم حقيقية). يتطلب DEV_LOGIN_ENABLED ووصول loopback موثوق.')}</p>
-            <button type="button" onClick={devLogin} disabled={loading} className="w-full py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/30">
-              <span>{loading ? '...' : L('一键进入（开发者/免密）','Enter now (Developer, no password)','الدخول الآن (مطور، بدون كلمة مرور)')}</span><ArrowRight className="w-4 h-4"/>
-            </button>
-            {!devAvailable && !statusLoading && devQuick?.reason && <p className="text-[10px] text-amber-300">{devQuick.reason}</p>}
-          </div>
+          )}
+          {infoMsg && (
+            <div className="mb-4 rounded-lg border border-slate-700 bg-slate-900/50 px-3.5 py-2.5 text-sm text-slate-200">
+              {infoMsg}
+            </div>
+          )}
 
-          <div className="grid grid-cols-3 p-1 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-medium">
-            <button type="button" onClick={()=>{setMode('login'); setErrorMsg(null);}} className={`py-2 rounded-lg ${mode==='login'?'bg-slate-800 text-slate-100':'text-slate-400'}`}>{L('邮箱/用户名','Email/User','البريد/المستخدم')}</button>
-            <button type="button" onClick={()=>{setMode('phone'); setErrorMsg(null);}} className={`py-2 rounded-lg ${mode==='phone'?'bg-slate-800 text-slate-100':'text-slate-400'}`}>{L('手机号','Phone','الهاتف')}</button>
-            <button type="button" onClick={()=>{setMode('register'); setErrorMsg(null);}} className={`py-2 rounded-lg ${mode==='register'?'bg-slate-800 text-slate-100':'text-slate-400'}`}>{L('注册','Register','تسجيل')}</button>
-          </div>
+          <form onSubmit={submit} className="space-y-4">
+            {mode === 'login' ? (
+              <>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-400">{L('邮箱或用户名', 'Email or username', 'البريد الإلكتروني أو اسم المستخدم')}</span>
+                  <input
+                    autoComplete="username"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    disabled={loading}
+                    className="w-full h-11 rounded-lg border border-slate-700 bg-[#0a0d14] px-3.5 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-slate-500 disabled:opacity-50"
+                    placeholder={L('you@example.com 或 username', 'you@example.com or username', 'you@example.com أو اسم المستخدم')}
+                  />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-400">{L('密码', 'Password', 'كلمة المرور')}</span>
+                  <div className="relative">
+                    <input
+                      type={showLoginPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      disabled={loading}
+                      className="w-full h-11 rounded-lg border border-slate-700 bg-[#0a0d14] px-3.5 pr-11 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-slate-500 disabled:opacity-50"
+                      placeholder={L('输入密码', 'Enter your password', 'أدخل كلمة المرور')}
+                    />
+                    <button type="button" onClick={() => setShowLoginPassword(v => !v)} tabIndex={-1} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label={showLoginPassword ? 'Hide password' : 'Show password'}>
+                      {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </label>
+                <div className="flex items-center justify-between pt-1">
+                  <button type="button" onClick={() => setInfoMsg(L('密码重置功能尚未开放。如需帮助，请稍后再试。', 'Password reset is not available yet.', 'إعادة تعيين كلمة المرور غير متاحة بعد.'))} className="text-xs text-slate-400 hover:text-slate-200">
+                    {L('忘记密码？', 'Forgot password?', 'نسيت كلمة المرور؟')}
+                  </button>
+                  <span className="text-[11px] text-slate-600">{L('暂未开放', 'Not available yet', 'غير متاح بعد')}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-400">{L('用户名', 'Username', 'اسم المستخدم')}</span>
+                  <input
+                    autoComplete="username"
+                    value={username}
+                    onChange={(e) => setUsername(normalizeUsername(e.target.value))}
+                    disabled={loading}
+                    className="w-full h-11 rounded-lg border border-slate-700 bg-[#0a0d14] px-3.5 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-slate-500 disabled:opacity-50"
+                    placeholder={L('字母、数字、下划线', 'letters, numbers, underscore', 'حروف وأرقام وشرطة سفلية')}
+                  />
+                  <span className="text-[11px] text-slate-500">{L('至少 3 个字符，仅支持 a-z、0-9、_', 'At least 3 characters: a-z, 0-9, _', '3 أحرف على الأقل: a-z، 0-9، _')}</span>
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-400">{L('邮箱', 'Email', 'البريد الإلكتروني')}</span>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={loading}
+                    className="w-full h-11 rounded-lg border border-slate-700 bg-[#0a0d14] px-3.5 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-slate-500 disabled:opacity-50"
+                    placeholder="you@example.com"
+                  />
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-400">{L('密码', 'Password', 'كلمة المرور')}</span>
+                  <div className="relative">
+                    <input
+                      type={showRegisterPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={registerPassword}
+                      onChange={(e) => setRegisterPassword(e.target.value)}
+                      disabled={loading}
+                      className="w-full h-11 rounded-lg border border-slate-700 bg-[#0a0d14] px-3.5 pr-11 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-slate-500 disabled:opacity-50"
+                      placeholder={L('至少 6 个字符', 'At least 6 characters', '6 أحرف على الأقل')}
+                    />
+                    <button type="button" onClick={() => setShowRegisterPassword(v => !v)} tabIndex={-1} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label={showRegisterPassword ? 'Hide password' : 'Show password'}>
+                      {showRegisterPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <span className="text-[11px] text-slate-500">{L('密码长度至少 6 位。', 'Use at least 6 characters.', 'استخدم 6 أحرف على الأقل.')}</span>
+                </label>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-400">{L('确认密码', 'Confirm password', 'تأكيد كلمة المرور')}</span>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      disabled={loading}
+                      className="w-full h-11 rounded-lg border border-slate-700 bg-[#0a0d14] px-3.5 pr-11 text-sm text-slate-100 placeholder:text-slate-600 outline-none transition focus:border-slate-500 disabled:opacity-50"
+                      placeholder={L('再次输入密码', 'Re-enter password', 'أعد إدخال كلمة المرور')}
+                    />
+                    <button type="button" onClick={() => setShowConfirmPassword(v => !v)} tabIndex={-1} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300" aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </label>
+              </>
+            )}
 
-          {errorMsg && <div className="p-3 rounded-xl bg-rose-950/70 border border-rose-800/70 text-rose-200 text-xs flex gap-2"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5"/><span>{errorMsg}</span></div>}
-          {infoMsg && <div className="p-3 rounded-xl bg-emerald-950/50 border border-emerald-800/60 text-emerald-200 text-xs">{infoMsg}</div>}
-
-          <form onSubmit={submit} className="space-y-3 text-sm">
-            {mode === 'login' && (<>
-              <label className="block space-y-1"><span className="text-xs text-slate-400">{L('邮箱或用户名','Email or username','البريد أو اسم المستخدم')}</span><div className="relative"><Mail className="w-4 h-4 absolute left-3 top-3 text-slate-500"/><input required value={emailOrUsername} onChange={e=>setEmailOrUsername(e.target.value)} className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div></label>
-              <label className="block space-y-1"><span className="text-xs text-slate-400">{L('密码','Password','كلمة المرور')}</span><div className="relative"><Lock className="w-4 h-4 absolute left-3 top-3 text-slate-500"/><input required type="password" value={password} onChange={e=>setPassword(e.target.value)} className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div></label>
-            </>)}
-            {mode === 'register' && (<>
-              <label className="block space-y-1"><span className="text-xs text-slate-400">Email</span><input required type="email" value={registerEmail} onChange={e=>setRegisterEmail(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></label>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="block space-y-1"><span className="text-xs text-slate-400">{L('昵称','Display name','الاسم')}</span><input required value={displayName} onChange={e=>setDisplayName(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></label>
-                <label className="block space-y-1"><span className="text-xs text-slate-400">Username</span><input required value={registerUsername} onChange={e=>setRegisterUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,''))} className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 font-mono" /></label>
-              </div>
-              <label className="block space-y-1"><span className="text-xs text-slate-400">{L('密码（至少 6 位）','Password (min 6)','كلمة المرور (6+)')}</span><input required type="password" minLength={6} value={password} onChange={e=>setPassword(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></label>
-            </>)}
-            {mode === 'phone' && (<>
-              <p className="text-[11px] text-slate-400">{L('手机号验证码登录/注册。SMS 服务未配置时将显示阻塞状态，不会伪造发送。','Phone OTP login/register. If SMS is not configured it will be blocked (no fake send).','تسجيل الدخول/التسجيل برمز الهاتف. إذا لم تُهيأ خدمة SMS سيتم الحظر دون إرسال وهمي.')}</p>
-              <div className="flex gap-2">
-                <select value={dial} onChange={e=>setDial(e.target.value)} className="w-28 px-2 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 text-xs">{COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}</select>
-                <div className="relative flex-1"><Phone className="w-4 h-4 absolute left-3 top-3 text-slate-500"/><input required value={phoneLocal} onChange={e=>setPhoneLocal(e.target.value)} placeholder={L('手机号','Phone number','رقم الهاتف')} className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div>
-              </div>
-              <div className="flex gap-2">
-                <input value={phoneCode} onChange={e=>setPhoneCode(e.target.value)} placeholder={L('验证码','Code','الرمز')} className="flex-1 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" />
-                <button type="button" onClick={sendPhoneCode} disabled={loading} className="px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold disabled:opacity-40">{L('发送验证码','Send code','إرسال الرمز')}</button>
-              </div>
-              {smsStatus && !smsStatus.configured && <p className="text-[10px] text-amber-300">{L('SMS 服务未配置（BLOCKED）','SMS provider not configured (BLOCKED)','مزود SMS غير مُهيأ (محظور)')}</p>}
-            </>)}
-
-            <button type="submit" disabled={loading} className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-white disabled:opacity-40 text-slate-950 font-bold text-sm flex items-center justify-center gap-2">
-              <span>{loading ? '...' : mode==='login'?L('登录','Sign in','تسجيل الدخول'):mode==='register'?L('注册并进入','Register & enter','تسجيل ودخول'):L('验证并登录','Verify & sign in','تحقق ودخول')}</span>
-              <ArrowRight className="w-4 h-4"/>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full h-11 mt-2 rounded-lg bg-white text-slate-950 text-sm font-semibold hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+            >
+              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {loading ? L('处理中…', 'Please wait…', 'يرجى الانتظار…') : (mode === 'login' ? L('登录', 'Sign in', 'تسجيل الدخول') : L('创建账号', 'Create account', 'إنشاء حساب'))}
             </button>
           </form>
+
+          <div className="mt-5 text-sm text-slate-400">
+            {mode === 'login' ? (
+              <span>
+                {L('还没有账号？', "Don't have an account?", 'ليس لديك حساب؟')}{' '}
+                <button type="button" onClick={() => switchMode('register')} className="text-slate-100 hover:underline font-medium">{L('注册', 'Create one', 'أنشئ حسابًا')}</button>
+              </span>
+            ) : (
+              <span>
+                {L('已有账号？', 'Already have an account?', 'لديك حساب بالفعل؟')}{' '}
+                <button type="button" onClick={() => switchMode('login')} className="text-slate-100 hover:underline font-medium">{L('登录', 'Sign in', 'تسجيل الدخول')}</button>
+              </span>
+            )}
+          </div>
         </div>
+
+        <p className="mt-6 text-center text-xs text-slate-500">ONE EARTH · ONE WORLD · ONE HUMANITY</p>
       </div>
     </div>
   );
