@@ -1,40 +1,36 @@
-# EARTH ONE - Cloudflare Worker backend (compatibility/migration scaffold)
-# Copy to wrangler.toml and fill IDs after `wrangler login` / resource creation.
-# Do NOT commit real account IDs/tokens/secrets.
+# EARTH ONE - Cloudflare Worker (production template, FREE plan only)
+# Copy to wrangler.toml locally for deployment, then fill real IDs after `npx wrangler login`.
+# Do NOT commit real account IDs/tokens/secrets. `cloudflare/wrangler.toml` is gitignored for safety.
 
 name = "earthone-api"
 main = "worker/src/index.ts"
 compatibility_date = "2026-11-12"
 compatibility_flags = ["nodejs_compat"]
-
-# Serve static assets from Pages in production; this Worker targets /api + /ws.
-# workers_dev = true
+workers_dev = true # set false if using only custom-domain routes
 
 [vars]
-ENVIRONMENT = "development"
-# Comma-separated origins allowed for CORS (GitHub Pages, custom domain). Do not use * with credentials.
-CORS_ORIGINS = "https://jsbs25.github.io,http://localhost:5173,http://localhost:3000"
-# Set to "false" in production once real auth is enforced.
+ENVIRONMENT = "production"
+# Comma-separated allowed browser origins for credentialed CORS (no wildcard).
+# Include your official frontend origin(s), e.g. https://earthone.example.com and/or https://jsbs25.github.io
+CORS_ORIGINS = "https://jsbs25.github.io"
+# Must remain false in production.
 DEV_LOGIN_ENABLED = "false"
+# Optional: set to "Lax" for same-site (same eTLD+1) deployments, or "None" for cross-site (requires Secure/HTTPS).
+# COOKIE_SAMESITE = "Lax"
+# Optional: cookie Domain for same-site subdomains (e.g. ".example.com"). Leave unset for host-only cookie.
+# COOKIE_DOMAIN = ""
 
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "earthone"
-# database_id = "<D1_DATABASE_ID>"
-# migrations_dir = "migrations"
+[[d1_databases]]
+binding = "DB"
+database_name = "earthone"
+# Fill with remote D1 database_id created on Cloudflare (free tier).
+database_id = "<D1_DATABASE_ID>"
+migrations_dir = "migrations"
 
+# R2 is optional for auth; create/bind only if needed and confirmed free for your usage.
 # [[r2_buckets]]
 # binding = "BUCKET"
 # bucket_name = "earthone-files"
 
-# [durable_objects]
-# bindings = [
-#   { name = "MESSENGER_ROOM", class_name = "MessengerRoom" },
-#   { name = "USER_PRESENCE", class_name = "UserPresence" }
-# ]
-
-# [[migrations]]
-# tag = "v1"
-# new_sqlite_classes = ["MessengerRoom", "UserPresence"]
-
-# Local dev: npx wrangler dev --config cloudflare/wrangler.toml.example --local --persist-to .wrangler/state
+# Local dev example:
+# npx wrangler dev --config wrangler.toml --local --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state

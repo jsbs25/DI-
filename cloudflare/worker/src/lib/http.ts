@@ -1,3 +1,5 @@
+import type { Env } from '../env';
+
 export const SESSION_COOKIE_NAME = 'earth_one_session';
 export const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 14; // 14 days
 
@@ -34,19 +36,26 @@ function isSecureRequest(request: Request): boolean {
   }
 }
 
-export function sessionCookie(token: string, request: Request, maxAge = SESSION_MAX_AGE_SEC): string {
+export function sessionCookie(token: string, request: Request, maxAge = SESSION_MAX_AGE_SEC, env?: Env): string {
   const secure = isSecureRequest(request);
+  const reqSameSite = String(env?.COOKIE_SAMESITE || '').trim().toLowerCase();
+  let sameSite: 'Lax' | 'Strict' | 'None' = secure ? 'None' : 'Lax';
+  if (reqSameSite === 'lax') sameSite = 'Lax';
+  else if (reqSameSite === 'strict') sameSite = 'Strict';
+  else if (reqSameSite === 'none') sameSite = secure ? 'None' : 'Lax';
   const parts = [
     `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
     `Max-Age=${maxAge}`,
-    `SameSite=${secure ? 'None' : 'Lax'}`,
+    `SameSite=${sameSite}`,
   ];
-  if (secure) parts.push('Secure');
+  const domain = String(env?.COOKIE_DOMAIN || '').trim();
+  if (domain) parts.push(`Domain=${domain}`);
+  if (secure || sameSite === 'None') parts.push('Secure');
   return parts.join('; ');
 }
 
-export function clearSessionCookie(request: Request): string {
-  return sessionCookie('', request, 0);
+export function clearSessionCookie(request: Request, env?: Env): string {
+  return sessionCookie('', request, 0, env);
 }

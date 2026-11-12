@@ -49,8 +49,8 @@ function requireTrustedOrigin(request: Request, env: Env): Response | null {
   return null;
 }
 
-function authResponse(user: any, request: Request, token: string, body: Record<string, any> = {}) {
-  return json({ success: true, user, ...body }, 200, { 'Set-Cookie': sessionCookie(token, request) });
+function authResponse(user: any, request: Request, token: string, body: Record<string, any> = {}, env?: Env) {
+  return json({ success: true, user, ...body }, 200, { 'Set-Cookie': sessionCookie(token, request, undefined, env) });
 }
 
 export async function handleAuth(request: Request, env: Env, path: string): Promise<Response | null> {
@@ -71,7 +71,7 @@ export async function handleAuth(request: Request, env: Env, path: string): Prom
       const body = await readJsonBody<any>(request) || {};
       const { user, token } = await store.registerUser(db, body);
       await store.addAudit(db, { userId: user?.id, event: 'register_success', detail: String(body.email || ''), ip: clientIp(request) });
-      return authResponse(user, request, token, { message: 'Welcome to Earth One! Please complete your citizen profile.' });
+      return authResponse(user, request, token, { message: 'Welcome to Earth One! Please complete your citizen profile.' }, env);
     }
 
     if (path === '/api/auth/login' && method === 'POST') {
@@ -83,13 +83,13 @@ export async function handleAuth(request: Request, env: Env, path: string): Prom
       const { user, token } = await store.loginUser(db, body);
       clearLoginRateLimit(request, String(body.identifier || ''));
       await store.addAudit(db, { userId: user?.id, event: 'login_success', detail: String(body.identifier || ''), ip: clientIp(request) });
-      return authResponse(user, request, token);
+      return authResponse(user, request, token, {}, env);
     }
 
     if (path === '/api/auth/logout' && method === 'POST') {
       const token = getSessionToken(request);
       if (token) await store.deleteSession(db, token);
-      return json({ success: true, message: 'Logged out successfully.' }, 200, { 'Set-Cookie': clearSessionCookie(request) });
+      return json({ success: true, message: 'Logged out successfully.' }, 200, { 'Set-Cookie': clearSessionCookie(request, env) });
     }
 
     if ((path === '/api/auth/me' || path === '/api/auth/current') && method === 'GET') {
@@ -120,7 +120,7 @@ export async function handleAuth(request: Request, env: Env, path: string): Prom
       if (!user) return json({ success: false, error: 'Demo account not found.' }, 404);
       const token = await store.createSession(db, user.id);
       await store.addAudit(db, { userId: user.id, event: 'dev_login_success', detail: 'li_wei', ip: clientIp(request) });
-      return authResponse(await store.selfUserForRow(db, user), request, token, { dev: true });
+      return authResponse(await store.selfUserForRow(db, user), request, token, { dev: true }, env);
     }
 
     if (path === '/api/auth/onboarding' && method === 'POST') {

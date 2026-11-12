@@ -8,6 +8,8 @@ export interface Env {
   DEV_LOGIN_ENABLED?: string;
   APP_URL?: string;
   VITE_API_BASE?: string;
+  COOKIE_DOMAIN?: string;
+  COOKIE_SAMESITE?: string;
 }
 
 export type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
