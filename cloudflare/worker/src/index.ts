@@ -1,11 +1,9 @@
 import type { Env } from './env';
 import { getCorsHeaders, withCors } from './cors';
-
-const json = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
-  });
+import { json } from './lib/json';
+import { handleAuth } from './routes/auth';
+import { handleUsers } from './routes/users';
+import { handlePrivacy } from './routes/privacy';
 
 function notImplemented(path: string, method: string) {
   return json(
@@ -38,17 +36,6 @@ async function handleHealth(_request: Request, env: Env) {
   });
 }
 
-async function handleIntegrations(_request: Request, _env: Env) {
-  // Safe runtime status only; does not claim providers are configured.
-  return json({
-    success: true,
-    channels: [],
-    sms: { configured: false, provider: 'unconfigured' },
-    mail: { configured: false, provider: 'unconfigured' },
-    runtime: 'cloudflare-worker-scaffold',
-  });
-}
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === 'OPTIONS') {
@@ -58,16 +45,23 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
 
-    let response: Response;
+    let response: Response | null = null;
     try {
       if (pathname === '/health' || pathname === '/api/health') {
         response = await handleHealth(request, env);
-      } else if (pathname === '/api/integrations' && request.method === 'GET') {
-        response = await handleIntegrations(request, env);
-      } else if (pathname.startsWith('/api/') || pathname === '/ws') {
-        response = notImplemented(pathname, request.method);
       } else {
-        response = json({ success: false, error: 'NOT_FOUND' }, 404);
+        // Route modules (return Response if handled, null to fall through)
+        response = await handleAuth(request, env, pathname);
+        if (!response) response = await handleUsers(request, env, pathname);
+        if (!response) response = await handlePrivacy(request, env, pathname);
+      }
+
+      if (!response) {
+        if (pathname.startsWith('/api/') || pathname === '/ws') {
+          response = notImplemented(pathname, request.method);
+        } else {
+          response = json({ success: false, error: 'NOT_FOUND' }, 404);
+        }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Internal error';

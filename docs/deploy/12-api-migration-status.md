@@ -7,46 +7,46 @@
 
 | # | Method | Path | Module | Status | Test | Notes |
 |---:|---|---|---|---|---|---|
-| 1 | GET | `/api/integrations` | auth/account | NOT_STARTED | NOT TESTED | Express source line 246 |
-| 2 | POST | `/api/auth/register` | auth/account | NOT_STARTED | NOT TESTED | Express source line 260 |
-| 3 | POST | `/api/auth/login` | auth/account | NOT_STARTED | NOT TESTED | Express source line 280 |
-| 4 | GET | `/api/account/me` | auth/account | NOT_STARTED | NOT TESTED | Express source line 307 |
-| 5 | GET | `/api/auth/me` | auth/account | NOT_STARTED | NOT TESTED | Express source line 315 |
-| 6 | GET | `/api/auth/status` | auth/account | NOT_STARTED | NOT TESTED | Express source line 320 |
-| 7 | POST | `/api/auth/dev-login` | auth/account | NOT_STARTED | NOT TESTED | Express source line 348 |
-| 8 | POST | `/api/auth/phone/send-code` | auth/account | NOT_STARTED | NOT TESTED | Express source line 377 |
-| 9 | POST | `/api/auth/phone/verify` | auth/account | NOT_STARTED | NOT TESTED | Express source line 403 |
-| 10 | GET | `/api/auth/wechat/start` | auth/account | NOT_STARTED | NOT TESTED | Express source line 468 |
-| 11 | GET | `/api/auth/wechat/callback` | auth/account | NOT_STARTED | NOT TESTED | Express source line 482 |
-| 12 | POST | `/api/auth/email/send-verification` | auth/account | NOT_STARTED | NOT TESTED | Express source line 546 |
-| 13 | POST | `/api/auth/email/verify` | auth/account | NOT_STARTED | NOT TESTED | Express source line 559 |
-| 14 | POST | `/api/auth/password/forgot` | auth/account | NOT_STARTED | NOT TESTED | Express source line 570 |
-| 15 | POST | `/api/auth/password/reset` | auth/account | NOT_STARTED | NOT TESTED | Express source line 584 |
-| 16 | GET | `/api/auth/security` | auth/account | NOT_STARTED | NOT TESTED | Express source line 607 |
-| 17 | POST | `/api/auth/password/change` | auth/account | NOT_STARTED | NOT TESTED | Express source line 613 |
-| 18 | POST | `/api/auth/bind/email/request` | auth/account | NOT_STARTED | NOT TESTED | Express source line 625 |
-| 19 | POST | `/api/auth/bind/email/confirm` | auth/account | NOT_STARTED | NOT TESTED | Express source line 639 |
-| 20 | POST | `/api/auth/bind/phone/request` | auth/account | NOT_STARTED | NOT TESTED | Express source line 654 |
-| 21 | POST | `/api/auth/bind/phone/confirm` | auth/account | NOT_STARTED | NOT TESTED | Express source line 670 |
-| 22 | POST | `/api/auth/unlink` | auth/account | NOT_STARTED | NOT TESTED | Express source line 685 |
-| 23 | GET | `/api/auth/google/start` | auth/account | NOT_STARTED | NOT TESTED | Express source line 711 |
-| 24 | GET | `/api/auth/google/callback` | auth/account | NOT_STARTED | NOT TESTED | Express source line 733 |
-| 25 | GET | `/api/auth/current` | auth/account | NOT_STARTED | NOT TESTED | Express source line 798 |
-| 26 | POST | `/api/auth/onboarding` | auth/account | NOT_STARTED | NOT TESTED | Express source line 803 |
+| 1 | GET | `/api/integrations` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | wrangler dev local: 200 safe status |
+| 2 | POST | `/api/auth/register` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: creates user+accounts+session, earthId allocated, persisted in local D1 |
+| 3 | POST | `/api/auth/login` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: username/email/id login, legacy hash verify/upgrade path supported, wrong pw 401 |
+| 4 | GET | `/api/account/me` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: Bearer session required, returns self profile |
+| 5 | GET | `/api/auth/me` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: returns null without token, user with valid session |
+| 6 | GET | `/api/auth/status` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: runtime status, dev login flags from env |
+| 7 | POST | `/api/auth/dev-login` | auth/account | LOCAL_TESTED | PASS (local wrangler+D1) | local D1 logic implemented (demo user lookup/session/audit), disabled by env in local config; enable-path needs env-specific test |
+| 8 | POST | `/api/auth/phone/send-code` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 9 | POST | `/api/auth/phone/verify` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 10 | GET | `/api/auth/wechat/start` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 11 | GET | `/api/auth/wechat/callback` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 12 | POST | `/api/auth/email/send-verification` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 13 | POST | `/api/auth/email/verify` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 14 | POST | `/api/auth/password/forgot` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 15 | POST | `/api/auth/password/reset` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 16 | GET | `/api/auth/security` | auth/account | LOCAL_TESTED | PASS (local wrangler+D1) | local D1: minimal security/binding view from DB; provider bind flows remain 501 |
+| 17 | POST | `/api/auth/password/change` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 18 | POST | `/api/auth/bind/email/request` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 19 | POST | `/api/auth/bind/email/confirm` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 20 | POST | `/api/auth/bind/phone/request` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 21 | POST | `/api/auth/bind/phone/confirm` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 22 | POST | `/api/auth/unlink` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 23 | GET | `/api/auth/google/start` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 24 | GET | `/api/auth/google/callback` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 25 | GET | `/api/auth/current` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: alias behavior matches /api/auth/me |
+| 26 | POST | `/api/auth/onboarding` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: updates profile fields and sets hasCompletedOnboarding |
 | 27 | GET | `/api/dev/status` | auth/account | NOT_STARTED | NOT TESTED | Express source line 818 |
-| 28 | POST | `/api/auth/logout` | auth/account | NOT_STARTED | NOT TESTED | Express source line 878 |
-| 29 | POST | `/api/auth/update-profile` | auth/account | NOT_STARTED | NOT TESTED | Express source line 894 |
-| 30 | POST | `/api/auth/toggle-location` | auth/account | NOT_STARTED | NOT TESTED | Express source line 918 |
-| 31 | GET | `/api/users` | social/content | NOT_STARTED | NOT TESTED | Express source line 932 |
-| 32 | GET | `/api/users/:id` | social/content | NOT_STARTED | NOT TESTED | Express source line 960 |
-| 33 | POST | `/api/users/:id/follow` | social/content | NOT_STARTED | NOT TESTED | Express source line 980 |
+| 28 | POST | `/api/auth/logout` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: deletes session token, subsequent /me returns null |
+| 29 | POST | `/api/auth/update-profile` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: profile field updates (partial coverage vs Express, needs parity expansion) |
+| 30 | POST | `/api/auth/toggle-location` | auth/account | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: toggles location public flag |
+| 31 | GET | `/api/users` | social/content | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: query search + privacy-aware filtering/best-effort list; needs deeper parity tests |
+| 32 | GET | `/api/users/:id` | social/content | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: public/self profile view with privacy checks |
+| 33 | POST | `/api/users/:id/follow` | social/content | LOCAL_TESTED | PASS (local wrangler+D1) | compat no-op success until social follow graph migrated |
 | 34 | POST | `/api/messenger/upload` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1117 |
 | 35 | POST | `/api/messenger/upload/stream` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1136 |
 | 36 | GET | `/api/messenger/files/:id` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1197 |
 | 37 | POST | `/api/conversations/:id/rename` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1226 |
 | 38 | POST | `/api/conversations/:id/admins` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1237 |
-| 39 | POST | `/api/auth/email/change/request` | auth/account | NOT_STARTED | NOT TESTED | Express source line 1258 |
-| 40 | POST | `/api/auth/email/change/confirm` | auth/account | NOT_STARTED | NOT TESTED | Express source line 1274 |
+| 39 | POST | `/api/auth/email/change/request` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
+| 40 | POST | `/api/auth/email/change/confirm` | auth/account | BLOCKED | BLOCKED/NOT TESTED | Explicit 501 in worker: requires provider secrets/config/compat logic (no fake success) |
 | 41 | GET | `/api/notifications` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1368 |
 | 42 | GET | `/api/notifications/unread-count` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1377 |
 | 43 | POST | `/api/notifications/:id/read` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1383 |
@@ -54,8 +54,8 @@
 | 45 | DELETE | `/api/notifications/:id` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1402 |
 | 46 | GET | `/api/notifications/preferences` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1412 |
 | 47 | PUT | `/api/notifications/preferences` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1418 |
-| 48 | GET | `/api/messenger/privacy` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1427 |
-| 49 | PUT | `/api/messenger/privacy` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1434 |
+| 48 | GET | `/api/messenger/privacy` | messenger/notifications | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: reads normalized privacy settings |
+| 49 | PUT | `/api/messenger/privacy` | messenger/notifications | D1_LOCAL_VERIFIED | PASS (local wrangler+D1) | local D1: updates normalized privacy settings |
 | 50 | GET | `/api/messenger/users/search` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1444 |
 | 51 | GET | `/api/messenger/friends` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1456 |
 | 52 | GET | `/api/messenger/friend-requests` | messenger/notifications | NOT_STARTED | NOT TESTED | Express source line 1470 |
@@ -183,4 +183,4 @@
 ## WebSocket
 | Endpoint | Module | Status | Test | Notes |
 |---|---|---|---|---|
-| `/ws` | messenger/realtime | NOT_STARTED | NOT TESTED | `server/messengerWs.ts` + `server.ts:3911`, in-memory state |
+| `/ws` | messenger/realtime | NOT_STARTED | NOT TESTED | DO scaffold exists; protocol/auth/ordering/multi-device/offline sync not implemented |
