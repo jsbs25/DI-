@@ -1,36 +1,38 @@
-# EARTH ONE - Cloudflare Worker (production template, FREE plan only)
-# Copy to wrangler.toml locally for deployment, then fill real IDs after `npx wrangler login`.
-# Do NOT commit real account IDs/tokens/secrets. `cloudflare/wrangler.toml` is gitignored for safety.
+# EARTH ONE - Cloudflare Worker single-origin deployment (frontend assets + /api + D1)
+# FREE plan only. Do NOT enable paid features, do NOT bind card, do NOT buy domains.
+# This file is a template; copy to wrangler.toml locally for deploy (wrangler.toml is gitignored).
+# Fill <D1_DATABASE_ID> after `npx wrangler login` and free D1 creation/selection.
 
 name = "earthone-api"
 main = "worker/src/index.ts"
 compatibility_date = "2026-11-12"
 compatibility_flags = ["nodejs_compat"]
-workers_dev = true # set false if using only custom-domain routes
+workers_dev = true
+
+# Same-origin SPA: static assets from React build (dist/) + Worker handles /api/* first.
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/health", "/ws"]
 
 [vars]
 ENVIRONMENT = "production"
-# Comma-separated allowed browser origins for credentialed CORS (no wildcard).
-# Include your official frontend origin(s), e.g. https://earthone.example.com and/or https://jsbs25.github.io
-CORS_ORIGINS = "https://jsbs25.github.io"
-# Must remain false in production.
+# Same-origin deployment: browser requests to the workers.dev site are same-origin (no cross-site cookie).
+# Keep CORS whitelist explicit for any allowed dev origins only; do not use "*".
+CORS_ORIGINS = "http://localhost:5173,http://localhost:8787"
 DEV_LOGIN_ENABLED = "false"
-# Optional: set to "Lax" for same-site (same eTLD+1) deployments, or "None" for cross-site (requires Secure/HTTPS).
-# COOKIE_SAMESITE = "Lax"
-# Optional: cookie Domain for same-site subdomains (e.g. ".example.com"). Leave unset for host-only cookie.
-# COOKIE_DOMAIN = ""
+COOKIE_SAMESITE = "Lax"
+# COOKIE_DOMAIN intentionally unset for workers.dev host-only cookie.
 
 [[d1_databases]]
 binding = "DB"
 database_name = "earthone"
-# Fill with remote D1 database_id created on Cloudflare (free tier).
 database_id = "<D1_DATABASE_ID>"
 migrations_dir = "migrations"
 
-# R2 is optional for auth; create/bind only if needed and confirmed free for your usage.
-# [[r2_buckets]]
-# binding = "BUCKET"
-# bucket_name = "earthone-files"
-
-# Local dev example:
-# npx wrangler dev --config wrangler.toml --local --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state
+# Build before deploy (same-origin):
+#   cd /Users/mafucheng/Desktop/EARTH_ONE/earthone
+#   VITE_BASE=/ npm run build
+# Deploy (after wrangler login + free D1 created/migrated):
+#   cd cloudflare && npx wrangler deploy --config wrangler.toml

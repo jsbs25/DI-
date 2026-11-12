@@ -10,22 +10,24 @@ function parseAllowed(env: Env): string[] {
 export function isOriginAllowed(request: Request, env: Env): boolean {
   const origin = request.headers.get('Origin') || '';
   if (!origin) return true; // non-browser / same-origin
+  try {
+    const reqOrigin = new URL(request.url).origin;
+    if (origin === reqOrigin) return true; // same-origin
+  } catch {}
   const allowed = parseAllowed(env);
   return allowed.includes(origin);
 }
 
 export function getCorsHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get('Origin') || '';
-  const allowed = parseAllowed(env);
-  const allowOrigin = origin && allowed.includes(origin) ? origin : '';
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-File-Name, X-Mime-Type, X-Conversation-Id, X-Earth-One-CSRF',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
-  if (allowOrigin) {
-    headers['Access-Control-Allow-Origin'] = allowOrigin;
+  if (origin && isOriginAllowed(request, env)) {
+    headers['Access-Control-Allow-Origin'] = origin;
     headers['Access-Control-Allow-Credentials'] = 'true';
   }
   return headers;

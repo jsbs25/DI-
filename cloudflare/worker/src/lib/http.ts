@@ -39,10 +39,11 @@ function isSecureRequest(request: Request): boolean {
 export function sessionCookie(token: string, request: Request, maxAge = SESSION_MAX_AGE_SEC, env?: Env): string {
   const secure = isSecureRequest(request);
   const reqSameSite = String(env?.COOKIE_SAMESITE || '').trim().toLowerCase();
-  let sameSite: 'Lax' | 'Strict' | 'None' = secure ? 'None' : 'Lax';
-  if (reqSameSite === 'lax') sameSite = 'Lax';
-  else if (reqSameSite === 'strict') sameSite = 'Strict';
+  // Same-origin Workers deployment: prefer Lax by default on HTTPS; allow explicit override.
+  let sameSite: 'Lax' | 'Strict' | 'None' = 'Lax';
+  if (reqSameSite === 'strict') sameSite = 'Strict';
   else if (reqSameSite === 'none') sameSite = secure ? 'None' : 'Lax';
+  else if (reqSameSite === 'lax' || !reqSameSite) sameSite = 'Lax';
   const parts = [
     `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
     'Path=/',

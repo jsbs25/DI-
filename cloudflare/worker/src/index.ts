@@ -23,6 +23,7 @@ async function handleHealth(_request: Request, env: Env) {
   const bindings = {
     db: Boolean(env.DB),
     bucket: Boolean(env.BUCKET),
+    assets: Boolean(env.ASSETS),
     messengerRoom: Boolean(env.MESSENGER_ROOM),
     userPresence: Boolean(env.USER_PRESENCE),
   };
@@ -44,21 +45,26 @@ export default {
 
     const url = new URL(request.url);
     const { pathname } = url;
+    const isApi = pathname.startsWith('/api/') || pathname === '/health' || pathname === '/ws';
 
     let response: Response | null = null;
     try {
       if (pathname === '/health' || pathname === '/api/health') {
         response = await handleHealth(request, env);
-      } else {
+      } else if (isApi) {
         // Route modules (return Response if handled, null to fall through)
         response = await handleAuth(request, env, pathname);
         if (!response) response = await handleUsers(request, env, pathname);
         if (!response) response = await handlePrivacy(request, env, pathname);
-      }
-
-      if (!response) {
-        if (pathname.startsWith('/api/') || pathname === '/ws') {
-          response = notImplemented(pathname, request.method);
+        if (!response) {
+          if (pathname.startsWith('/api/') || pathname === '/ws') {
+            response = notImplemented(pathname, request.method);
+          }
+        }
+      } else {
+        // Static frontend (SPA) served via Workers Assets binding when configured.
+        if (env.ASSETS) {
+          response = await env.ASSETS.fetch(request);
         } else {
           response = json({ success: false, error: 'NOT_FOUND' }, 404);
         }
@@ -68,6 +74,7 @@ export default {
       response = json({ success: false, error: 'WORKER_ERROR', message }, 500);
     }
 
+    if (!response) response = json({ success: false, error: 'NOT_FOUND' }, 404);
     return withCors(response, request, env);
   },
 };

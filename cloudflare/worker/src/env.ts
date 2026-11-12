@@ -1,6 +1,7 @@
 export interface Env {
   DB?: D1Database;
   BUCKET?: R2Bucket;
+  ASSETS?: Fetcher;
   MESSENGER_ROOM?: DurableObjectNamespace;
   USER_PRESENCE?: DurableObjectNamespace;
   ENVIRONMENT?: string;
