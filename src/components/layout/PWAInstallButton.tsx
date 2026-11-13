@@ -64,14 +64,14 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ lang = 'zh',
               <div className="flex items-center gap-3">
                 <img
                   src="/apple-touch-icon.png"
-                  alt="EARTH ONE App Icon"
+                  alt="ONE App Icon"
                   className="h-12 w-12 rounded-[13px] border border-white/15 shadow-lg"
                 />
                 <div>
                   <h3 className="text-base font-semibold text-white">
                     {isIOS
-                      ? L('安装 EARTH ONE 到 iPhone / iPad', 'Install EARTH ONE on iPhone / iPad')
-                      : L('安装 EARTH ONE Apple 桌面版', 'Install EARTH ONE Mac Desktop App')}
+                      ? L('安装 ONE 到 iPhone / iPad', 'Install ONE on iPhone / iPad')
+                      : L('安装 ONE 桌面版', 'Install ONE Desktop App')}
                   </h3>
                   <p className="text-xs text-slate-400">
                     {L('独立窗口运行 · 程序坞原生图标 · 离线支持', 'Standalone window · Native Dock icon · Offline ready')}
@@ -129,8 +129,8 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ lang = 'zh',
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#2D6BFF]" />
                     <span>
                       {L(
-                        'Chrome / Edge (Mac)：点击浏览器地址栏右侧的「安装」图标，或在菜单中选择「安装 EARTH ONE…」。',
-                        'Chrome / Edge on Mac: Click the Install icon in the address bar, or open menu → "Install EARTH ONE…".'
+                        'Chrome / Edge (Mac)：点击浏览器地址栏右侧的「安装」图标，或在菜单中选择「安装 ONE…」。',
+                        'Chrome / Edge on Mac: Click the Install icon in the address bar, or open menu → "Install ONE…".'
                       )}
                     </span>
                   </div>

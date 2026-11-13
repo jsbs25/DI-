@@ -115,12 +115,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
   };
 
   return (
-    <div className="min-h-[100dvh] bg-[#0B0F17] text-slate-100 flex items-center justify-center px-4 py-5 sm:py-10" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="min-h-[100dvh] bg-[var(--one-bg,#05070b)] text-[var(--one-text,#f4f3ee)] flex items-center justify-center px-4 py-5 sm:py-10" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
       <div className="w-full max-w-[440px]">
         <div className="mb-4 sm:mb-6 overflow-hidden rounded-2xl border border-white/10 bg-[#0B0F17] shadow-[0_24px_64px_-24px_rgba(45,107,255,0.28)]">
           <img
             src="/earth-one-cover.jpg"
-            alt="EARTH ONE — ONE PLANET. ONE WORLD."
+            alt="ONE — One World. Infinite Possibilities."
             className="aspect-video max-h-40 sm:max-h-none w-full object-cover"
           />
         </div>
@@ -129,23 +129,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
           <div className="flex items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 overflow-hidden rounded-[10px] border border-[#D8B778]/40 bg-[#0B0F17] shadow-md">
-                <img src="/earth-one-icon.png" alt="EARTH ONE" className="h-full w-full object-cover" />
+                <img src="/earth-one-icon.png" alt="ONE" className="h-full w-full object-cover" />
               </div>
-              <span className="text-sm font-medium tracking-[0.18em] text-slate-200">EARTH ONE</span>
+              <span className="text-sm font-medium tracking-[0.18em] text-slate-200">ONE</span>
             </div>
             <PWAInstallButton lang={lang} compact={true} />
           </div>
           <h1 className="text-[26px] leading-tight font-semibold text-white tracking-tight">
-            {mode === 'login' ? L('欢迎回来', 'Welcome back', 'مرحبًا بعودتك') : L('加入 EARTH ONE', 'Join EARTH ONE', 'انضم إلى EARTH ONE')}
+            {mode === 'login' ? L('欢迎回来', 'Welcome back', 'مرحبًا بعودتك') : L('加入 ONE', 'Join ONE', 'انضم إلى ONE')}
           </h1>
           <p className="mt-1.5 text-sm text-slate-400 leading-relaxed">
             {mode === 'login'
               ? L('使用你的账号登录，继续探索同一个地球。', 'Sign in to continue your journey on one Earth.', 'سجّل الدخول لمتابعة رحلتك على أرض واحدة.')
-              : L('创建你的真实账号，开始你的全球公民身份。', 'Create your account to begin as a global citizen.', 'أنشئ حسابك لتبدأ كمواطن عالمي.')}
+              : L('创建你的账号，进入统一的 ONE 世界。', 'Create your account and enter the world of ONE.', 'أنشئ حسابك وادخل عالم ONE.')}
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-800/80 bg-[#0c1018] p-6 sm:p-7 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.8)]">
+        <div className="rounded-[24px] border border-white/10 bg-[rgba(12,16,23,0.72)] backdrop-blur-xl p-6 sm:p-7 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
           <div className="flex items-center gap-6 border-b border-slate-800/80 mb-6">
             <button type="button" onClick={() => switchMode('login')} className={`pb-3 text-sm font-medium transition-colors ${mode === 'login' ? 'text-white border-b border-white -mb-px' : 'text-slate-500 hover:text-slate-300'}`}>
               {L('登录', 'Sign in', 'تسجيل الدخول')}
@@ -271,7 +271,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
             <button
               type="submit"
               disabled={loading}
-              className="w-full h-11 mt-2 rounded-lg bg-white text-slate-950 text-sm font-semibold hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+              className="w-full h-11 mt-2 rounded-xl bg-cyan-400 text-slate-950 text-sm font-semibold hover:bg-cyan-300 transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
               {loading ? L('处理中…', 'Please wait…', 'يرجى الانتظار…') : (mode === 'login' ? L('登录', 'Sign in', 'تسجيل الدخول') : L('创建账号', 'Create account', 'إنشاء حساب'))}
@@ -306,7 +306,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
           </div>
         )}
 
-        <p className="mt-5 text-center text-xs text-slate-500">ONE EARTH · ONE WORLD · ONE HUMANITY</p>
+        <p className="mt-5 text-center text-xs text-slate-500">ONE WORLD · INFINITE POSSIBILITIES</p>
       </div>
     </div>
   );

@@ -75,7 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, lang,
         {!collapsed && (
           <div className="flex items-center space-x-2">
             <Globe2 className="w-5 h-5 text-cyan-400" />
-            <span className="font-bold tracking-wider text-white text-sm">{lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}</span>
+            <span className="font-bold tracking-wider text-white text-sm">{lang === 'zh' ? 'ONE' : 'ONE'}</span>
           </div>
         )}
         {collapsed && <Globe2 className="w-5 h-5 text-cyan-400" />}
@@ -114,7 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, lang,
       {/* Footer hint */}
       {!collapsed && (
         <div className="px-4 py-3 border-t border-slate-800/70 text-[10px] text-slate-600">
-          ONE UNIVERSE · ONE WORLD
+          ONE WORLD · INFINITE POSSIBILITIES
         </div>
       )}
     </aside>

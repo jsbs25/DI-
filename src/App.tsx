@@ -96,7 +96,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const authErr = params.get('auth_error');
     if (authErr) {
-      const map: Record<string,string> = { wechat_unbound: '该微信账号尚未绑定 EARTH ONE 账户，请先使用已有账户登录后绑定。', wechat_state: '微信登录验证失败，请重试。', wechat_config: '微信登录尚未配置。', wechat_token: '微信授权失败。', wechat_profile: '未获取到微信身份信息。', wechat_failed: '微信登录失败。', google_unbound: '该 Google 账号尚未绑定 EARTH ONE 账户。', google_state: 'Google 登录验证失败。', google_config: 'Google 登录尚未配置。', google_token: 'Google 授权失败。', google_profile: '未获取到 Google 资料。', google_failed: 'Google 登录失败。' };
+      const map: Record<string,string> = { wechat_unbound: '该微信账号尚未绑定 ONE 账户，请先使用已有账户登录后绑定。', wechat_state: '微信登录验证失败，请重试。', wechat_config: '微信登录尚未配置。', wechat_token: '微信授权失败。', wechat_profile: '未获取到微信身份信息。', wechat_failed: '微信登录失败。', google_unbound: '该 Google 账号尚未绑定 ONE 账户。', google_state: 'Google 登录验证失败。', google_config: 'Google 登录尚未配置。', google_token: 'Google 授权失败。', google_profile: '未获取到 Google 资料。', google_failed: 'Google 登录失败。' };
       setWelcomeToast(map[authErr] || `Login failed: ${authErr}`);
       setTimeout(() => setWelcomeToast(null), 6000);
       window.history.replaceState({}, '', window.location.pathname);
@@ -255,7 +255,7 @@ export default function App() {
       {!isSpaceExperience && (
         <footer className="w-full border-t border-white/10 bg-[rgba(2,4,10,0.6)] py-5 px-4 text-xs text-slate-500 md:pl-24">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2"><img src="/earth-one-icon.png" alt="EARTH ONE" className="w-5 h-5 rounded-md object-cover ring-1 ring-[#D8B778]/40" /><span className="font-semibold text-slate-300">EARTH ONE</span></div>
+            <div className="flex items-center gap-2"><img src="/earth-one-icon.png" alt="ONE" className="w-5 h-5 rounded-md object-cover ring-1 ring-white/15" /><span className="font-semibold text-slate-200 tracking-wide">ONE</span></div>
             <div className="flex items-center gap-3 text-[11px] text-slate-400"><span>{t.motto}</span><span className="flex items-center gap-1 text-emerald-400"><ShieldCheck className="w-3.5 h-3.5" /><span>{t.locationPrivate}</span></span></div>
           </div>
         </footer>

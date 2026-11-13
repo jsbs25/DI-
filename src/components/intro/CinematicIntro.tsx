@@ -438,7 +438,15 @@ export function CinematicIntro({ onComplete }: CinematicIntroProps) {
     const flightDuration = 6.8; // Duration in seconds of the seamless cosmic flight
 
     const animate = () => {
-      animRef.current.rafId = requestAnimationFrame(animate);
+      const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) {
+      finishFlight();
+      return () => {
+        window.removeEventListener('resize', onResize);
+        window.removeEventListener('mousemove', onMouseMove);
+      };
+    }
+    animRef.current.rafId = requestAnimationFrame(animate);
       const elapsed = (performance.now() - animRef.current.startTime) / 1000;
       const boost = animRef.current.speedBoost;
 
@@ -518,6 +526,14 @@ export function CinematicIntro({ onComplete }: CinematicIntroProps) {
       renderer.render(scene, camera);
     };
 
+    const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced) {
+      finishFlight();
+      return () => {
+        window.removeEventListener('resize', onResize);
+        window.removeEventListener('mousemove', onMouseMove);
+      };
+    }
     animRef.current.rafId = requestAnimationFrame(animate);
 
     const onResize = () => {
@@ -545,8 +561,8 @@ export function CinematicIntro({ onComplete }: CinematicIntroProps) {
       className={`fixed inset-0 z-[250] bg-[#020617] select-none cursor-pointer overflow-hidden transition-opacity duration-700 ease-out ${
         isFadingOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
-      aria-label="EARTH ONE 宇宙穿梭"
-      title="点击任意处直接进入"
+      aria-label="ONE 宇宙穿梭"
+      title="点击任意处进入 ONE"
     >
       {/* 3D WebGL Canvas Layer (Pure Visual Spectacle, Zero Text Overlays) */}
       <div ref={containerRef} className="absolute inset-0" />
@@ -579,7 +595,7 @@ export function CinematicIntro({ onComplete }: CinematicIntroProps) {
             finishFlight();
           }}
           className="pointer-events-auto p-3 rounded-full border border-cyan-500/40 bg-slate-950/70 text-cyan-200 hover:text-white hover:border-cyan-400 hover:bg-cyan-950/80 transition-all shadow-[0_0_20px_rgba(6,182,212,0.2)] backdrop-blur-md group"
-          title="直接进入系统 (Space / Esc)"
+          title="进入 ONE (Space / Esc)"
         >
           <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
         </button>

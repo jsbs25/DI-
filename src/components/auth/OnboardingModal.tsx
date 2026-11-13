@@ -462,7 +462,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 className="flex items-center space-x-1.5 px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-slate-950 font-bold text-xs shadow-xl transition-all cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>{isLoading ? 'Anchoring Node...' : 'Launch into Earth One!'}</span>
+                <span>{isLoading ? 'Anchoring Node...' : 'Enter ONE'}</span>
               </button>
             </div>
           </div>

@@ -95,7 +95,7 @@ export const AccountSecurityModal: React.FC<Props> = ({ isOpen, onClose, current
 
           <section className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4 space-y-3">
             <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><Link2 className="w-4 h-4 text-cyan-400"/>已绑定登录方式</h3><button onClick={load} className="text-slate-400 hover:text-slate-200"><RefreshCw className="w-4 h-4"/></button></div>
-            <p className="text-[11px] text-slate-500">统一身份：Google/微信/手机号/邮箱登录同一 EARTH ONE 账户。解绑需验证原账户密码，且不能解绑最后一个可用方式。绑定新身份需通过对应验证；不会因相同邮箱/手机号自动合并不同账户。</p>
+            <p className="text-[11px] text-slate-500">统一身份：Google/微信/手机号/邮箱登录同一 ONE 账户。解绑需验证原账户密码，且不能解绑最后一个可用方式。绑定新身份需通过对应验证；不会因相同邮箱/手机号自动合并不同账户。</p>
             <div className="grid sm:grid-cols-2 gap-2 text-xs">
               {['email','phone','google','wechat'].map(pid => {
                 const li = identities.find(i => i.provider === pid);

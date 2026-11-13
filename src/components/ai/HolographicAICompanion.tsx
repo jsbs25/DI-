@@ -74,7 +74,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
   const initialGreeting = isZh
     ? '你好，我是智能助手 D。你可以直接提问、进行实时语音交流，或吩咐我：“进入3D宇宙”、“打开浏览器”、“打开影视中心”、“打开音乐馆”、“去世界图书馆”，我将随时为你切换功能视图。'
-    : 'Hello, I am D — your Earth One intelligence. Speak with me in real time or ask me to open the 3D Universe, Web Browser, Cinema, Music Station, or World Library.';
+    : 'Hello, I am D — your ONE intelligence. Speak with me in real time or ask me to open the 3D Universe, Web Browser, Cinema, Music Station, or World Library.';
 
   const [messages, setMessages] = useState<MessageItem[]>(() => {
     const saved = loadAIConversationHistory('earth-one-ai-companion:v1', (value): value is MessageItem =>
@@ -505,7 +505,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       {!isOpen && showLauncher && (
         <button
           onClick={() => setIsOpen(true)}
-          aria-label="打开地球计划 AI 对话"
+          aria-label="打开 ONE AI 对话"
           className="group relative flex items-center space-x-3 px-4 py-2.5 rounded-full bg-slate-950/95 hover:bg-slate-900 border border-cyan-400/50 hover:border-cyan-300 backdrop-blur-2xl shadow-2xl shadow-cyan-500/20 cursor-pointer transition-all hover:scale-105 active:scale-95"
           title={isZh ? "唤醒智能助手 D" : "Open Intelligence D"}
         >
@@ -850,7 +850,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                   <span>VOICE REASONING LINK</span>
                 </div>
                 <h3 className="text-base font-bold text-white">
-                  {isZh ? '地球计划 实时双向语音空间' : 'Project Earth Real-Time Voice'}
+                  {isZh ? 'ONE 实时双向语音空间' : 'ONE Real-Time Voice'}
                 </h3>
                 <p className="text-xs text-slate-400 max-w-xs mx-auto">
                   {isZh
@@ -994,7 +994,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                   className="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-900/30 cursor-pointer"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  <span>{isZh ? '进入全屏地球计划人工智能工作台' : 'Open Fullscreen AI Studio'}</span>
+                  <span>{isZh ? '进入全屏 ONE 人工智能工作台' : 'Open Fullscreen AI Studio'}</span>
                 </button>
               )}
             </div>

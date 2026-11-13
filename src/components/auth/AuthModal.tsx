@@ -107,15 +107,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
   };
 
 
-  const title = mode === 'login' ? 'Citizen Sign In' : mode === 'register' ? 'Join EARTH ONE' : mode === 'phone' ? 'Phone Login / 手机登录' : mode === 'forgot' ? 'Forgot Password' : 'Reset Password';
+  const title = mode === 'login' ? 'Sign in to ONE' : mode === 'register' ? 'Join ONE' : mode === 'phone' ? 'Phone Login / 手机登录' : mode === 'forgot' ? 'Forgot Password' : 'Reset Password';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl relative space-y-4 p-6 sm:p-7 animate-in fade-in duration-200 max-h-[92vh] overflow-y-auto">
-        <button onClick={onClose} className="absolute top-5 right-5 p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+    <div className="fixed inset-0 z-50 bg-[rgba(5,7,11,0.78)] backdrop-blur-md flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-[rgba(12,16,23,0.82)] border border-white/10 rounded-[28px] overflow-hidden shadow-[0_24px_80px_rgba(0,0,0,0.4)] backdrop-blur-xl relative space-y-4 p-6 sm:p-7 animate-in fade-in duration-200 max-h-[92vh] overflow-y-auto">
+        <button onClick={onClose} className="absolute top-5 right-5 p-2 rounded-xl border border-white/10 bg-white/[0.04] text-slate-400 hover:text-white hover:bg-white/[0.08]"><X className="w-4 h-4" /></button>
         <div className="text-center space-y-2">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-600 p-0.5 mx-auto"><div className="w-full h-full bg-[#030712] rounded-[14px] flex items-center justify-center"><Globe2 className="w-6 h-6 text-cyan-400" /></div></div>
-          <div><h2 className="text-xl font-bold text-slate-100 font-serif">{title}</h2><p className="text-xs text-slate-400 mt-0.5">ONE EARTH · ONE WORLD · ONE HUMANITY</p></div>
+          <div className="w-12 h-12 rounded-2xl border border-cyan-400/25 bg-cyan-400/10 p-0.5 mx-auto"><div className="w-full h-full bg-[rgba(8,11,16,0.9)] rounded-[14px] flex items-center justify-center"><Globe2 className="w-6 h-6 text-cyan-300" /></div></div>
+          <div><h2 className="text-xl font-bold text-slate-100 font-serif">{title}</h2><p className="text-xs text-slate-400 mt-0.5 tracking-wide">ONE WORLD · INFINITE POSSIBILITIES</p></div>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -130,10 +130,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
         </div>
         <p className="text-[10px] text-slate-500 leading-relaxed">官方接入：未配置时显示不可用且不伪造成功。微信/WhatsApp 不支持个人聊天同步。SMS/邮件投递依赖外部配置（未配置将 BLOCKED）。</p>
 
-        <div className="grid grid-cols-3 p-1 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-medium">
-          <button type="button" onClick={() => { setMode('login'); setErrorMsg(null); setInfoMsg(null); }} className={`py-2 rounded-lg ${mode === 'login' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400'}`}>Email</button>
-          <button type="button" onClick={() => { setMode('phone'); setErrorMsg(null); setInfoMsg(null); }} className={`py-2 rounded-lg ${mode === 'phone' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400'}`}>Phone</button>
-          <button type="button" onClick={() => { setMode('register'); setErrorMsg(null); setInfoMsg(null); }} className={`py-2 rounded-lg ${mode === 'register' ? 'bg-cyan-500 text-slate-950 font-bold' : 'text-slate-400'}`}>Register</button>
+        <div className="grid grid-cols-3 p-1 rounded-xl bg-black/20 border border-white/10 text-[11px] font-medium">
+          <button type="button" onClick={() => { setMode('login'); setErrorMsg(null); setInfoMsg(null); }} className={`py-2 rounded-lg ${mode === 'login' ? 'bg-cyan-400/15 text-cyan-100 border border-cyan-400/30 font-semibold' : 'text-slate-400'}`}>Email</button>
+          <button type="button" onClick={() => { setMode('phone'); setErrorMsg(null); setInfoMsg(null); }} className={`py-2 rounded-lg ${mode === 'phone' ? 'bg-cyan-400/15 text-cyan-100 border border-cyan-400/30 font-semibold' : 'text-slate-400'}`}>Phone</button>
+          <button type="button" onClick={() => { setMode('register'); setErrorMsg(null); setInfoMsg(null); }} className={`py-2 rounded-lg ${mode === 'register' ? 'bg-cyan-400/15 text-cyan-100 border border-cyan-400/30 font-semibold' : 'text-slate-400'}`}>Register</button>
         </div>
 
         {errorMsg && <div className="p-3 rounded-xl bg-rose-950/80 border border-rose-800/80 text-rose-300 text-xs flex gap-2"><AlertCircle className="w-4 h-4 shrink-0"/><span>{errorMsg}</span></div>}
@@ -142,20 +142,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
         <form onSubmit={handleSubmit} className="space-y-3 text-xs">
           {mode === 'login' && (
             <>
-              <div><label className="block text-slate-400 mb-1">Email or Username</label><div className="relative"><Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type="text" required value={emailOrUsername} onChange={e => setEmailOrUsername(e.target.value)} placeholder="email or username" className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div></div>
-              <div><label className="block text-slate-400 mb-1">Password</label><div className="relative"><Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)} className="w-full pl-9 pr-9 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /><button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-2.5 text-slate-500">{showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div></div>
+              <div><label className="block text-slate-400 mb-1">Email or Username</label><div className="relative"><Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type="text" required value={emailOrUsername} onChange={e => setEmailOrUsername(e.target.value)} placeholder="email or username" className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /></div></div>
+              <div><label className="block text-slate-400 mb-1">Password</label><div className="relative"><Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)} className="w-full pl-9 pr-9 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /><button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-2.5 text-slate-500">{showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div></div>
               <button type="button" onClick={() => { setMode('forgot'); setErrorMsg(null); }} className="text-cyan-400 text-[11px] hover:underline">Forgot password? / 忘记密码</button>
             </>
           )}
 
           {mode === 'register' && (
             <>
-              <div><label className="block text-slate-400 mb-1">Email</label><div className="relative"><Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type="email" required value={registerEmail} onChange={e => setRegisterEmail(e.target.value)} className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div></div>
+              <div><label className="block text-slate-400 mb-1">Email</label><div className="relative"><Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type="email" required value={registerEmail} onChange={e => setRegisterEmail(e.target.value)} className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /></div></div>
               <div className="grid grid-cols-2 gap-2">
-                <div><label className="block text-slate-400 mb-1">Display Name</label><input required value={displayName} onChange={e => setDisplayName(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div>
-                <div><label className="block text-slate-400 mb-1">Username</label><input required value={registerUsername} onChange={e => setRegisterUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 font-mono" /></div>
+                <div><label className="block text-slate-400 mb-1">Display Name</label><input required value={displayName} onChange={e => setDisplayName(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /></div>
+                <div><label className="block text-slate-400 mb-1">Username</label><input required value={registerUsername} onChange={e => setRegisterUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} className="w-full px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100 font-mono" /></div>
               </div>
-              <div><label className="block text-slate-400 mb-1">Password (min 6)</label><div className="relative"><Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type={showPassword ? 'text' : 'password'} required minLength={6} value={password} onChange={e => setPassword(e.target.value)} className="w-full pl-9 pr-9 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /><button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-2.5 text-slate-500">{showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div></div>
+              <div><label className="block text-slate-400 mb-1">Password (min 6)</label><div className="relative"><Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type={showPassword ? 'text' : 'password'} required minLength={6} value={password} onChange={e => setPassword(e.target.value)} className="w-full pl-9 pr-9 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /><button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-2.5 text-slate-500">{showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div></div>
             </>
           )}
 
@@ -163,12 +163,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
             <>
               <p className="text-[11px] text-slate-400">SMS 验证码登录/注册（未配置短信服务将 BLOCKED，不会伪造发送）。</p>
               <div className="flex gap-2">
-                <select value={dial} onChange={e=>setDial(e.target.value)} className="w-28 px-2 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 text-xs">{COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}</select>
-                <div className="relative flex-1"><Phone className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input required value={phoneLocal} onChange={e=>setPhoneLocal(e.target.value)} placeholder="Phone number" className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div>
+                <select value={dial} onChange={e=>setDial(e.target.value)} className="w-28 px-2 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100 text-xs">{COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}</select>
+                <div className="relative flex-1"><Phone className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input required value={phoneLocal} onChange={e=>setPhoneLocal(e.target.value)} placeholder="Phone number" className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /></div>
               </div>
               <div className="flex gap-2">
-                <input value={phoneCode} onChange={e=>setPhoneCode(e.target.value)} placeholder="SMS code" className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" />
-                <button type="button" onClick={sendPhoneCode} disabled={isLoading} className="px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold disabled:opacity-40">Send Code</button>
+                <input value={phoneCode} onChange={e=>setPhoneCode(e.target.value)} placeholder="SMS code" className="flex-1 px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" />
+                <button type="button" onClick={sendPhoneCode} disabled={isLoading} className="px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-slate-200 text-[11px] font-semibold disabled:opacity-40">Send Code</button>
               </div>
               {smsStatus && !smsStatus.configured && <p className="text-[10px] text-amber-300">SMS provider not configured (BLOCKED). Set SMS_PROVIDER + credentials.</p>}
             </>
@@ -177,19 +177,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuc
           {mode === 'forgot' && (
             <>
               <p className="text-[11px] text-slate-400">输入邮箱获取重置验证码（需邮件服务配置，否则 BLOCKED）。</p>
-              <div className="relative"><Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type="email" required value={resetEmail} onChange={e=>setResetEmail(e.target.value)} className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div>
+              <div className="relative"><Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input type="email" required value={resetEmail} onChange={e=>setResetEmail(e.target.value)} className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /></div>
             </>
           )}
 
           {mode === 'reset' && (
             <>
-              <div><label className="block text-slate-400 mb-1">Email</label><input type="email" required value={resetEmail} onChange={e=>setResetEmail(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div>
-              <div><label className="block text-slate-400 mb-1">Reset Code</label><div className="relative"><KeyRound className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input required value={resetCode} onChange={e=>setResetCode(e.target.value)} className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div></div>
-              <div><label className="block text-slate-400 mb-1">New Password (min 6)</label><input type="password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100" /></div>
+              <div><label className="block text-slate-400 mb-1">Email</label><input type="email" required value={resetEmail} onChange={e=>setResetEmail(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /></div>
+              <div><label className="block text-slate-400 mb-1">Reset Code</label><div className="relative"><KeyRound className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" /><input required value={resetCode} onChange={e=>setResetCode(e.target.value)} className="w-full pl-9 pr-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /></div></div>
+              <div><label className="block text-slate-400 mb-1">New Password (min 6)</label><input type="password" required minLength={6} value={newPassword} onChange={e=>setNewPassword(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-slate-100" /></div>
             </>
           )}
 
-          <button type="submit" disabled={isLoading} className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 mt-1">
+          <button type="submit" disabled={isLoading} className="w-full py-2.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-40 text-slate-950 font-semibold text-xs flex items-center justify-center gap-1.5 mt-1">
             <span>{isLoading ? '...' : mode==='login'?'Sign In':mode==='register'?'Register':mode==='phone'?'Verify & Sign In':mode==='forgot'?'Send Reset Code':'Reset Password'}</span><ArrowRight className="w-3.5 h-3.5" />
           </button>
         </form>
