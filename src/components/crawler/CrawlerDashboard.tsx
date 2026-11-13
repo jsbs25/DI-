@@ -254,150 +254,93 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
   const pendingPages = pages.filter(p => p.status === 'pending_review');
 
   return (
-    <div className="flex-1 flex flex-col bg-[#020512] text-slate-100 min-h-[calc(100vh-4rem)] p-4 sm:p-8">
-      {/* Toast Notice */}
+    <div className="flex min-h-[calc(100vh-4rem)] flex-1 flex-col bg-[var(--color-one-bg)] p-4 text-[var(--color-one-text)] sm:p-8">
       {actionNotice && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-2xl bg-slate-900 border border-cyan-500/70 text-cyan-200 text-xs font-semibold shadow-2xl backdrop-blur-md flex items-center space-x-2 animate-in fade-in">
-          <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+        <div className="fixed left-1/2 top-20 z-50 flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-[var(--color-one-border-strong)] bg-[color:var(--color-one-bg-elevated)] px-5 py-3 text-xs font-medium text-white shadow-[var(--shadow-one-lg)] backdrop-blur-md">
+          <Sparkles className="h-4 w-4 shrink-0 text-[var(--color-one-accent)]" />
           <span>{actionNotice}</span>
         </div>
       )}
 
-      {/* 1. Header Bar */}
-      <div className="max-w-7xl mx-auto w-full mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+      {/* Header */}
+      <div className="mx-auto mb-8 flex w-full max-w-7xl flex-col justify-between gap-4 border-b border-[var(--color-one-border)] pb-6 md:flex-row md:items-center">
         <div>
-          <div className="flex items-center space-x-3 mb-2">
-            <div className="p-2.5 rounded-xl bg-blue-950/80 border border-blue-500/40 text-blue-400">
-              <Globe2 className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-wide flex items-center gap-3">
-                <span>全球资源发现与智能采集引擎</span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full border border-cyan-500/40 bg-cyan-950/60 text-cyan-300 font-mono font-normal">
-                  FTS5 + SQLite Active
-                </span>
-              </h1>
-              <p className="text-xs text-slate-400 mt-1">
-                多源合规采集 · 自动去重清洗 · 十大星球共用底层统一数据库 · 本地 Qwen 意图理解
-              </p>
-            </div>
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-1 text-[11px] font-medium text-[var(--color-one-text-muted)]">
+            <Globe2 className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
+            <span>ONE DISCOVERY · {lang === 'zh' ? '资源发现与采集' : 'Discovery & Ingestion'}</span>
           </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">全球资源发现与智能采集引擎</h1>
+            <span className="rounded-full border border-[var(--color-one-border)] bg-white/[0.02] px-2.5 py-0.5 font-mono text-xs text-[var(--color-one-text-muted)]">FTS5 + SQLite</span>
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-[var(--color-one-text-muted)] sm:text-sm">多源合规采集 · 自动去重清洗 · 统一资源库 · 辅助能力以实际配置为准</p>
         </div>
 
-        <div className="flex items-center space-x-2.5 flex-wrap">
-          <button
-            onClick={handleTriggerHealthCheck}
-            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/50 text-xs text-slate-300 hover:text-white transition-all cursor-pointer"
-            title="对库内存量资源进行健康探活探测"
-          >
-            <Activity className="w-3.5 h-3.5 text-emerald-400" />
-            <span>健康巡检</span>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button onClick={handleTriggerHealthCheck} className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white" title="对库内存量资源进行健康探活探测">
+            <Activity className="h-3.5 w-3.5 text-emerald-300" /><span>健康巡检</span>
           </button>
-          <button
-            onClick={handleTriggerRssSync}
-            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-xs text-slate-300 hover:text-white transition-all cursor-pointer"
-            title="立即轮询活跃 RSS 订阅源"
-          >
-            <Rss className="w-3.5 h-3.5 text-amber-400" />
-            <span>同步 RSS</span>
+          <button onClick={handleTriggerRssSync} className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white" title="立即轮询活跃 RSS 订阅源">
+            <Rss className="h-3.5 w-3.5 text-amber-300" /><span>同步 RSS</span>
           </button>
-          <button
-            onClick={loadData}
-            disabled={isLoading}
-            className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 hover:text-white transition-all cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-cyan-400' : ''}`} />
-            <span>刷新</span>
+          <button onClick={loadData} disabled={isLoading} className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white disabled:opacity-50">
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin text-[var(--color-one-accent)]' : ''}`} /><span>刷新</span>
           </button>
-          <button
-            onClick={() => setIsAddResourceModalOpen(true)}
-            className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-semibold text-xs shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>录入新资源</span>
+          <button onClick={() => setIsAddResourceModalOpen(true)} className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-[#071018] shadow-[var(--shadow-one-sm)] transition hover:brightness-110">
+            <Plus className="h-4 w-4" /><span>录入新资源</span>
           </button>
         </div>
       </div>
 
-      {/* 2. Top Stats Overview (10 Planets + Total) */}
-      <div className="max-w-7xl mx-auto w-full grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] text-slate-400 block mb-1">统一资源总库 (SQLite)</span>
-          <span className="text-2xl font-bold text-cyan-400">{discoveryStats?.total ?? discoveryResources.length} 条</span>
+      {/* Stats */}
+      <div className="mx-auto mb-8 grid w-full max-w-7xl grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+        <div className="rounded-[22px] border border-[var(--color-one-border)] bg-white/[0.03] p-4 shadow-[var(--shadow-one-sm)]">
+          <span className="mb-1 block text-[11px] text-[var(--color-one-text-muted)]">统一资源总库</span>
+          <span className="text-2xl font-semibold tabular-nums text-white">{discoveryStats?.total ?? discoveryResources.length}</span>
+          <span className="ml-1 text-xs text-[var(--color-one-text-dim)]">条</span>
         </div>
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] text-slate-400 block mb-1">活跃采集数据源 (RSS/API)</span>
-          <span className="text-2xl font-bold text-white">{discoveryStats?.sourcesCount ?? 3} 个</span>
+        <div className="rounded-[22px] border border-[var(--color-one-border)] bg-white/[0.03] p-4 shadow-[var(--shadow-one-sm)]">
+          <span className="mb-1 block text-[11px] text-[var(--color-one-text-muted)]">活跃数据源</span>
+          <span className="text-2xl font-semibold tabular-nums text-white">{discoveryStats?.sourcesCount ?? 3}</span>
+          <span className="ml-1 text-xs text-[var(--color-one-text-dim)]">个</span>
         </div>
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-          <span className="text-[11px] text-slate-400 block mb-1">待审网页入库</span>
-          <span className="text-2xl font-bold text-amber-400">{pendingPages.length} 页</span>
+        <div className="rounded-[22px] border border-[var(--color-one-border)] bg-white/[0.03] p-4 shadow-[var(--shadow-one-sm)]">
+          <span className="mb-1 block text-[11px] text-[var(--color-one-text-muted)]">待审网页入库</span>
+          <span className="text-2xl font-semibold tabular-nums text-amber-200">{pendingPages.length}</span>
+          <span className="ml-1 text-xs text-[var(--color-one-text-dim)]">页</span>
         </div>
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
+        <div className="flex items-center justify-between rounded-[22px] border border-[var(--color-one-border)] bg-white/[0.03] p-4 shadow-[var(--shadow-one-sm)]">
           <div>
-            <span className="text-[11px] text-slate-400 block mb-1">防重算法与指纹引擎</span>
-            <span className="text-sm font-semibold text-emerald-400">Canonical SHA-256</span>
+            <span className="mb-1 block text-[11px] text-[var(--color-one-text-muted)]">去重与指纹</span>
+            <span className="text-sm font-semibold text-emerald-200">Canonical SHA-256</span>
           </div>
-          <ShieldCheck className="w-8 h-8 text-emerald-400/80" />
+          <ShieldCheck className="h-8 w-8 text-emerald-300/80" />
         </div>
       </div>
 
-      {/* 3. Section Tabs */}
-      <div className="max-w-7xl mx-auto w-full flex items-center space-x-2 mb-6 border-b border-slate-800/80 pb-2 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('discovery')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'discovery'
-              ? 'bg-blue-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-900'
-          }`}
-        >
-          <Globe2 className="w-3.5 h-3.5" />
-          <span>全网资源库总览 ({discoveryResources.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('tasks')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'tasks'
-              ? 'bg-blue-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-900'
-          }`}
-        >
-          <Layers className="w-3.5 h-3.5" />
-          <span>采集任务 ({tasks.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('pending')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'pending'
-              ? 'bg-blue-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-900'
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          <span>网页审核 ({pendingPages.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('logs')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-            activeTab === 'logs'
-              ? 'bg-blue-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-slate-900'
-          }`}
-        >
-          <Terminal className="w-3.5 h-3.5" />
-          <span>调度日志</span>
-        </button>
+      {/* Tabs */}
+      <div className="mx-auto mb-6 flex w-full max-w-7xl items-center gap-2 overflow-x-auto border-b border-[var(--color-one-border)] pb-2">
+        {([
+          { id: 'discovery', icon: Globe2, label: `全网资源库 (${discoveryResources.length})` },
+          { id: 'tasks', icon: Layers, label: `采集任务 (${tasks.length})` },
+          { id: 'pending', icon: FileText, label: `网页审核 (${pendingPages.length})` },
+          { id: 'logs', icon: Terminal, label: '调度日志' },
+        ] as const).map(tab => {
+          const Icon = tab.icon;
+          const active = activeTab === tab.id;
+          return (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`inline-flex min-h-10 cursor-pointer items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 text-xs font-medium transition ${active ? 'bg-[var(--color-one-accent)] text-[#071018]' : 'text-[var(--color-one-text-muted)] hover:bg-white/[0.05] hover:text-white'}`}>
+              <Icon className="h-3.5 w-3.5" /><span>{tab.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* 4. Tab 0: Unified Discovery Resources View */}
       {activeTab === 'discovery' && (
-        <div className="max-w-7xl mx-auto w-full space-y-6">
+        <div className="mx-auto w-full max-w-7xl space-y-6">
           {/* Planet filter chips */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+          <div className="scrollbar-none flex items-center gap-2 overflow-x-auto pb-2">
             {Object.entries(PLANET_LABELS).map(([pid, meta]) => {
               const count = pid === 'all'
                 ? discoveryStats?.total ?? discoveryResources.length
@@ -410,13 +353,13 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
                   onClick={() => setSelectedPlanetFilter(pid)}
                   className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer whitespace-nowrap border ${
                     isSelected
-                      ? 'bg-blue-600/30 border-cyan-400 text-cyan-200 shadow-md shadow-blue-500/20'
-                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                      ? 'border-[rgba(78,161,255,0.35)] bg-[rgba(78,161,255,0.14)] text-white'
+                      : 'border-[var(--color-one-border)] bg-white/[0.02] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white'
                   }`}
                 >
                   <span>{meta.icon}</span>
                   <span>{meta.label}</span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800/80 text-slate-300 font-mono">
+                  <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-one-text-muted)]">
                     {count}
                   </span>
                 </button>
@@ -426,13 +369,13 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
 
           {/* Search bar inside discovery */}
           <div className="relative">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
             <input
               type="text"
               value={searchFilter}
               onChange={e => setSearchFilter(e.target.value)}
               placeholder="在统一资源库中秒级检索（支持名称、域名、分类或标签）..."
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+              className="min-h-11 w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] py-2.5 pl-10 pr-4 text-xs text-white placeholder:text-[var(--color-one-text-dim)] focus:border-[rgba(78,161,255,0.45)] focus:outline-none"
             />
           </div>
 
@@ -441,7 +384,7 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
             {filteredResources.map(res => (
               <div
                 key={res.id}
-                className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between group"
+                className="group flex flex-col justify-between rounded-[24px] border border-[var(--color-one-border)] bg-white/[0.03] p-5 shadow-[var(--shadow-one-sm)] transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.04]"
               >
                 <div>
                   <div className="flex items-start justify-between gap-2 mb-2.5">
@@ -449,26 +392,26 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
                       {res.icon ? (
                         <img src={res.icon} alt="" className="w-5 h-5 rounded-md shrink-0 object-cover" />
                       ) : (
-                        <Globe2 className="w-5 h-5 text-cyan-400 shrink-0" />
+                        <Globe2 className="h-5 w-5 shrink-0 text-[var(--color-one-accent)]" />
                       )}
-                      <h3 className="font-semibold text-white text-sm truncate group-hover:text-cyan-300 transition-colors">
+                      <h3 className="truncate text-sm font-semibold text-white transition-colors group-hover:text-[var(--color-one-accent-soft)]">
                         {res.name}
                       </h3>
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 shrink-0 uppercase">
+                    <span className="shrink-0 rounded-full border border-[var(--color-one-border)] bg-white/[0.02] px-2 py-0.5 font-mono text-[10px] uppercase text-[var(--color-one-text-muted)]">
                       {res.primaryPlanet}
                     </span>
                   </div>
 
-                  <p className="text-xs text-slate-400 line-clamp-2 mb-3 leading-relaxed">
+                  <p className="mb-3 line-clamp-2 text-xs leading-relaxed text-[var(--color-one-text-muted)]">
                     {res.description || '暂无描述'}
                   </p>
 
                   <div className="flex items-center gap-1.5 flex-wrap mb-4">
-                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-950 text-slate-400 font-mono">
+                    <span className="rounded-md border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] px-2 py-0.5 font-mono text-[10px] text-[var(--color-one-text-muted)]">
                       {res.domain}
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-950/60 text-blue-300 border border-blue-500/30">
+                    <span className="rounded-md border border-[rgba(78,161,255,0.25)] bg-[rgba(78,161,255,0.1)] px-2 py-0.5 text-[10px] text-[var(--color-one-accent-soft)]">
                       {res.category}
                     </span>
                     <span className={`text-[10px] px-2 py-0.5 rounded-md border ${
@@ -484,15 +427,15 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
                   </div>
                 </div>
 
-                <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                  <div className="text-[10px] text-slate-500 font-mono">
-                    质量分: <span className="text-cyan-400 font-semibold">{res.qualityScore}</span>
+                <div className="flex items-center justify-between border-t border-[var(--color-one-border)] pt-3">
+                  <div className="font-mono text-[10px] text-[var(--color-one-text-dim)]">
+                    质量分: <span className="font-semibold text-[var(--color-one-accent-soft)]">{res.qualityScore}</span>
                   </div>
                   <a
                     href={res.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center space-x-1 text-xs text-cyan-400 hover:text-cyan-300 font-medium"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-one-accent-soft)] hover:text-white"
                   >
                     <span>访问资源</span>
                     <ExternalLink className="w-3 h-3" />
@@ -503,7 +446,7 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
           </div>
 
           {filteredResources.length === 0 && (
-            <div className="text-center py-16 text-slate-500 text-xs">
+            <div className="rounded-[28px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] py-16 text-center text-xs text-[var(--color-one-text-muted)]">
               该筛选条件下暂无资源，可点击右上角「录入新资源」或使用「同步 RSS」抓取。
             </div>
           )}
@@ -512,11 +455,11 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
 
       {/* 5. Tab 1: Tasks List */}
       {activeTab === 'tasks' && (
-        <div className="max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="mx-auto grid w-full max-w-7xl grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {tasks.map(task => (
             <div
               key={task.id}
-              className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between"
+              className="p-5 rounded-2xl border border-[var(--color-one-border)] bg-white/[0.03] hover:border-[var(--color-one-border-strong)] transition-all flex flex-col justify-between"
             >
               <div>
                 <div className="flex items-start justify-between mb-3">
@@ -539,7 +482,7 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
                   </span>
                 </div>
 
-                <div className="space-y-1.5 text-xs text-slate-400 mb-4 bg-slate-950/50 p-3 rounded-xl border border-slate-800/80">
+                <div className="space-y-1.5 text-xs text-slate-400 mb-4 rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-3">
                   <div className="flex items-center justify-between">
                     <span>起始 URL:</span>
                     <span className="font-mono text-slate-300 truncate max-w-[160px]">{task.startUrl}</span>
@@ -551,8 +494,8 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                <span className="text-[10px] text-slate-500 font-mono">{task.lastRunAt || '就绪'}</span>
+              <div className="flex items-center justify-between border-t border-[var(--color-one-border)] pt-3">
+                <span className="font-mono text-[10px] text-[var(--color-one-text-dim)]">{task.lastRunAt || '就绪'}</span>
                 <button
                   onClick={() => handleTriggerHealthCheck()}
                   className="px-3 py-1.5 rounded-xl bg-blue-600/20 text-cyan-300 hover:bg-blue-600 hover:text-white text-xs font-medium transition-all"
@@ -567,13 +510,13 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
 
       {/* 6. Tab 2: Pending Reviews */}
       {activeTab === 'pending' && (
-        <div className="max-w-7xl mx-auto w-full">
+        <div className="mx-auto w-full max-w-7xl">
           {pendingPages.length === 0 ? (
-            <div className="text-center py-20 text-slate-500 text-xs">暂无待审核页面</div>
+            <div className="text-center py-20 text-[var(--color-one-text-dim)] text-xs">暂无待审核页面</div>
           ) : (
             <div className="space-y-3">
               {pendingPages.map(page => (
-                <div key={page.id} className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                <div key={page.id} className="p-4 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] flex items-center justify-between">
                   <div>
                     <h4 className="text-sm font-semibold text-white">{page.title}</h4>
                     <span className="text-xs text-slate-400 font-mono">{page.url}</span>
@@ -606,7 +549,7 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
       {/* Manual Resource Addition Modal */}
       {isAddResourceModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-lg p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl">
+          <div className="w-full max-w-lg p-6 rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] shadow-2xl">
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
               <h3 className="font-bold text-white text-base flex items-center gap-2">
                 <Plus className="w-4 h-4 text-cyan-400" />
@@ -628,7 +571,7 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
                   placeholder="https://example.com/tool?ref=social"
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono"
                 />
-                <span className="text-[10px] text-slate-500 mt-1 block">
+                <span className="text-[10px] text-[var(--color-one-text-dim)] mt-1 block">
                   系统将自动剥离 utm_* 等营销参数，生成全局唯一 Canonical 索引指纹。
                 </span>
               </div>
