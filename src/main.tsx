@@ -8,7 +8,7 @@ registerSW({ immediate: true });
 
 const apiBase = getApiBase();
 const origFetch = window.fetch.bind(window);
-window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+const wrappedFetch: typeof window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   try {
     let nextInput: RequestInfo | URL = input;
     let isApi = false;
@@ -49,5 +49,15 @@ window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   } catch {}
   return origFetch(input as any, init);
 };
+
+try {
+  Object.defineProperty(window, 'fetch', {
+    value: wrappedFetch,
+    writable: true,
+    configurable: true,
+  });
+} catch {
+  // Some browsers or sandboxed iframes mark window.fetch as non-configurable
+}
 
 createRoot(document.getElementById('root')!).render(<App />);
