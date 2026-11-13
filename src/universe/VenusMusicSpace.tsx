@@ -22,25 +22,8 @@ import {
   Maximize2
 } from 'lucide-react';
 import { Language } from '../types/index.ts';
-
-export interface MusicTrack {
-  id: string;
-  title: string;
-  artist: string;
-  album: string;
-  genre: string;
-  durationSeconds: number;
-  audioUrl?: string;
-  embedUrl?: string;
-  playable?: 'audio' | 'embed';
-  coverUrl: string;
-  source: string;
-  sourceUrl: string;
-  license: string;
-  crawledAt: string;
-  bpm?: number;
-  description?: string;
-}
+import type { MusicTrack } from '../types/music.ts';
+import { useMusicPlayer } from '../music/useMusicPlayer.ts';
 
 interface VenusMusicSpaceProps {
   lang: Language;
@@ -74,14 +57,14 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('all');
 
-  // Playback state
-  const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.85);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isLoop, setIsLoop] = useState(false);
+  const player = useMusicPlayer();
+  const { state: p, currentTrack } = player;
+  const isPlaying = p.isPlaying;
+  const currentTime = p.positionSec;
+  const duration = p.durationSec || currentTrack?.durationSeconds || 0;
+  const volume = p.volume;
+  const isMuted = p.muted;
+  const isLoop = p.mode.repeat === 'one';
   const [showEmbedPlayer, setShowEmbedPlayer] = useState(true);
 
   // Crawler state
@@ -91,12 +74,8 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   const [crawlNotice, setCrawlNotice] = useState<string | null>(null);
   const [ytSearching, setYtSearching] = useState(false);
 
-  // Audio & Visualizer refs
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Visualizer refs (audio engine is global singleton in PlayerProvider)
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -115,11 +94,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
       loadAbortRef.current?.abort();
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-      try { audioRef.current?.pause(); } catch {}
-      try { audioCtxRef.current?.close(); } catch {}
-      audioCtxRef.current = null;
-      analyserRef.current = null;
-      sourceNodeRef.current = null;
+      // IMPORTANT: do not pause/close global audio engine here (playback must survive tab/view changes)
     };
   }, []);
 
@@ -187,7 +162,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         }));
         if (mapped.length) {
           setTracks(mapped);
-          setCurrentTrackIndex(0);
+          player.playTrack(mapped[0], mapped, 0);
           setShowEmbedPlayer(true);
           setCrawlNotice(isZh ? `YouTube 抓取完成：获取 ${mapped.length} 条可播放结果。` : `YouTube crawl done: ${mapped.length} playable results.`);
         } else {
@@ -235,7 +210,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           description: bv.description || '来自哔哩哔哩开放平台的原声音乐与现场音频流。'
         }));
         setTracks(mapped);
-        setCurrentTrackIndex(0);
+        player.playTrack(mapped[0], mapped, 0);
         setShowEmbedPlayer(true);
         setCrawlNotice(isZh ? `B站爬取完成：获取 ${mapped.length} 条可播放结果。` : `Bilibili crawl done: ${mapped.length} results.`);
       } else {
@@ -308,7 +283,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
       if (merged.length > 0) {
         setTracks(merged);
-        setCurrentTrackIndex(0);
+        player.playTrack(merged[0], merged, 0);
         setShowEmbedPlayer(true);
         const failMsg = errs.length ? `；失败: ${errs.join('；')}` : '';
         setCrawlNotice(isZh ? `双端爬取完成：B站 ${biliCount} 首，YouTube ${ytCount} 首，共 ${merged.length} 首${failMsg}` : `Dual crawl done: Bilibili ${biliCount}, YouTube ${ytCount}, total ${merged.length}${failMsg ? `; ${errs.join('; ')}` : ''}`);
@@ -334,31 +309,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     }
   }, [selectedGenre]);
 
-  const activeTrack = tracks[currentTrackIndex] || tracks[0];
+  const activeTrack = currentTrack || (tracks[0] ? { ...tracks[0], playback: { kind: (tracks[0].playable === 'embed' || tracks[0].embedUrl) ? 'embed' : (tracks[0].audioUrl ? 'audio' : 'none'), audioUrl: tracks[0].audioUrl, embedUrl: tracks[0].embedUrl } } as any : null);
 
-  // Initialize Web Audio Spectrum Visualizer
-  const setupVisualizer = () => {
-    if (!audioRef.current || audioCtxRef.current) return;
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64;
-
-      const source = ctx.createMediaElementSource(audioRef.current);
-      source.connect(analyser);
-      analyser.connect(ctx.destination);
-
-      audioCtxRef.current = ctx;
-      analyserRef.current = analyser;
-      sourceNodeRef.current = source;
-    } catch {
-      /* ignore */
-    }
-  };
-
-  // Draw spectrum loop
+  // Draw spectrum loop (uses global audio engine analyser, no duplicate MediaElementAudioSourceNode)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -369,11 +322,11 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       animFrameRef.current = requestAnimationFrame(renderSpectrum);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const analyser = analyserRef.current;
+      const analyser = player.getAudioAnalyser();
       const barCount = 32;
       const barWidth = (canvas.width / barCount) - 2;
 
-      if (analyser && isPlaying) {
+      if (analyser && isPlaying && currentTrack?.playback.kind === 'audio') {
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
         analyser.getByteFrequencyData(dataArray);
@@ -413,56 +366,46 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [isPlaying]);
+  }, [isPlaying, currentTrack, player]);
 
   // Handle Play/Pause
-  const togglePlay = () => {
-    if (activeTrack?.playable === 'embed' || activeTrack?.embedUrl) {
+  const togglePlay = async () => {
+    const track = currentTrack || (tracks[0] as any);
+    if (track && (track.playback?.kind === 'embed' || track.embedUrl || track.playable === 'embed')) {
       setShowEmbedPlayer(true);
+      if (!currentTrack && tracks[0]) player.playTrack(tracks[0], tracks, 0);
       showNotice(isZh ? '当前为官方嵌入播放器，请在上方嵌入窗口中点击播放/暂停。' : 'Use the embedded player controls.', 2500);
       return;
     }
-    if (!audioRef.current) return;
-    setupVisualizer();
-    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
-      audioCtxRef.current.resume();
+    if (!currentTrack && tracks.length > 0) {
+      player.playTrack(tracks[0], tracks, 0);
+      await player.resumeAudioContext();
+      return;
     }
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-    }
+    await player.resumeAudioContext();
+    player.togglePlay();
   };
 
   const handleSelectTrack = (index: number) => {
     const track = tracks[index];
-    setCurrentTrackIndex(index);
-    setCurrentTime(0);
+    if (!track) return;
     setShowEmbedPlayer(true);
-    if (track?.playable === 'embed' || track?.embedUrl) {
-      if (audioRef.current) audioRef.current.pause();
-      setIsPlaying(true);
-      return;
+    player.playTrack(track, tracks, index);
+    if ((track.playable === 'embed' || track.embedUrl)) {
+      // embed handled by iframe UI; engine stops audio automatically
+    } else {
+      void player.resumeAudioContext();
     }
-    setTimeout(() => {
-      if (audioRef.current) {
-        setupVisualizer();
-        audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-      }
-    }, 50);
   };
 
   const handleNext = () => {
-    if (tracks.length === 0) return;
-    const nextIdx = (currentTrackIndex + 1) % tracks.length;
-    handleSelectTrack(nextIdx);
+    if (tracks.length === 0 && p.queue.length === 0) return;
+    player.playNext();
   };
 
   const handlePrev = () => {
-    if (tracks.length === 0) return;
-    const prevIdx = (currentTrackIndex - 1 + tracks.length) % tracks.length;
-    handleSelectTrack(prevIdx);
+    if (tracks.length === 0 && p.queue.length === 0) return;
+    player.playPrevious();
   };
 
   // Run Fixed Crawler (persistent harvest for open sources; realtime search for Bili/YouTube)
@@ -535,7 +478,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       </div>
 
       {/* Floating Embedded Player (Bilibili / YouTube / SoundCloud) */}
-      {(activeTrack?.playable === 'embed' || activeTrack?.embedUrl) && showEmbedPlayer && (
+      {(activeTrack?.playback?.kind === 'embed' || activeTrack?.embedUrl || activeTrack?.playable === 'embed') && showEmbedPlayer && (
         <div className="fixed bottom-[calc(176px+env(safe-area-inset-bottom))] md:bottom-[115px] left-4 right-4 z-40 mx-auto max-w-xl rounded-2xl border border-rose-500/40 bg-black/95 p-3 backdrop-blur-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-4">
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-rose-900/40 text-xs">
             <div className="flex items-center gap-2">
@@ -556,7 +499,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           </div>
           <iframe
             title={activeTrack.title}
-            src={activeTrack.embedUrl}
+            src={activeTrack.playback?.embedUrl || activeTrack.embedUrl}
             className="aspect-video w-full rounded-xl border-0 bg-black"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
@@ -574,26 +517,12 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         </div>
       )}
 
-      {/* Native HTML5 Audio for Free Music Archive / Jamendo */}
-      <audio
-        ref={audioRef}
-        src={activeTrack?.audioUrl}
-        crossOrigin="anonymous"
-        onTimeUpdate={() => {
-          if (audioRef.current) {
-            setCurrentTime(audioRef.current.currentTime);
-            setDuration(audioRef.current.duration || 0);
-          }
-        }}
-        onEnded={() => {
-          if (isLoop && audioRef.current) {
-            audioRef.current.currentTime = 0;
-            audioRef.current.play();
-          } else {
-            handleNext();
-          }
-        }}
-      />
+      {/* Native audio playback is handled by the global PlayerProvider singleton engine */}
+      {p.error && (
+        <div className="fixed bottom-[calc(260px+env(safe-area-inset-bottom))] md:bottom-[170px] left-4 right-4 z-40 mx-auto max-w-xl rounded-xl border border-red-500/40 bg-red-950/80 px-3 py-2 text-xs text-red-100">
+          {isZh ? '播放失败：' : 'Playback error: '}{p.error.message}
+        </div>
+      )}
 
       {/* 1. Header Navigation Bar */}
       <header className="sticky top-[58px] md:top-16 z-30 border-b border-rose-900/30 bg-[#07040d]/85 backdrop-blur-2xl px-4 sm:px-8 py-3.5 flex items-center justify-between">
@@ -828,7 +757,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         {/* 5. Music Track Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {tracks.map((track, idx) => {
-            const isCurrent = activeTrack?.id === track.id;
+            const isCurrent = (currentTrack?.id || (activeTrack as any)?.id) === track.id;
             return (
               <div
                 key={track.id}
@@ -873,7 +802,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
                 </div>
 
                 <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500">
-                  <span>{formatSeconds(track.durationSeconds)}</span>
+                  <span>{formatSeconds(track.durationSeconds || 0)}</span>
                   <span className="truncate max-w-[120px]">{track.license || track.source}</span>
                 </div>
               </div>
@@ -888,16 +817,16 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           {/* Active Track Info */}
           <div className="flex items-center space-x-3 w-full sm:w-1/3 min-w-0">
             <img
-              src={activeTrack?.coverUrl}
-              alt={activeTrack?.title}
+              src={(currentTrack as any)?.coverUrl || (activeTrack as any)?.coverUrl}
+              alt={(currentTrack as any)?.title || (activeTrack as any)?.title}
               className="w-12 h-12 rounded-xl object-cover border border-rose-500/40 shrink-0"
             />
             <div className="min-w-0">
               <div className="font-bold text-white text-xs truncate">
-                {activeTrack?.title || '未选择播放曲目'}
+                {(currentTrack as any)?.title || (activeTrack as any)?.title || '未选择播放曲目'}
               </div>
               <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                {activeTrack?.artist} · {activeTrack?.album || activeTrack?.source}
+                {(currentTrack as any)?.artist || (activeTrack as any)?.artist} · {(currentTrack as any)?.album || (activeTrack as any)?.album || (activeTrack as any)?.source}
               </div>
             </div>
           </div>
@@ -906,7 +835,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           <div className="flex flex-col items-center w-full sm:w-2/5 space-y-1">
             <div className="flex items-center space-x-4">
               <button
-                onClick={() => setIsLoop(!isLoop)}
+                onClick={() => player.setRepeatMode(isLoop ? 'off' : 'one')}
                 className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer ${isLoop ? 'text-rose-400 bg-rose-950/60' : 'text-slate-400 hover:text-white'}`}
                 title="单曲循环"
               >
@@ -945,13 +874,13 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
                 type="range"
                 min={0}
                 max={duration || 100}
-                value={currentTime}
+                value={Math.min(currentTime, duration || 100)}
                 onChange={e => {
                   const t = parseFloat(e.target.value);
-                  setCurrentTime(t);
-                  if (audioRef.current) audioRef.current.currentTime = t;
+                  if (currentTrack?.playback?.kind === 'audio') player.seek(t);
                 }}
-                className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rose-500"
+                disabled={!(currentTrack?.playback?.kind === 'audio')}
+                className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rose-500 disabled:opacity-50"
               />
               <span>{formatSeconds(duration || activeTrack?.durationSeconds || 0)}</span>
             </div>
@@ -959,7 +888,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
           {/* Volume Control & Direct Source Link */}
           <div className="hidden sm:flex items-center justify-end space-x-3 w-1/3">
-            {(activeTrack?.playable === 'embed' || activeTrack?.embedUrl) && (
+            {(currentTrack?.playback?.kind === 'embed' || currentTrack?.playback?.embedUrl) && (
               <button
                 onClick={() => setShowEmbedPlayer(!showEmbedPlayer)}
                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
@@ -973,12 +902,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
             )}
 
             <button
-              onClick={() => {
-                if (audioRef.current) {
-                  audioRef.current.muted = !isMuted;
-                  setIsMuted(!isMuted);
-                }
-              }}
+              onClick={() => player.toggleMute()}
               className="text-slate-400 hover:text-white transition-colors cursor-pointer"
             >
               {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
@@ -991,12 +915,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
               value={isMuted ? 0 : volume}
               onChange={e => {
                 const v = parseFloat(e.target.value);
-                setVolume(v);
-                setIsMuted(false);
-                if (audioRef.current) {
-                  audioRef.current.volume = v;
-                  audioRef.current.muted = false;
-                }
+                player.setVolume(v);
               }}
               className="w-20 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rose-500"
             />
