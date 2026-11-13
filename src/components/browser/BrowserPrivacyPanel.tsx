@@ -102,13 +102,13 @@ export const BrowserPrivacyPanel: React.FC<BrowserPrivacyPanelProps> = ({ counts
     .filter((key): key is Category => key !== 'localData' && Object.prototype.hasOwnProperty.call(result?.results, key));
 
   return (
-    <div className="fixed inset-0 z-[100] flex justify-end bg-black/75 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="隐私与清除浏览数据" data-browser-privacy-panel>
+    <div className="fixed inset-0 z-[100] flex justify-end bg-black/60 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="隐私与清除浏览数据" data-browser-privacy-panel>
       <button type="button" aria-label="关闭隐私面板背景" onClick={onClose} disabled={pending} className="absolute inset-0 cursor-default disabled:cursor-wait" />
-      <section className="relative z-[1] flex h-full w-full max-w-2xl flex-col border-l border-white/10 bg-[#08111a] shadow-2xl">
-        <header className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-5 sm:px-7">
+      <section className="relative z-[1] flex h-full w-full max-w-2xl flex-col border-l border-white/10 bg-[rgba(10,14,20,0.98)] shadow-[0_30px_100px_rgba(0,0,0,0.5)]">
+        <header className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-5 sm:px-7 bg-white/[0.02]">
           <div>
             <div className="flex items-center gap-2 text-cyan-200">
-              <ShieldAlert className="h-5 w-5" />
+              <ShieldAlert className="h-5 w-5 text-cyan-300" />
               <h2 className="text-lg font-semibold text-white">隐私与清除浏览数据</h2>
             </div>
             <p className="mt-2 max-w-xl text-xs leading-relaxed text-slate-400">选择要清除的 Browser 本机数据。所有操作仅限当前设备，不会把已清除的数据发送到服务器。</p>

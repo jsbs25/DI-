@@ -3055,7 +3055,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               onClick={() => setIsAiPanelOpen(false)}
               className="absolute inset-0 z-20 cursor-default bg-black/50 backdrop-blur-[2px] md:hidden"
             />
-            <aside className="absolute inset-x-3 bottom-3 top-3 z-30 flex select-none flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#101720] shadow-2xl md:relative md:inset-auto md:z-0 md:w-[340px] md:shrink-0 md:rounded-none md:border-y-0 md:border-r-0 md:border-l md:border-white/[0.07] md:shadow-none">
+            <aside className="absolute inset-x-3 bottom-3 top-3 z-30 flex select-none flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[rgba(10,14,20,0.98)] backdrop-blur-xl shadow-2xl md:relative md:inset-auto md:z-0 md:w-[360px] md:shrink-0 md:rounded-none md:border-y-0 md:border-r-0 md:border-l md:border-white/10 md:shadow-none">
             <div className="border-b border-white/[0.07] bg-[#121b25] p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center space-x-2">
@@ -3197,8 +3197,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
 
       {/* Custom Shortcut Add Modal */}
       {showAddShortcutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0d1520] p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-[24px] border border-white/10 bg-[rgba(10,14,20,0.98)] p-6 shadow-[0_30px_100px_rgba(0,0,0,0.5)]">
             <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
               <h3 className="text-base font-semibold text-white">添加快捷方式</h3>
               <button onClick={() => setShowAddShortcutModal(false)} className="text-slate-400 hover:text-white">
@@ -3266,8 +3266,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
         const request = browserPermissionState.pending[0];
         const capability = request.permission === 'notifications' ? '通知' : '位置信息';
         return (
-          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="alertdialog" aria-modal="true" aria-labelledby="browser-permission-title" data-browser-permission-prompt data-permission={request.permission} data-origin={request.origin}>
-            <section className="w-full max-w-md rounded-2xl border border-cyan-200/15 bg-[#08111a] p-5 shadow-2xl shadow-black/60 sm:p-6">
+          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-md" role="alertdialog" aria-modal="true" aria-labelledby="browser-permission-title" data-browser-permission-prompt data-permission={request.permission} data-origin={request.origin}>
+            <section className="w-full max-w-md rounded-[24px] border border-white/10 bg-[rgba(10,14,20,0.98)] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.5)] sm:p-6">
               <div className="flex items-start gap-3">
                 <div className="rounded-xl border border-cyan-200/15 bg-cyan-200/[0.06] p-2 text-cyan-200">
                   {request.permission === 'notifications' ? <Bell className="h-5 w-5" /> : <MapPin className="h-5 w-5" />}
@@ -3290,9 +3290,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
       })()}
 
       {isPermissionsOpen && browserEngine && (
-        <div className="fixed inset-0 z-[60] flex justify-end bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="会话站点权限" data-browser-permissions-panel>
+        <div className="fixed inset-0 z-[60] flex justify-end bg-black/60 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="会话站点权限" data-browser-permissions-panel>
           <button type="button" aria-label="关闭会话站点权限背景" onClick={() => setIsPermissionsOpen(false)} className="absolute inset-0 cursor-default" />
-          <section className="relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[#08111a] p-5 shadow-2xl sm:p-6">
+          <section className="relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[rgba(10,14,20,0.98)] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.5)] sm:p-6">
             <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
               <div>
                 <div className="flex items-center gap-2 text-emerald-200">
@@ -3338,8 +3338,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
       )}
 
       {isBrowserDataOpen && (
-        <div className="fixed inset-0 z-[60] flex justify-end bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="本地浏览数据">
-          <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[#08111a] p-5 shadow-2xl sm:p-6">
+        <div className="fixed inset-0 z-[60] flex justify-end bg-black/60 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="本地浏览数据">
+          <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[rgba(10,14,20,0.98)] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.5)] sm:p-6">
             <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
               <div>
                 <div className="flex items-center gap-2 text-cyan-200">
@@ -3410,9 +3410,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
       )}
 
       {isDownloadsOpen && browserEngine && (
-        <div className="fixed inset-0 z-[60] flex justify-end bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="下载管理器" data-browser-download-manager>
+        <div className="fixed inset-0 z-[60] flex justify-end bg-black/60 backdrop-blur-md" role="dialog" aria-modal="true" aria-label="下载管理器" data-browser-download-manager>
           <button type="button" aria-label="关闭下载管理器背景" onClick={() => setIsDownloadsOpen(false)} className="absolute inset-0 cursor-default" />
-          <section className="relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[#08111a] p-5 shadow-2xl sm:p-6">
+          <section className="relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[rgba(10,14,20,0.98)] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.5)] sm:p-6">
             <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
               <div>
                 <div className="flex items-center gap-2 text-cyan-200">
@@ -3507,8 +3507,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
       )}
 
       {isSavedDrawerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end">
-          <div className="w-full max-w-md bg-[#0a1128] border-l border-slate-800 h-full flex flex-col p-6 shadow-2xl animate-in slide-in-from-right">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex justify-end">
+          <div className="w-full max-w-md bg-[rgba(10,14,20,0.98)] border-l border-white/10 h-full flex flex-col p-6 shadow-[0_30px_100px_rgba(0,0,0,0.5)]">
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div className="flex items-center space-x-2">
                 <Database className="w-5 h-5 text-cyan-400" />
