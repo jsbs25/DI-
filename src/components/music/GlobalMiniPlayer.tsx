@@ -31,10 +31,7 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
   const cover = currentTrack?.coverUrl || '';
   const canShow = !!currentTrack || state.queue.length > 0;
 
-  const bottomOffset = useMemo(() => {
-    // keep above mobile dock when dock visible
-    return 'calc(env(safe-area-inset-bottom) + 0.75rem)';
-  }, []);
+  const bottomOffset = 'calc(env(safe-area-inset-bottom) + 4.4rem)';
 
   if (!canShow) return null;
   if (currentTab === 'venus') return null; // Venus renders full player experience

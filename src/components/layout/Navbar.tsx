@@ -78,10 +78,10 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="pointer-events-auto mx-auto flex h-11 max-w-[1200px] items-center justify-between gap-2 rounded-2xl eo-glass px-2 sm:px-2.5 shadow-[0_8px_32px_-16px_rgba(0,0,0,0.5)]">
         <div className="flex min-w-0 items-center gap-1.5">
           <button onClick={() => onSelectTab('globe')} className="flex items-center gap-2 rounded-xl px-1.5 py-1 transition-colors hover:bg-white/[0.05]">
-            <div className="relative h-7 w-7 overflow-hidden rounded-[8px] ring-1 ring-[#D8B778]/40 bg-[#0B0F17]">
-              <img src="/earth-one-icon.png" alt="EARTH ONE" className="h-full w-full object-cover" />
+            <div className="relative h-7 w-7 overflow-hidden rounded-[9px] ring-1 ring-white/15 bg-[#0B0F17]">
+              <img src="/earth-one-icon.png" alt="ONE" className="h-full w-full object-cover" />
             </div>
-            <span className="hidden whitespace-nowrap text-[13px] font-semibold tracking-wide text-white/95 sm:inline">EARTH ONE</span>
+            <span className="hidden whitespace-nowrap text-[13px] font-semibold tracking-[0.18em] text-white/95 sm:inline">ONE</span>
           </button>
         </div>
 
