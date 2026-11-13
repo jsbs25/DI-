@@ -1,18 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import {
-  User,
-  Post,
-  GlobeUserNode,
-  GlobeCountryStat,
-  Conversation,
-  CreatorArticle,
-  VideoItem,
-  Community,
-  Language
-} from './types/index.ts';
+import type { User, Post, GlobeUserNode, GlobeCountryStat, Conversation, CreatorArticle, VideoItem, Community, Language } from './types/index.ts';
 import { translations } from './i18n/translations.ts';
 import { Navbar } from './components/layout/Navbar.tsx';
-import { Sidebar } from './components/layout/Sidebar.tsx';
+import { AppDock } from './components/layout/AppDock.tsx';
+import { CommandPalette } from './components/layout/CommandPalette.tsx';
 import { DigitalGlobe } from './components/globe/DigitalGlobe.tsx';
 import { GlobalFeed } from './components/social/GlobalFeed.tsx';
 import { GlobalMessenger } from './components/chat/GlobalMessenger.tsx';
@@ -38,12 +29,9 @@ import { MercurySearch } from './components/search/MercurySearch.tsx';
 import { getPlanetEcosystem } from './universe/planetEcosystems.ts';
 import { HolographicAICompanion } from './components/ai/HolographicAICompanion.tsx';
 import { Globe2, ShieldCheck, Sparkles } from 'lucide-react';
-import { MoonAcademy } from './universe/MoonAcademy.tsx';
 import { MoonSpaceObservatory } from './universe/MoonSpaceObservatory.tsx';
-import { VenusCreativeStudio } from './universe/VenusCreativeStudio.tsx';
 import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 import { LoginPage } from './components/auth/LoginPage.tsx';
-// DevStatusPanel removed from ordinary user UI
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -51,9 +39,7 @@ export default function App() {
       const params = new URLSearchParams(window.location.search);
       if (params.get('nointro') === '1') return false;
       return true;
-    } catch {
-      return true;
-    }
+    } catch { return true; }
   });
   const [lang, setLang] = useState<Language>('zh');
   const t = translations[lang] || translations.zh;
@@ -65,15 +51,12 @@ export default function App() {
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [browserInitialQuery, setBrowserInitialQuery] = useState<string | null>(() =>
-    window.location.pathname === '/jupiter/search'
-      ? new URLSearchParams(window.location.search).get('q')
-      : null
+    window.location.pathname === '/jupiter/search' ? new URLSearchParams(window.location.search).get('q') : null
   );
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showGlobeTools, setShowGlobeTools] = useState(true);
-  const [selectedSolarBodyId, setSelectedSolarBodyId] = useState<string | undefined>();
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [immersive, setImmersive] = useState(false);
 
-  // Core Data State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [nodes, setNodes] = useState<GlobeUserNode[]>([]);
   const [countries, setCountries] = useState<GlobeCountryStat[]>([]);
@@ -82,8 +65,6 @@ export default function App() {
   const [articles, setArticles] = useState<CreatorArticle[]>([]);
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
-
-  // Modals & Navigation triggers
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState(false);
@@ -96,390 +77,67 @@ export default function App() {
   const [knowledgeFocusNodeId, setKnowledgeFocusNodeId] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<any[]>([]);
 
-  // Handle RTL layout adaptation for Arabic
-  useEffect(() => {
-    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    document.documentElement.lang = lang;
-  }, [lang]);
+  useEffect(() => { document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'; document.documentElement.lang = lang; }, [lang]);
 
   const isImmersiveSpace = ['universe', 'globe', 'saturn', 'venus', 'browser', 'academy', 'mercury'].includes(currentTab);
+  useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
 
-  useEffect(() => {
-    if (['universe', 'saturn', 'venus'].includes(currentTab)) {
-      setSidebarCollapsed(true);
-    }
-  }, [currentTab]);
+  const refreshConversations = async () => { try { const res = await fetch('/api/conversations'); const data = await res.json(); if (data.success) setConversations(data.conversations || []); } catch {} };
+  const refreshIntegrations = async () => { try { const res = await fetch('/api/integrations'); const data = await res.json(); if (data.success) setIntegrations(data.integrations || []); } catch {} };
 
-  const refreshConversations = async () => {
-    try {
-      const res = await fetch('/api/conversations');
-      const data = await res.json();
-      if (data.success) setConversations(data.conversations || []);
-    } catch {}
-  };
-
-  const refreshIntegrations = async () => {
-    try {
-      const res = await fetch('/api/integrations');
-      const data = await res.json();
-      if (data.success) setIntegrations(data.integrations || []);
-    } catch {}
-  };
-
-  // Initial Data Fetch & Auth Check (+ OAuth callback hash)
   useEffect(() => {
     try { localStorage.removeItem('earth_one_token'); } catch {}
-
     const params = new URLSearchParams(window.location.search);
     const authErr = params.get('auth_error');
     if (authErr) {
-      const map: Record<string,string> = {
-        wechat_unbound: '该微信账号尚未绑定 EARTH ONE 账户，请先使用已有账户登录后绑定，或使用开发者登录。',
-        wechat_state: '微信登录验证失败（state 校验失败），请重试。',
-        wechat_config: '微信登录尚未配置，请使用开发者登录。',
-        wechat_token: '微信授权失败，请检查配置后重试。',
-        wechat_profile: '未获取到微信身份信息。',
-        wechat_failed: '微信登录失败，请稍后重试。',
-        google_unbound: '该 Google 账号尚未绑定 EARTH ONE 账户，请先绑定后再登录。',
-        google_state: 'Google 登录验证失败，请重试。',
-        google_config: 'Google 登录尚未配置。',
-        google_token: 'Google 授权失败。',
-        google_profile: '未获取到 Google 资料。',
-        google_failed: 'Google 登录失败。',
-      };
+      const map: Record<string,string> = { wechat_unbound: '该微信账号尚未绑定 EARTH ONE 账户，请先使用已有账户登录后绑定。', wechat_state: '微信登录验证失败，请重试。', wechat_config: '微信登录尚未配置。', wechat_token: '微信授权失败。', wechat_profile: '未获取到微信身份信息。', wechat_failed: '微信登录失败。', google_unbound: '该 Google 账号尚未绑定 EARTH ONE 账户。', google_state: 'Google 登录验证失败。', google_config: 'Google 登录尚未配置。', google_token: 'Google 授权失败。', google_profile: '未获取到 Google 资料。', google_failed: 'Google 登录失败。' };
       setWelcomeToast(map[authErr] || `Login failed: ${authErr}`);
       setTimeout(() => setWelcomeToast(null), 6000);
       window.history.replaceState({}, '', window.location.pathname);
     }
-    // Legacy hash token payloads are not trusted/stored; rely on secure session cookie.
-    if ((window.location.hash || '').startsWith('#auth=')) {
-      window.history.replaceState({}, '', window.location.pathname + window.location.search);
-    }
-
-    // Authenticated user check (server session cookie)
-    fetch('/api/auth/me')
-      .then(async (r) => {
-        const d = await r.json().catch(() => ({}));
-        if (r.ok && d?.success && d?.user) {
-          setCurrentUser(d.user);
-          if (d.user.hasCompletedOnboarding === false) {
-            setIsOnboardingModalOpen(true);
-          }
-        } else {
-          setCurrentUser(null);
-        }
-      })
-      .catch((err) => {
-        console.error(err);
-      });
-
-    fetch('/api/globe/nodes').then(r => r.json()).then(d => { if (d.success) setNodes(d.nodes); }).catch(console.error);
-    fetch('/api/globe/countries').then(r => r.json()).then(d => { if (d.success) setCountries(d.countries); }).catch(console.error);
-    fetch('/api/posts').then(r => r.json()).then(d => { if (d.success) setPosts(d.posts); }).catch(console.error);
+    if ((window.location.hash || '').startsWith('#auth=')) window.history.replaceState({}, '', window.location.pathname + window.location.search);
+    fetch('/api/auth/me').then(async (r) => { const d = await r.json().catch(() => ({})); if (r.ok && d?.success && d?.user) { setCurrentUser(d.user); if (d.user.hasCompletedOnboarding === false) setIsOnboardingModalOpen(true); } else setCurrentUser(null); }).catch(() => {});
+    fetch('/api/globe/nodes').then(r => r.json()).then(d => { if (d.success) setNodes(d.nodes); }).catch(() => {});
+    fetch('/api/globe/countries').then(r => r.json()).then(d => { if (d.success) setCountries(d.countries); }).catch(() => {});
+    fetch('/api/posts').then(r => r.json()).then(d => { if (d.success) setPosts(d.posts); }).catch(() => {});
     fetch('/api/conversations').then(r => r.json()).then(d => { if (d.success) setConversations(d.conversations || []); }).catch(() => {});
     fetch('/api/integrations').then(r => r.json()).then(d => { if (d.success) setIntegrations(d.integrations || []); }).catch(() => {});
-    fetch('/api/articles').then(r => r.json()).then(d => { if (d.success) setArticles(d.articles); }).catch(console.error);
-    fetch('/api/videos').then(r => r.json()).then(d => { if (d.success) setVideos(d.videos); }).catch(console.error);
-    fetch('/api/communities').then(r => r.json()).then(d => { if (d.success) setCommunities(d.communities); }).catch(console.error);
+    fetch('/api/articles').then(r => r.json()).then(d => { if (d.success) setArticles(d.articles); }).catch(() => {});
+    fetch('/api/videos').then(r => r.json()).then(d => { if (d.success) setVideos(d.videos); }).catch(() => {});
+    fetch('/api/communities').then(r => r.json()).then(d => { if (d.success) setCommunities(d.communities); }).catch(() => {});
   }, []);
 
-  // Post Actions
-  const handleLikePost = async (postId: string) => {
-    try {
-      const res = await fetch(`/api/posts/${postId}/like`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setPosts(prev =>
-          prev.map(p =>
-            p.id === postId ? { ...p, liked: data.liked, likesCount: data.likesCount } : p
-          )
-        );
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const handleLikePost = async (postId: string) => { try { const res = await fetch(`/api/posts/${postId}/like`, { method: 'POST' }); const data = await res.json(); if (data.success) setPosts(prev => prev.map(p => p.id === postId ? { ...p, liked: data.liked, likesCount: data.likesCount } : p)); } catch {} };
+  const handleAddComment = async (postId: string, content: string) => { try { const res = await fetch(`/api/posts/${postId}/comment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) }); const data = await res.json(); if (data.success && data.post) setPosts(prev => prev.map(p => p.id === postId ? data.post : p)); } catch {} };
+  const handleCreatePost = async (postData: { content: string; mediaUrl?: string; category: any }) => { try { const res = await fetch('/api/posts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(postData) }); const data = await res.json(); if (data.success && data.post) setPosts(prev => [data.post, ...prev]); } catch {} };
+  const handleCreateArticle = async (artData: any) => { try { const res = await fetch('/api/articles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(artData) }); const data = await res.json(); if (data.success && data.article) setArticles(prev => [data.article, ...prev]); } catch {} };
+  const handleToggleJoinCommunity = async (commId: string) => { try { const res = await fetch(`/api/communities/${commId}/join`, { method: 'POST' }); const data = await res.json(); if (data.success) setCommunities(prev => prev.map(c => c.id === commId ? { ...c, isJoined: data.isJoined, membersCount: data.membersCount } : c)); } catch {} };
+  const handleToggleLocationPrivacy = async () => { try { const res = await fetch('/api/auth/toggle-location', { method: 'POST' }); const data = await res.json(); if (data.success && data.user) { setCurrentUser(data.user); const nodesRes = await fetch('/api/globe/nodes'); const nodesData = await nodesRes.json(); if (nodesData.success) setNodes(nodesData.nodes); } } catch {} };
+  const handleUpdateProfile = async (userData: Partial<User>) => { try { const res = await fetch('/api/auth/update-profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(userData) }); const data = await res.json(); if (data.success && data.user) setCurrentUser(data.user); } catch {} };
+  const handleAuthSuccess = (user: User, _token: string, isNewRegistration: boolean) => { try { localStorage.removeItem('earth_one_token'); } catch {} setCurrentUser(user); if (isNewRegistration || user.hasCompletedOnboarding === false) setIsOnboardingModalOpen(true); else { setWelcomeToast(`Welcome back, ${user.displayName}!`); setTimeout(() => setWelcomeToast(null), 4000); if (user.location?.isPublic) { setCurrentTab('globe'); setFocusCoordinates({ lat: user.location.lat, lng: user.location.lng, timestamp: Date.now() }); } } };
+  const handleOnboardingComplete = async (updatedUser: User) => { setCurrentUser(updatedUser); setIsOnboardingModalOpen(false); const nodesRes = await fetch('/api/globe/nodes'); const nodesData = await nodesRes.json(); if (nodesData.success) setNodes(nodesData.nodes); setWelcomeToast(`Beacon active in ${updatedUser.location?.cityName || ''}`); setTimeout(() => setWelcomeToast(null), 5000); setCurrentTab('globe'); setFocusCoordinates({ lat: updatedUser.location.lat, lng: updatedUser.location.lng, timestamp: Date.now() }); };
+  const handleLogout = async () => { try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {} try { localStorage.removeItem('earth_one_token'); } catch {} setCurrentUser(null); setConversations([]); setIntegrations([]); setActiveConversationId('conv_global'); setWelcomeToast('Logged out.'); setTimeout(() => setWelcomeToast(null), 3000); };
+  const handleSelectGlobeUser = (node: GlobeUserNode) => { const fullUser: User = { id: node.userId, username: node.userId, displayName: node.displayName, avatar: node.avatar, bio: node.latestThought || '', location: { countryCode: node.countryCode, countryName: node.countryName, cityName: node.cityName, lat: node.lat, lng: node.lng, isPublic: true }, interests: [], followersCount: 0, followingCount: 0, tipsReceived: 0, isOnline: node.isOnline, verified: true, joinedAt: '' } as any; setProfileModalUser(fullUser); };
+  const handleOpenDirectChat = async (targetUser: User) => { const existing = conversations.find(c => c.type === 'direct' && c.participantIds?.includes(targetUser.id)); if (existing) { setActiveConversationId(existing.id); setCurrentTab('chat'); return; } try { const res = await fetch('/api/conversations/direct', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetUserId: targetUser.id }) }); const data = await res.json().catch(() => ({})); if (data.success) { if (Array.isArray(data.conversations)) setConversations(data.conversations); else await refreshConversations(); if (data.conversation?.id) setActiveConversationId(data.conversation.id); setCurrentTab('chat'); return; } } catch {} setCurrentTab('chat'); };
+  const handleEnterPlanet = (planetId: string) => { const eco = getPlanetEcosystem(planetId); if (!eco || !eco.available) return; setCurrentTab(eco.tab); setBrowserInitialQuery(null); };
 
-  const handleAddComment = async (postId: string, content: string) => {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const res = await fetch(`/api/posts/${postId}/comment`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ content })
-      });
-      const data = await res.json();
-      if (data.success && data.post) {
-        setPosts(prev => prev.map(p => (p.id === postId ? data.post : p)));
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleCreatePost = async (postData: { content: string; mediaUrl?: string; category: any }) => {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const res = await fetch('/api/posts', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(postData)
-      });
-      const data = await res.json();
-      if (data.success && data.post) {
-        setPosts(prev => [data.post, ...prev]);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleCreateArticle = async (artData: any) => {
-    try {
-      const res = await fetch('/api/articles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(artData)
-      });
-      const data = await res.json();
-      if (data.success && data.article) {
-        setArticles(prev => [data.article, ...prev]);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleToggleJoinCommunity = async (commId: string) => {
-    try {
-      const res = await fetch(`/api/communities/${commId}/join`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setCommunities(prev =>
-          prev.map(c =>
-            c.id === commId
-              ? { ...c, isJoined: data.isJoined, membersCount: data.membersCount }
-              : c
-          )
-        );
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleToggleLocationPrivacy = async () => {
-    try {
-      const res = await fetch('/api/auth/toggle-location', { method: 'POST' });
-      const data = await res.json();
-      if (data.success && data.user) {
-        setCurrentUser(data.user);
-        const nodesRes = await fetch('/api/globe/nodes');
-        const nodesData = await nodesRes.json();
-        if (nodesData.success) setNodes(nodesData.nodes);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleUpdateProfile = async (userData: Partial<User>) => {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const res = await fetch('/api/auth/update-profile', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(userData)
-      });
-      const data = await res.json();
-      if (data.success && data.user) {
-        setCurrentUser(data.user);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Auth & Onboarding Handlers
-  const handleAuthSuccess = (user: User, _token: string, isNewRegistration: boolean) => {
-    try { localStorage.removeItem('earth_one_token'); } catch {}
-    setCurrentUser(user);
-
-    if (isNewRegistration || user.hasCompletedOnboarding === false) {
-      setIsOnboardingModalOpen(true);
-    } else {
-      setWelcomeToast(`Welcome back, ${user.displayName}!`);
-      setTimeout(() => setWelcomeToast(null), 4000);
-
-      if (user.location?.isPublic) {
-        setCurrentTab('globe');
-        setFocusCoordinates({
-          lat: user.location.lat,
-          lng: user.location.lng,
-          timestamp: Date.now()
-        });
-      }
-    }
-  };
-
-  const handleOnboardingComplete = async (updatedUser: User) => {
-    setCurrentUser(updatedUser);
-    setIsOnboardingModalOpen(false);
-
-    const nodesRes = await fetch('/api/globe/nodes');
-    const nodesData = await nodesRes.json();
-    if (nodesData.success) {
-      setNodes(nodesData.nodes);
-    }
-
-    setWelcomeToast(`Your beacon is active in ${updatedUser.location.cityName}, ${updatedUser.location.countryName}!`);
-    setTimeout(() => setWelcomeToast(null), 5000);
-
-    setCurrentTab('globe');
-    setFocusCoordinates({
-      lat: updatedUser.location.lat,
-      lng: updatedUser.location.lng,
-      timestamp: Date.now()
-    });
-  };
-
-  const handleLogout = async () => {
-    try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-    } catch (err) {
-      console.warn(err);
-    }
-    try { localStorage.removeItem('earth_one_token'); } catch {}
-    setCurrentUser(null);
-    setConversations([]);
-    setIntegrations([]);
-    setActiveConversationId('conv_global');
-    setWelcomeToast('Logged out of Earth One.');
-    window.setTimeout(() => setWelcomeToast(current => current === 'Logged out of Earth One.' ? null : current), 3000);
-  };
-
-  const handleSelectGlobeUser = (node: GlobeUserNode) => {
-    const fullUser: User = {
-      id: node.userId,
-      username: node.userId,
-      displayName: node.displayName,
-      avatar: node.avatar,
-      bio: node.latestThought || 'Global citizen exploring Earth One.',
-      location: {
-        countryCode: node.countryCode,
-        countryName: node.countryName,
-        cityName: node.cityName,
-        lat: node.lat,
-        lng: node.lng,
-        isPublic: true
-      },
-      interests: ['Global Peace', 'Culture', 'AI Hub'],
-      followersCount: 1420,
-      followingCount: 380,
-      tipsReceived: 450,
-      isOnline: node.isOnline,
-      verified: true,
-      joinedAt: '2026-01-01'
-    };
-    setProfileModalUser(fullUser);
-  };
-
-  const handleOpenDirectChat = async (targetUser: User) => {
-    const existing = conversations.find(c => c.type === 'direct' && c.participantIds?.includes(targetUser.id));
-    if (existing) {
-      setActiveConversationId(existing.id);
-      setCurrentTab('chat');
-      return;
-    }
-    try {
-      const res = await fetch('/api/conversations/direct', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUserId: targetUser.id })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data.success) {
-        if (Array.isArray(data.conversations)) setConversations(data.conversations);
-        else await refreshConversations();
-        if (data.conversation?.id) setActiveConversationId(data.conversation.id);
-        setCurrentTab('chat');
-        return;
-      }
-    } catch {}
-    const newConv: Conversation = {
-      id: `conv_${targetUser.id}`,
-      type: 'direct',
-      name: targetUser.displayName,
-      countryCode: targetUser.location?.countryCode,
-      participantIds: [currentUser?.id || 'current_user', targetUser.id],
-      otherUser: targetUser,
-      lastMessage: 'Conversation opened',
-      lastMessageTime: 'Just now',
-      isOnline: targetUser.isOnline
-    } as any;
-    setConversations(prev => [newConv, ...prev]);
-    setActiveConversationId(newConv.id);
-    setCurrentTab('chat');
-  };
-
-  const handleEnterPlanet = (planetId: string) => {
-    const eco = getPlanetEcosystem(planetId);
-    if (!eco || !eco.available) return;
-    setCurrentTab(eco.tab);
-    setBrowserInitialQuery(null);
-  };
-
-  // Primary login gate: let project owner enter real product without hidden modal flow.
   if (!currentUser) {
     return (
       <>
-        {welcomeToast && (
-          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-950/95 border border-cyan-500/60 text-cyan-200 text-xs shadow-2xl backdrop-blur-md flex items-center space-x-2">
-            <Sparkles className="w-4 h-4 text-cyan-400" />
-            <span className="font-semibold">{welcomeToast}</span>
-          </div>
-        )}
+        {welcomeToast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl eo-glass text-cyan-200 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4" /><span>{welcomeToast}</span></div>}
         <LoginPage lang={lang} onAuthSuccess={handleAuthSuccess} />
       </>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#030712] text-slate-100 flex font-sans">
-      {/* Cinematic Intro (Hyperspace, Digital Earth, Cosmic Civilization) */}
-      {showIntro && (
-        <CinematicIntro
-          onComplete={() => {
-            setShowIntro(false);
-          }}
-          onAuthSuccess={handleAuthSuccess}
-          currentUser={currentUser}
-        />
-      )}
+    <div className="min-h-screen bg-[var(--color-space-bg)] text-slate-100 font-sans overflow-x-hidden">
+      {showIntro && <CinematicIntro onComplete={() => setShowIntro(false)} onAuthSuccess={handleAuthSuccess} currentUser={currentUser} />}
+      {welcomeToast && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-2xl eo-glass text-cyan-100 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4 text-cyan-400" /><span>{welcomeToast}</span></div>}
 
-      {/* Welcome Banner Toast */}
-      {welcomeToast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-cyan-950/95 border border-cyan-500/60 text-cyan-200 text-xs shadow-2xl backdrop-blur-md flex items-center space-x-2 animate-in fade-in slide-in-from-top-2">
-          <Sparkles className="w-4 h-4 text-cyan-400" />
-          <span className="font-semibold">{welcomeToast}</span>
-        </div>
-      )}
-
-      {/* Left sidebar navigation (desktop) */}
-      <Sidebar
-        currentTab={currentTab}
-        onSelectTab={(tab) => { setCurrentTab(tab); if (tab !== 'browser') setBrowserInitialQuery(null); }}
-        lang={lang}
-        onSelectLang={setLang}
-        collapsed={sidebarCollapsed}
-        onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
-      />
-
-      <div className="flex-1 flex flex-col min-w-0">
-      {/* 1. Universal Top Navigation */}
       <Navbar
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={(tab) => { setCurrentTab(tab); if (tab !== 'browser') setBrowserInitialQuery(null); }}
         lang={lang}
         onSelectLang={setLang}
         currentUser={currentUser}
@@ -491,254 +149,74 @@ export default function App() {
         onToggleLocationPrivacy={handleToggleLocationPrivacy}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        onOpenBook={bookId => {
-          setLibraryFocusBookId(bookId);
-          setCurrentTab('library');
-        }}
-        onOpenKnowledge={nodeId => {
-          setKnowledgeFocusNodeId(nodeId);
-          setCurrentTab('knowledge');
-        }}
+        onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }}
+        onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }}
         onReplayIntro={() => setShowIntro(true)}
+        onOpenCommand={() => setCommandOpen(true)}
       />
 
-      {/* 2. Main View Content Switcher */}
-      <main className={`flex-1 relative flex flex-col ${isImmersiveSpace ? 'h-[calc(100dvh-4rem)] overflow-hidden' : 'min-h-[calc(100dvh-4rem)]'}`}>
+      <AppDock currentTab={currentTab} lang={lang} hidden={currentTab === 'globe' && immersive} onSelectTab={(tab) => { setCurrentTab(tab); if (tab !== 'browser') setBrowserInitialQuery(null); }} />
+      <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} lang={lang} onSelectTab={(tab) => { setCurrentTab(tab); }} onSearch={(q) => { setSearchQuery(q); }} />
+
+      <main className={`relative ${isImmersiveSpace ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh] pt-16 pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6'} ${currentTab === 'globe' ? 'pt-0 pb-0' : ''}`}>
         {currentTab === 'globe' && (
-          <div className="flex-1 flex flex-col min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)]">
+          <div className="h-[100dvh] w-full">
             <DigitalGlobe
               nodes={nodes}
               countries={countries}
               showGlobeTools={showGlobeTools}
-              onToggleGlobeTools={() => setShowGlobeTools(open => !open)}
+              onToggleGlobeTools={() => setShowGlobeTools(o => !o)}
               onSelectTab={setCurrentTab}
               activeCountry={activeCountry}
               currentUserId={currentUser?.id}
               focusCoordinates={focusCoordinates}
-              onSelectCountry={code => {
-                setActiveCountry(code);
-                if (code) {
-                   setCurrentTab('feed');
-                }
-              }}
+              onSelectCountry={code => { setActiveCountry(code); if (code) setCurrentTab('feed'); }}
               onSelectUser={handleSelectGlobeUser}
               onExploreUniverse={() => setCurrentTab('universe')}
               onExploreCommunity={() => setCurrentTab('community')}
               lang={lang}
+              immersive={immersive}
+              onImmersiveChange={setImmersive}
             />
           </div>
         )}
 
-        {currentTab === 'universe' && (
-          <div className="flex-1 flex flex-col min-h-[calc(100dvh-4rem)]">
-            <UniverseEngine
-              onSwitchToEarthWorld={() => setCurrentTab('globe')}
-              onEnterEcosystem={handleEnterPlanet}
-              initialPlanetId={selectedSolarBodyId}
-            />
-          </div>
-        )}
-
-        {currentTab === 'saturn' && (
-          <SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} />
-        )}
-
-        <div className={currentTab === 'venus' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'venus'}>
-          <VenusMusicSpace lang={lang} onBack={() => setCurrentTab('universe')} />
-        </div>
-
-        {currentTab === 'mercury' && (
-          <MercurySearch
-            lang={lang}
-            onBack={() => setCurrentTab('universe')}
-            onOpenBook={bookId => {
-              setLibraryFocusBookId(bookId);
-              setCurrentTab('library');
-            }}
-            onOpenKnowledge={nodeId => {
-              setKnowledgeFocusNodeId(nodeId);
-              setCurrentTab('knowledge');
-            }}
-            onSelectTab={setCurrentTab}
-          />
-        )}
-
-        {currentTab === 'feed' && (
-          <GlobalFeed
-            posts={posts}
-            countries={countries}
-            activeCountry={activeCountry}
-            onSelectCountry={setActiveCountry}
-            currentUser={currentUser}
-            onLikePost={handleLikePost}
-            onAddComment={handleAddComment}
-            onCreatePost={handleCreatePost}
-            onSelectUser={u => setProfileModalUser(u)}
-            onFlyToCoordinates={(lat, lng) => {
-              setFocusCoordinates({ lat, lng, timestamp: Date.now() });
-              setCurrentTab('globe');
-            }}
-            lang={lang}
-          />
-        )}
-
-        <div className={currentTab === 'chat' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'chat'}>
-          <GlobalMessenger
-            conversations={conversations}
-            activeConversationId={activeConversationId}
-            onSelectConversation={setActiveConversationId}
-            currentUser={currentUser}
-            lang={lang}
-            integrations={integrations}
-            onRefreshConversations={refreshConversations}
-            onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }}
-          />
-        </div>
-
-        {currentTab === 'aihub' && <AIHub lang={lang} />}
-
-        <div className={currentTab === 'library' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'library'}>
-          <DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} />
-        </div>
-
-        {currentTab === 'moon' && (
-          <MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} />
-        )}
-
-        {currentTab === 'arabic-learning' && (
-          <ArabicLearningHub
-            lang={lang}
-            onOpenLibrary={() => setCurrentTab('library')}
-          />
-        )}
-
-        {currentTab === 'knowledge' && (
-          <KnowledgeUniverse
-            lang={lang}
-            focusNodeId={knowledgeFocusNodeId}
-            onOpenLibrary={() => setCurrentTab('library')}
-            onOpenBook={bookId => {
-              setLibraryFocusBookId(bookId);
-              setCurrentTab('library');
-            }}
-          />
-        )}
-
-        <div className={currentTab === 'browser' ? 'contents h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}>
-          <WebBrowser
-            lang={lang}
-            initialQuery={browserInitialQuery ?? undefined}
-            onBackToUniverse={() => setCurrentTab('universe')}
-            onBackToGlobe={() => setCurrentTab('globe')}
-          />
-        </div>
-
-        {currentTab === 'crawler' && <CrawlerDashboard lang={lang} />}
-
-        {currentTab === 'creator' && (
-          <CreatorHub
-            articles={articles}
-            onCreateArticle={handleCreateArticle}
-            lang={lang}
-          />
-        )}
-
-        {currentTab === 'video' && <VideoCenter videos={videos} lang={lang} />}
-
-        {currentTab === 'game' && <GameCenter currentUser={currentUser} lang={lang} />}
-
-        {currentTab === 'community' && (
-          <CommunityList
-            communities={communities}
-            onToggleJoin={handleToggleJoinCommunity}
-            lang={lang}
-          />
-        )}
+        {currentTab === 'universe' && <div className="h-[100dvh] pt-16 md:pl-[5.5rem]"><UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
+        {currentTab === 'saturn' && <div className="h-[100dvh] pt-16 md:pl-[5.5rem]"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
+        <div className={currentTab === 'venus' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'venus'}><div className="h-[100dvh] pt-16 md:pl-[5.5rem]"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div></div>
+        {currentTab === 'mercury' && <div className="h-[100dvh] pt-16 md:pl-[5.5rem]"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} /></div>}
+        {currentTab === 'feed' && <div className="pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} lang={lang} /></div>}
+        <div className={currentTab === 'chat' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'chat'}><div className="pt-16 md:pl-[5.5rem] h-[100dvh] pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0"><GlobalMessenger conversations={conversations} activeConversationId={activeConversationId} onSelectConversation={setActiveConversationId} currentUser={currentUser} lang={lang} integrations={integrations} onRefreshConversations={refreshConversations} onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }} /></div></div>
+        {currentTab === 'aihub' && <div className="pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><AIHub lang={lang} /></div>}
+        <div className={currentTab === 'library' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="pt-16 md:pl-[5.5rem] h-[100dvh] pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} /></div></div>
+        {currentTab === 'moon' && <div className="h-[100dvh] pt-16 md:pl-[5.5rem]"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
+        {currentTab === 'arabic-learning' && <div className="pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><ArabicLearningHub lang={lang} onOpenLibrary={() => setCurrentTab('library')} /></div>}
+        {currentTab === 'knowledge' && <div className="pt-16 md:pl-[5.5rem] h-[100dvh] pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
+        <div className={currentTab === 'browser' ? 'contents h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className="pt-16 h-[100dvh] md:pl-[5.5rem] pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0"><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
+        {currentTab === 'crawler' && <div className="pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><CrawlerDashboard lang={lang} /></div>}
+        {currentTab === 'creator' && <div className="pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
+        {currentTab === 'video' && <div className="pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><VideoCenter videos={videos} lang={lang} /></div>}
+        {currentTab === 'game' && <div className="pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><GameCenter currentUser={currentUser} lang={lang} /></div>}
+        {currentTab === 'community' && <div className="pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
       </main>
 
-      {/* 3. Luxury Sponsor Ad Banner (Chapter 10) */}
-      {!isImmersiveSpace && <LuxuryAdBanner lang={lang} />}
+      {!isImmersiveSpace && <div className="md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0"><LuxuryAdBanner lang={lang} /></div>}
 
-      {/* 4. Citizen Profile Modal */}
-      {profileModalUser && (
-        <UserProfileModal
-          user={profileModalUser}
-          currentUser={currentUser}
-          onClose={() => setProfileModalUser(null)}
-          onFollow={id => {
-            fetch(`/api/users/${id}/follow`, { method: 'POST' }).catch(() => {});
-          }}
-          onDirectMessage={handleOpenDirectChat}
-          onUpdateProfile={handleUpdateProfile}
-          lang={lang}
-        />
-      )}
+      {profileModalUser && <UserProfileModal user={profileModalUser} currentUser={currentUser} onClose={() => setProfileModalUser(null)} onFollow={id => { fetch(`/api/users/${id}/follow`, { method: 'POST' }).catch(() => {}); }} onDirectMessage={handleOpenDirectChat} onUpdateProfile={handleUpdateProfile} lang={lang} />}
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} onAuthSuccess={handleAuthSuccess} lang={lang} />
+      {currentUser && <AccountSecurityModal isOpen={isSecurityModalOpen} onClose={() => setIsSecurityModalOpen(false)} currentUser={currentUser} onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }} />}
+      {currentUser && <OnboardingModal isOpen={isOnboardingModalOpen} user={currentUser} onComplete={handleOnboardingComplete} lang={lang} />}
 
-      {/* 5. Secure Auth Modal (Sign In / Registration) */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onAuthSuccess={handleAuthSuccess}
-        lang={lang}
-      />
+      <HolographicAICompanion lang={lang} showLauncher={currentTab !== 'globe' || showGlobeTools} onFlyTo={(lat, lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} onExploreUniverse={() => setCurrentTab('universe')} onOpenAIHub={() => setCurrentTab('aihub')} onNavigateTab={tab => setCurrentTab(tab)} currentTab={currentTab} />
 
-      {currentUser && (
-        <AccountSecurityModal
-          isOpen={isSecurityModalOpen}
-          onClose={() => setIsSecurityModalOpen(false)}
-          currentUser={currentUser}
-          onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }}
-        />
-      )}
-
-      {/* 6. Post-Login Profile Onboarding Wizard */}
-      {currentUser && (
-        <OnboardingModal
-          isOpen={isOnboardingModalOpen}
-          user={currentUser}
-          onComplete={handleOnboardingComplete}
-          lang={lang}
-        />
-      )}
-
-      {/* 7. 3D Holographic AI Companion (Intelligence D) */}
-      <HolographicAICompanion
-        lang={lang}
-        showLauncher={currentTab !== 'globe' || showGlobeTools}
-        onFlyTo={(lat, lng) => {
-          setFocusCoordinates({ lat, lng, timestamp: Date.now() });
-          setCurrentTab('globe');
-        }}
-        onExploreUniverse={() => setCurrentTab('universe')}
-        onOpenAIHub={() => setCurrentTab('aihub')}
-        onNavigateTab={tab => setCurrentTab(tab)}
-        currentTab={currentTab}
-      />
-
-      {/* 8. Minimalist Earth One Global Footer */}
       {!isImmersiveSpace && (
-        <footer className="w-full border-t border-slate-900 bg-slate-950/80 py-6 px-4 text-center text-xs text-slate-500">
+        <footer className="w-full border-t border-white/10 bg-[rgba(2,4,10,0.6)] py-5 px-4 text-xs text-slate-500 md:pl-24">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center space-x-2">
-              <Globe2 className="w-4 h-4 text-cyan-500" />
-              <span className="font-serif font-bold text-slate-300">{lang === 'zh' ? '地球计划' : 'PROJECT EARTH'}</span>
-              <span>—</span>
-              <span className="text-slate-400">{t.motto}</span>
-            </div>
-            <div className="flex items-center space-x-4 text-slate-400 text-[11px]">
-              <span>{t.motto}</span>
-              <span>·</span>
-              <span>{t.tagline}</span>
-              <span>·</span>
-              <span className="flex items-center space-x-1 text-emerald-400">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>{t.locationPrivate}</span>
-              </span>
-            </div>
+            <div className="flex items-center gap-2"><Globe2 className="w-4 h-4 text-cyan-500" /><span className="font-semibold text-slate-300">EARTH ONE</span></div>
+            <div className="flex items-center gap-3 text-[11px] text-slate-400"><span>{t.motto}</span><span className="flex items-center gap-1 text-emerald-400"><ShieldCheck className="w-3.5 h-3.5" /><span>{t.locationPrivate}</span></span></div>
           </div>
         </footer>
       )}
-      </div>
     </div>
   );
 }

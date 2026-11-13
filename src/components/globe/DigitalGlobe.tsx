@@ -19,8 +19,6 @@ import {
 import { buildOrbitSystem, buildConnectionArcs, buildStarField } from './sceneBuilders.ts';
 import {
   ArrowRight,
-  BookOpen,
-  Compass,
   Globe2,
   Orbit,
   Network,
@@ -30,16 +28,10 @@ import {
   MapPin,
   ExternalLink,
   RotateCw,
-  Eye,
-  EyeOff,
-  ChevronRight,
-  Users2,
   X,
   Radio,
-  Activity,
   Navigation,
   Satellite,
-  Flame,
   Layers
 } from 'lucide-react';
 
@@ -57,6 +49,8 @@ interface DigitalGlobeProps {
   showGlobeTools?: boolean;
   onToggleGlobeTools?: () => void;
   lang: Language;
+  immersive?: boolean;
+  onImmersiveChange?: (v: boolean) => void;
 }
 
 export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
@@ -72,7 +66,9 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   onExploreCommunity,
   showGlobeTools = true,
   onToggleGlobeTools,
-  lang
+  lang,
+  immersive = false,
+  onImmersiveChange
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const t = translations[lang] || translations.zh;
@@ -136,6 +132,14 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     targetSphericalRotation: null as { x: number; y: number } | null,
     frameId: 0
   });
+
+  useEffect(() => {
+    setIsZoomedIn(!!immersive);
+    if (immersive) {
+      setAutoRotate(false);
+      stateRef.current.autoRotate = false;
+    }
+  }, [immersive]);
 
   // Sync state
   useEffect(() => {
@@ -285,17 +289,20 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     }
   }, [focusCoordinates, flyToCoordinates]);
 
-  // Toggle between Overview and Explore modes. Zoom is intentionally disabled
-  // (per OrbitControls config), so this only toggles auto-rotation and resets
-  // any targeted globe rotation back to the natural overview state.
+  // Overview <-> Immersive: fade HUD, keep controls/exit available. Auto-rotate pauses in immersive for focus.
   const handleToggleExplore = () => {
-    if (isZoomedIn) {
+    const next = !immersive;
+    if (next) {
+      setIsZoomedIn(true);
+      setAutoRotate(false);
+      stateRef.current.autoRotate = false;
+      onImmersiveChange?.(true);
+    } else {
       setIsZoomedIn(false);
       stateRef.current.targetSphericalRotation = null;
       setAutoRotate(true);
-    } else {
-      setIsZoomedIn(true);
-      setAutoRotate(false);
+      stateRef.current.autoRotate = true;
+      onImmersiveChange?.(false);
     }
   };
 
@@ -754,116 +761,39 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         </div>
       )}
 
-      <aside
-        id="globe-local-nav"
-        style={{ display: showGlobeTools ? undefined : 'none' }}
-        className="absolute bottom-6 left-3 top-4 z-20 hidden w-[174px] flex-col rounded-[26px] border border-slate-700/70 bg-[#071020]/85 p-3 shadow-2xl shadow-black/50 backdrop-blur-2xl md:flex"
-      >
-        <div className="flex items-center gap-2 border-b border-slate-800/90 px-2 pb-3 pt-1">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-blue-400/30 bg-blue-500/15 text-blue-300 shadow-[0_0_24px_rgba(37,99,235,.24)]">
-            <Globe2 className="h-5 w-5" />
-          </span>
-          <div className="min-w-0">
-            <div className="text-[11px] font-bold tracking-[.12em] text-white">地球计划</div>
-            <div className="text-[9px] text-slate-400">One Universe. One World.</div>
-          </div>
-        </div>
-
-        <nav aria-label="Earth One navigation" className="mt-3 flex flex-col gap-1">
-          {[
-            { id: 'globe', label: t.globeTab, icon: <Globe2 className="h-4 w-4" /> },
-            { id: 'feed', label: t.feedTab, icon: <Compass className="h-4 w-4" /> },
-            { id: 'universe', label: t.universeTab, icon: <Orbit className="h-4 w-4" /> },
-            { id: 'community', label: t.communityTab, icon: <Users2 className="h-4 w-4" /> },
-            { id: 'knowledge', label: t.knowledgeTab, icon: <Network className="h-4 w-4" /> },
-            { id: 'library', label: t.digitalLibrary, icon: <BookOpen className="h-4 w-4" /> }
-          ].map(item => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onSelectTab(item.id)}
-              aria-current={item.id === 'globe' ? 'page' : undefined}
-              className={`flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-[11px] font-semibold transition-all ${item.id === 'globe' ? 'bg-gradient-to-r from-blue-600/90 to-blue-500/50 text-white shadow-lg shadow-blue-900/40 ring-1 ring-blue-300/30' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'}`}
-            >
-              <span className={item.id === 'globe' ? 'text-blue-100' : 'text-slate-400'}>{item.icon}</span>
-              <span className="truncate">{item.label}</span>
-            </button>
-          ))}
-        </nav>
-
-        <div className="mt-1">
-          <button
-            type="button"
-            onClick={() => setAppsExpanded(open => !open)}
-            aria-expanded={appsExpanded}
-            className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-[11px] font-semibold text-slate-300 transition-colors hover:bg-slate-800/80 hover:text-white"
-          >
-            <Sparkles className="h-4 w-4 text-cyan-300" />
-            <span className="flex-1">{t.apps}</span>
-            <ChevronRight className={`h-3.5 w-3.5 transition-transform ${appsExpanded ? 'rotate-90' : ''}`} />
-          </button>
-          {appsExpanded && (
-            <div className="ml-3 mt-1 flex flex-col gap-0.5 border-l border-slate-700 pl-2">
-              {[
-                { id: 'chat', label: t.globalMessenger },
-                { id: 'aihub', label: t.aiHubTab },
-                { id: 'browser', label: t.webBrowser },
-                { id: 'crawler', label: t.crawlerCenter },
-                { id: 'creator', label: t.creatorArticles },
-                { id: 'video', label: t.worldVideoCenter },
-                { id: 'game', label: t.globalGameCenter }
-              ].map(item => (
-                <button key={item.id} type="button" onClick={() => onSelectTab(item.id)} className="rounded-lg px-2 py-1.5 text-left text-[9px] text-slate-400 transition-colors hover:bg-slate-800/70 hover:text-white">
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-auto overflow-hidden rounded-2xl border border-blue-400/20 bg-[radial-gradient(ellipse_at_70%_20%,rgba(37,99,235,.35),transparent_54%),linear-gradient(145deg,#101e39,#070b17_75%)] p-3">
-          <div className="mb-2 flex h-12 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,.5),transparent_55%),radial-gradient(circle_at_20%_10%,#fff_0_1px,transparent_1.5px),radial-gradient(circle_at_74%_30%,#93c5fd_0_1px,transparent_1.5px),#050914]">
-            <Orbit className="h-7 w-7 text-blue-300 drop-shadow-[0_0_14px_rgba(96,165,250,.9)]" />
-          </div>
-          <p className="text-[10px] font-semibold text-white">{t.universeTab}</p>
-          <p className="mt-1 text-[9px] leading-relaxed text-slate-400">{t.vastHome}</p>
-          <button type="button" onClick={onExploreUniverse} className="mt-2 inline-flex items-center gap-1 text-[9px] font-semibold text-cyan-300 hover:text-white">
-            {t.learnMore}<ArrowRight className="h-3 w-3" />
-          </button>
-        </div>
-      </aside>
+      {/* Global AppDock/CommandPalette provide primary navigation; globe focuses on Earth experience. */}
 
       {/* ============================================================== */}
       {/* 2. WORLD-CLASS USER HERO OVERLAY                               */}
       {/* ============================================================== */}
-      <div className="relative z-10 h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-[220px] lg:pl-[220px] flex flex-col justify-start md:justify-between pt-8 sm:pt-20 pb-8 pointer-events-none">
+      <div className={`relative z-10 h-full min-h-[100dvh] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-28 lg:pl-32 flex flex-col justify-start md:justify-between pt-24 sm:pt-28 pb-8 pointer-events-none transition-opacity duration-500 ${immersive ? 'opacity-0' : 'opacity-100'}`}>
         {/* Left Hero Title & CTA */}
-        <div className="max-w-xl pointer-events-auto">
-          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-400/30 text-blue-300 text-xs font-medium mb-3">
-            <Globe2 className="w-3.5 h-3.5" />
+        <div className={`max-w-xl pointer-events-auto transition-all duration-500 ${immersive ? 'opacity-0 translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full border border-white/10 bg-white/[0.04] text-slate-300 text-xs font-medium mb-4 backdrop-blur-sm">
+            <Globe2 className="w-3.5 h-3.5 text-cyan-400" />
             <span>{t.appName}</span>
             <span className="text-slate-500">·</span>
-            <span>{t.tagline}</span>
+            <span className="text-slate-400">{t.tagline}</span>
           </div>
 
-          <h1 className="text-3xl sm:text-5xl font-serif font-bold text-white tracking-tight leading-tight">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-semibold text-white tracking-tight leading-[1.05]">
             {t.appName}
           </h1>
-          <p className="mt-2 text-sm sm:text-base text-slate-300/90 leading-relaxed font-sans max-w-lg">
+          <p className="mt-3 text-sm sm:text-base text-slate-300/80 leading-relaxed font-sans max-w-md">
             {t.motto}
           </p>
 
           {showFirstUseHint && (
-            <div className="mt-3 flex max-w-md items-start gap-2 rounded-xl border border-cyan-900/70 bg-slate-950/75 px-3 py-2 text-xs leading-relaxed text-cyan-100/90 shadow-lg backdrop-blur-md">
+            <div className="mt-4 flex max-w-md items-start gap-2.5 rounded-2xl eo-glass px-3.5 py-3 text-xs leading-relaxed text-slate-200">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
-              <p className="flex-1">{t.firstUseHint}</p>
+              <p className="flex-1 text-slate-300">{t.firstUseHint}</p>
               <button
                 type="button"
                 onClick={() => {
                   setShowFirstUseHint(false);
                   try { localStorage.setItem('earth-one-globe-hint-dismissed', '1'); } catch {}
                 }}
-                className="rounded-md p-0.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+                className="rounded-md p-0.5 text-slate-500 hover:bg-white/5 hover:text-white"
                 aria-label={t.dismissFirstUseHint}
                 title={t.dismissFirstUseHint}
               >
@@ -873,14 +803,13 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           )}
 
           {/* Start Exploring Action Button & Tools Disclosure */}
-          <div className="mt-4 sm:mt-6 flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="mt-6 sm:mt-8 flex flex-wrap items-center gap-2.5">
             <button
               onClick={onExploreUniverse}
-              aria-pressed="false"
-              className="inline-flex items-center space-x-2 sm:space-x-3 px-4 sm:px-8 py-2.5 sm:py-3.5 rounded-full bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-semibold text-xs sm:text-base shadow-xl shadow-blue-500/40 border border-cyan-300/50 cursor-pointer transition-all hover:scale-105 active:scale-95 group"
+              className="inline-flex items-center space-x-2 px-5 sm:px-6 py-2.5 sm:py-3 rounded-full bg-white text-slate-950 font-semibold text-sm shadow-lg shadow-black/20 cursor-pointer transition-all hover:bg-slate-100 hover:-translate-y-px active:translate-y-0 group"
             >
               <span>{t.startExploring}</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
 
             {onToggleGlobeTools && (
@@ -888,9 +817,9 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                 type="button"
                 onClick={onToggleGlobeTools}
                 aria-expanded={showGlobeTools}
-                className="inline-flex items-center space-x-1.5 px-4 py-2.5 sm:py-3.5 rounded-full border border-slate-700/80 bg-slate-900/80 hover:bg-slate-800 text-slate-200 text-xs sm:text-sm font-medium transition-all shadow-lg"
+                className="inline-flex items-center space-x-2 px-4 py-2.5 sm:py-3 rounded-full eo-glass text-slate-200 text-sm font-medium transition-all hover:bg-white/[0.06]"
               >
-                <Layers className="w-4 h-4 text-cyan-400" />
+                <Layers className="w-4 h-4 text-slate-400" />
                 <span>{showGlobeTools ? t.hideGlobeTools : t.showGlobeTools}</span>
               </button>
             )}
@@ -900,23 +829,23 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           <div
             id="globe-statistics-panel"
             style={{ display: showGlobeTools ? undefined : 'none' }}
-            className="grid grid-cols-3 gap-2 sm:gap-3 mt-4 max-w-md"
+            className="grid grid-cols-3 gap-2 mt-5 max-w-sm"
           >
-            <div className="p-3 rounded-2xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-md">
-              <div className="text-[10px] text-slate-400 uppercase tracking-wider">{t.onlineUsers}</div>
-              <div className="text-base sm:text-lg font-bold font-mono text-cyan-300 mt-0.5">
+            <div className="px-3 py-2.5 rounded-xl eo-glass">
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider">{t.onlineUsers}</div>
+              <div className="text-sm sm:text-base font-semibold font-mono text-slate-100 mt-0.5">
                 {nodes.length > 0 ? nodes.length.toLocaleString() : '1,280'}
               </div>
             </div>
-            <div className="p-3 rounded-2xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-md">
-              <div className="text-[10px] text-slate-400 uppercase tracking-wider">{t.activeNodes}</div>
-              <div className="text-base sm:text-lg font-bold font-mono text-emerald-300 mt-0.5">
+            <div className="px-3 py-2.5 rounded-xl eo-glass">
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider">{t.activeNodes}</div>
+              <div className="text-sm sm:text-base font-semibold font-mono text-slate-100 mt-0.5">
                 {countries.length > 0 ? countries.length : '196'}
               </div>
             </div>
-            <div className="p-3 rounded-2xl bg-slate-950/75 border border-slate-800/80 backdrop-blur-md">
-              <div className="text-[10px] text-slate-400 uppercase tracking-wider">{t.registeredCitizens}</div>
-              <div className="text-base sm:text-lg font-bold font-mono text-amber-300 mt-0.5">
+            <div className="px-3 py-2.5 rounded-xl eo-glass">
+              <div className="text-[10px] text-slate-500 uppercase tracking-wider">{t.registeredCitizens}</div>
+              <div className="text-sm sm:text-base font-semibold font-mono text-slate-100 mt-0.5">
                 368,420
               </div>
             </div>
@@ -927,23 +856,23 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           <div
             id="globe-mobile-controls"
             style={{ display: showGlobeTools ? undefined : 'none' }}
-            className="mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden"
+            className={`mt-3 flex flex-wrap items-center gap-1.5 pointer-events-auto md:hidden transition-opacity ${immersive ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
             aria-label={t.globeControls}
           >
-            <button onClick={handleToggleExplore} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={isZoomedIn ? t.zoomOut : t.inspectEarth} title={isZoomedIn ? t.zoomOut : t.inspectEarth}>
+            <button onClick={handleToggleExplore} className="rounded-xl eo-glass p-3 text-slate-300" aria-label={immersive ? t.zoomOut : t.inspectEarth} title={immersive ? t.zoomOut : t.inspectEarth}>
               <Orbit className="h-4 w-4" />
             </button>
-            <button onClick={() => setShowBeacons(!showBeacons)} className={`rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 ${showBeacons ? 'text-cyan-300' : 'text-slate-500'}`} aria-label={t.toggleBeacons} title={t.toggleBeacons}>
+            <button onClick={() => setShowBeacons(!showBeacons)} className={`rounded-xl eo-glass p-3 ${showBeacons ? 'text-cyan-300' : 'text-slate-500'}`} aria-label={t.toggleBeacons} title={t.toggleBeacons}>
               <Network className="h-4 w-4" />
             </button>
-            <button onClick={() => setAutoRotate(!autoRotate)} className={`rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 ${autoRotate ? 'text-cyan-300' : 'text-slate-500'}`} aria-label={t.autoRotation} title={t.autoRotation}>
+            <button onClick={() => setAutoRotate(!autoRotate)} className={`rounded-xl eo-glass p-3 ${autoRotate ? 'text-cyan-300' : 'text-slate-500'}`} aria-label={t.autoRotation} title={t.autoRotation}>
               <RotateCw className="h-4 w-4" />
             </button>
-            <button onClick={() => setSoundEnabled(!soundEnabled)} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-slate-300" aria-label={soundEnabled ? t.mute : t.playCosmicSound} title={soundEnabled ? t.mute : t.playCosmicSound}>
+            <button onClick={() => setSoundEnabled(!soundEnabled)} className="rounded-xl eo-glass p-3 text-slate-300" aria-label={soundEnabled ? t.mute : t.playCosmicSound} title={soundEnabled ? t.mute : t.playCosmicSound}>
               {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </button>
             {onExploreUniverse && (
-              <button onClick={onExploreUniverse} className="rounded-xl border border-slate-700/70 bg-slate-950/80 p-3 text-purple-300" aria-label={t.solarSystemEngine} title={t.solarSystemEngine}>
+              <button onClick={onExploreUniverse} className="rounded-xl eo-glass p-3 text-slate-300" aria-label={t.solarSystemEngine} title={t.solarSystemEngine}>
                 <Sparkles className="h-4 w-4" />
               </button>
             )}
@@ -951,31 +880,28 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
         <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />
 
-        {/* Ultra-Clean Floating Aerospace Telemetry Capsule (Sleek, Unobstructed, High-Tech) */}
-        <div className="w-full flex justify-center pointer-events-auto pt-4 sm:pt-6">
+        <div className={`w-full flex justify-center pointer-events-auto pt-4 sm:pt-6 transition-opacity duration-500 ${immersive ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
           <div
             id="globe-telemetry-panel"
             style={{ display: showGlobeTools ? undefined : 'none' }}
-            className="w-full max-w-4xl p-2.5 sm:p-3 rounded-2xl bg-slate-950/80 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-3 text-xs"
+            className="w-full max-w-3xl px-3 py-2.5 rounded-2xl eo-glass flex flex-col md:flex-row items-center justify-between gap-2.5 text-xs"
           >
             {/* 1. ISS Live Telemetry */}
-            <div className="flex items-center space-x-3 w-full md:w-auto">
-              <div className="w-8 h-8 rounded-xl bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0">
-                <Satellite className="w-4 h-4 animate-pulse" />
+            <div className="flex items-center gap-2.5 w-full md:w-auto">
+              <div className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-cyan-400 shrink-0">
+                <Satellite className="w-4 h-4" />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center space-x-1.5">
-                  <span className="font-bold text-white text-xs">{t.issTracker || '国际空间站实时遥测'}</span>
-                  <span className="px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 font-mono text-[9px] border border-cyan-800/60">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-slate-100 text-xs">{t.issTracker || '国际空间站实时遥测'}</span>
+                  <span className="px-1.5 py-0.5 rounded-md bg-white/[0.04] text-slate-400 font-mono text-[9px] border border-white/[0.06]">
                     NORAD 25544
                   </span>
                 </div>
-                <div className="text-[11px] font-mono text-slate-400 flex items-center space-x-2 mt-0.5">
+                <div className="text-[11px] font-mono text-slate-500 flex items-center space-x-2 mt-0.5">
                   <span>{issData ? `${issData.lat.toFixed(1)}°, ${issData.lng.toFixed(1)}°` : '0.0°, 0.0°'}</span>
                   <span>·</span>
-                  <span className="text-cyan-300">{issData ? `${issData.altitudeKm.toFixed(0)}km` : '420km'}</span>
-                  <span>·</span>
-                  <span className="text-emerald-300">{issData ? `${Math.round(issData.velocityKmh).toLocaleString()}km/h` : '27,580km/h'}</span>
+                  <span className="text-slate-400">{issData ? `${issData.altitudeKm.toFixed(0)}km` : '420km'}</span>
                 </div>
               </div>
 
@@ -986,64 +912,53 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                     flyToCoordinates(issData.lat, issData.lng);
                   }
                 }}
-                className="ml-auto md:ml-2 px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer"
-                title="镜头瞬移锁定空间站"
+                className="ml-auto md:ml-2 px-2.5 py-1.5 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-slate-200 text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer"
+                title={lang === 'zh' ? '锁定空间站' : 'Focus ISS'}
               >
-                <Navigation className="w-3 h-3" />
-                <span>锁定聚焦</span>
+                <Navigation className="w-3 h-3 text-cyan-400" />
+                <span>{lang === 'zh' ? '锁定' : 'Focus'}</span>
               </button>
             </div>
 
-            <div className="hidden md:block h-6 w-px bg-slate-800" />
+            <div className="hidden md:block h-6 w-px bg-white/[0.08]" />
 
             {/* 2. Space Weather & Planetary Environment */}
-            <div className="hidden lg:flex items-center space-x-3 text-slate-400 text-[11px]">
-              <div className="w-8 h-8 rounded-xl bg-purple-950/80 border border-purple-500/40 flex items-center justify-center text-purple-400 shrink-0">
+            <div className="hidden lg:flex items-center gap-2.5 text-slate-400 text-[11px]">
+              <div className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-amber-400/80 shrink-0">
                 <Radio className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-semibold text-slate-200">{t.seismicMonitor || '全球地震带实时监测'}</div>
-                <div className="font-mono text-slate-400 text-[10px] mt-0.5">
-                  Kp-2.1 (地磁宁静) · 太阳风 412 km/s · 通讯正常
+                <div className="font-medium text-slate-300">{t.seismicMonitor || '全球地震带实时监测'}</div>
+                <div className="font-mono text-slate-500 text-[10px] mt-0.5">
+                  Kp-2.1 · 412 km/s
                 </div>
               </div>
             </div>
 
-            <div className="hidden md:block h-6 w-px bg-slate-800" />
+            <div className="hidden md:block h-6 w-px bg-white/[0.08]" />
 
             {/* 3. Quick Layer Toggles */}
-            <div className="flex items-center space-x-1.5 w-full md:w-auto justify-end">
+            <div className="flex items-center gap-1.5 w-full md:w-auto justify-end">
               <button
                 type="button"
                 onClick={() => setShowISS(!showISS)}
-                className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${
-                  showISS ? 'bg-cyan-950/60 border-cyan-500/50 text-cyan-300' : 'bg-slate-900 border-slate-800 text-slate-500'
-                }`}
-                title="开关国际空间站模型"
+                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${showISS ? 'bg-[rgba(78,161,255,0.12)] border-[rgba(78,161,255,0.25)] text-cyan-200' : 'bg-transparent border-white/[0.08] text-slate-500 hover:text-slate-300'}`}
               >
-                🛰️ 空间站
+                {lang === 'zh' ? '空间站' : 'ISS'}
               </button>
-
               <button
                 type="button"
                 onClick={() => setShowBeacons(!showBeacons)}
-                className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${
-                  showBeacons ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'
-                }`}
-                title="开关全球公民信标"
+                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${showBeacons ? 'bg-[rgba(52,211,153,0.1)] border-[rgba(52,211,153,0.22)] text-emerald-200' : 'bg-transparent border-white/[0.08] text-slate-500 hover:text-slate-300'}`}
               >
-                👥 公民信标
+                {lang === 'zh' ? '信标' : 'Beacons'}
               </button>
-
               <button
                 type="button"
                 onClick={() => setAutoRotate(!autoRotate)}
-                className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${
-                  autoRotate ? 'bg-blue-950/60 border-blue-500/50 text-blue-300' : 'bg-slate-900 border-slate-800 text-slate-500'
-                }`}
-                title="开关地球自转"
+                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${autoRotate ? 'bg-white/[0.06] border-white/[0.12)] text-slate-200' : 'bg-transparent border-white/[0.08] text-slate-500 hover:text-slate-300'}`}
               >
-                🌍 自转
+                {lang === 'zh' ? '自转' : 'Rotate'}
               </button>
             </div>
           </div>
@@ -1065,65 +980,41 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       <aside
         id="globe-controls-rail"
         style={{ display: showGlobeTools ? undefined : 'none' }}
-        className="hidden md:flex fixed right-6 top-1/2 -translate-y-1/2 z-20 flex-col space-y-3 pointer-events-auto"
+        className="hidden md:flex fixed right-5 top-1/2 -translate-y-1/2 z-20 flex-col space-y-2 pointer-events-auto"
       >
-        <div className="p-2 rounded-2xl bg-slate-950/70 border border-slate-800/80 backdrop-blur-xl shadow-2xl flex flex-col space-y-3 text-slate-400">
-          {/* Orbit switch */}
+        <div className="p-1.5 rounded-2xl eo-glass shadow-lg flex flex-col gap-1 text-slate-400">
           <button
             onClick={handleToggleExplore}
-            className={`p-2.5 rounded-xl transition-all cursor-pointer ${
-              isZoomedIn
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/40'
-                : 'hover:bg-slate-800/80 hover:text-white'
-            }`}
-            title={isZoomedIn ? t.zoomOut : t.inspectEarth}
+            className={`p-2.5 rounded-xl transition-all cursor-pointer ${immersive ? 'bg-white/[0.12] text-white ring-1 ring-white/10' : 'hover:bg-white/[0.06] hover:text-white'}`}
+            title={immersive ? (lang === 'zh' ? '退出沉浸' : 'Exit immersive') : (t.inspectEarth || 'Explore')}
           >
-            <Orbit className="w-4 h-4" />
+            {immersive ? <X className="w-4 h-4" /> : <Orbit className="w-4 h-4" />}
           </button>
 
-          {/* Solar explorer */}
-          {onExploreUniverse && (
-            <button
-              onClick={onExploreUniverse}
-              className="p-2.5 rounded-xl hover:bg-slate-800/80 hover:text-purple-300 transition-colors cursor-pointer"
-              title={t.solarSystemEngine}
-            >
+          {onExploreUniverse && !immersive && (
+            <button onClick={onExploreUniverse} className="p-2.5 rounded-xl hover:bg-white/[0.06] hover:text-white transition-colors cursor-pointer" title={t.solarSystemEngine}>
               <Sparkles className="w-4 h-4" />
             </button>
           )}
-
-          {/* Citizen beacons */}
-          <button
-            onClick={() => setShowBeacons(!showBeacons)}
-            className={`p-2.5 rounded-xl transition-colors cursor-pointer ${
-              showBeacons ? 'text-cyan-400 bg-cyan-950/60' : 'hover:bg-slate-800/80 hover:text-white'
-            }`}
-            title={t.toggleBeacons}
-          >
+          <button onClick={() => setShowBeacons(!showBeacons)} className={`p-2.5 rounded-xl transition-colors cursor-pointer ${showBeacons ? 'text-cyan-300 bg-white/[0.06]' : 'hover:bg-white/[0.06] hover:text-white'}`} title={t.toggleBeacons}>
             <Network className="w-4 h-4" />
           </button>
-
-          {/* Auto rotate toggle */}
-          <button
-            onClick={() => setAutoRotate(!autoRotate)}
-            className={`p-2.5 rounded-xl transition-colors cursor-pointer ${
-              autoRotate ? 'text-cyan-400' : 'text-slate-600'
-            }`}
-            title={t.autoRotation}
-          >
+          <button onClick={() => setAutoRotate(!autoRotate)} className={`p-2.5 rounded-xl transition-colors cursor-pointer ${autoRotate ? 'text-cyan-300' : 'text-slate-500 hover:text-white hover:bg-white/[0.06]'}`} title={t.autoRotation}>
             <RotateCw className="w-4 h-4" />
           </button>
-
-          {/* Deep Space Sound */}
-          <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className="p-2.5 rounded-xl hover:bg-slate-800/80 hover:text-white transition-colors cursor-pointer"
-            title={soundEnabled ? t.mute : t.playCosmicSound}
-          >
-            {soundEnabled ? <Volume2 className="w-4 h-4 text-cyan-400" /> : <VolumeX className="w-4 h-4" />}
+          <button onClick={() => setSoundEnabled(!soundEnabled)} className="p-2.5 rounded-xl hover:bg-white/[0.06] hover:text-white transition-colors cursor-pointer" title={soundEnabled ? t.mute : t.playCosmicSound}>
+            {soundEnabled ? <Volume2 className="w-4 h-4 text-cyan-300" /> : <VolumeX className="w-4 h-4" />}
           </button>
         </div>
       </aside>
+
+      {immersive && (
+        <div className="pointer-events-auto fixed bottom-6 right-5 z-30 md:hidden">
+          <button onClick={handleToggleExplore} className="inline-flex items-center gap-2 rounded-full eo-glass-strong px-4 py-2.5 text-sm font-medium text-white shadow-lg">
+            <X className="w-4 h-4" /><span>{lang === 'zh' ? '退出沉浸' : 'Exit'}</span>
+          </button>
+        </div>
+      )}
 
       {/* ============================================================== */}
       {/* 4. HOVERED CITIZEN TOOLTIP                                     */}
