@@ -3,14 +3,17 @@ import type { Language, User } from '../../types/index.ts';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { PWAInstallButton } from '../layout/PWAInstallButton.tsx';
 
+import { BrandMark } from '../brand/brandLogos.tsx';
+
 interface LoginPageProps {
   lang: Language;
   onAuthSuccess: (user: User, token: string, isNewRegistration: boolean) => void;
+  onOpenBrand?: () => void;
 }
 
 type Mode = 'login' | 'register';
 
-export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpenBrand }) => {
   const L = (zh: string, en: string, ar?: string) => (lang === 'ar' ? (ar || en) : lang === 'en' ? en : zh);
   const [mode, setMode] = useState<Mode>('login');
   const [identifier, setIdentifier] = useState('');
@@ -290,7 +293,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
           </div>
         </div>
 
-        <p className="mt-6 text-center text-xs text-slate-500">ONE EARTH · ONE WORLD · ONE HUMANITY</p>
+        {onOpenBrand && (
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={onOpenBrand}
+              className="inline-flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-xs font-medium text-[#F7F5F0] hover:bg-white/[0.07] hover:border-[#C4A876]/50 transition-colors cursor-pointer"
+            >
+              <BrandMark concept="origin-final" mode="dark" lockup="symbol" size={18} />
+              <span>{L('浏览「独一 ONE」品牌视觉识别系统（免登录）', 'Explore 独一 ONE Brand Identity System')}</span>
+            </button>
+          </div>
+        )}
+
+        <p className="mt-5 text-center text-xs text-slate-500">ONE EARTH · ONE WORLD · ONE HUMANITY</p>
       </div>
     </div>
   );

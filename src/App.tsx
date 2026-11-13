@@ -156,7 +156,18 @@ export default function App() {
       <>
         <OfflineIndicator lang={lang} />
         {welcomeToast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl eo-glass text-cyan-200 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4" /><span>{welcomeToast}</span></div>}
-        <LoginPage lang={lang} onAuthSuccess={handleAuthSuccess} />
+        <LoginPage
+          lang={lang}
+          onAuthSuccess={handleAuthSuccess}
+          onOpenBrand={() => {
+            setCurrentTab('brand');
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.set('module', 'brand');
+              window.history.replaceState({}, '', url.pathname + url.search);
+            } catch {}
+          }}
+        />
       </>
     );
   }
