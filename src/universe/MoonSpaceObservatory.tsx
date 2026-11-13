@@ -434,24 +434,34 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
 
       {/* Fullscreen High-Res Lightbox Modal */}
       {lightboxImage && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4 backdrop-blur-xl animate-in fade-in">
-          <div className="relative w-full max-w-5xl flex flex-col max-h-[92vh] bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/95 p-0 sm:p-4 backdrop-blur-xl animate-in fade-in"
+          onClick={() => setLightboxImage(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightboxImage.title}
+        >
+          <div
+            className="relative w-full sm:max-w-5xl flex flex-col h-[100dvh] sm:h-auto sm:max-h-[92vh] bg-slate-950 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-3xl overflow-hidden shadow-2xl"
+            style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+            onClick={e => e.stopPropagation()}
+          >
             {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/60">
-              <div className="flex items-center gap-2 min-w-0 pr-4">
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+            <div className="flex items-center justify-between gap-2 p-3 sm:p-4 border-b border-slate-800 bg-slate-900/70 shrink-0">
+              <div className="flex items-center gap-2 min-w-0 pr-2">
+                <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-bold ${
                   lightboxImage.source === 'NASA' ? 'bg-blue-600 text-white' : 'bg-purple-600 text-white'
                 }`}>
                   {lightboxImage.source}
                 </span>
                 <h2 className="text-sm sm:text-base font-bold text-white truncate">{lightboxImage.title}</h2>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                 <a
                   href={lightboxImage.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1 rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500 transition-colors cursor-pointer"
                   title="下载或查看高清大图"
                 >
                   <Download className="h-3.5 w-3.5" />
@@ -462,7 +472,7 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
                     href={lightboxImage.sourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-xl border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
+                    className="inline-flex items-center gap-1 rounded-xl border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                     <span className="hidden sm:inline">官方来源</span>
@@ -470,8 +480,9 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
                 )}
                 <button
                   onClick={() => setLightboxImage(null)}
-                  className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
+                  className="rounded-xl p-2 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
                   title="关闭"
+                  aria-label="关闭"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -479,18 +490,30 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
             </div>
 
             {/* Modal Image Body */}
-            <div className="flex-1 overflow-auto bg-black flex items-center justify-center p-2 sm:p-4 min-h-[300px]">
-              <img
-                src={lightboxImage.url}
-                alt={lightboxImage.title}
-                className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
-              />
+            <div className="flex-1 min-h-0 overflow-auto bg-black flex items-center justify-center p-2 sm:p-4">
+              {!lightboxImage.url ? (
+                <div className="text-sm text-slate-400">图片地址不可用</div>
+              ) : (
+                <img
+                  key={lightboxImage.id}
+                  src={lightboxImage.url}
+                  alt={lightboxImage.title}
+                  className="max-h-[70vh] sm:max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
+                  onError={e => {
+                    const el = e.currentTarget as HTMLImageElement;
+                    if (el.dataset.fallback !== '1' && lightboxImage.thumbnailUrl) {
+                      el.dataset.fallback = '1';
+                      el.src = lightboxImage.thumbnailUrl;
+                    }
+                  }}
+                />
+              )}
             </div>
 
             {/* Modal Info Footer */}
-            <div className="p-4 border-t border-slate-800 bg-slate-900/80 text-xs text-slate-300 space-y-1.5">
+            <div className="p-4 border-t border-slate-800 bg-slate-900/80 text-xs text-slate-300 space-y-1.5 shrink-0 max-h-40 overflow-y-auto">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-3 text-slate-400">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-400">
                   <span>拍摄/制作: <strong className="text-white">{lightboxImage.author}</strong></span>
                   {lightboxImage.date && <span>日期: <strong className="text-slate-200">{lightboxImage.date}</strong></span>}
                 </div>
@@ -499,7 +522,7 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
                 </span>
               </div>
               {lightboxImage.description && (
-                <p className="text-slate-400 text-xs leading-relaxed max-h-20 overflow-y-auto">
+                <p className="text-slate-400 text-xs leading-relaxed">
                   {lightboxImage.description}
                 </p>
               )}

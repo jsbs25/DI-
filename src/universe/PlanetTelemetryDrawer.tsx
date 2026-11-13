@@ -45,11 +45,15 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
   }[planet.humanityRole.status];
 
   return (
-    <div className="fixed top-18 md:top-32 right-4 bottom-6 w-96 max-w-[calc(100vw-2rem)] bg-slate-950/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-40 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
+    <div
+      className="fixed inset-x-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] top-[max(4.5rem,env(safe-area-inset-top))] z-40 flex max-h-[calc(100dvh-10rem)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950/92 shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom md:slide-in-from-right duration-300 md:inset-x-auto md:right-4 md:top-24 md:bottom-6 md:w-96 md:max-w-[calc(100vw-2rem)] md:max-h-[calc(100vh-7.5rem)]"
+      role="dialog"
+      aria-label={`${planet.chineseName || planet.name} telemetry`}
+    >
       {/* Drawer Header */}
-      <div className="relative p-5 border-b border-white/10 bg-gradient-to-r from-slate-900/80 to-transparent">
-        <div className="flex items-start justify-between">
-          <div>
+      <div className="relative p-4 sm:p-5 border-b border-white/10 bg-gradient-to-r from-slate-900/80 to-transparent shrink-0">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs font-mono uppercase tracking-wider text-cyan-400">
                 {planet.type.replace('_', ' ')}
@@ -59,8 +63,8 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
                 {planet.physical.meanOrbitRadiusAU > 0 ? `${planet.physical.meanOrbitRadiusAU} AU` : '0 AU (Central Star)'}
               </span>
             </div>
-            <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-              {planet.name} <span className="text-lg font-medium text-white/50">{planet.chineseName}</span>
+            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2 flex-wrap">
+              <span>{planet.name}</span> <span className="text-base sm:text-lg font-medium text-white/50">{planet.chineseName}</span>
             </h2>
           </div>
           <button 
@@ -68,7 +72,7 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
             aria-label="关闭天体遥测 (Close celestial telemetry)"
             title="关闭天体遥测 (Close celestial telemetry)"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+            className="shrink-0 p-2 rounded-xl text-white/70 hover:text-white hover:bg-white/10 transition-colors"
           >
             <X className="w-5 h-5" aria-hidden="true" />
           </button>
@@ -88,7 +92,7 @@ export const PlanetTelemetryDrawer: React.FC<PlanetTelemetryDrawerProps> = ({
       </div>
 
       {/* Drawer Content */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-6 text-sm">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-6 text-sm">
         {/* Quick Actions */}
         <div className="flex gap-2">
           <button
