@@ -118,17 +118,17 @@ export const AdminLibrary: React.FC<AdminLibraryProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto w-full px-4 sm:px-8 py-8">
+    <div className="max-w-7xl mx-auto w-full px-4 sm:px-8 py-8 text-[var(--one-text,#e8edf5)]">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center space-x-3">
-          <button onClick={onBack} className="text-xs text-slate-400 hover:text-white cursor-pointer">← 返回</button>
+          <button onClick={onBack} className="text-xs text-slate-300/80 hover:text-white cursor-pointer rounded-lg px-2 py-1 hover:bg-white/5 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40">← 返回</button>
           <div className="flex items-center space-x-2">
-            <ShieldCheck className="w-5 h-5 text-emerald-400" />
+            <ShieldCheck className="w-5 h-5 text-cyan-300" />
             <h2 className="text-xl font-bold text-white">图书管理后台</h2>
           </div>
         </div>
-        {message && <span className="text-xs text-emerald-400">{message}</span>}
+        {message && <span className="text-xs text-cyan-300">{message}</span>}
       </div>
 
       {/* Search */}
@@ -139,19 +139,19 @@ export const AdminLibrary: React.FC<AdminLibraryProps> = ({ onBack }) => {
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="搜索书名或作者..."
-          className="w-full bg-slate-900/80 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+          className="w-full bg-white/[0.04] border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/20"
         />
       </div>
 
       {/* Book list */}
       {isLoading ? (
-        <div className="text-center text-slate-500 py-12">加载中...</div>
+        <div className="text-center text-slate-400 py-12 rounded-2xl border border-white/10 bg-white/[0.03]">加载中...</div>
       ) : (
         <div className="space-y-2">
           {filtered.map(book => (
-            <div key={book.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-slate-700 transition-all">
+            <div key={book.id} className="flex items-center gap-3 p-3 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-cyan-400/25 hover:bg-white/[0.05] transition-all">
               {book.coverImage && (
-                <img src={book.coverImage} alt={book.title} className="w-10 h-14 object-cover rounded-md shrink-0" />
+                <img src={book.coverImage} alt={book.title} className="w-10 h-14 object-cover rounded-lg shrink-0 ring-1 ring-white/10" />
               )}
               <div className="flex-1 min-w-0">
                 <h4 className="text-xs font-bold text-white line-clamp-1">{book.title}</h4>
@@ -161,18 +161,18 @@ export const AdminLibrary: React.FC<AdminLibraryProps> = ({ onBack }) => {
                 </p>
               </div>
               <div className="flex items-center space-x-1 shrink-0">
-                <button onClick={() => startEdit(book)} className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer" title="编辑">
+                <button onClick={() => startEdit(book)} className="p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 hover:text-white cursor-pointer transition focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40" title="编辑">
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => deleteBook(book)} className="p-2 rounded-lg bg-slate-800 hover:bg-red-900/60 text-slate-300 hover:text-red-300 cursor-pointer" title="删除">
+                <button onClick={() => deleteBook(book)} className="p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-red-500/15 hover:border-red-400/30 text-slate-200 hover:text-red-200 cursor-pointer transition focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/30" title="删除">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
           ))}
           {filtered.length === 0 && (
-            <div className="text-center text-slate-500 py-12">
-              <BookOpen className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+            <div className="text-center text-slate-400 py-12 rounded-2xl border border-white/10 bg-white/[0.03]">
+              <BookOpen className="w-8 h-8 mx-auto mb-2 text-slate-500" />
               <p className="text-xs">暂无图书</p>
             </div>
           )}
@@ -182,13 +182,13 @@ export const AdminLibrary: React.FC<AdminLibraryProps> = ({ onBack }) => {
       {/* Edit modal */}
       {editing && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-[#0a1128] border border-slate-800 rounded-2xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-2xl bg-[rgba(10,14,22,0.96)] border border-white/10 rounded-2xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                <Pencil className="w-4 h-4 text-emerald-400" />
+                <Pencil className="w-4 h-4 text-cyan-300" />
                 <span>编辑图书元数据</span>
               </h3>
-              <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-white cursor-pointer">
+              <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-white cursor-pointer rounded-lg p-1 hover:bg-white/5">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -201,7 +201,7 @@ export const AdminLibrary: React.FC<AdminLibraryProps> = ({ onBack }) => {
                 <select
                   value={editForm.category}
                   onChange={e => setEditForm({ ...editForm, category: e.target.value as BookCategory })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/20"
                 >
                   {CATEGORY_OPTIONS.map(c => (
                     <option key={c.value} value={c.value}>{c.label}</option>
@@ -218,7 +218,7 @@ export const AdminLibrary: React.FC<AdminLibraryProps> = ({ onBack }) => {
                 <select
                   value={editForm.copyrightStatus || 'public_domain'}
                   onChange={e => setEditForm({ ...editForm, copyrightStatus: e.target.value as any })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/20"
                 >
                   <option value="public_domain">公共领域</option>
                   <option value="open_access">开放获取</option>
@@ -231,7 +231,7 @@ export const AdminLibrary: React.FC<AdminLibraryProps> = ({ onBack }) => {
                 <select
                   value={editForm.source}
                   onChange={e => setEditForm({ ...editForm, source: e.target.value as any })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/20"
                 >
                   <option value="Project Gutenberg">Project Gutenberg</option>
                   <option value="Internet Archive">Internet Archive</option>
@@ -247,15 +247,15 @@ export const AdminLibrary: React.FC<AdminLibraryProps> = ({ onBack }) => {
                 rows={3}
                 value={editForm.description}
                 onChange={e => setEditForm({ ...editForm, description: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                className="w-full bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/20"
               />
             </div>
 
             <div className="mt-6 flex items-center justify-end space-x-3">
-              <button onClick={() => setEditing(null)} className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium cursor-pointer">
+              <button onClick={() => setEditing(null)} className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-200 text-xs font-medium cursor-pointer transition">
                 取消
               </button>
-              <button onClick={saveEdit} className="flex items-center space-x-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold cursor-pointer">
+              <button onClick={saveEdit} className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 text-xs font-semibold cursor-pointer transition">
                 <Save className="w-3.5 h-3.5" />
                 <span>保存</span>
               </button>
@@ -275,7 +275,7 @@ function Field({ label, value, onChange }: { label: string; value?: string; onCh
         type="text"
         value={value || ''}
         onChange={e => onChange(e.target.value)}
-        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+        className="w-full bg-black/20 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/20"
       />
     </div>
   );

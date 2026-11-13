@@ -215,12 +215,12 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
   };
 
   return (
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="epub-reader-title" tabIndex={-1} className="fixed inset-0 z-50 bg-[#030712] flex flex-col focus:outline-none">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="epub-reader-title" tabIndex={-1} className="fixed inset-0 z-50 bg-[var(--one-bg,#030712)] flex flex-col focus:outline-none text-[var(--one-text,#e8edf5)]">
       {/* Toolbar */}
-      <header className="min-h-14 border-b border-slate-800 px-3 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-2 shrink-0 bg-[#02050f]">
+      <header className="min-h-14 border-b border-white/10 px-3 sm:px-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-2 shrink-0 bg-[rgba(8,12,20,0.88)] backdrop-blur-xl">
         <div className="flex items-center justify-between gap-2 w-full sm:w-auto min-w-0">
           <div className="flex items-center space-x-3 min-w-0">
-            <button ref={closeButtonRef} type="button" onClick={closeReader} aria-label="关闭 EPUB 阅读器" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer shrink-0">
+            <button ref={closeButtonRef} type="button" onClick={closeReader} aria-label="关闭 EPUB 阅读器" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-100 text-xs font-semibold cursor-pointer shrink-0 transition">
               <X className="w-4 h-4" />
               <span className="sr-only">返回</span>
             </button>
@@ -233,28 +233,28 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
 
         <div className="flex w-full sm:w-auto flex-col sm:flex-row sm:items-center gap-1.5">
           <div className="flex items-center justify-between sm:justify-start gap-1.5">
-            <button type="button" onClick={prev} aria-label="上一页" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">
+            <button type="button" onClick={prev} aria-label="上一页" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-100 cursor-pointer transition">
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <span aria-label={`阅读进度 ${progress}%`} className="text-[11px] text-slate-400 font-mono px-1">{progress}%</span>
-            <button type="button" onClick={next} aria-label="下一页" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">
+            <span aria-label={`阅读进度 ${progress}%`} className="text-[11px] text-slate-300 font-mono px-1">{progress}%</span>
+            <button type="button" onClick={next} aria-label="下一页" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-100 cursor-pointer transition">
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
           <div className="flex items-center justify-between sm:justify-end gap-1.5">
-            <button type="button" onClick={() => adjustFont(-10)} aria-label="缩小字体" className="min-h-11 min-w-11 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer">A-</button>
-            <button type="button" onClick={() => adjustFont(10)} aria-label="增大字体" className="min-h-11 min-w-11 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 cursor-pointer">A+</button>
-            <button type="button" onClick={() => setShowToc(!showToc)} aria-label={showToc ? '关闭目录' : '打开目录'} aria-expanded={showToc} aria-controls="epub-reader-toc" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">
+            <button type="button" onClick={() => adjustFont(-10)} aria-label="缩小字体" className="min-h-11 min-w-11 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs text-slate-200 cursor-pointer transition">A-</button>
+            <button type="button" onClick={() => adjustFont(10)} aria-label="增大字体" className="min-h-11 min-w-11 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs text-slate-200 cursor-pointer transition">A+</button>
+            <button type="button" onClick={() => setShowToc(!showToc)} aria-label={showToc ? '关闭目录' : '打开目录'} aria-expanded={showToc} aria-controls="epub-reader-toc" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-100 cursor-pointer transition">
               <Menu className="w-4 h-4" />
             </button>
-            <button type="button" onClick={toggleFullscreen} aria-label="切换全屏" className="min-h-11 min-w-11 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer">
+            <button type="button" onClick={toggleFullscreen} aria-label="切换全屏" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-100 cursor-pointer transition">
               <Maximize2 className="w-4 h-4" />
             </button>
           </div>
         </div>
       </header>
 
-      <aside aria-label="EPUB 阅读说明" className="border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-[11px] leading-relaxed text-amber-200/90">
+      <aside aria-label="EPUB 阅读说明" className="border-b border-amber-400/20 bg-amber-500/10 px-4 py-2 text-[11px] leading-relaxed text-amber-100/90">
         <strong className="mr-1">EPUB AI 段落解读暂不可用。</strong>
         阅读与续读仍可使用；这本 EPUB 的具体文件版本、服务器章节正文和 CFI 定位尚未建立可核验关联，因此不会把选文或阅读位置发送给 AI。公版/开放许可标签或已保存的续读 CFI 都不能替代这项核验。若馆藏提供已核实的 TXT/正文版本，可改用该版本的段落解读。
       </aside>
@@ -262,15 +262,15 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
       {/* Body */}
       <div className="flex-1 flex overflow-hidden relative">
         {showToc && (
-          <aside id="epub-reader-toc" aria-label="EPUB 目录" className="absolute inset-y-0 left-0 z-10 w-[min(80vw,16rem)] border-r border-slate-800 bg-[#060c20] p-4 overflow-y-auto shrink-0 shadow-2xl md:relative md:inset-auto md:z-auto md:w-64 md:shadow-none">
-            <h3 className="text-xs font-semibold text-slate-400 mb-3">目录</h3>
+          <aside id="epub-reader-toc" aria-label="EPUB 目录" className="absolute inset-y-0 left-0 z-10 w-[min(80vw,16rem)] border-r border-white/10 bg-[rgba(8,12,20,0.97)] backdrop-blur-xl p-4 overflow-y-auto shrink-0 shadow-2xl md:relative md:inset-auto md:z-auto md:w-64 md:shadow-none">
+            <h3 className="text-xs font-semibold text-slate-300 mb-3">目录</h3>
             <div className="space-y-1">
               {toc.map((item, i) => (
                 <button
                   key={i}
                   type="button"
                   onClick={() => goTo(item.href)}
-                  className="w-full min-h-11 text-left px-3 py-2 rounded text-xs text-slate-300 hover:bg-slate-800 hover:text-white cursor-pointer line-clamp-1"
+                  className="w-full min-h-11 text-left px-3 py-2 rounded-xl text-xs text-slate-300 hover:bg-white/5 hover:text-white cursor-pointer line-clamp-1 transition"
                 >
                   {item.label}
                 </button>
@@ -281,16 +281,16 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
 
         <div className="flex-1 bg-[#f5f1e8] flex items-center justify-center relative" dir={isRtl ? 'rtl' : 'ltr'} lang={book.language || undefined}>
           {loading && (
-              <div role="status" aria-live="polite" className="text-slate-500 text-sm flex items-center space-x-2">
+              <div role="status" aria-live="polite" className="text-slate-600 text-sm flex items-center space-x-2">
               <BookOpen className="w-5 h-5 animate-pulse" />
               <span>正在加载 EPUB...</span>
             </div>
           )}
           {error && (
-            <div role="alert" className="text-red-500 text-sm p-4 text-center">
+            <div role="alert" className="text-red-600 text-sm p-4 text-center max-w-md">
               {error}
               {officialSourceUrl && (
-                <a href={officialSourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-10 items-center justify-center rounded-lg border border-red-300/20 px-4 text-red-300 underline underline-offset-4">
+                <a href={officialSourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-10 items-center justify-center rounded-xl border border-red-400/30 bg-red-50 px-4 text-red-700 underline underline-offset-4">
                   前往官方来源页面
                 </a>
               )}
