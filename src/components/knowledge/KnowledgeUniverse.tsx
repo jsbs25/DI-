@@ -1,18 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Search,
-  BookOpen,
-  Sparkles,
-  Network,
-  MapPin,
-  X,
-  ArrowRight,
-  Languages,
-  Landmark,
-  Brain,
-  User,
-  Library
-} from 'lucide-react';
+import { ArrowRight, BookOpen, Brain, Landmark, Languages, Library, MapPin, Network, Search, Sparkles, User, X } from 'lucide-react';
 import { Language, KnowledgeNode, Book } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 
@@ -20,7 +7,6 @@ interface KnowledgeUniverseProps {
   lang: Language;
   onOpenLibrary?: () => void;
   onOpenBook?: (bookId: string) => void;
-  /** When set, auto-opens a specific node's detail (cross-module navigation). */
   focusNodeId?: string | null;
 }
 
@@ -31,14 +17,14 @@ interface NodeDetail {
 }
 
 const CATEGORIES: { id: string; label: Record<'zh' | 'en', string>; icon: React.ReactNode }[] = [
-  { id: 'all', label: { zh: '全部', en: 'All' }, icon: <Network className="w-3.5 h-3.5" /> },
-  { id: 'civilization', label: { zh: '文明', en: 'Civilizations' }, icon: <Landmark className="w-3.5 h-3.5" /> },
-  { id: 'person', label: { zh: '人物', en: 'People' }, icon: <User className="w-3.5 h-3.5" /> },
-  { id: 'place', label: { zh: '地点', en: 'Places' }, icon: <MapPin className="w-3.5 h-3.5" /> },
-  { id: 'language', label: { zh: '语言', en: 'Languages' }, icon: <Languages className="w-3.5 h-3.5" /> },
-  { id: 'scientific_concept', label: { zh: '科学概念', en: 'Science' }, icon: <Brain className="w-3.5 h-3.5" /> },
-  { id: 'thought', label: { zh: '思想', en: 'Ideas' }, icon: <Sparkles className="w-3.5 h-3.5" /> },
-  { id: 'book', label: { zh: '文献', en: 'Works' }, icon: <BookOpen className="w-3.5 h-3.5" /> }
+  { id: 'all', label: { zh: '全部', en: 'All' }, icon: <Network className="h-3.5 w-3.5" /> },
+  { id: 'civilization', label: { zh: '文明', en: 'Civilizations' }, icon: <Landmark className="h-3.5 w-3.5" /> },
+  { id: 'person', label: { zh: '人物', en: 'People' }, icon: <User className="h-3.5 w-3.5" /> },
+  { id: 'place', label: { zh: '地点', en: 'Places' }, icon: <MapPin className="h-3.5 w-3.5" /> },
+  { id: 'language', label: { zh: '语言', en: 'Languages' }, icon: <Languages className="h-3.5 w-3.5" /> },
+  { id: 'scientific_concept', label: { zh: '科学概念', en: 'Science' }, icon: <Brain className="h-3.5 w-3.5" /> },
+  { id: 'thought', label: { zh: '思想', en: 'Ideas' }, icon: <Sparkles className="h-3.5 w-3.5" /> },
+  { id: 'book', label: { zh: '文献', en: 'Works' }, icon: <BookOpen className="h-3.5 w-3.5" /> }
 ];
 
 const typeLabel: Record<string, Record<'zh' | 'en', string>> = {
@@ -57,7 +43,6 @@ const typeLabel: Record<string, Record<'zh' | 'en', string>> = {
 export const KnowledgeUniverse: React.FC<KnowledgeUniverseProps> = ({ lang, onOpenLibrary, onOpenBook, focusNodeId }) => {
   const t = translations[lang] || translations.zh;
   const isZh = lang === 'zh';
-
   const [nodes, setNodes] = useState<KnowledgeNode[]>([]);
   const [category, setCategory] = useState<string>('all');
   const [query, setQuery] = useState('');
@@ -77,19 +62,12 @@ export const KnowledgeUniverse: React.FC<KnowledgeUniverseProps> = ({ lang, onOp
       if (data.success) setNodes(data.nodes || []);
       else setError(data.error || t.noResults);
     } catch {
-      setError('无法连接到知识宇宙服务。');
-    } finally {
-      setIsLoading(false);
-    }
+      setError(isZh ? '无法连接到知识服务。' : 'Unable to reach knowledge service.');
+    } finally { setIsLoading(false); }
   };
 
-  // Initial load
-  useEffect(() => {
-    fetchNodes('', 'all');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { fetchNodes('', 'all'); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  // Debounced search
   useEffect(() => {
     const timer = setTimeout(() => fetchNodes(query, category), 250);
     return () => clearTimeout(timer);
@@ -97,218 +75,157 @@ export const KnowledgeUniverse: React.FC<KnowledgeUniverseProps> = ({ lang, onOp
   }, [query, category]);
 
   const openNode = async (id: string) => {
-    setDetail(null);
-    setError(null);
+    setDetail(null); setError(null);
     try {
       const res = await fetch(`/api/knowledge/nodes/${id}`);
       const data = await res.json();
       if (data.success) setDetail(data as NodeDetail);
       else setError(data.error || t.noResults);
-    } catch {
-      setError('无法加载该知识节点。');
-    }
+    } catch { setError(isZh ? '无法加载该知识节点。' : 'Unable to load this node.'); }
   };
 
-  // Cross-module navigation: open a node passed from global search or elsewhere
-  useEffect(() => {
-    if (focusNodeId) openNode(focusNodeId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusNodeId]);
+  useEffect(() => { if (focusNodeId) openNode(focusNodeId); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [focusNodeId]);
 
   const featured = useMemo(() => nodes.slice(0, 12), [nodes]);
-
-  const categoryLabel = (c: string) => {
-    if (isZh) return CATEGORIES.find(x => x.id === c)?.label.zh || c;
-    return CATEGORIES.find(x => x.id === c)?.label.en || c;
-  };
-
+  const categoryLabel = (c: string) => (isZh ? CATEGORIES.find(x => x.id === c)?.label.zh : CATEGORIES.find(x => x.id === c)?.label.en) || c;
   const nodeTypeLabel = (c: string) => (isZh ? typeLabel[c]?.zh : typeLabel[c]?.en) || c;
 
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-20">
-      {/* Hero */}
-      <header className="text-center max-w-3xl mx-auto mb-10">
-        <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-amber-950/50 border border-amber-600/40 text-amber-300 text-[11px] font-semibold mb-4">
-          <Network className="w-3.5 h-3.5" />
-          <span>KNOWLEDGE UNIVERSE</span>
+    <div className="mx-auto w-full max-w-7xl px-4 py-8 pb-20 sm:px-6 lg:px-8">
+      <header className="mx-auto mb-10 max-w-3xl text-center">
+        <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-1 text-[11px] font-medium text-[var(--color-one-text-muted)]">
+          <Network className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
+          <span>ONE KNOWLEDGE</span>
         </div>
-        <h1 className="text-3xl sm:text-5xl font-serif font-bold tracking-tight text-white">
-          {t.knowledgeTab}
-        </h1>
-        <p className="text-slate-400 mt-3 text-sm sm:text-base leading-relaxed">
-          {isZh
-            ? '沿着文明、人物、地点、语言与思想之间的真实联系，探索人类知识的网络。'
-            : 'Explore the network of human knowledge through the real connections between civilizations, people, places, languages and ideas.'}
+        <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-5xl">{t.knowledgeTab}</h1>
+        <p className="mt-3 text-sm leading-relaxed text-[var(--color-one-text-muted)] sm:text-base">
+          {isZh ? '沿着文明、人物、地点、语言与思想之间的真实联系，探索人类知识网络。' : 'Explore the human knowledge network through real connections between civilizations, people, places, languages, and ideas.'}
         </p>
 
-        {/* Search */}
-        <div className="mt-6 flex items-center bg-slate-900/70 border border-slate-700/60 rounded-2xl px-4 py-3 focus-within:border-amber-500/60 transition-colors">
-          <Search className="w-4 h-4 text-slate-400 shrink-0" />
+        <div className="mt-6 flex items-center rounded-[22px] border border-[var(--color-one-border)] bg-white/[0.03] px-4 py-3 shadow-[var(--shadow-one-sm)] transition focus-within:border-[rgba(78,161,255,0.45)] focus-within:ring-2 focus-within:ring-[rgba(78,161,255,0.12)]">
+          <Search className="h-4 w-4 shrink-0 text-[var(--color-one-text-dim)]" />
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder={t.knowledgeSearchPlaceholder}
-            className="flex-1 bg-transparent outline-none text-sm text-slate-100 placeholder:text-slate-500 ml-3"
+            className="ml-3 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[var(--color-one-text-dim)]"
           />
           {query && (
-            <button onClick={() => setQuery('')} className="text-slate-500 hover:text-slate-300 cursor-pointer">
-              <X className="w-4 h-4" />
+            <button onClick={() => setQuery('')} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-one-text-dim)] hover:bg-white/[0.05] hover:text-white">
+              <X className="h-4 w-4" />
             </button>
           )}
         </div>
       </header>
 
-      {/* Category chips */}
-      <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
+      <div className="mb-8 flex flex-wrap items-center justify-center gap-2">
         {CATEGORIES.map(c => (
           <button
             key={c.id}
             onClick={() => setCategory(c.id)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+            className={`inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
               category === c.id
-                ? 'bg-amber-600 text-white border-amber-500'
-                : 'bg-slate-900/50 border-slate-700/60 text-slate-300 hover:border-slate-500'
+                ? 'border-[rgba(78,161,255,0.35)] bg-[rgba(78,161,255,0.14)] text-white'
+                : 'border-[var(--color-one-border)] bg-white/[0.02] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white'
             }`}
           >
-            {c.icon}
-            <span>{categoryLabel(c.id)}</span>
+            {c.icon}<span>{categoryLabel(c.id)}</span>
           </button>
         ))}
       </div>
 
-      {/* Error / loading */}
-      {isLoading && <p className="text-center text-sm text-slate-500 py-10">正在探索知识宇宙...</p>}
-      {!isLoading && error && <p className="text-center text-sm text-red-400 py-10">{error}</p>}
+      {isLoading && (
+        <div className="py-12 text-center text-sm text-[var(--color-one-text-muted)]">
+          <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/10 border-t-[var(--color-one-accent)]" />
+          {isZh ? '正在探索知识网络…' : 'Exploring knowledge network…'}
+        </div>
+      )}
+      {!isLoading && error && <p className="rounded-2xl border border-red-500/20 bg-red-500/10 py-6 text-center text-sm text-red-200">{error}</p>}
       {!isLoading && !error && nodes.length === 0 && (
-        <p className="text-center text-sm text-slate-500 py-10">{t.noResults}</p>
+        <p className="rounded-[28px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] py-12 text-center text-sm text-[var(--color-one-text-muted)]">{t.noResults}</p>
       )}
 
-      {/* Node grid */}
       {!isLoading && nodes.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {featured.map(node => (
             <button
               key={node.id}
               onClick={() => openNode(node.id)}
-              className="group text-left p-5 rounded-2xl bg-slate-900/50 border border-slate-800 hover:border-amber-500/50 hover:bg-slate-900 transition-all cursor-pointer"
+              className="group cursor-pointer rounded-[24px] border border-[var(--color-one-border)] bg-white/[0.03] p-5 text-left transition hover:-translate-y-0.5 hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05]"
             >
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[10px] uppercase tracking-wider font-semibold text-amber-400">
-                  {nodeTypeLabel(node.type)}
-                </span>
-                {node.countryCode && (
-                  <span className="text-[10px] text-slate-500">{node.countryCode}</span>
-                )}
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-one-accent-soft)]">{nodeTypeLabel(node.type)}</span>
+                {node.countryCode && <span className="text-[10px] text-[var(--color-one-text-dim)]">{node.countryCode}</span>}
               </div>
-              <h3 className="text-base font-serif font-bold text-white group-hover:text-amber-300 transition-colors">
-                {node.title}
-              </h3>
-              {node.titleEn && node.titleEn !== node.title && (
-                <p className="text-xs text-slate-500 mt-0.5">{node.titleEn}</p>
-              )}
-              <p className="text-xs text-slate-400 mt-2 line-clamp-3 leading-relaxed">{node.description}</p>
-              <div className="mt-3 flex items-center space-x-1 text-[11px] text-slate-500">
-                <span>{node.relatedIds.length} 关联</span>
-                <ArrowRight className="w-3 h-3" />
+              <h3 className="text-base font-semibold text-white transition-colors group-hover:text-[var(--color-one-accent-soft)]">{node.title}</h3>
+              {node.titleEn && node.titleEn !== node.title && <p className="mt-0.5 text-xs text-[var(--color-one-text-dim)]">{node.titleEn}</p>}
+              <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--color-one-text-muted)]">{node.description}</p>
+              <div className="mt-3 flex items-center gap-1 text-[11px] text-[var(--color-one-text-dim)]">
+                <span>{node.relatedIds.length} {isZh ? '关联' : 'links'}</span><ArrowRight className="h-3 w-3" />
               </div>
             </button>
           ))}
         </div>
       )}
 
-      {/* Node detail modal */}
       {detail && (
-        <div className="fixed inset-0 z-50 bg-[#030712]/95 backdrop-blur-xl flex items-start justify-center overflow-y-auto p-4 sm:p-8 animate-in fade-in duration-150">
-          <div className="w-full max-w-2xl my-8 rounded-3xl bg-slate-950 border border-slate-800 shadow-2xl overflow-hidden">
-            {/* Header */}
-            <div className="p-6 sm:p-8 border-b border-slate-800/80">
-              <div className="flex items-start justify-between">
-                <div>
-                  <span className="text-[11px] uppercase tracking-wider font-semibold text-amber-400">
-                    {nodeTypeLabel(detail.node.type)}
-                  </span>
-                  <h2 className="text-2xl sm:text-3xl font-serif font-bold text-white mt-1">{detail.node.title}</h2>
-                  {detail.node.titleEn && detail.node.titleEn !== detail.node.title && (
-                    <p className="text-sm text-slate-500 mt-1">{detail.node.titleEn}</p>
-                  )}
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-xl sm:p-8">
+          <div className="my-8 w-full max-w-2xl overflow-hidden rounded-[28px] border border-[var(--color-one-border-strong)] bg-[color:var(--color-one-bg-elevated)] shadow-[var(--shadow-one-lg)]">
+            <div className="border-b border-[var(--color-one-border)] p-6 sm:p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-one-accent-soft)]">{nodeTypeLabel(detail.node.type)}</span>
+                  <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white sm:text-3xl">{detail.node.title}</h2>
+                  {detail.node.titleEn && detail.node.titleEn !== detail.node.title && <p className="mt-1 text-sm text-[var(--color-one-text-dim)]">{detail.node.titleEn}</p>}
                 </div>
-                <button onClick={() => setDetail(null)} className="text-slate-500 hover:text-white cursor-pointer">
-                  <X className="w-5 h-5" />
-                </button>
+                <button onClick={() => setDetail(null)} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--color-one-text-muted)] hover:bg-white/[0.05] hover:text-white"><X className="h-5 w-5" /></button>
               </div>
-              <p className="text-sm text-slate-300 leading-relaxed mt-4">{detail.node.description}</p>
+              <p className="mt-4 text-sm leading-relaxed text-[var(--color-one-text-muted)]">{detail.node.description}</p>
               {detail.node.tags && detail.node.tags.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-4">
+                <div className="mt-4 flex flex-wrap gap-2">
                   {detail.node.tags.map(tag => (
-                    <span key={tag} className="px-2.5 py-1 rounded-full bg-slate-900 text-[11px] text-slate-400 border border-slate-800">
-                      {tag}
-                    </span>
+                    <span key={tag} className="rounded-full border border-[var(--color-one-border)] bg-white/[0.02] px-2.5 py-1 text-[11px] text-[var(--color-one-text-muted)]">{tag}</span>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Related connections */}
             {detail.related.length > 0 && (
-              <div className="p-6 sm:p-8 border-b border-slate-800/80">
-                <h3 className="text-sm font-semibold text-slate-200 mb-4 flex items-center space-x-2">
-                  <Network className="w-4 h-4 text-amber-400" />
-                  <span>{t.relatedConnections}</span>
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="border-b border-[var(--color-one-border)] p-6 sm:p-8">
+                <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-white"><Network className="h-4 w-4 text-[var(--color-one-accent)]" /><span>{t.relatedConnections}</span></h3>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {detail.related.map(n => (
-                    <button
-                      key={n.id}
-                      onClick={() => openNode(n.id)}
-                      className="text-left p-3 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-amber-500/50 transition-all cursor-pointer"
-                    >
-                      <span className="text-[10px] uppercase tracking-wide text-amber-400">{nodeTypeLabel(n.type)}</span>
-                      <h4 className="text-sm font-bold text-white mt-0.5">{n.title}</h4>
+                    <button key={n.id} onClick={() => openNode(n.id)} className="cursor-pointer rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] p-3 text-left transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05]">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-one-accent-soft)]">{nodeTypeLabel(n.type)}</span>
+                      <h4 className="mt-0.5 text-sm font-semibold text-white">{n.title}</h4>
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Related books */}
             {detail.relatedBooks.length > 0 && (
               <div className="p-6 sm:p-8">
-                <h3 className="text-sm font-semibold text-slate-200 mb-4 flex items-center space-x-2">
-                  <Library className="w-4 h-4 text-amber-400" />
-                  <span>{t.relatedBooks}</span>
-                </h3>
+                <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-white"><Library className="h-4 w-4 text-[var(--color-one-accent)]" /><span>{t.relatedBooks}</span></h3>
                 <div className="space-y-3">
                   {detail.relatedBooks.map(book => (
-                    <div key={book.id} className="flex items-center space-x-3 p-3 rounded-xl bg-slate-900/50 border border-slate-800">
-                      {book.coverImage && (
-                        <img src={book.coverImage} alt={book.title} className="w-10 h-14 object-cover rounded-lg shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-bold text-white line-clamp-1">{book.title}</h4>
-                        <p className="text-xs text-slate-400">{book.author}</p>
+                    <div key={book.id} className="flex items-center gap-3 rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] p-3">
+                      {book.coverImage && <img src={book.coverImage} alt={book.title} className="h-14 w-10 shrink-0 rounded-lg object-cover" />}
+                      <div className="min-w-0 flex-1">
+                        <h4 className="line-clamp-1 text-sm font-semibold text-white">{book.title}</h4>
+                        <p className="text-xs text-[var(--color-one-text-muted)]">{book.author}</p>
                       </div>
-                      <button
-                        onClick={() => onOpenBook?.(book.id)}
-                        className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold cursor-pointer transition-all"
-                      >
-                        {t.viewInLibrary}
-                      </button>
+                      <button onClick={() => onOpenBook?.(book.id)} className="inline-flex min-h-10 shrink-0 cursor-pointer items-center rounded-xl bg-[var(--color-one-accent)] px-3 py-1.5 text-xs font-semibold text-[#071018] transition hover:brightness-110">{t.viewInLibrary}</button>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Library CTA */}
             {onOpenLibrary && (
-              <div className="px-6 sm:px-8 pb-8">
-                <button
-                  onClick={onOpenLibrary}
-                  className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 text-sm font-semibold cursor-pointer transition-all"
-                >
-                  <BookOpen className="w-4 h-4" />
-                  <span>{t.digitalLibrary}</span>
-                  <ArrowRight className="w-4 h-4" />
+              <div className="px-6 pb-8 sm:px-8">
+                <button onClick={onOpenLibrary} className="flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] py-3 text-sm font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">
+                  <BookOpen className="h-4 w-4" /><span>{t.digitalLibrary}</span><ArrowRight className="h-4 w-4" />
                 </button>
               </div>
             )}
