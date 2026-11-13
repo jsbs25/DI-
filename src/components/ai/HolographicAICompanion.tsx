@@ -146,49 +146,56 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const size = 56;
-    canvas.width = size;
-    canvas.height = size;
+    let renderer: THREE.WebGLRenderer | null = null;
+    try {
+      const size = 56;
+      canvas.width = size;
+      canvas.height = size;
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-    camera.position.z = 2.4;
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+      camera.position.z = 2.4;
 
-    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-    renderer.setSize(size, size);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+      renderer.setSize(size, size);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    const coreGeo = new THREE.IcosahedronGeometry(0.75, 2);
-    const coreMat = new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.85
-    });
-    const coreMesh = new THREE.Mesh(coreGeo, coreMat);
-    scene.add(coreMesh);
+      const coreGeo = new THREE.IcosahedronGeometry(0.75, 2);
+      const coreMat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.85
+      });
+      const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+      scene.add(coreMesh);
 
-    const nucGeo = new THREE.SphereGeometry(0.38, 16, 16);
-    const nucMat = new THREE.MeshBasicMaterial({ color: 0x06b6d4 });
-    const nucMesh = new THREE.Mesh(nucGeo, nucMat);
-    scene.add(nucMesh);
+      const nucGeo = new THREE.SphereGeometry(0.38, 16, 16);
+      const nucMat = new THREE.MeshBasicMaterial({ color: 0x06b6d4 });
+      const nucMesh = new THREE.Mesh(nucGeo, nucMat);
+      scene.add(nucMesh);
 
-    let t = 0;
-    const animate = () => {
-      animFrameRef.current = requestAnimationFrame(animate);
-      t += 0.025;
-      coreMesh.rotation.y += 0.02;
-      coreMesh.rotation.x += 0.01;
-      const s = 1 + Math.sin(t * 3) * 0.1;
-      nucMesh.scale.set(s, s, s);
-      renderer.render(scene, camera);
-    };
-    animate();
+      let t = 0;
+      const animate = () => {
+        animFrameRef.current = requestAnimationFrame(animate);
+        t += 0.025;
+        coreMesh.rotation.y += 0.02;
+        coreMesh.rotation.x += 0.01;
+        const s = 1 + Math.sin(t * 3) * 0.1;
+        nucMesh.scale.set(s, s, s);
+        renderer!.render(scene, camera);
+      };
+      animate();
 
-    return () => {
-      cancelAnimationFrame(animFrameRef.current);
-      renderer.dispose();
-    };
+      return () => {
+        cancelAnimationFrame(animFrameRef.current);
+        renderer?.dispose();
+      };
+    } catch {
+      // WebGL unavailable (e.g. headless/test env): show static launcher without 3D orb.
+      try { renderer?.dispose(); } catch {}
+      return;
+    }
   }, []);
 
   // Speech Synthesis (TTS) - robust with active state
