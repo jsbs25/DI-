@@ -292,17 +292,16 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   // Overview <-> Immersive: fade HUD, keep controls/exit available. Auto-rotate pauses in immersive for focus.
   const handleToggleExplore = () => {
     const next = !immersive;
+    onImmersiveChange?.(next);
     if (next) {
       setIsZoomedIn(true);
       setAutoRotate(false);
       stateRef.current.autoRotate = false;
-      onImmersiveChange?.(true);
     } else {
       setIsZoomedIn(false);
       stateRef.current.targetSphericalRotation = null;
       setAutoRotate(true);
       stateRef.current.autoRotate = true;
-      onImmersiveChange?.(false);
     }
   };
 
@@ -742,7 +741,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   }, [nodes, currentUserId, onSelectUser, flyToCoordinates]);
 
   return (
-    <div className="relative w-full h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] flex-1 overflow-x-clip bg-[#010309] select-none md:overflow-hidden">
+    <div data-immersive={immersive ? 'true' : 'false'} className="relative w-full h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] flex-1 overflow-x-clip bg-[#010309] select-none md:overflow-hidden">
       {/* ============================================================== */}
       {/* 1. LIVE THREE.JS 3D WEBGL UNIVERSE CANVAS                      */}
       {/* ============================================================== */}
@@ -766,9 +765,9 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       {/* ============================================================== */}
       {/* 2. WORLD-CLASS USER HERO OVERLAY                               */}
       {/* ============================================================== */}
-      <div className={`relative z-10 h-full min-h-[100dvh] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-28 lg:pl-32 flex flex-col justify-start md:justify-between pt-24 sm:pt-28 pb-8 pointer-events-none transition-opacity duration-500 ${immersive ? 'opacity-0' : 'opacity-100'}`}>
+      <div className={`relative z-10 h-full min-h-[100dvh] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-28 lg:pl-32 flex flex-col justify-start md:justify-between pt-24 sm:pt-28 pb-8 transition-all duration-500 ${immersive ? 'opacity-0 pointer-events-none' : 'opacity-100 pointer-events-none'}`}>
         {/* Left Hero Title & CTA */}
-        <div className={`max-w-xl pointer-events-auto transition-all duration-500 ${immersive ? 'opacity-0 translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+        <div className={`max-w-xl transition-all duration-500 ${immersive ? 'opacity-0 translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0 pointer-events-auto'}`}>
           <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full border border-white/10 bg-white/[0.04] text-slate-300 text-xs font-medium mb-4 backdrop-blur-sm">
             <Globe2 className="w-3.5 h-3.5 text-cyan-400" />
             <span>{t.appName}</span>
@@ -880,7 +879,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
         <div className="h-[38vh] shrink-0 md:hidden" aria-hidden="true" />
 
-        <div className={`w-full flex justify-center pointer-events-auto pt-4 sm:pt-6 transition-opacity duration-500 ${immersive ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        <div className={`w-full flex justify-center pt-4 sm:pt-6 transition-all duration-500 ${immersive ? 'opacity-0 translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0 pointer-events-auto'}`}>
           <div
             id="globe-telemetry-panel"
             style={{ display: showGlobeTools ? undefined : 'none' }}
@@ -1009,9 +1008,9 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       </aside>
 
       {immersive && (
-        <div className="pointer-events-auto fixed bottom-6 right-5 z-30 md:hidden">
-          <button onClick={handleToggleExplore} className="inline-flex items-center gap-2 rounded-full eo-glass-strong px-4 py-2.5 text-sm font-medium text-white shadow-lg">
-            <X className="w-4 h-4" /><span>{lang === 'zh' ? '退出沉浸' : 'Exit'}</span>
+        <div className="pointer-events-auto fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-4 z-30 md:bottom-6 md:right-5">
+          <button onClick={handleToggleExplore} data-testid="immersive-exit" className="inline-flex items-center gap-2 rounded-full eo-glass-strong px-4 py-2.5 text-sm font-medium text-white shadow-lg ring-1 ring-white/10">
+            <X className="w-4 h-4" /><span>{lang === 'zh' ? '退出沉浸' : 'Exit immersive'}</span>
           </button>
         </div>
       )}
