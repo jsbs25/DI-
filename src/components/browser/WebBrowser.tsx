@@ -1939,8 +1939,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
       >
 
       {/* 2. Omnibox Toolbar */}
-      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/[0.06] bg-[#0d151d] px-3 py-3 sm:px-5">
-        <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/[0.06] bg-white/[0.025] p-1 text-slate-400">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-white/10 bg-white/[0.02] px-3 py-2.5 backdrop-blur-xl sm:px-4">
+        <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-white/10 bg-black/20 p-1 text-slate-400">
           <button
             onClick={goBack}
             disabled={(historyIndex[activeTabId] ?? 0) <= 0 &&
@@ -1986,7 +1986,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
             e.preventDefault();
             handleNavigate(inputUrl);
           }}
-          className="flex min-h-10 min-w-[220px] flex-1 items-center rounded-full border border-white/[0.09] bg-[#080f16] px-4 shadow-inner transition-all focus-within:border-cyan-400/50 focus-within:ring-2 focus-within:ring-cyan-400/10"
+          className="flex min-h-11 min-w-[220px] flex-1 items-center rounded-2xl border border-white/10 bg-black/25 px-4 transition-all focus-within:border-cyan-400/40 focus-within:ring-2 focus-within:ring-cyan-400/10 hover:border-white/15"
         >
           {browserEngine && !activeTab?.readerMode ? (
             <span
@@ -2024,7 +2024,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
             value={inputUrl}
             onChange={e => setInputUrl(e.target.value)}
             aria-label="输入网址或搜索词"
-            placeholder="输入 Google 搜索词或网页网址 (支持全网爬虫解析)..."
+            placeholder="搜索或输入网址"
             className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-500 focus:outline-none"
           />
           {inputUrl && (
@@ -2134,7 +2134,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
           title={browserEngine
             ? '此桌面版由 Electron 内嵌的 Chromium 渲染网页'
             : '此 Web 版为网页预览，不具备桌面浏览器引擎'}
-          className={`inline-flex min-h-8 shrink-0 items-center rounded-full border px-3 text-[11px] font-medium ${
+          className={`inline-flex min-h-8 shrink-0 items-center rounded-full border px-3 text-[11px] font-medium tracking-wide ${
             browserEngine
               ? 'border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-200'
               : 'border-amber-300/20 bg-amber-300/[0.05] text-amber-200'
@@ -2143,7 +2143,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
           {browserEngine ? '真实 Chromium' : '网页预览'}
         </div>
 
-        <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 sm:w-auto">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
           {browserEngine && browserSessionSettingsReady && (
             <button
               type="button"
@@ -2404,7 +2404,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
       )}
 
       {/* 3. Chrome Bookmarks Bar */}
-      <div className="flex items-center gap-1 overflow-x-auto border-b border-white/[0.06] bg-[#0c141d] px-3 py-1.5 text-xs [scrollbar-width:none]">
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-white/10 bg-white/[0.015] px-3 py-1.5 text-xs [scrollbar-width:none]">
         {bookmarks.slice(0, 12).map(bm => (
           <button
             key={bm.id}
@@ -2483,22 +2483,20 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
       )}
 
       {/* 4. Split Layout */}
-      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[#080d13]">
-        <div ref={searchResultsScrollRef} className="min-w-0 flex-1 overflow-y-auto bg-[#080d13] p-4 sm:p-8">
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(34,211,238,0.06),transparent_55%),linear-gradient(180deg,#070a0f,#05080d)]">
+        <div ref={searchResultsScrollRef} className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-8">
           {lastSearchQuery || searchResults.length > 0 || isSearching ? (
-            <div className="max-w-3xl mx-auto">
+            <div className="mx-auto w-full max-w-4xl">
               <div className="mb-6">
                 <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                  <span className="rounded-full border border-amber-200/20 bg-amber-200/[0.06] px-2.5 py-1 font-semibold tracking-[0.16em] text-amber-100">
-                    JUPITER
-                  </span>
+                  <span className="rounded-full border border-cyan-300/20 bg-cyan-300/[0.08] px-2.5 py-1 font-semibold tracking-[0.18em] text-cyan-100">JUPITER SEARCH</span>
                   <span className={`rounded-full border px-2.5 py-1 font-medium ${searchCategory !== 'all' ? 'border-violet-300/20 bg-violet-300/[0.06] text-violet-100' : searchEngine === 'github' ? 'border-slate-600 bg-slate-900 text-white' : 'border-white/[0.08] bg-white/[0.04] text-slate-300'}`}>
                     {searchCategory !== 'all' ? `${JUPITER_SEARCH_CATEGORY_LABELS[searchCategory]}搜索` : searchEngine === 'github' ? 'GitHub 公共仓库' : '真实互联网搜索'}
                   </span>
                   {!isSearching && <span>{searchResults.length} 条结果</span>}
                   <span className="text-slate-500">{searchCategory === 'all' ? 'EARTH 内容与公开网页' : 'EARTH 内容与对应外部搜索源'}</span>
                 </div>
-                <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-snug">
+                <h1 className="text-2xl font-semibold tracking-tight text-white leading-snug sm:text-4xl">
                   “{lastSearchQuery}”
                 </h1>
                 <nav aria-label="JUPITER 搜索分类" className="mt-4 flex gap-2 overflow-x-auto pb-1">
@@ -2529,8 +2527,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                 </div>
               ) : searchResults.length === 0 ? (
                 <div className="text-center text-slate-500 py-16 space-y-3">
-                  <p>{searchError || '没有找到相关结果。'}</p>
-                  <p className="text-xs">结果来自真实搜索源；如果当前来源没有结果，可切换搜索源或输入网址直接打开。</p>
+                  <p className="text-sm text-slate-300">{searchError || '没有找到相关结果。'}</p>
+                  <p className="mx-auto max-w-md text-xs leading-relaxed text-slate-500">结果来自真实搜索源与 EARTH 索引；无结果可能代表来源限制、配置缺失或查询过窄。可切换分类/引擎、调整语言，或直接输入网址打开。</p>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -2710,31 +2708,46 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               </article>
               )
             ) : activeTab.url === JUPITER_HOME_URL ? (
-              <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col items-center justify-center px-4 py-12 text-center">
-                <img src="/favicon.svg" alt="EARTH ONE" className="h-20 w-20 mb-8" />
+              <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-4 py-16 text-center sm:py-24">
+                <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] tracking-[0.18em] text-slate-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-cyan-300/80" aria-hidden="true" />
+                  ONE BROWSER
+                </div>
+                <h1 className="text-balance text-3xl font-semibold tracking-tight text-white sm:text-5xl">Explore Beyond Boundaries.</h1>
+                <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-400 sm:text-base">JUPITER 统一搜索 EARTH 内容与公开网络来源，并以阅读、查看器或{browserEngine ? '原生 Chromium' : '网页预览'}方式打开结果。结果与可用性取决于真实来源与配置。</p>
                 <form
                   onSubmit={event => {
                     event.preventDefault();
                     void handleNavigate(inputUrl);
                   }}
-                  className="w-full flex items-center gap-3 rounded-full border border-white/10 bg-[#121c27] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.4)] transition-all hover:border-white/20 focus-within:border-cyan-400/60 focus-within:ring-4 focus-within:ring-cyan-500/10"
+                  className="mt-8 w-full max-w-2xl flex items-center gap-3 rounded-2xl border border-white/10 bg-black/25 px-4 py-3.5 transition-all hover:border-white/15 focus-within:border-cyan-400/40 focus-within:ring-2 focus-within:ring-cyan-400/10"
                 >
                   <Search className="h-5 w-5 shrink-0 text-slate-400" />
                   <input
                     value={inputUrl}
                     onChange={event => setInputUrl(event.target.value)}
-                    aria-label="搜索"
-                    placeholder="Google 搜索，或输入网址…"
+                    aria-label="搜索或输入网址"
+                    placeholder="搜索 EARTH 与互联网，或输入网址"
                     className="min-w-0 flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-slate-500 sm:text-base"
                     autoComplete="off"
                   />
+                  <button type="submit" className="shrink-0 rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300">搜索</button>
                 </form>
-                <div className="mt-6 flex items-center gap-4 text-xs text-slate-400">
-                  <button type="button" onClick={() => void handleNavigate('https://www.google.com')} className="hover:text-white transition">Google</button>
-                  <button type="button" onClick={() => void handleNavigate('https://duckduckgo.com')} className="hover:text-white transition">DuckDuckGo</button>
-                  <button type="button" onClick={() => void handleNavigate('https://www.youtube.com')} className="hover:text-white transition">YouTube</button>
-                  <button type="button" onClick={() => void handleNavigate('https://z-library.sk')} className="hover:text-white transition">Z-Library</button>
-                  <button type="button" onClick={() => void handleNavigate('jupiter://home')} className="hover:text-white transition">Home</button>
+                <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+                  {[
+                    { label: 'NASA Earth', url: 'https://earthobservatory.nasa.gov' },
+                    { label: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Earth' },
+                    { label: 'arXiv', url: 'https://arxiv.org' },
+                    { label: 'Project Gutenberg', url: 'https://www.gutenberg.org' },
+                    { label: 'GitHub', url: 'https://github.com' }
+                  ].map(item => (
+                    <button key={item.url} type="button" onClick={() => void handleNavigate(item.url)} className="rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-2 text-xs text-slate-300 transition hover:border-cyan-400/20 hover:bg-cyan-400/10 hover:text-cyan-100">{item.label}</button>
+                  ))}
+                </div>
+                <div className="mt-10 grid w-full max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-3">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><p className="text-xs font-medium text-slate-200">真实搜索</p><p className="mt-1 text-[11px] leading-relaxed text-slate-400">聚合 EARTH 索引与公开搜索源；部分垂类依赖服务端配置。</p></div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><p className="text-xs font-medium text-slate-200">沉浸阅读与查看</p><p className="mt-1 text-[11px] leading-relaxed text-slate-400">网页提取阅读、PDF/图片/音频/视频查看器与可嵌入媒体播放。</p></div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><p className="text-xs font-medium text-slate-200">诚实边界</p><p className="mt-1 text-[11px] leading-relaxed text-slate-400">网页预览不等于原生浏览器；受站点策略、CSP 与 iframe 限制。</p></div>
                 </div>
               </div>
             ) : activeTab.crawlerView ? (
@@ -2760,7 +2773,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                     </div>
                   </div>
 
-                  <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-snug">
+                  <h1 className="text-2xl font-semibold tracking-tight text-white leading-snug sm:text-4xl">
                     {activeTab.title}
                   </h1>
 
@@ -2902,7 +2915,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                     <span>·</span>
                     <span>{activeTab.readTime || '3 min read'}</span>
                   </div>
-                  <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-snug">
+                  <h1 className="text-2xl font-semibold tracking-tight text-white leading-snug sm:text-4xl">
                     {activeTab.title}
                   </h1>
                   <div className="mt-3 flex items-center space-x-2 text-xs text-cyan-400/80 font-mono">

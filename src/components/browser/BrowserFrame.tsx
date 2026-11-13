@@ -52,17 +52,17 @@ export function BrowserFrame({
 }: BrowserFrameProps) {
   return (
     <section
-      aria-label="JUPITER 全球互联网搜索与浏览器"
-      className="flex min-h-[calc(100vh-8rem)] flex-col overflow-hidden rounded-2xl border border-white/[0.09] bg-[#0b1118] shadow-[0_24px_80px_rgba(0,0,0,0.38)] ring-1 ring-black/30"
+      aria-label="ONE BROWSER — JUPITER"
+      className="flex min-h-[calc(100vh-8rem)] flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,14,20,0.98),rgba(7,10,15,0.98))] shadow-[0_32px_100px_rgba(0,0,0,0.45)] ring-1 ring-white/[0.03]"
     >
-      <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.07] bg-[#101720] px-3 pt-2.5 sm:px-4">
-        <div aria-hidden="true" className="hidden shrink-0 items-center gap-1.5 sm:flex">
-          <span className="h-2.5 w-2.5 rounded-full bg-[#f16b64] shadow-[0_0_10px_rgba(241,107,100,0.28)]" />
-          <span className="h-2.5 w-2.5 rounded-full bg-[#e9b55d] shadow-[0_0_10px_rgba(233,181,93,0.2)]" />
-          <span className="h-2.5 w-2.5 rounded-full bg-[#5fb878] shadow-[0_0_10px_rgba(95,184,120,0.2)]" />
+      <header className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-white/[0.02] px-3 pt-2 sm:gap-3 sm:px-4 backdrop-blur-xl">
+        <div aria-hidden="true" className="hidden shrink-0 items-center gap-1.5 pl-0.5 sm:flex" title="ONE BROWSER">
+          <span className="h-2.5 w-2.5 rounded-full bg-white/20" />
+          <span className="h-2.5 w-2.5 rounded-full bg-white/15" />
+          <span className="h-2.5 w-2.5 rounded-full bg-cyan-300/50" />
         </div>
 
-        <div role="tablist" aria-label="浏览器标签" className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div role="tablist" aria-label="浏览器标签" className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto pb-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map(tab => {
             const selected = tab.id === activeTabId;
             return (
@@ -90,10 +90,10 @@ export function BrowserFrame({
                   reordered.splice(toIndex, 0, dragged);
                   onReorderTabs(reordered.map(item => item.id));
                 }}
-                className={`group flex min-w-[118px] max-w-[220px] shrink-0 items-center rounded-t-xl border border-b-0 px-2 py-2 transition-colors sm:min-w-[145px] sm:px-3 ${
+                className={`group flex min-w-[120px] max-w-[240px] shrink-0 items-center rounded-t-2xl border border-b-0 px-2 py-2 transition-all duration-150 sm:min-w-[150px] sm:px-3 ${
                   selected
-                    ? 'border-white/[0.09] bg-[#0b1118] text-slate-100'
-                    : 'border-transparent bg-transparent text-slate-400 hover:bg-white/[0.035] hover:text-slate-200'
+                    ? 'border-white/10 bg-[#0b1118] text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+                    : 'border-transparent bg-transparent text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'
                 }`}
               >
                 <button
@@ -134,7 +134,7 @@ export function BrowserFrame({
           aria-label="恢复最近关闭的标签页"
           aria-keyshortcuts="Control+Shift+T Meta+Shift+T"
           title="恢复最近关闭的标签页（Ctrl/Cmd+Shift+T）"
-          className="mb-1 shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.07] hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70 disabled:cursor-not-allowed disabled:opacity-30"
+          className="mb-1.5 shrink-0 rounded-xl p-2 text-slate-400 transition hover:bg-white/[0.06] hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 disabled:cursor-not-allowed disabled:opacity-30"
         >
           <RotateCcw className="h-4 w-4" />
         </button>
@@ -144,7 +144,7 @@ export function BrowserFrame({
           onClick={onNewTab}
           aria-label="新建标签"
           title="新建标签"
-          className="mb-1 shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.07] hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+          className="mb-1.5 shrink-0 rounded-xl p-2 text-slate-400 transition hover:bg-white/[0.06] hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -158,7 +158,7 @@ export function BrowserFrame({
                 onClick={onBackToUniverse}
                 aria-label="返回 3D 宇宙"
                 title="返回 3D 宇宙深空"
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-cyan-500/30 bg-cyan-950/40 text-cyan-300 hover:bg-cyan-900/60 hover:text-white text-[11px] font-medium transition cursor-pointer"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-white/10 bg-white/[0.03] text-slate-300 hover:bg-cyan-400/10 hover:text-cyan-100 hover:border-cyan-400/20 text-[11px] font-medium transition cursor-pointer"
               >
                 <Orbit className="h-3.5 w-3.5 text-cyan-400" />
                 <span className="hidden sm:inline">🌌 返回宇宙</span>
@@ -170,7 +170,7 @@ export function BrowserFrame({
                 onClick={onBackToGlobe}
                 aria-label="返回数字地球"
                 title="返回人类数字地球"
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-blue-500/30 bg-blue-950/40 text-blue-300 hover:bg-blue-900/60 hover:text-white text-[11px] font-medium transition cursor-pointer"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-white/10 bg-white/[0.03] text-slate-300 hover:bg-cyan-400/10 hover:text-cyan-100 hover:border-cyan-400/20 text-[11px] font-medium transition cursor-pointer"
               >
                 <Globe className="h-3.5 w-3.5 text-blue-400" />
                 <span className="hidden sm:inline">🌍 人类地球</span>
