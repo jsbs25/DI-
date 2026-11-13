@@ -33,6 +33,7 @@ import { MoonSpaceObservatory } from './universe/MoonSpaceObservatory.tsx';
 import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
+import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -210,6 +211,7 @@ export default function App() {
         {currentTab === 'video' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><VideoCenter videos={videos} lang={lang} /></div>}
         {currentTab === 'game' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><GameCenter currentUser={currentUser} lang={lang} /></div>}
         {currentTab === 'community' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
+        {currentTab === 'brand' && <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><BrandIdentitySystem lang={lang} onBackToGlobe={() => setCurrentTab('globe')} /></div>}
       </main>
 
       {!isSpaceExperience && <div className="md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0"><LuxuryAdBanner lang={lang} /></div>}

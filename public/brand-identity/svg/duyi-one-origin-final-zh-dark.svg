@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 100" width="440" height="200">
+  
+  
+  <g transform="translate(44, 20) scale(1.38)">
+    <g fill="none" stroke="#F7F5F0" stroke-width="4.4" stroke-linecap="square" stroke-linejoin="miter">
+      <path d="M 14.5 3.5 L 3.5 15.5" />
+      <path d="M 5.5 6.5 Q 13.5 18 11 40.5 L 6.5 38" />
+      <path d="M 11.5 18.5 L 3 28.5" />
+      <rect x="20" y="13.5" width="21" height="14.5" />
+      <line x1="30.5" y1="2.5" x2="30.5" y2="35.2" />
+      <path d="M 17.5 39.5 L 39 35.5" />
+      <path d="M 37.5 31.5 L 43 40.5" />
+    </g>
+    <path d="M 51 19.5 L 90 19.5 L 87.5 25 L 51 25 Z" fill="#F7F5F0" />
+  </g>
+</svg>

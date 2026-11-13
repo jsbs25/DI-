@@ -408,4 +408,14 @@ ONE ORIGIN 作为首要探索母题，要求标志同时具备：
 4. **文化共创的几何网格**：未来可发布品牌几何网格规范，邀请全球创作者在不破坏母标的前提下进行合规衍生，强化“ONE 连接世界”的生态叙事。
 
 ---
+
+## 12. 线上交互式品牌系统与静态 Web 导出资产（V1.1 补充）
+
+除本目录下 `brand-identity/assets/` 提案源文件外，已同步实装可交互的前端品牌规范模块与标准 Web/PNG 导出资产：
+- **线上交互展示中心**：应用内导航 **「品牌规范」**（路由参数 `?module=brand`），支持五阶段完整浏览、`128×128` 构造网格开关、深/浅/单色模式切换、12 大产品应用实时同场对比、1.6 秒四阶段启动动效播放器，以及前端实时 SVG / 透明 PNG 导出。
+- **前端核心代码**：`src/components/brand/BrandIdentitySystem.tsx`、`src/components/brand/brandLogos.tsx`（含跨系统零失真纯矢量「独一 ONE」定制路径字标）。
+- **16 个标准化可编辑矢量 SVG**：`public/brand-identity/svg/*.svg`
+- **16 个 2× 高清透明背景 PNG**：`public/brand-identity/png/*.png`
+
+---
 *End of Document*

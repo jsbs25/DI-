@@ -96,9 +96,13 @@ trap cleanup EXIT INT TERM
 echo "🚀 Connecting to remote repository with GitHub Personal Access Token..."
 git remote set-url origin "${AUTHENTICATED_URL}"
 
-# Push to main
-echo "⬆️  Pushing ${TARGET_BRANCH} branch to GitHub..."
-git push -u origin "${TARGET_BRANCH}" --force
+# Push to main safely (preserve remote commits)
+echo "⬆️  Rebasing and pushing ${TARGET_BRANCH} branch to GitHub..."
+git fetch origin "${TARGET_BRANCH}" 2>/dev/null || true
+if git show-ref --verify --quiet "refs/remotes/origin/${TARGET_BRANCH}"; then
+  git rebase "origin/${TARGET_BRANCH}"
+fi
+git push -u origin "${TARGET_BRANCH}"
 
 echo ""
 echo "========================================================"

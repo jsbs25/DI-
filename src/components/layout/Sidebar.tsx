@@ -19,7 +19,8 @@ import {
   PanelLeftOpen,
   Globe2,
   Music2,
-  Moon
+  Moon,
+  Palette
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 
@@ -56,7 +57,8 @@ const NAV_ITEMS: NavItem[] = [
   { tab: 'knowledge', icon: Network, label: { zh: '全域知识图谱', en: 'KNOWLEDGE' } },
   { tab: 'feed', icon: Compass, label: { zh: '全球社群动态', en: 'COMMUNITY FEED' } },
   { tab: 'chat', icon: MessageSquare, label: { zh: '全球即时通信', en: 'MESSENGER' } },
-  { tab: 'community', icon: Users2, label: { zh: '数字聚落社区', en: 'COMMUNITIES' } }
+  { tab: 'community', icon: Users2, label: { zh: '数字聚落社区', en: 'COMMUNITIES' } },
+  { tab: 'brand', icon: Palette, label: { zh: '独一 ONE 品牌规范', en: 'BRAND SYSTEM' } }
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab, lang, collapsed, onToggleCollapsed }) => {

@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { Home, Orbit, Sparkles, BookOpen, GraduationCap, Compass, MessageSquare, Search, Radar, Network, PenTool, Film, Gamepad2, Users2, Music2, Moon } from 'lucide-react';
+import { Home, Orbit, Sparkles, BookOpen, GraduationCap, Compass, MessageSquare, Search, Radar, Network, PenTool, Film, Gamepad2, Users2, Music2, Moon, Palette } from 'lucide-react';
 
 export type DockItem = { id: string; tab: string; icon: LucideIcon; labelZh: string; labelEn: string; group?: string };
 
@@ -16,6 +16,7 @@ export const DOCK_ITEMS: DockItem[] = [
 ];
 
 export const MORE_ITEMS: DockItem[] = [
+  { tab: 'brand', icon: Palette, labelZh: '品牌规范', labelEn: 'Brand' } as any,
   { tab: 'feed', icon: Compass, labelZh: '全球动态', labelEn: 'Feed' } as any,
   { tab: 'knowledge', icon: Network, labelZh: '知识图谱', labelEn: 'Knowledge' } as any,
   { tab: 'creator', icon: PenTool, labelZh: '创作者', labelEn: 'Creator' } as any,

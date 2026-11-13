@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Command } from 'cmdk';
-import { Search, Home, Orbit, Sparkles, MessageSquare, BookOpen, Film, Users2, GraduationCap, Globe2, Compass, Network, PenTool, Gamepad2, Radar, Music2, Moon } from 'lucide-react';
+import { Search, Home, Orbit, Sparkles, MessageSquare, BookOpen, Film, Users2, GraduationCap, Globe2, Compass, Network, PenTool, Gamepad2, Radar, Music2, Moon, Palette } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
 
 type Props = {
@@ -30,6 +30,7 @@ const ITEMS = [
   { tab: 'venus', zh: '音乐馆', en: 'Music', icon: Music2 },
   { tab: 'moon', zh: '天文观测', en: 'Observatory', icon: Moon },
   { tab: 'mercury', zh: '全局信息检索', en: 'Discovery Search', icon: Search },
+  { tab: 'brand', zh: '独一 ONE 品牌规范', en: 'Brand System', icon: Palette },
 ];
 
 export const CommandPalette: React.FC<Props> = ({ open, onOpenChange, onSelectTab, onSearch, lang }) => {
