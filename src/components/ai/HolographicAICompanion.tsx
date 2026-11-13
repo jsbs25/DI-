@@ -500,13 +500,20 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   ];
 
   return (
-    <div id="globe-ai-launcher" className="fixed bottom-6 right-6 z-40 select-none">
+    <div
+      id="globe-ai-launcher"
+      className={
+        isOpen
+          ? 'fixed inset-x-2 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-50 sm:inset-auto sm:bottom-6 sm:right-6 sm:z-40 select-none'
+          : 'fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] right-3 z-40 sm:bottom-6 sm:right-6 select-none'
+      }
+    >
       {/* Floating 3D Holographic AI Widget Capsule */}
       {!isOpen && showLauncher && (
         <button
           onClick={() => setIsOpen(true)}
           aria-label="打开地球计划 AI 对话"
-          className="group relative flex items-center space-x-3 px-4 py-2.5 rounded-full bg-slate-950/95 hover:bg-slate-900 border border-cyan-400/60 hover:border-cyan-300 backdrop-blur-2xl shadow-2xl shadow-cyan-500/25 cursor-pointer transition-all hover:scale-105 active:scale-95"
+          className="group relative flex items-center space-x-2.5 sm:space-x-3 px-3 sm:px-4 py-2 sm:py-2.5 rounded-full bg-slate-950/95 hover:bg-slate-900 border border-cyan-400/60 hover:border-cyan-300 backdrop-blur-2xl shadow-2xl shadow-cyan-500/25 cursor-pointer transition-all active:scale-95 sm:hover:scale-105"
           title={isZh ? "唤醒宇宙智能体 D" : "Awaken Celestial Intelligence D"}
         >
           <div className="relative w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-cyan-950/80 border border-cyan-400/50 shadow-inner">
@@ -521,7 +528,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               </span>
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             </div>
-            <div className="text-[10px] text-slate-400 font-medium">
+            <div className="text-[10px] text-slate-400 font-medium hidden sm:block">
               {isZh ? '数字生命 · 语音与跨星系穿梭已就绪' : `${modelName} · Voice & Space Ready`}
             </div>
           </div>
@@ -533,9 +540,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         <div
           className={`rounded-3xl bg-slate-950/95 border border-cyan-500/40 backdrop-blur-2xl shadow-2xl shadow-cyan-950/80 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 transition-all duration-200 ${
             isExpanded
-              ? 'fixed inset-4 sm:inset-10 z-50 w-auto h-auto max-w-5xl mx-auto'
-              : 'w-[92vw] sm:w-[440px] h-[600px] max-h-[86vh]'
+              ? 'fixed inset-2 sm:inset-10 z-50 w-auto h-auto max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-5rem)] max-w-5xl mx-auto'
+              : 'w-full sm:w-[440px] h-[min(72dvh,620px)] sm:h-[600px] max-h-[calc(100dvh-6rem)] sm:max-h-[86vh]'
           }`}
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
           {/* Mission Control Top Bar */}
           <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between">
@@ -588,10 +596,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                   stopSpeaking();
                   setIsOpen(false);
                 }}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950 hover:text-rose-400 text-slate-400 transition-colors cursor-pointer"
+                className="p-2 rounded-lg bg-slate-800 hover:bg-rose-950 hover:text-rose-400 text-slate-300 transition-colors cursor-pointer"
                 title="关闭"
+                aria-label={isZh ? '关闭智能体' : 'Close assistant'}
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
           </div>
