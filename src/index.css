@@ -1,44 +1,175 @@
 @import "tailwindcss";
 
 @theme {
-  --color-space-bg: #02040a;
-  --color-space-bg-soft: #050814;
-  --color-hud-surface: rgba(8, 14, 28, 0.38);
-  --color-hud-surface-strong: rgba(8, 14, 28, 0.62);
-  --color-hud-border: rgba(255, 255, 255, 0.08);
-  --color-accent: #4ea1ff;
-  --color-accent-soft: #7bc4ff;
-  --color-text-primary: rgba(255, 255, 255, 0.96);
-  --color-text-secondary: rgba(226, 232, 240, 0.68);
-  --color-status-ok: #34d399;
+  /* ONE Quiet Futurism tokens */
+  --color-one-bg: #05070b;
+  --color-one-bg-deep: #030508;
+  --color-one-surface: #0e131b;
+  --color-one-surface-soft: #151b26;
+  --color-one-surface-elevated: #1b2230;
+  --color-one-text: #f4f3ee;
+  --color-one-text-muted: #b7bdc8;
+  --color-one-text-dim: #8892a3;
+  --color-one-accent: #7fd4ff;
+  --color-one-accent-soft: rgba(127, 212, 255, 0.14);
+  --color-one-gold: #d7b676;
+  --color-one-gold-soft: rgba(215, 182, 118, 0.14);
+  --color-one-border: rgba(244, 243, 238, 0.1);
+  --color-one-border-strong: rgba(244, 243, 238, 0.16);
+  --color-one-success: #4cc38a;
+  --color-one-warning: #e3b341;
+  --color-one-danger: #e07a7a;
+
+  /* Legacy compatibility tokens (kept for existing modules; prefer --color-one-* going forward) */
+  --color-space-bg: #05070b;
+  --color-space-bg-soft: #0e131b;
+  --color-hud-surface: rgba(14, 19, 27, 0.72);
+  --color-hud-surface-strong: rgba(21, 27, 38, 0.88);
+  --color-hud-border: rgba(244, 243, 238, 0.1);
+  --color-accent: #7fd4ff;
+  --color-accent-soft: #b9e7ff;
+  --color-text-primary: rgba(244, 243, 238, 0.98);
+  --color-text-secondary: rgba(183, 189, 200, 0.82);
+  --color-status-ok: #4cc38a;
+
+  --radius-one-sm: 12px;
+  --radius-one-md: 16px;
+  --radius-one-lg: 24px;
+  --radius-one-xl: 32px;
+
+  --shadow-one-sm: 0 1px 2px rgba(0,0,0,0.35), 0 8px 24px rgba(0,0,0,0.18);
+  --shadow-one-md: 0 2px 8px rgba(0,0,0,0.35), 0 20px 48px rgba(0,0,0,0.24);
+  --shadow-one-lg: 0 8px 24px rgba(0,0,0,0.4), 0 40px 80px rgba(0,0,0,0.28);
+
+  --ease-one: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-one-fast: 140ms;
+  --dur-one-base: 220ms;
+  --dur-one-slow: 360ms;
+}
+
+:root {
+  color-scheme: dark;
+  --one-bg: var(--color-one-bg);
+  --one-surface: var(--color-one-surface);
+  --one-surface-soft: var(--color-one-surface-soft);
+  --one-text: var(--color-one-text);
+  --one-text-muted: var(--color-one-text-muted);
+  --one-accent: var(--color-one-accent);
+  --one-gold: var(--color-one-gold);
+  --one-border: var(--color-one-border);
 }
 
 @layer base {
   html {
     color-scheme: dark;
-    background-color: var(--color-space-bg);
+    background-color: var(--color-one-bg);
   }
   body {
-    background: radial-gradient(ellipse at 50% 0%, #071022 0%, #02040a 55%, #000000 100%);
+    margin: 0;
+    color: var(--color-one-text);
+    background:
+      radial-gradient(1200px 600px at 70% -10%, rgba(127, 212, 255, 0.08), transparent 55%),
+      radial-gradient(900px 500px at 10% 0%, rgba(215, 182, 118, 0.05), transparent 50%),
+      linear-gradient(180deg, #070a10 0%, #05070b 45%, #030508 100%);
+    font-family: 'Plus Jakarta Sans', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+    letter-spacing: 0.005em;
   }
   [dir="rtl"] {
     font-family: 'Tajawal', system-ui, -apple-system, sans-serif;
   }
+  ::selection {
+    background: rgba(127, 212, 255, 0.22);
+    color: #ffffff;
+  }
 }
 
 @layer components {
+  /* Legacy glass classes mapped to restrained Quiet Futurism surfaces */
   .eo-glass {
-    background: var(--color-hud-surface);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid var(--color-hud-border);
+    background: color-mix(in srgb, var(--color-one-surface) 78%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--color-one-border);
+    box-shadow: var(--shadow-one-sm);
   }
   .eo-glass-strong {
-    background: var(--color-hud-surface-strong);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border: 1px solid var(--color-hud-border);
+    background: color-mix(in srgb, var(--color-one-surface-elevated) 88%, transparent);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--color-one-border-strong);
+    box-shadow: var(--shadow-one-md);
   }
+
+  .one-surface {
+    background: var(--color-one-surface);
+    border: 1px solid var(--color-one-border);
+    border-radius: var(--radius-one-md);
+  }
+  .one-surface-elevated {
+    background: var(--color-one-surface-elevated);
+    border: 1px solid var(--color-one-border-strong);
+    border-radius: var(--radius-one-lg);
+    box-shadow: var(--shadow-one-md);
+  }
+  .one-surface-subtle {
+    background: color-mix(in srgb, var(--color-one-surface-soft) 70%, transparent);
+    border: 1px solid var(--color-one-border);
+    border-radius: var(--radius-one-md);
+  }
+
+  .one-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 999px;
+    font-weight: 500;
+    transition: all var(--dur-one-base) var(--ease-one);
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+  .one-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-one-accent) 70%, white);
+    outline-offset: 2px;
+  }
+  .one-btn-sm { height: 2rem; padding: 0 0.875rem; font-size: 0.8125rem; }
+  .one-btn-md { height: 2.5rem; padding: 0 1.125rem; font-size: 0.875rem; }
+  .one-btn-primary {
+    background: var(--color-one-text);
+    color: #0a0d12;
+  }
+  .one-btn-primary:hover { background: #ffffff; }
+  .one-btn-secondary {
+    background: color-mix(in srgb, var(--color-one-surface-soft) 85%, transparent);
+    color: var(--color-one-text);
+    border-color: var(--color-one-border-strong);
+  }
+  .one-btn-secondary:hover {
+    background: var(--color-one-surface-elevated);
+    border-color: rgba(244,243,238,0.22);
+  }
+  .one-btn-ghost {
+    background: transparent;
+    color: var(--color-one-text-muted);
+  }
+  .one-btn-ghost:hover {
+    color: var(--color-one-text);
+    background: rgba(244,243,238,0.06);
+  }
+
+  .one-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid var(--color-one-border);
+  }
+  .one-badge-neutral { color: var(--color-one-text-muted); background: rgba(244,243,238,0.04); }
+  .one-badge-accent { color: var(--color-one-accent); background: var(--color-one-accent-soft); border-color: rgba(127,212,255,0.22); }
+  .one-badge-gold { color: var(--color-one-gold); background: var(--color-one-gold-soft); border-color: rgba(215,182,118,0.22); }
 }
 
 /* Respect motion-sensitive settings without removing static status indicators. */
@@ -53,24 +184,11 @@
   }
 }
 
-/* Custom minimal dark scrollbars */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: #030712;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #334155;
-}
+/* Minimal dark scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(183, 189, 200, 0.22); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(183, 189, 200, 0.34); }
 
 section[aria-label="JUPITER 全球互联网搜索与浏览器"] [role="tablist"] {
   scroll-padding-inline: 0.75rem;
@@ -99,7 +217,7 @@ section[aria-label="JUPITER 全球互联网搜索与浏览器"] [role="tab"] spa
 
 section[aria-label="JUPITER 全球互联网搜索与浏览器"] [role="tab"]:focus-visible {
   border-radius: 0.5rem;
-  outline: 2px solid rgb(34 211 238 / 0.8);
+  outline: 2px solid rgb(127 212 255 / 0.7);
   outline-offset: 2px;
 }
 
