@@ -5,6 +5,7 @@ import { Navbar } from './components/layout/Navbar.tsx';
 import { AppDock } from './components/layout/AppDock.tsx';
 import { CommandPalette } from './components/layout/CommandPalette.tsx';
 import { DigitalGlobe } from './components/globe/DigitalGlobe.tsx';
+import { OneHome } from './components/home/OneHome.tsx';
 import { GlobalFeed } from './components/social/GlobalFeed.tsx';
 import { GlobalMessenger } from './components/chat/GlobalMessenger.tsx';
 import { AIHub } from './components/ai/AIHub.tsx';
@@ -83,8 +84,8 @@ export default function App() {
 
   useEffect(() => { document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'; document.documentElement.lang = lang; }, [lang]);
 
-  const isViewportWorkspace = ['globe', 'universe', 'chat', 'browser'].includes(currentTab);
-  const isSpaceExperience = isViewportWorkspace || ['saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge'].includes(currentTab);
+  const isViewportWorkspace = ['universe', 'chat', 'browser'].includes(currentTab);
+  const isSpaceExperience = isViewportWorkspace || ['globe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge'].includes(currentTab);
   useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
 
   const refreshConversations = async () => { try { const res = await fetch('/api/conversations'); const data = await res.json(); if (data.success) setConversations(data.conversations || []); } catch {} };
@@ -204,25 +205,21 @@ export default function App() {
 
       <main className={`relative ${isViewportWorkspace ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'}`}>
         {currentTab === 'globe' && (
-          <div className="h-[100dvh] w-full">
-            <DigitalGlobe
-              nodes={nodes}
-              countries={countries}
-              showGlobeTools={showGlobeTools}
-              onToggleGlobeTools={() => setShowGlobeTools(o => !o)}
-              onSelectTab={setCurrentTab}
-              activeCountry={activeCountry}
-              currentUserId={currentUser?.id}
-              focusCoordinates={focusCoordinates}
-              onSelectCountry={code => { setActiveCountry(code); if (code) setCurrentTab('feed'); }}
-              onSelectUser={handleSelectGlobeUser}
-              onExploreUniverse={() => setCurrentTab('universe')}
-              onExploreCommunity={() => setCurrentTab('community')}
-              lang={lang}
-              immersive={immersive}
-              onImmersiveChange={setImmersive}
-            />
-          </div>
+          <OneHome
+            lang={lang}
+            currentUser={currentUser}
+            nodes={nodes}
+            countries={countries}
+            posts={posts}
+            videos={videos}
+            articles={articles}
+            conversations={conversations}
+            focusCoordinates={focusCoordinates}
+            onSelectCountry={code => { setActiveCountry(code); if (code) setCurrentTab('feed'); }}
+            onSelectUser={handleSelectGlobeUser}
+            onSelectTab={(tab) => { setCurrentTab(tab); if (tab !== 'browser') setBrowserInitialQuery(null); }}
+            onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }}
+          />
         )}
 
         {currentTab === 'universe' && <div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem]"><UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
