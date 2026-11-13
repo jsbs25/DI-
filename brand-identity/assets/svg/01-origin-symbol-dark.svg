@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">独一 ONE - ONE ORIGIN Symbol (Dark Background)</title>
+  <desc id="desc">Abstract geometric mark: central origin core with squircle ring, ordered cut and open extension, dark background.</desc>
+  <defs>
+    <style>
+      .bg{fill:#0B0D10}
+      .fg{fill:#F4F1EA}
+      .accent{fill:#2F6F5E}
+      .silver{fill:#A7ADB4}
+    </style>
+  </defs>
+  <rect class="bg" width="512" height="512"/>
+  <!-- outer squircle-ring inspired form (circle-square fusion) with open extension -->
+  <g transform="translate(256 256)">
+    <!-- main ring body -->
+    <path class="fg" d="M 0 -168
+      A 168 168 0 1 1 -118.8 -118.8
+      L -86 -86
+      A 122 122 0 1 0 0 -122
+      Z"/>
+    <!-- stabilizing square-cut order (abstract tian-yuan di-fang) -->
+    <rect class="fg" x="-168" y="-24" width="46" height="48" rx="4"/>
+    <!-- extension arm (open, infinite) -->
+    <path class="fg" d="M 118 -118 L 168 -168 L 168 -118 L 138 -88 Z"/>
+    <!-- inner order line -->
+    <circle cx="0" cy="0" r="86" fill="none" stroke="#F4F1EA" stroke-width="10" opacity="0.35"/>
+    <!-- origin core -->
+    <circle class="accent" cx="0" cy="0" r="34"/>
+    <circle class="fg" cx="0" cy="0" r="10"/>
+  </g>
+</svg>

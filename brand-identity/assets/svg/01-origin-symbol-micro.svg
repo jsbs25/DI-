@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">独一 ONE - ONE ORIGIN Micro Icon</title>
+  <desc id="desc">Simplified mark for favicon/app icon small sizes: core and open ring.</desc>
+  <rect fill="#0B0D10" width="512" height="512" rx="108"/>
+  <g transform="translate(256 256)">
+    <path fill="#F4F1EA" d="M 0 -150 A 150 150 0 1 1 -106 -106 L -70 -70 A 100 100 0 1 0 0 -100 Z"/>
+    <circle fill="#2F6F5E" cx="0" cy="0" r="46"/>
+  </g>
+</svg>

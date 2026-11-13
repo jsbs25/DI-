@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">独一 ONE - ONE HORIZON Symbol (Dark Background)</title>
+  <desc id="desc">Layered horizon arcs and origin point expressing space, exploration and future.</desc>
+  <rect fill="#0B0D10" width="512" height="512"/>
+  <g transform="translate(256 292)">
+    <!-- horizon layers (virtual depth / shanshui void-solid) -->
+    <path d="M -190 0 A 190 190 0 0 1 190 0" fill="none" stroke="#A7ADB4" stroke-width="10" opacity="0.35"/>
+    <path d="M -150 -30 A 160 160 0 0 1 150 -30" fill="none" stroke="#F4F1EA" stroke-width="14" opacity="0.55"/>
+    <path d="M -110 -62 A 130 130 0 0 1 110 -62" fill="none" stroke="#F4F1EA" stroke-width="18" opacity="0.85"/>
+    <!-- structural base plane -->
+    <path d="M -170 40 L 170 40" stroke="#A7ADB4" stroke-width="8" opacity="0.5"/>
+    <path d="M -120 70 L 120 70" stroke="#A7ADB4" stroke-width="6" opacity="0.3"/>
+    <!-- ascending path (origin to horizon) -->
+    <path d="M 0 20 L 0 -150" stroke="#F4F1EA" stroke-width="10" stroke-linecap="round" opacity="0.5"/>
+    <path d="M 0 -150 L 60 -190" stroke="#F4F1EA" stroke-width="10" stroke-linecap="round" opacity="0.5"/>
+    <!-- origin point -->
+    <circle cx="0" cy="20" r="30" fill="#2F6F5E"/>
+    <circle cx="0" cy="20" r="9" fill="#F4F1EA"/>
+  </g>
+</svg>

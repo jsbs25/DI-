@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">独一 ONE Favicon</title>
+  <rect fill="#0B0D10" width="64" height="64" rx="14"/>
+  <g transform="translate(32 32)">
+    <path fill="#F4F1EA" d="M 0 -20 A 20 20 0 1 1 -14.1 -14.1 L -8 -8 A 11 11 0 1 0 0 -11 Z"/>
+    <circle fill="#2F6F5E" cx="0" cy="0" r="6.5"/>
+  </g>
+</svg>

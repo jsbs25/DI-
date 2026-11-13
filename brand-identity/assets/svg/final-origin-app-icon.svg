@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">独一 ONE - App Icon (Optimized ORIGIN Micro)</title>
+  <desc id="desc">App icon master using simplified ONE ORIGIN symbol, safe for small sizes. No text.</desc>
+  <rect fill="#0B0D10" width="1024" height="1024" rx="228"/>
+  <g transform="translate(512 512) scale(1.55)">
+    <path fill="#F4F1EA" d="M 0 -150 A 150 150 0 1 1 -106 -106 L -70 -70 A 100 100 0 1 0 0 -100 Z"/>
+    <rect fill="#F4F1EA" x="-150" y="-16" width="34" height="32" rx="4"/>
+    <circle fill="#2F6F5E" cx="0" cy="0" r="46"/>
+    <circle fill="#F4F1EA" cx="0" cy="0" r="12"/>
+  </g>
+</svg>

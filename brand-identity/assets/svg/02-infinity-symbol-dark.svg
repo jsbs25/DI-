@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">独一 ONE - ONE INFINITY Symbol (Dark Background)</title>
+  <desc id="desc">Open rotational geometry with central origin and extending arms suggesting connection and infinity.</desc>
+  <rect fill="#0B0D10" width="512" height="512"/>
+  <g transform="translate(256 256)" stroke="#F4F1EA" stroke-width="18" stroke-linecap="round" fill="none">
+    <g opacity="0.95">
+      <path d="M 0 -40 L 0 -150"/>
+      <path d="M 28 -28 L 110 -110"/>
+      <path d="M 40 0 L 160 0"/>
+      <path d="M 28 28 L 110 110"/>
+      <path d="M 0 40 L 0 165"/>
+      <path d="M -28 28 L -110 110"/>
+      <path d="M -40 0 L -165 0"/>
+      <path d="M -28 -28 L -110 -110"/>
+    </g>
+    <!-- open arc segments (order + openness) -->
+    <path d="M -70 -150 A 165 165 0 0 1 150 -70" stroke="#A7ADB4" stroke-width="14"/>
+    <path d="M 150 70 A 165 165 0 0 1 70 150" stroke="#A7ADB4" stroke-width="14"/>
+    <path d="M -150 70 A 165 165 0 0 0 -70 150" stroke="#A7ADB4" stroke-width="14"/>
+  </g>
+  <g transform="translate(256 256)">
+    <circle fill="#2F6F5E" cx="0" cy="0" r="26"/>
+    <circle fill="#F4F1EA" cx="0" cy="0" r="8"/>
+  </g>
+</svg>

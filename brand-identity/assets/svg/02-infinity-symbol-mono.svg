@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">独一 ONE - ONE INFINITY Symbol (Monochrome)</title>
+  <rect fill="#FFFFFF" width="512" height="512"/>
+  <g transform="translate(256 256)" stroke="#0B0D10" stroke-width="18" stroke-linecap="round" fill="none">
+    <path d="M 0 -40 L 0 -150"/><path d="M 28 -28 L 110 -110"/><path d="M 40 0 L 160 0"/><path d="M 28 28 L 110 110"/>
+    <path d="M 0 40 L 0 165"/><path d="M -28 28 L -110 110"/><path d="M -40 0 L -165 0"/><path d="M -28 -28 L -110 -110"/>
+    <path d="M -70 -150 A 165 165 0 0 1 150 -70" stroke-width="14"/>
+    <path d="M 150 70 A 165 165 0 0 1 70 150" stroke-width="14"/>
+    <path d="M -150 70 A 165 165 0 0 0 -70 150" stroke-width="14"/>
+    <circle fill="#0B0D10" stroke="none" cx="0" cy="0" r="26"/>
+  </g>
+</svg>
