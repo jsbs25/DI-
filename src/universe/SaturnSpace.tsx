@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   Search,
-  Sparkles,
   Play,
   Bookmark,
   BookmarkCheck,
@@ -12,10 +11,9 @@ import {
   RefreshCw,
   Tv,
   Youtube,
-  Radio,
-  SlidersHorizontal,
-  Flame,
-  CheckCircle2
+  Film,
+  Clapperboard,
+  Radio
 } from 'lucide-react';
 import { Language } from '../types/index.ts';
 
@@ -51,14 +49,14 @@ const PIPED_INSTANCES = [
 
 // 快捷探索频道标签
 const QUICK_CHANNELS: { key: string; zh: string; en: string; query: string; platform: 'all' | 'bilibili' | 'youtube' }[] = [
-  { key: 'daily', zh: '🔥 每日精选', en: 'Daily Picks', query: 'universe space documentary', platform: 'all' },
-  { key: 'bili_universe', zh: '📺 B站 · 宇宙探索', en: 'Bilibili Space', query: '宇宙 天文 纪录片 空间站', platform: 'bilibili' },
-  { key: 'bili_scifi', zh: '🚀 B站 · 深度科幻', en: 'Bilibili Sci-Fi', query: '流浪地球 三体 科幻电影 解说', platform: 'bilibili' },
-  { key: 'bili_science', zh: '🧬 B站 · 硬核科普', en: 'Bilibili Science', query: '量子力学 相对论 人工智能 科普', platform: 'bilibili' },
-  { key: 'yt_space', zh: '🪐 YouTube · 天文纪实', en: 'YouTube Space', query: 'space astronomy universe NASA James Webb', platform: 'youtube' },
-  { key: 'yt_tech', zh: '🤖 YouTube · 前沿科技', en: 'YouTube Tech', query: 'future technology AI robotics quantum', platform: 'youtube' },
-  { key: 'yt_doc', zh: '🎬 YouTube · 顶级纪录片', en: 'YouTube Doc', query: 'nature space civilization documentary 4K', platform: 'youtube' },
-  { key: 'ambient', zh: '🎵 太空环境白噪音', en: 'Space Ambient', query: 'space ambient music deep sleep', platform: 'youtube' }
+  { key: 'daily', zh: '每日精选', en: 'Daily Picks', query: 'universe space documentary', platform: 'all' },
+  { key: 'bili_universe', zh: 'B站 · 宇宙探索', en: 'Bilibili Space', query: '宇宙 天文 纪录片 空间站', platform: 'bilibili' },
+  { key: 'bili_scifi', zh: 'B站 · 深度科幻', en: 'Bilibili Sci-Fi', query: '流浪地球 三体 科幻电影 解说', platform: 'bilibili' },
+  { key: 'bili_science', zh: 'B站 · 硬核科普', en: 'Bilibili Science', query: '量子力学 相对论 人工智能 科普', platform: 'bilibili' },
+  { key: 'yt_space', zh: 'YouTube · 天文纪实', en: 'YouTube Space', query: 'space astronomy universe NASA James Webb', platform: 'youtube' },
+  { key: 'yt_tech', zh: 'YouTube · 前沿科技', en: 'YouTube Tech', query: 'future technology AI robotics quantum', platform: 'youtube' },
+  { key: 'yt_doc', zh: 'YouTube · 顶级纪录片', en: 'YouTube Doc', query: 'nature space civilization documentary 4K', platform: 'youtube' },
+  { key: 'ambient', zh: '太空环境白噪音', en: 'Space Ambient', query: 'space ambient music deep sleep', platform: 'youtube' }
 ];
 
 const WATCHLIST_KEY = 'earth-one.saturn.watchlist.v3';
@@ -285,10 +283,7 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
         return await searchYouTube(q, 18);
       }
       // 并行请求双方
-      const [biliRes, ytRes] = await Promise.allSettled([
-        searchBilibili(q, 12),
-        searchYouTube(q, 12)
-      ]);
+      const [biliRes, ytRes] = await Promise.allSettled([searchBilibili(q, 12), searchYouTube(q, 12)]);
       const biliList = biliRes.status === 'fulfilled' ? biliRes.value : [];
       const ytList = ytRes.status === 'fulfilled' ? ytRes.value : [];
 
@@ -424,7 +419,7 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
 
   // 切换频道
   const onChannel = useCallback(
-    async (ch: typeof QUICK_CHANNELS[number]) => {
+    async (ch: (typeof QUICK_CHANNELS)[number]) => {
       setActiveChannel(ch.key);
       setPlatformFilter(ch.platform);
       setQuery('');
@@ -459,7 +454,7 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
 
   const toggleWatchlist = (video: SaturnVideo) => {
     const key = `${video.platform}:${video.videoId}`;
-    setWatchlist(prev => (prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key]));
+    setWatchlist((prev) => (prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]));
   };
 
   const isBookmarked = (video: SaturnVideo) => {
@@ -469,248 +464,286 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
   // 根据当前平台筛选器展示
   const displayVideos = useMemo(() => {
     if (platformFilter === 'all') return results;
-    return results.filter(v => v.platform === platformFilter);
+    return results.filter((v) => v.platform === platformFilter);
   }, [results, platformFilter]);
 
+  // cinema keyboard close
+  useEffect(() => {
+    if (!cinemaVideo) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCinemaVideo(null);
+    };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [cinemaVideo]);
+
   return (
-    <div className="min-h-screen bg-[#02050f] text-slate-100 selection:bg-amber-500/30 selection:text-amber-200">
-      {/* 顶部环境光景 */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute -top-[20%] left-[15%] w-[50vw] h-[50vw] rounded-full bg-amber-600/10 blur-[150px]" />
-        <div className="absolute top-[30%] -right-[10%] w-[45vw] h-[45vw] rounded-full bg-sky-600/10 blur-[160px]" />
+    <div
+      className="min-h-screen text-[color:var(--color-one-text)]"
+      style={{
+        background:
+          'radial-gradient(1100px 600px at 20% -10%, rgba(215,182,118,0.08), transparent 55%), radial-gradient(900px 500px at 85% 10%, rgba(127,212,255,0.06), transparent 50%), linear-gradient(180deg, #030508 0%, #05070b 45%, #030508 100%)'
+      }}
+    >
+      <div aria-hidden className="pointer-events-none fixed inset-0 z-0">
+        <div
+          className="absolute bottom-[-15%] left-1/2 h-[60vw] w-[60vw] -translate-x-1/2 rounded-full opacity-[0.08] blur-[140px]"
+          style={{ background: 'radial-gradient(circle, rgba(215,182,118,0.45), transparent 65%)' }}
+        />
       </div>
 
-      {/* Hero Header */}
-      <header className="relative z-10 overflow-hidden border-b border-slate-800/70 bg-[radial-gradient(ellipse_at_50%_120%,rgba(245,190,110,0.16),transparent_60%),#02050f] px-4 py-8 sm:px-8">
-        <button
-          onClick={onBack}
-          className="mb-6 inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900/70 px-4 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-amber-500/50 hover:text-white cursor-pointer"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
+      <header className="relative z-10 mx-auto w-full max-w-[1440px] px-4 pb-6 pt-6 sm:px-6 lg:px-10 lg:pt-8">
+        <button onClick={onBack} className="one-btn one-btn-sm one-btn-ghost mb-5 -ml-2">
+          <ArrowLeft className="h-4 w-4" />
           <span>{isZh ? '返回宇宙引擎' : 'Back to Universe'}</span>
         </button>
 
-        <div className="mx-auto max-w-6xl">
-          <div className="flex flex-wrap items-center gap-2 mb-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/40 bg-sky-500/15 px-3 py-1 text-[11px] font-semibold text-sky-300">
-              <Tv className="h-3.5 w-3.5 text-sky-400" />
-              <span>B站 / Bilibili 原生爬虫集成</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/15 px-3 py-1 text-[11px] font-semibold text-red-300">
-              <Youtube className="h-3.5 w-3.5 text-red-400" />
-              <span>YouTube 开放媒体流</span>
-            </span>
+        <div className="one-surface-elevated relative overflow-hidden px-5 py-6 sm:px-7 sm:py-8">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-20 -top-16 h-72 w-72 rounded-full opacity-20 blur-3xl"
+            style={{ background: 'radial-gradient(circle, rgba(215,182,118,0.4), transparent 70%)' }}
+          />
+          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="one-badge one-badge-gold inline-flex items-center gap-1.5">
+                  <Clapperboard className="h-3.5 w-3.5" />
+                  ONE · SATURN
+                </span>
+                <span className="one-badge one-badge-neutral inline-flex items-center gap-1.5 normal-case tracking-normal">
+                  <Tv className="h-3.5 w-3.5" /> Bilibili
+                </span>
+                <span className="one-badge one-badge-neutral inline-flex items-center gap-1.5 normal-case tracking-normal">
+                  <Youtube className="h-3.5 w-3.5" /> YouTube
+                </span>
+              </div>
+              <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-4xl lg:text-5xl">
+                ONE SATURN
+              </h1>
+              <p className="mt-1 text-sm font-medium tracking-[0.18em] text-[color:var(--color-one-text-muted)] sm:text-base">
+                A World of Moving Stories.
+              </p>
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-[color:var(--color-one-text-muted)]">
+                {isZh
+                  ? '影像、时间、叙事与探索。原生检索 Bilibili 与 YouTube 的真实内容，即搜即播，无需安装。封面即入口，故事即旅程。'
+                  : 'Moving image, time, narrative, discovery. Search real content across Bilibili and YouTube and play instantly—no install required.'}
+              </p>
+            </div>
+
+            <div
+              className="flex shrink-0 items-center gap-4 rounded-2xl border px-4 py-3.5"
+              style={{ borderColor: 'var(--color-one-border)', background: 'rgba(244,243,238,0.03)' }}
+            >
+              <div
+                className="flex h-11 w-11 items-center justify-center rounded-xl border"
+                style={{ borderColor: 'rgba(215,182,118,0.28)', background: 'rgba(215,182,118,0.1)', color: 'var(--color-one-gold)' }}
+              >
+                <Film className="h-5 w-5" />
+              </div>
+              <div className="text-xs">
+                <div className="text-[color:var(--color-one-text-dim)]">{isZh ? '双源影像检索' : 'Dual-source discovery'}</div>
+                <div className="mt-0.5 font-medium text-[color:var(--color-one-text)]">
+                  {isZh ? '免装播放 · 真实内容' : 'Instant play · Real content'}
+                </div>
+                <div className="mt-0.5 font-mono text-[10px] text-[color:var(--color-one-text-dim)]">Bilibili · YouTube</div>
+              </div>
+            </div>
           </div>
 
-          <h1 className="mt-2 text-3xl font-extrabold tracking-tight text-white sm:text-5xl">
-            {isZh ? '🪐 土星观影站 · 影视宇宙' : '🪐 Saturn Cinema Station'}
-          </h1>
-          <p className="mt-2 text-xs sm:text-sm font-semibold tracking-[0.2em] text-amber-400/90 uppercase">
-            SATURN CINEMA · ZERO INSTALLATION DIRECT PLAYER
-          </p>
-          <p className="mt-3 max-w-3xl text-xs sm:text-sm leading-relaxed text-slate-300">
-            {isZh
-              ? '后端高并发双轨爬虫：原生检索 B站 (Bilibili) 视频与官方播放器嵌入，同步支持 YouTube 宇宙纪录片与深度科幻。无需安装客户端，即搜即播。'
-              : 'Direct full-stack crawler for Bilibili & YouTube. No app installation required. Search and watch instantly.'}
-          </p>
+          {/* Search */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              runSearch(query);
+            }}
+            className="relative mt-7 space-y-3"
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative flex-1">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4 text-[color:var(--color-one-text-dim)]">
+                  <Search className="h-4 w-4" />
+                </div>
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={
+                    isZh
+                      ? '搜索 B站 / YouTube，或粘贴 BV号、视频链接直达播放...'
+                      : 'Search Bilibili/YouTube, or paste BV/video link to play...'
+                  }
+                  className="w-full rounded-xl border bg-[color:var(--color-one-surface-soft)] py-3 pl-11 pr-10 text-sm text-[color:var(--color-one-text)] placeholder-[color:var(--color-one-text-dim)] transition focus:border-[rgba(215,182,118,0.45)] focus:outline-none focus:ring-1 focus:ring-[rgba(215,182,118,0.35)]"
+                  style={{ borderColor: 'var(--color-one-border)' }}
+                />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery('')}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-[color:var(--color-one-text-dim)] hover:text-[color:var(--color-one-text)]"
+                    aria-label="Clear"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              <button type="submit" disabled={loading} className="one-btn one-btn-md one-btn-primary shrink-0 disabled:cursor-not-allowed disabled:opacity-60">
+                {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                {loading ? (isZh ? '检索中...' : 'Searching...') : isZh ? '全网检索' : 'Search'}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-[11px] font-medium uppercase tracking-[0.14em] text-[color:var(--color-one-text-dim)]">
+                {isZh ? '来源' : 'Source'}
+              </span>
+              {([
+                { id: 'all' as const, label: isZh ? `聚合 (${results.length})` : `All (${results.length})` },
+                { id: 'bilibili' as const, label: 'Bilibili' },
+                { id: 'youtube' as const, label: 'YouTube' }
+              ]).map((s) => {
+                const active = platformFilter === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setPlatformFilter(s.id);
+                      if (query.trim()) runSearch(query, s.id);
+                    }}
+                    className="rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all"
+                    style={
+                      active
+                        ? {
+                            color: 'var(--color-one-gold)',
+                            background: 'rgba(215,182,118,0.14)',
+                            border: '1px solid rgba(215,182,118,0.28)'
+                          }
+                        : {
+                            color: 'var(--color-one-text-muted)',
+                            background: 'rgba(244,243,238,0.03)',
+                            border: '1px solid var(--color-one-border)'
+                          }
+                    }
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+          </form>
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto max-w-6xl px-4 py-8 sm:px-8 space-y-6">
-        {/* 顶部正在播放视窗（若有） */}
+      <main className="relative z-10 mx-auto w-full max-w-[1440px] space-y-5 px-4 pb-16 sm:px-6 lg:px-10">
+        {/* Now playing (inline) */}
         {playingVideo && (
-          <div className="overflow-hidden rounded-3xl border border-amber-500/40 bg-black/90 p-4 shadow-2xl backdrop-blur-xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase ${
-                  playingVideo.platform === 'bilibili' ? 'bg-sky-500 text-white' : 'bg-red-600 text-white'
-                }`}>
-                  {playingVideo.platform === 'bilibili' ? 'Bilibili' : 'YouTube'}
-                </span>
-                <span className="text-sm font-bold text-white truncate max-w-xl">{playingVideo.title}</span>
+          <section className="one-surface-elevated overflow-hidden">
+            <div className="flex flex-col gap-2 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5" style={{ borderColor: 'var(--color-one-border)' }}>
+              <div className="flex min-w-0 items-center gap-2.5">
+                <PlatformBadge platform={playingVideo.platform} />
+                <h2 className="truncate text-sm font-medium text-[color:var(--color-one-text)]">{playingVideo.title}</h2>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCinemaVideo(playingVideo)}
-                  className="rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                  title="全屏影院模式"
-                >
-                  <Maximize2 className="h-4 w-4" />
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button type="button" onClick={() => setCinemaVideo(playingVideo)} className="one-btn one-btn-sm one-btn-secondary" title={isZh ? '影院模式' : 'Cinema'}>
+                  <Maximize2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">{isZh ? '影院' : 'Cinema'}</span>
                 </button>
-                <button
-                  onClick={() => setPlayingVideo(null)}
-                  className="rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                  title="关闭播放器"
-                >
+                <button type="button" onClick={() => setPlayingVideo(null)} className="one-btn one-btn-sm one-btn-ghost" aria-label="Close player">
                   <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
-
-            <div className="relative aspect-video w-full mt-3 rounded-2xl overflow-hidden bg-black">
-              {playingVideo.platform === 'bilibili' ? (
-                <iframe
-                  src={playingVideo.embedUrl || `https://player.bilibili.com/player.html?bvid=${playingVideo.videoId}&page=1&autoplay=1`}
-                  title={playingVideo.title}
-                  className="h-full w-full border-0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              ) : (
-                <iframe
-                  src={`https://www.youtube.com/embed/${playingVideo.videoId}?autoplay=1&rel=0`}
-                  title={playingVideo.title}
-                  className="h-full w-full border-0"
-                  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-                  allowFullScreen
-                />
-              )}
+            <div className="bg-black">
+              <div className="aspect-video w-full">
+                {playingVideo.platform === 'bilibili' ? (
+                  <iframe
+                    src={playingVideo.embedUrl || `https://player.bilibili.com/player.html?bvid=${playingVideo.videoId}&page=1&autoplay=1`}
+                    title={playingVideo.title}
+                    className="h-full w-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <iframe
+                    src={`https://www.youtube.com/embed/${playingVideo.videoId}?autoplay=1&rel=0`}
+                    title={playingVideo.title}
+                    className="h-full w-full border-0"
+                    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                    allowFullScreen
+                  />
+                )}
+              </div>
             </div>
-
-            <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
-              <span>{playingVideo.author} {playingVideo.durationText ? `· ${playingVideo.durationText}` : ''}</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-[color:var(--color-one-text-muted)] sm:px-5">
+              <span className="truncate">
+                {playingVideo.author}
+                {playingVideo.durationText ? ` · ${playingVideo.durationText}` : ''}
+              </span>
               {playingVideo.arcurl && (
                 <a
                   href={playingVideo.arcurl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sky-400 hover:underline"
+                  className="inline-flex items-center gap-1 transition hover:text-[color:var(--color-one-accent)]"
                 >
-                  <span>B站官方链接</span>
+                  <span>{isZh ? 'B站官方链接' : 'Bilibili link'}</span>
                   <ExternalLink className="h-3 w-3" />
                 </a>
               )}
             </div>
-          </div>
+          </section>
         )}
 
-        {/* 综合搜索栏 */}
-        <form
-          onSubmit={e => {
-            e.preventDefault();
-            runSearch(query);
-          }}
-          className="space-y-3"
-        >
-          <div className="flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 shadow-xl focus-within:border-amber-500/80 transition-all">
-            <Search className="h-5 w-5 shrink-0 text-slate-400" />
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder={isZh ? '搜索 B站视频、YouTube 科幻纪录片，或直接粘贴 BV号 / 视频链接...' : 'Search Bilibili, YouTube space docs, or paste BV/video link...'}
-              className="flex-1 bg-transparent text-sm sm:text-base text-slate-100 outline-none placeholder:text-slate-500"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery('')}
-                className="text-slate-500 hover:text-slate-300"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 px-5 py-2 text-xs font-bold text-white shadow-lg shadow-amber-900/40 transition-transform active:scale-95 disabled:opacity-50 cursor-pointer"
-            >
-              {loading ? (isZh ? '爬取中...' : 'Crawling...') : isZh ? '全网爬取' : 'Crawl'}
-            </button>
-          </div>
-
-          {/* 平台筛选标签 */}
-          <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 font-medium">来源筛选:</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setPlatformFilter('all');
-                  if (query.trim()) runSearch(query, 'all');
-                }}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                  platformFilter === 'all'
-                    ? 'bg-amber-500/20 text-amber-200 border border-amber-500/50'
-                    : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-white'
-                }`}
-              >
-                ✨ 聚合双端 ({results.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPlatformFilter('bilibili');
-                  if (query.trim()) runSearch(query, 'bilibili');
-                }}
-                className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                  platformFilter === 'bilibili'
-                    ? 'bg-sky-500/20 text-sky-200 border border-sky-500/50'
-                    : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-white'
-                }`}
-              >
-                <Tv className="w-3 h-3 text-sky-400" />
-                <span>哔哩哔哩 (B站)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPlatformFilter('youtube');
-                  if (query.trim()) runSearch(query, 'youtube');
-                }}
-                className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                  platformFilter === 'youtube'
-                    ? 'bg-red-500/20 text-red-200 border border-red-500/50'
-                    : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-white'
-                }`}
-              >
-                <Youtube className="w-3 h-3 text-red-400" />
-                <span>YouTube</span>
-              </button>
-            </div>
-
-            <div className="text-[11px] text-slate-500 font-mono">
-              免装播放 · 免 Key 原生流
-            </div>
-          </div>
-        </form>
-
-        {/* 快捷频道标签 */}
+        {/* Channels */}
         <div className="flex flex-wrap items-center gap-2">
-          {QUICK_CHANNELS.map(ch => (
-            <button
-              key={ch.key}
-              onClick={() => onChannel(ch)}
-              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                activeChannel === ch.key
-                  ? 'bg-amber-500/20 text-amber-200 border border-amber-500/50'
-                  : 'border border-slate-800 bg-slate-900/40 text-slate-300 hover:text-white hover:border-slate-600'
-              }`}
-            >
-              {isZh ? ch.zh : ch.en}
-            </button>
-          ))}
-          <button
-            onClick={() => loadDaily()}
-            className="inline-flex items-center gap-1 rounded-full border border-slate-800 bg-slate-900/40 px-3 py-1.5 text-xs text-slate-400 hover:text-white cursor-pointer"
-            title={isZh ? '刷新每日精选' : 'Refresh daily'}
-          >
+          {QUICK_CHANNELS.map((ch) => {
+            const active = activeChannel === ch.key;
+            return (
+              <button
+                key={ch.key}
+                onClick={() => onChannel(ch)}
+                className="rounded-full px-3.5 py-1.5 text-xs font-medium transition-all"
+                style={
+                  active
+                    ? {
+                        color: 'var(--color-one-text)',
+                        background: 'rgba(244,243,238,0.1)',
+                        border: '1px solid rgba(244,243,238,0.22)'
+                      }
+                    : {
+                        color: 'var(--color-one-text-muted)',
+                        background: 'rgba(244,243,238,0.03)',
+                        border: '1px solid var(--color-one-border)'
+                      }
+                }
+              >
+                {isZh ? ch.zh : ch.en}
+              </button>
+            );
+          })}
+          <button onClick={() => loadDaily()} className="one-btn one-btn-sm one-btn-ghost" title={isZh ? '刷新每日精选' : 'Refresh daily'}>
             <RefreshCw className="h-3.5 w-3.5" />
-            <span>刷新</span>
+            <span>{isZh ? '刷新' : 'Refresh'}</span>
           </button>
         </div>
 
-        {/* 我的观影单（书签） */}
+        {/* Watchlist */}
         {watchlist.length > 0 && (
-          <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
-            <h2 className="mb-3 flex items-center gap-2 text-xs sm:text-sm font-bold text-amber-200">
-              <BookmarkCheck className="h-4 w-4" />
-              {isZh ? '我的星际观影单' : 'My Watchlist'} · {watchlist.length}
+          <div className="one-surface px-4 py-4 sm:px-5">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-[color:var(--color-one-text)]">
+              <BookmarkCheck className="h-4 w-4" style={{ color: 'var(--color-one-gold)' }} />
+              {isZh ? '我的观影单' : 'My Watchlist'} <span className="one-badge one-badge-neutral font-mono normal-case tracking-normal">{watchlist.length}</span>
             </h2>
             <div className="flex flex-wrap gap-2">
-              {watchlist.map(key => {
+              {watchlist.map((key) => {
                 const [platform, id] = key.split(':');
-                const v = results.find(x => x.videoId === id);
+                const v = results.find((x) => x.videoId === id);
                 return (
                   <button
                     key={key}
@@ -718,23 +751,27 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
                       if (v) {
                         setPlayingVideo(v);
                       } else {
-                        // 构造直解
                         const fallback: SaturnVideo = {
                           videoId: id,
                           platform: platform as any,
                           title: `${platform === 'bilibili' ? 'B站' : 'YouTube'} 收藏视频 (${id})`,
                           author: 'Watchlist',
-                          embedUrl: platform === 'bilibili'
-                            ? `https://player.bilibili.com/player.html?bvid=${id}&page=1&autoplay=1`
-                            : `https://www.youtube.com/embed/${id}?autoplay=1&rel=0`
+                          embedUrl:
+                            platform === 'bilibili'
+                              ? `https://player.bilibili.com/player.html?bvid=${id}&page=1&autoplay=1`
+                              : `https://www.youtube.com/embed/${id}?autoplay=1&rel=0`
                         };
                         setPlayingVideo(fallback);
                       }
                     }}
-                    className="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-xs text-slate-200 hover:border-amber-500/50 flex items-center gap-1.5 cursor-pointer"
+                    className="inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition hover:bg-[rgba(244,243,238,0.05)]"
+                    style={{ borderColor: 'var(--color-one-border)', color: 'var(--color-one-text-muted)' }}
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full ${platform === 'bilibili' ? 'bg-sky-400' : 'bg-red-400'}`} />
-                    <span className="truncate max-w-[200px]">{v ? v.title : id}</span>
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: platform === 'bilibili' ? 'var(--color-one-accent)' : 'var(--color-one-danger)' }}
+                    />
+                    <span className="max-w-[220px] truncate">{v ? v.title : id}</span>
                   </button>
                 );
               })}
@@ -742,140 +779,160 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
           </div>
         )}
 
-        {/* 状态指示 */}
+        {/* States */}
         {loading && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-12 text-center text-sm text-slate-400">
-            <div className="inline-block animate-spin mb-3">🪐</div>
-            <div>{isZh ? '正在从 B站与 YouTube 爬虫网络检索音画资源...' : 'Crawling video streams across platforms...'}</div>
-          </div>
-        )}
-        {!loading && error && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-10 text-center text-sm text-slate-400">
-            {error}
-          </div>
-        )}
-        {!loading && !error && displayVideos.length === 0 && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-12 text-center text-sm text-slate-400">
-            {isZh ? '暂无视频，点击上方频道标签（如 B站 · 宇宙探索）或搜索关键词开始探索。' : 'No videos found. Pick a channel or search above.'}
-          </div>
-        )}
-
-        {/* 视频卡片网格 */}
-        {!loading && displayVideos.length > 0 && (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {displayVideos.map(video => (
-              <article
-                key={`${video.platform}:${video.videoId}`}
-                className="group overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/60 shadow-xl backdrop-blur-sm transition-all hover:border-slate-600 hover:-translate-y-0.5"
-              >
-                {/* 封面缩略图 + 播放按钮 */}
-                <div
-                  onClick={() => setPlayingVideo(video)}
-                  className="group/thumb relative block aspect-video w-full bg-slate-950 overflow-hidden cursor-pointer"
-                >
-                  <img
-                    src={thumbnailOf(video)}
-                    alt={video.title}
-                    loading="lazy"
-                    className="h-full w-full object-cover opacity-90 transition-transform duration-300 group-hover/thumb:scale-105 group-hover/thumb:opacity-75"
-                    onError={e => {
-                      (e.currentTarget as HTMLImageElement).src =
-                        video.platform === 'bilibili'
-                          ? 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600&auto=format&fit=crop&q=80'
-                          : `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg`;
-                    }}
-                  />
-                  {/* Platform Badge */}
-                  <span className={`absolute top-2.5 left-2.5 px-2 py-0.5 rounded text-[10px] font-bold shadow-md ${
-                    video.platform === 'bilibili' ? 'bg-sky-500 text-white' : 'bg-red-600 text-white'
-                  }`}>
-                    {video.platform === 'bilibili' ? 'B站' : 'YouTube'}
-                  </span>
-
-                  {/* Play Trigger */}
-                  <span className="absolute inset-0 flex items-center justify-center">
-                    <span className={`flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-transform group-hover/thumb:scale-110 ${
-                      video.platform === 'bilibili' ? 'bg-sky-500/90' : 'bg-red-600/90'
-                    }`}>
-                      <Play className="h-5 w-5 fill-white text-white ml-0.5" />
-                    </span>
-                  </span>
-
-                  {/* Duration Tag */}
-                  {(video.durationText || video.durationSeconds) && (
-                    <span className="absolute bottom-2 right-2 rounded bg-black/85 px-1.5 py-0.5 text-[11px] font-semibold text-white font-mono">
-                      {video.durationText || formatDuration(video.durationSeconds)}
-                    </span>
-                  )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="overflow-hidden rounded-2xl border" style={{ borderColor: 'var(--color-one-border)', background: 'rgba(14,19,27,0.45)' }}>
+                <div className="aspect-video w-full animate-pulse" style={{ background: 'rgba(244,243,238,0.06)' }} />
+                <div className="space-y-2 p-4">
+                  <div className="h-3.5 w-4/5 animate-pulse rounded" style={{ background: 'rgba(244,243,238,0.08)' }} />
+                  <div className="h-3 w-2/3 animate-pulse rounded" style={{ background: 'rgba(244,243,238,0.05)' }} />
                 </div>
-
-                {/* 视频信息区 */}
-                <div className="p-4 flex flex-col justify-between">
-                  <div>
-                    <h3
-                      onClick={() => setPlayingVideo(video)}
-                      className="line-clamp-2 text-xs sm:text-sm font-bold text-white hover:text-amber-300 transition-colors cursor-pointer"
-                      title={video.title}
-                    >
-                      {video.title}
-                    </h3>
-                    <div className="mt-1.5 flex items-center justify-between text-xs text-slate-400">
-                      <span className="truncate max-w-[160px]">{video.author}</span>
-                      <span className="text-[11px] text-slate-500 shrink-0">
-                        {video.viewsText || (video.views ? `${formatViews(video.views)} 次观看` : video.publishedText || '')}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 快捷操作条 */}
-                  <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                    <button
-                      onClick={() => setPlayingVideo(video)}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400 hover:text-amber-300 cursor-pointer"
-                    >
-                      <Play className="h-3 w-3 fill-current" />
-                      <span>立即播放</span>
-                    </button>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => toggleWatchlist(video)}
-                        className={`rounded-lg p-1.5 transition-colors cursor-pointer ${
-                          isBookmarked(video)
-                            ? 'text-amber-300 bg-amber-500/10'
-                            : 'text-slate-500 hover:bg-slate-800 hover:text-white'
-                        }`}
-                        title={isBookmarked(video) ? '已在观影单' : '加入观影单'}
-                      >
-                        {isBookmarked(video) ? (
-                          <BookmarkCheck className="h-4 w-4" />
-                        ) : (
-                          <Bookmark className="h-4 w-4" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => setCinemaVideo(video)}
-                        className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
-                        title="全屏影院模式"
-                      >
-                        <Maximize2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </article>
+              </div>
             ))}
           </div>
         )}
 
-        {/* 外部观影扩展（新窗口直通） */}
-        <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800/70 pt-6">
-          <div className="flex items-center gap-3">
+        {!loading && error && (
+          <div className="one-surface flex flex-col items-center justify-center px-6 py-12 text-center" role="status">
+            <Radio className="mb-3 h-8 w-8" style={{ color: 'var(--color-one-warning)' }} />
+            <p className="text-sm font-medium text-[color:var(--color-one-text)]">{error}</p>
+            <p className="mt-1 text-xs text-[color:var(--color-one-text-dim)]">
+              {isZh ? '可切换频道、来源或更换关键词重试。' : 'Try another channel, source, or keyword.'}
+            </p>
+          </div>
+        )}
+
+        {!loading && !error && displayVideos.length === 0 && (
+          <div className="one-surface flex flex-col items-center justify-center px-6 py-14 text-center">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border" style={{ borderColor: 'var(--color-one-border)', background: 'rgba(244,243,238,0.03)' }}>
+              <Film className="h-7 w-7 text-[color:var(--color-one-text-dim)]" />
+            </div>
+            <h3 className="text-base font-semibold text-[color:var(--color-one-text)]">
+              {isZh ? '暂无影像内容' : 'No stories yet'}
+            </h3>
+            <p className="mt-2 max-w-md text-sm leading-6 text-[color:var(--color-one-text-muted)]">
+              {isZh ? '选择上方频道或输入关键词开始探索。' : 'Pick a channel above or search to discover moving stories.'}
+            </p>
+          </div>
+        )}
+
+        {/* Video grid */}
+        {!loading && displayVideos.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {displayVideos.map((video) => {
+              const bookmarked = isBookmarked(video);
+              return (
+                <article
+                  key={`${video.platform}:${video.videoId}`}
+                  className="group flex flex-col overflow-hidden rounded-2xl border transition-all"
+                  style={{ borderColor: 'var(--color-one-border)', background: 'rgba(14,19,27,0.55)' }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setPlayingVideo(video)}
+                    className="relative block aspect-video w-full overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2"
+                    style={{ background: '#030508' }}
+                  >
+                    <img
+                      src={thumbnailOf(video)}
+                      alt={video.title}
+                      loading="lazy"
+                      className="h-full w-full object-cover transition-transform duration-500 ease-[var(--ease-one)] group-hover:scale-[1.03]"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src =
+                          video.platform === 'bilibili'
+                            ? 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600&auto=format&fit=crop&q=80'
+                            : `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg`;
+                      }}
+                    />
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
+                    <div className="absolute left-2.5 top-2.5">
+                      <PlatformBadge platform={video.platform} />
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                      <span
+                        className="flex h-12 w-12 items-center justify-center rounded-full border backdrop-blur-sm"
+                        style={{ borderColor: 'rgba(244,243,238,0.3)', background: 'rgba(5,7,11,0.45)', color: 'var(--color-one-text)' }}
+                      >
+                        <Play className="ml-0.5 h-5 w-5 fill-current" />
+                      </span>
+                    </div>
+                    {(video.durationText || video.durationSeconds) && (
+                      <span
+                        className="absolute bottom-2.5 right-2.5 rounded-md px-1.5 py-0.5 font-mono text-[10px]"
+                        style={{ background: 'rgba(5,7,11,0.7)', color: 'var(--color-one-text)' }}
+                      >
+                        {video.durationText || formatDuration(video.durationSeconds)}
+                      </span>
+                    )}
+                  </button>
+
+                  <div className="flex flex-1 flex-col justify-between p-4">
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setPlayingVideo(video)}
+                        className="line-clamp-2 text-left text-sm font-medium leading-snug text-[color:var(--color-one-text)] transition hover:text-[color:var(--color-one-accent)]"
+                        title={video.title}
+                      >
+                        {video.title}
+                      </button>
+                      <div className="mt-1.5 flex items-center justify-between gap-2 text-xs text-[color:var(--color-one-text-dim)]">
+                        <span className="truncate">{video.author}</span>
+                        <span className="shrink-0 text-[11px]">
+                          {video.viewsText || (video.views ? `${formatViews(video.views)} ${isZh ? '次观看' : 'views'}` : video.publishedText || '')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between border-t pt-3" style={{ borderColor: 'var(--color-one-border)' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPlayingVideo(video)}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium transition"
+                        style={{ color: 'var(--color-one-gold)' }}
+                      >
+                        <Play className="h-3.5 w-3.5 fill-current" />
+                        <span>{isZh ? '播放' : 'Play'}</span>
+                      </button>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => toggleWatchlist(video)}
+                          className="rounded-lg p-1.5 transition hover:bg-[rgba(244,243,238,0.06)]"
+                          style={{ color: bookmarked ? 'var(--color-one-gold)' : 'var(--color-one-text-dim)' }}
+                          title={bookmarked ? (isZh ? '已在观影单' : 'In watchlist') : (isZh ? '加入观影单' : 'Add to watchlist')}
+                        >
+                          {bookmarked ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCinemaVideo(video)}
+                          className="rounded-lg p-1.5 text-[color:var(--color-one-text-dim)] transition hover:bg-[rgba(244,243,238,0.06)] hover:text-[color:var(--color-one-text)]"
+                          title={isZh ? '影院模式' : 'Cinema mode'}
+                        >
+                          <Maximize2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        {/* External links */}
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-6" style={{ borderColor: 'var(--color-one-border)' }}>
+          <div className="flex flex-wrap items-center gap-2">
             <a
               href="https://souju6.ai/"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-lg shadow-purple-600/20 transition-all hover:from-purple-500 hover:to-indigo-500"
+              className="one-btn one-btn-sm one-btn-secondary"
             >
               <Tv className="h-3.5 w-3.5" />
               <span>{isZh ? '在线影视检索站' : 'Online Cinema Portal'}</span>
@@ -885,59 +942,67 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
               href="https://www.bilibili.com"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-xl bg-sky-600/20 border border-sky-500/40 px-3 py-2 text-xs font-semibold text-sky-200 transition-all hover:bg-sky-600/30"
+              className="one-btn one-btn-sm one-btn-ghost"
             >
-              <Tv className="h-3.5 w-3.5 text-sky-400" />
+              <Tv className="h-3.5 w-3.5" />
               <span>哔哩哔哩官方主站</span>
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           </div>
-          <span className="text-xs text-slate-500">
-            {isZh ? '第三方站点 · 版权归原权利人所有' : 'Third-party sites · all rights belong to respective owners'}
+          <span className="text-xs text-[color:var(--color-one-text-dim)]">
+            {isZh ? '第三方站点 · 版权归原权利人所有' : 'Third-party sites · rights belong to respective owners'}
           </span>
         </div>
       </main>
 
-      {/* 全屏影院模式 */}
+      {/* Cinema modal */}
       {cinemaVideo && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-4 backdrop-blur-md">
-          <div className="relative w-full max-w-5xl">
-            <button
-              onClick={() => setCinemaVideo(null)}
-              className="absolute -top-10 right-0 rounded-lg bg-white/10 p-2 text-white hover:bg-white/20 cursor-pointer"
-              title={isZh ? '关闭影院模式' : 'Close cinema'}
-            >
+        <div
+          className="fixed inset-0 z-[100] flex flex-col"
+          style={{ background: 'rgba(3,5,8,0.97)' }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={cinemaVideo.title}
+        >
+          <div className="flex items-center justify-between gap-3 border-b px-4 py-3 sm:px-6" style={{ borderColor: 'var(--color-one-border)' }}>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <PlatformBadge platform={cinemaVideo.platform} />
+              <h2 className="truncate text-sm font-medium text-[color:var(--color-one-text)]">{cinemaVideo.title}</h2>
+            </div>
+            <button type="button" onClick={() => setCinemaVideo(null)} className="one-btn one-btn-sm one-btn-ghost" aria-label="Close cinema">
               <X className="h-5 w-5" />
             </button>
-            <div className="aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl">
-              {cinemaVideo.platform === 'bilibili' ? (
-                <iframe
-                  src={cinemaVideo.embedUrl || `https://player.bilibili.com/player.html?bvid=${cinemaVideo.videoId}&page=1&autoplay=1`}
-                  title={cinemaVideo.title}
-                  className="h-full w-full border-0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              ) : (
-                <iframe
-                  src={`https://www.youtube.com/embed/${cinemaVideo.videoId}?autoplay=1&rel=0`}
-                  title={cinemaVideo.title}
-                  className="h-full w-full border-0"
-                  allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-                  allowFullScreen
-                />
-              )}
-            </div>
-            <div className="mt-3 flex items-center justify-between">
-              <div>
-                <p className="truncate text-base font-bold text-white">{cinemaVideo.title}</p>
-                <p className="mt-0.5 text-xs text-slate-400">{cinemaVideo.author}</p>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-3 sm:p-6">
+            <div className="w-full max-w-6xl">
+              <div className="aspect-video w-full overflow-hidden rounded-xl bg-black" style={{ boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }}>
+                {cinemaVideo.platform === 'bilibili' ? (
+                  <iframe
+                    src={cinemaVideo.embedUrl || `https://player.bilibili.com/player.html?bvid=${cinemaVideo.videoId}&page=1&autoplay=1`}
+                    title={cinemaVideo.title}
+                    className="h-full w-full border-0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <iframe
+                    src={`https://www.youtube.com/embed/${cinemaVideo.videoId}?autoplay=1&rel=0`}
+                    title={cinemaVideo.title}
+                    className="h-full w-full border-0"
+                    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+                    allowFullScreen
+                  />
+                )}
               </div>
-              <span className={`px-2.5 py-1 rounded text-xs font-bold ${
-                cinemaVideo.platform === 'bilibili' ? 'bg-sky-500 text-white' : 'bg-red-600 text-white'
-              }`}>
-                {cinemaVideo.platform === 'bilibili' ? 'Bilibili' : 'YouTube'}
-              </span>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-[color:var(--color-one-text)]">{cinemaVideo.title}</p>
+                  <p className="mt-0.5 text-xs text-[color:var(--color-one-text-muted)]">{cinemaVideo.author}</p>
+                </div>
+                <p className="hidden text-[11px] text-[color:var(--color-one-text-dim)] sm:block">
+                  {isZh ? 'Esc 关闭' : 'Esc to close'}
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -945,6 +1010,22 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
     </div>
   );
 };
+
+function PlatformBadge({ platform }: { platform: SaturnVideo['platform'] }) {
+  const isBili = platform === 'bilibili';
+  return (
+    <span
+      className="rounded-md px-2 py-0.5 text-[10px] font-medium"
+      style={
+        isBili
+          ? { color: 'var(--color-one-accent)', background: 'rgba(127,212,255,0.14)', border: '1px solid rgba(127,212,255,0.28)' }
+          : { color: 'var(--color-one-danger)', background: 'rgba(224,122,122,0.14)', border: '1px solid rgba(224,122,122,0.28)' }
+      }
+    >
+      {isBili ? 'Bilibili' : 'YouTube'}
+    </span>
+  );
+}
 
 // ISO 8601 duration ("PT1H2M3S") -> seconds
 function parseISODuration(iso?: string): number {
