@@ -528,7 +528,7 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
   }
 
   return (
-    <div className="relative w-full h-[calc(100vh-4rem)] bg-black overflow-hidden select-none">
+    <div className="relative w-full h-full bg-black overflow-hidden select-none">
       {/* Three.js Canvas Container */}
       <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
@@ -563,7 +563,7 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
       </div>
 
       {/* Bottom Horizontal Engine Control Dock */}
-      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-slate-950/85 backdrop-blur-xl px-4 py-2.5 rounded-2xl border border-white/15 shadow-2xl">
+      <div className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-slate-950/85 backdrop-blur-xl px-4 py-2.5 rounded-2xl border border-white/15 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto">
         {/* Return to Earth Social World */}
         <button
           onClick={onSwitchToEarthWorld}

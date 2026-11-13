@@ -81,8 +81,8 @@ export default function App() {
 
   useEffect(() => { document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'; document.documentElement.lang = lang; }, [lang]);
 
-  const isImmersiveSpace = ['universe', 'globe', 'saturn', 'venus', 'browser', 'academy', 'mercury'].includes(currentTab);
-  const isViewportWorkspace = isImmersiveSpace || ['chat', 'library', 'knowledge'].includes(currentTab);
+  const isViewportWorkspace = ['globe', 'universe', 'chat', 'browser'].includes(currentTab);
+  const isSpaceExperience = isViewportWorkspace || ['saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge'].includes(currentTab);
   useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
 
   const refreshConversations = async () => { try { const res = await fetch('/api/conversations'); const data = await res.json(); if (data.success) setConversations(data.conversations || []); } catch {} };
@@ -143,7 +143,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--color-space-bg)] text-slate-100 font-sans overflow-x-hidden">
+    <div className="min-h-screen bg-[var(--color-space-bg)] text-slate-100 font-sans overflow-x-clip">
       {showIntro && <CinematicIntro onComplete={() => setShowIntro(false)} onAuthSuccess={handleAuthSuccess} currentUser={currentUser} />}
       {welcomeToast && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-2xl eo-glass text-cyan-100 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4 text-cyan-400" /><span>{welcomeToast}</span></div>}
 
@@ -194,16 +194,16 @@ export default function App() {
         )}
 
         {currentTab === 'universe' && <div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem]"><UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
-        {currentTab === 'saturn' && <div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem]"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
-        <div className={currentTab === 'venus' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'venus'}><div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem]"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div></div>
-        {currentTab === 'mercury' && <div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem]"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} /></div>}
+        {currentTab === 'saturn' && <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
+        <div className={currentTab === 'venus' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'venus'}><div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem]"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div></div>
+        {currentTab === 'mercury' && <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} /></div>}
         {currentTab === 'feed' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} lang={lang} /></div>}
         <div className={currentTab === 'chat' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'chat'}><div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(62px+env(safe-area-inset-bottom))] md:pb-0 flex flex-col min-h-0"><GlobalMessenger conversations={conversations} activeConversationId={activeConversationId} onSelectConversation={setActiveConversationId} currentUser={currentUser} lang={lang} integrations={integrations} onRefreshConversations={refreshConversations} onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }} directOpenSeq={directOpenSeq} /></div></div>
         {currentTab === 'aihub' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><AIHub lang={lang} /></div>}
-        <div className={currentTab === 'library' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(62px+env(safe-area-inset-bottom))] md:pb-0 flex flex-col min-h-0"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} /></div></div>
-        {currentTab === 'moon' && <div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem]"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
+        <div className={currentTab === 'library' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6 flex flex-col"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} /></div></div>
+        {currentTab === 'moon' && <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
         {currentTab === 'arabic-learning' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><ArabicLearningHub lang={lang} onOpenLibrary={() => setCurrentTab('library')} /></div>}
-        {currentTab === 'knowledge' && <div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(62px+env(safe-area-inset-bottom))] md:pb-0 flex flex-col min-h-0"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
+        {currentTab === 'knowledge' && <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
         <div className={currentTab === 'browser' ? 'contents h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(62px+env(safe-area-inset-bottom))] md:pb-0 flex flex-col min-h-0"><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
         {currentTab === 'crawler' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><CrawlerDashboard lang={lang} /></div>}
         {currentTab === 'creator' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
@@ -212,7 +212,7 @@ export default function App() {
         {currentTab === 'community' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
       </main>
 
-      {!isViewportWorkspace && <div className="md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0"><LuxuryAdBanner lang={lang} /></div>}
+      {!isSpaceExperience && <div className="md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0"><LuxuryAdBanner lang={lang} /></div>}
 
       {profileModalUser && <UserProfileModal user={profileModalUser} currentUser={currentUser} onClose={() => setProfileModalUser(null)} onFollow={id => { fetch(`/api/users/${id}/follow`, { method: 'POST' }).catch(() => {}); }} onDirectMessage={handleOpenDirectChat} onUpdateProfile={handleUpdateProfile} lang={lang} />}
       <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} onAuthSuccess={handleAuthSuccess} lang={lang} />
@@ -221,7 +221,7 @@ export default function App() {
 
       <HolographicAICompanion lang={lang} showLauncher={currentTab !== 'globe' || showGlobeTools} onFlyTo={(lat, lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} onExploreUniverse={() => setCurrentTab('universe')} onOpenAIHub={() => setCurrentTab('aihub')} onNavigateTab={tab => setCurrentTab(tab)} currentTab={currentTab} />
 
-      {!isViewportWorkspace && (
+      {!isSpaceExperience && (
         <footer className="w-full border-t border-white/10 bg-[rgba(2,4,10,0.6)] py-5 px-4 text-xs text-slate-500 md:pl-24">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-2"><img src="/earth-one-icon.png" alt="EARTH ONE" className="w-5 h-5 rounded-md object-cover ring-1 ring-[#D8B778]/40" /><span className="font-semibold text-slate-300">EARTH ONE</span></div>

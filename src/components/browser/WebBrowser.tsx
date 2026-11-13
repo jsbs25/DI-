@@ -1920,7 +1920,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
   };
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] min-w-0 flex-1 flex-col bg-[#05080d] p-3 text-slate-100 sm:p-5">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-[#05080d] p-3 text-slate-100 sm:p-5">
       <BrowserFrame
         tabs={tabs}
         activeTabId={activeTabId}

@@ -503,7 +503,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   };
 
   return (
-    <div className="min-h-screen bg-[#07040d] text-slate-100 flex flex-col font-sans relative overflow-x-hidden selection:bg-rose-500/30 selection:text-rose-200 pb-36">
+    <div className="min-h-screen bg-[#07040d] text-slate-100 flex flex-col font-sans relative overflow-x-clip selection:bg-rose-500/30 selection:text-rose-200 pb-[calc(11.5rem+env(safe-area-inset-bottom))] md:pb-36">
       {/* Venus Golden-Pink Atmospheric Glow */}
       <div className="fixed inset-0 pointer-events-none z-0">
         <div className="absolute -top-[25%] -left-[10%] w-[55vw] h-[55vw] rounded-full bg-rose-600/10 blur-[140px]" />
@@ -513,7 +513,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
       {/* Floating Embedded Player (Bilibili / YouTube / SoundCloud) */}
       {(activeTrack?.playable === 'embed' || activeTrack?.embedUrl) && showEmbedPlayer && (
-        <div className="fixed bottom-[115px] left-4 right-4 z-40 mx-auto max-w-xl rounded-2xl border border-rose-500/40 bg-black/95 p-3 backdrop-blur-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-4">
+        <div className="fixed bottom-[calc(176px+env(safe-area-inset-bottom))] md:bottom-[115px] left-4 right-4 z-40 mx-auto max-w-xl rounded-2xl border border-rose-500/40 bg-black/95 p-3 backdrop-blur-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-4">
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-rose-900/40 text-xs">
             <div className="flex items-center gap-2">
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
@@ -573,7 +573,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       />
 
       {/* 1. Header Navigation Bar */}
-      <header className="sticky top-0 z-30 border-b border-rose-900/30 bg-[#07040d]/85 backdrop-blur-2xl px-4 sm:px-8 py-3.5 flex items-center justify-between">
+      <header className="sticky top-[58px] md:top-16 z-30 border-b border-rose-900/30 bg-[#07040d]/85 backdrop-blur-2xl px-4 sm:px-8 py-3.5 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <button
             onClick={onBack}
@@ -860,7 +860,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       </main>
 
       {/* 6. Sticky Bottom Floating Music Player Bar */}
-      <footer className="fixed bottom-0 left-0 right-0 z-40 bg-[#0c0516]/95 border-t border-rose-900/40 backdrop-blur-2xl px-4 sm:px-8 py-3 shadow-2xl">
+      <footer className="fixed bottom-[calc(62px+env(safe-area-inset-bottom))] md:bottom-0 left-0 md:left-[5.5rem] right-0 z-30 bg-[#0c0516]/95 border-t border-rose-900/40 backdrop-blur-2xl px-4 sm:px-8 py-3 shadow-2xl">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           {/* Active Track Info */}
           <div className="flex items-center space-x-3 w-full sm:w-1/3 min-w-0">
