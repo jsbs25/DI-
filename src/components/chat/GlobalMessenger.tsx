@@ -1552,38 +1552,41 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   if (!authed) {
     return (
-      <div className="w-full max-w-3xl mx-auto p-6">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 text-center space-y-3">
-          <MessageCircle className="w-10 h-10 text-cyan-400 mx-auto" />
-          <h2 className="text-lg font-semibold text-slate-100">Global Messenger</h2>
-          <p className="text-sm text-slate-400">正在同步登录状态…</p>
+      <div className="w-full h-full min-h-0 p-3 sm:p-6 flex items-center justify-center">
+        <div className="w-full max-w-xl rounded-[28px] border border-white/10 bg-[rgba(10,14,20,0.72)] backdrop-blur-xl p-6 sm:p-8 text-center space-y-3 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+          <div className="mx-auto w-12 h-12 rounded-2xl border border-cyan-400/25 bg-cyan-400/10 flex items-center justify-center"><MessageCircle className="w-5 h-5 text-cyan-200" /></div>
+          <h2 className="text-lg sm:text-xl font-semibold tracking-tight text-[var(--one-text,#f4f3ee)]">ONE MESSENGER</h2>
+          <p className="text-sm text-slate-400 leading-relaxed">正在同步登录状态与会话上下文…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full max-w-7xl mx-auto h-full min-h-0 p-1.5 sm:p-4 flex flex-col lg:flex-row gap-3 sm:gap-4">
-      {/* Left panel */}
-      <div className={`w-full lg:w-[372px] flex-1 lg:flex-initial rounded-2xl bg-slate-900/85 border border-slate-800 p-3 sm:p-3.5 flex-col shrink-0 shadow-xl backdrop-blur-md min-h-0 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
-        <div className="flex items-center justify-between pb-2.5 border-b border-slate-800 mb-2.5 gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <MessageCircle className="w-4 h-4 text-cyan-400 shrink-0" />
-            <h2 className="font-bold text-sm text-slate-100 truncate">Messenger</h2>
-            <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${wsStatus==='open'?'text-emerald-300 border-emerald-700/50 bg-emerald-500/10':'text-amber-300 border-amber-700/50 bg-amber-500/10'}`}>
-              {wsStatus==='open' ? <Wifi className="w-3 h-3"/> : <WifiOff className="w-3 h-3"/>}{wsStatus==='open'?'实时':'同步'}
-            </span>
+    <div className="w-full h-full min-h-0 p-1.5 sm:p-4 lg:p-5"><div className="mx-auto h-full min-h-0 max-w-[1680px] rounded-[28px] border border-white/10 bg-[rgba(8,11,16,0.72)] backdrop-blur-xl shadow-[0_24px_80px_rgba(0,0,0,0.35)] overflow-hidden flex flex-col lg:flex-row">
+      {/* Left rail / list */}
+      <aside className={`w-full lg:w-[380px] xl:w-[420px] shrink-0 border-b lg:border-b-0 lg:border-r border-white/10 bg-[rgba(10,14,20,0.55)] p-3 sm:p-4 flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+        <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3 gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl border border-cyan-400/20 bg-cyan-400/10 flex items-center justify-center shrink-0"><MessageCircle className="w-4 h-4 text-cyan-200" /></div>
+            <div className="min-w-0">
+              <h2 className="font-semibold text-sm sm:text-[15px] tracking-tight text-[var(--one-text,#f4f3ee)] truncate">ONE MESSENGER</h2>
+              <p className="text-[11px] text-slate-400 truncate">对话、联系人与通知</p>
+            </div>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button type="button" onClick={()=>setTab(t => t === 'msgsearch' ? 'chats' : 'msgsearch')} title={lang==='ar'?'بحث الرسائل':lang==='en'?'Search messages':'搜索消息'} className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border transition-colors ${tab==='msgsearch'?'border-cyan-500/50 bg-cyan-500/15 text-cyan-200':'border-slate-700/80 text-slate-300 hover:bg-slate-800'}`}><Search className="w-4 h-4"/></button>
-            <button type="button" onClick={()=>{ setTab(t => t === 'privacy' ? 'chats' : 'privacy'); void loadPrivacy(); void loadBlocked(); }} title={lang==='ar'?'الخصوصية':lang==='en'?'Privacy':'隐私与安全'} className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border transition-colors ${tab==='privacy'?'border-cyan-500/50 bg-cyan-500/15 text-cyan-200':'border-slate-700/80 text-slate-300 hover:bg-slate-800'}`}><Shield className="w-4 h-4"/></button>
-            <button type="button" onClick={()=>{ setShowCreateGroup(true); void loadFriends(); }} title="创建群聊" className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border border-slate-700/80 text-slate-300 hover:bg-slate-800"><Users className="w-4 h-4"/></button>
-            <button type="button" onClick={()=>void openMyProfile()} title={lang==='ar'?'ملفي الشخصي':lang==='en'?'My profile':'我的资料'} className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border border-slate-700/80 text-slate-300 hover:bg-slate-800"><UserIcon className="w-4 h-4"/></button>
-            <button type="button" onClick={() => setShowIntegrations(v=>!v)} title="官方接入" className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border transition-colors ${showIntegrations?'border-cyan-500/50 bg-cyan-500/15 text-cyan-200':'border-slate-700/80 text-slate-300 hover:bg-slate-800'}`}><Plug className="w-4 h-4"/></button>
-          </div>
+          <span className={`inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] px-2.5 py-1 rounded-full border shrink-0 ${wsStatus==='open'?'text-emerald-300 border-emerald-500/30 bg-emerald-500/10':'text-amber-300 border-amber-500/30 bg-amber-500/10'}`}>
+            {wsStatus==='open' ? <Wifi className="w-3 h-3"/> : <WifiOff className="w-3 h-3"/>}{wsStatus==='open'?'实时':'同步'}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 mb-3 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button type="button" onClick={()=>setTab(t => t === 'msgsearch' ? 'chats' : 'msgsearch')} title={lang==='ar'?'بحث الرسائل':lang==='en'?'Search messages':'搜索消息'} className={`min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border transition-colors ${tab==='msgsearch'?'border-cyan-400/40 bg-cyan-400/12 text-cyan-100':'border-white/10 text-slate-300 hover:bg-white/5 hover:text-[var(--one-text,#f4f3ee)]'}`}><Search className="w-4 h-4"/></button>
+          <button type="button" onClick={()=>{ setTab(t => t === 'privacy' ? 'chats' : 'privacy'); void loadPrivacy(); void loadBlocked(); }} title={lang==='ar'?'الخصوصية':lang==='en'?'Privacy':'隐私与安全'} className={`min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border transition-colors ${tab==='privacy'?'border-cyan-400/40 bg-cyan-400/12 text-cyan-100':'border-white/10 text-slate-300 hover:bg-white/5 hover:text-[var(--one-text,#f4f3ee)]'}`}><Shield className="w-4 h-4"/></button>
+          <button type="button" onClick={()=>{ setShowCreateGroup(true); void loadFriends(); }} title="创建群聊" className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-white/10 text-slate-300 hover:bg-white/5 hover:text-[var(--one-text,#f4f3ee)]"><Users className="w-4 h-4"/></button>
+          <button type="button" onClick={()=>void openMyProfile()} title={lang==='ar'?'ملفي الشخصي':lang==='en'?'My profile':'我的资料'} className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border border-white/10 text-slate-300 hover:bg-white/5 hover:text-[var(--one-text,#f4f3ee)]"><UserIcon className="w-4 h-4"/></button>
+          <button type="button" onClick={() => setShowIntegrations(v=>!v)} title="官方接入" className={`min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-xl border transition-colors ${showIntegrations?'border-cyan-400/40 bg-cyan-400/12 text-cyan-100':'border-white/10 text-slate-300 hover:bg-white/5 hover:text-[var(--one-text,#f4f3ee)]'}`}><Plug className="w-4 h-4"/></button>
         </div>
 
-        {notice && <div className="mb-2 rounded-xl border border-cyan-700/40 bg-cyan-950/40 px-3 py-2 text-xs text-cyan-200 flex items-center justify-between gap-2"><span>{notice}</span><button onClick={()=>setNotice(null)} className="text-cyan-300 p-1">×</button></div>}
+        {notice && <div className="mb-3 rounded-xl border border-cyan-400/25 bg-cyan-400/10 px-3 py-2 text-xs text-cyan-100 flex items-center justify-between gap-2"><span className="min-w-0">{notice}</span><button onClick={()=>setNotice(null)} className="text-cyan-200/90 p-1 shrink-0">×</button></div>}
         <div className="grid grid-cols-5 gap-1.5 mb-2.5 text-xs">
           {([
             { k: 'chats', label: lang==='ar'?'المحادثات':lang==='en'?'Chats':'会话' },
@@ -1600,11 +1603,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 if (item.k === 'requests') void loadRequests();
                 if (item.k === 'friends') void loadFriends();
               }}
-              className={`relative min-h-[42px] px-1 py-1.5 rounded-xl border font-medium whitespace-nowrap transition-colors flex items-center justify-center ${tab===item.k?'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]':'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200'}`}
+              className={`relative min-h-[40px] px-1 py-1.5 rounded-xl border font-medium whitespace-nowrap transition-colors flex items-center justify-center ${tab===item.k?'bg-cyan-400/12 border-cyan-400/35 text-cyan-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]':'bg-white/[0.02] border-white/10 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'}`}
             >
               <span>{item.label}</span>
               {!!(item as any).badge && (item as any).badge > 0 && (
-                <span className={`ml-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] leading-4 font-semibold ${(item as any).tone === 'rose' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                <span className={`ml-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] leading-4 font-semibold ${(item as any).tone === 'rose' ? 'bg-rose-500 text-white' : 'bg-white/[0.06] text-slate-300'}`}>
                   {(item as any).badge > 99 ? '99+' : (item as any).badge}
                 </span>
               )}
@@ -1613,14 +1616,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         </div>
 
         {showIntegrations && (
-          <div className="mb-2 rounded-xl border border-slate-800 bg-slate-950/60 p-2.5 space-y-2">
+          <div className="mb-2 rounded-xl border border-white/10 bg-white/[0.03] p-2.5 space-y-2">
             <p className="text-[10px] text-slate-500 leading-relaxed">官方接口接入；不支持个人微信/WhatsApp 聊天同步或非官方自动化。</p>
             <div className="space-y-1.5 max-h-40 overflow-y-auto">
               {integrations.map(it => (
-                <div key={it.id} className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 text-[10px]">
+                <div key={it.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-2 text-[10px]">
                   <div className="flex items-center justify-between gap-2"><span className="font-semibold text-slate-200">{it.name}</span>
                     {it.id==='google' ? <button onClick={connectGoogle} className="px-2 py-1 rounded bg-white text-slate-900 font-semibold">Google</button>
-                    : it.id==='wechat' ? <button onClick={connectWechat} disabled={it.status!=='available'} className={`px-2 py-1 rounded font-semibold ${it.status==='available'?'bg-emerald-500 text-slate-950':'bg-slate-800 text-slate-400'}`}>{it.status==='available'?'微信登录':'未配置'}</button>
+                    : it.id==='wechat' ? <button onClick={connectWechat} disabled={it.status!=='available'} className={`px-2 py-1 rounded font-semibold ${it.status==='available'?'bg-emerald-500 text-slate-950':'bg-white/[0.06] text-slate-400'}`}>{it.status==='available'?'微信登录':'未配置'}</button>
                     : <span className={`px-1.5 py-0.5 rounded border ${it.status==='available'?'text-emerald-300 border-emerald-700':'text-amber-300 border-amber-700'}`}>{it.status}</span>}
                   </div>
                   {it.limitations?.[0] && <p className="mt-1 text-amber-300/80 flex gap-1"><ShieldAlert className="w-3 h-3 mt-0.5"/>{it.limitations[0]}</p>}
@@ -1632,22 +1635,22 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
         {tab === 'chats' && (
           <>
-            <div className="relative mb-2"><Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" /><input value={convQuery} onChange={e=>setConvQuery(e.target.value)} placeholder="搜索会话…" className="w-full min-h-[42px] pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm sm:text-xs text-slate-200 outline-none focus:border-cyan-500/40" /></div>
+            <div className="relative mb-2"><Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" /><input value={convQuery} onChange={e=>setConvQuery(e.target.value)} placeholder="搜索会话…" className="w-full min-h-[44px] pl-9 pr-3 py-2.5 rounded-xl bg-black/20 border border-white/10 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-cyan-400/35 focus:bg-black/30 transition-colors" /></div>
             <div className="flex-1 overflow-y-auto space-y-2 min-h-0 pr-0.5">
               {sorted.map(conv => (
-                <button key={conv.id} onClick={()=>{onSelectConversation(conv.id); setMobileShowChat(true);}} className={`w-full min-h-[64px] flex items-center gap-3 p-3 rounded-xl text-left transition-colors ${conv.id===activeConv?.id?'bg-cyan-500/15 border border-cyan-500/40':'bg-slate-950/50 border border-slate-800/70 hover:bg-slate-800/60'}`}>
-                  {conv.type==='global_channel' ? <div className="w-11 h-11 rounded-full bg-cyan-950 border border-cyan-500/40 flex items-center justify-center text-cyan-300 shrink-0"><Globe className="w-5 h-5"/></div>
-                  : <div className="relative shrink-0"><img src={conv.otherUser?.avatar || conv.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-11 h-11 rounded-full object-cover border border-slate-700"/>{(conv.isOnline || conv.otherUser?.isOnline) && <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-slate-950"/>}</div>}
+                <button key={conv.id} onClick={()=>{onSelectConversation(conv.id); setMobileShowChat(true);}} className={`w-full min-h-[64px] flex items-center gap-3 p-3 rounded-xl text-left transition-colors ${conv.id===activeConv?.id?'bg-cyan-400/10 border border-cyan-400/30':'bg-white/[0.02] border border-white/10 hover:bg-white/[0.05]'}`}>
+                  {conv.type==='global_channel' ? <div className="w-11 h-11 rounded-full bg-cyan-950 border border-cyan-400/30 flex items-center justify-center text-cyan-200 shrink-0"><Globe className="w-5 h-5"/></div>
+                  : <div className="relative shrink-0"><img src={conv.otherUser?.avatar || conv.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-11 h-11 rounded-full object-cover border border-white/10"/>{(conv.isOnline || conv.otherUser?.isOnline) && <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-slate-950"/>}</div>}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-sm sm:text-xs truncate text-slate-100">{conv.name}</span>
-                      {(conv.unreadCount||0)>0 && <span className="text-[11px] px-1.5 min-w-[20px] text-center rounded-full bg-cyan-500 text-slate-950 font-bold">{conv.unreadCount}</span>}
+                      <span className="font-semibold text-sm sm:text-xs truncate text-[var(--one-text,#f4f3ee)]">{conv.name}</span>
+                      {(conv.unreadCount||0)>0 && <span className="text-[11px] px-1.5 min-w-[20px] text-center rounded-full bg-cyan-400 text-slate-950 font-bold">{conv.unreadCount}</span>}
                     </div>
                     <p className="text-xs sm:text-[11px] text-slate-400 truncate mt-0.5">{conv.lastMessage || '点击开始对话'}</p>
                   </div>
                 </button>
               ))}
-              {sorted.length===0 && <div className="text-xs text-slate-500 text-center py-8">暂无会话</div>}
+              {sorted.length===0 && <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-10 text-center text-sm text-slate-400">暂无会话</div>}
             </div>
           </>
         )}
@@ -1657,44 +1660,44 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs text-slate-400">好友 ({friends.length})</p>
               <div className="flex items-center gap-2">
-                <button onClick={()=>setTab('search')} className="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-medium inline-flex items-center gap-1"><UserPlus className="w-3.5 h-3.5"/>加好友</button>
-                <button onClick={()=>{void loadFriends(); void loadRecent();}} className="px-2 py-1.5 rounded-lg border border-slate-800 text-slate-300 text-xs">刷新</button>
+                <button onClick={()=>setTab('search')} className="px-2.5 py-1.5 rounded-lg bg-cyan-400/10 border border-cyan-500/30 text-cyan-200 text-xs font-medium inline-flex items-center gap-1"><UserPlus className="w-3.5 h-3.5"/>加好友</button>
+                <button onClick={()=>{void loadFriends(); void loadRecent();}} className="px-2 py-1.5 rounded-lg border border-white/10 text-slate-300 text-xs">刷新</button>
               </div>
             </div>
             {friends.map(f => (
-              <div key={f.id} className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 space-y-2.5">
+              <div key={f.id} className="p-3 rounded-xl border border-white/10 bg-white/[0.03] space-y-2.5">
                 <div className="flex items-center gap-3">
                   <button onClick={()=>void openProfile(f.id)} className="relative shrink-0">
-                    <img src={f.avatar} className="w-11 h-11 rounded-full object-cover border border-slate-700"/>
+                    <img src={f.avatar} className="w-11 h-11 rounded-full object-cover border border-white/10"/>
                     {f.isOnline && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950"/>}
                   </button>
                   <button onClick={()=>void openProfile(f.id)} className="flex-1 min-w-0 text-left">
-                    <p className="text-sm font-semibold text-slate-100 truncate">{f.displayName}</p>
+                    <p className="text-sm font-semibold text-[var(--one-text,#f4f3ee)] truncate">{f.displayName}</p>
                     <p className="text-xs text-slate-400 truncate">@{f.username} · {f.isOnline ? '在线' : (f.lastActiveAt ? `最近 ${new Date(f.lastActiveAt).toLocaleDateString()}` : '离线')}</p>
                   </button>
                 </div>
                 <div className="grid grid-cols-5 gap-1.5">
-                  <button onClick={()=>void openDirect(f.id)} className="col-span-2 min-h-[38px] px-2 rounded-lg bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 text-xs font-medium inline-flex items-center justify-center gap-1.5"><MessageCircle className="w-3.5 h-3.5"/>发消息</button>
+                  <button onClick={()=>void openDirect(f.id)} className="col-span-2 min-h-[38px] px-2 rounded-lg bg-cyan-400/12 text-cyan-200 border border-cyan-400/30 text-xs font-medium inline-flex items-center justify-center gap-1.5"><MessageCircle className="w-3.5 h-3.5"/>发消息</button>
                   <button onClick={()=>void startCall('audio', { targetUserId: f.id })} disabled={!!callAction} className="min-h-[38px] px-2 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 text-xs font-medium inline-flex items-center justify-center gap-1" title="语音通话"><Phone className="w-3.5 h-3.5"/><span>语音</span></button>
                   <button onClick={()=>void startCall('video', { targetUserId: f.id })} disabled={!!callAction} className="min-h-[38px] px-2 rounded-lg bg-sky-500/15 text-sky-300 border border-sky-500/35 text-xs font-medium inline-flex items-center justify-center gap-1" title="视频通话"><Video className="w-3.5 h-3.5"/><span>视频</span></button>
-                  <button onClick={()=>void removeFriend(f.id)} className="min-h-[38px] px-1 rounded-lg bg-slate-800/80 text-rose-300 text-xs inline-flex items-center justify-center" title="删除好友"><Trash2 className="w-3.5 h-3.5"/></button>
+                  <button onClick={()=>void removeFriend(f.id)} className="min-h-[38px] px-1 rounded-lg bg-white/[0.06] text-rose-300 text-xs inline-flex items-center justify-center" title="删除好友"><Trash2 className="w-3.5 h-3.5"/></button>
                 </div>
               </div>
             ))}
-            {recentConvs.length>0 && <div className="pt-2.5 border-t border-slate-800 space-y-1.5"><p className="text-xs text-slate-400">最近联系人</p>{recentConvs.slice(0,8).map(c => (
-              <button key={c.id} onClick={()=>{ onSelectConversation(c.id); setTab('chats'); setMobileShowChat(true); }} className="w-full min-h-[48px] flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-950/40 border border-slate-800 text-left">
+            {recentConvs.length>0 && <div className="pt-2.5 border-t border-white/10 space-y-1.5"><p className="text-xs text-slate-400">最近联系人</p>{recentConvs.slice(0,8).map(c => (
+              <button key={c.id} onClick={()=>{ onSelectConversation(c.id); setTab('chats'); setMobileShowChat(true); }} className="w-full min-h-[48px] flex items-center gap-2.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/10 text-left">
                 <img src={c.otherUser?.avatar || c.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-8 h-8 rounded-full object-cover shrink-0"/>
                 <div className="flex-1 min-w-0"><p className="text-xs font-medium text-slate-200 truncate">{c.name}</p><p className="text-[11px] text-slate-500 truncate">{c.lastMessage || ''}</p></div>
-                {(c.unreadCount||0)>0 && <span className="text-[10px] px-1.5 rounded-full bg-cyan-500 text-slate-950 font-bold">{c.unreadCount}</span>}
+                {(c.unreadCount||0)>0 && <span className="text-[10px] px-1.5 rounded-full bg-cyan-400 text-slate-950 font-bold">{c.unreadCount}</span>}
               </button>
             ))}</div>}
-            {blocked.length>0 && <div className="pt-2.5 border-t border-slate-800"><p className="text-xs text-slate-400 mb-1.5">已屏蔽用户</p>{blocked.map(b => (
-              <div key={b.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/40 border border-slate-800 text-xs"><span className="text-slate-300">{b.displayName}</span><button onClick={()=>unblockUser(b.id)} className="text-cyan-300 px-2 py-1">解除屏蔽</button></div>
+            {blocked.length>0 && <div className="pt-2.5 border-t border-white/10"><p className="text-xs text-slate-400 mb-1.5">已屏蔽用户</p>{blocked.map(b => (
+              <div key={b.id} className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.02] border border-white/10 text-xs"><span className="text-slate-300">{b.displayName}</span><button onClick={()=>unblockUser(b.id)} className="text-cyan-200 px-2 py-1">解除屏蔽</button></div>
             ))}</div>}
             {friends.length===0 && (
               <div className="text-xs text-slate-400 text-center py-8 space-y-3">
                 <p>暂无好友</p>
-                <button onClick={()=>setTab('search')} className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 font-semibold inline-flex items-center gap-1.5"><UserPlus className="w-4 h-4"/>去添加好友</button>
+                <button onClick={()=>setTab('search')} className="px-4 py-2 rounded-xl bg-cyan-400 text-slate-950 font-semibold inline-flex items-center gap-1.5"><UserPlus className="w-4 h-4"/>去添加好友</button>
               </div>
             )}
           </div>
@@ -1702,13 +1705,13 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
         {tab === 'requests' && (
           <div className="flex-1 overflow-y-auto space-y-2.5 min-h-0 pr-0.5">
-            <div className="flex items-center justify-between"><p className="text-xs text-slate-400">收到的好友申请 ({incomingReqs.length})</p><button onClick={()=>void loadRequests()} className="text-xs text-cyan-300 px-2 py-1">刷新</button></div>
+            <div className="flex items-center justify-between"><p className="text-xs text-slate-400">收到的好友申请 ({incomingReqs.length})</p><button onClick={()=>void loadRequests()} className="text-xs text-cyan-200 px-2 py-1">刷新</button></div>
             {incomingReqs.map(r => (
-              <div key={r.id} className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 space-y-2.5">
+              <div key={r.id} className="p-3 rounded-xl border border-white/10 bg-white/[0.03] space-y-2.5">
                 <div className="flex items-center gap-3">
-                  <button onClick={()=>r.fromUser?.id && void openProfile(r.fromUser.id)} className="shrink-0"><img src={r.fromUser?.avatar || ''} className="w-10 h-10 rounded-full object-cover border border-slate-700"/></button>
+                  <button onClick={()=>r.fromUser?.id && void openProfile(r.fromUser.id)} className="shrink-0"><img src={r.fromUser?.avatar || ''} className="w-10 h-10 rounded-full object-cover border border-white/10"/></button>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-100 truncate">{r.fromUser?.displayName || r.fromUserId}</p>
+                    <p className="text-sm font-semibold text-[var(--one-text,#f4f3ee)] truncate">{r.fromUser?.displayName || r.fromUserId}</p>
                     <p className="text-xs text-slate-400 truncate">@{r.fromUser?.username || r.fromUserId} {r.fromUser?.isOnline?'· 在线':''}</p>
                   </div>
                 </div>
@@ -1719,9 +1722,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               </div>
             ))}
             {incomingReqs.length===0 && <div className="text-xs text-slate-500 py-3">无待处理好友申请</div>}
-            <p className="text-xs text-slate-400 pt-2.5 border-t border-slate-800">我发出的申请 ({outgoingReqs.length})</p>
+            <p className="text-xs text-slate-400 pt-2.5 border-t border-white/10">我发出的申请 ({outgoingReqs.length})</p>
             {outgoingReqs.map(r => (
-              <div key={r.id} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-800 bg-slate-950/50 text-xs text-slate-300">
+              <div key={r.id} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-white/10 bg-white/[0.02] text-xs text-slate-300">
                 <img src={r.toUser?.avatar || ''} className="w-8 h-8 rounded-full object-cover shrink-0"/>
                 <span className="flex-1 truncate">→ {r.toUser?.displayName || r.toUserId}</span>
                 <span className="text-amber-300/90 text-[11px] shrink-0">等待通过</span>
@@ -1733,26 +1736,26 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         {tab === 'search' && (
           <div className="flex-1 overflow-y-auto space-y-2.5 min-h-0 pr-0.5">
             <div className="flex gap-2">
-              <input value={userSearch} onChange={e=>setUserSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void doSearchUsers();}} placeholder="输入用户名 / 昵称 / ID 添加好友" className="flex-1 min-h-[42px] px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm sm:text-xs text-slate-200 outline-none focus:border-cyan-500/40"/>
-              <button onClick={()=>void doSearchUsers()} className="min-h-[42px] px-4 rounded-xl bg-cyan-500 text-slate-950 text-xs font-semibold shrink-0">搜索</button>
+              <input value={userSearch} onChange={e=>setUserSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void doSearchUsers();}} placeholder="输入用户名 / 昵称 / ID 添加好友" className="flex-1 min-h-[42px] px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-sm sm:text-xs text-slate-200 outline-none focus:border-cyan-400/35"/>
+              <button onClick={()=>void doSearchUsers()} className="min-h-[42px] px-4 rounded-xl bg-cyan-400 text-slate-950 text-xs font-semibold shrink-0">搜索</button>
             </div>
             <div className="flex items-center justify-between text-[11px] text-slate-400 px-0.5">
               <span>{userSearch.trim() ? `搜索结果 (${searchResults.length})` : `可添加的好友 (${searchResults.length})`}</span>
-              {suggestedLoading && <span className="text-cyan-300">加载中…</span>}
+              {suggestedLoading && <span className="text-cyan-200">加载中…</span>}
             </div>
             {searchResults.map(u => {
               const isFriend = friends.some(f => f.id === u.id);
               const outgoing = outgoingReqs.some(r => r.toUserId === u.id);
               const incoming = incomingReqs.find(r => r.fromUserId === u.id);
               return (
-              <div key={u.id} className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 space-y-2.5">
+              <div key={u.id} className="p-3 rounded-xl border border-white/10 bg-white/[0.03] space-y-2.5">
                 <div className="flex items-center gap-3">
                   <button onClick={()=>void openProfile(u.id)} className="relative shrink-0">
-                    <img src={u.avatar} className="w-11 h-11 rounded-full object-cover border border-slate-700"/>
+                    <img src={u.avatar} className="w-11 h-11 rounded-full object-cover border border-white/10"/>
                     {u.isOnline && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950"/>}
                   </button>
                   <button onClick={()=>void openProfile(u.id)} className="flex-1 min-w-0 text-left">
-                    <p className="text-sm font-semibold text-slate-100 truncate">{u.displayName}</p>
+                    <p className="text-sm font-semibold text-[var(--one-text,#f4f3ee)] truncate">{u.displayName}</p>
                     <p className="text-xs text-slate-400 truncate">@{u.username} · {u.isOnline?'在线':(u.lastActiveAt?`最近 ${new Date(u.lastActiveAt).toLocaleDateString()}`:'离线')}</p>
                   </button>
                 </div>
@@ -1762,11 +1765,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   ) : incoming ? (
                     <button onClick={()=>respondRequest(incoming.id,true)} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-[11px] font-semibold inline-flex items-center justify-center">通过</button>
                   ) : outgoing ? (
-                    <span className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-400 text-[11px] inline-flex items-center justify-center">已申请</span>
+                    <span className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-white/[0.06] border border-white/10 text-slate-400 text-[11px] inline-flex items-center justify-center">已申请</span>
                   ) : (
-                    <button disabled={pendingRequestIds.has(u.id)} onClick={()=>sendFriendRequest(u.id)} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-cyan-500 text-slate-950 text-[11px] font-semibold inline-flex items-center justify-center gap-1 disabled:opacity-40"><UserPlus className="w-3.5 h-3.5"/>加好友</button>
+                    <button disabled={pendingRequestIds.has(u.id)} onClick={()=>sendFriendRequest(u.id)} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-cyan-400 text-slate-950 text-[11px] font-semibold inline-flex items-center justify-center gap-1 disabled:opacity-40"><UserPlus className="w-3.5 h-3.5"/>加好友</button>
                   )}
-                  <button onClick={()=>void openDirect(u.id)} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-cyan-500/20 border border-cyan-500/35 text-cyan-200 text-[11px] font-medium inline-flex items-center justify-center gap-1"><MessageCircle className="w-3.5 h-3.5"/>私聊</button>
+                  <button onClick={()=>void openDirect(u.id)} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-cyan-400/12 border border-cyan-500/35 text-cyan-200 text-[11px] font-medium inline-flex items-center justify-center gap-1"><MessageCircle className="w-3.5 h-3.5"/>私聊</button>
                   <button onClick={()=>void startCall('audio', { targetUserId: u.id })} disabled={!!callAction} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[11px] font-medium inline-flex items-center justify-center gap-1"><Phone className="w-3.5 h-3.5"/>语音</button>
                   <button onClick={()=>void startCall('video', { targetUserId: u.id })} disabled={!!callAction} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-sky-500/15 border border-sky-500/35 text-sky-300 text-[11px] font-medium inline-flex items-center justify-center gap-1"><Video className="w-3.5 h-3.5"/>视频</button>
                 </div>
@@ -1778,13 +1781,13 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
         {tab === 'msgsearch' && (
           <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
-            <input value={msgQuery} onChange={e=>setMsgQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void doSearchMessages();}} placeholder="关键词（消息内容/附件名）" className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm sm:text-xs text-slate-200"/>
+            <input value={msgQuery} onChange={e=>setMsgQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void doSearchMessages();}} placeholder="关键词（消息内容/附件名）" className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-sm sm:text-xs text-slate-200"/>
             <div className="grid grid-cols-2 gap-2">
-              <select value={msgConvId} onChange={e=>{setMsgConvId(e.target.value); setMsgSender('');}} className="min-h-[40px] px-2 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200">
+              <select value={msgConvId} onChange={e=>{setMsgConvId(e.target.value); setMsgSender('');}} className="min-h-[40px] px-2 py-2 rounded-xl bg-black/20 border border-white/10 text-xs text-slate-200">
                 <option value="">全部会话</option>
                 {conversations.filter(c=>c.type!=='country_room').map(c => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
               </select>
-              <select value={msgSender} onChange={e=>setMsgSender(e.target.value)} className="min-h-[40px] px-2 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200">
+              <select value={msgSender} onChange={e=>setMsgSender(e.target.value)} className="min-h-[40px] px-2 py-2 rounded-xl bg-black/20 border border-white/10 text-xs text-slate-200">
                 <option value="">全部发送者</option>
                 {(() => {
                   const opts: {id:string; name:string}[] = [];
@@ -1802,10 +1805,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 })()}
               </select>
             </div>
-            <button onClick={()=>void doSearchMessages()} disabled={msgSearching} className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-cyan-500 text-slate-950 text-xs font-semibold disabled:opacity-40">{msgSearching?'搜索中…':'搜索消息'}</button>
+            <button onClick={()=>void doSearchMessages()} disabled={msgSearching} className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-cyan-400 text-slate-950 text-xs font-semibold disabled:opacity-40">{msgSearching?'搜索中…':'搜索消息'}</button>
             <div className="text-[10px] text-slate-500">支持关键词、发送者、会话筛选</div>
             {msgResults.map(m => (
-              <button key={m.id} onClick={()=>{ onSelectConversation(m.conversationId); setTab('chats'); setMobileShowChat(true); }} className="w-full text-left p-2.5 rounded-xl border border-slate-800 bg-slate-950/50 hover:bg-slate-800/60 space-y-1">
+              <button key={m.id} onClick={()=>{ onSelectConversation(m.conversationId); setTab('chats'); setMobileShowChat(true); }} className="w-full text-left p-2.5 rounded-xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] space-y-1">
                 <div className="flex items-center justify-between gap-2"><span className="text-[11px] font-semibold text-slate-200 truncate">{(m as any).conversationName || m.conversationId}</span><span className="text-[10px] text-slate-500 shrink-0">{new Date(m.createdAt).toLocaleString()}</span></div>
                 <p className="text-[11px] text-slate-300 truncate">{m.senderName}: {m.content || (m.attachments?.length ? `[附件] ${m.attachments.map(a=>a.name).join(', ')}` : '')}</p>
               </button>
@@ -1821,7 +1824,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               const self = (selectedProfile?.isSelf ? selectedProfile.user : (currentUser as any)) || {};
               const bindings = self.bindingStatus || {};
               const linked = Array.isArray(self.linkedIdentities) ? self.linkedIdentities : [];
-              const Section = ({title, children}: any) => (<div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 space-y-2"><p className="text-xs font-semibold text-slate-200">{title}</p>{children}</div>);
+              const Section = ({title, children}: any) => (<div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-2"><p className="text-xs font-semibold text-slate-200">{title}</p>{children}</div>);
               const Radio = ({name, value, label, desc}: any) => (
                 <label className="flex items-start gap-2 py-1 cursor-pointer">
                   <input type="radio" name={name} checked={draft[name]===value} onChange={()=>updatePrivacy({ [name]: value })} className="mt-0.5 accent-cyan-500" />
@@ -1837,10 +1840,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               return (<>
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <p className="text-sm font-semibold text-slate-100">{L('隐私与安全','Privacy & Security','الخصوصية والأمان')}</p>
+                    <p className="text-sm font-semibold text-[var(--one-text,#f4f3ee)]">{L('隐私与安全','Privacy & Security','الخصوصية والأمان')}</p>
                     <p className="text-[10px] text-slate-500">{L('设置保存在服务器并跨设备同步；服务器始终强制执行。','Settings are saved on server, synced across devices, and enforced by server.','يتم حفظ الإعدادات على الخادم ومزامنتها عبر الأجهزة ويفرضها الخادم.')}</p>
                   </div>
-                  <button onClick={()=>{ void loadPrivacy(); void loadBlocked(); }} disabled={privacyLoading} className="text-[10px] px-2 py-1 rounded border border-slate-700 text-slate-300 disabled:opacity-40">{privacyLoading ? L('加载中…','Loading…','جارٍ التحميل…') : L('刷新','Reload','تحديث')}</button>
+                  <button onClick={()=>{ void loadPrivacy(); void loadBlocked(); }} disabled={privacyLoading} className="text-[10px] px-2 py-1 rounded border border-white/10 text-slate-300 disabled:opacity-40">{privacyLoading ? L('加载中…','Loading…','جارٍ التحميل…') : L('刷新','Reload','تحديث')}</button>
                 </div>
 
                 <Section title={L('个人资料可见性','Profile visibility','ظهور الملف الشخصي')}>
@@ -1882,12 +1885,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <p className="text-[10px] text-slate-500">{L('屏蔽会阻止新的好友申请和受限的私聊互动，抑制对方通知，并隐藏相应在线状态；不会自动删除历史记录或移除共同群组。','Blocking prevents new friend requests and restricted direct interactions, suppresses notifications, and hides presence; it does not auto-delete history or remove mutual groups.','يمنع الحظر طلبات الصداقة الجديدة والتفاعلات المباشرة المقيدة ويخفي الحالة؛ ولا يحذف السجل تلقائيًا ولا يزيل المجموعات المشتركة.')}</p>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
                     {blocked.map(b => (
-                      <div key={b.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
+                      <div key={b.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white/[0.04] border border-white/10 text-xs">
                         <button onClick={()=>void openProfile(b.id)} className="flex items-center gap-2 min-w-0 text-left">
                           <img src={b.avatar} className="w-7 h-7 rounded-full object-cover" />
                           <span className="text-slate-200 truncate">{b.displayName}</span>
                         </button>
-                        <button onClick={()=>void unblockUser(b.id)} className="text-cyan-300 shrink-0">{L('解除屏蔽','Unblock','إلغاء الحظر')}</button>
+                        <button onClick={()=>void unblockUser(b.id)} className="text-cyan-200 shrink-0">{L('解除屏蔽','Unblock','إلغاء الحظر')}</button>
                       </div>
                     ))}
                     {blocked.length===0 && <div className="text-xs text-slate-500 py-2">{L('暂无屏蔽用户','No blocked users','لا يوجد مستخدمون محظورون')}</div>}
@@ -1900,31 +1903,31 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                     <p>• {L('删除自己视图中的聊天记录：在会话中使用“清除记录”，仅对你隐藏，不删除对方记录。','Delete chat history in your view: use “Clear” in a conversation to hide for you only.','حذف السجل من عرضك: استخدم "مسح" داخل المحادثة لإخفائه لك فقط.')}</p>
                     <p>• {L('删除单条消息：对你删除单条消息，不影响对方。','Delete a single message: removes it for you only.','حذف رسالة واحدة: يزيلها لك فقط.')}</p>
                     <p>• {L('双方撤回消息：撤回对双方生效（按现有撤回机制与时效）。','Recall for both sides: follows existing recall behavior/timing.','سحب الرسالة للطرفين: وفق آلية السحب الحالية.')}</p>
-                    <button onClick={()=>{ setMessages([]); setNotice(L('已清除本设备会话缓存视图','Cleared local conversation cache view','تم مسح عرض ذاكرة المحادثات المحلية')); }} className="mt-1 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-200 hover:bg-slate-800">{L('清除当前设备本地缓存','Clear local device cache','مسح ذاكرة الجهاز المحلية')}</button>
+                    <button onClick={()=>{ setMessages([]); setNotice(L('已清除本设备会话缓存视图','Cleared local conversation cache view','تم مسح عرض ذاكرة المحادثات المحلية')); }} className="mt-1 px-3 py-1.5 rounded-lg border border-white/10 text-slate-200 hover:bg-white/[0.06]">{L('清除当前设备本地缓存','Clear local device cache','مسح ذاكرة الجهاز المحلية')}</button>
                   </div>
                 </Section>
 
                 <Section title={L('账户安全信息','Account security','أمان الحساب')}>
                   <div className="grid grid-cols-1 gap-2 text-[11px]">
-                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">{L('唯一用户 ID','Unique User ID','معرّف المستخدم الفريد')}</p><p className="text-slate-200 break-all mt-0.5">{self.id || '-'}</p></div>
-                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">Email</p><p className="text-slate-200 mt-0.5">{bindings.email?.bound ? `${bindings.email?.value || L('已绑定','Bound','مرتبط')} (${bindings.email?.verified?L('已验证','verified','موثّق'):L('未验证','unverified','غير موثّق')})` : L('未绑定','Not bound','غير مرتبط')}</p></div>
-                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">{L('手机','Phone','الهاتف')}</p><p className="text-slate-200 mt-0.5">{bindings.phone?.bound ? `${bindings.phone?.value || L('已绑定','Bound','مرتبط')} (${bindings.phone?.verified?L('已验证','verified','موثّق'):L('未验证','unverified','غير موثّق')})` : L('未绑定','Not bound','غير مرتبط')}</p></div>
-                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">Google</p><p className="text-slate-200 mt-0.5">{bindings.google?.bound ? L('已绑定','Bound','مرتبط') : L('未绑定 (config required)','Not bound (config required)','غير مرتبط (يتطلب إعدادًا)')}</p></div>
-                    <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5"><p className="text-slate-500">WeChat</p><p className="text-slate-200 mt-0.5">{bindings.wechat?.bound ? L('已绑定','Bound','مرتبط') : L('未绑定 (config required)','Not bound (config required)','غير مرتبط (يتطلب إعدادًا)')}</p></div>
+                    <div className="rounded-lg border border-white/10 bg-[rgba(15,20,28,0.72)]/50 p-2.5"><p className="text-slate-500">{L('唯一用户 ID','Unique User ID','معرّف المستخدم الفريد')}</p><p className="text-slate-200 break-all mt-0.5">{self.id || '-'}</p></div>
+                    <div className="rounded-lg border border-white/10 bg-[rgba(15,20,28,0.72)]/50 p-2.5"><p className="text-slate-500">Email</p><p className="text-slate-200 mt-0.5">{bindings.email?.bound ? `${bindings.email?.value || L('已绑定','Bound','مرتبط')} (${bindings.email?.verified?L('已验证','verified','موثّق'):L('未验证','unverified','غير موثّق')})` : L('未绑定','Not bound','غير مرتبط')}</p></div>
+                    <div className="rounded-lg border border-white/10 bg-[rgba(15,20,28,0.72)]/50 p-2.5"><p className="text-slate-500">{L('手机','Phone','الهاتف')}</p><p className="text-slate-200 mt-0.5">{bindings.phone?.bound ? `${bindings.phone?.value || L('已绑定','Bound','مرتبط')} (${bindings.phone?.verified?L('已验证','verified','موثّق'):L('未验证','unverified','غير موثّق')})` : L('未绑定','Not bound','غير مرتبط')}</p></div>
+                    <div className="rounded-lg border border-white/10 bg-[rgba(15,20,28,0.72)]/50 p-2.5"><p className="text-slate-500">Google</p><p className="text-slate-200 mt-0.5">{bindings.google?.bound ? L('已绑定','Bound','مرتبط') : L('未绑定 (config required)','Not bound (config required)','غير مرتبط (يتطلب إعدادًا)')}</p></div>
+                    <div className="rounded-lg border border-white/10 bg-[rgba(15,20,28,0.72)]/50 p-2.5"><p className="text-slate-500">WeChat</p><p className="text-slate-200 mt-0.5">{bindings.wechat?.bound ? L('已绑定','Bound','مرتبط') : L('未绑定 (config required)','Not bound (config required)','غير مرتبط (يتطلب إعدادًا)')}</p></div>
                     {Array.isArray(linked) && linked.length > 0 && <p className="text-[10px] text-slate-500">{L('已关联身份','Linked identities','الهويات المرتبطة')}: {linked.map((i:any)=>i.provider).join(', ')}</p>}
                   </div>
                 </Section>
 
-                <div className="sticky bottom-0 bg-slate-900/95 backdrop-blur py-2 border-t border-slate-800 flex items-center justify-between gap-2">
+                <div className="sticky bottom-0 bg-[rgba(15,20,28,0.72)]/95 backdrop-blur py-2 border-t border-white/10 flex items-center justify-between gap-2">
                   <div className="text-[10px] min-h-[16px]">
-                    {privacyStatus==='saving' && <span className="text-cyan-300">{L('保存中…','Saving…','جارٍ الحفظ…')}</span>}
+                    {privacyStatus==='saving' && <span className="text-cyan-200">{L('保存中…','Saving…','جارٍ الحفظ…')}</span>}
                     {privacyStatus==='saved' && <span className="text-emerald-300">{L('已保存并同步','Saved & synced','تم الحفظ والمزامنة')}</span>}
                     {privacyStatus==='error' && <span className="text-rose-300">{L('保存失败','Save failed','فشل الحفظ')}{privacyError?`: ${privacyError}`:''}</span>}
                     {privacyStatus==='idle' && privacyError && <span className="text-rose-300">{privacyError}</span>}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={()=>void loadPrivacy()} className="text-[10px] px-3 py-1.5 rounded border border-slate-700 text-slate-300">{L('重置','Reset','إعادة تعيين')}</button>
-                    <button onClick={()=>void savePrivacy()} disabled={privacySaving || !privacyDraft} className="text-[10px] px-3 py-1.5 rounded bg-cyan-500 text-slate-950 font-semibold disabled:opacity-40">{L('保存设置','Save settings','حفظ الإعدادات')}</button>
+                    <button onClick={()=>void loadPrivacy()} className="text-[10px] px-3 py-1.5 rounded border border-white/10 text-slate-300">{L('重置','Reset','إعادة تعيين')}</button>
+                    <button onClick={()=>void savePrivacy()} disabled={privacySaving || !privacyDraft} className="text-[10px] px-3 py-1.5 rounded bg-cyan-400 text-slate-950 font-semibold disabled:opacity-40">{L('保存设置','Save settings','حفظ الإعدادات')}</button>
                   </div>
                 </div>
               </>);
@@ -1939,20 +1942,20 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 <p className="text-[11px] text-slate-400">{lang==='ar' ? 'مركز الإشعارات' : lang==='en' ? 'Notification Center' : '通知中心'} · {lang==='ar' ? 'غير مقروء' : lang==='en' ? 'Unread' : '未读'} {notifUnread}</p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                <button onClick={()=>{ setShowNotifSettings((v:boolean)=>!v); if (!notifPrefs) void loadNotifPrefs(); }} className={`p-1.5 rounded border ${showNotifSettings?'border-cyan-500/50 text-cyan-300 bg-cyan-500/10':'border-slate-700 text-slate-300 hover:bg-slate-800'}`} title={lang==='ar'?'الإعدادات':lang==='en'?'Settings':'设置'}><Settings className="w-3.5 h-3.5"/></button>
-                <button onClick={()=>void loadNotifications()} className="text-[11px] text-cyan-300">{lang==='ar'?'تحديث':lang==='en'?'Refresh':'刷新'}</button>
-                <button onClick={()=>void markAllNotifsRead()} className="text-[11px] text-cyan-300 inline-flex items-center gap-1"><CheckCheck className="w-3 h-3"/>{lang==='ar'?'قراءة الكل':lang==='en'?'Read all':'全部已读'}</button>
+                <button onClick={()=>{ setShowNotifSettings((v:boolean)=>!v); if (!notifPrefs) void loadNotifPrefs(); }} className={`p-1.5 rounded border ${showNotifSettings?'border-cyan-400/35 text-cyan-200 bg-cyan-400/10':'border-white/10 text-slate-300 hover:bg-white/[0.06]'}`} title={lang==='ar'?'الإعدادات':lang==='en'?'Settings':'设置'}><Settings className="w-3.5 h-3.5"/></button>
+                <button onClick={()=>void loadNotifications()} className="text-[11px] text-cyan-200">{lang==='ar'?'تحديث':lang==='en'?'Refresh':'刷新'}</button>
+                <button onClick={()=>void markAllNotifsRead()} className="text-[11px] text-cyan-200 inline-flex items-center gap-1"><CheckCheck className="w-3 h-3"/>{lang==='ar'?'قراءة الكل':lang==='en'?'Read all':'全部已读'}</button>
               </div>
             </div>
 
             {showNotifSettings && (
-              <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-3 space-y-3" dir={lang==='ar'?'rtl':'ltr'}>
+              <div className="rounded-xl border border-white/10 bg-black/20 p-3 space-y-3" dir={lang==='ar'?'rtl':'ltr'}>
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <p className="text-xs font-semibold text-slate-100">{lang==='ar'?'إعدادات الإشعارات':lang==='en'?'Notification Settings':'通知设置'}</p>
+                    <p className="text-xs font-semibold text-[var(--one-text,#f4f3ee)]">{lang==='ar'?'إعدادات الإشعارات':lang==='en'?'Notification Settings':'通知设置'}</p>
                     <p className="text-[10px] text-slate-500">{lang==='ar'?'تُحفظ على الخادم وتُزامن عبر الأجهزة.':lang==='en'?'Saved on server and synced across devices.':'保存在服务器并跨设备同步。'}</p>
                   </div>
-                  <button onClick={()=>void loadNotifPrefs()} disabled={notifPrefsLoading} className="text-[10px] px-2 py-1 rounded border border-slate-700 text-slate-300 disabled:opacity-40">{notifPrefsLoading ? (lang==='ar'?'جارٍ التحميل…':lang==='en'?'Loading…':'加载中…') : (lang==='ar'?'إعادة تحميل':lang==='en'?'Reload':'重载')}</button>
+                  <button onClick={()=>void loadNotifPrefs()} disabled={notifPrefsLoading} className="text-[10px] px-2 py-1 rounded border border-white/10 text-slate-300 disabled:opacity-40">{notifPrefsLoading ? (lang==='ar'?'جارٍ التحميل…':lang==='en'?'Loading…':'加载中…') : (lang==='ar'?'إعادة تحميل':lang==='en'?'Reload':'重载')}</button>
                 </div>
                 {(() => {
                   const draft = notifPrefsDraft || notifPrefs || defaultNotifPrefs();
@@ -1971,19 +1974,19 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                       {row('friendRequests', lang==='ar'?'إشعارات طلبات الصداقة':lang==='en'?'Friend request notifications':'好友申请通知')}
                       {row('friendAccepted', lang==='ar'?'إشعارات قبول الصداقة':lang==='en'?'Friend accepted notifications':'好友通过通知')}
                       {row('groupEvents', lang==='ar'?'إشعارات المجموعة والإدارة':lang==='en'?'Group & admin event notifications':'群聊/群邀请/群管理通知')}
-                      <div className="h-px bg-slate-800 my-1" />
+                      <div className="h-px bg-white/[0.06] my-1" />
                       {row('desktop', lang==='ar'?'إشعارات سطح المكتب':lang==='en'?'Desktop system notifications':'桌面系统通知', lang==='ar'?'يتطلب إذن النظام/إلكترون.':lang==='en'?'Requires system/Electron permission.':'需系统/Electron 权限。')}
                       {row('sound', lang==='ar'?'صوت الإشعار':lang==='en'?'Notification sound':'通知声音')}
-                      <div className="h-px bg-slate-800 my-1" />
+                      <div className="h-px bg-white/[0.06] my-1" />
                       {row('dndEnabled', lang==='ar'?'وضع عدم الإزعاج':lang==='en'?'Do Not Disturb':'免打扰模式', lang==='ar'?'يُكتم الصوت والتنبيهات مع استمرار حفظ الرسائل والإشعارات.':lang==='en'?'Mutes alerts/sound; messages and notifications are still saved.':'静音并关闭提醒；消息和通知仍正常接收保存。')}
                       <div className="grid grid-cols-2 gap-2 pt-1">
                         <label className="text-[10px] text-slate-400 space-y-1">
                           <span>{lang==='ar'?'وقت البدء':lang==='en'?'Start time':'开始时间'}</span>
-                          <input type="time" value={draft.dndStart || '22:00'} onChange={e=>updateNotifPref({ dndStart: e.target.value })} disabled={!draft.dndEnabled} className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200 disabled:opacity-50" />
+                          <input type="time" value={draft.dndStart || '22:00'} onChange={e=>updateNotifPref({ dndStart: e.target.value })} disabled={!draft.dndEnabled} className="w-full px-2 py-1.5 rounded-lg bg-[rgba(15,20,28,0.72)] border border-white/10 text-xs text-slate-200 disabled:opacity-50" />
                         </label>
                         <label className="text-[10px] text-slate-400 space-y-1">
                           <span>{lang==='ar'?'وقت الانتهاء':lang==='en'?'End time':'结束时间'}</span>
-                          <input type="time" value={draft.dndEnd || '08:00'} onChange={e=>updateNotifPref({ dndEnd: e.target.value })} disabled={!draft.dndEnabled} className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-slate-200 disabled:opacity-50" />
+                          <input type="time" value={draft.dndEnd || '08:00'} onChange={e=>updateNotifPref({ dndEnd: e.target.value })} disabled={!draft.dndEnabled} className="w-full px-2 py-1.5 rounded-lg bg-[rgba(15,20,28,0.72)] border border-white/10 text-xs text-slate-200 disabled:opacity-50" />
                         </label>
                       </div>
                       {draft.dndEnabled && draft.dndStart === draft.dndEnd && <p className="text-[10px] text-amber-300">{lang==='ar'?'وقت البدء والانتهاء متطابقان — لن يتم تفعيل عدم الإزعاج.':lang==='en'?'Start and end are equal — DND will not activate.':'开始与结束时间相同 — 免打扰不会生效。'}</p>}
@@ -1992,25 +1995,25 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 })()}
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <div className="text-[10px] min-h-[16px]">
-                    {notifPrefsStatus==='saving' && <span className="text-cyan-300">{lang==='ar'?'جارٍ الحفظ…':lang==='en'?'Saving…':'保存中…'}</span>}
+                    {notifPrefsStatus==='saving' && <span className="text-cyan-200">{lang==='ar'?'جارٍ الحفظ…':lang==='en'?'Saving…':'保存中…'}</span>}
                     {notifPrefsStatus==='saved' && <span className="text-emerald-300">{lang==='ar'?'تم الحفظ':lang==='en'?'Saved':'保存成功'}</span>}
                     {notifPrefsStatus==='error' && <span className="text-rose-300">{lang==='ar'?'فشل الحفظ':lang==='en'?'Save failed':'保存失败'}{notifPrefsError?`: ${notifPrefsError}`:''}</span>}
                     {notifPrefsStatus==='idle' && notifPrefsError && <span className="text-rose-300">{notifPrefsError}</span>}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={()=>{ void ensureAudioUnlocked(); void playNotifSound(); }} className="text-[10px] px-2 py-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800 inline-flex items-center gap-1"><Volume2 className="w-3 h-3"/>{lang==='ar'?'اختبار':lang==='en'?'Test':'测试'}</button>
-                    <button onClick={()=>void saveNotifPrefs()} disabled={notifPrefsSaving || !notifPrefsDraft} className="text-[10px] px-3 py-1.5 rounded bg-cyan-500 text-slate-950 font-semibold disabled:opacity-40">{lang==='ar'?'حفظ':lang==='en'?'Save':'保存'}</button>
+                    <button onClick={()=>{ void ensureAudioUnlocked(); void playNotifSound(); }} className="text-[10px] px-2 py-1 rounded border border-white/10 text-slate-300 hover:bg-white/[0.06] inline-flex items-center gap-1"><Volume2 className="w-3 h-3"/>{lang==='ar'?'اختبار':lang==='en'?'Test':'测试'}</button>
+                    <button onClick={()=>void saveNotifPrefs()} disabled={notifPrefsSaving || !notifPrefsDraft} className="text-[10px] px-3 py-1.5 rounded bg-cyan-400 text-slate-950 font-semibold disabled:opacity-40">{lang==='ar'?'حفظ':lang==='en'?'Save':'保存'}</button>
                   </div>
                 </div>
               </div>
             )}
 
             {notifications.map(n => (
-              <div key={n.id} className={`p-2.5 rounded-xl border text-left space-y-1 ${n.read ? 'border-slate-800 bg-slate-950/40' : 'border-cyan-700/40 bg-cyan-950/20'}`}>
+              <div key={n.id} className={`p-2.5 rounded-xl border text-left space-y-1 ${n.read ? 'border-white/10 bg-white/[0.02]' : 'border-cyan-700/40 bg-cyan-950/20'}`}>
                 <button onClick={()=>void openNotification(n)} className="w-full text-left space-y-1">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      {n.actorAvatar ? <img src={n.actorAvatar} className="w-6 h-6 rounded-full object-cover"/> : <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center"><Bell className="w-3 h-3 text-slate-300"/></div>}
+                      {n.actorAvatar ? <img src={n.actorAvatar} className="w-6 h-6 rounded-full object-cover"/> : <div className="w-6 h-6 rounded-full bg-white/[0.06] flex items-center justify-center"><Bell className="w-3 h-3 text-slate-300"/></div>}
                       <p className="text-xs font-semibold text-slate-200 truncate">{n.title || (lang==='ar'?'إشعار':lang==='en'?'Notification':'通知')}</p>
                     </div>
                     {!n.read && <span className="w-2 h-2 rounded-full bg-cyan-400 mt-1 shrink-0"/>}
@@ -2019,31 +2022,31 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <p className="text-[10px] text-slate-500">{new Date(n.createdAt).toLocaleString()}</p>
                 </button>
                 <div className="flex items-center gap-2 pt-1">
-                  {!n.read && <button onClick={()=>void markNotifRead(n.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-200">{lang==='ar'?'وضع علامة مقروء':lang==='en'?'Mark read':'标记已读'}</button>}
-                  <button onClick={()=>void deleteNotif(n.id)} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-rose-300 inline-flex items-center gap-1"><Trash2 className="w-3 h-3"/>{lang==='ar'?'حذف':lang==='en'?'Delete':'删除'}</button>
+                  {!n.read && <button onClick={()=>void markNotifRead(n.id)} className="text-[10px] px-2 py-1 rounded bg-white/[0.06] text-slate-200">{lang==='ar'?'وضع علامة مقروء':lang==='en'?'Mark read':'标记已读'}</button>}
+                  <button onClick={()=>void deleteNotif(n.id)} className="text-[10px] px-2 py-1 rounded bg-white/[0.06] text-rose-300 inline-flex items-center gap-1"><Trash2 className="w-3 h-3"/>{lang==='ar'?'حذف':lang==='en'?'Delete':'删除'}</button>
                 </div>
               </div>
             ))}
-            {notifHasMore && <button onClick={()=>void loadNotifications({ append: true, before: notifNextBefore || undefined })} disabled={notifLoading} className="w-full text-[11px] px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-40">{notifLoading?(lang==='ar'?'جارٍ التحميل…':lang==='en'?'Loading…':'加载中…'):(lang==='ar'?'تحميل المزيد':lang==='en'?'Load more':'加载更多')}</button>}
+            {notifHasMore && <button onClick={()=>void loadNotifications({ append: true, before: notifNextBefore || undefined })} disabled={notifLoading} className="w-full text-[11px] px-3 py-2 rounded-xl border border-white/10 text-slate-300 hover:bg-white/[0.06] disabled:opacity-40">{notifLoading?(lang==='ar'?'جارٍ التحميل…':lang==='en'?'Loading…':'加载中…'):(lang==='ar'?'تحميل المزيد':lang==='en'?'Load more':'加载更多')}</button>}
             {notifications.length===0 && !notifLoading && <div className="text-xs text-slate-500 text-center py-8">{lang==='ar'?'لا توجد إشعارات':lang==='en'?'No notifications':'暂无通知'}</div>}
             {notifLoading && notifications.length===0 && <div className="text-xs text-slate-500 text-center py-8">{lang==='ar'?'جارٍ التحميل…':lang==='en'?'Loading…':'加载中…'}</div>}
           </div>
         )}
-      </div>
+      </aside>
 
       {/* Right: chat */}
-      <div className={`flex-1 rounded-2xl bg-slate-900/85 border border-slate-800 flex-col shadow-xl backdrop-blur-md overflow-hidden min-h-0 ${mobileShowChat ? "flex" : "hidden lg:flex"}`}>
-        <div className="px-2.5 py-2 sm:px-4 sm:py-3 border-b border-slate-800/90 flex items-center justify-between gap-2 bg-slate-950/50 shrink-0">
+      <main className={`flex-1 bg-[rgba(12,16,23,0.35)] flex-col overflow-hidden min-h-0 ${mobileShowChat ? "flex" : "hidden lg:flex"}`}>
+        <div className="px-2.5 py-2 sm:px-4 sm:py-3 border-b border-white/10 flex items-center justify-between gap-2 bg-white/[0.02] shrink-0">
           <div className="min-w-0 flex items-center gap-2 flex-1">
-            <button type="button" onClick={()=>setMobileShowChat(false)} className="lg:hidden rounded-xl border border-slate-700/80 text-slate-200 hover:bg-slate-800 shrink-0 min-h-[40px] min-w-[40px] inline-flex items-center justify-center" aria-label="Back"><ChevronLeft className="w-5 h-5"/></button>
+            <button type="button" onClick={()=>setMobileShowChat(false)} className="lg:hidden rounded-xl border border-white/10 text-slate-200 hover:bg-white/[0.06] shrink-0 min-h-[40px] min-w-[40px] inline-flex items-center justify-center" aria-label="Back"><ChevronLeft className="w-5 h-5"/></button>
             {activeConv?.type !== 'global_channel' && (
               <div className="relative shrink-0 hidden xs:block sm:block">
-                <img src={activeConv?.otherUser?.avatar || activeConv?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-9 h-9 rounded-full object-cover border border-slate-700" />
+                <img src={activeConv?.otherUser?.avatar || activeConv?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-9 h-9 rounded-full object-cover border border-white/10" />
                 {(activeConv?.otherUser?.isOnline || activeConv?.isOnline) && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950" />}
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <h3 className="font-bold text-sm text-slate-100 truncate flex items-center gap-1.5">{activeConv?.name || 'Chat'} {activeConv?.type==='group' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0">群聊</span>}</h3>
+              <h3 className="font-bold text-sm text-[var(--one-text,#f4f3ee)] truncate flex items-center gap-1.5">{activeConv?.name || 'Chat'} {activeConv?.type==='group' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-300 shrink-0">群聊</span>}</h3>
               <p className="text-[11px] text-slate-400 truncate">{typingNames ? `${typingNames} 正在输入…` : (activeConv?.otherUser?.isOnline || activeConv?.isOnline ? '在线' : 'Earth One Messenger')}</p>
             </div>
           </div>
@@ -2051,33 +2054,33 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             {canStartCallHere && (
               <>
                 <button type="button" onClick={()=>void startCall('audio')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="min-h-[38px] min-w-[38px] sm:px-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-40 inline-flex items-center justify-center gap-1" title={lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话'}><Phone className="w-4 h-4"/><span className="hidden md:inline text-xs font-medium">语音</span></button>
-                <button type="button" onClick={()=>void startCall('video')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="min-h-[38px] min-w-[38px] sm:px-2.5 rounded-xl border border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 disabled:opacity-40 inline-flex items-center justify-center gap-1" title={lang==='ar'?'مكالمة فيديو':lang==='en'?'Video call':'视频通话'}><Video className="w-4 h-4"/><span className="hidden md:inline text-xs font-medium">视频</span></button>
+                <button type="button" onClick={()=>void startCall('video')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="min-h-[38px] min-w-[38px] sm:px-2.5 rounded-xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-200 hover:bg-cyan-300/25 disabled:opacity-40 inline-flex items-center justify-center gap-1" title={lang==='ar'?'مكالمة فيديو':lang==='en'?'Video call':'视频通话'}><Video className="w-4 h-4"/><span className="hidden md:inline text-xs font-medium">视频</span></button>
               </>
             )}
-            {activeConv?.type === 'group' && <button type="button" onClick={()=>{ setShowGroupPanel(v=>!v); if (!showGroupPanel) void loadGroupDetail(activeConv.id); }} className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-700/80 text-slate-300 hover:bg-slate-800 inline-flex items-center justify-center" title="群信息"><Info className="w-4 h-4"/></button>}
-            <button type="button" onClick={()=>setShowTranslateBar(v=>!v)} className={`sm:hidden min-h-[38px] min-w-[38px] rounded-xl border inline-flex items-center justify-center ${autoTranslate?'border-cyan-500/40 bg-cyan-500/15 text-cyan-300':'border-slate-700/80 text-slate-400'}`} title="实时翻译"><Languages className="w-4 h-4"/></button>
+            {activeConv?.type === 'group' && <button type="button" onClick={()=>{ setShowGroupPanel(v=>!v); if (!showGroupPanel) void loadGroupDetail(activeConv.id); }} className="min-h-[38px] min-w-[38px] rounded-xl border border-white/10 text-slate-300 hover:bg-white/[0.06] inline-flex items-center justify-center" title="群信息"><Info className="w-4 h-4"/></button>}
+            <button type="button" onClick={()=>setShowTranslateBar(v=>!v)} className={`sm:hidden min-h-[38px] min-w-[38px] rounded-xl border inline-flex items-center justify-center ${autoTranslate?'border-cyan-400/30 bg-cyan-400/10 text-cyan-200':'border-white/10 text-slate-400'}`} title="实时翻译"><Languages className="w-4 h-4"/></button>
             <div className="hidden sm:flex items-center gap-1.5">
-              <Languages className="w-4 h-4 text-cyan-400" />
-              <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-xs"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
-              <button type="button" onClick={()=>setAutoTranslate(v=>!v)} className={`px-2 py-1 rounded text-[11px] border ${autoTranslate?'bg-cyan-500/20 text-cyan-300 border-cyan-500/50':'bg-slate-800 text-slate-400 border-slate-700'}`}>{autoTranslate?'AUTO':'OFF'}</button>
+              <Languages className="w-4 h-4 text-cyan-300" />
+              <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-white/[0.06] border border-white/10 rounded-lg px-2 py-1 text-slate-200 text-xs"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
+              <button type="button" onClick={()=>setAutoTranslate(v=>!v)} className={`px-2 py-1 rounded text-[11px] border ${autoTranslate?'bg-cyan-400/12 text-cyan-200 border-cyan-400/35':'bg-white/[0.06] text-slate-400 border-white/10'}`}>{autoTranslate?'AUTO':'OFF'}</button>
             </div>
-            <button type="button" onClick={()=>void fetchMessages(false)} className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-700/80 text-slate-300 hover:bg-slate-800 inline-flex items-center justify-center" title="刷新"><RefreshCw className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>void fetchMessages(false)} className="min-h-[38px] min-w-[38px] rounded-xl border border-white/10 text-slate-300 hover:bg-white/[0.06] inline-flex items-center justify-center" title="刷新"><RefreshCw className="w-4 h-4"/></button>
           </div>
         </div>
 
         {showTranslateBar && (
-          <div className="sm:hidden px-3 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between gap-2 text-xs">
+          <div className="sm:hidden px-3 py-2 bg-black/20/80 border-b border-white/10 flex items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2">
-              <Languages className="w-4 h-4 text-cyan-400" />
+              <Languages className="w-4 h-4 text-cyan-300" />
               <span className="text-slate-300">目标语言</span>
-              <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-xs"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
+              <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-white/[0.06] border border-white/10 rounded-lg px-2 py-1 text-slate-200 text-xs"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
             </div>
-            <button type="button" onClick={()=>setAutoTranslate(v=>!v)} className={`px-2.5 py-1 rounded-lg text-xs border font-medium ${autoTranslate?'bg-cyan-500/20 text-cyan-300 border-cyan-500/50':'bg-slate-800 text-slate-400 border-slate-700'}`}>{autoTranslate?'自动翻译开':'已关闭'}</button>
+            <button type="button" onClick={()=>setAutoTranslate(v=>!v)} className={`px-2.5 py-1 rounded-lg text-xs border font-medium ${autoTranslate?'bg-cyan-400/12 text-cyan-200 border-cyan-400/35':'bg-white/[0.06] text-slate-400 border-white/10'}`}>{autoTranslate?'自动翻译开':'已关闭'}</button>
           </div>
         )}
 
         <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 min-h-0">
-          {hasMore && <div className="text-center"><button disabled={loadingMore} onClick={async()=>{ if(!messages[0]) return; setLoadingMore(true); await fetchMessages(true, messages[0].id); setLoadingMore(false); }} className="text-[11px] px-3 py-1 rounded-full border border-slate-700 text-slate-300 hover:bg-slate-800">加载更早消息</button></div>}
+          {hasMore && <div className="text-center"><button disabled={loadingMore} onClick={async()=>{ if(!messages[0]) return; setLoadingMore(true); await fetchMessages(true, messages[0].id); setLoadingMore(false); }} className="text-[11px] px-3 py-1 rounded-full border border-white/10 text-slate-300 hover:bg-white/[0.06]">加载更早消息</button></div>}
           {connError && <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200 flex items-center justify-between gap-2"><span>{connError}</span><button onClick={()=>{setConnError(null); void fetchMessages(false);}} className="px-2 py-1 rounded bg-amber-800/50">重试</button></div>}
           {messages.map(msg => {
             const isMe = msg.senderId === currentUser?.id;
@@ -2085,10 +2088,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             if (msg.recalled) return <div key={msg.id} className="text-center text-[11px] text-slate-500 py-1">消息已撤回</div>;
             return (
               <div key={msg.id} className={`flex items-start gap-2.5 ${isMe?'flex-row-reverse':''}`}>
-                <img src={msg.senderAvatar} className="w-8 h-8 rounded-full object-cover border border-slate-700 mt-1"/>
+                <img src={msg.senderAvatar} className="w-8 h-8 rounded-full object-cover border border-white/10 mt-1"/>
                 <div className={`max-w-[min(42rem,88%)] sm:max-w-[min(42rem,85%)] ${isMe?'items-end':'items-start'}`}>
                   <div className={`flex items-center gap-1.5 text-[11px] text-slate-400 mb-1 ${isMe?'justify-end':''}`}><span className="font-semibold text-slate-300">{msg.senderName}</span><span>{new Date(msg.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span></div>
-                  <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-md space-y-2 ${isMe?'bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-tr-none':'bg-slate-800/90 text-slate-200 border border-slate-700/60 rounded-tl-none'}`}>
+                  <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-md space-y-2 ${isMe?'bg-gradient-to-r from-cyan-500/90 to-sky-500/80 text-white rounded-tr-none':'bg-white/[0.06] text-slate-200 border border-white/10 rounded-tl-none'}`}>
                     {msg.replyToId && <div className="text-[11px] opacity-80 border-l-2 border-white/30 pl-2">回复消息</div>}
                     {msg.attachments && msg.attachments.length>0 && (() => {
                       const imgs = (msg.attachments || []).filter(a => a.type === 'image');
@@ -2143,23 +2146,23 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           <div ref={messagesEndRef} />
         </div>
 
-        <form onSubmit={handleSendMessage} className="p-2.5 sm:p-3 bg-slate-950/70 border-t border-slate-800 space-y-2 shrink-0">
-          {replyTo && <div className="text-[11px] text-slate-300 flex items-center justify-between bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5"><span className="truncate">回复：{replyTo.content || '[附件]'}</span><button type="button" onClick={()=>setReplyTo(null)}><X className="w-3.5 h-3.5"/></button></div>}
+        <form onSubmit={handleSendMessage} className="p-2.5 sm:p-3 bg-black/20 border-t border-white/10 space-y-2 shrink-0">
+          {replyTo && <div className="text-[11px] text-slate-300 flex items-center justify-between bg-[rgba(15,20,28,0.72)] border border-white/10 rounded-lg px-3 py-1.5"><span className="truncate">回复：{replyTo.content || '[附件]'}</span><button type="button" onClick={()=>setReplyTo(null)}><X className="w-3.5 h-3.5"/></button></div>}
           {pendingUploads.length > 0 && (
-            <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-2.5 space-y-2">
-              <div className="flex items-center justify-between text-[11px] text-slate-300"><span>待发送附件 ({pendingUploads.length})</span><button type="button" onClick={()=>void sendPendingUploads()} disabled={isUploading || pendingUploads.every(p=>p.status==='error')} className="px-2.5 py-1 rounded-lg bg-cyan-500 text-slate-950 font-semibold disabled:opacity-40">上传并发送</button></div>
+            <div className="rounded-xl border border-white/10 bg-[rgba(12,16,23,0.55)] p-2.5 space-y-2">
+              <div className="flex items-center justify-between text-[11px] text-slate-300"><span>待发送附件 ({pendingUploads.length})</span><button type="button" onClick={()=>void sendPendingUploads()} disabled={isUploading || pendingUploads.every(p=>p.status==='error')} className="px-2.5 py-1 rounded-lg bg-cyan-400 text-slate-950 font-semibold disabled:opacity-40">上传并发送</button></div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
                 {pendingUploads.map(p => (
-                  <div key={p.id} className="rounded-lg border border-slate-700 bg-slate-950/60 p-2 space-y-1.5">
+                  <div key={p.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2 space-y-1.5">
                     <div className="flex items-start gap-2">
-                      {p.kind === 'image' && p.previewUrl ? <img src={p.previewUrl} alt={p.name} className="w-14 h-14 object-cover rounded-md border border-slate-700"/> : <div className="w-10 h-10 rounded-md bg-slate-800 flex items-center justify-center"><FileText className="w-4 h-4 text-slate-300"/></div>}
+                      {p.kind === 'image' && p.previewUrl ? <img src={p.previewUrl} alt={p.name} className="w-14 h-14 object-cover rounded-md border border-white/10"/> : <div className="w-10 h-10 rounded-md bg-white/[0.06] flex items-center justify-center"><FileText className="w-4 h-4 text-slate-300"/></div>}
                       <div className="min-w-0 flex-1"><p className="text-xs text-slate-200 truncate">{p.name}</p><p className="text-[10px] text-slate-500">{formatBytes(p.size)} · {p.mimeType || 'file'}</p></div>
-                      <button type="button" onClick={()=>removePending(p.id)} className="p-1 rounded hover:bg-slate-800 text-slate-400"><X className="w-3.5 h-3.5"/></button>
+                      <button type="button" onClick={()=>removePending(p.id)} className="p-1 rounded hover:bg-white/[0.06] text-slate-400"><X className="w-3.5 h-3.5"/></button>
                     </div>
-                    <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div className={`h-full ${p.status==='error'?'bg-rose-500':'bg-cyan-500'}`} style={{ width: `${p.progress}%` }} /></div>
+                    <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden"><div className={`h-full ${p.status==='error'?'bg-rose-500':'bg-cyan-400'}`} style={{ width: `${p.progress}%` }} /></div>
                     <div className="flex items-center justify-between text-[10px] text-slate-400">
                       <span>{p.status==='error' ? `失败：${p.error || '失败'}` : p.status==='uploading' ? `上传中 ${p.progress}%` : p.status==='sending' ? '发送中…' : p.status==='done' ? '已发送' : (p.uploadedAttachment ? '待发送' : '待上传')}</span>
-                      {p.status==='error' && <button type="button" onClick={()=>retryPending(p.id)} className="text-cyan-300 underline">重新上传</button>}
+                      {p.status==='error' && <button type="button" onClick={()=>retryPending(p.id)} className="text-cyan-200 underline">重新上传</button>}
                     </div>
                   </div>
                 ))}
@@ -2169,8 +2172,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           <div className="flex items-end gap-1.5 sm:gap-2">
             <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
-            <button type="button" onClick={()=>imageInputRef.current?.click()} title="发送图片" className="min-h-[44px] min-w-[40px] px-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 inline-flex items-center justify-center shrink-0"><ImagePlus className="w-4 h-4"/></button>
-            <button type="button" onClick={()=>fileInputRef.current?.click()} title="发送文件" className="min-h-[44px] min-w-[40px] px-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 inline-flex items-center justify-center shrink-0"><Paperclip className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>imageInputRef.current?.click()} title="发送图片" className="min-h-[44px] min-w-[40px] px-2.5 rounded-xl border border-white/10 text-slate-300 hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0"><ImagePlus className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>fileInputRef.current?.click()} title="发送文件" className="min-h-[44px] min-w-[40px] px-2.5 rounded-xl border border-white/10 text-slate-300 hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0"><Paperclip className="w-4 h-4"/></button>
             <textarea
               value={inputText}
               onChange={e=>{ setInputText(e.target.value); sendTyping(true); }}
@@ -2178,11 +2181,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); void handleSendMessage(); } }}
               placeholder="输入消息…"
               rows={1}
-              className="flex-1 min-h-[44px] max-h-28 resize-none px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-sm text-slate-100 outline-none focus:border-cyan-500/50"
+              className="flex-1 min-h-[44px] max-h-28 resize-none px-3.5 py-2.5 rounded-xl bg-[rgba(15,20,28,0.72)] border border-white/10 text-base sm:text-sm text-[var(--one-text,#f4f3ee)] outline-none focus:border-cyan-400/35"
             />
-            <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-3.5 sm:px-4 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-semibold text-xs flex items-center gap-1.5 h-[44px] shrink-0"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
+            <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-3.5 sm:px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-40 text-slate-950 font-semibold text-xs flex items-center gap-1.5 h-[44px] shrink-0"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
           </div>
         </form>
+      </main>
       </div>
 
       {lightbox && (
@@ -2191,22 +2195,22 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             <div className="text-xs truncate max-w-[70vw]">{lightbox.items[lightbox.index]?.name || ''}</div>
             <div className="flex items-center gap-2">
               {lightbox.items.length > 1 && <span className="text-xs text-slate-400">{lightbox.index + 1}/{lightbox.items.length}</span>}
-              <button onClick={()=>setLightbox(null)} className="p-1.5 rounded bg-slate-800 hover:bg-slate-700"><X className="w-4 h-4"/></button>
+              <button onClick={()=>setLightbox(null)} className="p-1.5 rounded bg-white/[0.06] hover:bg-slate-700"><X className="w-4 h-4"/></button>
             </div>
           </div>
           <div className="flex-1 min-h-0 flex items-center justify-center gap-3 px-3 pb-4" onClick={e=>e.stopPropagation()}>
-            {lightbox.items.length > 1 && <button onClick={()=>setLightbox(l=>l?{...l,index:(l.index-1+l.items.length)%l.items.length}:l)} className="p-2 rounded-full bg-slate-800/80 hover:bg-slate-700 text-white"><ChevronLeft className="w-5 h-5"/></button>}
+            {lightbox.items.length > 1 && <button onClick={()=>setLightbox(l=>l?{...l,index:(l.index-1+l.items.length)%l.items.length}:l)} className="p-2 rounded-full bg-white/[0.06] hover:bg-slate-700 text-white"><ChevronLeft className="w-5 h-5"/></button>}
             <div className="flex-1 min-h-0 flex items-center justify-center">
-              {(() => { const it: any = lightbox.items[lightbox.index]; if (!it) return null; if (it.type === 'application/pdf' || /\.pdf$/i.test(it.name||'')) return <iframe src={it.url} title={it.name||'PDF'} className="w-full h-[80vh] rounded-lg bg-white" />; if (it.type === 'text/plain' || /\.txt$/i.test(it.name||'')) return <iframe src={it.url} title={it.name||'Text'} className="w-full max-w-4xl h-[80vh] rounded-lg bg-slate-950 border border-slate-700" />; return <img src={it.url} alt={it.name||''} className="max-w-full max-h-[80vh] object-contain rounded-lg" />; })()}
+              {(() => { const it: any = lightbox.items[lightbox.index]; if (!it) return null; if (it.type === 'application/pdf' || /\.pdf$/i.test(it.name||'')) return <iframe src={it.url} title={it.name||'PDF'} className="w-full h-[80vh] rounded-lg bg-white" />; if (it.type === 'text/plain' || /\.txt$/i.test(it.name||'')) return <iframe src={it.url} title={it.name||'Text'} className="w-full max-w-4xl h-[80vh] rounded-lg bg-black/20 border border-white/10" />; return <img src={it.url} alt={it.name||''} className="max-w-full max-h-[80vh] object-contain rounded-lg" />; })()}
             </div>
-            {lightbox.items.length > 1 && <button onClick={()=>setLightbox(l=>l?{...l,index:(l.index+1)%l.items.length}:l)} className="p-2 rounded-full bg-slate-800/80 hover:bg-slate-700 text-white"><ChevronRight className="w-5 h-5"/></button>}
+            {lightbox.items.length > 1 && <button onClick={()=>setLightbox(l=>l?{...l,index:(l.index+1)%l.items.length}:l)} className="p-2 rounded-full bg-white/[0.06] hover:bg-slate-700 text-white"><ChevronRight className="w-5 h-5"/></button>}
           </div>
         </div>
       )}
 
       {selectedProfile && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }}>
-          <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-800 p-5 space-y-4" dir={lang==='ar'?'rtl':'ltr'} onClick={e=>e.stopPropagation()}>
+          <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-[rgba(15,20,28,0.72)] border border-white/10 p-5 space-y-4" dir={lang==='ar'?'rtl':'ltr'} onClick={e=>e.stopPropagation()}>
             {(() => {
               const u = selectedProfile.user || {};
               const isSelf = !!selectedProfile.isSelf || u.id === currentUser?.id;
@@ -2218,39 +2222,39 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               return (<>
                 <div className="flex items-start gap-4">
                   <div className="relative shrink-0">
-                    <img src={avatarPreview || u.avatar} alt={u.displayName} className="w-20 h-20 rounded-full object-cover border border-slate-700" />
+                    <img src={avatarPreview || u.avatar} alt={u.displayName} className="w-20 h-20 rounded-full object-cover border border-white/10" />
                     {u.isOnline && <span className="absolute bottom-1 right-1 w-3.5 h-3.5 rounded-full bg-emerald-400 ring-2 ring-slate-900" />}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-lg font-semibold text-slate-100 truncate">{u.displayName || '-'}</p>
-                    <p className="text-xs text-cyan-300 truncate">@{u.username || '-'}</p>
+                    <p className="text-lg font-semibold text-[var(--one-text,#f4f3ee)] truncate">{u.displayName || '-'}</p>
+                    <p className="text-xs text-cyan-200 truncate">@{u.username || '-'}</p>
                     <p className="text-[11px] text-slate-400 mt-1">{u.isOnline ? L('在线','Online','متصل') : L('离线','Offline','غير متصل')} · {L('最近活跃','Last active','آخر نشاط')}: {fmtDate(u.lastActiveAt)}</p>
-                    {isSelf && !editing && <button onClick={()=>{ setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); setProfileMode('edit'); setProfileSaveState('idle'); setProfileError(null); }} className="mt-2 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-semibold">{L('编辑资料','Edit profile','تعديل الملف')}</button>}
+                    {isSelf && !editing && <button onClick={()=>{ setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); setProfileMode('edit'); setProfileSaveState('idle'); setProfileError(null); }} className="mt-2 px-3 py-1.5 rounded-lg bg-cyan-400/12 text-cyan-200 border border-cyan-400/30 text-xs font-semibold">{L('编辑资料','Edit profile','تعديل الملف')}</button>}
                   </div>
-                  <button onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }} className="p-1.5 rounded-lg border border-slate-700 text-slate-300"><X className="w-4 h-4"/></button>
+                  <button onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }} className="p-1.5 rounded-lg border border-white/10 text-slate-300"><X className="w-4 h-4"/></button>
                 </div>
 
                 {isSelf && editing ? (
-                  <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+                  <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.02] p-3">
                     <p className="text-xs font-semibold text-slate-200">{L('编辑个人资料','Edit your profile','تعديل ملفك الشخصي')}</p>
                     <div className="flex flex-wrap items-center gap-2">
                       <input ref={profileAvatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(f) void onPickAvatar(f); e.currentTarget.value=''; }} />
-                      <button onClick={()=>profileAvatarInputRef.current?.click()} disabled={avatarUploading} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs disabled:opacity-40">{avatarUploading ? L('上传中…','Uploading…','جارٍ الرفع…') : L('上传头像','Upload avatar','رفع صورة')}</button>
-                      <button onClick={()=>void resetAvatar()} disabled={avatarUploading} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs disabled:opacity-40">{L('恢复默认头像','Reset avatar','استعادة الصورة الافتراضية')}</button>
+                      <button onClick={()=>profileAvatarInputRef.current?.click()} disabled={avatarUploading} className="px-3 py-1.5 rounded-lg bg-white/[0.06] text-slate-200 text-xs disabled:opacity-40">{avatarUploading ? L('上传中…','Uploading…','جارٍ الرفع…') : L('上传头像','Upload avatar','رفع صورة')}</button>
+                      <button onClick={()=>void resetAvatar()} disabled={avatarUploading} className="px-3 py-1.5 rounded-lg border border-white/10 text-slate-300 text-xs disabled:opacity-40">{L('恢复默认头像','Reset avatar','استعادة الصورة الافتراضية')}</button>
                       <span className="text-[10px] text-slate-500">JPG/PNG/WebP · ≤2MB</span>
                     </div>
-                    <label className="block space-y-1"><span className="text-[11px] text-slate-400">{L('昵称','Display name','الاسم المعروض')}</span><input value={profileDraft.displayName} onChange={e=>{ setProfileDraft(p=>({...p, displayName:e.target.value})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-100" maxLength={40} /></label>
-                    <label className="block space-y-1"><span className="text-[11px] text-slate-400">{L('用户名 (唯一)','Username (unique)','اسم المستخدم (فريد)')}</span><input value={profileDraft.username} onChange={e=>{ setProfileDraft(p=>({...p, username:e.target.value.toLowerCase()})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-100" maxLength={30} placeholder="a-z 0-9 _ (3-30)" /><span className="text-[10px] text-slate-500">{L('3-30 位，小写字母/数字/下划线，修改后需全局唯一','3-30 chars: lowercase letters, numbers, underscore. Must be unique.','3-30 حرفًا: أحرف صغيرة/أرقام/شرطة سفلية، يجب أن يكون فريدًا.')}</span></label>
-                    <label className="block space-y-1"><span className="text-[11px] text-slate-400">{L('个人简介','Bio','نبذة شخصية')}</span><textarea value={profileDraft.bio} onChange={e=>{ setProfileDraft(p=>({...p, bio:e.target.value})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-100 min-h-[72px]" maxLength={300} /></label>
+                    <label className="block space-y-1"><span className="text-[11px] text-slate-400">{L('昵称','Display name','الاسم المعروض')}</span><input value={profileDraft.displayName} onChange={e=>{ setProfileDraft(p=>({...p, displayName:e.target.value})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-[rgba(15,20,28,0.72)] border border-white/10 text-sm text-[var(--one-text,#f4f3ee)]" maxLength={40} /></label>
+                    <label className="block space-y-1"><span className="text-[11px] text-slate-400">{L('用户名 (唯一)','Username (unique)','اسم المستخدم (فريد)')}</span><input value={profileDraft.username} onChange={e=>{ setProfileDraft(p=>({...p, username:e.target.value.toLowerCase()})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-[rgba(15,20,28,0.72)] border border-white/10 text-sm text-[var(--one-text,#f4f3ee)]" maxLength={30} placeholder="a-z 0-9 _ (3-30)" /><span className="text-[10px] text-slate-500">{L('3-30 位，小写字母/数字/下划线，修改后需全局唯一','3-30 chars: lowercase letters, numbers, underscore. Must be unique.','3-30 حرفًا: أحرف صغيرة/أرقام/شرطة سفلية، يجب أن يكون فريدًا.')}</span></label>
+                    <label className="block space-y-1"><span className="text-[11px] text-slate-400">{L('个人简介','Bio','نبذة شخصية')}</span><textarea value={profileDraft.bio} onChange={e=>{ setProfileDraft(p=>({...p, bio:e.target.value})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-[rgba(15,20,28,0.72)] border border-white/10 text-sm text-[var(--one-text,#f4f3ee)] min-h-[72px]" maxLength={300} /></label>
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-[11px] min-h-[16px]">
-                        {profileSaveState==='saving' && <span className="text-cyan-300">{L('保存中…','Saving…','جارٍ الحفظ…')}</span>}
+                        {profileSaveState==='saving' && <span className="text-cyan-200">{L('保存中…','Saving…','جارٍ الحفظ…')}</span>}
                         {profileSaveState==='saved' && <span className="text-emerald-300">{L('保存成功','Saved','تم الحفظ')}</span>}
                         {(profileSaveState==='error' || profileError) && <span className="text-rose-300">{profileError || L('保存失败','Save failed','فشل الحفظ')}</span>}
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={()=>{ setProfileMode('view'); setProfileError(null); setAvatarPreview(null); setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); }} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">{L('取消','Cancel','إلغاء')}</button>
-                        <button onClick={()=>void saveMyProfile()} disabled={profileSaving} className="px-3 py-1.5 rounded-lg bg-cyan-500 text-slate-950 font-semibold text-xs disabled:opacity-40">{L('保存','Save','حفظ')}</button>
+                        <button onClick={()=>{ setProfileMode('view'); setProfileError(null); setAvatarPreview(null); setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); }} className="px-3 py-1.5 rounded-lg border border-white/10 text-slate-300 text-xs">{L('取消','Cancel','إلغاء')}</button>
+                        <button onClick={()=>void saveMyProfile()} disabled={profileSaving} className="px-3 py-1.5 rounded-lg bg-cyan-400 text-slate-950 font-semibold text-xs disabled:opacity-40">{L('保存','Save','حفظ')}</button>
                       </div>
                     </div>
                   </div>
@@ -2258,13 +2262,13 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <>
                     {u.bio && <div><p className="text-[11px] text-slate-400 mb-1">{L('个人简介','Bio','نبذة')}</p><p className="text-sm text-slate-200 whitespace-pre-wrap break-words">{u.bio}</p></div>}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5"><p className="text-slate-500">{L('唯一用户 ID','Unique User ID','معرّف المستخدم')}</p><p className="text-slate-200 break-all mt-0.5">{u.id}</p></div>
-                      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5"><p className="text-slate-500">{L('注册时间','Joined','تاريخ التسجيل')}</p><p className="text-slate-200 mt-0.5">{fmtDate(u.joinedAt)}</p></div>
-                      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5"><p className="text-slate-500">{L('最近活跃','Last active','آخر نشاط')}</p><p className="text-slate-200 mt-0.5">{fmtDate(u.lastActiveAt)}</p></div>
-                      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5"><p className="text-slate-500">{L('在线状态','Status','الحالة')}</p><p className={`${u.isOnline?'text-emerald-300':'text-slate-300'} mt-0.5`}>{u.isOnline ? L('在线','Online','متصل') : L('离线','Offline','غير متصل')}</p></div>
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5"><p className="text-slate-500">{L('唯一用户 ID','Unique User ID','معرّف المستخدم')}</p><p className="text-slate-200 break-all mt-0.5">{u.id}</p></div>
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5"><p className="text-slate-500">{L('注册时间','Joined','تاريخ التسجيل')}</p><p className="text-slate-200 mt-0.5">{fmtDate(u.joinedAt)}</p></div>
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5"><p className="text-slate-500">{L('最近活跃','Last active','آخر نشاط')}</p><p className="text-slate-200 mt-0.5">{fmtDate(u.lastActiveAt)}</p></div>
+                      <div className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5"><p className="text-slate-500">{L('在线状态','Status','الحالة')}</p><p className={`${u.isOnline?'text-emerald-300':'text-slate-300'} mt-0.5`}>{u.isOnline ? L('在线','Online','متصل') : L('离线','Offline','غير متصل')}</p></div>
                     </div>
                     {isSelf && (
-                      <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 space-y-2">
+                      <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-2">
                         <p className="text-xs font-semibold text-slate-200">{L('账户绑定状态','Account binding status','حالة ربط الحساب')}</p>
                         <div className="grid grid-cols-2 gap-2 text-[11px]">
                           <div className="text-slate-300">Email: <span className={bindings.email?.bound?'text-emerald-300':'text-slate-500'}>{bindings.email?.bound ? (bindings.email?.value || L('已绑定','Bound','مرتبط')) : L('未绑定','Not bound','غير مرتبط')}</span>{bindings.email?.bound && <span className="text-slate-500"> ({bindings.email?.verified?L('已验证','verified','موثّق'):L('未验证','unverified','غير موثّق')})</span>}</div>
@@ -2281,15 +2285,15 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 {!editing && (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {!isSelf && u.id && <>
-                      <button onClick={()=>{ void openDirect(u.id); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs">{L('发消息','Message','رسالة')}</button>
+                      <button onClick={()=>{ void openDirect(u.id); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-cyan-400/12 text-cyan-200 border border-cyan-400/30 text-xs">{L('发消息','Message','رسالة')}</button>
                       <button onClick={()=>{ void startCall('audio', { targetUserId: u.id }); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs inline-flex items-center gap-1"><Phone className="w-3.5 h-3.5"/>{L('语音通话','Voice call','مكالمة صوتية')}</button>
                       <button onClick={()=>{ void startCall('video', { targetUserId: u.id }); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/40 text-xs inline-flex items-center gap-1"><Video className="w-3.5 h-3.5"/>{L('视频通话','Video call','مكالمة فيديو')}</button>
-                      {!selectedProfile.isFriend && !selectedProfile.blocked && <button onClick={()=>{ void sendFriendRequest(u.id); }} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs">{L('加好友','Add friend','إضافة صديق')}</button>}
-                      {selectedProfile.isFriend && <button onClick={()=>{ void removeFriend(u.id); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-slate-800 text-rose-300 text-xs">{L('删除好友','Remove friend','إزالة صديق')}</button>}
-                      {!selectedProfile.blocked ? <button onClick={()=>{ void blockUser(u.id); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">{L('屏蔽','Block','حظر')}</button> : <span className="text-[11px] text-amber-300">{L('已屏蔽','Blocked','محظور')}</span>}
+                      {!selectedProfile.isFriend && !selectedProfile.blocked && <button onClick={()=>{ void sendFriendRequest(u.id); }} className="px-3 py-2 rounded-lg bg-white/[0.06] text-slate-200 text-xs">{L('加好友','Add friend','إضافة صديق')}</button>}
+                      {selectedProfile.isFriend && <button onClick={()=>{ void removeFriend(u.id); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-white/[0.06] text-rose-300 text-xs">{L('删除好友','Remove friend','إزالة صديق')}</button>}
+                      {!selectedProfile.blocked ? <button onClick={()=>{ void blockUser(u.id); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-white/[0.06] text-slate-300 text-xs">{L('屏蔽','Block','حظر')}</button> : <span className="text-[11px] text-amber-300">{L('已屏蔽','Blocked','محظور')}</span>}
                     </>}
-                    {isSelf && profileMode==='view' && <button onClick={()=>{ setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); setProfileMode('edit'); }} className="px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs">{L('编辑资料','Edit profile','تعديل الملف')}</button>}
-                    <button onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }} className="px-3 py-2 rounded-lg border border-slate-700 text-slate-300 text-xs">{L('关闭','Close','إغلاق')}</button>
+                    {isSelf && profileMode==='view' && <button onClick={()=>{ setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); setProfileMode('edit'); }} className="px-3 py-2 rounded-lg bg-cyan-400/12 text-cyan-200 border border-cyan-400/30 text-xs">{L('编辑资料','Edit profile','تعديل الملف')}</button>}
+                    <button onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }} className="px-3 py-2 rounded-lg border border-white/10 text-slate-300 text-xs">{L('关闭','Close','إغلاق')}</button>
                   </div>
                 )}
                 {selectedProfile.pendingRequest && <p className="text-[11px] text-amber-300">{L('存在待处理好友申请','Pending friend request','يوجد طلب صداقة قيد الانتظار')}</p>}
@@ -2302,18 +2306,18 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       {/* Create Group Modal */}
       {showCreateGroup && (
         <div className="fixed inset-0 z-[75] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={()=>setShowCreateGroup(false)}>
-          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 p-4 sm:p-5 space-y-4 max-h-[85vh] flex flex-col" onClick={e=>e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-2xl bg-[rgba(15,20,28,0.72)] border border-white/10 p-4 sm:p-5 space-y-4 max-h-[85vh] flex flex-col" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-100">创建群聊</h3>
-              <button onClick={()=>setShowCreateGroup(false)} className="p-1.5 rounded-lg border border-slate-700 text-slate-300"><X className="w-4 h-4"/></button>
+              <h3 className="text-base font-bold text-[var(--one-text,#f4f3ee)]">创建群聊</h3>
+              <button onClick={()=>setShowCreateGroup(false)} className="p-1.5 rounded-lg border border-white/10 text-slate-300"><X className="w-4 h-4"/></button>
             </div>
-            <input value={newGroupName} onChange={e=>setNewGroupName(e.target.value)} placeholder="输入群聊名称" className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100" />
+            <input value={newGroupName} onChange={e=>setNewGroupName(e.target.value)} placeholder="输入群聊名称" className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-black/20 border border-white/10 text-sm text-[var(--one-text,#f4f3ee)]" />
             <div className="text-xs text-slate-400">选择好友成员 ({newGroupMembers.length} 已选)</div>
             <div className="flex-1 overflow-y-auto space-y-1.5 min-h-[120px] max-h-60">
               {friends.map(f => {
                 const checked = newGroupMembers.includes(f.id);
                 return (
-                  <label key={f.id} className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer ${checked ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-slate-800 bg-slate-950/60'}`}>
+                  <label key={f.id} className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer ${checked ? 'border-cyan-400/35 bg-cyan-400/10' : 'border-white/10 bg-white/[0.03]'}`}>
                     <input type="checkbox" checked={checked} onChange={e=>setNewGroupMembers(prev => e.target.checked ? [...prev, f.id] : prev.filter(x => x !== f.id))} className="h-4 w-4 accent-cyan-500" />
                     <img src={f.avatar} className="w-8 h-8 rounded-full object-cover" />
                     <span className="text-sm text-slate-200 truncate flex-1">{f.displayName}</span>
@@ -2323,8 +2327,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               {friends.length === 0 && <div className="text-xs text-slate-500 py-6 text-center">请先添加好友后再创建群聊</div>}
             </div>
             <div className="flex justify-end gap-2">
-              <button onClick={()=>setShowCreateGroup(false)} className="min-h-[42px] px-4 rounded-xl border border-slate-700 text-slate-300 text-xs">取消</button>
-              <button onClick={()=>void createGroup()} className="min-h-[42px] px-4 rounded-xl bg-cyan-500 text-slate-950 font-semibold text-xs">创建群聊</button>
+              <button onClick={()=>setShowCreateGroup(false)} className="min-h-[42px] px-4 rounded-xl border border-white/10 text-slate-300 text-xs">取消</button>
+              <button onClick={()=>void createGroup()} className="min-h-[42px] px-4 rounded-xl bg-cyan-400 text-slate-950 font-semibold text-xs">创建群聊</button>
             </div>
           </div>
         </div>
@@ -2333,16 +2337,16 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       {/* Group Detail Modal */}
       {showGroupPanel && activeConv?.type === 'group' && (
         <div className="fixed inset-0 z-[75] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={()=>setShowGroupPanel(false)}>
-          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 p-4 sm:p-5 space-y-4 max-h-[85vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-2xl bg-[rgba(15,20,28,0.72)] border border-white/10 p-4 sm:p-5 space-y-4 max-h-[85vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-100 truncate">{groupDetail?.name || activeConv.name}</h3>
-              <button onClick={()=>setShowGroupPanel(false)} className="p-1.5 rounded-lg border border-slate-700 text-slate-300"><X className="w-4 h-4"/></button>
+              <h3 className="text-base font-bold text-[var(--one-text,#f4f3ee)] truncate">{groupDetail?.name || activeConv.name}</h3>
+              <button onClick={()=>setShowGroupPanel(false)} className="p-1.5 rounded-lg border border-white/10 text-slate-300"><X className="w-4 h-4"/></button>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={()=>void renameGroupAction()} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs">修改群名</button>
-              <button onClick={()=>void changeGroupAvatar()} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs">更换头像</button>
-              <button onClick={()=>void inviteMembers()} className="px-3 py-2 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-200 text-xs">邀请成员</button>
-              <button onClick={()=>void clearConversationForMe()} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">清除本地记录</button>
+              <button onClick={()=>void renameGroupAction()} className="px-3 py-2 rounded-lg bg-white/[0.06] text-slate-200 text-xs">修改群名</button>
+              <button onClick={()=>void changeGroupAvatar()} className="px-3 py-2 rounded-lg bg-white/[0.06] text-slate-200 text-xs">更换头像</button>
+              <button onClick={()=>void inviteMembers()} className="px-3 py-2 rounded-lg bg-cyan-400/12 border border-cyan-400/30 text-cyan-200 text-xs">邀请成员</button>
+              <button onClick={()=>void clearConversationForMe()} className="px-3 py-2 rounded-lg bg-white/[0.06] text-slate-300 text-xs">清除本地记录</button>
               <button onClick={()=>void leaveGroupAction()} className="px-3 py-2 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs inline-flex items-center gap-1"><LogOut className="w-3.5 h-3.5"/>退出群聊</button>
             </div>
             <div className="space-y-2">
@@ -2352,7 +2356,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 const isAdmin = (groupDetail?.adminIds || []).includes(m.id);
                 const iAmOwner = groupDetail?.ownerId === currentUser?.id;
                 return (
-                  <div key={m.id} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <div key={m.id} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-white/[0.03] border border-white/10">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <img src={m.avatar} className="w-8 h-8 rounded-full object-cover" />
                       <div className="min-w-0">
@@ -2362,9 +2366,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                     </div>
                     {iAmOwner && m.id !== currentUser?.id && (
                       <div className="flex items-center gap-1 shrink-0">
-                        <button onClick={()=>void toggleAdmin(m.id, !isAdmin)} className="px-2 py-1 rounded bg-slate-800 text-[10px] text-slate-300">{isAdmin ? '取消管理' : '设管理'}</button>
-                        <button onClick={()=>void transferOwner(m.id)} className="px-2 py-1 rounded bg-slate-800 text-[10px] text-amber-300">转让</button>
-                        <button onClick={()=>void removeMember(m.id)} className="p-1.5 rounded bg-slate-800 text-rose-300"><UserMinus className="w-3.5 h-3.5"/></button>
+                        <button onClick={()=>void toggleAdmin(m.id, !isAdmin)} className="px-2 py-1 rounded bg-white/[0.06] text-[10px] text-slate-300">{isAdmin ? '取消管理' : '设管理'}</button>
+                        <button onClick={()=>void transferOwner(m.id)} className="px-2 py-1 rounded bg-white/[0.06] text-[10px] text-amber-300">转让</button>
+                        <button onClick={()=>void removeMember(m.id)} className="p-1.5 rounded bg-white/[0.06] text-rose-300"><UserMinus className="w-3.5 h-3.5"/></button>
                       </div>
                     )}
                   </div>
@@ -2384,12 +2388,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         const callerName = callerUser?.displayName || incomingCall.initiatorName || '好友来电';
         const callerAvatar = callerUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120';
         return (
-          <div className="fixed inset-x-3 top-14 sm:top-20 sm:left-auto sm:right-6 sm:w-96 z-[85] rounded-2xl border border-cyan-500/40 bg-[#071020]/95 p-4 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.85)] backdrop-blur-xl space-y-3">
+          <div className="fixed inset-x-3 top-14 sm:top-20 sm:left-auto sm:right-6 sm:w-96 z-[85] rounded-2xl border border-cyan-400/30 bg-[#071020]/95 p-4 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.85)] backdrop-blur-xl space-y-3">
             <div className="flex items-center gap-3">
               <img src={callerAvatar} alt={callerName} className="w-12 h-12 rounded-full object-cover ring-2 ring-cyan-400/50 shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-white truncate">{callerName}</p>
-                <p className="text-xs text-cyan-300 flex items-center gap-1.5 mt-0.5">
+                <p className="text-xs text-cyan-200 flex items-center gap-1.5 mt-0.5">
                   {incomingCall.kind === 'video' ? <Video className="w-3.5 h-3.5"/> : <Phone className="w-3.5 h-3.5"/>}
                   <span>{incomingCall.kind === 'video' ? '邀请你视频通话…' : '邀请你语音通话…'}</span>
                 </p>
@@ -2431,16 +2435,16 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
         if (callMinimized) {
           return (
-            <div className="fixed top-14 right-3 sm:top-20 sm:right-6 z-[85] rounded-2xl border border-cyan-500/40 bg-[#071020]/95 px-3.5 py-2.5 shadow-2xl backdrop-blur-xl flex items-center gap-3">
+            <div className="fixed top-14 right-3 sm:top-20 sm:right-6 z-[85] rounded-2xl border border-cyan-400/30 bg-[#071020]/95 px-3.5 py-2.5 shadow-2xl backdrop-blur-xl flex items-center gap-3">
               {remoteAudioParticipants.map((p: any) => p.audioTrack ? <CallTrackView key={`aud_${p.identity}`} track={p.audioTrack} kind="audio" /> : null)}
               <div className="flex items-center gap-2 min-w-0">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-white truncate max-w-[110px]">{displayTitle}</p>
-                  <p className="text-[11px] text-cyan-300 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
+                  <p className="text-[11px] text-cyan-200 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
                 </div>
               </div>
-              <button type="button" onClick={()=>setCallMinimized(false)} className="min-h-[36px] min-w-[36px] rounded-xl bg-slate-800 text-slate-200 inline-flex items-center justify-center" title="展开通话"><Maximize2 className="w-4 h-4"/></button>
+              <button type="button" onClick={()=>setCallMinimized(false)} className="min-h-[36px] min-w-[36px] rounded-xl bg-white/[0.06] text-slate-200 inline-flex items-center justify-center" title="展开通话"><Maximize2 className="w-4 h-4"/></button>
               {!isTerminal && <button type="button" onClick={()=>void endOrCancelActiveCall()} disabled={!!callAction} className="min-h-[36px] min-w-[36px] rounded-xl bg-rose-500 text-white inline-flex items-center justify-center" title="挂断"><PhoneOff className="w-4 h-4"/></button>}
             </div>
           );
@@ -2469,7 +2473,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             <div className="flex items-center justify-between gap-3 px-4 pt-[max(0.9rem,env(safe-area-inset-top))] pb-3 border-b border-white/10 bg-black/25 shrink-0">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  {activeCall.kind === 'video' ? <Video className="w-4 h-4 text-cyan-400 shrink-0"/> : <Phone className="w-4 h-4 text-emerald-400 shrink-0"/>}
+                  {activeCall.kind === 'video' ? <Video className="w-4 h-4 text-cyan-300 shrink-0"/> : <Phone className="w-4 h-4 text-emerald-400 shrink-0"/>}
                   <span className="text-sm font-bold text-white truncate">{displayTitle}</span>
                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/10 text-cyan-200 tabular-nums shrink-0">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</span>
                 </div>
@@ -2483,7 +2487,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               {activeCall.kind === 'video' ? (
                 <div className={`w-full h-full grid gap-3 ${tilesToRender.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
                   {tilesToRender.map((p: any) => (
-                    <div key={p.identity} className="relative w-full h-full min-h-[220px] rounded-2xl bg-slate-950 border border-white/10 overflow-hidden flex items-center justify-center">
+                    <div key={p.identity} className="relative w-full h-full min-h-[220px] rounded-2xl bg-black/20 border border-white/10 overflow-hidden flex items-center justify-center">
                       {p.videoTrack ? (
                         <CallTrackView track={p.videoTrack} kind="video" className="w-full h-full object-cover" />
                       ) : p.screenTrack ? (
@@ -2504,7 +2508,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                     </div>
                   ))}
                   {/* Local PiP preview */}
-                  <div className="absolute top-5 right-5 w-28 h-40 sm:w-44 sm:h-32 rounded-2xl border border-white/20 bg-slate-900/90 shadow-2xl overflow-hidden flex items-center justify-center">
+                  <div className="absolute top-5 right-5 w-28 h-40 sm:w-44 sm:h-32 rounded-2xl border border-white/20 bg-[rgba(15,20,28,0.72)]/90 shadow-2xl overflow-hidden flex items-center justify-center">
                     {localP?.videoTrack || localP?.screenTrack ? (
                       <CallTrackView track={localP.screenTrack || localP.videoTrack} kind="video" muted className="w-full h-full object-cover" mirror={!localP?.screenTrack} />
                     ) : (
@@ -2521,7 +2525,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   </div>
                   <div className="space-y-1">
                     <h3 className="text-xl font-bold text-white">{displayTitle}</h3>
-                    <p className="text-sm text-cyan-300 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
+                    <p className="text-sm text-cyan-200 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
                     <p className="text-xs text-slate-400">{mediaPhaseLabel}</p>
                   </div>
                 </div>
@@ -2555,7 +2559,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                         </button>
                       </>
                     )}
-                    <button type="button" onClick={()=>void toggleCallDevice('screenSharing')} className={`hidden sm:flex min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex-col items-center justify-center gap-1 text-[11px] font-medium ${!callDevices.screenSharing ? 'border-white/15 bg-white/10 text-white' : 'border-cyan-500/50 bg-cyan-500/20 text-cyan-200'}`}>
+                    <button type="button" onClick={()=>void toggleCallDevice('screenSharing')} className={`hidden sm:flex min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex-col items-center justify-center gap-1 text-[11px] font-medium ${!callDevices.screenSharing ? 'border-white/15 bg-white/10 text-white' : 'border-cyan-400/35 bg-cyan-400/12 text-cyan-200'}`}>
                       {callDevices.screenSharing ? <MonitorOff className="w-5 h-5"/> : <Monitor className="w-5 h-5"/>}
                       <span>{callDevices.screenSharing ? '停止共享' : '共享屏幕'}</span>
                     </button>
@@ -2566,7 +2570,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   </>
                 )}
                 {activeCall.scope === 'group' && ['connecting','active','reconnecting'].includes(activeCall.status) && (
-                  <button type="button" onClick={()=>void leaveActiveGroupCall()} disabled={!!callAction} className="min-h-[52px] px-4 rounded-2xl border border-white/15 bg-white/10 text-slate-100 text-xs font-semibold disabled:opacity-40">离开通话</button>
+                  <button type="button" onClick={()=>void leaveActiveGroupCall()} disabled={!!callAction} className="min-h-[52px] px-4 rounded-2xl border border-white/15 bg-white/10 text-[var(--one-text,#f4f3ee)] text-xs font-semibold disabled:opacity-40">离开通话</button>
                 )}
                 {!isTerminal && (
                   <button type="button" onClick={()=>void endOrCancelActiveCall()} disabled={!!callAction} className="h-[54px] px-7 rounded-full bg-rose-500 hover:bg-rose-400 text-white text-sm font-bold inline-flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 disabled:opacity-40">
@@ -2575,7 +2579,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   </button>
                 )}
                 {isTerminal && (
-                  <button type="button" onClick={()=>{ void cleanupCallMedia('dismiss'); setActiveCall(null); setCallMediaNote(null); setCallMinimized(false); }} className="h-[50px] px-7 rounded-full bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold">关闭</button>
+                  <button type="button" onClick={()=>{ void cleanupCallMedia('dismiss'); setActiveCall(null); setCallMediaNote(null); setCallMinimized(false); }} className="h-[50px] px-7 rounded-full bg-white/[0.06] hover:bg-slate-700 text-white text-sm font-semibold">关闭</button>
                 )}
               </div>
             </div>
