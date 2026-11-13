@@ -1,14 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Community, Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
-import {
-  Users2,
-  Plus,
-  Sparkles,
-  Check,
-  Globe2,
-  ExternalLink
-} from 'lucide-react';
+import { Check, Plus, Users2 } from 'lucide-react';
 
 interface CommunityListProps {
   communities: Community[];
@@ -16,78 +9,68 @@ interface CommunityListProps {
   lang: Language;
 }
 
-export const CommunityList: React.FC<CommunityListProps> = ({
-  communities,
-  onToggleJoin,
-  lang
-}) => {
+export const CommunityList: React.FC<CommunityListProps> = ({ communities, onToggleJoin, lang }) => {
   const t = translations[lang];
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-4 py-8 space-y-6">
-      {/* Header */}
-      <div className="pb-4 border-b border-slate-800">
-        <div className="flex items-center space-x-2 text-cyan-400 text-xs font-mono mb-1">
-          <Users2 className="w-4 h-4" />
-          <span>GLOBAL COLLECTIVES</span>
+    <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
+      <div className="border-b border-[var(--color-one-border)] pb-5">
+        <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-1 text-[11px] font-medium text-[var(--color-one-text-muted)]">
+          <Users2 className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
+          <span>{lang === 'zh' ? 'ONE 社区 · 真实共创空间' : 'ONE COMMUNITY · Real Collectives'}</span>
         </div>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-100">
-          {t.communityTab}
-        </h1>
-        <p className="text-xs text-slate-400 mt-1">
-          Join international guilds dedicated to polyglot learning, biophilic architecture, cosmology, and world arts.
+        <h1 className="text-3xl font-semibold tracking-tight text-white">{t.communityTab}</h1>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-one-text-muted)]">
+          {lang === 'zh'
+            ? '加入围绕语言、文化、科学与创作的真实社区，与全球用户协作与交流。'
+            : 'Join real communities around language, culture, science, and creation to collaborate with people worldwide.'}
         </p>
       </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-5">
         {communities.map(comm => (
           <div
             key={comm.id}
-            className="rounded-3xl bg-slate-900/70 border border-slate-800 overflow-hidden shadow-xl hover:border-slate-700 transition-all flex flex-col justify-between p-6 space-y-4"
+            className="flex flex-col justify-between space-y-4 rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-5 shadow-[var(--shadow-one-sm)] transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.04] sm:p-6"
           >
             <div className="space-y-3">
-              <div className="flex items-start justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center text-2xl shadow-inner">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.6)] text-2xl shadow-inner">
                   {comm.icon}
                 </div>
-                <span className="text-[10px] uppercase font-mono px-2.5 py-1 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-800">
+                <span className="rounded-full border border-[var(--color-one-border)] bg-white/[0.02] px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--color-one-text-muted)]">
                   {comm.category}
                 </span>
               </div>
 
               <div>
-                <h3 className="text-base font-bold text-slate-100">{comm.name}</h3>
-                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                  {comm.description}
-                </p>
+                <h3 className="text-base font-semibold text-white">{comm.name}</h3>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--color-one-text-muted)] sm:text-sm">{comm.description}</p>
               </div>
             </div>
 
-            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-              <div className="text-slate-400">
-                <span className="font-mono font-bold text-slate-200">
-                  {comm.membersCount.toLocaleString()}
-                </span>{' '}
-                citizens
+            <div className="flex items-center justify-between border-t border-[var(--color-one-border)] pt-3 text-xs">
+              <div className="text-[var(--color-one-text-muted)]">
+                <span className="font-medium tabular-nums text-white">{comm.membersCount.toLocaleString()}</span>{' '}
+                {lang === 'zh' ? '成员' : 'members'}
               </div>
 
               <button
                 onClick={() => onToggleJoin(comm.id)}
-                className={`flex items-center space-x-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors ${
+                className={`inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition ${
                   comm.isJoined
-                    ? 'bg-slate-800 text-slate-300 border border-slate-700'
-                    : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md'
+                    ? 'border border-[var(--color-one-border-strong)] bg-white/[0.04] text-white hover:bg-white/[0.07]'
+                    : 'bg-[var(--color-one-accent)] text-[#071018] hover:brightness-110'
                 }`}
               >
                 {comm.isJoined ? (
                   <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <Check className="h-3.5 w-3.5 text-emerald-300" />
                     <span>{t.joined}</span>
                   </>
                 ) : (
                   <>
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="h-3.5 w-3.5" />
                     <span>{t.joinCommunity}</span>
                   </>
                 )}
@@ -96,6 +79,11 @@ export const CommunityList: React.FC<CommunityListProps> = ({
           </div>
         ))}
       </div>
+      {communities.length === 0 && (
+        <div className="rounded-[28px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] py-16 text-center text-sm text-[var(--color-one-text-muted)]">
+          {lang === 'zh' ? '暂无社区数据。' : 'No communities available yet.'}
+        </div>
+      )}
     </div>
   );
 };
