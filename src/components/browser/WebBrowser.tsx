@@ -1600,6 +1600,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
   }, [activeTabId]);
 
   useEffect(() => {
+    if (browserEngine || !activeTab || activeTab.readerMode || isJupiterContentUrl(activeTab.url) || parseJupiterSearchRoute(activeTab.url)) {
+      setPreviewHtml(null);
+      return;
+    }
+    if (isHttpUrl(activeTab.url)) void loadPreviewHtml(activeTab.url);
+    else setPreviewHtml(null);
+  }, [activeTabId, activeTab?.url, activeTab?.readerMode, browserEngine]);
+
+  useEffect(() => {
     const route = activeTab ? parseJupiterSearchRoute(activeTab.url) : null;
     if (!route || isSearching) return;
     const key = buildJupiterSearchRoute(route.query, route.engine, route.lang, route.category, route.page);
@@ -1626,26 +1635,21 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialQuery]);
 
-  // 网页预览：通过后端代理抓取原始 HTML，注入 base href 后写入 iframe srcdoc
+  // 网页预览（Web 预览模式）：优先尝试同源 HTML 代理（可嵌入时体验更接近原页），
+  // 不可用时回退到 /api/browser/proxy。两者都不是原生 Chromium 浏览器。
   const loadPreviewHtml = async (url: string) => {
+    const safe = isHttpUrl(url) ? url : '';
     setIsPreviewLoading(true);
     setPreviewHtml(null);
+    if (!safe) { setIsPreviewLoading(false); return; }
     try {
-      const res = await fetch(`/api/browser/raw-html?url=${encodeURIComponent(url)}`);
+      const res = await fetch(`/api/browser/raw-html?url=${encodeURIComponent(safe)}`);
       if (res.ok) {
-        let html = await res.text();
-        try {
-          const origin = new URL(url).origin;
-          html = html.replace(/<head([^>]*)>/i, `<head$1><base href="${origin}/">`);
-        } catch {
-          /* keep raw html */
-        }
-        setPreviewHtml(html);
-      } else {
-        setPreviewHtml(null);
+        const html = await res.text();
+        if (html && html.length > 32) setPreviewHtml(html);
       }
     } catch {
-      setPreviewHtml(null);
+      /* proxy iframe fallback */
     } finally {
       setIsPreviewLoading(false);
     }
@@ -2269,7 +2273,6 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
             <button
               onClick={() => {
                 setTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, readerMode: false, crawlerView: false } : t));
-                if (activeTab?.url) void loadPreviewHtml(activeTab.url);
               }}
               title="原生网页浏览"
               className={`rounded-full px-2.5 py-1 font-medium transition ${!activeTab?.readerMode && !activeTab?.crawlerView ? 'bg-cyan-400 text-slate-950 font-semibold' : 'text-slate-400 hover:text-white'}`}
@@ -2991,6 +2994,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               </div>
             ) : (
               <div className="relative flex h-full min-h-[480px] w-full flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-slate-950">
+                {!browserEngine && isHttpUrl(activeTab.url) && (
+                  <div data-browser-preview-notice className="border-b border-amber-300/10 bg-amber-300/[0.04] px-4 py-2 text-[11px] leading-relaxed text-amber-100/80">
+                    网页预览模式：通过服务端抓取/代理展示页面内容，受目标站点策略、脚本与动态行为限制，不等同于原生 Chromium 浏览器。需要完整交互请使用桌面版或“外部打开”。
+                  </div>
+                )}
                 <div
                   ref={nativeViewportRef}
                   data-browser-engine-viewport
@@ -3011,14 +3019,14 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                         srcDoc={previewHtml}
                         title={activeTab.title}
                         className="w-full flex-1 border-0 bg-white"
-                        sandbox="allow-scripts allow-same-origin allow-popups"
+                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
                       />
                     ) : (
                       <iframe
-                        src={toEmbedUrl(activeTab.url)}
+                        src={isHttpUrl(activeTab.url) ? `/api/browser/proxy?url=${encodeURIComponent(activeTab.url)}` : toEmbedUrl(activeTab.url)}
                         title={activeTab.title}
                         className="w-full flex-1 border-0 bg-white"
-                        sandbox="allow-scripts allow-same-origin allow-popups"
+                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
                       />
                     )
                   )}

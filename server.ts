@@ -16,7 +16,7 @@ import { buildConversationPrompt, normalizeConversationHistory } from './server/
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
-import { fetchAndExtract, searchGitHubRepositories, searchGoogleCategory, searchGoogleImages, searchWeb, searchWebProviders, searchZLibraryDiscovery, type JupiterExternalSearchCategory, type SearchResult } from './server/webFetcher.ts';
+import { fetchAndExtract, fetchRawHtml, searchGitHubRepositories, searchGoogleCategory, searchGoogleImages, searchWeb, searchWebProviders, searchZLibraryDiscovery, type JupiterExternalSearchCategory, type SearchResult } from './server/webFetcher.ts';
 import { searchYouTubeVideos } from './server/youtubeSearch.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
@@ -3443,49 +3443,84 @@ app.delete('/api/browser/saved-articles/:id', (req, res) => {
 });
 
 app.post('/api/browser/fetch-preview', async (req, res) => {
-  const { url } = req.body;
-  if (!url) return res.status(400).json({ success: false, error: 'URL required' });
+  const { url } = req.body || {};
+  const safeUrl = getSafeBrowserFetchUrl(url);
+  if (!safeUrl) return res.status(400).json({ success: false, error: 'A safe public HTTP(S) URL is required.' });
 
   try {
-    const extracted = await fetchAndExtract(url);
-    res.json({ success: true, ...extracted, hostname: new URL(url).hostname });
+    const extracted = await fetchAndExtract(safeUrl.toString());
+    res.json({ success: true, ...extracted, hostname: safeUrl.hostname });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Unable to fetch this URL' });
   }
 });
 
+app.get('/api/browser/raw-html', async (req, res) => {
+  const targetUrl = req.query.url;
+  const safeUrl = getSafeBrowserFetchUrl(typeof targetUrl === 'string' ? targetUrl : '');
+  if (!safeUrl) return res.status(400).type('text/plain; charset=utf-8').send('A safe public HTTP(S) URL is required.');
+
+  try {
+    const html = await fetchRawHtml(safeUrl.toString());
+    const baseHref = `${safeUrl.protocol}//${safeUrl.host}${safeUrl.pathname.substring(0, safeUrl.pathname.lastIndexOf('/') + 1)}`;
+    const withBase = /<head([^>]*)>/i.test(html)
+      ? html.replace(/<head([^>]*)>/i, `<head$1><base href="${baseHref}">`)
+      : `<base href="${baseHref}">${html}`;
+    const cleaned = withBase
+      .replace(/<meta[^>]+http-equiv=["']?X-Frame-Options["']?[^>]*>/gi, '')
+      .replace(/<meta[^>]+http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi, '');
+    res.removeHeader('X-Frame-Options');
+    res.removeHeader('Content-Security-Policy');
+    res.type('text/html; charset=utf-8').send(cleaned);
+  } catch (err: any) {
+    res.status(502).type('text/plain; charset=utf-8').send(err?.message || 'Unable to fetch this URL');
+  }
+});
+
+
+function isBlockedBrowserFetchHostname(hostname: string): boolean {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!h) return true;
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (h === '::1' || h === '0:0:0:0:0:0:0:1') return true;
+  if (/^fe[89ab][0-9a-f]:/i.test(h) || /^f[cd][0-9a-f]{2}:/i.test(h)) return true;
+  const mapped = h.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
+  if (mapped) return isBlockedBrowserFetchHostname(mapped[1]);
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const [a, b, c, d] = m.slice(1).map(Number);
+  if ([a, b, c, d].some(n => n < 0 || n > 255)) return true;
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a >= 224) return true;
+  return false;
+}
+
+function getSafeBrowserFetchUrl(raw: unknown): URL | null {
+  if (typeof raw !== 'string' || raw.length > 4096) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password) return null;
+    if (isBlockedBrowserFetchHostname(parsed.hostname)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 // Interactive Web Content Proxy for Browser Viewport
 app.get('/api/browser/proxy', async (req, res) => {
   const targetUrl = req.query.url;
-  if (!targetUrl || typeof targetUrl !== 'string') {
-    return res.status(400).send('URL query parameter required');
+  const parsed = getSafeBrowserFetchUrl(typeof targetUrl === 'string' ? targetUrl : '');
+  if (!parsed) {
+    return res.status(400).send('A safe public HTTP(S) URL is required');
   }
 
   try {
-    let parsed: URL;
-    try {
-      parsed = new URL(targetUrl);
-    } catch {
-      return res.status(400).send('Invalid URL format');
-    }
-
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return res.status(400).send('Only HTTP and HTTPS URLs are supported');
-    }
-
-    // Block private/loopback/cloud metadata IP ranges
-    const hostname = parsed.hostname.toLowerCase();
-    if (
-      hostname === 'localhost' ||
-      hostname === '127.0.0.1' ||
-      hostname.startsWith('10.') ||
-      hostname.startsWith('192.168.') ||
-      hostname.startsWith('172.16.') ||
-      hostname === '169.254.169.254'
-    ) {
-      return res.status(403).send('Forbidden destination');
-    }
-
     const response = await fetch(parsed.toString(), {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
