@@ -25,7 +25,7 @@ export const ImageDocumentViewer: React.FC<ImageDocumentViewerProps> = ({ source
 
   return (
     <section data-jupiter-image-viewer aria-label={isChinese ? '图片查看器' : 'Image viewer'} className="mx-auto w-full max-w-6xl">
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/[0.08] bg-[#0d151d] p-4 sm:p-5">
+      <header className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-4 sm:p-5">
         <div className="min-w-0">
           <p className="text-xs font-medium text-amber-200/80">JUPITER · IMAGE</p>
           <h1 className="mt-1 break-words text-lg font-semibold text-white sm:text-xl">{title}</h1>
@@ -60,7 +60,7 @@ export const ImageDocumentViewer: React.FC<ImageDocumentViewerProps> = ({ source
           </a>
         </div>
       ) : (
-        <div className="max-h-[75vh] overflow-auto rounded-2xl border border-white/[0.08] bg-[#111820] p-3 text-center sm:p-5">
+        <div className="max-h-[75vh] overflow-auto rounded-2xl border border-white/[0.08] bg-black/20 p-3 text-center sm:p-5">
           <img
             src={sourceUrl}
             alt={title}

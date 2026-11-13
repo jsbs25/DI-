@@ -2533,7 +2533,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               ) : (
                 <div className="space-y-3">
                   {visibleSearchResults.map((result, idx) => result.source === 'github' ? (
-                    <div key={idx} className="group w-full rounded-2xl border border-white/[0.08] bg-[#0d151d] p-5 text-left transition-all hover:border-cyan-200/20 hover:bg-[#111d25] sm:p-6">
+                    <div key={idx} className="group w-full rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-left transition-all hover:border-cyan-300/20 hover:bg-white/[0.04] sm:p-6">
                       <div className="flex items-start justify-between gap-4">
                         <button onClick={() => openJupiterResult(result)} className="min-w-0 text-left">
                           <div className="flex min-w-0 items-center gap-2 truncate font-mono text-[11px] text-cyan-300/80"><Code2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">github.com/{result.repository}</span></div>
@@ -2554,7 +2554,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                       </div>
                     </div>
                   ) : (
-                    <button key={idx} onClick={() => openJupiterResult(result)} className="group w-full cursor-pointer rounded-2xl border border-white/[0.07] bg-[#0d151d] p-5 text-left transition-all hover:border-amber-200/20 hover:bg-[#111922] sm:p-6">
+                    <button key={idx} onClick={() => openJupiterResult(result)} className="group w-full cursor-pointer rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-left transition-all hover:border-cyan-300/20 hover:bg-white/[0.04] sm:p-6">
                       {(result.category === 'images' || result.category === 'videos') && result.thumbnailUrl && (
                         <div className="mb-4 flex max-h-72 items-center justify-center overflow-hidden rounded-xl bg-black/20">
                           <img
@@ -2656,14 +2656,14 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                   </Suspense>
                 </div>
               ) : (
-              <article className="mx-auto w-full max-w-4xl rounded-3xl border border-white/[0.07] bg-[#0d151d] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-10">
+              <article className="mx-auto w-full max-w-4xl rounded-[28px] border border-white/10 bg-[rgba(12,16,23,0.72)] backdrop-blur-xl p-5 shadow-[0_24px_80px_rgba(0,0,0,0.28)] sm:p-10">
                 {isJupiterContentLoading ? (
                   <div className="py-20 text-center text-sm text-slate-400" role="status">正在从 EARTH 内容索引加载…</div>
                 ) : jupiterContentError ? (
                   <div className="py-20 text-center text-sm text-rose-300" role="alert">{jupiterContentError}</div>
                 ) : jupiterContent ? (
                   <>
-                    <div className="mb-6 border-b border-slate-800 pb-6">
+                    <div className="mb-6 border-b border-white/10 pb-6">
                       <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                         <span className="rounded-full border border-amber-200/15 bg-amber-200/[0.06] px-2.5 py-1 font-medium text-amber-100">EARTH · {jupiterContent.kind}</span>
                         {jupiterContent.author && <span>{jupiterContent.author}</span>}
@@ -2699,7 +2699,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                         ))}
                       </div>
                     ) : (
-                      <div className="whitespace-pre-wrap text-sm leading-8 text-slate-300 sm:text-base">
+                      <div className="whitespace-pre-wrap text-[15px] leading-8 text-slate-200/90 sm:text-base">
                         {jupiterContent.content || '此内容目前没有可供站内阅读的正文。'}
                       </div>
                     )}
@@ -2751,12 +2751,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                 </div>
               </div>
             ) : activeTab.crawlerView ? (
-              <div className="mx-auto max-w-4xl rounded-3xl border border-amber-500/20 bg-[#0d1622] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.35)] sm:p-10">
+              <div className="mx-auto max-w-4xl rounded-[28px] border border-white/10 bg-[rgba(12,16,23,0.72)] backdrop-blur-xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)] sm:p-10">
                 {/* Crawler Inspector Header */}
-                <div className="border-b border-amber-500/20 pb-6 mb-6">
+                <div className="border-b border-white/10 pb-6 mb-6">
                   <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                     <div className="flex items-center space-x-2 text-xs">
-                      <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 font-semibold text-amber-200 flex items-center gap-1.5">
+                      <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 font-medium text-cyan-100 flex items-center gap-1.5">
                         <Compass className="w-3.5 h-3.5 text-amber-300" />
                         <span>🕷️ 爬虫数据探针 · 结构化解析</span>
                       </span>
@@ -2905,12 +2905,10 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                 </div>
               </div>
             ) : activeTab.readerMode ? (
-              <div className="mx-auto max-w-3xl rounded-3xl border border-white/[0.07] bg-[#0d151d] p-6 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-10">
-                <div className="border-b border-slate-800 pb-6 mb-6">
+              <div className="mx-auto max-w-3xl rounded-[28px] border border-white/10 bg-[rgba(12,16,23,0.72)] backdrop-blur-xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)] sm:p-10">
+                <div className="border-b border-white/10 pb-6 mb-6">
                   <div className="flex items-center space-x-3 mb-3 text-xs text-slate-400">
-                    <span className="rounded-full border border-cyan-200/15 bg-cyan-200/[0.06] px-2.5 py-1 font-medium text-cyan-100">
-                      Reader Mode
-                    </span>
+                    <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-1 font-medium text-cyan-100">阅读模式 · 服务端提取正文</span>
                     <span>{activeTab.author || 'EARTH ONE Knowledge Archive'}</span>
                     <span>·</span>
                     <span>{activeTab.readTime || '3 min read'}</span>
@@ -3006,7 +3004,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                 </div>
               </div>
             ) : (
-              <div className="relative flex h-full min-h-[480px] w-full flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-slate-950">
+              <div className="relative flex h-full min-h-[480px] w-full flex-col overflow-hidden rounded-[24px] border border-white/10 bg-slate-950 shadow-[0_20px_60px_rgba(0,0,0,0.25)]">
                 {!browserEngine && isHttpUrl(activeTab.url) && (
                   <div data-browser-preview-notice className="border-b border-amber-300/10 bg-amber-300/[0.04] px-4 py-2 text-[11px] leading-relaxed text-amber-100/80">
                     网页预览模式：通过服务端抓取/代理展示页面内容，受目标站点策略、脚本与动态行为限制，不等同于原生 Chromium 浏览器。需要完整交互请使用桌面版或“外部打开”。

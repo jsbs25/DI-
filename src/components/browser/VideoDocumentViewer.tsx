@@ -24,7 +24,7 @@ export const VideoDocumentViewer: React.FC<VideoDocumentViewerProps> = ({ source
   };
 
   return (
-    <section aria-label={isChinese ? '视频播放器' : 'Video player'} className="mx-auto w-full max-w-5xl rounded-3xl border border-white/[0.08] bg-[#0d151d] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-8">
+    <section aria-label={isChinese ? '视频播放器' : 'Video player'} className="mx-auto w-full max-w-5xl rounded-3xl border border-white/[0.08] bg-white/[0.03] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-8">
       <header className="mb-5 flex items-start gap-4">
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-amber-200/20 bg-amber-200/[0.08] text-amber-100">
           <Film className="h-6 w-6" />
@@ -81,7 +81,7 @@ export const VideoDocumentViewer: React.FC<VideoDocumentViewerProps> = ({ source
               value={playbackRate}
               onChange={event => handlePlaybackRate(Number(event.target.value))}
               aria-label={isChinese ? '选择播放速度' : 'Select playback speed'}
-              className="min-h-9 rounded-lg border border-white/10 bg-[#111820] px-2 text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+              className="min-h-9 rounded-lg border border-white/10 bg-black/20 px-2 text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
             >
               {PLAYBACK_RATES.map(rate => <option key={rate} value={rate}>{rate}×</option>)}
             </select>

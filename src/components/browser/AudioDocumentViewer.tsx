@@ -26,7 +26,7 @@ export const AudioDocumentViewer: React.FC<AudioDocumentViewerProps> = ({ source
   };
 
   return (
-    <section aria-label={isChinese ? '音频播放器' : 'Audio player'} className="mx-auto w-full max-w-4xl rounded-3xl border border-white/[0.08] bg-[#0d151d] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-10">
+    <section aria-label={isChinese ? '音频播放器' : 'Audio player'} className="mx-auto w-full max-w-4xl rounded-3xl border border-white/[0.08] bg-white/[0.03] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.2)] sm:p-10">
       <header className="mb-8 flex items-start gap-4 border-b border-white/[0.08] pb-6">
         <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-amber-200/20 bg-amber-200/[0.08] text-amber-100">
           <Music2 className="h-6 w-6" />
@@ -68,7 +68,7 @@ export const AudioDocumentViewer: React.FC<AudioDocumentViewerProps> = ({ source
                 value={playbackRate}
                 onChange={event => handlePlaybackRate(Number(event.target.value))}
                 aria-label={isChinese ? '选择播放速度' : 'Select playback speed'}
-                className="min-h-9 rounded-lg border border-white/10 bg-[#111820] px-2 text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+                className="min-h-9 rounded-lg border border-white/10 bg-black/20 px-2 text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70"
               >
                 {PLAYBACK_RATES.map(rate => <option key={rate} value={rate}>{rate}×</option>)}
               </select>

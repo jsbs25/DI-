@@ -133,7 +133,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({ sourceUrl,
 
   return (
     <section aria-label={isChinese ? 'PDF 文档查看器' : 'PDF document viewer'} className="mx-auto w-full max-w-5xl">
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/[0.08] bg-[#0d151d] p-4 sm:p-5">
+      <header className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-4 sm:p-5">
         <div className="min-w-0">
           <p className="text-xs font-medium text-amber-200/80">JUPITER · PDF</p>
           <h1 className="mt-1 break-words text-lg font-semibold text-white sm:text-xl">{title}</h1>
@@ -144,7 +144,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({ sourceUrl,
         </div>
       </header>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.08] bg-[#0d151d] p-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
         <button type="button" onClick={() => setPageNumber(page => Math.max(1, page - 1))} disabled={!documentProxy || pageNumber <= 1} aria-label={isChinese ? '上一页' : 'Previous page'} className="rounded-lg p-2 text-slate-200 hover:bg-white/[0.08] disabled:opacity-40">
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -190,7 +190,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({ sourceUrl,
           </a>
         </div>
       ) : (
-        <div className="overflow-auto rounded-2xl border border-white/[0.08] bg-[#111820] p-3 sm:p-5">
+        <div className="overflow-auto rounded-2xl border border-white/10 bg-black/20 p-3 sm:p-5">
           <canvas ref={canvasRef} aria-label={isChinese ? `PDF 第 ${pageNumber} 页` : `PDF page ${pageNumber}`} className="mx-auto block h-auto max-w-full shadow-2xl" />
         </div>
       )}
