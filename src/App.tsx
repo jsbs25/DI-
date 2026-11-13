@@ -134,6 +134,24 @@ export default function App() {
   const handleEnterPlanet = (planetId: string) => { const eco = getPlanetEcosystem(planetId); if (!eco || !eco.available) return; setCurrentTab(eco.tab); setBrowserInitialQuery(null); };
 
   if (!currentUser) {
+    if (currentTab === 'brand') {
+      return (
+        <>
+          <OfflineIndicator lang={lang} />
+          <BrandIdentitySystem
+            lang={lang}
+            onBackToGlobe={() => {
+              setCurrentTab('globe');
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('module');
+                window.history.replaceState({}, '', url.pathname + url.search);
+              } catch {}
+            }}
+          />
+        </>
+      );
+    }
     return (
       <>
         <OfflineIndicator lang={lang} />
