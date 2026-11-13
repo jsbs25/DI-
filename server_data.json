@@ -1,0 +1,1321 @@
+{
+  "users": [
+    {
+      "id": "current_user",
+      "username": "cosmic_explorer",
+      "displayName": "Global Citizen (世界公民)",
+      "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+      "banner": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80",
+      "bio": "One Earth, One Humanity. Passionate about cross-cultural bridges, languages, and future technology.",
+      "location": {
+        "countryCode": "CN",
+        "countryName": "China",
+        "cityName": "Shanghai",
+        "lat": 31.2304,
+        "lng": 121.4737,
+        "isPublic": true
+      },
+      "interests": [
+        "Global Peace",
+        "Languages",
+        "AI",
+        "Astronomy",
+        "Chess"
+      ],
+      "followersCount": 156,
+      "followingCount": 42,
+      "tipsReceived": 60,
+      "isOnline": true,
+      "verified": true,
+      "joinedAt": "2026-11-01"
+    },
+    {
+      "id": "user_cn_1",
+      "username": "li_wei",
+      "displayName": "Li Wei (李伟)",
+      "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+      "banner": "https://images.unsplash.com/photo-1508804185872-d7badad00f7d?w=800&auto=format&fit=crop&q=80",
+      "bio": "Architect in Beijing. Exploring high-tech timber structures and classical Eastern spatial philosophy.",
+      "location": {
+        "countryCode": "CN",
+        "countryName": "China",
+        "cityName": "Beijing",
+        "lat": 39.9042,
+        "lng": 116.4074,
+        "isPublic": true
+      },
+      "interests": [
+        "Architecture",
+        "Tea Culture",
+        "AI & Design",
+        "Chess"
+      ],
+      "followersCount": 1420,
+      "followingCount": 310,
+      "tipsReceived": 450,
+      "isOnline": true,
+      "verified": true,
+      "joinedAt": "2026-01-15",
+      "email": "li_wei@earthone.world",
+      "hasCompletedOnboarding": true
+    },
+    {
+      "id": "user_us_1",
+      "username": "sarah_sky",
+      "displayName": "Sarah Jenkins",
+      "avatar": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
+      "banner": "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=800&auto=format&fit=crop&q=80",
+      "bio": "Astrophysics PhD researcher at Berkeley. Star gazer, digital nomad, and amateur cellist.",
+      "location": {
+        "countryCode": "US",
+        "countryName": "United States",
+        "cityName": "San Francisco",
+        "lat": 37.7749,
+        "lng": -122.4194,
+        "isPublic": true
+      },
+      "interests": [
+        "Astronomy",
+        "Space Tech",
+        "Music",
+        "Deep Learning"
+      ],
+      "followersCount": 2310,
+      "followingCount": 420,
+      "tipsReceived": 880,
+      "isOnline": true,
+      "verified": true,
+      "joinedAt": "2026-02-01",
+      "email": "sarah_sky@earthone.world",
+      "hasCompletedOnboarding": true
+    },
+    {
+      "id": "user_jo_1",
+      "username": "tariq_amman",
+      "displayName": "Tariq Al-Hashemi (طارق)",
+      "avatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+      "banner": "https://images.unsplash.com/photo-1579606032834-de00b1a0e10b?w=800&auto=format&fit=crop&q=80",
+      "bio": "Heritage storyteller and photographer in Amman. Connecting ancient Petra & modern Levant innovation.",
+      "location": {
+        "countryCode": "JO",
+        "countryName": "Jordan",
+        "cityName": "Amman",
+        "lat": 31.9454,
+        "lng": 35.9284,
+        "isPublic": true
+      },
+      "interests": [
+        "Levantine History",
+        "Photography",
+        "Arabic Calligraphy",
+        "Poetry"
+      ],
+      "followersCount": 1890,
+      "followingCount": 280,
+      "tipsReceived": 620,
+      "isOnline": true,
+      "verified": true,
+      "joinedAt": "2026-01-20",
+      "email": "tariq_amman@earthone.world",
+      "hasCompletedOnboarding": true
+    },
+    {
+      "id": "user_sa_1",
+      "username": "noura_riyadh",
+      "displayName": "Noura Al-Saud (نورة)",
+      "avatar": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
+      "banner": "https://images.unsplash.com/photo-1586724237569-f3d0c1dee8c6?w=800&auto=format&fit=crop&q=80",
+      "bio": "Clean tech entrepreneur in Riyadh. Working on solar-desalination and green desert agriculture.",
+      "location": {
+        "countryCode": "SA",
+        "countryName": "Saudi Arabia",
+        "cityName": "Riyadh",
+        "lat": 24.7136,
+        "lng": 46.6753,
+        "isPublic": true
+      },
+      "interests": [
+        "Renewable Energy",
+        "Future Cities",
+        "Equestrian",
+        "AI Hub"
+      ],
+      "followersCount": 3140,
+      "followingCount": 560,
+      "tipsReceived": 1200,
+      "isOnline": true,
+      "verified": true,
+      "joinedAt": "2026-02-10",
+      "email": "noura_riyadh@earthone.world",
+      "hasCompletedOnboarding": true
+    },
+    {
+      "id": "user_fr_1",
+      "username": "julien_paris",
+      "displayName": "Julien Moreau",
+      "avatar": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
+      "banner": "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=800&auto=format&fit=crop&q=80",
+      "bio": "Philosopher and literary essayist in Paris. Writing about human consciousness in the era of artificial general intelligence.",
+      "location": {
+        "countryCode": "FR",
+        "countryName": "France",
+        "cityName": "Paris",
+        "lat": 48.8566,
+        "lng": 2.3522,
+        "isPublic": true
+      },
+      "interests": [
+        "Philosophy",
+        "Literature",
+        "Cinema",
+        "Gomoku"
+      ],
+      "followersCount": 2050,
+      "followingCount": 390,
+      "tipsReceived": 740,
+      "isOnline": false,
+      "verified": true,
+      "joinedAt": "2026-01-28",
+      "email": "julien_paris@earthone.world",
+      "hasCompletedOnboarding": true
+    },
+    {
+      "id": "user_es_1",
+      "username": "elena_bcn",
+      "displayName": "Elena Gómez",
+      "avatar": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80",
+      "banner": "https://images.unsplash.com/photo-1511527661048-7fe73d85e9a4?w=800&auto=format&fit=crop&q=80",
+      "bio": "Visual artist and generative sculptor in Barcelona. Blending Mediterranean light with computational shaders.",
+      "location": {
+        "countryCode": "ES",
+        "countryName": "Spain",
+        "cityName": "Barcelona",
+        "lat": 41.3879,
+        "lng": 2.1699,
+        "isPublic": true
+      },
+      "interests": [
+        "Digital Art",
+        "Three.js",
+        "Flamenco",
+        "Culinary"
+      ],
+      "followersCount": 1670,
+      "followingCount": 340,
+      "tipsReceived": 590,
+      "isOnline": true,
+      "verified": true,
+      "joinedAt": "2026-02-18",
+      "email": "elena_bcn@earthone.world",
+      "hasCompletedOnboarding": true
+    },
+    {
+      "id": "user_ru_1",
+      "username": "dmitry_spb",
+      "displayName": "Dmitry Volkov (Дмитрий)",
+      "avatar": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80",
+      "banner": "https://images.unsplash.com/photo-1513622470522-26c3c8a854bc?w=800&auto=format&fit=crop&q=80",
+      "bio": "Mathematician and Grandmaster chess coach in Saint Petersburg. Believer in algorithmic clarity and human warmth.",
+      "location": {
+        "countryCode": "RU",
+        "countryName": "Russia",
+        "cityName": "Saint Petersburg",
+        "lat": 59.9343,
+        "lng": 30.3351,
+        "isPublic": true
+      },
+      "interests": [
+        "Chess",
+        "Number Theory",
+        "Classical Music",
+        "Winter Sports"
+      ],
+      "followersCount": 2890,
+      "followingCount": 210,
+      "tipsReceived": 980,
+      "isOnline": true,
+      "verified": true,
+      "joinedAt": "2026-01-10",
+      "email": "dmitry_spb@earthone.world",
+      "hasCompletedOnboarding": true
+    }
+  ],
+  "posts": [
+    {
+      "id": "post_1",
+      "userId": "user_cn_1",
+      "author": {
+        "id": "user_cn_1",
+        "displayName": "Li Wei (李伟)",
+        "username": "li_wei",
+        "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+        "countryCode": "CN",
+        "countryName": "China",
+        "cityName": "Beijing",
+        "verified": true
+      },
+      "content": "Sunset over the Western Hills of Beijing. Watching how traditional dougong wooden brackets inspire our new bio-climatic canopy. Architecture is frozen music across centuries. ⛩️🌅",
+      "mediaUrl": "https://images.unsplash.com/photo-1508804185872-d7badad00f7d?w=1200&auto=format&fit=crop&q=80",
+      "mediaType": "image",
+      "countryCode": "CN",
+      "countryName": "China",
+      "cityName": "Beijing",
+      "category": "culture",
+      "likesCount": 142,
+      "commentsCount": 24,
+      "sharesCount": 18,
+      "liked": false,
+      "saved": false,
+      "createdAt": "2026-11-03T08:15:00Z",
+      "comments": [
+        {
+          "id": "c_1",
+          "postId": "post_1",
+          "userId": "user_fr_1",
+          "author": {
+            "id": "user_fr_1",
+            "displayName": "Julien Moreau",
+            "username": "julien_paris",
+            "avatar": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
+            "countryCode": "FR"
+          },
+          "content": "Magnificent symmetry! In French classical architecture, we pursue ratio; here you balance harmony between heaven and earth.",
+          "createdAt": "2026-11-03T08:32:00Z",
+          "likesCount": 15,
+          "liked": false
+        }
+      ]
+    },
+    {
+      "id": "post_2",
+      "userId": "user_jo_1",
+      "author": {
+        "id": "user_jo_1",
+        "displayName": "Tariq Al-Hashemi (طارق)",
+        "username": "tariq_amman",
+        "avatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+        "countryCode": "JO",
+        "countryName": "Jordan",
+        "cityName": "Amman",
+        "verified": true
+      },
+      "content": "صباح الخير من عمان! (Good morning from Amman!) Morning coffee flavored with cardamom overlooking the Roman Theatre. A greeting of peace to every soul on Earth One today. ☕✨",
+      "mediaUrl": "https://images.unsplash.com/photo-1579606032834-de00b1a0e10b?w=1200&auto=format&fit=crop&q=80",
+      "mediaType": "image",
+      "countryCode": "JO",
+      "countryName": "Jordan",
+      "cityName": "Amman",
+      "category": "life",
+      "likesCount": 289,
+      "commentsCount": 39,
+      "sharesCount": 31,
+      "liked": true,
+      "saved": true,
+      "createdAt": "2026-11-03T07:45:00Z",
+      "comments": [
+        {
+          "id": "c_2",
+          "postId": "post_2",
+          "userId": "user_us_1",
+          "author": {
+            "id": "user_us_1",
+            "displayName": "Sarah Jenkins",
+            "username": "sarah_sky",
+            "avatar": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
+            "countryCode": "US"
+          },
+          "content": "Warmest greetings from California, Tariq! That golden sandstone glowing in the morning light is breathtaking.",
+          "createdAt": "2026-11-03T08:00:00Z",
+          "likesCount": 22,
+          "liked": false
+        }
+      ]
+    },
+    {
+      "id": "post_3",
+      "userId": "user_sa_1",
+      "author": {
+        "id": "user_sa_1",
+        "displayName": "Noura Al-Saud (نورة)",
+        "username": "noura_riyadh",
+        "avatar": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
+        "countryCode": "SA",
+        "countryName": "Saudi Arabia",
+        "cityName": "Riyadh",
+        "verified": true
+      },
+      "content": "Testing our new agrivoltaic farm near Riyadh. Shading date palms with bifacial photovoltaic panels reduces evaporative water loss by 40% while generating clean megawatt-hours. One earth, one future! ☀️🌿",
+      "mediaUrl": "https://images.unsplash.com/photo-1509391365360-2e959784a276?w=1200&auto=format&fit=crop&q=80",
+      "mediaType": "image",
+      "countryCode": "SA",
+      "countryName": "Saudi Arabia",
+      "cityName": "Riyadh",
+      "category": "tech",
+      "likesCount": 412,
+      "commentsCount": 52,
+      "sharesCount": 65,
+      "liked": false,
+      "saved": false,
+      "createdAt": "2026-11-03T06:30:00Z",
+      "comments": []
+    },
+    {
+      "id": "post_4",
+      "userId": "user_ru_1",
+      "author": {
+        "id": "user_ru_1",
+        "displayName": "Dmitry Volkov (Дмитрий)",
+        "username": "dmitry_spb",
+        "avatar": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80",
+        "countryCode": "RU",
+        "countryName": "Russia",
+        "cityName": "Saint Petersburg",
+        "verified": true
+      },
+      "content": "First snowfall over the Fontanka canal in Saint Petersburg. Setting up the chess board with a hot samovar. Who wants an international match on Earth One Game Center today? ♟️❄️",
+      "mediaUrl": "https://images.unsplash.com/photo-1513622470522-26c3c8a854bc?w=1200&auto=format&fit=crop&q=80",
+      "mediaType": "image",
+      "countryCode": "RU",
+      "countryName": "Russia",
+      "cityName": "Saint Petersburg",
+      "category": "life",
+      "likesCount": 198,
+      "commentsCount": 34,
+      "sharesCount": 14,
+      "liked": false,
+      "saved": false,
+      "createdAt": "2026-11-03T05:10:00Z",
+      "comments": []
+    }
+  ],
+  "articles": [
+    {
+      "id": "art_1",
+      "authorId": "user_fr_1",
+      "author": {
+        "displayName": "Julien Moreau",
+        "username": "julien_paris",
+        "avatar": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
+        "countryCode": "FR"
+      },
+      "title": "The Digital Agora: Reclaiming Human Connection Across Continents",
+      "summary": "Why spatial awareness and cultural translation are replacing the algorithmic echo chambers of the first internet era.",
+      "content": "When we look at the night sky or view our blue planet from orbit, no political borders are visible. The lights of cities shine as interconnected constellations of human warmth, work, and wonder.\n\nThe first era of social media flattened human geography into 2D algorithmic engagement traps. In contrast, Earth One reconstructs the digital space around authentic planetary presence: you can feel the physical distance, celebrate cultural specificity, and instantly dissolve language barriers through artificial intelligence.\n\nWhen an architect in Beijing speaks with a researcher in California and an entrepreneur in Riyadh, true mutual civilizational enrichment occurs. Let us cultivate this shared planet together.",
+      "coverUrl": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1000&auto=format&fit=crop&q=80",
+      "category": "Philosophy & Society",
+      "readTime": "6 min read",
+      "clapsCount": 428,
+      "clapped": false,
+      "tipsTotal": 240,
+      "createdAt": "2026-11-01T14:00:00Z"
+    },
+    {
+      "id": "art_2",
+      "authorId": "user_cn_1",
+      "author": {
+        "displayName": "Li Wei (李伟)",
+        "username": "li_wei",
+        "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+        "countryCode": "CN"
+      },
+      "title": "Modern Timber & Biophilic Architecture for 21st-Century Megacities",
+      "summary": "A deep dive into cross-laminated timber, passive airflow, and centuries of Chinese mortise-and-tenon craftsmanship.",
+      "content": "For thousands of years, ancient master carpenters built pagodas that survived 8.0-magnitude earthquakes without a single metal nail. The secret lies in flexible mortise and tenon joints that dissipate seismic kinetic energy.\n\nToday, combining this ancestral heritage with satellite parametric modeling and engineered timber allows us to build carbon-negative skyscrapers. By returning to biological materials, our cities transform from concrete canyons into breathing vertical forests.",
+      "coverUrl": "https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1000&auto=format&fit=crop&q=80",
+      "category": "Architecture & Nature",
+      "readTime": "8 min read",
+      "clapsCount": 312,
+      "clapped": true,
+      "tipsTotal": 180,
+      "createdAt": "2026-10-28T10:30:00Z"
+    }
+  ],
+  "videos": [
+    {
+      "id": "vid_1",
+      "creatorId": "user_jo_1",
+      "creator": {
+        "displayName": "Tariq Al-Hashemi",
+        "username": "tariq_amman",
+        "avatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+        "countryCode": "JO"
+      },
+      "title": "Wadi Rum at Twilight: The Martian Wonder of Jordan",
+      "description": "Cinematic journey through the towering sandstone monoliths and Bedouin night fires under millions of stars.",
+      "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+      "thumbnailUrl": "https://images.unsplash.com/photo-1547234935-80c7145ec969?w=800&auto=format&fit=crop&q=80",
+      "duration": "03:45",
+      "viewsCount": 14200,
+      "likesCount": 1850,
+      "liked": false,
+      "category": "Travel & Nature",
+      "countryName": "Jordan",
+      "createdAt": "2026-10-30T16:00:00Z"
+    },
+    {
+      "id": "vid_2",
+      "creatorId": "user_es_1",
+      "creator": {
+        "displayName": "Elena Gómez",
+        "username": "elena_bcn",
+        "avatar": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80",
+        "countryCode": "ES"
+      },
+      "title": "Sculpting Light: Interactive Three.js Geometries in Barcelona",
+      "description": "Behind the scenes at my studio exhibition exploring generative mathematics and glass reflection.",
+      "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+      "thumbnailUrl": "https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&auto=format&fit=crop&q=80",
+      "duration": "04:12",
+      "viewsCount": 9800,
+      "likesCount": 1120,
+      "liked": true,
+      "category": "Creative Arts",
+      "countryName": "Spain",
+      "createdAt": "2026-11-02T12:00:00Z"
+    }
+  ],
+  "communities": [
+    {
+      "id": "comm_1",
+      "name": "Global Polyglots & Language Exchange",
+      "slug": "language-exchange",
+      "description": "Learn Chinese, English, Arabic, Spanish, French, and Russian with native speakers powered by AI translation.",
+      "category": "Education & Linguistics",
+      "membersCount": 4280,
+      "icon": "🗣️",
+      "banner": "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&auto=format&fit=crop&q=80",
+      "isJoined": true,
+      "leaderName": "Li Wei & Julien"
+    },
+    {
+      "id": "comm_2",
+      "name": "Earth Architecture & Regenerative Cities",
+      "slug": "earth-architecture",
+      "description": "Architects, engineers, and urbanists collaborating on climate-positive structures and bio-materials.",
+      "category": "Architecture & Design",
+      "membersCount": 3120,
+      "icon": "🏛️",
+      "banner": "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&auto=format&fit=crop&q=80",
+      "isJoined": false,
+      "leaderName": "Li Wei"
+    },
+    {
+      "id": "comm_3",
+      "name": "Cosmology, Space & Astrophysics",
+      "slug": "astrophysics-space",
+      "description": "Discussing planetary science, space telescopes, quantum gravity, and stellar nucleosynthesis.",
+      "category": "Science & Cosmos",
+      "membersCount": 5690,
+      "icon": "🌌",
+      "banner": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80",
+      "isJoined": true,
+      "leaderName": "Sarah Jenkins"
+    },
+    {
+      "id": "comm_4",
+      "name": "World Intellectual Games (Chess & Gomoku)",
+      "slug": "intellectual-games",
+      "description": "Daily tactics, classical masters analysis, international friendly tournaments, and strategy guides.",
+      "category": "Games & Strategy",
+      "membersCount": 2940,
+      "icon": "♟️",
+      "banner": "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=800&auto=format&fit=crop&q=80",
+      "isJoined": false,
+      "leaderName": "Dmitry Volkov"
+    }
+  ],
+  "conversations": [
+    {
+      "id": "conv_global",
+      "type": "global_channel",
+      "name": "Earth One Global Lounge (全球交流大厅)",
+      "participantIds": [
+        "current_user",
+        "user_cn_1",
+        "user_us_1",
+        "user_jo_1",
+        "user_sa_1",
+        "user_fr_1",
+        "user_es_1",
+        "user_ru_1"
+      ],
+      "lastMessage": "Welcome to Earth One! Connect with citizens worldwide.",
+      "lastMessageTime": "Just now"
+    },
+    {
+      "id": "conv_direct_tariq",
+      "type": "direct",
+      "name": "Tariq Al-Hashemi",
+      "countryCode": "JO",
+      "participantIds": [
+        "current_user",
+        "user_jo_1"
+      ],
+      "otherUser": {
+        "id": "user_jo_1",
+        "username": "tariq_amman",
+        "displayName": "Tariq Al-Hashemi (طارق)",
+        "avatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+        "banner": "https://images.unsplash.com/photo-1579606032834-de00b1a0e10b?w=800&auto=format&fit=crop&q=80",
+        "bio": "Heritage storyteller and photographer in Amman. Connecting ancient Petra & modern Levant innovation.",
+        "location": {
+          "countryCode": "JO",
+          "countryName": "Jordan",
+          "cityName": "Amman",
+          "lat": 31.9454,
+          "lng": 35.9284,
+          "isPublic": true
+        },
+        "interests": [
+          "Levantine History",
+          "Photography",
+          "Arabic Calligraphy",
+          "Poetry"
+        ],
+        "followersCount": 1890,
+        "followingCount": 280,
+        "tipsReceived": 620,
+        "isOnline": true,
+        "verified": true,
+        "joinedAt": "2026-01-20",
+        "email": "tariq_amman@earthone.world",
+        "hasCompletedOnboarding": true
+      },
+      "lastMessage": "Ahlan wa sahlan! Welcome from Amman.",
+      "lastMessageTime": "10m ago",
+      "isOnline": true
+    },
+    {
+      "id": "conv_direct_sarah",
+      "type": "direct",
+      "name": "Sarah Jenkins",
+      "countryCode": "US",
+      "participantIds": [
+        "current_user",
+        "user_us_1"
+      ],
+      "otherUser": {
+        "id": "user_us_1",
+        "username": "sarah_sky",
+        "displayName": "Sarah Jenkins",
+        "avatar": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
+        "banner": "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=800&auto=format&fit=crop&q=80",
+        "bio": "Astrophysics PhD researcher at Berkeley. Star gazer, digital nomad, and amateur cellist.",
+        "location": {
+          "countryCode": "US",
+          "countryName": "United States",
+          "cityName": "San Francisco",
+          "lat": 37.7749,
+          "lng": -122.4194,
+          "isPublic": true
+        },
+        "interests": [
+          "Astronomy",
+          "Space Tech",
+          "Music",
+          "Deep Learning"
+        ],
+        "followersCount": 2310,
+        "followingCount": 420,
+        "tipsReceived": 880,
+        "isOnline": true,
+        "verified": true,
+        "joinedAt": "2026-02-01",
+        "email": "sarah_sky@earthone.world",
+        "hasCompletedOnboarding": true
+      },
+      "lastMessage": "Did you see the latest James Webb spectra analysis?",
+      "lastMessageTime": "1h ago",
+      "isOnline": true
+    },
+    {
+      "id": "conv_direct_dmitry",
+      "type": "direct",
+      "name": "Dmitry Volkov",
+      "countryCode": "RU",
+      "participantIds": [
+        "current_user",
+        "user_ru_1"
+      ],
+      "otherUser": {
+        "id": "user_ru_1",
+        "username": "dmitry_spb",
+        "displayName": "Dmitry Volkov (Дмитрий)",
+        "avatar": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80",
+        "banner": "https://images.unsplash.com/photo-1513622470522-26c3c8a854bc?w=800&auto=format&fit=crop&q=80",
+        "bio": "Mathematician and Grandmaster chess coach in Saint Petersburg. Believer in algorithmic clarity and human warmth.",
+        "location": {
+          "countryCode": "RU",
+          "countryName": "Russia",
+          "cityName": "Saint Petersburg",
+          "lat": 59.9343,
+          "lng": 30.3351,
+          "isPublic": true
+        },
+        "interests": [
+          "Chess",
+          "Number Theory",
+          "Classical Music",
+          "Winter Sports"
+        ],
+        "followersCount": 2890,
+        "followingCount": 210,
+        "tipsReceived": 980,
+        "isOnline": true,
+        "verified": true,
+        "joinedAt": "2026-01-10",
+        "email": "dmitry_spb@earthone.world",
+        "hasCompletedOnboarding": true
+      },
+      "lastMessage": "Whenever you are ready for a chess game, invite me!",
+      "lastMessageTime": "2h ago",
+      "isOnline": true
+    }
+  ],
+  "messages": [
+    {
+      "id": "msg_1",
+      "conversationId": "conv_global",
+      "senderId": "user_cn_1",
+      "senderName": "Li Wei (李伟)",
+      "senderAvatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+      "senderCountry": "CN",
+      "content": "大家好！欢迎来到 EARTH ONE。从北京向全世界问好！",
+      "originalLanguage": "zh",
+      "translatedContent": "Hello everyone! Welcome to EARTH ONE. Greetings to the whole world from Beijing!",
+      "translatedTo": "en",
+      "createdAt": "2026-11-03T08:00:00Z"
+    },
+    {
+      "id": "msg_2",
+      "conversationId": "conv_global",
+      "senderId": "user_jo_1",
+      "senderName": "Tariq Al-Hashemi (طارق)",
+      "senderAvatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+      "senderCountry": "JO",
+      "content": "أهلاً وسهلاً بالجميع من الأردن! يوم جميل يجمعنا معاً.",
+      "originalLanguage": "ar",
+      "translatedContent": "Welcome everyone from Jordan! A beautiful day bringing us all together.",
+      "translatedTo": "en",
+      "createdAt": "2026-11-03T08:05:00Z"
+    },
+    {
+      "id": "msg_3",
+      "conversationId": "conv_global",
+      "senderId": "user_us_1",
+      "senderName": "Sarah Jenkins",
+      "senderAvatar": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
+      "senderCountry": "US",
+      "content": "Spinning the 3D globe and seeing light nodes pulse in real time is mesmerizing! Greetings from San Francisco!",
+      "originalLanguage": "en",
+      "translatedContent": "旋转3D地球并看到光节点实时脉动真是太迷人了！旧金山向大家问好！",
+      "translatedTo": "zh",
+      "createdAt": "2026-11-03T08:12:00Z"
+    },
+    {
+      "id": "msg_4",
+      "conversationId": "conv_direct_tariq",
+      "senderId": "user_jo_1",
+      "senderName": "Tariq Al-Hashemi",
+      "senderAvatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+      "senderCountry": "JO",
+      "content": "Ahlan wa sahlan! Welcome to Earth One, my friend. Let me know if you want to explore the history of Amman and Petra.",
+      "originalLanguage": "en",
+      "createdAt": "2026-11-03T08:30:00Z"
+    }
+  ],
+  "gameRooms": [
+    {
+      "id": "game_1",
+      "gameSlug": "chess",
+      "title": "Friendly Grandmaster Blitz",
+      "host": {
+        "id": "user_ru_1",
+        "displayName": "Dmitry Volkov",
+        "countryCode": "RU",
+        "avatar": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80"
+      },
+      "status": "waiting",
+      "currentTurn": "white",
+      "boardState": {}
+    },
+    {
+      "id": "game_2",
+      "gameSlug": "gomoku",
+      "title": "Eastern Five-in-a-Row Arena",
+      "host": {
+        "id": "user_cn_1",
+        "displayName": "Li Wei",
+        "countryCode": "CN",
+        "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
+      },
+      "status": "waiting",
+      "currentTurn": "black",
+      "boardState": {}
+    }
+  ],
+  "ads": [
+    {
+      "id": "ad_1",
+      "brand": "Orbital Horizon Space Exploration",
+      "tagline": "See Earth from 400km above. The Overview Effect changes everything.",
+      "description": "Next-generation orbital scientific missions open for global research collaboration and civilian observers.",
+      "ctaText": "Explore Mission",
+      "ctaUrl": "#",
+      "imageUrl": "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?w=600&auto=format&fit=crop&q=80",
+      "category": "global",
+      "impressions": 12400,
+      "clicks": 890
+    },
+    {
+      "id": "ad_2",
+      "brand": "Silk & Desert Cultural Fellowship",
+      "tagline": "Bridging heritage craftsmanship with artificial intelligence.",
+      "description": "A global endowment supporting traditional artisans, calligraphers, and digital sculptors worldwide.",
+      "ctaText": "Apply for Grant",
+      "ctaUrl": "#",
+      "imageUrl": "https://images.unsplash.com/photo-1586724237569-f3d0c1dee8c6?w=600&auto=format&fit=crop&q=80",
+      "category": "culture",
+      "impressions": 9800,
+      "clicks": 720
+    }
+  ],
+  "countries": [
+    {
+      "code": "CN",
+      "name": "China",
+      "nativeName": "中国",
+      "lat": 35.8617,
+      "lng": 104.1954,
+      "userCount": 3840,
+      "onlineCount": 620,
+      "postsCount": 12400
+    },
+    {
+      "code": "US",
+      "name": "United States",
+      "nativeName": "United States",
+      "lat": 37.0902,
+      "lng": -95.7129,
+      "userCount": 3120,
+      "onlineCount": 540,
+      "postsCount": 10890
+    },
+    {
+      "code": "JO",
+      "name": "Jordan",
+      "nativeName": "الأردن",
+      "lat": 30.5852,
+      "lng": 36.2384,
+      "userCount": 940,
+      "onlineCount": 180,
+      "postsCount": 3200
+    },
+    {
+      "code": "SA",
+      "name": "Saudi Arabia",
+      "nativeName": "المملكة العربية السعودية",
+      "lat": 23.8859,
+      "lng": 45.0792,
+      "userCount": 1450,
+      "onlineCount": 290,
+      "postsCount": 4720
+    },
+    {
+      "code": "FR",
+      "name": "France",
+      "nativeName": "France",
+      "lat": 46.2276,
+      "lng": 2.2137,
+      "userCount": 1820,
+      "onlineCount": 310,
+      "postsCount": 6100
+    },
+    {
+      "code": "ES",
+      "name": "Spain",
+      "nativeName": "España",
+      "lat": 40.4637,
+      "lng": -3.7492,
+      "userCount": 1540,
+      "onlineCount": 260,
+      "postsCount": 4950
+    },
+    {
+      "code": "RU",
+      "name": "Russia",
+      "nativeName": "Россия",
+      "lat": 61.524,
+      "lng": 105.3188,
+      "userCount": 2100,
+      "onlineCount": 380,
+      "postsCount": 7420
+    },
+    {
+      "code": "JP",
+      "name": "Japan",
+      "nativeName": "日本",
+      "lat": 36.2048,
+      "lng": 138.2529,
+      "userCount": 2400,
+      "onlineCount": 420,
+      "postsCount": 8900
+    },
+    {
+      "code": "BR",
+      "name": "Brazil",
+      "nativeName": "Brasil",
+      "lat": -14.235,
+      "lng": -51.9253,
+      "userCount": 1780,
+      "onlineCount": 330,
+      "postsCount": 5600
+    },
+    {
+      "code": "EG",
+      "name": "Egypt",
+      "nativeName": "مصر",
+      "lat": 26.8206,
+      "lng": 30.8025,
+      "userCount": 1120,
+      "onlineCount": 210,
+      "postsCount": 3890
+    },
+    {
+      "code": "GB",
+      "name": "United Kingdom",
+      "nativeName": "United Kingdom",
+      "lat": 55.3781,
+      "lng": -3.436,
+      "userCount": 1980,
+      "onlineCount": 360,
+      "postsCount": 6840
+    },
+    {
+      "code": "DE",
+      "name": "Germany",
+      "nativeName": "Deutschland",
+      "lat": 51.1657,
+      "lng": 10.4515,
+      "userCount": 1890,
+      "onlineCount": 340,
+      "postsCount": 6410
+    }
+  ],
+  "books": [
+    {
+      "id": "wikisource_classic_孙子兵法",
+      "title": "孙子兵法",
+      "author": "维基文库 · 公版文献",
+      "category": "philosophy",
+      "language": "zh",
+      "source": "Open Access",
+      "description": "中国公版经典《孙子兵法》全文，源自中文维基文库。",
+      "readProgress": 0,
+      "chapters": [
+        {
+          "id": "ch2",
+          "title": "始計第一",
+          "content": ""
+        },
+        {
+          "id": "ch3",
+          "title": "作戰第二",
+          "content": ""
+        },
+        {
+          "id": "ch4",
+          "title": "謀攻第三",
+          "content": ""
+        },
+        {
+          "id": "ch5",
+          "title": "軍形第四",
+          "content": ""
+        },
+        {
+          "id": "ch6",
+          "title": "兵勢第五",
+          "content": ""
+        },
+        {
+          "id": "ch7",
+          "title": "虛實第六",
+          "content": ""
+        },
+        {
+          "id": "ch8",
+          "title": "軍爭第七",
+          "content": ""
+        },
+        {
+          "id": "ch9",
+          "title": "九變第八",
+          "content": ""
+        },
+        {
+          "id": "ch10",
+          "title": "行軍第九",
+          "content": ""
+        },
+        {
+          "id": "ch11",
+          "title": "地形第十",
+          "content": ""
+        },
+        {
+          "id": "ch12",
+          "title": "九地第十一",
+          "content": ""
+        },
+        {
+          "id": "ch13",
+          "title": "火攻第十二",
+          "content": ""
+        },
+        {
+          "id": "ch14",
+          "title": "用間第十三",
+          "content": ""
+        },
+        {
+          "id": "ch15",
+          "title": "答話",
+          "content": ""
+        }
+      ],
+      "copyrightStatus": "public_domain",
+      "formatType": "text",
+      "textAvailability": "full_text",
+      "sourceUrl": "https://zh.wikisource.org/wiki/%E5%AD%AB%E5%AD%90%E5%85%B5%E6%B3%95"
+    },
+    {
+      "id": "book_republic",
+      "title": "The Republic (理想国)",
+      "author": "Plato (柏拉图)",
+      "category": "philosophy",
+      "language": "en",
+      "year": "c. 375 BC",
+      "source": "Project Gutenberg",
+      "coverImage": "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80",
+      "description": "Socratic dialogue concerning justice, the order and character of the just city-state, and the just human being.",
+      "readProgress": 12,
+      "textAvailability": "excerpt",
+      "chapters": [
+        {
+          "id": "ch1",
+          "title": "Book I: The Nature of Justice",
+          "content": ""
+        },
+        {
+          "id": "ch2",
+          "title": "Book VII: The Allegory of the Cave",
+          "content": ""
+        }
+      ]
+    },
+    {
+      "id": "book_copernicus",
+      "title": "De Revolutionibus Orbium Coelestium (天体运行论)",
+      "author": "Nicolaus Copernicus (尼古拉·哥白尼)",
+      "category": "science",
+      "language": "en",
+      "year": "1543",
+      "source": "Internet Archive",
+      "coverImage": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&auto=format&fit=crop&q=80",
+      "description": "The seminal work on the heliocentric theory that placed the Sun at the rest center of the universe.",
+      "readProgress": 5,
+      "textAvailability": "excerpt",
+      "chapters": [
+        {
+          "id": "ch1",
+          "title": "Book I: The Universe is Spherical and Heliocentric",
+          "content": ""
+        }
+      ]
+    },
+    {
+      "id": "book_pride",
+      "title": "Pride and Prejudice (傲慢与偏见)",
+      "author": "Jane Austen (简·奥斯汀)",
+      "category": "literature",
+      "language": "en",
+      "year": "1813",
+      "source": "Project Gutenberg",
+      "coverImage": "https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=600&auto=format&fit=crop&q=80",
+      "description": "A classic romantic novel examining character, class, marriage, and human morality in 19th-century England.",
+      "readProgress": 24,
+      "textAvailability": "excerpt",
+      "chapters": [
+        {
+          "id": "ch1",
+          "title": "Chapter 1: A Truth Universally Acknowledged",
+          "content": ""
+        }
+      ]
+    },
+    {
+      "id": "book_daodejing",
+      "title": "Dao De Jing (道德经)",
+      "author": "Laozi (老子)",
+      "category": "philosophy",
+      "language": "zh",
+      "year": "c. 4th Century BC",
+      "source": "Open Access",
+      "coverImage": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=600&auto=format&fit=crop&q=80",
+      "description": "Ancient Chinese classic text on the Way and Virtue, foundational to philosophical Taoism.",
+      "readProgress": 45,
+      "textAvailability": "excerpt",
+      "chapters": [
+        {
+          "id": "ch1",
+          "title": "第一章：道可道，非常道",
+          "content": ""
+        },
+        {
+          "id": "ch2",
+          "title": "第八章：上善若水",
+          "content": ""
+        }
+      ]
+    }
+  ],
+  "bookAnnotations": [],
+  "bookShelf": [],
+  "crawlerTasks": [
+    {
+      "id": "task_nasa",
+      "name": "NASA Earth Observatory 卫星环境快报",
+      "targetDomain": "earthobservatory.nasa.gov",
+      "startUrl": "https://earthobservatory.nasa.gov",
+      "maxPages": 30,
+      "status": "idle",
+      "lastRunAt": "2026-11-12T20:19:24.228Z",
+      "pagesCrawled": 12,
+      "respectsRobotsTxt": true
+    },
+    {
+      "id": "task_gutenberg",
+      "name": "Project Gutenberg 开放文献索引",
+      "targetDomain": "gutenberg.org",
+      "startUrl": "https://www.gutenberg.org",
+      "maxPages": 50,
+      "status": "idle",
+      "lastRunAt": "2026-11-12T12:19:24.229Z",
+      "pagesCrawled": 28,
+      "respectsRobotsTxt": true
+    }
+  ],
+  "crawledPages": [
+    {
+      "id": "page_nasa_01",
+      "taskId": "task_nasa",
+      "url": "https://earthobservatory.nasa.gov/images/151240/chlorophyll-bloom-in-north-atlantic",
+      "title": "North Atlantic Phytoplankton Spring Bloom Measured from Space",
+      "author": "NASA Ocean Biology Processing Group",
+      "cleanContent": "Every spring, the waters of the North Atlantic erupt into a massive bloom of microscopic plant-like organisms called phytoplankton. Satellite sensors like MODIS aboard Aqua capture chlorophyll concentrations exceeding 10 mg/m³, providing crucial biological carbon sequestration for Earth's global biosphere.",
+      "crawledAt": "2026-11-13T00:19:24.229Z",
+      "status": "pending_review"
+    }
+  ],
+  "browserBookmarks": [
+    {
+      "id": "bm_1",
+      "title": "NASA Earth Observatory",
+      "url": "https://earthobservatory.nasa.gov",
+      "category": "Science",
+      "createdAt": "2026-11-13T00:19:24.230Z"
+    },
+    {
+      "id": "bm_2",
+      "title": "Project Gutenberg",
+      "url": "https://www.gutenberg.org",
+      "category": "Library",
+      "createdAt": "2026-11-13T00:19:24.230Z"
+    },
+    {
+      "id": "bm_3",
+      "title": "arXiv Astrophysics",
+      "url": "https://arxiv.org/archive/astro-ph",
+      "category": "Research",
+      "createdAt": "2026-11-13T00:19:24.230Z"
+    },
+    {
+      "id": "bm_4",
+      "title": "Stanford Encyclopedia of Philosophy",
+      "url": "https://plato.stanford.edu",
+      "category": "Philosophy",
+      "createdAt": "2026-11-13T00:19:24.230Z"
+    }
+  ],
+  "savedArticles": [],
+  "friendRequests": [],
+  "blockedBy": {},
+  "securityAudit": [],
+  "loginFailures": {},
+  "notifications": [],
+  "notificationPrefs": {},
+  "privacySettings": {},
+  "calls": [],
+  "nextEarthSequence": 100001,
+  "earthIdMap": {},
+  "currentUser": {
+    "id": "current_user",
+    "username": "cosmic_explorer",
+    "displayName": "Global Citizen (世界公民)",
+    "avatar": "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+    "banner": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80",
+    "bio": "One Earth, One Humanity. Passionate about cross-cultural bridges, languages, and future technology.",
+    "location": {
+      "countryCode": "CN",
+      "countryName": "China",
+      "cityName": "Shanghai",
+      "lat": 31.2304,
+      "lng": 121.4737,
+      "isPublic": true
+    },
+    "interests": [
+      "Global Peace",
+      "Languages",
+      "AI",
+      "Astronomy",
+      "Chess"
+    ],
+    "followersCount": 156,
+    "followingCount": 42,
+    "tipsReceived": 60,
+    "isOnline": true,
+    "verified": true,
+    "joinedAt": "2026-11-01"
+  },
+  "accounts": {
+    "user_cn_1": {
+      "userId": "user_cn_1",
+      "email": "li_wei@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "li_wei@earthone.world": {
+      "userId": "user_cn_1",
+      "email": "li_wei@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "li_wei": {
+      "userId": "user_cn_1",
+      "email": "li_wei@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "user_us_1": {
+      "userId": "user_us_1",
+      "email": "sarah_sky@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "sarah_sky@earthone.world": {
+      "userId": "user_us_1",
+      "email": "sarah_sky@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "sarah_sky": {
+      "userId": "user_us_1",
+      "email": "sarah_sky@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "user_jo_1": {
+      "userId": "user_jo_1",
+      "email": "tariq_amman@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "tariq_amman@earthone.world": {
+      "userId": "user_jo_1",
+      "email": "tariq_amman@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "tariq_amman": {
+      "userId": "user_jo_1",
+      "email": "tariq_amman@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "user_sa_1": {
+      "userId": "user_sa_1",
+      "email": "noura_riyadh@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "noura_riyadh@earthone.world": {
+      "userId": "user_sa_1",
+      "email": "noura_riyadh@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "noura_riyadh": {
+      "userId": "user_sa_1",
+      "email": "noura_riyadh@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "user_fr_1": {
+      "userId": "user_fr_1",
+      "email": "julien_paris@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "julien_paris@earthone.world": {
+      "userId": "user_fr_1",
+      "email": "julien_paris@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "julien_paris": {
+      "userId": "user_fr_1",
+      "email": "julien_paris@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "user_es_1": {
+      "userId": "user_es_1",
+      "email": "elena_bcn@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "elena_bcn@earthone.world": {
+      "userId": "user_es_1",
+      "email": "elena_bcn@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "elena_bcn": {
+      "userId": "user_es_1",
+      "email": "elena_bcn@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "user_ru_1": {
+      "userId": "user_ru_1",
+      "email": "dmitry_spb@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "dmitry_spb@earthone.world": {
+      "userId": "user_ru_1",
+      "email": "dmitry_spb@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    },
+    "dmitry_spb": {
+      "userId": "user_ru_1",
+      "email": "dmitry_spb@earthone.world",
+      "passwordHash": "f53e0435fcc289ba032d7128656465c0ba5806b996e5fd85d040dfe99d3b3318",
+      "salt": "earth_one_salt_2026"
+    }
+  },
+  "sessions": {},
+  "lastSavedAt": "2026-11-13T00:19:25.200Z"
+}
