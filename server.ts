@@ -2947,12 +2947,16 @@ app.get('/api/bilibili/search', async (req, res) => {
 });
 
 app.post('/api/music/crawl', async (req, res) => {
-  const { sourceDomain, keyword } = req.body;
+  const { sourceDomain, keyword } = req.body || {};
   try {
     const result = await musicStore.crawlExternalMusic(sourceDomain, keyword);
-    res.json({ success: true, ...result });
+    // success reflects whether data was actually crawled+saved; errors explain failures/limitations
+    if (!result.success) {
+      return res.status(200).json({ ...result, success: false });
+    }
+    res.json({ ...result, success: true });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message || 'Music crawl failed' });
+    res.status(500).json({ success: false, error: err?.message || 'Music crawl failed', errors: [err?.message || 'Music crawl failed'], crawledCount: 0, savedCount: 0, newTracks: [] });
   }
 });
 
