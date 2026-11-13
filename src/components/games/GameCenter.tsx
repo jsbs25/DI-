@@ -197,84 +197,43 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
     setShowTriviaResult(false);
   };
 
+  const gameTabs = [
+    { id: 'flight' as const, icon: Rocket, label: lang === 'zh' ? '3D 太空穿梭' : 'Space Flight' },
+    { id: 'gravity' as const, icon: Orbit, label: lang === 'zh' ? '天体引力沙盒' : 'Gravity Sandbox' },
+    { id: 'chess' as const, icon: Swords, label: lang === 'zh' ? '星际国际象棋' : 'Space Chess' },
+    { id: 'gomoku' as const, icon: Sparkles, label: t.playGomoku },
+    { id: 'trivia' as const, icon: Globe, label: t.globalTrivia }
+  ];
+
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8 space-y-8 animate-in fade-in">
-      {/* Hero Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
+    <div className="mx-auto w-full max-w-7xl space-y-8 px-4 py-8 sm:px-6">
+      <div className="flex flex-col justify-between gap-4 border-b border-[var(--color-one-border)] pb-6 sm:flex-row sm:items-center">
         <div>
-          <div className="flex items-center space-x-2 text-cyan-400 text-xs font-mono mb-1">
-            <Gamepad2 className="w-4 h-4" />
-            <span>GLOBAL INTELLECTUAL & COSMIC ARENA</span>
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-1 text-[11px] font-medium text-[var(--color-one-text-muted)]">
+            <Gamepad2 className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
+            <span>ONE GAMES · {lang === 'zh' ? '互动与探索' : 'Play & Explore'}</span>
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-100">
-            {t.gameTab}
-          </h1>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            Explore 3D space flight, cosmic gravitational simulations, grandmaster chess, five-in-a-row, and planetary trivia.
+          <h1 className="text-3xl font-semibold tracking-tight text-white">{t.gameTab}</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-one-text-muted)]">
+            {lang === 'zh' ? '体验 3D 太空穿梭、引力沙盒、国际象棋、五子棋与全球知识问答等真实互动模块。' : 'Explore 3D space flight, gravity sandbox, chess, gomoku, and global trivia experiences.'}
           </p>
         </div>
 
-        {/* Game Switcher Tabs */}
-        <div className="flex flex-wrap items-center gap-1.5 p-1.5 rounded-2xl bg-slate-900 border border-slate-800">
-          <button
-            onClick={() => setActiveGame('flight')}
-            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-all ${
-              activeGame === 'flight'
-                ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Rocket className="w-3.5 h-3.5" />
-            <span>3D 太空穿梭</span>
-          </button>
-
-          <button
-            onClick={() => setActiveGame('gravity')}
-            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-all ${
-              activeGame === 'gravity'
-                ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Orbit className="w-3.5 h-3.5" />
-            <span>天体引力沙盒</span>
-          </button>
-
-          <button
-            onClick={() => setActiveGame('chess')}
-            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-all ${
-              activeGame === 'chess'
-                ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Swords className="w-3.5 h-3.5" />
-            <span>星际国际象棋</span>
-          </button>
-
-          <button
-            onClick={() => setActiveGame('gomoku')}
-            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-all ${
-              activeGame === 'gomoku'
-                ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{t.playGomoku}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveGame('trivia')}
-            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-medium cursor-pointer transition-all ${
-              activeGame === 'trivia'
-                ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Globe className="w-3.5 h-3.5" />
-            <span>{t.globalTrivia}</span>
-          </button>
+        <div className="flex flex-wrap items-center gap-1.5 rounded-[22px] border border-[var(--color-one-border)] bg-white/[0.03] p-1.5 shadow-[var(--shadow-one-sm)]">
+          {gameTabs.map(tab => {
+            const Icon = tab.icon;
+            const active = activeGame === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveGame(tab.id)}
+                className={`inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition ${active ? 'bg-[var(--color-one-accent)] text-[#071018] shadow-[var(--shadow-one-sm)]' : 'text-[var(--color-one-text-muted)] hover:bg-white/[0.05] hover:text-white'}`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -291,31 +250,31 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
 
       {/* GAME 4: GOMOKU */}
       {activeGame === 'gomoku' && (
-        <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-2xl flex flex-col items-center space-y-6">
-          <div className="w-full flex items-center justify-between flex-wrap gap-3">
+        <div className="flex flex-col items-center space-y-6 rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-6 shadow-[var(--shadow-one-sm)]">
+          <div className="flex w-full flex-wrap items-center justify-between gap-3">
             <div className="flex items-center space-x-3">
-              <span className="text-sm font-bold text-slate-100">{t.playGomoku}</span>
-              <span className="text-xs text-slate-400">13x13 Classical Grid</span>
+              <span className="text-sm font-semibold text-white">{t.playGomoku}</span>
+              <span className="text-xs text-[var(--color-one-text-muted)]">13x13 Classical Grid</span>
             </div>
 
             {/* Scoreboard */}
-            <div className="flex items-center space-x-4 bg-slate-950 px-4 py-2 rounded-2xl border border-slate-800 text-xs">
+            <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] px-4 py-2 text-xs">
               <div className="flex items-center space-x-2">
                 <div className="w-3.5 h-3.5 rounded-full bg-slate-900 border border-slate-500 shadow-sm" />
-                <span className="text-slate-200 font-medium">You (Black):</span>
-                <span className="font-mono font-bold text-cyan-400">{score.player}</span>
+                <span className="font-medium text-[var(--color-one-text)]">You (Black):</span>
+                <span className="font-mono font-semibold text-[var(--color-one-accent-soft)]">{score.player}</span>
               </div>
               <span className="text-slate-600">|</span>
               <div className="flex items-center space-x-2">
                 <div className="w-3.5 h-3.5 rounded-full bg-white border border-slate-300 shadow-sm" />
-                <span className="text-slate-200 font-medium">Global AI (White):</span>
-                <span className="font-mono font-bold text-cyan-400">{score.ai}</span>
+                <span className="font-medium text-[var(--color-one-text)]">Global AI (White):</span>
+                <span className="font-mono font-semibold text-[var(--color-one-accent-soft)]">{score.ai}</span>
               </div>
             </div>
 
             <button
               onClick={resetGomoku}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium cursor-pointer transition-colors"
+              className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Board</span>
@@ -325,7 +284,7 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
           {/* Turn / Winner announcement */}
           <div className="text-xs">
             {winner ? (
-              <div className="px-4 py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/50 text-cyan-300 font-bold flex items-center space-x-2">
+              <div className="flex items-center gap-2 rounded-xl border border-[rgba(78,161,255,0.35)] bg-[rgba(78,161,255,0.12)] px-4 py-2 font-semibold text-[var(--color-one-accent-soft)]">
                 <Trophy className="w-4 h-4 text-amber-400" />
                 <span>
                   {winner === 'black' ? 'Victory! You achieved five in a row!' : 'AI Bot connected 5 stones. Play again!'}
@@ -339,7 +298,7 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
           </div>
 
           {/* Interactive Gomoku Board */}
-          <div className="p-3 sm:p-5 rounded-2xl bg-[#bf8d5e]/90 border-4 border-[#8c5a2c] shadow-2xl overflow-x-auto max-w-full">
+          <div className="max-w-full overflow-x-auto rounded-2xl border-4 border-[#8c5a2c] bg-[#bf8d5e]/90 p-3 shadow-[var(--shadow-one-md)] sm:p-5">
             <div
               className="grid gap-0"
               style={{
@@ -372,23 +331,23 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
 
       {/* GAME 5: GLOBAL TRIVIA QUIZ */}
       {activeGame === 'trivia' && (
-        <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-2xl max-w-2xl mx-auto space-y-6">
+        <div className="mx-auto w-full max-w-2xl space-y-6 rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-6 shadow-[var(--shadow-one-sm)] sm:p-8">
           {!showTriviaResult ? (
             <div className="space-y-6">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-xs">
-                <span className="font-mono text-cyan-400">
+              <div className="flex items-center justify-between border-b border-[var(--color-one-border)] pb-3 text-xs">
+                <span className="font-mono text-[var(--color-one-accent-soft)]">
                   Question {currentTriviaIndex + 1} of {triviaQuestions.length}
                 </span>
-                <span className="font-mono font-bold text-amber-400">
+                <span className="font-mono font-semibold text-amber-300">
                   Score: {triviaScore} pts
                 </span>
               </div>
 
               <div className="space-y-2">
-                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                <span className="rounded bg-white/[0.06] px-2 py-0.5 font-mono text-[10px] uppercase text-[var(--color-one-text-muted)]">
                   Topic: {triviaQuestions[currentTriviaIndex].country}
                 </span>
-                <h3 className="text-base sm:text-lg font-bold text-slate-100 leading-snug">
+                <h3 className="text-base font-semibold leading-snug text-white sm:text-lg">
                   {triviaQuestions[currentTriviaIndex].q}
                 </h3>
               </div>
@@ -400,10 +359,10 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
                   const isCorrect = idx === triviaQuestions[currentTriviaIndex].answer;
                   const showFeedback = selectedTriviaOption !== null;
 
-                  let btnStyle = 'bg-slate-950/70 border-slate-800 text-slate-200 hover:border-slate-700';
+                  let btnStyle = 'border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] text-[var(--color-one-text)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05]';
                   if (showFeedback) {
-                    if (isCorrect) btnStyle = 'bg-emerald-950/80 border-emerald-500 text-emerald-200';
-                    else if (isChosen) btnStyle = 'bg-rose-950/80 border-rose-500 text-rose-200';
+                    if (isCorrect) btnStyle = 'border-emerald-500/35 bg-emerald-500/10 text-emerald-100';
+                    else if (isChosen) btnStyle = 'border-rose-500/35 bg-rose-500/10 text-rose-100';
                   }
 
                   return (
@@ -426,7 +385,7 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
                 <div className="flex justify-end pt-2">
                   <button
                     onClick={nextTrivia}
-                    className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-md cursor-pointer"
+                    className="inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-[var(--color-one-accent)] px-5 py-2 text-xs font-semibold text-[#071018] shadow-[var(--shadow-one-sm)] hover:brightness-110"
                   >
                     {currentTriviaIndex < triviaQuestions.length - 1 ? 'Next Question →' : 'See Final Score'}
                   </button>
@@ -436,13 +395,13 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
           ) : (
             <div className="text-center py-8 space-y-4">
               <Trophy className="w-14 h-14 text-amber-400 mx-auto" />
-              <h2 className="text-2xl font-bold text-slate-100">Quiz Completed!</h2>
-              <p className="text-sm text-slate-300">
+              <h2 className="text-2xl font-semibold text-white">Quiz Completed!</h2>
+              <p className="text-sm text-[var(--color-one-text-muted)]">
                 You earned <span className="font-mono font-bold text-cyan-400 text-lg">{triviaScore}</span> points across planetary trivia!
               </p>
               <button
                 onClick={resetTrivia}
-                className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs cursor-pointer shadow-lg"
+                className="inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-[var(--color-one-accent)] px-5 py-2.5 text-xs font-semibold text-[#071018] shadow-[var(--shadow-one-sm)] hover:brightness-110"
               >
                 Play Again
               </button>
