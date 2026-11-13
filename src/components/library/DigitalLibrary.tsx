@@ -815,27 +815,22 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const readerLineHeight = { lineHeight: lineHeight };
 
   return (
-    <div className="flex-1 flex flex-col bg-[#030713] text-slate-100 min-h-[calc(100vh-4rem)]">
-      {/* ===================================================================== */}
-      {/* WORLD LIBRARY TOP BRAND BAR                                          */}
-      {/* ===================================================================== */}
-      <header className="sticky top-16 z-30 bg-[#030713]/90 backdrop-blur-xl border-b border-slate-800/70">
-        <div className="max-w-7xl mx-auto px-4 sm:px-8 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-xl bg-amber-950/80 border border-amber-500/40 text-amber-400">
-              <Library className="w-5 h-5" />
+    <div className="flex min-h-[calc(100vh-4rem)] flex-1 flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+      {/* ONE LIBRARY header */}
+      <header className="sticky top-[58px] z-30 border-b border-[var(--color-one-border)] bg-[color:var(--color-one-bg-elevated)]/88 backdrop-blur-xl md:top-16">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:px-8 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[var(--color-one-border-strong)] bg-white/[0.03] text-[var(--color-one-accent)]">
+              <Library className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-base sm:text-lg font-bold text-white tracking-wide leading-tight">
-                WORLD LIBRARY
-              </h1>
-              <p className="text-[11px] text-slate-400 tracking-wide">
-                A World of Knowledge · One Library for Humanity
-              </p>
+              <p className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-one-text-dim)]">ONE LIBRARY</p>
+              <h1 className="text-base font-semibold leading-tight tracking-tight text-white sm:text-lg">A World of Knowledge</h1>
+              <p className="text-[11px] text-[var(--color-one-text-muted)]">One library for humanity · 真实馆藏、开放检索与阅读</p>
             </div>
           </div>
 
-          <nav className="grid grid-cols-3 gap-2 md:hidden" aria-label="WORLD LIBRARY 导航">
+          <nav className="grid grid-cols-3 gap-2 md:hidden" aria-label="ONE LIBRARY 导航">
             {[
               { id: 'home', label: '首页' },
               { id: 'shelf', label: '我的书架' },
@@ -846,16 +841,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 type="button"
                 onClick={() => setView(n.id as any)}
                 aria-current={view === n.id ? 'page' : undefined}
-                className={`min-h-11 px-3 rounded-lg transition-colors cursor-pointer ${
-                  view === n.id ? 'bg-amber-600 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                }`}
+                className={`min-h-11 rounded-xl px-3 text-sm font-medium transition-colors cursor-pointer ${view === n.id ? 'bg-[var(--color-one-accent)] text-[#071018]' : 'border border-[var(--color-one-border)] bg-white/[0.02] text-[var(--color-one-text-muted)] hover:bg-white/[0.05] hover:text-white'}`}
               >
                 {n.label}
               </button>
             ))}
           </nav>
 
-          <nav className="hidden md:flex items-center space-x-1 text-xs font-medium">
+          <nav className="hidden items-center gap-1 rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] p-1 text-xs font-medium md:flex">
             {[
               { id: 'home', label: '首页' },
               { id: 'shelf', label: '我的书架' },
@@ -864,9 +857,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               <button
                 key={n.id}
                 onClick={() => setView(n.id as any)}
-                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
-                  view === n.id ? 'bg-amber-600 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                }`}
+                className={`rounded-xl px-3 py-2 transition-colors cursor-pointer ${view === n.id ? 'bg-white/[0.08] text-white' : 'text-[var(--color-one-text-muted)] hover:bg-white/[0.04] hover:text-white'}`}
               >
                 {n.label}
               </button>
@@ -877,9 +868,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
       {readerNotice && (
         <div role="status" className="mx-auto mt-3 w-full max-w-7xl px-4 sm:px-8">
-          <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-700/40 bg-amber-950/30 p-3 text-xs text-amber-200">
-            <p className="leading-relaxed"><span className="font-semibold">无法在站内完整阅读：</span>{readerNotice}</p>
-            <button type="button" onClick={()=>setReaderNotice(null)} className="shrink-0 rounded p-1 text-amber-300 hover:bg-amber-900/40"><X className="w-4 h-4" /></button>
+          <div className="flex items-start justify-between gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/[0.08] p-3 text-xs text-amber-100/90">
+            <p className="leading-relaxed"><span className="font-semibold text-amber-200">无法在站内完整阅读：</span>{readerNotice}</p>
+            <button type="button" onClick={()=>setReaderNotice(null)} className="shrink-0 rounded-lg p-1.5 text-amber-200 hover:bg-white/10"><X className="h-4 w-4" /></button>
           </div>
         </div>
       )}
@@ -888,24 +879,24 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {/* ===================================================================== */}
       {view === 'home' && (
         <div className="max-w-7xl mx-auto w-full px-4 sm:px-8 py-8 space-y-12">
-          {/* Hero with Sun Planetary Knowledge Branding */}
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center py-6">
+          {/* ONE LIBRARY hero */}
+          <section className="grid grid-cols-1 items-center gap-8 py-4 lg:grid-cols-[1.2fr_0.8fr] lg:gap-12">
             <div>
-              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium mb-3">
-                <Sun className="w-3.5 h-3.5 text-amber-400 animate-spin-slow" />
-                <span>太阳生态 · 全球开源数字图书馆搜索引擎</span>
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-1 text-xs font-medium text-[var(--color-one-text-muted)]">
+                <Sparkles className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
+                <span>开放馆藏 · 真实检索 · 诚实阅读能力</span>
               </div>
-              <h2 className="text-3xl sm:text-5xl font-serif font-bold text-white leading-tight">
+              <h2 className="max-w-2xl text-3xl font-semibold leading-[1.08] tracking-tight text-white sm:text-5xl">
                 一个世界，无数思想。
               </h2>
-              <p className="mt-4 text-sm sm:text-base text-slate-300 max-w-xl leading-relaxed">
-                汇聚 Project Gutenberg、Open Library、Internet Archive、arXiv 与汉籍公版典籍。直接在此检索数百万开源图书与全本文献。
+              <p className="mt-4 max-w-xl text-sm leading-relaxed text-[var(--color-one-text-muted)] sm:text-base">
+                在 ONE LIBRARY 中检索与阅读真实的公开图书与文献资源。汇聚 Project Gutenberg、Open Library、Internet Archive、arXiv 等来源，保留原始入口、权利标注与可用阅读方式。
               </p>
 
               {/* Global search */}
-              <div className="mt-6">
+              <div className="mt-7 rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-3 shadow-[var(--shadow-one-sm)] backdrop-blur-sm sm:p-4">
                 <div className="relative">
-                  <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-amber-400" />
+                  <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
                   <label htmlFor="world-library-search" className="sr-only">搜索全球馆藏</label>
                   <input
                     id="world-library-search"
@@ -913,37 +904,36 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleUnifiedSearch()}
-                    placeholder="输入书名、作者、哲学、科学、文学或 ISBN..."
+                    placeholder="输入书名、作者、主题、ISBN 或 DOI..."
                     aria-describedby="world-library-search-help"
-                    className="w-full bg-slate-900/90 border border-amber-500/40 focus:border-amber-400 rounded-2xl pl-11 pr-[13rem] py-3.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none transition-all shadow-inner"
+                    className="w-full rounded-2xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] py-3.5 pl-11 pr-4 text-sm text-white placeholder:text-[var(--color-one-text-dim)] focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)] sm:pr-[13.5rem]"
                   />
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                  <div className="mt-2 flex items-center gap-2 sm:absolute sm:right-2 sm:top-1/2 sm:mt-0 sm:-translate-y-1/2">
                     <button
                       type="button"
                       onClick={() => handleCrawlBooks()}
                       disabled={isCrawling || !searchQuery.trim()}
-                      title="像土星影视一样多源并行检索开放图书（Gutenberg/Open Library/Internet Archive/Wikisource）"
-                      className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-sky-500/40 bg-sky-950/40 hover:bg-sky-900/50 disabled:opacity-40 text-sky-100 text-xs font-semibold transition-all cursor-pointer"
+                      title="多源并行检索开放图书（Gutenberg/Open Library/Internet Archive/Wikisource）"
+                      className="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.06] hover:text-white disabled:opacity-40 sm:flex-none"
                     >
-                      <Compass className="w-3.5 h-3.5" />
+                      <Compass className="h-3.5 w-3.5" />
                       <span>{isCrawling ? '爬取中...' : '开放爬取'}</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleUnifiedSearch()}
                       disabled={(isSearchingOnline && isCrawling) || !searchQuery.trim()}
-                      className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-xs font-semibold transition-all cursor-pointer shadow-md"
+                      className="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-[#071018] transition hover:brightness-110 disabled:opacity-40 sm:flex-none"
                     >
-                      <Search className="w-3.5 h-3.5" />
+                      <Search className="h-3.5 w-3.5" />
                       <span>{isSearchingOnline || isCrawling ? '检索中...' : '搜索'}</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Popular open-source search chips */}
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-amber-400" /> 推荐检索:
+                  <span className="flex items-center gap-1 text-[11px] text-[var(--color-one-text-dim)]">
+                    <Sparkles className="h-3 w-3 text-[var(--color-one-accent)]" /> 推荐检索
                   </span>
                   {[
                     { label: '道德经', q: '道德经' },
@@ -957,49 +947,37 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       key={chip.label}
                       type="button"
                       onClick={() => handleUnifiedSearch(chip.q)}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-amber-950/70 text-slate-300 hover:text-amber-200 border border-slate-700 hover:border-amber-600/50 text-[11px] transition-all cursor-pointer"
+                      className="cursor-pointer rounded-lg border border-[var(--color-one-border)] bg-white/[0.02] px-2.5 py-1.5 text-[11px] text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white"
                     >
                       {chip.label}
                     </button>
                   ))}
                 </div>
 
-                <div className="mt-3 flex items-center space-x-2 text-[11px] text-slate-500">
-                  <Globe className="w-3.5 h-3.5 text-amber-500/70" />
-                  <span id="world-library-search-help">直连 Project Gutenberg、Open Library、Internet Archive、arXiv 全球开源文献库</span>
+                <div className="mt-3 flex items-center gap-2 text-[11px] text-[var(--color-one-text-dim)]">
+                  <Globe className="h-3.5 w-3.5 text-[var(--color-one-accent)]/80" />
+                  <span id="world-library-search-help">直连公开/开放来源；结果保留来源、许可与可用性信息</span>
                 </div>
               </div>
                 <div className="mt-4">
-                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">
                     国际数字图书馆官方入口 · {searchQuery.trim() ? '将当前关键词带到来源网站' : '可直接访问或搜索'}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    <a
-                      href={`https://openlibrary.org/search?q=${encodeURIComponent(searchQuery.trim())}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label="在 Open Library 官方网站搜索当前关键词（新标签页）"
-                      className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-                    >
+                    <a href={`https://openlibrary.org/search?q=${encodeURIComponent(searchQuery.trim())}`} target="_blank" rel="noopener noreferrer" aria-label="在 Open Library 官方网站搜索当前关键词（新标签页）" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">
                       Open Library <ExternalLink className="h-3 w-3" aria-hidden="true" />
                     </a>
-                    <a
-                      href={`https://www.europeana.eu/en/search?query=${encodeURIComponent(searchQuery.trim())}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label="在 Europeana 官方网站搜索当前关键词（新标签页）"
-                      className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-                    >
+                    <a href={`https://www.europeana.eu/en/search?query=${encodeURIComponent(searchQuery.trim())}`} target="_blank" rel="noopener noreferrer" aria-label="在 Europeana 官方网站搜索当前关键词（新标签页）" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">
                       Europeana <ExternalLink className="h-3 w-3" aria-hidden="true" />
                     </a>
                   </div>
                 </div>
                 <div className="mt-4">
-                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">阿拉伯语馆藏官方入口 · 仅跳转，不复制全文</p>
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">阿拉伯语馆藏官方入口 · 仅跳转，不复制全文</p>
                   <div className="flex flex-wrap gap-2">
-                    <a href="https://waqfeya.net/books" target="_blank" rel="noopener noreferrer" title="Waqfeya 官方扫描书目录" className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Waqfeya</a>
-                    <a href="https://shamela.ws/search" target="_blank" rel="noopener noreferrer" title="Shamela 官方站内搜索" className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Shamela</a>
-                    <a href="https://www.qdl.qa/en/search/site/" target="_blank" rel="noopener noreferrer" title="Qatar Digital Library 官方档案搜索" className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-2 text-[11px] text-slate-300 hover:border-amber-500/60 hover:text-white">Qatar Digital Library</a>
+                    <a href="https://waqfeya.net/books" target="_blank" rel="noopener noreferrer" title="Waqfeya 官方扫描书目录" className="inline-flex min-h-11 items-center rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">Waqfeya</a>
+                    <a href="https://shamela.ws/search" target="_blank" rel="noopener noreferrer" title="Shamela 官方站内搜索" className="inline-flex min-h-11 items-center rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">Shamela</a>
+                    <a href="https://www.qdl.qa/en/search/site/" target="_blank" rel="noopener noreferrer" title="Qatar Digital Library 官方档案搜索" className="inline-flex min-h-11 items-center rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">Qatar Digital Library</a>
                   </div>
                 </div>
               </div>
@@ -1010,22 +988,23 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 type="button"
                 onClick={() => openBookDetail(featuredBook)}
                 aria-label={`查看《${featuredBook.title}》详情`}
-                className="flex justify-center lg:justify-end cursor-pointer group text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 rounded-2xl"
+                className="group flex cursor-pointer justify-center rounded-3xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-one-accent)] lg:justify-end"
               >
-                <div className="relative">
-                  <div className="w-48 sm:w-56 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl shadow-amber-900/30 border border-slate-700/50 group-hover:scale-[1.02] transition-transform duration-300">
+                <div className="relative w-full max-w-sm rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-4 sm:p-5">
+                  <p className="mb-3 text-[11px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">馆藏精选</p>
+                  <div className="mx-auto aspect-[2/3] w-44 overflow-hidden rounded-2xl border border-white/10 shadow-[var(--shadow-one-md)] transition duration-300 group-hover:scale-[1.02] sm:w-52">
                     <img
                       src={featuredBook.coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80'}
                       alt={featuredBook.title}
-                      className="w-full h-full object-cover"
+                      className="h-full w-full object-cover"
                     />
                   </div>
-                  <div className="mt-3">
-                    <p className="text-xs font-semibold text-amber-400">编辑精选</p>
-                    <h3 className="text-sm font-serif font-bold text-white mt-1 group-hover:text-amber-300 transition-colors">
+                  <div className="mt-4">
+                    <h3 className="text-base font-semibold leading-snug text-white transition-colors group-hover:text-[var(--color-one-accent-soft)]">
                       {featuredBook.title}
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">{featuredBook.author}</p>
+                    <p className="mt-1 text-sm text-[var(--color-one-text-muted)]">{featuredBook.author}</p>
+                    {featuredBook.description && <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--color-one-text-dim)]">{featuredBook.description}</p>}
                   </div>
                 </div>
               </button>
@@ -1034,48 +1013,48 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
           {/* Saturn-style open book crawl results */}
           {(crawlResults.length > 0 || isCrawling) && (
-            <section aria-labelledby="library-crawl-results-title" aria-busy={isCrawling} className="p-5 rounded-2xl bg-slate-900/50 border border-sky-600/30">
-              <h3 id="library-crawl-results-title" className="text-sm font-semibold text-sky-300 mb-2">开放图书爬取/多源检索结果</h3>
-              <p className="text-[11px] text-slate-400 mb-3">并行检索 Gutenberg、Open Library、Internet Archive、Wikisource 等公开/开放来源；仅展示元数据与官方链接，不抓取受版权保护内容。</p>
+            <section aria-labelledby="library-crawl-results-title" aria-busy={isCrawling} className="rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-5 shadow-[var(--shadow-one-sm)]">
+              <h3 id="library-crawl-results-title" className="mb-1 text-sm font-semibold text-white">开放图书爬取 / 多源检索结果</h3>
+              <p className="mb-3 text-[11px] leading-relaxed text-[var(--color-one-text-muted)]">并行检索 Gutenberg、Open Library、Internet Archive、Wikisource 等公开/开放来源；仅展示元数据与官方链接，不抓取受版权保护内容。</p>
               {crawlSources.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-3">
+                <div className="mb-3 flex flex-wrap gap-1.5">
                   {crawlSources.map((src: any) => (
-                    <span key={src.source} className={`rounded-md border px-2 py-1 text-[10px] ${src.ok ? 'text-emerald-300 border-emerald-800/70' : 'text-slate-400 border-slate-700'}`}>
+                    <span key={src.source} className={`rounded-md border px-2 py-1 text-[10px] ${src.ok ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : 'border-[var(--color-one-border)] text-[var(--color-one-text-dim)]'}`}>
                       {src.source}: {src.ok ? `可用 ${src.count}` : '失败/超时'}
                     </span>
                   ))}
                 </div>
               )}
               {isCrawling ? (
-                <div role="status" className="text-xs text-slate-400 py-4 text-center">正在并行爬取/检索开放图书来源...</div>
+                <div role="status" className="py-6 text-center text-xs text-[var(--color-one-text-muted)]">正在并行爬取/检索开放图书来源...</div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {crawlResults.map((r: any) => {
                     const embedInfo = getBookEmbedUrl(r);
                     return (
-                    <div key={r.id} className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-sky-500/50 transition-all">
-                      {r.coverImage && <img src={r.coverImage} alt={r.title} className="w-12 h-16 object-cover rounded-lg shrink-0" />}
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-xs font-bold text-white line-clamp-1">{r.title}</h4>
-                        <p className="text-[11px] text-sky-300 mb-1">{r.author} · {(r.language || '').toUpperCase()} · {r.source}{r.year ? ` · ${r.year}` : ''}</p>
-                        <p className="text-[11px] text-slate-400 line-clamp-2 mb-2">{r.description}</p>
+                    <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-3 transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.04]">
+                      {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
+                      <div className="min-w-0 flex-1">
+                        <h4 className="line-clamp-1 text-xs font-semibold text-white">{r.title}</h4>
+                        <p className="mb-1 text-[11px] text-[var(--color-one-accent-soft)]">{r.author} · {(r.language || '').toUpperCase()} · {r.source}{r.year ? ` · ${r.year}` : ''}</p>
+                        <p className="mb-2 line-clamp-2 text-[11px] text-[var(--color-one-text-muted)]">{r.description}</p>
                         <div className="flex flex-wrap items-center gap-2">
                           {r.canImport && (
-                            <button type="button" onClick={() => handleIngestCrawledBook(r)} disabled={ingestingId === r.id} className="min-h-11 inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer transition-all">
-                              {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="w-3 h-3" /><span>保存并诵读</span></>}
+                            <button type="button" onClick={() => handleIngestCrawledBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-3 py-2 text-[11px] font-semibold text-[#071018] transition hover:brightness-110 disabled:opacity-50">
+                              {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="h-3 w-3" /><span>保存并诵读</span></>}
                             </button>
                           )}
                           {(r.canReadOnline || embedInfo || getBookPdfUrl(r) || r.sourceUrl) && (
-                            <button type="button" onClick={() => { const pdf=getBookPdfUrl(r); if(pdf){setPdfReader({url:pdf,title:r.title,sourceUrl:r.sourceUrl}); return;} if(embedInfo){setWebReader({url:embedInfo.url,title:r.title,sourceUrl:r.sourceUrl,label:embedInfo.label}); return;} setReaderNotice(getOnlineReaderReason(r)); if(r.sourceUrl) window.open(r.sourceUrl,'_blank','noopener,noreferrer'); }} className="min-h-11 inline-flex items-center space-x-1 px-3 py-2 rounded-lg bg-emerald-700/80 hover:bg-emerald-600 text-white text-[11px] font-semibold transition-colors">
-                              <BookOpen className="w-3 h-3" /><span>在线阅读</span>
+                            <button type="button" onClick={() => { const pdf=getBookPdfUrl(r); if(pdf){setPdfReader({url:pdf,title:r.title,sourceUrl:r.sourceUrl}); return;} if(embedInfo){setWebReader({url:embedInfo.url,title:r.title,sourceUrl:r.sourceUrl,label:embedInfo.label}); return;} setReaderNotice(getOnlineReaderReason(r)); if(r.sourceUrl) window.open(r.sourceUrl,'_blank','noopener,noreferrer'); }} className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/15">
+                              <BookOpen className="h-3 w-3" /><span>在线阅读</span>
                             </button>
                           )}
                           {r.canReadOnline === false && !embedInfo && !getBookPdfUrl(r) && (
-                            <span className="text-[10px] text-amber-300/90">无法站内阅读：{r.rightsNote || r.availability || '来源受限/需官方页面'}</span>
+                            <span className="text-[10px] text-amber-200/90">无法站内阅读：{r.rightsNote || r.availability || '来源受限/需官方页面'}</span>
                           )}
                           {r.sourceUrl && (
-                            <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center space-x-1 px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors">
-                              <ExternalLink className="w-3 h-3" /><span>官方来源</span>
+                            <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-[var(--color-one-border)] px-3 py-2 text-[11px] font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white">
+                              <ExternalLink className="h-3 w-3" /><span>官方来源</span>
                             </a>
                           )}
                         </div>
@@ -1090,8 +1069,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
           {/* Online search results */}
           {(onlineResults.length > 0 || isSearchingOnline || ingestError) && (
-            <section aria-labelledby="library-online-results-title" aria-busy={isSearchingOnline} className="p-5 rounded-2xl bg-slate-900/50 border border-amber-600/30">
-              <h3 id="library-online-results-title" className="text-sm font-semibold text-amber-300 mb-3">全球检索结果</h3>
+            <section aria-labelledby="library-online-results-title" aria-busy={isSearchingOnline} className="rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-5 shadow-[var(--shadow-one-sm)]">
+              <h3 id="library-online-results-title" className="mb-3 text-sm font-semibold text-white">全球检索结果</h3>
               {onlineSourceStatuses.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {onlineSourceStatuses.map(source => {
@@ -1107,159 +1086,90 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               )}
               {ingestError && <div role="status" aria-live="polite" className="text-xs text-red-400 mb-3">{ingestError}</div>}
               {!isSearchingOnline && onlineResults.length > 0 && (
-                <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:items-end">
-                  <label className="block text-[11px] text-slate-400">
+                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end xl:grid-cols-4">
+                  <label className="block text-[11px] text-[var(--color-one-text-muted)]">
                     <span className="mb-1 block">按来源筛选</span>
-                    <select
-                      aria-label="按来源筛选全球检索结果"
-                      value={onlineSourceFilter}
-                      onChange={event => setOnlineSourceFilter(event.target.value)}
-                      className="min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                    >
+                    <select aria-label="按来源筛选全球检索结果" value={onlineSourceFilter} onChange={event => setOnlineSourceFilter(event.target.value)} className="min-h-11 w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] px-3 py-2 text-xs text-white focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)]">
                       <option value="all">全部来源（{onlineResults.length}）</option>
-                      {onlineFilterOptions.sources.map(option => (
-                        <option key={option.source} value={option.source}>{option.name}（{option.count}）</option>
-                      ))}
+                      {onlineFilterOptions.sources.map(option => (<option key={option.source} value={option.source}>{option.name}（{option.count}）</option>))}
                     </select>
                   </label>
-                  <label className="block text-[11px] text-slate-400">
+                  <label className="block text-[11px] text-[var(--color-one-text-muted)]">
                     <span className="mb-1 block">按语言筛选</span>
-                    <select
-                      aria-label="按语言筛选全球检索结果"
-                      value={onlineLanguageFilter}
-                      onChange={event => setOnlineLanguageFilter(event.target.value)}
-                      className="min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                    >
+                    <select aria-label="按语言筛选全球检索结果" value={onlineLanguageFilter} onChange={event => setOnlineLanguageFilter(event.target.value)} className="min-h-11 w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] px-3 py-2 text-xs text-white focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)]">
                       <option value="all">全部语言（{onlineResults.length}）</option>
-                      {onlineFilterOptions.languages.map(option => (
-                        <option key={option.value} value={option.value}>{option.label}（{option.count}）</option>
-                      ))}
+                      {onlineFilterOptions.languages.map(option => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
                     </select>
                   </label>
-                  <label className="block text-[11px] text-slate-400">
+                  <label className="block text-[11px] text-[var(--color-one-text-muted)]">
                     <span className="mb-1 block">按年份筛选</span>
-                    <select
-                      aria-label="按年份筛选全球检索结果"
-                      value={onlineYearFilter}
-                      onChange={event => setOnlineYearFilter(event.target.value)}
-                      className="min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                    >
+                    <select aria-label="按年份筛选全球检索结果" value={onlineYearFilter} onChange={event => setOnlineYearFilter(event.target.value)} className="min-h-11 w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] px-3 py-2 text-xs text-white focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)]">
                       <option value="all">全部年份（{onlineResults.length}）</option>
-                      {onlineFilterOptions.years.map(option => (
-                        <option key={option.value} value={option.value}>{option.label}（{option.count}）</option>
-                      ))}
+                      {onlineFilterOptions.years.map(option => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
                     </select>
                   </label>
-                  <label className="block text-[11px] text-slate-400">
+                  <label className="block text-[11px] text-[var(--color-one-text-muted)]">
                     <span className="mb-1 block">按来源标注的权利状态筛选</span>
-                    <select
-                      aria-label="按权利状态筛选全球检索结果"
-                      value={onlineRightsFilter}
-                      onChange={event => setOnlineRightsFilter(event.target.value)}
-                      className="min-h-11 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                    >
+                    <select aria-label="按权利状态筛选全球检索结果" value={onlineRightsFilter} onChange={event => setOnlineRightsFilter(event.target.value)} className="min-h-11 w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] px-3 py-2 text-xs text-white focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)]">
                       <option value="all">全部权利状态</option>
-                      {onlineFilterOptions.rights.map(option => (
-                        <option key={option.value} value={option.value}>{LIBRARY_RIGHTS_FILTER_LABELS[option.value]}（{option.count}）</option>
-                      ))}
+                      {onlineFilterOptions.rights.map(option => (<option key={option.value} value={option.value}>{LIBRARY_RIGHTS_FILTER_LABELS[option.value]}（{option.count}）</option>))}
                     </select>
                   </label>
-                  <p role="status" aria-live="polite" className="text-[10px] text-slate-500 sm:col-span-2 xl:col-span-4">
+                  <p role="status" aria-live="polite" className="text-[10px] text-[var(--color-one-text-dim)] sm:col-span-2 xl:col-span-4">
                     显示 {visibleOnlineResults.length} / {onlineResults.length} 条；仅按返回记录的来源、语言、年份和权利分类筛选，未标注的语言/年份及未知权利仍保留为未知。
                   </p>
                 </div>
               )}
               {!isSearchingOnline && onlineResults.length > 0 && visibleOnlineResults.length === 0 && (
-                <div role="status" className="rounded-lg border border-slate-800 px-4 py-6 text-center text-xs text-slate-400">
+                <div role="status" className="rounded-2xl border border-dashed border-[var(--color-one-border-strong)] px-4 py-8 text-center text-xs text-[var(--color-one-text-muted)]">
                   没有符合当前筛选条件的结果，请尝试其他来源、语言、年份或权利状态。
                 </div>
               )}
               {isSearchingOnline ? (
-                <div role="status" aria-live="polite" className="text-xs text-slate-400 py-4 text-center">正在查询全球图书馆与开放资源...</div>
+                <div role="status" aria-live="polite" className="py-6 text-center text-xs text-[var(--color-one-text-muted)]">正在查询全球图书馆与开放资源...</div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {visibleOnlineResults.map(r => {
                     const canImport = r.canImport === true;
                     const sourceName = r.sourceName || ({
-                      openlibrary: 'Open Library',
-                      gutenberg: 'Project Gutenberg',
-                      googlebooks: 'Google Books',
-                      europeana: 'Europeana',
-                      archive: 'Internet Archive',
-                      wikisource: 'Wikisource',
-                      ar_wikisource: '阿拉伯语维基文库',
-                      openalex: 'OpenAlex',
-                      crossref: 'Crossref',
-                      arxiv: 'arXiv',
-                      europepmc: 'Europe PMC',
-                      pmc: 'PubMed Central',
-                      pubmed: 'PubMed',
-                      shamela: 'Shamela'
+                      openlibrary: 'Open Library', gutenberg: 'Project Gutenberg', googlebooks: 'Google Books', europeana: 'Europeana', archive: 'Internet Archive', wikisource: 'Wikisource', ar_wikisource: '阿拉伯语维基文库', openalex: 'OpenAlex', crossref: 'Crossref', arxiv: 'arXiv', europepmc: 'Europe PMC', pmc: 'PubMed Central', pubmed: 'PubMed', shamela: 'Shamela'
                     } as Record<string, string>)[r.source] || r.source;
                     const resourceType = typeof r.metadata?.resourceType === 'string' ? r.metadata.resourceType : undefined;
                     const identifierLabel = r.doi ? `DOI ${r.doi}` : r.isbn?.length ? `ISBN ${r.isbn[0]}` : r.identifier ? `ID ${r.identifier}` : undefined;
-                    const availabilityLabel = ({
-                      'official-source-only': '仅官方来源页面',
-                      'licensed-thumbnail-and-official-source': '官方页面；许可缩略图',
-                      'provider-preview': '提供方预览',
-                      'provider-full-view': '提供方页面阅读',
-                      'open-access-link': '开放获取入口（官方来源）',
-                      'provider-download': '提供方访问入口',
-                      'metadata-only': '仅元数据',
-                      'access-unknown': '访问状态未知',
-                      'verify-official-opds': '需官方目录核验'
-                    } as Record<string, string>)[r.availability || ''] || '官方来源访问';
+                    const availabilityLabel = ({ 'official-source-only': '仅官方来源页面', 'licensed-thumbnail-and-official-source': '官方页面；许可缩略图', 'provider-preview': '提供方预览', 'provider-full-view': '提供方页面阅读', 'open-access-link': '开放获取入口（官方来源）', 'provider-download': '提供方访问入口', 'metadata-only': '仅元数据', 'access-unknown': '访问状态未知', 'verify-official-opds': '需官方目录核验' } as Record<string, string>)[r.availability || ''] || '官方来源访问';
                     const downloadLabel = (r.downloadLinks?.length || 0) > 0 ? `来源链接 ${r.downloadLinks!.length} 个（遵循许可）` : '无已核验下载入口';
-                    const rightsLabel = ({
-                      PUBLIC_DOMAIN: '公共领域（依来源声明）',
-                      OPEN_LICENSE: '开放许可',
-                      OPEN_ACCESS: '开放获取',
-                      BORROWABLE: '需经来源借阅',
-                      PREVIEW_ONLY: '仅预览',
-                      METADATA_ONLY: '仅元数据',
-                      COPYRIGHT_RESTRICTED: '受版权限制',
-                      UNKNOWN: '权利状态未知'
-                    } as Record<string, string>)[r.rightsClassification || 'UNKNOWN'] || '权利状态未知';
+                    const rightsLabel = ({ PUBLIC_DOMAIN: '公共领域（依来源声明）', OPEN_LICENSE: '开放许可', OPEN_ACCESS: '开放获取', BORROWABLE: '需经来源借阅', PREVIEW_ONLY: '仅预览', METADATA_ONLY: '仅元数据', COPYRIGHT_RESTRICTED: '受版权限制', UNKNOWN: '权利状态未知' } as Record<string, string>)[r.rightsClassification || 'UNKNOWN'] || '权利状态未知';
                     const licenseUrl = safeHttpsUrl(r.licenseUrl);
                     const providerFullTextUrl = safeHttpsUrl(r.providerFullTextUrl);
                     return (
-                      <div key={r.id} className="flex items-start space-x-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-amber-500/50 transition-all">
-                        {r.coverImage && (
-                          <img src={r.coverImage} alt={r.title} className="w-12 h-16 object-cover rounded-lg shrink-0" />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-xs font-bold text-white line-clamp-1">{r.title}</h4>
-                          <p className="text-[11px] text-amber-400 mb-1">
-                            {r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}
-                          </p>
-                          <p className="text-[11px] text-slate-400 line-clamp-2 mb-1">{r.description}</p>
-                          {(resourceType || identifierLabel) && <p className="text-[10px] text-slate-500 mb-1">{resourceType ? `类型：${resourceType}` : ''}{resourceType && identifierLabel ? ' · ' : ''}{identifierLabel || ''}</p>}
-                          <p className="text-[10px] text-slate-500 mb-1">访问：{availabilityLabel} · 下载：{downloadLabel}</p>
-                          <p className="text-[10px] text-slate-500 mb-2">权利状态：{rightsLabel}{r.rightsNote ? ` · ${r.rightsNote}` : ''}</p>
+                      <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-3 transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.04]">
+                        {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
+                        <div className="min-w-0 flex-1">
+                          <h4 className="line-clamp-1 text-xs font-semibold text-white">{r.title}</h4>
+                          <p className="mb-1 text-[11px] text-[var(--color-one-accent-soft)]">{r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}</p>
+                          <p className="mb-1 line-clamp-2 text-[11px] text-[var(--color-one-text-muted)]">{r.description}</p>
+                          {(resourceType || identifierLabel) && <p className="mb-1 text-[10px] text-[var(--color-one-text-dim)]">{resourceType ? `类型：${resourceType}` : ''}{resourceType && identifierLabel ? ' · ' : ''}{identifierLabel || ''}</p>}
+                          <p className="mb-1 text-[10px] text-[var(--color-one-text-dim)]">访问：{availabilityLabel} · 下载：{downloadLabel}</p>
+                          <p className="mb-2 text-[10px] text-[var(--color-one-text-dim)]">权利状态：{rightsLabel}{r.rightsNote ? ` · ${r.rightsNote}` : ''}</p>
                           <div className="flex flex-wrap items-center gap-2">
                             {canImport && (
-                              <button
-                                type="button"
-                                onClick={() => handleIngestBook(r)}
-                                disabled={ingestingId === r.id}
-                                className="min-h-11 inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer transition-all"
-                              >
-                                {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="w-3 h-3" /><span>保存并诵读</span></>}
+                              <button type="button" onClick={() => handleIngestBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-3 py-2 text-[11px] font-semibold text-[#071018] transition hover:brightness-110 disabled:opacity-50">
+                                {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="h-3 w-3" /><span>保存并诵读</span></>}
                               </button>
                             )}
                             {r.sourceUrl && (
-                              <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center space-x-1 px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-colors">
-                                <ExternalLink className="w-3 h-3" /><span>在来源平台查看</span>
+                              <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-[var(--color-one-border)] px-3 py-2 text-[11px] font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white">
+                                <ExternalLink className="h-3 w-3" /><span>在来源平台查看</span>
                               </a>
                             )}
                             {providerFullTextUrl && providerFullTextUrl !== r.sourceUrl && (
-                              <a href={providerFullTextUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center space-x-1 px-3 py-2 rounded-lg border border-emerald-800/70 text-emerald-200 hover:text-white text-[11px] font-semibold transition-colors">
-                                <ExternalLink className="w-3 h-3" /><span>打开官方全文</span>
+                              <a href={providerFullTextUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/15">
+                                <ExternalLink className="h-3 w-3" /><span>打开官方全文</span>
                               </a>
                             )}
                             {licenseUrl && (
-                              <a href={licenseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center space-x-1 px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold transition-all">
-                                <ExternalLink className="w-3 h-3" /><span>查看许可证</span>
+                              <a href={licenseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-[var(--color-one-border)] px-3 py-2 text-[11px] font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white">
+                                <ExternalLink className="h-3 w-3" /><span>查看许可证</span>
                               </a>
                             )}
                           </div>
@@ -1277,20 +1187,20 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             const catBooks = booksByCategory(cat.id);
             return (
               <section key={cat.id}>
-                <div className="flex items-end justify-between mb-4">
+                <div className="mb-4 flex items-end justify-between">
                   <div>
-                    <h3 className="text-lg font-serif font-bold text-white">{cat.label}</h3>
-                    <p className="text-xs text-slate-500 mt-0.5">{cat.description}</p>
+                    <h3 className="text-lg font-semibold tracking-tight text-white">{cat.label}</h3>
+                    <p className="mt-0.5 text-xs text-[var(--color-one-text-dim)]">{cat.description}</p>
                   </div>
                   <button
                     onClick={() => { setActiveCategory(cat.id); setView('category'); }}
-                    className="flex items-center space-x-1 text-xs text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+                    className="flex cursor-pointer items-center gap-1 text-xs font-medium text-[var(--color-one-accent-soft)] transition hover:text-white"
                   >
                     <span>查看全部</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <ArrowRight className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
                   {catBooks.slice(0, 6).map(book => (
                     <BookCard key={book.id} book={book} onClick={() => openBookDetail(book)} />
                   ))}
@@ -1301,9 +1211,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
           {/* Empty state */}
           {!isLoading && books.length === 0 && (
-            <div className="text-center py-20 text-slate-500">
-              <Library className="w-10 h-10 mx-auto mb-3 text-slate-600" />
-              <p>图书馆正在建设中。使用上方搜索框检索全球公版书籍。</p>
+            <div className="rounded-[28px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] py-20 text-center text-[var(--color-one-text-muted)]">
+              <Library className="mx-auto mb-3 h-10 w-10 text-[var(--color-one-text-dim)]" />
+              <p className="text-sm font-medium text-white">ONE LIBRARY 正在加载馆藏</p>
+              <p className="mt-1 text-xs">使用上方搜索框检索全球公开/开放书籍与文献。</p>
             </div>
           )}
         </div>
@@ -1509,19 +1420,19 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           </div>
 
           {shelfBooks.length === 0 ? (
-            <div className="text-center py-20 text-slate-500">
-              <BookMarked className="w-10 h-10 mx-auto mb-3 text-slate-600" />
-              <p className="text-sm">书架还是空的</p>
-              <p className="text-xs mt-1">在书籍详情页点击「加入书架」即可收藏。</p>
+            <div className="rounded-[28px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] py-20 text-center text-[var(--color-one-text-muted)]">
+              <BookMarked className="mx-auto mb-3 h-10 w-10 text-[var(--color-one-text-dim)]" />
+              <p className="text-sm font-medium text-white">书架还是空的</p>
+              <p className="mt-1 text-xs">在书籍详情页点击「加入书架」即可收藏。</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 sm:gap-5">
               {shelfBooks.map(item => (
                 <div key={item.id} className="relative">
                   <BookCard book={item.book} onClick={() => openShelfBook(item.book)} />
                   {item.progress > 0 && (
-                    <div className="absolute bottom-2 left-2 right-2 h-1 bg-slate-800 rounded-full overflow-hidden">
-                      <div className="h-full bg-amber-500" style={{ width: `${item.progress}%` }} />
+                    <div className="pointer-events-none absolute inset-x-2 bottom-[3.25rem] h-1 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/10">
+                      <div className="h-full rounded-full bg-[var(--color-one-accent)]" style={{ width: `${item.progress}%` }} />
                     </div>
                   )}
                 </div>
@@ -1899,7 +1810,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 };
 
 // ===========================================================================
-// Book card (editorial-quality cover wall)
+// Book card (ONE LIBRARY)
 // ===========================================================================
 function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
   return (
@@ -1907,21 +1818,21 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
       type="button"
       onClick={onClick}
       aria-label={`打开《${book.title}》详情`}
-      className="group cursor-pointer flex flex-col w-full text-left rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+      className="group flex w-full cursor-pointer flex-col rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-one-accent)]"
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl bg-slate-900 border border-slate-800/60 shadow-lg group-hover:shadow-xl group-hover:shadow-amber-900/20 group-hover:border-amber-500/40 transition-all duration-300">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] shadow-[var(--shadow-one-sm)] transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-[var(--color-one-border-strong)] group-hover:shadow-[var(--shadow-one-md)]">
         <img
           src={book.coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80'}
           alt=""
           loading="lazy"
-          className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500"
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
-      <h3 className="mt-2.5 text-xs font-serif font-bold text-white line-clamp-2 group-hover:text-amber-300 transition-colors leading-snug">
+      <h3 className="mt-2.5 line-clamp-2 text-[13px] font-medium leading-snug text-white transition-colors group-hover:text-[var(--color-one-accent-soft)]">
         {book.title}
       </h3>
-      <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">{book.author}</p>
+      <p className="mt-0.5 line-clamp-1 text-[11px] text-[var(--color-one-text-muted)]">{book.author}</p>
     </button>
   );
 }
@@ -1931,9 +1842,9 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
 // ===========================================================================
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-slate-900/50 border border-slate-800/60 rounded-xl px-3 py-2">
-      <div className="text-[10px] text-slate-500 uppercase tracking-wide">{label}</div>
-      <div className="text-xs text-slate-200 mt-0.5 font-medium">{value}</div>
+    <div className="rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2.5">
+      <div className="text-[10px] uppercase tracking-wide text-[var(--color-one-text-dim)]">{label}</div>
+      <div className="mt-0.5 text-xs font-medium text-[var(--color-one-text)]">{value}</div>
     </div>
   );
 }
