@@ -141,6 +141,7 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.2;
+      renderer.domElement.style.touchAction = 'pan-y';
       containerRef.current.appendChild(renderer.domElement);
       rendererRef.current = renderer;
     } catch {
@@ -530,7 +531,7 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
   return (
     <div className="relative w-full h-full bg-black overflow-hidden select-none">
       {/* Three.js Canvas Container */}
-      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing touch-pan-y" />
 
       {/* Top Left Status & Mode Header */}
       <div className="absolute top-4 left-4 z-20 flex flex-col gap-1.5 pointer-events-none">

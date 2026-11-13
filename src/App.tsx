@@ -81,8 +81,8 @@ export default function App() {
 
   useEffect(() => { document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'; document.documentElement.lang = lang; }, [lang]);
 
-  const isViewportWorkspace = ['globe', 'universe', 'chat', 'browser'].includes(currentTab);
-  const isSpaceExperience = isViewportWorkspace || ['saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge'].includes(currentTab);
+  const isViewportWorkspace = ['globe', 'chat', 'browser'].includes(currentTab);
+  const isSpaceExperience = isViewportWorkspace || ['universe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge'].includes(currentTab);
   useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
 
   const refreshConversations = async () => { try { const res = await fetch('/api/conversations'); const data = await res.json(); if (data.success) setConversations(data.conversations || []); } catch {} };
@@ -193,7 +193,7 @@ export default function App() {
           </div>
         )}
 
-        {currentTab === 'universe' && <div className="h-full pt-[58px] md:pt-16 md:pl-[5.5rem]"><UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
+        {currentTab === 'universe' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><div className="h-[calc(100dvh-58px)] md:h-[calc(100dvh-4rem)] w-full"><UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div></div>}
         {currentTab === 'saturn' && <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
         <div className={currentTab === 'venus' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'venus'}><div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem]"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div></div>
         {currentTab === 'mercury' && <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-6"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} /></div>}
