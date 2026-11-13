@@ -65,7 +65,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
         });
         const data = await parseJsonSafe(res);
         if (res.ok && data?.success && data?.user) {
-          onAuthSuccess(data.user, '', !data.user.hasCompletedOnboarding);
+          onAuthSuccess(data.user, data.token || '', !data.user.hasCompletedOnboarding);
         } else {
           setErrorMsg(data?.error || L('登录失败，请检查账号和密码。', 'Sign-in failed. Check your credentials.', 'فشل تسجيل الدخول. تحقق من بياناتك.'));
         }
@@ -100,7 +100,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
       });
       const data = await parseJsonSafe(res);
       if (res.ok && data?.success && data?.user) {
-        onAuthSuccess(data.user, '', true);
+        onAuthSuccess(data.user, data.token || '', true);
       } else {
         setErrorMsg(data?.error || L('注册失败，请稍后重试。', 'Registration failed. Please try again.', 'فشل إنشاء الحساب. حاول مرة أخرى.'));
       }
@@ -112,13 +112,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess }) => 
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex items-center justify-center px-4 py-10" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="min-h-[100dvh] bg-[#0B0F17] text-slate-100 flex items-center justify-center px-4 py-5 sm:py-10" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
       <div className="w-full max-w-[440px]">
-        <div className="mb-6 overflow-hidden rounded-2xl border border-white/10 bg-[#0B0F17] shadow-[0_24px_64px_-24px_rgba(45,107,255,0.28)]">
+        <div className="mb-4 sm:mb-6 overflow-hidden rounded-2xl border border-white/10 bg-[#0B0F17] shadow-[0_24px_64px_-24px_rgba(45,107,255,0.28)]">
           <img
             src="/earth-one-cover.jpg"
             alt="EARTH ONE — ONE PLANET. ONE WORLD."
-            className="aspect-video w-full object-cover"
+            className="aspect-video max-h-40 sm:max-h-none w-full object-cover"
           />
         </div>
 

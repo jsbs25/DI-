@@ -3,13 +3,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Conversation, ChatMessage, User, Language, ChannelIntegration } from '../../types/index.ts';
 import {
   Send, Languages, Sparkles, MessageCircle, Globe, Search, Plug, ShieldAlert,
-  Users, UserPlus, Check, X, ImagePlus, Paperclip, Reply, Trash2, Undo2, MoreVertical,
-  Wifi, WifiOff, RefreshCw, Info, Crown, Shield, LogOut, UserMinus, Settings2,
-  Download, ChevronLeft, ChevronRight, FileText, AlertTriangle, Loader2, Eye,
-  Bell, CheckCheck, User as UserIcon, Settings, Volume2, Phone, PhoneOff, Video, Mic, MicOff, VideoOff, Monitor, MonitorOff
+  Users, UserPlus, Check, X, ImagePlus, Paperclip, Reply, Trash2, Undo2,
+  Wifi, WifiOff, RefreshCw, Info, Crown, Shield, LogOut, UserMinus,
+  Download, ChevronLeft, ChevronRight, FileText, AlertTriangle, Eye,
+  Bell, CheckCheck, User as UserIcon, Settings, Volume2, Phone, PhoneOff, Video, Mic, MicOff, VideoOff, Monitor, MonitorOff,
+  Minimize2, Maximize2
 } from 'lucide-react';
 import { callApi } from '../../services/calls/api.ts';
-import { LiveKitCallSession, type CallMediaState, friendlyMediaError } from '../../services/calls/media.ts';
+import { createCallMediaSession, type ICallMediaSession, type CallMediaState, friendlyMediaError } from '../../services/calls/media.ts';
 
 const CallTrackView: React.FC<{ track?: MediaStreamTrack | null; kind: 'video' | 'audio'; muted?: boolean; className?: string; mirror?: boolean }> = ({ track, kind, muted, className, mirror }) => {
   const ref = React.useRef<HTMLVideoElement & HTMLAudioElement | null>(null);
@@ -41,6 +42,7 @@ interface GlobalMessengerProps {
   integrations?: ChannelIntegration[];
   onRefreshConversations?: () => Promise<void> | void;
   onUserUpdate?: (user: User) => void;
+  directOpenSeq?: number;
 }
 
 type FriendUser = { id: string; username: string; displayName: string; avatar: string; isOnline?: boolean; bio?: string; lastActiveAt?: string };
@@ -54,7 +56,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   lang,
   integrations = [],
   onRefreshConversations,
-  onUserUpdate
+  onUserUpdate,
+  directOpenSeq = 0
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -77,6 +80,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [tab, setTab] = useState<'chats' | 'friends' | 'requests' | 'search' | 'msgsearch' | 'notifs' | 'privacy'>('chats');
   const [userSearch, setUserSearch] = useState('');
   const [searchResults, setSearchResults] = useState<FriendUser[]>([]);
+  const [suggestedLoading, setSuggestedLoading] = useState(false);
+  const [showTranslateBar, setShowTranslateBar] = useState(false);
   const [msgQuery, setMsgQuery] = useState('');
   const [msgSender, setMsgSender] = useState('');
   const [msgConvId, setMsgConvId] = useState('');
@@ -142,20 +147,29 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const lastSyncRef = useRef<string>(new Date().toISOString());
   const lastSyncCursorRef = useRef<{ since?: string; sinceId?: string } | null>(null);
 
-  // Calls (EARTH ONE signaling; media transport gated server-side, no fake A/V)
+  // Calls (EARTH ONE signaling + LiveKit/WebRTC media transport)
   const [activeCall, setActiveCall] = useState<any>(null);
   const [incomingCall, setIncomingCall] = useState<any>(null);
   const [callAction, setCallAction] = useState<string | null>(null);
   const [callMediaNote, setCallMediaNote] = useState<string | null>(null);
   const [callDevices, setCallDevices] = useState<{ micEnabled: boolean; cameraEnabled: boolean; screenSharing: boolean }>({ micEnabled: true, cameraEnabled: true, screenSharing: false });
+  const [callMinimized, setCallMinimized] = useState(false);
+  const [callElapsedSec, setCallElapsedSec] = useState(0);
   const activeCallRef = useRef<any>(null);
   useEffect(() => { activeCallRef.current = activeCall; }, [activeCall]);
-  const mediaSessionRef = useRef<LiveKitCallSession | null>(null);
+  const incomingCallRef = useRef<any>(null);
+  useEffect(() => { incomingCallRef.current = incomingCall; }, [incomingCall]);
+  const mediaSessionRef = useRef<ICallMediaSession | null>(null);
   const mediaJoinedCallIdRef = useRef<string | null>(null);
   const mediaTokenRef = useRef<string | null>(null);
   const [mediaState, setMediaState] = useState<CallMediaState>({ phase: 'idle', canPlaybackAudio: false, participants: {} });
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const localScreenRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (directOpenSeq > 0) {
+      setTab('chats');
+      setMobileShowChat(true);
+    }
+  }, [directOpenSeq]);
 
   type PendingUpload = { id: string; file: File; name: string; size: number; mimeType: string; kind: 'image' | 'file'; previewUrl?: string; progress: number; status: 'queued' | 'uploading' | 'sending' | 'error' | 'done'; error?: string; uploadedAttachment?: any };
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
@@ -214,7 +228,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     }
   };
 
-  const token = () => '';
+  const token = () => {
+    try { return localStorage.getItem('earth_one_token') || ''; } catch { return ''; }
+  };
   const authed = !!currentUser;
 
   const sorted = useMemo(() => {
@@ -538,28 +554,259 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); void loadNotifications(); void loadNotifPrefs(); void loadPrivacy(); } }, [authed, currentUser?.id]);
 
-  // WebSocket realtime (Worker runtime does not provide /ws; use session-cookie sync)
+  // Real-time WebSocket (/ws) + resilient fallback sync & call polling
   useEffect(() => {
     if (!authed) { setWsStatus('off'); return; }
     let stopped = false;
-    setWsStatus('closed');
+    let pingTimer: ReturnType<typeof setInterval> | null = null;
     void syncSince();
 
-    // server-sent Events not available; poll sync as lightweight fallback in same-origin auth
-    const poll = setInterval(() => { if (!stopped) void syncSince(); }, 8000);
-    const onOnline = () => { if (!stopped) void syncSince(); };
-    window.addEventListener('online', onOnline);
-    return () => { stopped = true; clearInterval(poll); window.removeEventListener('online', onOnline); if (reconnectRef.current) clearTimeout(reconnectRef.current); try { wsRef.current?.close(); } catch {}; };
+    const pollCalls = async () => {
+      if (stopped) return;
+      try {
+        const d = await callApi.list();
+        const calls: any[] = Array.isArray(d?.calls) ? d.calls : [];
+        const curActive = activeCallRef.current;
+        const curIncoming = incomingCallRef.current;
+        if (curActive) {
+          const updated = calls.find((c: any) => c.id === curActive.id);
+          if (updated) setActiveCall(updated);
+        }
+        const ringingForMe = calls.find(
+          (c: any) =>
+            (c.status === 'ringing' || c.status === 'connecting') &&
+            c.initiatorId !== currentUser?.id &&
+            c.participants?.[currentUser?.id || '']?.status !== 'joined'
+        );
+        if (ringingForMe && (!curActive || curActive.id !== ringingForMe.id)) {
+          setIncomingCall(ringingForMe);
+        } else if (curIncoming) {
+          const matched = calls.find((c: any) => c.id === curIncoming.id);
+          if (matched && ['ended', 'rejected', 'missed', 'busy', 'failed', 'canceled'].includes(matched.status)) {
+            setIncomingCall(null);
+          }
+        }
+      } catch {}
+    };
 
-    /* WS path disabled for current Worker deployment (no /ws upgrade handler)
     const connect = () => {
       if (stopped) return;
       setWsStatus('connecting');
-      const ws = new WebSocket(wsUrl('/ws'));
+      const tkn = token();
+      const base = wsUrl('/ws');
+      const url = tkn ? `${base}${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(tkn)}` : base;
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(url);
+      } catch {
+        setWsStatus('closed');
+        return;
+      }
       wsRef.current = ws;
-      ws.onopen = () => { const wasReconnecting = reconnectAttemptRef.current > 0; reconnectAttemptRef.current = 0; setWsStatus('open'); setConnError(null); if (wasReconnecting) setNotice('网络已恢复，实时连接已重建'); void syncSince(); void onRefreshConversations?.(); void loadNotifications(); void loadNotifPrefs(); void loadPrivacy(); void loadBlocked(); void loadFriends(); void loadRequests(); };
-    */
-  }, [authed, currentUser?.id, activeConv?.id]);
+
+      ws.onopen = () => {
+        if (stopped) { try { ws.close(); } catch {} return; }
+        const wasReconnecting = reconnectAttemptRef.current > 0;
+        reconnectAttemptRef.current = 0;
+        setWsStatus('open');
+        setConnError(null);
+        if (wasReconnecting) {
+          setNotice('网络已恢复，实时连接已重建');
+          setTimeout(() => setNotice(n => n === '网络已恢复，实时连接已重建' ? null : n), 2500);
+        }
+        void syncSince();
+        void onRefreshConversations?.();
+        void loadNotifications();
+        void loadFriends();
+        void loadRequests();
+        void pollCalls();
+        if (pingTimer) clearInterval(pingTimer);
+        pingTimer = setInterval(() => {
+          if (ws.readyState === 1) {
+            try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
+          }
+        }, 25000);
+      };
+
+      ws.onmessage = (ev) => {
+        if (stopped) return;
+        let msg: any;
+        try { msg = JSON.parse(String(ev.data)); } catch { return; }
+        const type = msg?.type;
+        if (!type || type === 'pong' || type === 'hello') return;
+
+        if (type === 'presence') {
+          setFriends(prev => prev.map(f => f.id === msg.userId ? { ...f, isOnline: !!msg.online, lastActiveAt: msg.lastActiveAt || f.lastActiveAt } : f));
+          return;
+        }
+        if (type === 'typing') {
+          if (msg.conversationId === activeConvIdRef.current && msg.userId && msg.userId !== currentUser?.id) {
+            setTypingUsers(prev => ({ ...prev, [msg.userId]: msg.on ? Date.now() : 0 }));
+          }
+          return;
+        }
+        if (type === 'read') {
+          if (msg.conversationId === activeConvIdRef.current && msg.userId) {
+            setMessages(prev => prev.map(m => {
+              const rb = Array.isArray(m.readBy) ? m.readBy : [];
+              if (rb.includes(msg.userId)) return m;
+              return { ...m, readBy: [...rb, msg.userId], status: m.senderId === currentUser?.id ? 'read' : m.status };
+            }));
+          }
+          return;
+        }
+        if (type === 'message' && msg.message) {
+          const incomingMsg: ChatMessage = msg.message;
+          if (msg.conversationId === activeConvIdRef.current || incomingMsg.conversationId === activeConvIdRef.current) {
+            setMessages(prev => {
+              const map = new Map(prev.map(m => [m.id, m]));
+              map.set(incomingMsg.id, incomingMsg);
+              return Array.from(map.values()).sort((a, b) => {
+                const ta = new Date(a.createdAt).getTime(), tb = new Date(b.createdAt).getTime();
+                if (ta !== tb) return ta - tb;
+                return String(a.id).localeCompare(String(b.id));
+              });
+            });
+            if (ws.readyState === 1 && incomingMsg.senderId !== currentUser?.id) {
+              try { ws.send(JSON.stringify({ type: 'read', conversationId: activeConvIdRef.current })); } catch {}
+            }
+          }
+          void onRefreshConversations?.();
+          return;
+        }
+        if (type === 'send_ack') {
+          const cid = msg.clientMsgId;
+          if (cid) pendingClientIds.current.delete(cid);
+          if (msg.ok && msg.message) {
+            setMessages(prev => {
+              const replaced = prev.map(m => m.id === cid ? msg.message : m);
+              const seen = new Set<string>();
+              const deduped: ChatMessage[] = [];
+              for (const m of replaced) {
+                if (seen.has(m.id)) continue;
+                seen.add(m.id);
+                deduped.push(m);
+              }
+              return deduped;
+            });
+            void onRefreshConversations?.();
+          } else if (!msg.ok && cid) {
+            setMessages(prev => prev.map(m => m.id === cid ? { ...m, status: 'failed' } : m));
+          }
+          return;
+        }
+        if (type === 'recall' && msg.messageId) {
+          setMessages(prev => prev.map(m => m.id === msg.messageId ? { ...m, recalled: true, content: '消息已撤回', translatedContent: undefined, attachments: [] } : m));
+          void onRefreshConversations?.();
+          return;
+        }
+        if (type === 'conversation_updated') {
+          void onRefreshConversations?.();
+          void loadRecent();
+          return;
+        }
+        if (type === 'friend_request' || type === 'friend_request_updated') {
+          void loadRequests();
+          void loadFriends();
+          void onRefreshConversations?.();
+          return;
+        }
+        if (type === 'notification' && msg.notification) {
+          setNotifications(prev => [msg.notification, ...prev.filter(n => n.id !== msg.notification.id)]);
+          if (typeof msg.unreadCount === 'number') setNotifUnread(msg.unreadCount);
+          maybeAlertNotification(msg.notification, msg.alert);
+          return;
+        }
+        if (type === 'notification_sync') {
+          void loadNotifications();
+          return;
+        }
+        if (type === 'notification_prefs_sync' && msg.preferences) {
+          setNotifPrefs(normalizeNotifPrefs(msg.preferences));
+          return;
+        }
+        if (type === 'call_invite' && msg.call) {
+          if (msg.call.initiatorId !== currentUser?.id) {
+            setIncomingCall(msg.call);
+            void ensureAudioUnlocked();
+          }
+          return;
+        }
+        if (type === 'call_accept' || type === 'call_state' || type === 'call_leave') {
+          if (msg.call) {
+            if (activeCallRef.current?.id === msg.call.id) setActiveCall(msg.call);
+            if (incomingCallRef.current?.id === msg.call.id && msg.call.participants?.[currentUser?.id || '']?.status === 'joined') {
+              setIncomingCall(null);
+            }
+          }
+          return;
+        }
+        if (type === 'call_reject' || type === 'call_cancel' || type === 'call_end') {
+          if (msg.call) {
+            if (incomingCallRef.current?.id === msg.call.id) setIncomingCall(null);
+            if (activeCallRef.current?.id === msg.call.id) {
+              setActiveCall(msg.call);
+              if (['ended', 'rejected', 'missed', 'busy', 'failed', 'canceled'].includes(msg.call.status)) {
+                void cleanupCallMedia(msg.call.status);
+                setTimeout(() => {
+                  setActiveCall((prev: any) => prev?.id === msg.call.id && ['ended', 'rejected', 'missed', 'busy', 'failed', 'canceled'].includes(prev.status) ? null : prev);
+                }, 1500);
+              }
+            }
+          }
+          return;
+        }
+        if (type === 'call_signal' && msg.callId && msg.fromUserId && msg.signal) {
+          if (mediaJoinedCallIdRef.current === msg.callId && mediaSessionRef.current?.handleRemoteSignal) {
+            void mediaSessionRef.current.handleRemoteSignal(msg.fromUserId, msg.signal, msg.seq);
+          }
+          return;
+        }
+      };
+
+      ws.onerror = () => {};
+      ws.onclose = () => {
+        if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+        if (wsRef.current === ws) wsRef.current = null;
+        if (stopped) return;
+        setWsStatus('closed');
+        const delay = Math.min(10000, 1000 * Math.pow(2, reconnectAttemptRef.current));
+        reconnectAttemptRef.current += 1;
+        reconnectRef.current = setTimeout(connect, delay);
+      };
+    };
+
+    connect();
+    const syncTimer = setInterval(() => {
+      if (stopped) return;
+      if (wsRef.current?.readyState !== 1) void syncSince();
+    }, 10000);
+    const callTimer = setInterval(() => {
+      if (stopped) return;
+      if (wsRef.current?.readyState !== 1 || activeCallRef.current || incomingCallRef.current) {
+        void pollCalls();
+      }
+    }, 3500);
+    const onOnline = () => {
+      if (!stopped) {
+        void syncSince();
+        void pollCalls();
+        if (!wsRef.current || wsRef.current.readyState !== 1) connect();
+      }
+    };
+    window.addEventListener('online', onOnline);
+    return () => {
+      stopped = true;
+      if (pingTimer) clearInterval(pingTimer);
+      clearInterval(syncTimer);
+      clearInterval(callTimer);
+      window.removeEventListener('online', onOnline);
+      if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      try { wsRef.current?.close(); } catch {}
+      wsRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, currentUser?.id]);
 
 
   // Desktop (Electron) notification click -> navigate to conversation
@@ -612,7 +859,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputText.trim() || isSending || !activeConv || !authed) return;
+    if (!activeConv || !authed) return;
+    if (!inputText.trim() && pendingUploads.length > 0) {
+      await sendPendingUploads();
+      return;
+    }
+    if (!inputText.trim() || isSending) return;
     const text = inputText.trim();
     const clientId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
     const optimistic: ChatMessage = {
@@ -656,11 +908,15 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     } finally {
       setIsSending(false);
     }
+    if (pendingUploads.length > 0) void sendPendingUploads();
   };
 
   const uploadOne = (file: File, convId: string, onProgress: (p: number) => void): Promise<any> => new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/messenger/upload/stream');
+    xhr.withCredentials = true;
+    const tkn = token();
+    if (tkn) xhr.setRequestHeader('Authorization', `Bearer ${tkn}`);
     xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
     xhr.setRequestHeader('x-mime-type', encodeURIComponent(file.type || 'application/octet-stream'));
     xhr.setRequestHeader('x-conversation-id', encodeURIComponent(convId));
@@ -760,10 +1016,28 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     setTimeout(() => { void sendPendingUploads(); }, 0);
   };
 
-  const doSearchUsers = async () => {
-    if (!userSearch.trim()) { setSearchResults([]); return; }
-    try { const d = await api(`/api/messenger/users/search?q=${encodeURIComponent(userSearch.trim())}`); setSearchResults(d.users || []); } catch (e:any) { setConnError(e?.message || '搜索失败'); }
+  const doSearchUsers = async (queryOverride?: string) => {
+    const q = (queryOverride !== undefined ? queryOverride : userSearch).trim();
+    setSuggestedLoading(true);
+    try {
+      const url = q
+        ? `/api/messenger/users/search?q=${encodeURIComponent(q)}`
+        : `/api/messenger/users/search?suggested=1`;
+      const d = await api(url);
+      setSearchResults(d.users || []);
+    } catch (e: any) {
+      setConnError(e?.message || '搜索失败');
+    } finally {
+      setSuggestedLoading(false);
+    }
   };
+
+  useEffect(() => {
+    if (!authed || tab !== 'search') return;
+    const t = setTimeout(() => { void doSearchUsers(); }, userSearch.trim() ? 220 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, userSearch, authed]);
 
   const doSearchMessages = async () => {
     if (!msgQuery.trim() && !msgSender && !msgConvId) { setMsgResults([]); return; }
@@ -788,7 +1062,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const removeFriend = async (id: string) => { if(!window.confirm('确认删除好友？')) return; try { await api(`/api/messenger/friends/${id}`, { method: 'DELETE' }); setNotice('已删除好友'); await loadFriends(); await loadBlocked(); await loadRecent(); } catch (e:any) { setConnError(e?.message || '操作失败'); } };
   const blockUser = async (id: string) => { try { await api('/api/messenger/block', { method: 'POST', body: JSON.stringify({ userId: id }) }); await loadFriends(); await loadBlocked(); await onRefreshConversations?.(); } catch (e:any) { setConnError(e?.message || '操作失败'); } };
   const unblockUser = async (id: string) => { try { await api('/api/messenger/unblock', { method: 'POST', body: JSON.stringify({ userId: id }) }); await loadBlocked(); } catch (e:any) { setConnError(e?.message || '操作失败'); } };
-  const openDirect = async (uid: string) => { try { const d = await api('/api/conversations/direct', { method: 'POST', body: JSON.stringify({ targetUserId: uid }) }); await onRefreshConversations?.(); await loadRecent(); if (d.conversation?.id) onSelectConversation(d.conversation.id); setTab('chats'); } catch (e:any) { setConnError(e?.message || '无法创建会话'); } };
+  const openDirect = async (uid: string) => { try { const d = await api('/api/conversations/direct', { method: 'POST', body: JSON.stringify({ targetUserId: uid }) }); await onRefreshConversations?.(); await loadRecent(); if (d.conversation?.id) onSelectConversation(d.conversation.id); setTab('chats'); setMobileShowChat(true); } catch (e:any) { setConnError(e?.message || '无法创建会话'); } };
   const openProfile = async (uid: string) => {
     try {
       const d = await api(`/api/messenger/profile/${uid}`);
@@ -936,7 +1210,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     try {
       const d = await api('/api/conversations/group', { method: 'POST', body: JSON.stringify({ name: newGroupName.trim(), memberIds: newGroupMembers }) });
       await onRefreshConversations?.();
-      if (d.conversation?.id) { onSelectConversation(d.conversation.id); setTab('chats'); }
+      if (d.conversation?.id) { onSelectConversation(d.conversation.id); setTab('chats'); setMobileShowChat(true); }
       setShowCreateGroup(false); setNewGroupName(''); setNewGroupMembers([]); setNotice('群聊已创建');
     } catch (e:any) { setConnError(e?.message || '创建群聊失败'); }
   };
@@ -1015,23 +1289,46 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     if (n.type === 'call_invite') {
       const cid = n.data?.callId;
       if (cid) { try { const d = await callApi.get(cid); if (d?.call) setIncomingCall(d.call); } catch { setIncomingCall({ id: cid, kind: n.data?.kind, scope: n.data?.scope, status: 'ringing', conversationId: n.conversationId || n.data?.conversationId }); } }
-      else if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); }
+      else if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); setMobileShowChat(true); }
       return;
     }
-    if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); return; }
+    if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); setMobileShowChat(true); return; }
     if (n.type === 'friend_request') { setTab('requests'); void loadRequests(); return; }
     if (n.type === 'friend_accepted' || n.type === 'account_security') {
       if (n.actorId || n.targetUserId) { await openProfile(n.actorId || n.targetUserId); }
       return;
     }
     if (n.type === 'group_invite' || n.type === 'group_member_joined' || n.type === 'group_member_left' || n.type === 'group_admin_changed' || n.type === 'group_owner_transferred') {
-      if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); }
+      if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); setMobileShowChat(true); }
       return;
     }
     if (n.actorId) { await openProfile(n.actorId); }
   };
 
-  // ---- Calls (EARTH ONE signaling + LiveKit media when configured) ----
+  // ---- Calls (EARTH ONE signaling + LiveKit / WebRTC media) ----
+  const formatDuration = (sec: number) => {
+    const s = Math.max(0, Math.floor(sec));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+    if (!activeCall || ['ended', 'rejected', 'missed', 'busy', 'failed', 'canceled'].includes(activeCall.status)) {
+      setCallElapsedSec(0);
+      return;
+    }
+    if (activeCall.status !== 'active' && mediaState.phase !== 'connected') {
+      setCallElapsedSec(0);
+      return;
+    }
+    const baseMs = activeCall.startedAt ? new Date(activeCall.startedAt).getTime() : Date.now();
+    const tick = () => setCallElapsedSec(Math.max(0, Math.floor((Date.now() - baseMs) / 1000)));
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [activeCall?.id, activeCall?.status, activeCall?.startedAt, mediaState.phase]);
+
   const callErrorText = (e: any) => {
     const msg = String(e?.body?.error || e?.message || e || '');
     if (msg === 'BUSY') return lang==='ar'?'أنت في مكالمة حالياً':lang==='en'?'You are already in a call':'你当前正在通话中';
@@ -1061,15 +1358,16 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   const joinCallMedia = async (call: any, media?: any) => {
     if (!call?.id) return;
-    // avoid duplicate joins for same call/token
     const isTerminal = ['ended','rejected','missed','busy','failed','canceled'].includes(call.status);
     if (isTerminal) return;
     if (mediaJoinedCallIdRef.current === call.id && mediaSessionRef.current) return;
     let info = media;
-    if (!info || (!info.ok && !info.token)) {
+    if (!info || (!info.ok && info.provider !== 'webrtc' && !info.token)) {
       try { info = await callApi.token(call.id); } catch (e:any) { info = e?.body || { ok:false, reason: e?.message || 'MEDIA_ERROR' }; }
     }
-    if (!info || info.ok === false || info.blocked || !info.token || !info.url) {
+    const isWebRtc = info?.provider === 'webrtc';
+    const hasLiveKit = !!info?.token && !!info?.url;
+    if (!info || info.ok === false || info.blocked || (!isWebRtc && !hasLiveKit)) {
       const reason = info?.reason || (info?.blocked ? 'MEDIA_NOT_CONFIGURED' : 'MEDIA_UNAVAILABLE');
       setCallMediaNote(reason === 'MEDIA_NOT_CONFIGURED' || reason === 'MEDIA_SDK_UNAVAILABLE'
         ? (lang==='ar'?'وسائط الصوت/الفيديو الحقيقية غير متاحة: الخادم غير مُعد (تم الاحتفاظ بالإشارة فقط).':lang==='en'?'Real audio/video media unavailable: server not configured (signaling only).':'真实音视频不可用：媒体服务未配置（仅保留信令）。')
@@ -1077,23 +1375,36 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       setMediaState(s => ({ ...s, phase: 'blocked', reason: String(reason) }));
       return;
     }
-    // if switching calls, cleanup previous
     if (mediaSessionRef.current && mediaJoinedCallIdRef.current && mediaJoinedCallIdRef.current !== call.id) {
       await cleanupCallMedia('replace');
     }
-    mediaTokenRef.current = info.token;
+    mediaTokenRef.current = info.token || `webrtc_${call.id}`;
     mediaJoinedCallIdRef.current = call.id;
-    const session = new LiveKitCallSession();
+    const session = createCallMediaSession(info.provider);
     mediaSessionRef.current = session;
-    setCallMediaNote(lang==='ar'?'جارٍ الاتصال بوسائط المكالمة…':lang==='en'?'Connecting to call media…':'正在连接通话媒体…');
+    setCallMediaNote(lang==='ar'?'جارٍ الاتصال بوسائط المكالمة…':lang==='en'?'Connecting to call media…':'正在连接音视频通道…');
     try {
       await session.connect({
         url: info.url,
         token: info.token,
         roomName: info.roomName || call.roomName,
+        callId: call.id,
+        selfUserId: currentUser?.id,
+        selfName: currentUser?.displayName,
+        participantIds: call.participantIds || [],
+        iceServers: info.iceServers,
         kind: call.kind || 'audio',
         initialMicEnabled: callDevices.micEnabled !== false,
         initialCameraEnabled: call.kind === 'video' ? (callDevices.cameraEnabled !== false) : false,
+        sendSignal: async (toUserId, signal) => {
+          if (wsRef.current?.readyState === 1) {
+            try {
+              wsRef.current.send(JSON.stringify({ type: 'call_signal', callId: call.id, toUserId, signal }));
+            } catch {}
+          }
+          try { await callApi.signal(call.id, { toUserId, signal }); } catch {}
+        },
+        pollSignals: (afterSeq) => callApi.signals(call.id, afterSeq),
         onState: (st) => {
           setMediaState(st);
           if (st.phase === 'connected') {
@@ -1112,18 +1423,20 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       const msg = friendlyMediaError(e);
       setCallMediaNote(msg);
       setMediaState(s => ({ ...s, phase: 'failed', error: msg }));
-      // keep signaling alive; do not fake success
     }
   };
 
-  const startCall = async (kind: 'audio'|'video') => {
-    if (!activeConv || !authed || callAction) return;
+  const startCall = async (kind: 'audio'|'video', overrideTarget?: { targetUserId: string; conversationId?: string }) => {
+    if (!authed || callAction) return;
+    if (!overrideTarget && !activeConv) return;
     if (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status)) { setConnError(callErrorText({ message: 'BUSY' })); return; }
-    setCallAction('start'); setCallMediaNote(null); await cleanupCallMedia('replace');
+    setCallAction('start'); setCallMediaNote(null); setCallMinimized(false); await cleanupCallMedia('replace');
     try {
-      const payload: any = activeConv.type === 'direct'
-        ? { scope: 'direct', kind, targetUserId: activeConv.otherUser?.id, conversationId: activeConv.id }
-        : { scope: 'group', kind, conversationId: activeConv.id };
+      const payload: any = overrideTarget?.targetUserId
+        ? { scope: 'direct', kind, targetUserId: overrideTarget.targetUserId, ...(overrideTarget.conversationId ? { conversationId: overrideTarget.conversationId } : {}) }
+        : activeConv?.type === 'direct'
+          ? { scope: 'direct', kind, targetUserId: activeConv.otherUser?.id, conversationId: activeConv.id }
+          : { scope: 'group', kind, conversationId: activeConv?.id };
       const d = await callApi.invite(payload);
       if (d?.call) {
         setActiveCall(d.call);
@@ -1132,7 +1445,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       }
       if (d?.media?.blocked || d?.media?.ok === false) {
         setCallMediaNote(d.media.reason === 'MEDIA_NOT_CONFIGURED' || d.media.reason === 'MEDIA_SDK_UNAVAILABLE'
-          ? (lang==='ar'?'تم إنشاء إشارة المكالمة. وسائط الصوت/الفيديو الحقيقية غير متاحة (الخادم غير مُعد).':lang==='en'?'Call signaling created. Real audio/video media unavailable (server not configured/blocked).':'已创建通话信令。真实音视频媒体不可用（服务端未配置/BLOCKED）。')
+          ? (lang==='ar'?'تم إنشاء إشارة المكالمة. وسائط الصوت/الفيديو الحقيقية غير متاحة.':lang==='en'?'Call signaling created. Real audio/video media unavailable.':'已创建通话信令，真实音视频暂不可用。')
           : (d.media.reason || ''));
       }
       setNotice(kind==='video' ? (lang==='ar'?'بدء مكالمة فيديو':lang==='en'?'Video call started':'已发起视频通话') : (lang==='ar'?'بدء مكالمة صوتية':lang==='en'?'Audio call started':'已发起语音通话'));
@@ -1141,7 +1454,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   };
   const acceptIncomingCall = async () => {
     if (!incomingCall?.id || callAction) return;
-    setCallAction('accept'); setCallMediaNote(null);
+    setCallAction('accept'); setCallMediaNote(null); setCallMinimized(false);
     try {
       const d = await callApi.accept(incomingCall.id);
       if (d?.call) {
@@ -1149,7 +1462,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         setCallDevices({ micEnabled: d.call.self?.micEnabled ?? true, cameraEnabled: d.call.self?.cameraEnabled ?? (d.call.kind==='video'), screenSharing: !!d.call.self?.screenSharing });
         await joinCallMedia(d.call, d.media);
       }
-      if (d?.media?.blocked || d?.media?.ok === false) setCallMediaNote(lang==='ar'?'تم قبول المكالمة (إشارة). وسائط حقيقية غير متاحة/محظورة.':lang==='en'?'Call accepted (signaling). Real media unavailable/blocked.':'已接听（信令）。真实媒体不可用/BLOCKED。');
+      if (d?.media?.blocked || d?.media?.ok === false) setCallMediaNote(lang==='ar'?'تم قبول المكالمة (إشارة). وسائط حقيقية غير متاحة.':lang==='en'?'Call accepted (signaling). Real media unavailable.':'已接听（信令），真实媒体不可用。');
     } catch (e: any) { setConnError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
@@ -1250,30 +1563,51 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   }
 
   return (
-    <div className="w-full max-w-7xl mx-auto h-[calc(100dvh-7.5rem)] min-h-[420px] sm:min-h-[620px] p-2 sm:p-4 flex flex-col lg:flex-row gap-3 sm:gap-4">
+    <div className="w-full max-w-7xl mx-auto h-full min-h-0 p-1.5 sm:p-4 flex flex-col lg:flex-row gap-3 sm:gap-4">
       {/* Left panel */}
-      <div className={`w-full lg:w-[360px] rounded-2xl bg-slate-900/80 border border-slate-800 p-3 sm:p-3.5 flex-col shrink-0 shadow-xl backdrop-blur-md min-h-0 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-2">
-          <div className="flex items-center gap-2">
-            <MessageCircle className="w-4 h-4 text-cyan-400" />
-            <h2 className="font-bold text-sm text-slate-100">Messenger</h2>
-            <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${wsStatus==='open'?'text-emerald-300 border-emerald-700/50 bg-emerald-500/10':'text-amber-300 border-amber-700/50 bg-amber-500/10'}`}>
-              {wsStatus==='open' ? <Wifi className="w-3 h-3"/> : <WifiOff className="w-3 h-3"/>}{wsStatus==='closed'?'sync':wsStatus}
+      <div className={`w-full lg:w-[372px] flex-1 lg:flex-initial rounded-2xl bg-slate-900/85 border border-slate-800 p-3 sm:p-3.5 flex-col shrink-0 shadow-xl backdrop-blur-md min-h-0 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+        <div className="flex items-center justify-between pb-2.5 border-b border-slate-800 mb-2.5 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <MessageCircle className="w-4 h-4 text-cyan-400 shrink-0" />
+            <h2 className="font-bold text-sm text-slate-100 truncate">Messenger</h2>
+            <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${wsStatus==='open'?'text-emerald-300 border-emerald-700/50 bg-emerald-500/10':'text-amber-300 border-amber-700/50 bg-amber-500/10'}`}>
+              {wsStatus==='open' ? <Wifi className="w-3 h-3"/> : <WifiOff className="w-3 h-3"/>}{wsStatus==='open'?'实时':'同步'}
             </span>
           </div>
-          <div className="flex gap-1">
-            <button onClick={()=>void openMyProfile()} title={lang==='ar'?'ملفي الشخصي':lang==='en'?'My profile':'我的资料'} className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"><UserIcon className="w-3.5 h-3.5"/></button>
-            <button onClick={()=>{ setShowCreateGroup(true); void loadFriends(); }} title="创建群聊" className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"><Users className="w-3.5 h-3.5"/></button>
-            <button onClick={() => setShowIntegrations(v=>!v)} className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800"><Plug className="w-3.5 h-3.5"/></button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button type="button" onClick={()=>setTab(t => t === 'msgsearch' ? 'chats' : 'msgsearch')} title={lang==='ar'?'بحث الرسائل':lang==='en'?'Search messages':'搜索消息'} className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border transition-colors ${tab==='msgsearch'?'border-cyan-500/50 bg-cyan-500/15 text-cyan-200':'border-slate-700/80 text-slate-300 hover:bg-slate-800'}`}><Search className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>{ setTab(t => t === 'privacy' ? 'chats' : 'privacy'); void loadPrivacy(); void loadBlocked(); }} title={lang==='ar'?'الخصوصية':lang==='en'?'Privacy':'隐私与安全'} className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border transition-colors ${tab==='privacy'?'border-cyan-500/50 bg-cyan-500/15 text-cyan-200':'border-slate-700/80 text-slate-300 hover:bg-slate-800'}`}><Shield className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>{ setShowCreateGroup(true); void loadFriends(); }} title="创建群聊" className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border border-slate-700/80 text-slate-300 hover:bg-slate-800"><Users className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>void openMyProfile()} title={lang==='ar'?'ملفي الشخصي':lang==='en'?'My profile':'我的资料'} className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border border-slate-700/80 text-slate-300 hover:bg-slate-800"><UserIcon className="w-4 h-4"/></button>
+            <button type="button" onClick={() => setShowIntegrations(v=>!v)} title="官方接入" className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border transition-colors ${showIntegrations?'border-cyan-500/50 bg-cyan-500/15 text-cyan-200':'border-slate-700/80 text-slate-300 hover:bg-slate-800'}`}><Plug className="w-4 h-4"/></button>
           </div>
         </div>
 
-        {notice && <div className="mb-2 rounded-lg border border-cyan-700/40 bg-cyan-950/40 px-2.5 py-1.5 text-[11px] text-cyan-200 flex items-center justify-between gap-2"><span>{notice}</span><button onClick={()=>setNotice(null)} className="text-cyan-300">×</button></div>}
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 mb-2 text-[11px]">
-          {(['chats','friends','requests','search','msgsearch','notifs','privacy'] as const).map(k => (
-            <button key={k} onClick={()=>{ setTab(k); if (k==='notifs') void loadNotifications(); if (k==='privacy') { void loadPrivacy(); void loadBlocked(); void openMyProfile(); } }} className={`relative px-1 py-1.5 rounded-lg border ${tab===k?'bg-cyan-500/15 border-cyan-500/40 text-cyan-200':'bg-slate-950 border-slate-800 text-slate-400'}`}>
-              {k==='chats'?(lang==='ar'?'المحادثات':lang==='en'?'Chats':'会话'):k==='friends'?(lang==='ar'?'الأصدقاء':lang==='en'?'Friends':'好友'):k==='requests'?(lang==='ar'?'الطلبات':lang==='en'?'Requests':'申请'):k==='search'?(lang==='ar'?'بحث':lang==='en'?'Search':'找人'):k==='msgsearch'?(lang==='ar'?'الرسائل':lang==='en'?'Msgs':'搜消息'):k==='notifs'?(lang==='ar'?'الإشعارات':lang==='en'?'Notifs':'通知'):(lang==='ar'?'الخصوصية':lang==='en'?'Privacy':'隐私')}
-              {k==='notifs' && notifUnread>0 && <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] leading-4">{notifUnread>99?'99+':notifUnread}</span>}
+        {notice && <div className="mb-2 rounded-xl border border-cyan-700/40 bg-cyan-950/40 px-3 py-2 text-xs text-cyan-200 flex items-center justify-between gap-2"><span>{notice}</span><button onClick={()=>setNotice(null)} className="text-cyan-300 p-1">×</button></div>}
+        <div className="grid grid-cols-5 gap-1.5 mb-2.5 text-xs">
+          {([
+            { k: 'chats', label: lang==='ar'?'المحادثات':lang==='en'?'Chats':'会话' },
+            { k: 'friends', label: lang==='ar'?'الأصدقاء':lang==='en'?'Friends':'好友', badge: friends.length > 0 ? friends.length : 0, tone: 'slate' },
+            { k: 'requests', label: lang==='ar'?'الطلبات':lang==='en'?'Requests':'申请', badge: incomingReqs.length, tone: 'rose' },
+            { k: 'search', label: lang==='ar'?'إضافة':lang==='en'?'Add':'加好友' },
+            { k: 'notifs', label: lang==='ar'?'الإشعارات':lang==='en'?'Notifs':'通知', badge: notifUnread, tone: 'rose' },
+          ] as const).map(item => (
+            <button
+              key={item.k}
+              onClick={()=>{
+                setTab(item.k);
+                if (item.k === 'notifs') void loadNotifications();
+                if (item.k === 'requests') void loadRequests();
+                if (item.k === 'friends') void loadFriends();
+              }}
+              className={`relative min-h-[42px] px-1 py-1.5 rounded-xl border font-medium whitespace-nowrap transition-colors flex items-center justify-center ${tab===item.k?'bg-cyan-500/20 border-cyan-500/50 text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]':'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-slate-200'}`}
+            >
+              <span>{item.label}</span>
+              {!!(item as any).badge && (item as any).badge > 0 && (
+                <span className={`ml-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] leading-4 font-semibold ${(item as any).tone === 'rose' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                  {(item as any).badge > 99 ? '99+' : (item as any).badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -1298,15 +1632,18 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
         {tab === 'chats' && (
           <>
-            <div className="relative mb-2"><Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-500" /><input value={convQuery} onChange={e=>setConvQuery(e.target.value)} placeholder="搜索会话…" className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200" /></div>
-            <div className="flex-1 overflow-y-auto space-y-1.5 min-h-0">
+            <div className="relative mb-2"><Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" /><input value={convQuery} onChange={e=>setConvQuery(e.target.value)} placeholder="搜索会话…" className="w-full min-h-[42px] pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm sm:text-xs text-slate-200 outline-none focus:border-cyan-500/40" /></div>
+            <div className="flex-1 overflow-y-auto space-y-2 min-h-0 pr-0.5">
               {sorted.map(conv => (
-                <button key={conv.id} onClick={()=>{onSelectConversation(conv.id); setMobileShowChat(true);}} className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-left ${conv.id===activeConv?.id?'bg-cyan-500/15 border border-cyan-500/40':'bg-slate-950/40 border border-slate-800/60 hover:bg-slate-800/60'}`}>
-                  {conv.type==='global_channel' ? <div className="w-10 h-10 rounded-full bg-cyan-950 border border-cyan-500/40 flex items-center justify-center text-cyan-300"><Globe className="w-5 h-5"/></div>
-                  : <div className="relative"><img src={conv.otherUser?.avatar || conv.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-10 h-10 rounded-full object-cover border border-slate-700"/>{(conv.isOnline || conv.otherUser?.isOnline) && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950"/>}</div>}
+                <button key={conv.id} onClick={()=>{onSelectConversation(conv.id); setMobileShowChat(true);}} className={`w-full min-h-[64px] flex items-center gap-3 p-3 rounded-xl text-left transition-colors ${conv.id===activeConv?.id?'bg-cyan-500/15 border border-cyan-500/40':'bg-slate-950/50 border border-slate-800/70 hover:bg-slate-800/60'}`}>
+                  {conv.type==='global_channel' ? <div className="w-11 h-11 rounded-full bg-cyan-950 border border-cyan-500/40 flex items-center justify-center text-cyan-300 shrink-0"><Globe className="w-5 h-5"/></div>
+                  : <div className="relative shrink-0"><img src={conv.otherUser?.avatar || conv.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-11 h-11 rounded-full object-cover border border-slate-700"/>{(conv.isOnline || conv.otherUser?.isOnline) && <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-slate-950"/>}</div>}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2"><span className="font-semibold text-xs truncate text-slate-200">{conv.name}</span>{(conv.unreadCount||0)>0 && <span className="text-[10px] px-1.5 rounded-full bg-cyan-500 text-slate-950 font-bold">{conv.unreadCount}</span>}</div>
-                    <p className="text-[11px] text-slate-400 truncate mt-0.5">{conv.lastMessage || '暂无消息'}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-sm sm:text-xs truncate text-slate-100">{conv.name}</span>
+                      {(conv.unreadCount||0)>0 && <span className="text-[11px] px-1.5 min-w-[20px] text-center rounded-full bg-cyan-500 text-slate-950 font-bold">{conv.unreadCount}</span>}
+                    </div>
+                    <p className="text-xs sm:text-[11px] text-slate-400 truncate mt-0.5">{conv.lastMessage || '点击开始对话'}</p>
                   </div>
                 </button>
               ))}
@@ -1316,79 +1653,138 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         )}
 
         {tab === 'friends' && (
-          <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
-            <div className="flex items-center justify-between"><p className="text-[11px] text-slate-400">好友列表 ({friends.length})</p><button onClick={()=>{void loadFriends(); void loadRecent();}} className="text-[11px] text-cyan-300">刷新</button></div>
+          <div className="flex-1 overflow-y-auto space-y-2.5 min-h-0 pr-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-slate-400">好友 ({friends.length})</p>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>setTab('search')} className="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-medium inline-flex items-center gap-1"><UserPlus className="w-3.5 h-3.5"/>加好友</button>
+                <button onClick={()=>{void loadFriends(); void loadRecent();}} className="px-2 py-1.5 rounded-lg border border-slate-800 text-slate-300 text-xs">刷新</button>
+              </div>
+            </div>
             {friends.map(f => (
-              <div key={f.id} className="flex items-center gap-2 p-2 rounded-xl border border-slate-800 bg-slate-950/50">
-                <button onClick={()=>void openProfile(f.id)} className="shrink-0"><img src={f.avatar} className="w-9 h-9 rounded-full object-cover"/></button>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-slate-200 truncate">{f.displayName}</p>
-                  <p className="text-[10px] text-slate-500 truncate">@{f.username} · {f.isOnline ? '在线' : (f.lastActiveAt ? `最近活跃 ${new Date(f.lastActiveAt).toLocaleString()}` : '离线')}</p>
+              <div key={f.id} className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 space-y-2.5">
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>void openProfile(f.id)} className="relative shrink-0">
+                    <img src={f.avatar} className="w-11 h-11 rounded-full object-cover border border-slate-700"/>
+                    {f.isOnline && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950"/>}
+                  </button>
+                  <button onClick={()=>void openProfile(f.id)} className="flex-1 min-w-0 text-left">
+                    <p className="text-sm font-semibold text-slate-100 truncate">{f.displayName}</p>
+                    <p className="text-xs text-slate-400 truncate">@{f.username} · {f.isOnline ? '在线' : (f.lastActiveAt ? `最近 ${new Date(f.lastActiveAt).toLocaleDateString()}` : '离线')}</p>
+                  </button>
                 </div>
-                <button onClick={()=>openDirect(f.id)} className="px-2 py-1 text-[10px] rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">聊天</button>
-                <button onClick={()=>removeFriend(f.id)} className="px-2 py-1 text-[10px] rounded bg-slate-800 text-rose-300">删除</button>
-                <button onClick={()=>blockUser(f.id)} className="px-2 py-1 text-[10px] rounded bg-slate-800 text-slate-300">屏蔽</button>
+                <div className="grid grid-cols-5 gap-1.5">
+                  <button onClick={()=>void openDirect(f.id)} className="col-span-2 min-h-[38px] px-2 rounded-lg bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 text-xs font-medium inline-flex items-center justify-center gap-1.5"><MessageCircle className="w-3.5 h-3.5"/>发消息</button>
+                  <button onClick={()=>void startCall('audio', { targetUserId: f.id })} disabled={!!callAction} className="min-h-[38px] px-2 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 text-xs font-medium inline-flex items-center justify-center gap-1" title="语音通话"><Phone className="w-3.5 h-3.5"/><span>语音</span></button>
+                  <button onClick={()=>void startCall('video', { targetUserId: f.id })} disabled={!!callAction} className="min-h-[38px] px-2 rounded-lg bg-sky-500/15 text-sky-300 border border-sky-500/35 text-xs font-medium inline-flex items-center justify-center gap-1" title="视频通话"><Video className="w-3.5 h-3.5"/><span>视频</span></button>
+                  <button onClick={()=>void removeFriend(f.id)} className="min-h-[38px] px-1 rounded-lg bg-slate-800/80 text-rose-300 text-xs inline-flex items-center justify-center" title="删除好友"><Trash2 className="w-3.5 h-3.5"/></button>
+                </div>
               </div>
             ))}
-            {recentConvs.length>0 && <div className="pt-2 border-t border-slate-800 space-y-1.5"><p className="text-[11px] text-slate-400">最近联系人</p>{recentConvs.slice(0,8).map(c => (
-              <button key={c.id} onClick={()=>{ onSelectConversation(c.id); setTab('chats'); setMobileShowChat(true); }} className="w-full flex items-center gap-2 p-2 rounded-lg bg-slate-950/40 border border-slate-800 text-left">
-                <img src={c.otherUser?.avatar || c.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-7 h-7 rounded-full object-cover"/>
-                <div className="flex-1 min-w-0"><p className="text-[11px] text-slate-200 truncate">{c.name}</p><p className="text-[10px] text-slate-500 truncate">{c.lastMessage || ''}</p></div>
+            {recentConvs.length>0 && <div className="pt-2.5 border-t border-slate-800 space-y-1.5"><p className="text-xs text-slate-400">最近联系人</p>{recentConvs.slice(0,8).map(c => (
+              <button key={c.id} onClick={()=>{ onSelectConversation(c.id); setTab('chats'); setMobileShowChat(true); }} className="w-full min-h-[48px] flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-950/40 border border-slate-800 text-left">
+                <img src={c.otherUser?.avatar || c.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-8 h-8 rounded-full object-cover shrink-0"/>
+                <div className="flex-1 min-w-0"><p className="text-xs font-medium text-slate-200 truncate">{c.name}</p><p className="text-[11px] text-slate-500 truncate">{c.lastMessage || ''}</p></div>
                 {(c.unreadCount||0)>0 && <span className="text-[10px] px-1.5 rounded-full bg-cyan-500 text-slate-950 font-bold">{c.unreadCount}</span>}
               </button>
             ))}</div>}
-            {blocked.length>0 && <div className="pt-2 border-t border-slate-800"><p className="text-[11px] text-slate-400 mb-1">已屏蔽用户</p>{blocked.map(b => (
-              <div key={b.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-950/40 text-xs"><span className="text-slate-300">{b.displayName}</span><button onClick={()=>unblockUser(b.id)} className="text-cyan-300">解除屏蔽</button></div>
+            {blocked.length>0 && <div className="pt-2.5 border-t border-slate-800"><p className="text-xs text-slate-400 mb-1.5">已屏蔽用户</p>{blocked.map(b => (
+              <div key={b.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950/40 border border-slate-800 text-xs"><span className="text-slate-300">{b.displayName}</span><button onClick={()=>unblockUser(b.id)} className="text-cyan-300 px-2 py-1">解除屏蔽</button></div>
             ))}</div>}
-            {friends.length===0 && <div className="text-xs text-slate-500 text-center py-6">暂无好友，可在“查找”添加</div>}
+            {friends.length===0 && (
+              <div className="text-xs text-slate-400 text-center py-8 space-y-3">
+                <p>暂无好友</p>
+                <button onClick={()=>setTab('search')} className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 font-semibold inline-flex items-center gap-1.5"><UserPlus className="w-4 h-4"/>去添加好友</button>
+              </div>
+            )}
           </div>
         )}
 
         {tab === 'requests' && (
-          <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
-            <div className="flex items-center justify-between"><p className="text-[11px] text-slate-400">收到的好友申请 ({incomingReqs.length})</p><button onClick={()=>void loadRequests()} className="text-[11px] text-cyan-300">刷新</button></div>
+          <div className="flex-1 overflow-y-auto space-y-2.5 min-h-0 pr-0.5">
+            <div className="flex items-center justify-between"><p className="text-xs text-slate-400">收到的好友申请 ({incomingReqs.length})</p><button onClick={()=>void loadRequests()} className="text-xs text-cyan-300 px-2 py-1">刷新</button></div>
             {incomingReqs.map(r => (
-              <div key={r.id} className="flex items-center gap-2 p-2 rounded-xl border border-slate-800 bg-slate-950/50">
-                <button onClick={()=>r.fromUser?.id && void openProfile(r.fromUser.id)}><img src={r.fromUser?.avatar || ''} className="w-8 h-8 rounded-full object-cover"/></button>
-                <div className="flex-1 min-w-0"><p className="text-xs text-slate-200 truncate">{r.fromUser?.displayName || r.fromUserId}</p><p className="text-[10px] text-slate-500 truncate">@{r.fromUser?.username || r.fromUserId} {r.fromUser?.isOnline?'· 在线':''}</p></div>
-                <button disabled={pendingRequestIds.has(r.id)} onClick={()=>respondRequest(r.id,true)} className="p-1.5 rounded bg-emerald-600/30 text-emerald-300 disabled:opacity-40" title="接受"><Check className="w-3.5 h-3.5"/></button>
-                <button disabled={pendingRequestIds.has(r.id)} onClick={()=>respondRequest(r.id,false)} className="p-1.5 rounded bg-rose-600/30 text-rose-300 disabled:opacity-40" title="拒绝"><X className="w-3.5 h-3.5"/></button>
+              <div key={r.id} className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 space-y-2.5">
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>r.fromUser?.id && void openProfile(r.fromUser.id)} className="shrink-0"><img src={r.fromUser?.avatar || ''} className="w-10 h-10 rounded-full object-cover border border-slate-700"/></button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-100 truncate">{r.fromUser?.displayName || r.fromUserId}</p>
+                    <p className="text-xs text-slate-400 truncate">@{r.fromUser?.username || r.fromUserId} {r.fromUser?.isOnline?'· 在线':''}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button disabled={pendingRequestIds.has(r.id)} onClick={()=>respondRequest(r.id,true)} className="min-h-[40px] rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40"><Check className="w-4 h-4"/>同意加好友</button>
+                  <button disabled={pendingRequestIds.has(r.id)} onClick={()=>respondRequest(r.id,false)} className="min-h-[40px] rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-200 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-40"><X className="w-4 h-4"/>拒绝</button>
+                </div>
               </div>
             ))}
-            {incomingReqs.length===0 && <div className="text-xs text-slate-500">无待处理申请</div>}
-            <p className="text-[11px] text-slate-400 pt-2 border-t border-slate-800">我发出的申请 ({outgoingReqs.length})</p>
-            {outgoingReqs.map(r => (<div key={r.id} className="flex items-center gap-2 p-2 rounded-xl border border-slate-800 bg-slate-950/50 text-xs text-slate-300"><img src={r.toUser?.avatar || ''} className="w-7 h-7 rounded-full"/><span className="flex-1 truncate">→ {r.toUser?.displayName || r.toUserId}</span><span className="text-slate-500">待确认</span></div>))}
+            {incomingReqs.length===0 && <div className="text-xs text-slate-500 py-3">无待处理好友申请</div>}
+            <p className="text-xs text-slate-400 pt-2.5 border-t border-slate-800">我发出的申请 ({outgoingReqs.length})</p>
+            {outgoingReqs.map(r => (
+              <div key={r.id} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-800 bg-slate-950/50 text-xs text-slate-300">
+                <img src={r.toUser?.avatar || ''} className="w-8 h-8 rounded-full object-cover shrink-0"/>
+                <span className="flex-1 truncate">→ {r.toUser?.displayName || r.toUserId}</span>
+                <span className="text-amber-300/90 text-[11px] shrink-0">等待通过</span>
+              </div>
+            ))}
           </div>
         )}
 
         {tab === 'search' && (
-          <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
-            <div className="flex gap-2"><input value={userSearch} onChange={e=>setUserSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void doSearchUsers();}} placeholder="用户名 / 昵称 / ID" className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200"/><button onClick={()=>void doSearchUsers()} className="px-3 rounded-xl bg-cyan-500 text-slate-950 text-xs font-semibold">搜索</button></div>
+          <div className="flex-1 overflow-y-auto space-y-2.5 min-h-0 pr-0.5">
+            <div className="flex gap-2">
+              <input value={userSearch} onChange={e=>setUserSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void doSearchUsers();}} placeholder="输入用户名 / 昵称 / ID 添加好友" className="flex-1 min-h-[42px] px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm sm:text-xs text-slate-200 outline-none focus:border-cyan-500/40"/>
+              <button onClick={()=>void doSearchUsers()} className="min-h-[42px] px-4 rounded-xl bg-cyan-500 text-slate-950 text-xs font-semibold shrink-0">搜索</button>
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-slate-400 px-0.5">
+              <span>{userSearch.trim() ? `搜索结果 (${searchResults.length})` : `可添加的好友 (${searchResults.length})`}</span>
+              {suggestedLoading && <span className="text-cyan-300">加载中…</span>}
+            </div>
             {searchResults.map(u => {
               const isFriend = friends.some(f => f.id === u.id);
               const outgoing = outgoingReqs.some(r => r.toUserId === u.id);
               const incoming = incomingReqs.find(r => r.fromUserId === u.id);
               return (
-              <div key={u.id} className="flex items-center gap-2 p-2 rounded-xl border border-slate-800 bg-slate-950/50">
-                <button onClick={()=>void openProfile(u.id)}><img src={u.avatar} className="w-9 h-9 rounded-full object-cover"/></button>
-                <div className="flex-1 min-w-0"><p className="text-xs font-semibold text-slate-200 truncate">{u.displayName}</p><p className="text-[10px] text-slate-500 truncate">@{u.username} · {u.isOnline?'在线':(u.lastActiveAt?`最近 ${new Date(u.lastActiveAt).toLocaleString()}`:'离线')}</p></div>
-                {isFriend ? <span className="text-[10px] text-emerald-300">已是好友</span> : incoming ? <button onClick={()=>respondRequest(incoming.id,true)} className="px-2 py-1 text-[10px] rounded bg-emerald-600/30 text-emerald-300">接受</button> : outgoing ? <span className="text-[10px] text-slate-400">已申请</span> : <button disabled={pendingRequestIds.has(u.id)} onClick={()=>sendFriendRequest(u.id)} className="p-1.5 rounded bg-slate-800 text-cyan-300 disabled:opacity-40" title="加好友"><UserPlus className="w-3.5 h-3.5"/></button>}
-                <button onClick={()=>openDirect(u.id)} className="px-2 py-1 text-[10px] rounded bg-cyan-500/20 text-cyan-300">私聊</button>
+              <div key={u.id} className="p-3 rounded-xl border border-slate-800 bg-slate-950/60 space-y-2.5">
+                <div className="flex items-center gap-3">
+                  <button onClick={()=>void openProfile(u.id)} className="relative shrink-0">
+                    <img src={u.avatar} className="w-11 h-11 rounded-full object-cover border border-slate-700"/>
+                    {u.isOnline && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950"/>}
+                  </button>
+                  <button onClick={()=>void openProfile(u.id)} className="flex-1 min-w-0 text-left">
+                    <p className="text-sm font-semibold text-slate-100 truncate">{u.displayName}</p>
+                    <p className="text-xs text-slate-400 truncate">@{u.username} · {u.isOnline?'在线':(u.lastActiveAt?`最近 ${new Date(u.lastActiveAt).toLocaleDateString()}`:'离线')}</p>
+                  </button>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {isFriend ? (
+                    <span className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] font-medium inline-flex items-center justify-center">已好友</span>
+                  ) : incoming ? (
+                    <button onClick={()=>respondRequest(incoming.id,true)} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-[11px] font-semibold inline-flex items-center justify-center">通过</button>
+                  ) : outgoing ? (
+                    <span className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-400 text-[11px] inline-flex items-center justify-center">已申请</span>
+                  ) : (
+                    <button disabled={pendingRequestIds.has(u.id)} onClick={()=>sendFriendRequest(u.id)} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-cyan-500 text-slate-950 text-[11px] font-semibold inline-flex items-center justify-center gap-1 disabled:opacity-40"><UserPlus className="w-3.5 h-3.5"/>加好友</button>
+                  )}
+                  <button onClick={()=>void openDirect(u.id)} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-cyan-500/20 border border-cyan-500/35 text-cyan-200 text-[11px] font-medium inline-flex items-center justify-center gap-1"><MessageCircle className="w-3.5 h-3.5"/>私聊</button>
+                  <button onClick={()=>void startCall('audio', { targetUserId: u.id })} disabled={!!callAction} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[11px] font-medium inline-flex items-center justify-center gap-1"><Phone className="w-3.5 h-3.5"/>语音</button>
+                  <button onClick={()=>void startCall('video', { targetUserId: u.id })} disabled={!!callAction} className="col-span-1 min-h-[38px] px-1.5 rounded-lg bg-sky-500/15 border border-sky-500/35 text-sky-300 text-[11px] font-medium inline-flex items-center justify-center gap-1"><Video className="w-3.5 h-3.5"/>视频</button>
+                </div>
               </div>
             );})}
-            {searchResults.length===0 && userSearch.trim() && <div className="text-xs text-slate-500 text-center py-4">无匹配用户</div>}
+            {!suggestedLoading && searchResults.length===0 && <div className="text-xs text-slate-500 text-center py-8">{userSearch.trim() ? '无匹配用户' : '暂无其他可添加用户'}</div>}
           </div>
         )}
 
         {tab === 'msgsearch' && (
           <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
-            <input value={msgQuery} onChange={e=>setMsgQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void doSearchMessages();}} placeholder="关键词（消息内容/附件名）" className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200"/>
+            <input value={msgQuery} onChange={e=>setMsgQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') void doSearchMessages();}} placeholder="关键词（消息内容/附件名）" className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm sm:text-xs text-slate-200"/>
             <div className="grid grid-cols-2 gap-2">
-              <select value={msgConvId} onChange={e=>{setMsgConvId(e.target.value); setMsgSender('');}} className="px-2 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200">
+              <select value={msgConvId} onChange={e=>{setMsgConvId(e.target.value); setMsgSender('');}} className="min-h-[40px] px-2 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200">
                 <option value="">全部会话</option>
                 {conversations.filter(c=>c.type!=='country_room').map(c => <option key={c.id} value={c.id}>{c.name || c.id}</option>)}
               </select>
-              <select value={msgSender} onChange={e=>setMsgSender(e.target.value)} className="px-2 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200">
+              <select value={msgSender} onChange={e=>setMsgSender(e.target.value)} className="min-h-[40px] px-2 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200">
                 <option value="">全部发送者</option>
                 {(() => {
                   const opts: {id:string; name:string}[] = [];
@@ -1406,10 +1802,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 })()}
               </select>
             </div>
-            <button onClick={()=>void doSearchMessages()} disabled={msgSearching} className="w-full px-3 py-2 rounded-xl bg-cyan-500 text-slate-950 text-xs font-semibold disabled:opacity-40">{msgSearching?'搜索中…':'搜索消息'}</button>
-            <div className="text-[10px] text-slate-500">支持关键词、发送者、会话筛选（真实后端搜索）</div>
+            <button onClick={()=>void doSearchMessages()} disabled={msgSearching} className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-cyan-500 text-slate-950 text-xs font-semibold disabled:opacity-40">{msgSearching?'搜索中…':'搜索消息'}</button>
+            <div className="text-[10px] text-slate-500">支持关键词、发送者、会话筛选</div>
             {msgResults.map(m => (
-              <button key={m.id} onClick={()=>{ onSelectConversation(m.conversationId); setTab('chats'); }} className="w-full text-left p-2.5 rounded-xl border border-slate-800 bg-slate-950/50 hover:bg-slate-800/60 space-y-1">
+              <button key={m.id} onClick={()=>{ onSelectConversation(m.conversationId); setTab('chats'); setMobileShowChat(true); }} className="w-full text-left p-2.5 rounded-xl border border-slate-800 bg-slate-950/50 hover:bg-slate-800/60 space-y-1">
                 <div className="flex items-center justify-between gap-2"><span className="text-[11px] font-semibold text-slate-200 truncate">{(m as any).conversationName || m.conversationId}</span><span className="text-[10px] text-slate-500 shrink-0">{new Date(m.createdAt).toLocaleString()}</span></div>
                 <p className="text-[11px] text-slate-300 truncate">{m.senderName}: {m.content || (m.attachments?.length ? `[附件] ${m.attachments.map(a=>a.name).join(', ')}` : '')}</p>
               </button>
@@ -1636,142 +2032,51 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       </div>
 
       {/* Right: chat */}
-      <div className={`flex-1 rounded-2xl bg-slate-900/80 border border-slate-800 flex-col shadow-xl backdrop-blur-md overflow-hidden min-h-0 ${mobileShowChat ? "flex" : "hidden lg:flex"}`}>
-        <div className="p-3 sm:p-3.5 border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-2 sm:gap-3 bg-slate-950/40">
-          <div className="min-w-0 flex items-center gap-2">
-            <button type="button" onClick={()=>setMobileShowChat(false)} className="lg:hidden p-1.5 -ml-0.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800 shrink-0 min-h-[36px] min-w-[36px] inline-flex items-center justify-center" aria-label="Back"><ChevronLeft className="w-4 h-4"/></button>
-            <div className="min-w-0">
-              <h3 className="font-bold text-sm text-slate-100 truncate flex items-center gap-2">{activeConv?.name || 'Chat'} {activeConv?.type==='group' && <span className="text-[10px] px-1.5 rounded bg-slate-800 text-slate-300">群聊</span>}</h3>
+      <div className={`flex-1 rounded-2xl bg-slate-900/85 border border-slate-800 flex-col shadow-xl backdrop-blur-md overflow-hidden min-h-0 ${mobileShowChat ? "flex" : "hidden lg:flex"}`}>
+        <div className="px-2.5 py-2 sm:px-4 sm:py-3 border-b border-slate-800/90 flex items-center justify-between gap-2 bg-slate-950/50 shrink-0">
+          <div className="min-w-0 flex items-center gap-2 flex-1">
+            <button type="button" onClick={()=>setMobileShowChat(false)} className="lg:hidden rounded-xl border border-slate-700/80 text-slate-200 hover:bg-slate-800 shrink-0 min-h-[40px] min-w-[40px] inline-flex items-center justify-center" aria-label="Back"><ChevronLeft className="w-5 h-5"/></button>
+            {activeConv?.type !== 'global_channel' && (
+              <div className="relative shrink-0 hidden xs:block sm:block">
+                <img src={activeConv?.otherUser?.avatar || activeConv?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-9 h-9 rounded-full object-cover border border-slate-700" />
+                {(activeConv?.otherUser?.isOnline || activeConv?.isOnline) && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-950" />}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <h3 className="font-bold text-sm text-slate-100 truncate flex items-center gap-1.5">{activeConv?.name || 'Chat'} {activeConv?.type==='group' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0">群聊</span>}</h3>
               <p className="text-[11px] text-slate-400 truncate">{typingNames ? `${typingNames} 正在输入…` : (activeConv?.otherUser?.isOnline || activeConv?.isOnline ? '在线' : 'Earth One Messenger')}</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-2 text-xs flex-wrap justify-end">
+          <div className="flex items-center gap-1 sm:gap-1.5 text-xs shrink-0">
             {canStartCallHere && (
-              <div className="flex items-center gap-1">
-                <button onClick={()=>void startCall('audio')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="p-1.5 rounded border border-slate-700 text-emerald-300 hover:bg-slate-800 disabled:opacity-40" title={lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话'}><Phone className="w-3.5 h-3.5"/></button>
-                <button onClick={()=>void startCall('video')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="p-1.5 rounded border border-slate-700 text-cyan-300 hover:bg-slate-800 disabled:opacity-40" title={lang==='ar'?'مكالمة فيديو':lang==='en'?'Video call':'视频通话'}><Video className="w-3.5 h-3.5"/></button>
-              </div>
+              <>
+                <button type="button" onClick={()=>void startCall('audio')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="min-h-[38px] min-w-[38px] sm:px-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-40 inline-flex items-center justify-center gap-1" title={lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话'}><Phone className="w-4 h-4"/><span className="hidden md:inline text-xs font-medium">语音</span></button>
+                <button type="button" onClick={()=>void startCall('video')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="min-h-[38px] min-w-[38px] sm:px-2.5 rounded-xl border border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 disabled:opacity-40 inline-flex items-center justify-center gap-1" title={lang==='ar'?'مكالمة فيديو':lang==='en'?'Video call':'视频通话'}><Video className="w-4 h-4"/><span className="hidden md:inline text-xs font-medium">视频</span></button>
+              </>
             )}
-            {activeConv?.type === 'group' && <button onClick={()=>{ setShowGroupPanel(v=>!v); if (!showGroupPanel) void loadGroupDetail(activeConv.id); }} className="p-1.5 rounded border border-slate-700 text-slate-300" title="群信息"><Info className="w-3.5 h-3.5"/></button>}
-            <Languages className="w-4 h-4 text-cyan-400" />
-            <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-xs"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
-            <button onClick={()=>setAutoTranslate(v=>!v)} className={`px-2 py-1 rounded text-[11px] border ${autoTranslate?'bg-cyan-500/20 text-cyan-300 border-cyan-500/50':'bg-slate-800 text-slate-400 border-slate-700'}`}>{autoTranslate?'AUTO':'OFF'}</button>
-            <button onClick={()=>void fetchMessages(false)} className="p-1.5 rounded border border-slate-700 text-slate-300"><RefreshCw className="w-3.5 h-3.5"/></button>
+            {activeConv?.type === 'group' && <button type="button" onClick={()=>{ setShowGroupPanel(v=>!v); if (!showGroupPanel) void loadGroupDetail(activeConv.id); }} className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-700/80 text-slate-300 hover:bg-slate-800 inline-flex items-center justify-center" title="群信息"><Info className="w-4 h-4"/></button>}
+            <button type="button" onClick={()=>setShowTranslateBar(v=>!v)} className={`sm:hidden min-h-[38px] min-w-[38px] rounded-xl border inline-flex items-center justify-center ${autoTranslate?'border-cyan-500/40 bg-cyan-500/15 text-cyan-300':'border-slate-700/80 text-slate-400'}`} title="实时翻译"><Languages className="w-4 h-4"/></button>
+            <div className="hidden sm:flex items-center gap-1.5">
+              <Languages className="w-4 h-4 text-cyan-400" />
+              <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-xs"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
+              <button type="button" onClick={()=>setAutoTranslate(v=>!v)} className={`px-2 py-1 rounded text-[11px] border ${autoTranslate?'bg-cyan-500/20 text-cyan-300 border-cyan-500/50':'bg-slate-800 text-slate-400 border-slate-700'}`}>{autoTranslate?'AUTO':'OFF'}</button>
+            </div>
+            <button type="button" onClick={()=>void fetchMessages(false)} className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-700/80 text-slate-300 hover:bg-slate-800 inline-flex items-center justify-center" title="刷新"><RefreshCw className="w-4 h-4"/></button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
-          {incomingCall && incomingCall.initiatorId !== currentUser?.id && ['ringing','connecting'].includes(incomingCall.status) && (
-            <div className="rounded-xl border border-cyan-700/50 bg-cyan-950/40 px-3 py-2.5 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-cyan-100">{incomingCall.kind === 'video' ? (lang==='ar'?'مكالمة فيديو واردة':lang==='en'?'Incoming video call':'视频来电') : (lang==='ar'?'مكالمة صوتية واردة':lang==='en'?'Incoming audio call':'语音来电')}</p>
-                  <p className="text-[11px] text-cyan-200/80 truncate">{incomingCall.scope === 'group' ? (lang==='ar'?'مكالمة جماعية':lang==='en'?'Group call':'群组通话') : (lang==='ar'?'مكالمة مباشرة':lang==='en'?'Direct call':'一对一通话')} · {callStatusLabel(incomingCall.status)}</p>
-                </div>
-                <span className="text-[10px] text-cyan-300/80">{incomingCall.id?.slice(-8)}</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button onClick={()=>void acceptIncomingCall()} disabled={!!callAction} className="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-40"><Phone className="w-3.5 h-3.5"/>{lang==='ar'?'قبول':lang==='en'?'Accept':'接听'}</button>
-                <button onClick={()=>void rejectIncomingCall()} disabled={!!callAction} className="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-200 border border-rose-500/40 text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-40"><PhoneOff className="w-3.5 h-3.5"/>{lang==='ar'?'رفض':lang==='en'?'Reject':'拒绝'}</button>
-              </div>
-              <p className="text-[10px] text-cyan-200/70">{lang==='ar'?'طبقة الإشارة من EARTH ONE؛ الوسائط الحقيقية تتطلب خادم وسائط مُهيأ.':lang==='en'?'EARTH ONE signaling only; real media requires configured media runtime.':'EARTH ONE 信令层；真实音视频需已配置媒体运行时。'}</p>
+        {showTranslateBar && (
+          <div className="sm:hidden px-3 py-2 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <Languages className="w-4 h-4 text-cyan-400" />
+              <span className="text-slate-300">目标语言</span>
+              <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 text-xs"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
             </div>
-          )}
-          {activeCall && (() => {
-            const mediaPhase = mediaState.phase || 'idle';
-            const mediaParticipants = Object.values(mediaState.participants || {});
-            const remoteAudioParticipants = mediaParticipants.filter((p: any) => !p.isLocal && (p.audioTrack || p.audioEnabled));
-            const remoteVideoTiles = mediaParticipants.filter((p: any) => !p.isLocal);
-            const localP: any = mediaParticipants.find((p: any) => p.isLocal) || null;
-            const participantUsers: any[] = Array.isArray(activeCall.users) ? activeCall.users : [];
-            const nameFor = (id: string) => {
-              const fromState = mediaParticipants.find((p:any)=>p.identity===id);
-              if (fromState?.name) return fromState.name;
-              const u = participantUsers.find((x:any)=>x.id===id); if (u?.displayName) return u.displayName;
-              if (id === currentUser?.id) return currentUser?.displayName || 'Me';
-              return id?.slice(0,8) || 'participant';
-            };
-            const qualityLabel = (q?: string) => {
-              const v = String(q||'').toLowerCase();
-              if (v.includes('excellent')) return lang==='ar'?'ممتازة':lang==='en'?'Excellent':'优秀';
-              if (v.includes('good')) return lang==='ar'?'جيدة':lang==='en'?'Good':'良好';
-              if (v.includes('poor')) return lang==='ar'?'ضعيفة':lang==='en'?'Poor':'较差';
-              if (v.includes('lost')) return lang==='ar'?'مفقودة':lang==='en'?'Lost':'丢失';
-              return lang==='ar'?'غير معروف':lang==='en'?'Unknown':'未知';
-            };
-            const mediaPhaseLabel = ({ idle: lang==='ar'?'خامل':lang==='en'?'Idle':'空闲', acquiring: lang==='ar'?'جارٍ الحصول على الأجهزة':lang==='en'?'Acquiring devices':'获取设备中', connecting: lang==='ar'?'جارٍ اتصال الوسائط':lang==='en'?'Connecting media':'媒体连接中', connected: lang==='ar'?'الوسائط متصلة':lang==='en'?'Media connected':'媒体已连接', reconnecting: lang==='ar'?'إعادة اتصال الوسائط':lang==='en'?'Reconnecting media':'媒体重连中', disconnected: lang==='ar'?'انقطع اتصال الوسائط':lang==='en'?'Media disconnected':'媒体已断开', failed: lang==='ar'?'فشل الوسائط':lang==='en'?'Media failed':'媒体失败', blocked: lang==='ar'?'الوسائط محظورة/غير مُعدة':lang==='en'?'Media blocked/unconfigured':'媒体被阻止/未配置' } as any)[mediaPhase] || mediaPhase;
-            return (
-            <div className="rounded-xl border border-slate-700 bg-slate-950/60 px-3 py-2.5 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-slate-100 inline-flex items-center gap-1.5">{activeCall.kind === 'video' ? <Video className="w-3.5 h-3.5 text-cyan-300"/> : <Phone className="w-3.5 h-3.5 text-emerald-300"/>}{activeCall.kind === 'video' ? (lang==='ar'?'مكالمة فيديو':lang==='en'?'Video call':'视频通话') : (lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话')} · {callStatusLabel(activeCall.status)}</p>
-                  <p className="text-[11px] text-slate-400 truncate">{activeCall.scope === 'group' ? (lang==='ar'?'جماعية':lang==='en'?'Group':'群组') : (lang==='ar'?'مباشرة':lang==='en'?'Direct':'一对一')} · {(activeCall.participantIds || []).length} {lang==='ar'?'مشاركين':lang==='en'?'participants':'参与者'} · {mediaPhaseLabel}{activeCall.roomName ? ` · ${activeCall.roomName}` : ''}</p>
-                </div>
-                <span className="text-[10px] text-slate-500">{activeCall.id?.slice(-8)}</span>
-              </div>
+            <button type="button" onClick={()=>setAutoTranslate(v=>!v)} className={`px-2.5 py-1 rounded-lg text-xs border font-medium ${autoTranslate?'bg-cyan-500/20 text-cyan-300 border-cyan-500/50':'bg-slate-800 text-slate-400 border-slate-700'}`}>{autoTranslate?'自动翻译开':'已关闭'}</button>
+          </div>
+        )}
 
-              {!mediaState.canPlaybackAudio && ['connected','reconnecting','connecting'].includes(mediaPhase) && remoteAudioParticipants.length > 0 && (
-                <button onClick={()=>void startCallMediaPlayback()} className="w-full text-[11px] px-2.5 py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 inline-flex items-center justify-center gap-2"><Volume2 className="w-3.5 h-3.5"/>{lang==='ar'?'انقر لتشغيل الصوت الوارد':lang==='en'?'Click to enable incoming audio playback':'点击启用来电音频播放'}</button>
-              )}
-
-              {['connecting','active','reconnecting','ringing'].includes(activeCall.status) && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {(remoteVideoTiles.length ? remoteVideoTiles : (activeCall.participantIds||[]).filter((id:string)=>id!==currentUser?.id).map((id:string)=>({ identity:id, isLocal:false, audioEnabled: !!activeCall.participants?.[id]?.micEnabled, videoEnabled: !!activeCall.participants?.[id]?.cameraEnabled, screenShareEnabled: !!activeCall.participants?.[id]?.screenSharing, speaking:false, connectionQuality: mediaState.connectionQuality, audioTrack:null, videoTrack:null, screenTrack:null }))).map((p:any) => (
-                    <div key={p.identity} className="rounded-lg border border-slate-800 bg-slate-900/70 overflow-hidden">
-                      <div className="aspect-video bg-slate-950 flex items-center justify-center relative">
-                        {p.videoTrack ? <CallTrackView track={p.videoTrack} kind="video" className="w-full h-full object-cover" /> : p.screenTrack ? <CallTrackView track={p.screenTrack} kind="video" className="w-full h-full object-contain bg-black" /> : <div className="flex flex-col items-center gap-2 text-slate-500"><UserIcon className="w-8 h-8"/><span className="text-[11px]">{activeCall.kind==='video' ? (lang==='ar'?'لا يوجد فيديو':lang==='en'?'No video':'无视频画面') : (lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话')}</span></div>}
-                        {p.speaking && <span className="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-500/40">{lang==='ar'?'يتحدث':lang==='en'?'Speaking':'正在说话'}</span>}
-                      </div>
-                      <div className="px-2.5 py-2 space-y-1">
-                        <div className="flex items-center justify-between gap-2 text-[11px]"><span className="text-slate-200 truncate">{nameFor(p.identity)}</span><span className="text-slate-500">{p.isLocal ? (lang==='ar'?'أنت':lang==='en'?'You':'我') : (lang==='ar'?'مشارك':lang==='en'?'Participant':'参与者')}</span></div>
-                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                          <span className="inline-flex items-center gap-1">{p.audioEnabled ? <Mic className="w-3 h-3 text-emerald-300"/> : <MicOff className="w-3 h-3 text-rose-300"/>}{p.audioEnabled ? (lang==='ar'?'ميكروفون':lang==='en'?'Mic':'麦克风') : (lang==='ar'?'كتم':lang==='en'?'Muted':'静音')}</span>
-                          <span className="inline-flex items-center gap-1">{p.videoEnabled ? <Video className="w-3 h-3 text-cyan-300"/> : <VideoOff className="w-3 h-3 text-slate-500"/>}{p.videoEnabled ? (lang==='ar'?'كاميرا':lang==='en'?'Cam':'摄像头') : (lang==='ar'?'بلا كاميرا':lang==='en'?'Cam off':'关摄像头')}</span>
-                          {p.screenShareEnabled && <span className="inline-flex items-center gap-1"><Monitor className="w-3 h-3 text-cyan-300"/>{lang==='ar'?'مشاركة':lang==='en'?'Share':'共享'}</span>}
-                        </div>
-                        <div className="text-[10px] text-slate-500">{lang==='ar'?'جودة الشبكة':lang==='en'?'Network':'网络质量'}: {qualityLabel(p.connectionQuality || mediaState.connectionQuality)}</div>
-                      </div>
-                      {p.audioTrack && <CallTrackView track={p.audioTrack} kind="audio" />}
-                      {p.screenTrack && p.videoTrack && <div className="px-2.5 pb-2 text-[10px] text-cyan-300 inline-flex items-center gap-1"><Monitor className="w-3 h-3"/>{lang==='ar'?'مشاركة شاشة نشطة':lang==='en'?'Screen sharing active':'屏幕共享中'}</div>}
-                    </div>
-                  ))}
-                  <div className="rounded-lg border border-slate-800 bg-slate-900/70 overflow-hidden">
-                    <div className="aspect-video bg-slate-950 flex items-center justify-center relative">
-                      {localP?.videoTrack || localP?.screenTrack ? <CallTrackView track={localP.screenTrack || localP.videoTrack} kind="video" muted className="w-full h-full object-cover" mirror={!localP?.screenTrack} /> : <div className="flex flex-col items-center gap-2 text-slate-500"><UserIcon className="w-8 h-8"/><span className="text-[11px]">{lang==='ar'?'معاينة محلية':lang==='en'?'Local preview':'本地预览'}</span></div>}
-                    </div>
-                    <div className="px-2.5 py-2 space-y-1">
-                      <div className="flex items-center justify-between gap-2 text-[11px]"><span className="text-slate-200 truncate">{currentUser?.displayName || (lang==='ar'?'أنا':lang==='en'?'You':'我')}</span><span className="text-cyan-300">{lang==='ar'?'محلي':lang==='en'?'Local':'本地'}</span></div>
-                      <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                        <span className="inline-flex items-center gap-1">{callDevices.micEnabled ? <Mic className="w-3 h-3 text-emerald-300"/> : <MicOff className="w-3 h-3 text-rose-300"/>}{lang==='ar'?'ميكروفون':lang==='en'?'Mic':'麦克风'}</span>
-                        <span className="inline-flex items-center gap-1">{callDevices.cameraEnabled ? <Video className="w-3 h-3 text-cyan-300"/> : <VideoOff className="w-3 h-3 text-slate-500"/>}{lang==='ar'?'كاميرا':lang==='en'?'Camera':'摄像头'}</span>
-                        {callDevices.screenSharing && <span className="inline-flex items-center gap-1"><Monitor className="w-3 h-3 text-cyan-300"/>{lang==='ar'?'مشاركة':lang==='en'?'Sharing':'共享中'}</span>}
-                      </div>
-                      <div className="text-[10px] text-slate-500">{lang==='ar'?'حالة الصوت':lang==='en'?'Audio':'音频'}: {mediaPhase==='connected' ? (lang==='ar'?'متصل':lang==='en'?'Connected':'已连接') : mediaPhaseLabel}{!mediaState.canPlaybackAudio && remoteAudioParticipants.length>0 ? ` · ${lang==='ar'?'التشغيل يحتاج تفاعل':lang==='en'?'Playback needs interaction':'需交互启用播放'}` : ''}</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center gap-2">
-                {['connecting','active','reconnecting'].includes(activeCall.status) && (
-                  <>
-                    <button onClick={()=>void toggleCallDevice('micEnabled')} className={`px-2.5 py-1.5 rounded-lg border text-xs inline-flex items-center gap-1 ${callDevices.micEnabled ? 'border-slate-700 text-slate-200 bg-slate-800/60' : 'border-rose-500/40 text-rose-200 bg-rose-500/10'}`}>{callDevices.micEnabled ? <Mic className="w-3.5 h-3.5"/> : <MicOff className="w-3.5 h-3.5"/>}{callDevices.micEnabled ? (lang==='ar'?'ميكروفون':lang==='en'?'Mic':'麦克风') : (lang==='ar'?'كتم':lang==='en'?'Muted':'静音')}</button>
-                    <button onClick={()=>void toggleCallDevice('cameraEnabled')} disabled={activeCall.kind !== 'video'} className={`px-2.5 py-1.5 rounded-lg border text-xs inline-flex items-center gap-1 disabled:opacity-40 ${callDevices.cameraEnabled ? 'border-slate-700 text-slate-200 bg-slate-800/60' : 'border-rose-500/40 text-rose-200 bg-rose-500/10'}`}>{callDevices.cameraEnabled ? <Video className="w-3.5 h-3.5"/> : <VideoOff className="w-3.5 h-3.5"/>}{callDevices.cameraEnabled ? (lang==='ar'?'كاميرا':lang==='en'?'Camera':'摄像头') : (lang==='ar'?'إيقاف الكاميرا':lang==='en'?'Camera off':'关摄像头')}</button>
-                    <button onClick={()=>void toggleCallDevice('screenSharing')} className={`px-2.5 py-1.5 rounded-lg border text-xs inline-flex items-center gap-1 ${!callDevices.screenSharing ? 'border-slate-700 text-slate-200 bg-slate-800/60' : 'border-cyan-500/40 text-cyan-200 bg-cyan-500/10'}`}>{callDevices.screenSharing ? <MonitorOff className="w-3.5 h-3.5"/> : <Monitor className="w-3.5 h-3.5"/>}{callDevices.screenSharing ? (lang==='ar'?'إيقاف المشاركة':lang==='en'?'Stop share':'停止共享') : (lang==='ar'?'مشاركة الشاشة':lang==='en'?'Share screen':'共享屏幕')}</button>
-                    {activeCall.kind === 'video' && <button onClick={()=>void switchCallCamera()} disabled={!callDevices.cameraEnabled || !mediaSessionRef.current} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs inline-flex items-center gap-1 disabled:opacity-40"><RefreshCw className="w-3.5 h-3.5"/>{lang==='ar'?'تبديل الكاميرا':lang==='en'?'Switch camera':'切换摄像头'}</button>}
-                    <button onClick={()=>void requestCallMediaToken()} disabled={!!callAction} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs disabled:opacity-40">{lang==='ar'?'حالة/إعادة وسائط':lang==='en'?'Media retry/status':'媒体重试/状态'}</button>
-                  </>
-                )}
-                {activeCall.scope === 'group' && ['connecting','active','reconnecting'].includes(activeCall.status) && <button onClick={()=>void leaveActiveGroupCall()} disabled={!!callAction} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-200 text-xs disabled:opacity-40">{lang==='ar'?'مغادرة':lang==='en'?'Leave':'离开'}</button>}
-                {['ringing','connecting','active','reconnecting'].includes(activeCall.status) && <button onClick={()=>void endOrCancelActiveCall()} disabled={!!callAction} className="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-200 border border-rose-500/40 text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-40"><PhoneOff className="w-3.5 h-3.5"/>{activeCall.status==='ringing' && activeCall.initiatorId===currentUser?.id ? (lang==='ar'?'إلغاء':lang==='en'?'Cancel':'取消') : (lang==='ar'?'إنهاء':lang==='en'?'End':'挂断')}</button>}
-                {['ended','rejected','missed','busy','failed','canceled'].includes(activeCall.status) && <button onClick={()=>{ void cleanupCallMedia('dismiss'); setActiveCall(null); setCallMediaNote(null); }} className="px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">{lang==='ar'?'إغلاق':lang==='en'?'Dismiss':'关闭'}</button>}
-              </div>
-
-              {callMediaNote && <p className="text-[10px] text-amber-200/90">{callMediaNote}</p>}
-              {mediaState.error && !callMediaNote && <p className="text-[10px] text-amber-200/90">{mediaState.error}</p>}
-              <p className="text-[10px] text-slate-500">{lang==='ar'?'إشارات EARTH ONE مع طبقة وسائط LiveKit عند التهيئة. الرموز تصدر من الخادم فقط (هوية المستخدم + غرفة المكالمة) دون أسرار في الواجهة.':lang==='en'?'EARTH ONE signaling with LiveKit media layer when configured. Tokens issued server-side only (user identity + call room), no secrets in frontend.':'EARTH ONE 信令 + 已配置时的 LiveKit 媒体层；令牌仅服务端签发（绑定用户身份与通话房间），前端无密钥。'}</p>
-            </div>
-          ); })()}
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 min-h-0">
           {hasMore && <div className="text-center"><button disabled={loadingMore} onClick={async()=>{ if(!messages[0]) return; setLoadingMore(true); await fetchMessages(true, messages[0].id); setLoadingMore(false); }} className="text-[11px] px-3 py-1 rounded-full border border-slate-700 text-slate-300 hover:bg-slate-800">加载更早消息</button></div>}
           {connError && <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200 flex items-center justify-between gap-2"><span>{connError}</span><button onClick={()=>{setConnError(null); void fetchMessages(false);}} className="px-2 py-1 rounded bg-amber-800/50">重试</button></div>}
           {messages.map(msg => {
@@ -1834,11 +2139,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               </div>
             );
           })}
-          {messages.length===0 && <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center text-slate-400 gap-2"><MessageCircle className="w-10 h-10 text-slate-600"/><p className="text-sm">选择会话开始聊天（实时 WebSocket）</p></div>}
+          {messages.length===0 && <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center text-slate-400 gap-2"><MessageCircle className="w-10 h-10 text-slate-600"/><p className="text-sm">选择会话开始聊天</p></div>}
           <div ref={messagesEndRef} />
         </div>
 
-        <form onSubmit={handleSendMessage} className="p-2.5 sm:p-3 bg-slate-950/60 border-t border-slate-800 space-y-2 pb-[calc(0.625rem+env(safe-area-inset-bottom))]">
+        <form onSubmit={handleSendMessage} className="p-2.5 sm:p-3 bg-slate-950/70 border-t border-slate-800 space-y-2 shrink-0">
           {replyTo && <div className="text-[11px] text-slate-300 flex items-center justify-between bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5"><span className="truncate">回复：{replyTo.content || '[附件]'}</span><button type="button" onClick={()=>setReplyTo(null)}><X className="w-3.5 h-3.5"/></button></div>}
           {pendingUploads.length > 0 && (
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-2.5 space-y-2">
@@ -1861,21 +2166,21 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               </div>
             </div>
           )}
-          <div className="flex items-end gap-2">
+          <div className="flex items-end gap-1.5 sm:gap-2">
             <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
             <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
-            <button type="button" onClick={()=>imageInputRef.current?.click()} title="发送图片" className="p-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800"><ImagePlus className="w-4 h-4"/></button>
-            <button type="button" onClick={()=>fileInputRef.current?.click()} title="发送文件" className="p-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800"><Paperclip className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>imageInputRef.current?.click()} title="发送图片" className="min-h-[44px] min-w-[40px] px-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 inline-flex items-center justify-center shrink-0"><ImagePlus className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>fileInputRef.current?.click()} title="发送文件" className="min-h-[44px] min-w-[40px] px-2.5 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 inline-flex items-center justify-center shrink-0"><Paperclip className="w-4 h-4"/></button>
             <textarea
               value={inputText}
               onChange={e=>{ setInputText(e.target.value); sendTyping(true); }}
               onBlur={()=>sendTyping(false)}
               onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); void handleSendMessage(); } }}
-              placeholder="输入消息… (Enter 发送)"
+              placeholder="输入消息…"
               rows={1}
-              className="flex-1 min-h-[44px] max-h-32 resize-y px-3.5 sm:px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-sm text-slate-100"
+              className="flex-1 min-h-[44px] max-h-28 resize-none px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-sm text-slate-100 outline-none focus:border-cyan-500/50"
             />
-            <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-semibold text-xs flex items-center gap-1.5 h-[44px]"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
+            <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-3.5 sm:px-4 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-semibold text-xs flex items-center gap-1.5 h-[44px] shrink-0"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
           </div>
         </form>
       </div>
@@ -1976,13 +2281,15 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 {!editing && (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {!isSelf && u.id && <>
-                      <button onClick={()=>{ void openDirect(u.id); setSelectedProfile(null); }} className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs">{L('发消息','Message','رسالة')}</button>
-                      {!selectedProfile.isFriend && !selectedProfile.blocked && <button onClick={()=>{ void sendFriendRequest(u.id); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs">{L('加好友','Add friend','إضافة صديق')}</button>}
-                      {selectedProfile.isFriend && <button onClick={()=>{ void removeFriend(u.id); setSelectedProfile(null); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-rose-300 text-xs">{L('删除好友','Remove friend','إزالة صديق')}</button>}
-                      {!selectedProfile.blocked ? <button onClick={()=>{ void blockUser(u.id); setSelectedProfile(null); }} className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs">{L('屏蔽','Block','حظر')}</button> : <span className="text-[11px] text-amber-300">{L('已屏蔽','Blocked','محظور')}</span>}
+                      <button onClick={()=>{ void openDirect(u.id); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs">{L('发消息','Message','رسالة')}</button>
+                      <button onClick={()=>{ void startCall('audio', { targetUserId: u.id }); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs inline-flex items-center gap-1"><Phone className="w-3.5 h-3.5"/>{L('语音通话','Voice call','مكالمة صوتية')}</button>
+                      <button onClick={()=>{ void startCall('video', { targetUserId: u.id }); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/40 text-xs inline-flex items-center gap-1"><Video className="w-3.5 h-3.5"/>{L('视频通话','Video call','مكالمة فيديو')}</button>
+                      {!selectedProfile.isFriend && !selectedProfile.blocked && <button onClick={()=>{ void sendFriendRequest(u.id); }} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs">{L('加好友','Add friend','إضافة صديق')}</button>}
+                      {selectedProfile.isFriend && <button onClick={()=>{ void removeFriend(u.id); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-slate-800 text-rose-300 text-xs">{L('删除好友','Remove friend','إزالة صديق')}</button>}
+                      {!selectedProfile.blocked ? <button onClick={()=>{ void blockUser(u.id); setSelectedProfile(null); }} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">{L('屏蔽','Block','حظر')}</button> : <span className="text-[11px] text-amber-300">{L('已屏蔽','Blocked','محظور')}</span>}
                     </>}
-                    {isSelf && profileMode==='view' && <button onClick={()=>{ setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); setProfileMode('edit'); }} className="px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs">{L('编辑资料','Edit profile','تعديل الملف')}</button>}
-                    <button onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }} className="px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 text-xs">{L('关闭','Close','إغلاق')}</button>
+                    {isSelf && profileMode==='view' && <button onClick={()=>{ setProfileDraft({ displayName: u.displayName || '', username: u.username || '', bio: u.bio || '' }); setProfileMode('edit'); }} className="px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs">{L('编辑资料','Edit profile','تعديل الملف')}</button>}
+                    <button onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }} className="px-3 py-2 rounded-lg border border-slate-700 text-slate-300 text-xs">{L('关闭','Close','إغلاق')}</button>
                   </div>
                 )}
                 {selectedProfile.pendingRequest && <p className="text-[11px] text-amber-300">{L('存在待处理好友申请','Pending friend request','يوجد طلب صداقة قيد الانتظار')}</p>}
@@ -1991,6 +2298,290 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Create Group Modal */}
+      {showCreateGroup && (
+        <div className="fixed inset-0 z-[75] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={()=>setShowCreateGroup(false)}>
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 p-4 sm:p-5 space-y-4 max-h-[85vh] flex flex-col" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-100">创建群聊</h3>
+              <button onClick={()=>setShowCreateGroup(false)} className="p-1.5 rounded-lg border border-slate-700 text-slate-300"><X className="w-4 h-4"/></button>
+            </div>
+            <input value={newGroupName} onChange={e=>setNewGroupName(e.target.value)} placeholder="输入群聊名称" className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100" />
+            <div className="text-xs text-slate-400">选择好友成员 ({newGroupMembers.length} 已选)</div>
+            <div className="flex-1 overflow-y-auto space-y-1.5 min-h-[120px] max-h-60">
+              {friends.map(f => {
+                const checked = newGroupMembers.includes(f.id);
+                return (
+                  <label key={f.id} className={`flex items-center gap-3 p-2.5 rounded-xl border cursor-pointer ${checked ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-slate-800 bg-slate-950/60'}`}>
+                    <input type="checkbox" checked={checked} onChange={e=>setNewGroupMembers(prev => e.target.checked ? [...prev, f.id] : prev.filter(x => x !== f.id))} className="h-4 w-4 accent-cyan-500" />
+                    <img src={f.avatar} className="w-8 h-8 rounded-full object-cover" />
+                    <span className="text-sm text-slate-200 truncate flex-1">{f.displayName}</span>
+                  </label>
+                );
+              })}
+              {friends.length === 0 && <div className="text-xs text-slate-500 py-6 text-center">请先添加好友后再创建群聊</div>}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={()=>setShowCreateGroup(false)} className="min-h-[42px] px-4 rounded-xl border border-slate-700 text-slate-300 text-xs">取消</button>
+              <button onClick={()=>void createGroup()} className="min-h-[42px] px-4 rounded-xl bg-cyan-500 text-slate-950 font-semibold text-xs">创建群聊</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group Detail Modal */}
+      {showGroupPanel && activeConv?.type === 'group' && (
+        <div className="fixed inset-0 z-[75] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={()=>setShowGroupPanel(false)}>
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 p-4 sm:p-5 space-y-4 max-h-[85vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-100 truncate">{groupDetail?.name || activeConv.name}</h3>
+              <button onClick={()=>setShowGroupPanel(false)} className="p-1.5 rounded-lg border border-slate-700 text-slate-300"><X className="w-4 h-4"/></button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={()=>void renameGroupAction()} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs">修改群名</button>
+              <button onClick={()=>void changeGroupAvatar()} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs">更换头像</button>
+              <button onClick={()=>void inviteMembers()} className="px-3 py-2 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-200 text-xs">邀请成员</button>
+              <button onClick={()=>void clearConversationForMe()} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">清除本地记录</button>
+              <button onClick={()=>void leaveGroupAction()} className="px-3 py-2 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs inline-flex items-center gap-1"><LogOut className="w-3.5 h-3.5"/>退出群聊</button>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400">群成员 ({(groupDetail?.members || activeConv.participantIds || []).length})</p>
+              {(groupDetail?.members || []).map((m: any) => {
+                const isOwner = groupDetail?.ownerId === m.id;
+                const isAdmin = (groupDetail?.adminIds || []).includes(m.id);
+                const iAmOwner = groupDetail?.ownerId === currentUser?.id;
+                return (
+                  <div key={m.id} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <img src={m.avatar} className="w-8 h-8 rounded-full object-cover" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-slate-200 truncate flex items-center gap-1">{m.displayName} {isOwner && <Crown className="w-3 h-3 text-amber-400"/>}</p>
+                        <p className="text-[10px] text-slate-500">{isOwner ? '群主' : isAdmin ? '管理员' : '成员'}</p>
+                      </div>
+                    </div>
+                    {iAmOwner && m.id !== currentUser?.id && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={()=>void toggleAdmin(m.id, !isAdmin)} className="px-2 py-1 rounded bg-slate-800 text-[10px] text-slate-300">{isAdmin ? '取消管理' : '设管理'}</button>
+                        <button onClick={()=>void transferOwner(m.id)} className="px-2 py-1 rounded bg-slate-800 text-[10px] text-amber-300">转让</button>
+                        <button onClick={()=>void removeMember(m.id)} className="p-1.5 rounded bg-slate-800 text-rose-300"><UserMinus className="w-3.5 h-3.5"/></button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Incoming Call Overlay (Visible from any tab/screen on mobile & desktop) */}
+      {incomingCall && incomingCall.initiatorId !== currentUser?.id && ['ringing','connecting'].includes(incomingCall.status) && (() => {
+        const callerUser =
+          (Array.isArray(incomingCall.users) ? incomingCall.users.find((u: any) => u.id === incomingCall.initiatorId) : null) ||
+          friends.find(f => f.id === incomingCall.initiatorId) ||
+          conversations.find(c => c.otherUser?.id === incomingCall.initiatorId)?.otherUser;
+        const callerName = callerUser?.displayName || incomingCall.initiatorName || '好友来电';
+        const callerAvatar = callerUser?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120';
+        return (
+          <div className="fixed inset-x-3 top-14 sm:top-20 sm:left-auto sm:right-6 sm:w-96 z-[85] rounded-2xl border border-cyan-500/40 bg-[#071020]/95 p-4 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.85)] backdrop-blur-xl space-y-3">
+            <div className="flex items-center gap-3">
+              <img src={callerAvatar} alt={callerName} className="w-12 h-12 rounded-full object-cover ring-2 ring-cyan-400/50 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-white truncate">{callerName}</p>
+                <p className="text-xs text-cyan-300 flex items-center gap-1.5 mt-0.5">
+                  {incomingCall.kind === 'video' ? <Video className="w-3.5 h-3.5"/> : <Phone className="w-3.5 h-3.5"/>}
+                  <span>{incomingCall.kind === 'video' ? '邀请你视频通话…' : '邀请你语音通话…'}</span>
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button type="button" onClick={()=>void rejectIncomingCall()} disabled={!!callAction} className="min-h-[46px] rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-200 text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-40"><PhoneOff className="w-4 h-4"/><span>拒绝</span></button>
+              <button type="button" onClick={()=>void acceptIncomingCall()} disabled={!!callAction} className="min-h-[46px] rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-bold inline-flex items-center justify-center gap-2 disabled:opacity-40"><Phone className="w-4 h-4"/><span>接听</span></button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Active Voice / Video Call Full-Screen Mobile-First Stage + Minimized Pill */}
+      {activeCall && (() => {
+        const mediaPhase = mediaState.phase || 'idle';
+        const mediaParticipants = Object.values(mediaState.participants || {});
+        const remoteAudioParticipants = mediaParticipants.filter((p: any) => !p.isLocal && (p.audioTrack || p.audioEnabled));
+        const remoteTiles = mediaParticipants.filter((p: any) => !p.isLocal);
+        const localP: any = mediaParticipants.find((p: any) => p.isLocal) || null;
+        const participantUsers: any[] = Array.isArray(activeCall.users) ? activeCall.users : [];
+        const peerIds = (activeCall.participantIds || []).filter((id: string) => id !== currentUser?.id);
+        const userInfoFor = (id: string) =>
+          participantUsers.find((x: any) => x.id === id) ||
+          friends.find(f => f.id === id) ||
+          conversations.find(c => c.otherUser?.id === id)?.otherUser;
+        const nameFor = (id: string) => {
+          const fromState = mediaParticipants.find((p: any) => p.identity === id);
+          if (fromState?.name) return fromState.name;
+          const u = userInfoFor(id);
+          if (u?.displayName) return u.displayName;
+          if (id === currentUser?.id) return currentUser?.displayName || 'Me';
+          return id?.slice(0, 8) || 'participant';
+        };
+        const displayTitle = activeCall.scope === 'group' ? (activeConv?.name || '群组通话') : (peerIds[0] ? nameFor(peerIds[0]) : '通话中');
+        const primaryPeerAvatar = peerIds[0] ? (userInfoFor(peerIds[0])?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=160') : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=160';
+        const mediaPhaseLabel = ({ idle: '准备中', acquiring: '打开设备中', connecting: '连接音视频…', connected: '已接通', reconnecting: '重连中…', disconnected: '已断开', failed: '连接异常', blocked: '仅信令' } as any)[mediaPhase] || mediaPhase;
+        const isTerminal = ['ended','rejected','missed','busy','failed','canceled'].includes(activeCall.status);
+
+        if (callMinimized) {
+          return (
+            <div className="fixed top-14 right-3 sm:top-20 sm:right-6 z-[85] rounded-2xl border border-cyan-500/40 bg-[#071020]/95 px-3.5 py-2.5 shadow-2xl backdrop-blur-xl flex items-center gap-3">
+              {remoteAudioParticipants.map((p: any) => p.audioTrack ? <CallTrackView key={`aud_${p.identity}`} track={p.audioTrack} kind="audio" /> : null)}
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-white truncate max-w-[110px]">{displayTitle}</p>
+                  <p className="text-[11px] text-cyan-300 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
+                </div>
+              </div>
+              <button type="button" onClick={()=>setCallMinimized(false)} className="min-h-[36px] min-w-[36px] rounded-xl bg-slate-800 text-slate-200 inline-flex items-center justify-center" title="展开通话"><Maximize2 className="w-4 h-4"/></button>
+              {!isTerminal && <button type="button" onClick={()=>void endOrCancelActiveCall()} disabled={!!callAction} className="min-h-[36px] min-w-[36px] rounded-xl bg-rose-500 text-white inline-flex items-center justify-center" title="挂断"><PhoneOff className="w-4 h-4"/></button>}
+            </div>
+          );
+        }
+
+        const tilesToRender = remoteTiles.length
+          ? remoteTiles
+          : peerIds.map((id: string) => ({
+              identity: id,
+              isLocal: false,
+              audioEnabled: !!activeCall.participants?.[id]?.micEnabled,
+              videoEnabled: !!activeCall.participants?.[id]?.cameraEnabled,
+              screenShareEnabled: !!activeCall.participants?.[id]?.screenSharing,
+              speaking: false,
+              audioTrack: null,
+              videoTrack: null,
+              screenTrack: null,
+            }));
+
+        return (
+          <div className="fixed inset-0 md:inset-6 z-[85] bg-[#060a14]/96 backdrop-blur-2xl flex flex-col justify-between md:rounded-3xl md:border md:border-white/15 md:shadow-2xl overflow-hidden">
+            {/* Hidden audio renderers so remote voice always plays */}
+            {tilesToRender.map((p: any) => p.audioTrack ? <CallTrackView key={`aud_${p.identity}`} track={p.audioTrack} kind="audio" /> : null)}
+
+            {/* Top bar */}
+            <div className="flex items-center justify-between gap-3 px-4 pt-[max(0.9rem,env(safe-area-inset-top))] pb-3 border-b border-white/10 bg-black/25 shrink-0">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  {activeCall.kind === 'video' ? <Video className="w-4 h-4 text-cyan-400 shrink-0"/> : <Phone className="w-4 h-4 text-emerald-400 shrink-0"/>}
+                  <span className="text-sm font-bold text-white truncate">{displayTitle}</span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/10 text-cyan-200 tabular-nums shrink-0">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{activeCall.kind === 'video' ? '视频通话' : '语音通话'} · {mediaPhaseLabel}</p>
+              </div>
+              <button type="button" onClick={()=>setCallMinimized(true)} className="min-h-[40px] min-w-[40px] rounded-xl border border-white/15 bg-white/5 text-slate-200 inline-flex items-center justify-center" title="最小化"><Minimize2 className="w-4 h-4"/></button>
+            </div>
+
+            {/* Stage */}
+            <div className="relative flex-1 min-h-0 flex items-center justify-center p-3 sm:p-5 overflow-hidden">
+              {activeCall.kind === 'video' ? (
+                <div className={`w-full h-full grid gap-3 ${tilesToRender.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                  {tilesToRender.map((p: any) => (
+                    <div key={p.identity} className="relative w-full h-full min-h-[220px] rounded-2xl bg-slate-950 border border-white/10 overflow-hidden flex items-center justify-center">
+                      {p.videoTrack ? (
+                        <CallTrackView track={p.videoTrack} kind="video" className="w-full h-full object-cover" />
+                      ) : p.screenTrack ? (
+                        <CallTrackView track={p.screenTrack} kind="video" className="w-full h-full object-contain bg-black" />
+                      ) : (
+                        <div className="flex flex-col items-center gap-3 text-center px-4">
+                          <img src={userInfoFor(p.identity)?.avatar || primaryPeerAvatar} alt={nameFor(p.identity)} className="w-24 h-24 rounded-full object-cover ring-2 ring-cyan-400/40" />
+                          <div>
+                            <p className="text-base font-semibold text-white">{nameFor(p.identity)}</p>
+                            <p className="text-xs text-slate-400 mt-1">{activeCall.status === 'ringing' ? '正在等待对方接听…' : '对方未开启摄像头'}</p>
+                          </div>
+                        </div>
+                      )}
+                      <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-lg bg-black/55 backdrop-blur-md text-xs text-white flex items-center gap-1.5">
+                        <span>{nameFor(p.identity)}</span>
+                        {!p.audioEnabled && <MicOff className="w-3.5 h-3.5 text-rose-400"/>}
+                      </div>
+                    </div>
+                  ))}
+                  {/* Local PiP preview */}
+                  <div className="absolute top-5 right-5 w-28 h-40 sm:w-44 sm:h-32 rounded-2xl border border-white/20 bg-slate-900/90 shadow-2xl overflow-hidden flex items-center justify-center">
+                    {localP?.videoTrack || localP?.screenTrack ? (
+                      <CallTrackView track={localP.screenTrack || localP.videoTrack} kind="video" muted className="w-full h-full object-cover" mirror={!localP?.screenTrack} />
+                    ) : (
+                      <div className="flex flex-col items-center gap-1 text-slate-400"><VideoOff className="w-5 h-5"/><span className="text-[10px]">本地未开启</span></div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center text-center space-y-5 max-w-sm">
+                  <div className="relative">
+                    <div className={`w-32 h-32 rounded-full p-1 ${activeCall.status === 'active' || mediaPhase === 'connected' ? 'ring-4 ring-emerald-400/35' : 'ring-4 ring-cyan-400/30 animate-pulse'}`}>
+                      <img src={primaryPeerAvatar} alt={displayTitle} className="w-full h-full rounded-full object-cover" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-xl font-bold text-white">{displayTitle}</h3>
+                    <p className="text-sm text-cyan-300 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
+                    <p className="text-xs text-slate-400">{mediaPhaseLabel}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Notices + Bottom Controls */}
+            <div className="px-4 pt-2 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-black/35 border-t border-white/10 space-y-3 shrink-0">
+              {!mediaState.canPlaybackAudio && ['connected','reconnecting','connecting'].includes(mediaPhase) && remoteAudioParticipants.length > 0 && (
+                <button type="button" onClick={()=>void startCallMediaPlayback()} className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-amber-500/40 bg-amber-500/15 text-amber-200 text-xs font-medium inline-flex items-center justify-center gap-2"><Volume2 className="w-4 h-4"/>点击开启扬声器声音</button>
+              )}
+              {(callMediaNote || mediaState.error) && (
+                <p className="text-center text-xs text-amber-200/90 px-2">{callMediaNote || mediaState.error}</p>
+              )}
+              <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4">
+                {['ringing','connecting','active','reconnecting'].includes(activeCall.status) && (
+                  <>
+                    <button type="button" onClick={()=>void toggleCallDevice('micEnabled')} className={`min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex flex-col items-center justify-center gap-1 text-[11px] font-medium ${callDevices.micEnabled ? 'border-white/15 bg-white/10 text-white' : 'border-rose-500/50 bg-rose-500/20 text-rose-200'}`}>
+                      {callDevices.micEnabled ? <Mic className="w-5 h-5"/> : <MicOff className="w-5 h-5"/>}
+                      <span>{callDevices.micEnabled ? '麦克风' : '已静音'}</span>
+                    </button>
+                    {activeCall.kind === 'video' && (
+                      <>
+                        <button type="button" onClick={()=>void toggleCallDevice('cameraEnabled')} className={`min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex flex-col items-center justify-center gap-1 text-[11px] font-medium ${callDevices.cameraEnabled ? 'border-white/15 bg-white/10 text-white' : 'border-rose-500/50 bg-rose-500/20 text-rose-200'}`}>
+                          {callDevices.cameraEnabled ? <Video className="w-5 h-5"/> : <VideoOff className="w-5 h-5"/>}
+                          <span>{callDevices.cameraEnabled ? '摄像头' : '关画面'}</span>
+                        </button>
+                        <button type="button" onClick={()=>void switchCallCamera()} disabled={!callDevices.cameraEnabled || !mediaSessionRef.current} className="min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border border-white/15 bg-white/10 text-white flex flex-col items-center justify-center gap-1 text-[11px] font-medium disabled:opacity-40">
+                          <RefreshCw className="w-5 h-5"/>
+                          <span>翻转</span>
+                        </button>
+                      </>
+                    )}
+                    <button type="button" onClick={()=>void toggleCallDevice('screenSharing')} className={`hidden sm:flex min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex-col items-center justify-center gap-1 text-[11px] font-medium ${!callDevices.screenSharing ? 'border-white/15 bg-white/10 text-white' : 'border-cyan-500/50 bg-cyan-500/20 text-cyan-200'}`}>
+                      {callDevices.screenSharing ? <MonitorOff className="w-5 h-5"/> : <Monitor className="w-5 h-5"/>}
+                      <span>{callDevices.screenSharing ? '停止共享' : '共享屏幕'}</span>
+                    </button>
+                    <button type="button" onClick={()=>void requestCallMediaToken()} disabled={!!callAction} className="min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border border-white/15 bg-white/10 text-slate-200 flex flex-col items-center justify-center gap-1 text-[11px] font-medium disabled:opacity-40">
+                      <RefreshCw className="w-5 h-5"/>
+                      <span>重连</span>
+                    </button>
+                  </>
+                )}
+                {activeCall.scope === 'group' && ['connecting','active','reconnecting'].includes(activeCall.status) && (
+                  <button type="button" onClick={()=>void leaveActiveGroupCall()} disabled={!!callAction} className="min-h-[52px] px-4 rounded-2xl border border-white/15 bg-white/10 text-slate-100 text-xs font-semibold disabled:opacity-40">离开通话</button>
+                )}
+                {!isTerminal && (
+                  <button type="button" onClick={()=>void endOrCancelActiveCall()} disabled={!!callAction} className="h-[54px] px-7 rounded-full bg-rose-500 hover:bg-rose-400 text-white text-sm font-bold inline-flex items-center justify-center gap-2 shadow-lg shadow-rose-500/30 disabled:opacity-40">
+                    <PhoneOff className="w-5 h-5"/>
+                    <span>{activeCall.status === 'ringing' && activeCall.initiatorId === currentUser?.id ? '取消' : '挂断'}</span>
+                  </button>
+                )}
+                {isTerminal && (
+                  <button type="button" onClick={()=>{ void cleanupCallMedia('dismiss'); setActiveCall(null); setCallMediaNote(null); setCallMinimized(false); }} className="h-[50px] px-7 rounded-full bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold">关闭</button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

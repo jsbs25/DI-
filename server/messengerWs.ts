@@ -3,6 +3,9 @@ import type { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'http';
 import { store } from './store.ts';
 import { decideNotification } from './notificationPolicy.ts';
+import { getCallById } from './calls/index.ts';
+import { isActiveCallStatus } from './calls/service.ts';
+import { pushCallSignal } from './calls/signals.ts';
 
 type Client = { ws: WebSocket; userId: string; deviceId: string };
 
@@ -54,6 +57,20 @@ export function getTokenFromReq(req: IncomingMessage): string | null {
   } catch {}
   const auth = req.headers['authorization'];
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice(7);
+  const cookieHeader = String(req.headers['cookie'] || '');
+  if (cookieHeader) {
+    for (const part of cookieHeader.split(';')) {
+      const idx = part.indexOf('=');
+      if (idx < 0) continue;
+      const k = part.slice(0, idx).trim();
+      if (k === 'earth_one_session') {
+        try {
+          const val = decodeURIComponent(part.slice(idx + 1).trim());
+          if (val) return val;
+        } catch {}
+      }
+    }
+  }
   return null;
 }
 
@@ -148,6 +165,31 @@ export function attachMessengerWs(wss: WebSocketServer) {
         } catch (e: any) {
           safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: e?.message || 'failed' });
         }
+        return;
+      }
+
+      if (type === 'call_signal') {
+        const callId = String(msg.callId || '');
+        const toUserId = typeof msg.toUserId === 'string' && msg.toUserId ? msg.toUserId : undefined;
+        const signal = msg.signal;
+        if (!callId || !signal || typeof signal !== 'object') return;
+        const call = getCallById(store, callId);
+        if (!call || !isActiveCallStatus(call.status)) return;
+        if (!(call.participantIds || []).includes(user.id)) return;
+        if (toUserId && !(call.participantIds || []).includes(toUserId)) return;
+        const entry = pushCallSignal(callId, user.id, toUserId, signal);
+        const recipients = toUserId
+          ? [toUserId]
+          : (call.participantIds || []).filter((id: string) => id !== user.id);
+        broadcastToUsers(recipients, {
+          type: 'call_signal',
+          callId,
+          fromUserId: user.id,
+          toUserId: entry.toUserId,
+          signal: entry.signal,
+          seq: entry.seq,
+          at: entry.at,
+        });
         return;
       }
     });

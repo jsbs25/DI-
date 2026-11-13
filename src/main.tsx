@@ -44,6 +44,16 @@ const wrappedFetch: typeof window.fetch = (input: RequestInfo | URL, init?: Requ
     if (isApi) {
       const nextInit: RequestInit = { ...(init || {}) };
       if (!nextInit.credentials) nextInit.credentials = 'include';
+      try {
+        const storedToken = window.localStorage.getItem('earth_one_token');
+        if (storedToken) {
+          const headers = new Headers(nextInit.headers || (input instanceof Request ? input.headers : undefined));
+          if (!headers.has('Authorization')) {
+            headers.set('Authorization', `Bearer ${storedToken}`);
+          }
+          nextInit.headers = headers;
+        }
+      } catch {}
       return origFetch(nextInput as any, nextInit);
     }
   } catch {}

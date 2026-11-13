@@ -219,13 +219,32 @@ export function canIssueMediaToken(call: CallRecord, userId: string, store?: any
   return { ok: true };
 }
 
-export async function issueMediaToken(call: CallRecord, userId: string, opts?: { canPublish?: boolean; canSubscribe?: boolean; store?: any }): Promise<import('./types.ts').CallTokenResponse> {
+export async function issueMediaToken(
+  call: CallRecord,
+  userId: string,
+  opts?: { canPublish?: boolean; canSubscribe?: boolean; store?: any; allowWebRtcFallback?: boolean }
+): Promise<import('./types.ts').CallTokenResponse> {
   const perm = canIssueMediaToken(call, userId, opts?.store);
   if (!perm.ok) return { ok: false, reason: perm.error, provider: 'none' };
   const apiKey = process.env.LIVEKIT_API_KEY || '';
   const apiSecret = process.env.LIVEKIT_API_SECRET || '';
   const url = process.env.LIVEKIT_URL || process.env.LIVEKIT_WS_URL || '';
   if (!apiKey || !apiSecret || !url) {
+    if (opts?.allowWebRtcFallback) {
+      call.mediaProvider = 'webrtc';
+      return {
+        ok: true,
+        callId: call.id,
+        roomName: call.roomName,
+        provider: 'webrtc',
+        expiresInSec: 3600,
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+        ],
+      };
+    }
     return { ok: false, blocked: true, reason: 'MEDIA_NOT_CONFIGURED', callId: call.id, roomName: call.roomName, provider: 'none' };
   }
   try {
@@ -238,8 +257,23 @@ export async function issueMediaToken(call: CallRecord, userId: string, opts?: {
     // Grant is bound to this EARTH ONE user identity and this specific call room.
     at.addGrant({ roomJoin: true, room: call.roomName, canPublish: opts?.canPublish ?? true, canSubscribe: opts?.canSubscribe ?? true });
     const token = await at.toJwt();
+    call.mediaProvider = 'livekit';
     return { ok: true, callId: call.id, roomName: call.roomName, token, url, expiresInSec: 600, provider: 'livekit' };
   } catch {
+    if (opts?.allowWebRtcFallback) {
+      call.mediaProvider = 'webrtc';
+      return {
+        ok: true,
+        callId: call.id,
+        roomName: call.roomName,
+        provider: 'webrtc',
+        expiresInSec: 3600,
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      };
+    }
     return { ok: false, blocked: true, reason: 'MEDIA_SDK_UNAVAILABLE', callId: call.id, roomName: call.roomName, provider: 'none' };
   }
 }

@@ -40,7 +40,7 @@ export interface CallRecord {
   endedBy?: string;
   endReason?: string;
   busyFor?: string;
-  mediaProvider?: 'livekit' | 'none';
+  mediaProvider?: 'livekit' | 'webrtc' | 'none';
   capabilities?: {
     audio: boolean;
     video: boolean;
@@ -68,5 +68,6 @@ export interface CallTokenResponse {
   token?: string;
   url?: string;
   expiresInSec?: number;
-  provider?: 'livekit' | 'none';
+  provider?: 'livekit' | 'webrtc' | 'none';
+  iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }>;
 }

@@ -37,6 +37,7 @@ import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE16
 import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers } from './server/messengerWs.ts';
 import { addCall, getCallById, listCallsForUser, ensureCallsArray } from './server/calls/index.ts';
 import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus } from './server/calls/service.ts';
+import { pushCallSignal, listCallSignalsForUser, clearCallSignals } from './server/calls/signals.ts';
 import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -104,10 +105,20 @@ if (process.env.GEMINI_API_KEY) {
 
 // Resolve only an explicitly valid session. Keep the legacy guest fallback
 // separate so identity endpoints never expose another visitor's active user.
-function getSessionUser(req: express.Request) {
+function getSessionToken(req: express.Request): string | null {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
+    const t = authHeader.substring(7).trim();
+    if (t) return t;
+  }
+  const cookies = parseCookies(req);
+  if (cookies.earth_one_session) return cookies.earth_one_session;
+  return null;
+}
+
+function getSessionUser(req: express.Request) {
+  const token = getSessionToken(req);
+  if (token) {
     const user = store.getUserByToken(token);
     if (user) return user;
   }
@@ -158,9 +169,29 @@ function parseCookies(req: express.Request): Record<string, string> {
     if (idx < 0) return;
     const k = part.slice(0, idx).trim();
     const v = part.slice(idx + 1).trim();
-    if (k) out[k] = decodeURIComponent(v || '');
+    if (k) {
+      try { out[k] = decodeURIComponent(v || ''); } catch { out[k] = v || ''; }
+    }
   });
   return out;
+}
+
+function isSecureRequest(req: express.Request): boolean {
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  return !!(req.secure || proto === 'https');
+}
+
+function setSessionCookie(req: express.Request, res: express.Response, token: string) {
+  if (!token) return;
+  const secure = isSecureRequest(req);
+  const sameSite = secure ? 'None; Secure' : 'Lax';
+  res.append('Set-Cookie', `earth_one_session=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=2592000; SameSite=${sameSite}`);
+}
+
+function clearSessionCookie(req: express.Request, res: express.Response) {
+  const secure = isSecureRequest(req);
+  const sameSite = secure ? 'None; Secure' : 'Lax';
+  res.append('Set-Cookie', `earth_one_session=; HttpOnly; Path=/; Max-Age=0; SameSite=${sameSite}`);
 }
 
 function isDevLoginEnabledConfig() {
@@ -271,6 +302,7 @@ app.post('/api/auth/register', (req, res) => {
   }
   try {
     const { user, token } = store.registerUser(email, password, displayName, username);
+    setSessionCookie(req, res, token);
     res.json({ success: true, user, token, message: 'Welcome to Earth One! Please complete your citizen profile.' });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
@@ -295,6 +327,7 @@ app.post('/api/auth/login', (req, res) => {
     const { user, token } = store.loginUser(identifier, password);
     store.clearLoginFailures(lockKey);
     store.addAudit(user.id, 'login_success', String(identifier||''), req.ip);
+    setSessionCookie(req, res, token);
     res.json({ success: true, user, token });
   } catch (err: any) {
     store.recordLoginFailure(lockKey);
@@ -364,6 +397,7 @@ app.post('/api/auth/dev-login', async (req, res) => {
       (store as any).currentUser = user;
       store.addAudit(user.id, 'dev_login_success', 'li_wei', req.ip);
       store.persist();
+      setSessionCookie(req, res, token);
       res.json({ success: true, user: store.getSelfProfileView(user.id) || user, token, dev: true });
     });
   } catch (e: any) {
@@ -453,6 +487,7 @@ app.post('/api/auth/phone/verify', async (req, res) => {
       (store as any).currentUser = user;
       store.addAudit(user!.id, 'phone_login_success', `phone=${phone}`, req.ip);
       store.persist();
+      setSessionCookie(req, res, token);
       res.json({ success: true, user, token });
     });
   } catch (err: any) {
@@ -509,6 +544,7 @@ app.get('/api/auth/wechat/callback', async (req, res) => {
         const payload = Buffer.from(JSON.stringify({ token: r.token, user: r.user })).toString('base64url');
         store.addAudit(r.user.id, 'wechat_login_success', 'openid_login', req.ip);
         store.persist();
+        setSessionCookie(req, res, r.token);
         res.redirect(`${appUrl}/#auth=${payload}`);
       } catch (e: any) {
         if (String(e?.message || '') === 'UNBOUND_EXTERNAL_IDENTITY') {
@@ -787,6 +823,7 @@ app.get('/api/auth/google/callback', async (req, res) => {
       throw e;
     }
     const payload = Buffer.from(JSON.stringify({ token: r.token, user: r.user })).toString('base64url');
+    setSessionCookie(req, res, r.token);
     // pass via hash so SPA can pick it up without server-rendered template change
     return res.redirect(`${appUrl}/#auth=${payload}`);
   } catch (e) {
@@ -876,9 +913,8 @@ app.get('/api/dev/status', async (req, res) => {
 });
 
 app.post('/api/auth/logout', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
+  const token = getSessionToken(req);
+  if (token) {
     try {
       await store.mutate(async () => {
         store.sessions.delete(token);
@@ -888,6 +924,7 @@ app.post('/api/auth/logout', async (req, res) => {
       // best-effort: token removal should not block client logout
     }
   }
+  clearSessionCookie(req, res);
   res.json({ success: true, message: 'Logged out successfully.' });
 });
 
@@ -1445,7 +1482,21 @@ app.get('/api/messenger/users/search', (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
   const q = typeof req.query.q === 'string' ? req.query.q : '';
-  const users = store.searchUsers(q, user.id, 40).map(u => {
+  const wantSuggested = req.query.suggested === '1' && !q.trim();
+  let list = store.searchUsers(q, user.id, 40);
+  if (wantSuggested) {
+    const blocked = (store.blockedBy[user.id] || []);
+    list = store.users.filter(u => {
+      if (u.id === user.id) return false;
+      if (blocked.includes(u.id) || (store.blockedBy[u.id] || []).includes(user.id)) return false;
+      if (store.getAccountStatus(u) === 'deleted') return false;
+      const priv = store.getPrivacySettings(u.id);
+      if (!priv.searchableByUsername && !priv.searchableById && !priv.searchableByDisplayName) return false;
+      const isFriend = store.getFriendIds(user.id).includes(u.id);
+      return canViewProfileByPolicy(false, isFriend, false, priv);
+    }).slice(0, 30);
+  }
+  const users = list.map(u => {
     const view = (store.getPublicProfileView(user.id, u.id) as any)?.user;
     if (view) return view;
     return toPublicUser(u, { privacy: store.getPrivacySettings(u.id) });
@@ -1841,7 +1892,7 @@ app.post('/api/calls/invite', async (req, res) => {
     }
     try { emitCallInviteDelivery(call, user); } catch {}
     try { emitCallEvent(call, 'call_invite', { fromUserId: user.id }); } catch {}
-    const tok = await issueMediaToken(call, user.id, { store });
+    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: body?.transport === 'webrtc' });
     res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to create call' });
@@ -1862,7 +1913,7 @@ app.post('/api/calls/:id/accept', async (req, res) => {
     });
     if (out) return res.status(out.code).json(out.body);
     try { emitCallEvent(call, 'call_accept', { userId: user.id }); } catch {}
-    const tok = await issueMediaToken(call, user.id, { store });
+    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport === 'webrtc' });
     res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to accept call' });
@@ -1882,6 +1933,7 @@ app.post('/api/calls/:id/reject', async (req, res) => {
       store.persist();
     });
     if (out) return res.status(out.code).json(out.body);
+    if (!isActiveCallStatus(call.status)) clearCallSignals(call.id);
     try { emitCallEvent(call, 'call_reject', { userId: user.id }); } catch {}
     res.json({ success: true, call: publicCallForUser(call, user.id) });
   } catch (e:any) {
@@ -1902,6 +1954,7 @@ app.post('/api/calls/:id/cancel', async (req, res) => {
       store.persist();
     });
     if (out) return res.status(out.code).json(out.body);
+    clearCallSignals(call.id);
     try { emitCallEvent(call, 'call_cancel', { userId: user.id }); } catch {}
     res.json({ success: true, call: publicCallForUser(call, user.id) });
   } catch (e:any) {
@@ -1923,6 +1976,7 @@ app.post('/api/calls/:id/end', async (req, res) => {
       store.persist();
     });
     if (out) return res.status(out.code).json(out.body);
+    clearCallSignals(call.id);
     try { emitCallEvent(call, 'call_end', { userId: user.id, reason }); } catch {}
     res.json({ success: true, call: publicCallForUser(call, user.id) });
   } catch (e:any) {
@@ -1943,6 +1997,7 @@ app.post('/api/calls/:id/leave', async (req, res) => {
       store.persist();
     });
     if (out) return res.status(out.code).json(out.body);
+    if (!isActiveCallStatus(call.status)) clearCallSignals(call.id);
     try { emitCallEvent(call, 'call_leave', { userId: user.id }); } catch {}
     res.json({ success: true, call: publicCallForUser(call, user.id) });
   } catch (e:any) {
@@ -1954,9 +2009,35 @@ app.post('/api/calls/:id/token', async (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
   const call = getCallById(store, req.params.id);
   if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
-  const tok = await issueMediaToken(call, user.id, { store });
+  const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport === 'webrtc' });
   if (!tok.ok) return res.status(tok.blocked ? 503 : 403).json({ success: false, ...tok });
   res.json({ success: true, ...tok });
+});
+
+app.post('/api/calls/:id/signal', (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const call = getCallById(store, req.params.id);
+  if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
+  if (!isActiveCallStatus(call.status)) return res.status(400).json({ success: false, error: 'Call not active' });
+  const toUserId = typeof req.body?.toUserId === 'string' && req.body.toUserId ? req.body.toUserId : undefined;
+  const signal = req.body?.signal;
+  if (!signal || typeof signal !== 'object') return res.status(400).json({ success: false, error: 'signal object required' });
+  if (toUserId && !(call.participantIds || []).includes(toUserId)) return res.status(403).json({ success: false, error: 'Forbidden' });
+  const entry = pushCallSignal(call.id, user.id, toUserId, signal);
+  const recipients = toUserId ? [toUserId] : (call.participantIds || []).filter((id: string) => id !== user.id);
+  for (const rid of recipients) {
+    try { wsBroadcastToUser(rid, { type: 'call_signal', ...entry }); } catch {}
+  }
+  res.json({ success: true, entry });
+});
+
+app.get('/api/calls/:id/signals', (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const call = getCallById(store, req.params.id);
+  if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
+  const afterSeq = Math.max(0, Number(req.query.afterSeq) || 0);
+  const { signals, lastSeq } = listCallSignalsForUser(call.id, user.id, afterSeq);
+  res.json({ success: true, signals, lastSeq });
 });
 
 app.post('/api/calls/:id/state', async (req, res) => {
