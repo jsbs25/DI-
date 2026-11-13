@@ -1,38 +1,39 @@
 /**
  * EARTH ONE - UNIVERSE ENGINE
  * Interactive Solar System & Celestial Explorer
- * 
- * Renders the Sun, 8 canonical planets, Earth-Moon system, and photorealistic
- * Saturn ring system with Cassini division (matching Cassini-Huygens imaging).
- * Features smooth camera transitions, orbital speed controls, raycasting,
- * and astrophysical telemetry inspection.
+ *
+ * Preserves real Three.js/WebGL engine: Sun, 8 planets, Earth-Moon, Saturn rings
+ * with Cassini division, procedural textures, raycast focus, camera controls,
+ * orbital simulation, and ecosystem/telemetry integration.
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { 
-  CELESTIAL_BODIES, 
-  CelestialBody, 
-  getCelestialBodyById 
+import {
+  CELESTIAL_BODIES,
+  CelestialBody,
+  getCelestialBodyById
 } from './celestialBodies';
-import { 
-  createEarthDayTexture, 
-  createEarthCloudTexture, 
-  createSaturnRingTexture, 
-  createJupiterTexture, 
-  createMarsTexture, 
-  createSunTexture, 
-  createCelestialTexture 
+import {
+  createEarthDayTexture,
+  createEarthCloudTexture,
+  createSaturnRingTexture,
+  createJupiterTexture,
+  createMarsTexture,
+  createSunTexture,
+  createCelestialTexture
 } from './proceduralPlanets';
 import { PlanetTelemetryDrawer } from './PlanetTelemetryDrawer';
-import { 
-  Play, 
-  Pause, 
-  FastForward, 
-  Maximize2, 
-  RotateCcw, 
-  Globe2, 
-  Layers
+import { getPlanetEcosystem } from './planetEcosystems';
+import {
+  Play,
+  Pause,
+  Maximize2,
+  Globe2,
+  Layers,
+  Compass,
+  Orbit,
+  Sparkles
 } from 'lucide-react';
 
 interface UniverseEngineProps {
@@ -51,26 +52,43 @@ interface PlanetMeshNode {
   currentAngle: number;
 }
 
-export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthWorld, onEnterEcosystem, initialPlanetId }) => {
+export const UniverseEngine: React.FC<UniverseEngineProps> = ({
+  onSwitchToEarthWorld,
+  onEnterEcosystem,
+  initialPlanetId
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [selectedPlanet, setSelectedPlanet] = useState<CelestialBody | null>(() => getCelestialBodyById(initialPlanetId || 'saturn') || null);
+  const [selectedPlanet, setSelectedPlanet] = useState<CelestialBody | null>(
+    () => getCelestialBodyById(initialPlanetId || 'saturn') || null
+  );
   const initialFocusRequestedRef = useRef(false);
   const [simSpeed, setSimSpeed] = useState<number>(1);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [showOrbits, setShowOrbits] = useState<boolean>(true);
   const [webGlAvailable, setWebGlAvailable] = useState<boolean>(true);
 
-  // References for Three.js scene loop
+  // Three.js refs
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const planetNodesRef = useRef<PlanetMeshNode[]>([]);
-  const moonNodeRef = useRef<{ mesh: THREE.Mesh; angle: number; parentMesh: THREE.Mesh | null }>({
-    mesh: null as unknown as THREE.Mesh,
+  const orbitVisibleRef = useRef<boolean>(true);
+  const moonNodeRef = useRef<{ mesh: THREE.Mesh | null; angle: number; parentMesh: THREE.Mesh | null }>({
+    mesh: null,
     angle: 0,
     parentMesh: null
   });
-  
+
+  // Simulation refs to avoid scene rebuild on control changes
+  const simSpeedRef = useRef(simSpeed);
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => {
+    simSpeedRef.current = simSpeed;
+  }, [simSpeed]);
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
   // Camera animation target
   const cameraTargetRef = useRef<{
     position: THREE.Vector3;
@@ -82,32 +100,37 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
     isTransitioning: false
   });
 
-  // Focus a specific planet with smooth camera transition
-  const handleFocusPlanet = useCallback((planetId: string) => {
-    const body = getCelestialBodyById(planetId);
-    if (!body) return;
-    setSelectedPlanet(body);
-
-    const node = planetNodesRef.current.find(n => n.body.id === planetId);
-    if (node) {
-      const worldPos = new THREE.Vector3();
-      node.mesh.getWorldPosition(worldPos);
-
-      // Position camera offset based on display size
-      const dist = body.visual.displayRadius * 3.5 + 4;
-      cameraTargetRef.current = {
-        position: new THREE.Vector3(worldPos.x + dist * 0.8, worldPos.y + dist * 0.5, worldPos.z + dist),
-        lookAt: worldPos.clone(),
-        isTransitioning: true
-      };
-    } else if (planetId === 'sun') {
-      cameraTargetRef.current = {
-        position: new THREE.Vector3(0, 25, 38),
-        lookAt: new THREE.Vector3(0, 0, 0),
-        isTransitioning: true
-      };
-    }
+  const focusCameraOnWorldPosition = useCallback((worldPos: THREE.Vector3, distance: number) => {
+    cameraTargetRef.current = {
+      position: new THREE.Vector3(worldPos.x + distance * 0.8, worldPos.y + distance * 0.5, worldPos.z + distance),
+      lookAt: worldPos.clone(),
+      isTransitioning: true
+    };
   }, []);
+
+  // Focus a specific planet with smooth camera transition
+  const handleFocusPlanet = useCallback(
+    (planetId: string) => {
+      const body = getCelestialBodyById(planetId);
+      if (!body) return;
+      setSelectedPlanet(body);
+
+      const node = planetNodesRef.current.find((n) => n.body.id === planetId);
+      if (node) {
+        const worldPos = new THREE.Vector3();
+        node.mesh.getWorldPosition(worldPos);
+        const dist = body.visual.displayRadius * 3.5 + 4;
+        focusCameraOnWorldPosition(worldPos, dist);
+      } else if (planetId === 'sun') {
+        cameraTargetRef.current = {
+          position: new THREE.Vector3(0, 25, 38),
+          lookAt: new THREE.Vector3(0, 0, 0),
+          isTransitioning: true
+        };
+      }
+    },
+    [focusCameraOnWorldPosition]
+  );
 
   // Reset to full Solar System Overview
   const handleOverviewCamera = useCallback(() => {
@@ -120,12 +143,13 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
 
   // Initialize Three.js Scene
   useEffect(() => {
-    if (!containerRef.current) return;
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
+    const container = containerRef.current;
+    if (!container) return;
+    const width = container.clientWidth;
+    const height = container.clientHeight;
 
-    // 1. Scene & Camera Setup
     const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x020409);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 2000);
@@ -133,127 +157,125 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    // 2. WebGL Renderer with software fallback check
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
       renderer.setSize(width, height);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.2;
-      containerRef.current.appendChild(renderer.domElement);
+      renderer.toneMappingExposure = 1.15;
+      container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
     } catch {
       setWebGlAvailable(false);
       return;
     }
 
-    // 3. Deep Space Starfield Background
+    const disposables: Array<THREE.BufferGeometry | THREE.Material> = [];
+    const track = <T extends THREE.BufferGeometry | THREE.Material>(obj: T): T => {
+      disposables.push(obj);
+      return obj;
+    };
+
+    // Starfield
     const starsCount = 3500;
-    const starGeometry = new THREE.BufferGeometry();
+    const starGeometry = track(new THREE.BufferGeometry());
     const starPositions = new Float32Array(starsCount * 3);
     const starColors = new Float32Array(starsCount * 3);
-
     for (let i = 0; i < starsCount; i++) {
       const r = 400 + Math.random() * 800;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-
       starPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
       starPositions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       starPositions[i * 3 + 2] = r * Math.cos(phi);
-
       const colorMod = 0.75 + Math.random() * 0.25;
       starColors[i * 3] = colorMod;
       starColors[i * 3 + 1] = colorMod;
       starColors[i * 3 + 2] = 1.0;
     }
-
     starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
     starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
-    const starMaterial = new THREE.PointsMaterial({ size: 1.2, vertexColors: true, transparent: true, opacity: 0.85 });
+    const starMaterial = track(
+      new THREE.PointsMaterial({ size: 1.2, vertexColors: true, transparent: true, opacity: 0.8 })
+    );
     const starField = new THREE.Points(starGeometry, starMaterial);
     scene.add(starField);
 
-    // 4. Central Sun & Lighting
-    const sunBody = CELESTIAL_BODIES.find(b => b.id === 'sun')!;
-    const sunGeo = new THREE.SphereGeometry(sunBody.visual.displayRadius, 64, 64);
+    // Sun & lighting
+    const sunBody = CELESTIAL_BODIES.find((b) => b.id === 'sun')!;
+    const sunGeo = track(new THREE.SphereGeometry(sunBody.visual.displayRadius, 64, 64));
     const sunTex = createSunTexture();
-    const sunMat = new THREE.MeshBasicMaterial({ map: sunTex });
+    const sunMat = track(new THREE.MeshBasicMaterial({ map: sunTex }));
     const sunMesh = new THREE.Mesh(sunGeo, sunMat);
     sunMesh.userData = { body: sunBody };
     scene.add(sunMesh);
 
-    // Sun point light & ambient solar radiation
-    const sunLight = new THREE.PointLight(0xfff6e6, 3.5, 600, 0.4);
+    const sunLight = new THREE.PointLight(0xfff6e6, 3.2, 650, 0.45);
     sunLight.position.set(0, 0, 0);
     scene.add(sunLight);
 
-    const ambientLight = new THREE.AmbientLight(0x223355, 0.65);
+    const ambientLight = new THREE.AmbientLight(0x223355, 0.6);
     scene.add(ambientLight);
 
-    // Sun atmospheric corona flare
-    const coronaGeo = new THREE.SphereGeometry(sunBody.visual.displayRadius * 1.15, 32, 32);
-    const coronaMat = new THREE.MeshBasicMaterial({
-      color: 0xffaa33,
-      transparent: true,
-      opacity: 0.25,
-      side: THREE.BackSide
-    });
+    const coronaGeo = track(new THREE.SphereGeometry(sunBody.visual.displayRadius * 1.12, 32, 32));
+    const coronaMat = track(
+      new THREE.MeshBasicMaterial({
+        color: 0xffaa55,
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.BackSide
+      })
+    );
     const coronaMesh = new THREE.Mesh(coronaGeo, coronaMat);
     sunMesh.add(coronaMesh);
 
-    // 5. Planetary System Construction
+    // Planets
     const nodes: PlanetMeshNode[] = [];
+    const planetBodies = CELESTIAL_BODIES.filter((b) => b.id !== 'sun' && b.id !== 'moon');
 
-    CELESTIAL_BODIES.filter(b => b.id !== 'sun' && b.id !== 'moon').forEach((body, idx) => {
+    planetBodies.forEach((body, idx) => {
       const pivot = new THREE.Group();
       scene.add(pivot);
 
-      // Render Orbit Trajectory Line
-      const orbitCurve = new THREE.EllipseCurve(0, 0, body.visual.orbitDistance, body.visual.orbitDistance, 0, Math.PI * 2, false, 0);
+      const orbitCurve = new THREE.EllipseCurve(
+        0,
+        0,
+        body.visual.orbitDistance,
+        body.visual.orbitDistance,
+        0,
+        Math.PI * 2,
+        false,
+        0
+      );
       const points = orbitCurve.getPoints(128);
-      const orbitGeo = new THREE.BufferGeometry().setFromPoints(points.map(p => new THREE.Vector3(p.x, 0, p.y)));
-      const orbitMat = new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.22 });
+      const orbitGeo = track(
+        new THREE.BufferGeometry().setFromPoints(points.map((p) => new THREE.Vector3(p.x, 0, p.y)))
+      );
+      const orbitMat = track(
+        new THREE.LineBasicMaterial({ color: 0x6b8aa6, transparent: true, opacity: 0.22 })
+      );
       const orbitLine = new THREE.Line(orbitGeo, orbitMat);
+      orbitLine.visible = orbitVisibleRef.current;
       scene.add(orbitLine);
 
-      // Create Planet Geometry & Procedural Material
-      const sphereGeo = new THREE.SphereGeometry(body.visual.displayRadius, 48, 48);
+      const sphereGeo = track(new THREE.SphereGeometry(body.visual.displayRadius, 48, 48));
       let planetMat: THREE.Material;
 
       if (body.id === 'earth') {
-        const earthDayTex = createEarthDayTexture();
-        planetMat = new THREE.MeshStandardMaterial({
-          map: earthDayTex,
-          roughness: 0.65,
-          metalness: 0.1
-        });
+        planetMat = track(
+          new THREE.MeshStandardMaterial({ map: createEarthDayTexture(), roughness: 0.65, metalness: 0.08 })
+        );
       } else if (body.id === 'saturn') {
-        const saturnTex = createCelestialTexture('saturn_body');
-        planetMat = new THREE.MeshStandardMaterial({
-          map: saturnTex,
-          roughness: 0.7,
-          metalness: 0.05
-        });
+        planetMat = track(
+          new THREE.MeshStandardMaterial({ map: createCelestialTexture('saturn_body'), roughness: 0.72, metalness: 0.04 })
+        );
       } else if (body.id === 'jupiter') {
-        const jupiterTex = createJupiterTexture();
-        planetMat = new THREE.MeshStandardMaterial({
-          map: jupiterTex,
-          roughness: 0.6
-        });
+        planetMat = track(new THREE.MeshStandardMaterial({ map: createJupiterTexture(), roughness: 0.62 }));
       } else if (body.id === 'mars') {
-        const marsTex = createMarsTexture();
-        planetMat = new THREE.MeshStandardMaterial({
-          map: marsTex,
-          roughness: 0.8
-        });
+        planetMat = track(new THREE.MeshStandardMaterial({ map: createMarsTexture(), roughness: 0.82 }));
       } else {
-        const genTex = createCelestialTexture(body.id);
-        planetMat = new THREE.MeshStandardMaterial({
-          map: genTex,
-          roughness: 0.75
-        });
+        planetMat = track(new THREE.MeshStandardMaterial({ map: createCelestialTexture(body.id), roughness: 0.75 }));
       }
 
       const planetMesh = new THREE.Mesh(sphereGeo, planetMat);
@@ -265,40 +287,37 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
       let cloudMesh: THREE.Mesh | undefined;
       let ringsMesh: THREE.Mesh | undefined;
 
-      // Special Layer: Earth Dynamic Clouds
       if (body.id === 'earth') {
-        const cloudGeo = new THREE.SphereGeometry(body.visual.displayRadius * 1.025, 48, 48);
-        const cloudTex = createEarthCloudTexture();
-        const cloudMat = new THREE.MeshStandardMaterial({
-          map: cloudTex,
-          transparent: true,
-          opacity: 0.75,
-          blending: THREE.NormalBlending
-        });
+        const cloudGeo = track(new THREE.SphereGeometry(body.visual.displayRadius * 1.025, 48, 48));
+        const cloudMat = track(
+          new THREE.MeshStandardMaterial({
+            map: createEarthCloudTexture(),
+            transparent: true,
+            opacity: 0.72,
+            blending: THREE.NormalBlending,
+            depthWrite: false
+          })
+        );
         cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
         planetMesh.add(cloudMesh);
 
-        // Add Moon orbiting Earth
         const moonBody = getCelestialBodyById('moon')!;
-        const moonGeo = new THREE.SphereGeometry(moonBody.visual.displayRadius, 24, 24);
-        const moonTex = createCelestialTexture('moon');
-        const moonMat = new THREE.MeshStandardMaterial({ map: moonTex, roughness: 0.9 });
+        const moonGeo = track(new THREE.SphereGeometry(moonBody.visual.displayRadius, 24, 24));
+        const moonMat = track(
+          new THREE.MeshStandardMaterial({ map: createCelestialTexture('moon'), roughness: 0.92 })
+        );
         const moonMesh = new THREE.Mesh(moonGeo, moonMat);
         moonMesh.userData = { body: moonBody };
         planetMesh.add(moonMesh);
         moonNodeRef.current = { mesh: moonMesh, angle: 0, parentMesh: planetMesh };
       }
 
-      // Special Layer: Saturn Magnificent Rings with Cassini Division
-      // Matches the user-provided Cassini-Huygens reference (/public/assets/aistudio/image_4845819a.png)
       if (body.visual.rings) {
         const innerR = body.visual.displayRadius * body.visual.rings.innerRadiusRatio;
         const outerR = body.visual.displayRadius * body.visual.rings.outerRadiusRatio;
-        const ringGeo = new THREE.RingGeometry(innerR, outerR, 96);
-        
-        // Correct UV mapping for radial ring texture
+        const ringGeo = track(new THREE.RingGeometry(innerR, outerR, 96));
         const pos = ringGeo.attributes.position;
-        const uvs = [];
+        const uvs: number[] = [];
         for (let i = 0; i < pos.count; i++) {
           const vx = pos.getX(i);
           const vy = pos.getY(i);
@@ -307,22 +326,22 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
           uvs.push(u, 0.5);
         }
         ringGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-
-        const ringTex = createSaturnRingTexture();
-        const ringMat = new THREE.MeshStandardMaterial({
-          map: ringTex,
-          side: THREE.DoubleSide,
-          transparent: true,
-          roughness: 0.5,
-          metalness: 0.1
-        });
+        const ringMat = track(
+          new THREE.MeshStandardMaterial({
+            map: createSaturnRingTexture(),
+            side: THREE.DoubleSide,
+            transparent: true,
+            roughness: 0.55,
+            metalness: 0.08,
+            depthWrite: false
+          })
+        );
         ringsMesh = new THREE.Mesh(ringGeo, ringMat);
-        ringsMesh.rotation.x = Math.PI / 2; // Flat in equator plane
+        ringsMesh.rotation.x = Math.PI / 2;
         planetMesh.add(ringsMesh);
       }
 
-      // Initial distributed orbit angle
-      const initialAngle = (idx / 8) * Math.PI * 2;
+      const initialAngle = (idx / planetBodies.length) * Math.PI * 2;
       pivot.rotation.y = initialAngle;
 
       nodes.push({
@@ -337,25 +356,26 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
     });
 
     planetNodesRef.current = nodes;
+
     if (initialPlanetId && !initialFocusRequestedRef.current) {
       initialFocusRequestedRef.current = true;
-      handleFocusPlanet(initialPlanetId);
+      // defer to next tick so refs/nodes are ready
+      requestAnimationFrame(() => handleFocusPlanet(initialPlanetId));
     }
 
-    // 6. Interactive Raycasting for Planet Selection
+    // Raycasting
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    const handlePointerDown = (event: MouseEvent) => {
+    const handlePointerDown = (event: PointerEvent) => {
       if (!containerRef.current || !cameraRef.current) return;
+      // ignore if it was a drag end handled separately? simple pick
       const rect = containerRef.current.getBoundingClientRect();
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
       raycaster.setFromCamera(mouse, cameraRef.current);
-      const interactiveMeshes = [sunMesh, ...nodes.map(n => n.mesh)];
+      const interactiveMeshes: THREE.Object3D[] = [sunMesh, ...nodes.map((n) => n.mesh)];
       if (moonNodeRef.current.mesh) interactiveMeshes.push(moonNodeRef.current.mesh);
-
       const intersects = raycaster.intersectObjects(interactiveMeshes, false);
       if (intersects.length > 0) {
         const hit = intersects[0].object;
@@ -365,33 +385,41 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
       }
     };
 
-    containerRef.current.addEventListener('pointerdown', handlePointerDown);
-
-    // 7. Mouse Drag Rotation Controls
+    // Controls
     let isDragging = false;
+    let dragMoved = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
     let prevMouseX = 0;
     let prevMouseY = 0;
 
-    const onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) {
-        isDragging = true;
-        prevMouseX = e.clientX;
-        prevMouseY = e.clientY;
-      }
+    const onPointerDownDrag = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      isDragging = true;
+      dragMoved = false;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      prevMouseX = e.clientX;
+      prevMouseY = e.clientY;
     };
 
-    const onMouseMove = (e: MouseEvent) => {
+    const onPointerMoveDrag = (e: PointerEvent) => {
       if (!isDragging || !cameraRef.current) return;
+      const totalDx = e.clientX - dragStartX;
+      const totalDy = e.clientY - dragStartY;
+      if (Math.abs(totalDx) + Math.abs(totalDy) > 4) dragMoved = true;
       const deltaX = e.clientX - prevMouseX;
       const deltaY = e.clientY - prevMouseY;
       prevMouseX = e.clientX;
       prevMouseY = e.clientY;
 
-      // Orbit camera around target
       const cam = cameraRef.current;
       const radius = cam.position.length();
       const theta = Math.atan2(cam.position.x, cam.position.z) - deltaX * 0.005;
-      const phi = Math.max(0.1, Math.min(Math.PI / 2 - 0.05, Math.asin(cam.position.y / radius) + deltaY * 0.005));
+      const phi = Math.max(
+        0.12,
+        Math.min(Math.PI / 2 - 0.06, Math.asin(Math.min(0.999, Math.max(-0.999, cam.position.y / radius))) + deltaY * 0.005)
+      );
 
       cam.position.x = radius * Math.cos(phi) * Math.sin(theta);
       cam.position.y = radius * Math.sin(phi);
@@ -400,25 +428,32 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
       cameraTargetRef.current.isTransitioning = false;
     };
 
-    const onMouseUp = () => { isDragging = false; };
+    const onPointerUpDrag = (e: PointerEvent) => {
+      if (isDragging && !dragMoved) {
+        handlePointerDown(e);
+      }
+      isDragging = false;
+      dragMoved = false;
+    };
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (!cameraRef.current) return;
       const factor = e.deltaY > 0 ? 1.08 : 0.92;
       cameraRef.current.position.multiplyScalar(factor);
-      cameraRef.current.position.clampLength(12, 500);
+      const len = cameraRef.current.position.length();
+      if (len < 12) cameraRef.current.position.setLength(12);
+      if (len > 520) cameraRef.current.position.setLength(520);
       cameraTargetRef.current.isTransitioning = false;
     };
 
-    const dom = containerRef.current;
-    dom.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    dom.addEventListener('wheel', onWheel, { passive: false });
+    container.addEventListener('pointerdown', onPointerDownDrag);
+    window.addEventListener('pointermove', onPointerMoveDrag);
+    window.addEventListener('pointerup', onPointerUpDrag);
+    container.addEventListener('wheel', onWheel, { passive: false });
 
-    // 8. Animation & Physics Loop
-    let animId: number;
+    // Animation loop
+    let animId = 0;
     let lastTime = performance.now();
 
     const animate = () => {
@@ -427,29 +462,17 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
       const dt = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
-      // Rotate Sun
       sunMesh.rotation.y += 0.002;
 
-      // Orbit and spin planets
-      if (!isPaused) {
-        const speedMultiplier = simSpeed * dt;
-
-        nodes.forEach(node => {
-          // Keplerian relative orbital angular velocity (faster inner, slower outer)
+      if (!isPausedRef.current) {
+        const speedMultiplier = simSpeedRef.current * dt;
+        nodes.forEach((node) => {
           const baseOrbitalSpeed = Math.sqrt(100 / (node.body.visual.orbitDistance || 1)) * 0.08;
           node.currentAngle += baseOrbitalSpeed * speedMultiplier;
           node.pivot.rotation.y = node.currentAngle;
-
-          // Planetary self-rotation (diurnal spin)
           node.mesh.rotation.y += 0.015;
-
-          // Earth Cloud Layer differential spin
-          if (node.cloudMesh) {
-            node.cloudMesh.rotation.y += 0.018;
-          }
+          if (node.cloudMesh) node.cloudMesh.rotation.y += 0.018;
         });
-
-        // Orbit Moon around Earth
         if (moonNodeRef.current.mesh) {
           moonNodeRef.current.angle += 0.3 * speedMultiplier;
           const moonDist = 5.2;
@@ -462,16 +485,19 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
         }
       }
 
-      // Smooth Camera Transition (Exponential Damping)
       if (cameraTargetRef.current.isTransitioning && cameraRef.current) {
         const cam = cameraRef.current;
         const targetPos = cameraTargetRef.current.position;
         const targetLook = cameraTargetRef.current.lookAt;
-
         cam.position.lerp(targetPos, 0.05);
-        cam.lookAt(targetLook);
-
-        if (cam.position.distanceTo(targetPos) < 0.2) {
+        // smooth lookAt by moving camera orientation toward target (approximate)
+        const currentDir = new THREE.Vector3();
+        cam.getWorldDirection(currentDir);
+        const desiredDir = targetLook.clone().sub(cam.position).normalize();
+        currentDir.lerp(desiredDir, 0.08).normalize();
+        cam.lookAt(cam.position.clone().add(currentDir));
+        if (cam.position.distanceTo(targetPos) < 0.25) {
+          cam.lookAt(targetLook);
           cameraTargetRef.current.isTransitioning = false;
         }
       }
@@ -481,11 +507,11 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
 
     animate();
 
-    // 9. Resize Listener
     const handleResize = () => {
       if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
       const w = containerRef.current.clientWidth;
       const h = containerRef.current.clientHeight;
+      if (w === 0 || h === 0) return;
       cameraRef.current.aspect = w / h;
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(w, h);
@@ -495,138 +521,242 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({ onSwitchToEarthW
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
-      dom.removeEventListener('pointerdown', handlePointerDown);
-      dom.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      dom.removeEventListener('wheel', onWheel);
-      if (containerRef.current && renderer.domElement) {
-        containerRef.current.removeChild(renderer.domElement);
-      }
-      renderer.dispose();
-    };
-  }, [handleFocusPlanet, isPaused, simSpeed]);
+      container.removeEventListener('pointerdown', onPointerDownDrag);
+      window.removeEventListener('pointermove', onPointerMoveDrag);
+      window.removeEventListener('pointerup', onPointerUpDrag);
+      container.removeEventListener('wheel', onWheel);
 
-  // Update orbit lines visibility
+      if (container && renderer.domElement && renderer.domElement.parentNode === container) {
+        container.removeChild(renderer.domElement);
+      }
+
+      // Dispose scene resources (geometries/materials). Procedural textures are cached in module.
+      disposables.forEach((d) => d.dispose());
+      renderer.dispose();
+
+      planetNodesRef.current = [];
+      moonNodeRef.current = { mesh: null, angle: 0, parentMesh: null };
+      sceneRef.current = null;
+      cameraRef.current = null;
+      rendererRef.current = null;
+    };
+  }, [handleFocusPlanet, initialPlanetId]);
+
+  // Orbit lines visibility
   useEffect(() => {
-    planetNodesRef.current.forEach(node => {
+    orbitVisibleRef.current = showOrbits;
+    planetNodesRef.current.forEach((node) => {
       node.orbitLine.visible = showOrbits;
     });
   }, [showOrbits]);
 
   if (!webGlAvailable) {
     return (
-      <div className="flex items-center justify-center h-full bg-slate-950 text-white p-6">
-        <div className="max-w-md text-center p-6 bg-red-950/40 border border-red-500/30 rounded-2xl">
-          <h3 className="text-lg font-bold text-red-300 mb-2">WebGL Hardware Acceleration Needed</h3>
-          <p className="text-sm text-white/70">
-            三维宇宙引擎需要 WebGL 支持。请在浏览器设置中启用硬件加速以畅享太阳系与深空探索。
+      <div className="flex h-full min-h-[60vh] items-center justify-center p-6" style={{ background: 'var(--color-one-bg)' }}>
+        <div className="one-surface-elevated max-w-md p-6 text-center">
+          <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-2xl border" style={{ borderColor: 'rgba(227,179,65,0.3)', background: 'rgba(227,179,65,0.1)', color: 'var(--color-one-warning)' }}>
+            <Orbit className="h-6 w-6" />
+          </div>
+          <h3 className="text-lg font-semibold text-[color:var(--color-one-text)]">需要 WebGL 支持</h3>
+          <p className="mt-2 text-sm leading-6 text-[color:var(--color-one-text-muted)]">
+            三维宇宙引擎需要 WebGL。请在浏览器设置中启用硬件加速后重新打开。
           </p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="relative w-full h-full bg-black overflow-hidden select-none">
-      {/* Three.js Canvas Container */}
-      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+  const selectedEco = selectedPlanet ? getPlanetEcosystem(selectedPlanet.id) : undefined;
 
-      {/* Top Left Status & Mode Header */}
-      <div className="absolute top-4 left-4 z-20 flex flex-col gap-1.5 pointer-events-none">
-        <div className="flex items-center gap-2">
-          <div className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
-          <span className="font-mono text-xs font-semibold uppercase tracking-widest text-cyan-400">
-            UNIVERSE ENGINE • SOLAR SYSTEM EXPLORER
+  return (
+    <div className="relative h-full w-full overflow-hidden select-none" style={{ background: '#020409' }}>
+      {/* Three.js Canvas */}
+      <div ref={containerRef} className="h-full w-full cursor-grab touch-none active:cursor-grabbing" />
+
+      {/* Top HUD */}
+      <div className="pointer-events-none absolute left-4 top-4 z-20 flex max-w-[min(92vw,420px)] flex-col gap-2 sm:left-5 sm:top-5">
+        <div className="one-surface-subtle pointer-events-auto inline-flex w-fit items-center gap-2 px-3 py-2" style={{ background: 'rgba(14,19,27,0.7)', backdropFilter: 'blur(12px)' }}>
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full rounded-full opacity-70" style={{ background: 'var(--color-one-accent)' }} />
+            <span className="relative inline-flex h-2 w-2 rounded-full" style={{ background: 'var(--color-one-accent)' }} />
+          </span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--color-one-accent)' }}>
+            ONE UNIVERSE
           </span>
         </div>
-        <p className="text-xs text-white/50 max-w-sm">
-          基于 NASA 天体物理模型与卡西尼-惠更斯探测器观测数据构建的三维数字太阳系
-        </p>
+        <div className="pointer-events-auto rounded-2xl border px-3.5 py-3" style={{ borderColor: 'var(--color-one-border)', background: 'rgba(14,19,27,0.62)', backdropFilter: 'blur(12px)' }}>
+          <p className="text-sm font-medium tracking-[0.08em] text-[color:var(--color-one-text)]">One World. Infinite Possibilities.</p>
+          <p className="mt-1 text-xs leading-5 text-[color:var(--color-one-text-muted)]">
+            真实 3D 太阳系与空间入口。拖拽旋转视角，滚轮缩放，点选天体查看真实信息与可用空间。
+          </p>
+        </div>
       </div>
 
-      {/* Collapsible Celestial Selector Pill Bar */}
-      <div className="absolute top-4 right-4 z-20 hidden md:flex items-center gap-1.5 bg-slate-950/80 backdrop-blur-md p-1.5 rounded-full border border-white/10 shadow-xl">
-        {CELESTIAL_BODIES.map(body => (
-          <button
-            key={body.id}
-            onClick={() => handleFocusPlanet(body.id)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
-              selectedPlanet?.id === body.id
-                ? 'bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20'
-                : 'text-white/70 hover:text-white hover:bg-white/10'
-            }`}
+      {/* Space selector (desktop) */}
+      <div
+        className="absolute right-4 top-4 z-20 hidden max-w-[46vw] flex-wrap justify-end gap-1.5 rounded-2xl border p-2 md:flex"
+        style={{ borderColor: 'var(--color-one-border)', background: 'rgba(14,19,27,0.66)', backdropFilter: 'blur(14px)' }}
+      >
+        {CELESTIAL_BODIES.map((body) => {
+          const eco = getPlanetEcosystem(body.id);
+          const active = selectedPlanet?.id === body.id;
+          const label = eco ? eco.titleZh : body.chineseName;
+          return (
+            <button
+              key={body.id}
+              onClick={() => handleFocusPlanet(body.id)}
+              className="rounded-full px-2.5 py-1.5 text-[11px] font-medium transition-all"
+              title={`${body.chineseName} · ${eco ? `${eco.titleZh} / ${eco.titleEn}` : body.name}`}
+              style={
+                active
+                  ? {
+                      color: 'var(--color-one-text)',
+                      background: 'rgba(127,212,255,0.16)',
+                      border: '1px solid rgba(127,212,255,0.3)'
+                    }
+                  : {
+                      color: 'var(--color-one-text-muted)',
+                      background: 'rgba(244,243,238,0.03)',
+                      border: '1px solid transparent'
+                    }
+              }
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Mobile quick selector */}
+      <div className="absolute inset-x-3 top-[7.5rem] z-20 md:hidden">
+        <div
+          className="flex gap-1.5 overflow-x-auto rounded-2xl border p-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ borderColor: 'var(--color-one-border)', background: 'rgba(14,19,27,0.66)', backdropFilter: 'blur(14px)' }}
+        >
+          {CELESTIAL_BODIES.map((body) => {
+            const eco = getPlanetEcosystem(body.id);
+            const active = selectedPlanet?.id === body.id;
+            const label = eco ? eco.titleZh : body.chineseName;
+            return (
+              <button
+                key={body.id}
+                onClick={() => handleFocusPlanet(body.id)}
+                className="shrink-0 rounded-full px-3 py-1.5 text-xs font-medium"
+                style={
+                  active
+                    ? { color: 'var(--color-one-text)', background: 'rgba(127,212,255,0.16)', border: '1px solid rgba(127,212,255,0.3)' }
+                    : { color: 'var(--color-one-text-muted)', background: 'rgba(244,243,238,0.03)', border: '1px solid var(--color-one-border)' }
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Selected space hint */}
+      {selectedPlanet && selectedEco && (
+        <div className="pointer-events-none absolute left-4 top-[10.8rem] z-20 hidden max-w-sm sm:left-5 md:top-[5.5rem] md:block lg:top-24">
+          <div
+            className="pointer-events-auto flex items-start gap-3 rounded-2xl border px-3.5 py-3"
+            style={{ borderColor: 'var(--color-one-border)', background: 'rgba(14,19,27,0.6)', backdropFilter: 'blur(12px)' }}
           >
-            {body.chineseName}
-          </button>
-        ))}
-      </div>
+            <span
+              className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border"
+              style={{ borderColor: 'rgba(244,243,238,0.18)', background: 'rgba(244,243,238,0.04)', color: 'var(--color-one-text)' }}
+            >
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs text-[color:var(--color-one-text-dim)]">{selectedPlanet.chineseName} · {selectedPlanet.name}</p>
+              <p className="mt-0.5 text-sm font-medium text-[color:var(--color-one-text)]">{selectedEco.titleZh}</p>
+              <p className="mt-0.5 text-xs leading-5 text-[color:var(--color-one-text-muted)]">{selectedEco.descriptionZh}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* Bottom Horizontal Engine Control Dock */}
-      <div className="absolute bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-slate-950/85 backdrop-blur-xl px-4 py-2.5 rounded-2xl border border-white/15 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto">
-        {/* Return to Earth Social World */}
-        <button
-          onClick={onSwitchToEarthWorld}
-          className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-900/40 transition-all mr-2"
-        >
-          <Globe2 className="w-3.5 h-3.5" />
-          <span>返回地球社交孪生 (Earth Social Twin)</span>
+      {/* Control dock */}
+      <div
+        className="absolute bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-1/2 z-30 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 items-center gap-1.5 overflow-x-auto rounded-2xl border px-2.5 py-2 md:bottom-5 md:gap-2 md:px-3"
+        style={{ borderColor: 'var(--color-one-border-strong)', background: 'rgba(14,19,27,0.78)', backdropFilter: 'blur(16px)', boxShadow: '0 12px 40px rgba(0,0,0,0.45)' }}
+      >
+        <button onClick={onSwitchToEarthWorld} className="one-btn one-btn-sm one-btn-primary shrink-0 whitespace-nowrap">
+          <Globe2 className="h-4 w-4" />
+          <span>返回地球世界</span>
         </button>
 
-        <div className="h-4 w-px bg-white/20 mx-1" />
+        <div className="mx-0.5 h-5 w-px shrink-0" style={{ background: 'var(--color-one-border)' }} />
 
-        {/* Orbit Lines Toggle */}
         <button
-          onClick={() => setShowOrbits(!showOrbits)}
-          className={`p-2 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all ${
-            showOrbits ? 'bg-white/15 text-cyan-300' : 'text-white/60 hover:bg-white/10'
-          }`}
-          title="切换公转轨道线显示"
+          onClick={() => setShowOrbits((v) => !v)}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition"
+          style={
+            showOrbits
+              ? { color: 'var(--color-one-accent)', background: 'rgba(127,212,255,0.12)', border: '1px solid rgba(127,212,255,0.22)' }
+              : { color: 'var(--color-one-text-muted)', border: '1px solid transparent' }
+          }
+          title="显示/隐藏轨道"
         >
-          <Layers className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">轨道线</span>
+          <Layers className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">轨道</span>
         </button>
 
-        {/* Reset / Solar Overview */}
         <button
           onClick={handleOverviewCamera}
-          className="p-2 rounded-xl text-xs text-white/70 hover:text-white hover:bg-white/10 transition-all flex items-center gap-1"
-          title="太阳系全景视角"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-[color:var(--color-one-text-muted)] transition hover:bg-[rgba(244,243,238,0.06)] hover:text-[color:var(--color-one-text)]"
+          title="全景视角"
         >
-          <Maximize2 className="w-3.5 h-3.5" />
+          <Maximize2 className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">全景</span>
         </button>
 
-        {/* Simulation Speed Controls */}
-        <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/5">
-          <button
-            onClick={() => setIsPaused(!isPaused)}
-            className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors"
-            title={isPaused ? '恢复演化' : '暂停'}
-          >
-            {isPaused ? <Play className="w-3.5 h-3.5 text-emerald-400" /> : <Pause className="w-3.5 h-3.5" />}
-          </button>
+        <button
+          onClick={() => selectedPlanet && handleFocusPlanet(selectedPlanet.id)}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-[color:var(--color-one-text-muted)] transition hover:bg-[rgba(244,243,238,0.06)] hover:text-[color:var(--color-one-text)]"
+          title="对焦当前天体"
+          disabled={!selectedPlanet}
+        >
+          <Compass className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">对焦</span>
+        </button>
 
-          {[1, 5, 25].map(speed => (
-            <button
-              key={speed}
-              onClick={() => {
-                setSimSpeed(speed);
-                setIsPaused(false);
-              }}
-              className={`px-2 py-1 rounded-lg text-[11px] font-mono font-medium transition-all ${
-                simSpeed === speed && !isPaused
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                  : 'text-white/50 hover:text-white'
-              }`}
-            >
-              {speed}x
-            </button>
-          ))}
+        <div className="mx-0.5 h-5 w-px shrink-0" style={{ background: 'var(--color-one-border)' }} />
+
+        <div className="flex shrink-0 items-center gap-1 rounded-xl border p-1" style={{ borderColor: 'var(--color-one-border)', background: 'rgba(244,243,238,0.03)' }}>
+          <button
+            onClick={() => setIsPaused((p) => !p)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg transition hover:bg-[rgba(244,243,238,0.08)]"
+            title={isPaused ? '继续' : '暂停'}
+            style={{ color: isPaused ? 'var(--color-one-success)' : 'var(--color-one-text-muted)' }}
+          >
+            {isPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+          </button>
+          {[1, 5, 25].map((speed) => {
+            const active = simSpeed === speed && !isPaused;
+            return (
+              <button
+                key={speed}
+                onClick={() => {
+                  setSimSpeed(speed);
+                  setIsPaused(false);
+                }}
+                className="rounded-md px-2 py-1 font-mono text-[11px] font-medium transition"
+                style={
+                  active
+                    ? { color: 'var(--color-one-accent)', background: 'rgba(127,212,255,0.14)' }
+                    : { color: 'var(--color-one-text-dim)' }
+                }
+              >
+                {speed}x
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Planet Telemetry Science Drawer */}
+      {/* Telemetry drawer */}
       <PlanetTelemetryDrawer
         planet={selectedPlanet}
         onClose={() => setSelectedPlanet(null)}
