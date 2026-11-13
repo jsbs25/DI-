@@ -1,19 +1,18 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ArrowLeft,
   Search,
-  Sparkles,
-  ExternalLink,
-  Download,
   X,
-  Maximize2,
   RefreshCw,
   Moon,
   Telescope,
   Camera,
-  Layers,
-  Compass,
   Eye,
+  Download,
+  ExternalLink,
+  ChevronLeft,
+  ChevronRight,
+  ImageOff,
   Info
 } from 'lucide-react';
 import { Language } from '../types/index.ts';
@@ -130,29 +129,43 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
   const [images, setImages] = useState<AstroImage[]>(INITIAL_IMAGES);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lightboxImage, setLightboxImage] = useState<AstroImage | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
-  const fetchImages = useCallback(async (q: string, src = sourceFilter) => {
-    if (!q.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/images/search?q=${encodeURIComponent(q)}&limit=24&source=${src}`);
-      const data = await res.json();
-      if (data.success && Array.isArray(data.images) && data.images.length > 0) {
-        setImages(data.images);
-      } else {
-        setError(isZh ? '未检索到该关键词的开放天体照片，请尝试其他天体或英文名称（如 Mars / Orion）。' : 'No images found for this query.');
+  const touchStartX = useRef<number | null>(null);
+
+  const fetchImages = useCallback(
+    async (q: string, src = sourceFilter) => {
+      if (!q.trim()) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/images/search?q=${encodeURIComponent(q)}&limit=24&source=${src}`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.images) && data.images.length > 0) {
+          setImages(data.images);
+        } else {
+          setImages([]);
+          setError(
+            isZh
+              ? '未检索到该关键词的开放天体影像，请尝试其他天体或英文名称（如 Mars / Orion）。'
+              : 'No images found for this query. Try another body or keyword (e.g. Mars, Orion).'
+          );
+        }
+      } catch {
+        setImages((prev) => (prev.length ? prev : INITIAL_IMAGES));
+        setError(
+          isZh
+            ? '影像接口连接超时，已保留本地精选影像。'
+            : 'Image search timed out. Local curated imagery remains available.'
+        );
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      setError(isZh ? '图像开放接口连接超时，已保留本地精选图像。' : 'Image search timeout.');
-    } finally {
-      setLoading(false);
-    }
-  }, [sourceFilter, isZh]);
+    },
+    [sourceFilter, isZh]
+  );
 
-  // 切换频道
-  const handleSelectChannel = (ch: typeof PRESET_CHANNELS[number]) => {
+  const handleSelectChannel = (ch: (typeof PRESET_CHANNELS)[number]) => {
     setActiveChannel(ch.key);
     setQuery('');
     fetchImages(ch.query, sourceFilter);
@@ -165,265 +178,364 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
     fetchImages(query, sourceFilter);
   };
 
+  const lightboxImage = lightboxIndex !== null ? images[lightboxIndex] : null;
+
+  const openLightbox = (index: number) => setLightboxIndex(index);
+  const closeLightbox = () => setLightboxIndex(null);
+  const showPrev = useCallback(() => {
+    setLightboxIndex((idx) => (idx === null ? idx : (idx - 1 + images.length) % images.length));
+  }, [images.length]);
+  const showNext = useCallback(() => {
+    setLightboxIndex((idx) => (idx === null ? idx : (idx + 1) % images.length));
+  }, [images.length]);
+
+  useEffect(() => {
+    if (lightboxIndex === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowLeft') showPrev();
+      if (e.key === 'ArrowRight') showNext();
+    };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [lightboxIndex, showPrev, showNext]);
+
+  const onLightboxTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0]?.clientX ?? null;
+  };
+  const onLightboxTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStartX.current;
+    const end = e.changedTouches[0]?.clientX ?? null;
+    touchStartX.current = null;
+    if (start == null || end == null) return;
+    const dx = end - start;
+    if (Math.abs(dx) > 48) {
+      if (dx > 0) showPrev();
+      else showNext();
+    }
+  };
+
+  const sourceFilters = useMemo(
+    () => [
+      { id: 'all' as const, label: isZh ? '全部聚合' : 'All sources' },
+      { id: 'nasa' as const, label: 'NASA' },
+      { id: 'wikimedia' as const, label: 'Wikimedia Commons' },
+      { id: 'met' as const, label: isZh ? 'Met 公版' : 'Met Museum' }
+    ],
+    [isZh]
+  );
+
   return (
-    <div className="min-h-screen bg-[#030611] text-slate-100 selection:bg-sky-500/30 selection:text-sky-200">
-      {/* Lunar Moon & Deep Space Ambient Glow */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute -top-[15%] left-[20%] w-[55vw] h-[55vw] rounded-full bg-slate-400/10 blur-[150px]" />
-        <div className="absolute top-[40%] -right-[10%] w-[45vw] h-[45vw] rounded-full bg-sky-500/10 blur-[160px]" />
-        <div className="absolute bottom-0 left-[10%] w-[50vw] h-[30vw] rounded-full bg-indigo-600/10 blur-[140px]" />
+    <div
+      className="min-h-screen text-[color:var(--color-one-text)]"
+      style={{
+        background:
+          'radial-gradient(1200px 700px at 50% -10%, rgba(127,212,255,0.08), transparent 55%), radial-gradient(900px 500px at 80% 20%, rgba(183,189,200,0.06), transparent 50%), linear-gradient(180deg, #030508 0%, #05070b 40%, #030508 100%)'
+      }}
+    >
+      {/* subtle starfield / depth */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        <div
+          className="absolute -top-[20%] left-1/2 h-[70vw] w-[70vw] -translate-x-1/2 rounded-full opacity-[0.12] blur-[120px]"
+          style={{ background: 'radial-gradient(circle, rgba(244,243,238,0.35), transparent 65%)' }}
+        />
+        <div
+          className="absolute bottom-[-10%] right-[-5%] h-[50vw] w-[50vw] rounded-full opacity-[0.08] blur-[140px]"
+          style={{ background: 'radial-gradient(circle, rgba(127,212,255,0.5), transparent 60%)' }}
+        />
       </div>
 
-      {/* Header Banner */}
-      <header className="relative z-10 border-b border-slate-800/80 bg-gradient-to-b from-[#070b1a] to-[#030611] px-4 py-8 sm:px-8">
-        <div className="mx-auto max-w-7xl">
-          <button
-            onClick={onBack}
-            className="mb-6 inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900/80 px-4 py-1.5 text-xs font-semibold text-slate-300 transition-colors hover:border-sky-400 hover:text-white cursor-pointer"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            <span>{isZh ? '返回太阳系' : 'Back to Solar System'}</span>
-          </button>
+      <header className="relative z-10 mx-auto w-full max-w-[1440px] px-4 pb-6 pt-6 sm:px-6 lg:px-10 lg:pt-8">
+        <button
+          onClick={onBack}
+          className="one-btn one-btn-sm one-btn-ghost mb-5 -ml-2"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span>{isZh ? '返回太阳系' : 'Back to Solar System'}</span>
+        </button>
 
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div>
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-400/40 bg-sky-500/15 px-3 py-1 text-[11px] font-semibold text-sky-300 font-mono">
-                  <Moon className="h-3.5 w-3.5 text-slate-200" />
-                  <span>EARTH ONE · MOON OBSERVATORY</span>
+        <div className="one-surface-elevated relative overflow-hidden px-5 py-6 sm:px-7 sm:py-8">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-16 top-1/2 h-72 w-72 -translate-y-1/2 rounded-full opacity-20 blur-3xl"
+            style={{ background: 'radial-gradient(circle, rgba(244,243,238,0.5), transparent 70%)' }}
+          />
+          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="one-badge one-badge-neutral inline-flex items-center gap-1.5">
+                  <Moon className="h-3.5 w-3.5" />
+                  ONE · OBSERVATORY
                 </span>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-400/30 bg-indigo-500/10 px-3 py-1 text-[11px] font-semibold text-indigo-300">
-                  <Telescope className="h-3.5 w-3.5 text-indigo-400" />
-                  <span>NASA & 维基共享资源开放图像</span>
+                <span className="one-badge one-badge-accent inline-flex items-center gap-1.5 normal-case tracking-normal">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--color-one-accent)]" />
+                  NASA / Wikimedia / Met · {isZh ? '开放影像直连' : 'Open imagery'}
                 </span>
               </div>
-
-              <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white">
-                {isZh ? '🌙 月球 · 宇宙深空天文图库' : '🌙 Moon Space Observatory'}
+              <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-4xl lg:text-5xl">
+                ONE OBSERVATORY
               </h1>
-              <p className="mt-2 text-xs sm:text-sm font-semibold tracking-[0.2em] text-sky-400/90 uppercase">
-                ASTRONOMICAL IMAGERY & DEEP SPACE EXPLORATION
+              <p className="mt-1 text-sm font-medium tracking-[0.18em] text-[color:var(--color-one-text-muted)] sm:text-base">
+                Explore the Universe.
               </p>
-              <p className="mt-3 max-w-2xl text-xs sm:text-sm leading-relaxed text-slate-300">
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-[color:var(--color-one-text-muted)]">
                 {isZh
-                  ? '月球是人类眺望宇宙的天然深空天文台。实时直连 NASA 官方宇宙图库、维基共享资源 (Wikimedia Commons) 亿级开放档案与大都会艺术博物馆公版星图，全网高保真天文真彩照片即搜即看。'
-                  : 'The natural deep space observatory for humanity. Directly querying NASA open archives, Wikimedia Commons, and public-domain celestial collections.'}
+                  ? '月球是人类眺望宇宙的天然观测台。直连 NASA 官方图库、维基共享资源与大都会艺术博物馆公版星图，以影像为主体沉浸探索深空。'
+                  : 'A lunar vantage on deep space. Search open imagery from NASA, Wikimedia Commons, and the Met—images first, exploration immersive.'}
               </p>
             </div>
 
-            {/* Observatory Live Stats Indicator */}
-            <div className="flex items-center gap-4 bg-slate-900/70 border border-slate-800 p-4 rounded-2xl shrink-0 backdrop-blur-xl">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-sky-900/40">
-                <Camera className="w-6 h-6 animate-pulse" />
+            <div
+              className="flex shrink-0 items-center gap-4 rounded-2xl border px-4 py-3.5"
+              style={{ borderColor: 'var(--color-one-border)', background: 'rgba(244,243,238,0.03)' }}
+            >
+              <div
+                className="flex h-11 w-11 items-center justify-center rounded-xl border"
+                style={{ borderColor: 'rgba(127,212,255,0.25)', background: 'rgba(127,212,255,0.1)', color: 'var(--color-one-accent)' }}
+              >
+                <Camera className="h-5 w-5" />
               </div>
               <div className="text-xs">
-                <div className="text-slate-400">开放影像资源节点</div>
-                <div className="text-white font-bold text-sm font-mono mt-0.5">100,000,000+ 公版典藏</div>
-                <div className="text-emerald-400 text-[10px] mt-0.5 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                  <span>NASA / Wikimedia API 直连中</span>
+                <div className="text-[color:var(--color-one-text-dim)]">{isZh ? '开放影像节点' : 'Open archives'}</div>
+                <div className="mt-0.5 font-medium text-[color:var(--color-one-text)]">NASA · Commons · Met</div>
+                <div className="mt-0.5 font-mono text-[10px] text-[color:var(--color-one-text-dim)]">
+                  Public Domain / Open
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Search */}
+          <form onSubmit={handleSearch} className="relative mt-7 space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative flex-1">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4 text-[color:var(--color-one-text-dim)]">
+                  <Search className="h-4 w-4" />
+                </div>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={
+                    isZh
+                      ? '搜索天体、探测器、星云或英文名（如 Mars, Orion, JWST）...'
+                      : 'Search bodies, missions, nebulae (e.g. Mars, Orion, JWST)...'
+                  }
+                  className="w-full rounded-xl border bg-[color:var(--color-one-surface-soft)] py-3 pl-11 pr-10 text-sm text-[color:var(--color-one-text)] placeholder-[color:var(--color-one-text-dim)] transition focus:border-[rgba(127,212,255,0.45)] focus:outline-none focus:ring-1 focus:ring-[rgba(127,212,255,0.35)]"
+                  style={{ borderColor: 'var(--color-one-border)' }}
+                />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery('')}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-[color:var(--color-one-text-dim)] hover:text-[color:var(--color-one-text)]"
+                    aria-label="Clear"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={loading || !query.trim()}
+                className="one-btn one-btn-md one-btn-primary shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Telescope className="h-4 w-4" />
+                {loading ? (isZh ? '检索中...' : 'Searching...') : isZh ? '探索影像' : 'Explore'}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-[11px] font-medium uppercase tracking-[0.14em] text-[color:var(--color-one-text-dim)]">
+                {isZh ? '来源' : 'Source'}
+              </span>
+              {sourceFilters.map((s) => {
+                const active = sourceFilter === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setSourceFilter(s.id);
+                      if (query.trim()) fetchImages(query, s.id);
+                    }}
+                    className="rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all"
+                    style={
+                      active
+                        ? {
+                            color: 'var(--color-one-accent)',
+                            background: 'rgba(127,212,255,0.12)',
+                            border: '1px solid rgba(127,212,255,0.26)'
+                          }
+                        : {
+                            color: 'var(--color-one-text-muted)',
+                            background: 'rgba(244,243,238,0.03)',
+                            border: '1px solid var(--color-one-border)'
+                          }
+                    }
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+              <span className="ml-auto hidden text-[11px] text-[color:var(--color-one-text-dim)] sm:inline">
+                {isZh ? '高清 · 公有领域 / 开放许可' : 'High-res · Public domain / open'}
+              </span>
+            </div>
+          </form>
         </div>
       </header>
 
-      {/* Main Observatory Content */}
-      <main className="relative z-10 mx-auto max-w-7xl px-4 py-8 sm:px-8 space-y-6">
-        {/* Search Bar */}
-        <form onSubmit={handleSearch} className="space-y-3">
-          <div className="flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 shadow-xl focus-within:border-sky-500 transition-all">
-            <Search className="h-5 w-5 shrink-0 text-slate-400" />
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder={isZh ? '搜索天体名、黑洞、火星全景、木星大红斑、詹姆斯·韦伯深空或星云...' : 'Search celestial bodies, black holes, Mars rover, JWST deep field...'}
-              className="flex-1 bg-transparent text-sm sm:text-base text-slate-100 outline-none placeholder:text-slate-500"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery('')}
-                className="text-slate-500 hover:text-slate-300"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-            <button
-              type="submit"
-              disabled={loading || !query.trim()}
-              className="rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 px-5 py-2 text-xs font-bold text-white shadow-lg shadow-sky-900/40 transition-transform active:scale-95 disabled:opacity-50 cursor-pointer"
-            >
-              {loading ? (isZh ? '检索中...' : 'Searching...') : isZh ? '探索图像' : 'Search'}
-            </button>
-          </div>
-
-          {/* Source Filter Tags */}
-          <div className="flex items-center justify-between flex-wrap gap-2 pt-1 text-xs">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-slate-400 font-medium">数据源:</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setSourceFilter('all');
-                  if (query.trim()) fetchImages(query, 'all');
-                }}
-                className={`px-3 py-1 rounded-full font-semibold transition-all cursor-pointer ${
-                  sourceFilter === 'all'
-                    ? 'bg-sky-500/20 text-sky-200 border border-sky-400/50'
-                    : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-white'
-                }`}
-              >
-                ✨ 全部聚合来源
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSourceFilter('nasa');
-                  if (query.trim()) fetchImages(query, 'nasa');
-                }}
-                className={`px-3 py-1 rounded-full font-semibold transition-all cursor-pointer ${
-                  sourceFilter === 'nasa'
-                    ? 'bg-blue-500/20 text-blue-200 border border-blue-400/50'
-                    : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-white'
-                }`}
-              >
-                🚀 NASA 官方深空图像库
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSourceFilter('wikimedia');
-                  if (query.trim()) fetchImages(query, 'wikimedia');
-                }}
-                className={`px-3 py-1 rounded-full font-semibold transition-all cursor-pointer ${
-                  sourceFilter === 'wikimedia'
-                    ? 'bg-purple-500/20 text-purple-200 border border-purple-400/50'
-                    : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-white'
-                }`}
-              >
-                🌐 维基共享资源 (Wikimedia)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSourceFilter('met');
-                  if (query.trim()) fetchImages(query, 'met');
-                }}
-                className={`px-3 py-1 rounded-full font-semibold transition-all cursor-pointer ${
-                  sourceFilter === 'met'
-                    ? 'bg-amber-500/20 text-amber-200 border border-amber-400/50'
-                    : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-white'
-                }`}
-              >
-                🎨 大都会博物馆公版藏品
-              </button>
-            </div>
-
-            <div className="text-slate-500 font-mono text-[11px]">
-              高清无水印 · 公有领域 (Public Domain / CC0)
-            </div>
-          </div>
-        </form>
-
-        {/* Preset Category Channels */}
+      <main className="relative z-10 mx-auto w-full max-w-[1440px] space-y-5 px-4 pb-16 sm:px-6 lg:px-10">
+        {/* Channels */}
         <div className="flex flex-wrap items-center gap-2">
-          {PRESET_CHANNELS.map(ch => (
-            <button
-              key={ch.key}
-              onClick={() => handleSelectChannel(ch)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all cursor-pointer ${
-                activeChannel === ch.key
-                  ? 'bg-sky-500/20 text-sky-200 border border-sky-400/50 shadow-md shadow-sky-950'
-                  : 'border border-slate-800 bg-slate-900/40 text-slate-300 hover:text-white hover:border-slate-600'
-              }`}
-            >
-              {isZh ? ch.zh : ch.en}
-            </button>
-          ))}
+          {PRESET_CHANNELS.map((ch) => {
+            const active = activeChannel === ch.key;
+            return (
+              <button
+                key={ch.key}
+                onClick={() => handleSelectChannel(ch)}
+                className="rounded-full px-3.5 py-1.5 text-xs font-medium transition-all"
+                style={
+                  active
+                    ? {
+                        color: 'var(--color-one-text)',
+                        background: 'rgba(244,243,238,0.1)',
+                        border: '1px solid rgba(244,243,238,0.22)'
+                      }
+                    : {
+                        color: 'var(--color-one-text-muted)',
+                        background: 'rgba(244,243,238,0.03)',
+                        border: '1px solid var(--color-one-border)'
+                      }
+                }
+              >
+                {isZh ? ch.zh : ch.en}
+              </button>
+            );
+          })}
           <button
             onClick={() => fetchImages(PRESET_CHANNELS[0].query)}
-            className="inline-flex items-center gap-1 rounded-full border border-slate-800 bg-slate-900/40 px-3 py-1.5 text-xs text-slate-400 hover:text-white cursor-pointer"
-            title="刷新图库"
+            className="one-btn one-btn-sm one-btn-ghost"
+            title={isZh ? '刷新' : 'Refresh'}
           >
-            <RefreshCw className="h-3 w-3" />
-            <span>刷新</span>
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>{isZh ? '刷新' : 'Refresh'}</span>
           </button>
         </div>
 
-        {/* Loading & Error States */}
-        {loading && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-12 text-center text-sm text-slate-400">
-            <div className="inline-block animate-spin mb-3">🌙</div>
-            <div>{isZh ? '正在从 NASA 与维基共享媒体库抓取高清天体图像...' : 'Fetching high-resolution cosmic imagery...'}</div>
-          </div>
-        )}
+        {/* States */}
+        {loading && <GallerySkeleton />}
+
         {!loading && error && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-8 text-center text-sm text-amber-300">
-            {error}
+          <div
+            className="one-surface flex items-start gap-3 px-5 py-4"
+            style={{ borderColor: 'rgba(227,179,65,0.28)' }}
+            role="status"
+          >
+            <Info className="mt-0.5 h-4 w-4 shrink-0" style={{ color: 'var(--color-one-warning)' }} />
+            <div>
+              <p className="text-sm text-[color:var(--color-one-text)]">{error}</p>
+              <p className="mt-1 text-xs text-[color:var(--color-one-text-dim)]">
+                {isZh ? '可切换频道、来源或更换关键词重试。' : 'Switch channel, source, or try another keyword.'}
+              </p>
+            </div>
           </div>
         )}
 
-        {/* Image Grid */}
+        {!loading && !error && images.length === 0 && (
+          <div className="one-surface flex flex-col items-center justify-center px-6 py-16 text-center">
+            <div
+              className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border"
+              style={{ borderColor: 'var(--color-one-border)', background: 'rgba(244,243,238,0.03)' }}
+            >
+              <ImageOff className="h-7 w-7 text-[color:var(--color-one-text-dim)]" />
+            </div>
+            <h3 className="text-base font-semibold text-[color:var(--color-one-text)]">
+              {isZh ? '暂无影像结果' : 'No imagery yet'}
+            </h3>
+            <p className="mt-2 max-w-md text-sm leading-6 text-[color:var(--color-one-text-muted)]">
+              {isZh ? '尝试搜索天体英文名或选择上方观测频道。' : 'Try a celestial keyword or pick a channel above.'}
+            </p>
+          </div>
+        )}
+
+        {/* Gallery */}
         {!loading && images.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {images.map(img => (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {images.map((img, index) => (
               <article
                 key={img.id}
-                onClick={() => setLightboxImage(img)}
-                className="group relative overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/60 shadow-xl backdrop-blur-sm transition-all duration-300 hover:border-sky-500/60 hover:-translate-y-1 cursor-pointer flex flex-col justify-between"
+                onClick={() => openLightbox(index)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openLightbox(index);
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={img.title}
+                className="group relative cursor-pointer overflow-hidden rounded-2xl border text-left transition-all focus-visible:outline-none focus-visible:ring-2"
+                style={{
+                  borderColor: 'var(--color-one-border)',
+                  background: 'rgba(14,19,27,0.55)',
+                  focusRingColor: 'rgba(127,212,255,0.6)'
+                } as React.CSSProperties}
               >
-                <div className="relative aspect-video w-full bg-slate-950 overflow-hidden">
+                <div className="relative aspect-[4/3] w-full overflow-hidden" style={{ background: '#030508' }}>
                   <img
-                    src={img.thumbnailUrl}
+                    src={img.thumbnailUrl || img.url}
                     alt={img.title}
                     loading="lazy"
-                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    onError={e => {
-                      (e.currentTarget as HTMLImageElement).src = 'https://images-assets.nasa.gov/image/PIA01518/PIA01518~thumb.jpg';
+                    className="h-full w-full object-cover transition-transform duration-500 ease-[var(--ease-one)] group-hover:scale-[1.03]"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src =
+                        'https://images-assets.nasa.gov/image/PIA01518/PIA01518~thumb.jpg';
                     }}
                   />
-                  {/* Source Badge */}
-                  <span className={`absolute top-2.5 left-2.5 px-2 py-0.5 rounded text-[10px] font-bold shadow-md ${
-                    img.source === 'NASA'
-                      ? 'bg-blue-600 text-white'
-                      : img.source === 'Wikimedia Commons'
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-amber-600 text-white'
-                  }`}>
-                    {img.source}
-                  </span>
-
-                  {/* Hover Inspect Icon */}
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-sky-500 text-white shadow-lg transform group-hover:scale-105 transition-transform">
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-80" />
+                  <div className="absolute left-2.5 top-2.5 flex items-center gap-1.5">
+                    <SourceBadge source={img.source} />
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    <span
+                      className="flex h-11 w-11 items-center justify-center rounded-full border backdrop-blur-sm"
+                      style={{
+                        borderColor: 'rgba(244,243,238,0.3)',
+                        background: 'rgba(5,7,11,0.45)',
+                        color: 'var(--color-one-text)'
+                      }}
+                    >
                       <Eye className="h-5 w-5" />
                     </span>
                   </div>
-
                   {img.date && (
-                    <span className="absolute bottom-2 right-2 rounded bg-black/75 px-1.5 py-0.5 text-[10px] text-slate-300 font-mono">
+                    <span
+                      className="absolute bottom-2.5 right-2.5 rounded-md px-1.5 py-0.5 font-mono text-[10px]"
+                      style={{ background: 'rgba(5,7,11,0.65)', color: 'var(--color-one-text-muted)' }}
+                    >
                       {img.date}
                     </span>
                   )}
                 </div>
 
-                <div className="p-4 flex flex-col justify-between flex-1">
-                  <div>
-                    <h3 className="line-clamp-2 text-xs sm:text-sm font-bold text-white group-hover:text-sky-300 transition-colors" title={img.title}>
-                      {img.title}
-                    </h3>
-                    {img.description && (
-                      <p className="mt-1 line-clamp-2 text-[11px] text-slate-400 leading-relaxed">
-                        {img.description}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-                    <span className="truncate max-w-[160px]">{img.author}</span>
-                    <span className="text-sky-400 font-medium">{isZh ? '查看原图' : 'View'}</span>
+                <div className="space-y-1.5 p-4">
+                  <h3 className="line-clamp-2 text-sm font-medium leading-snug text-[color:var(--color-one-text)]" title={img.title}>
+                    {img.title}
+                  </h3>
+                  {img.description && (
+                    <p className="line-clamp-2 text-[11px] leading-relaxed text-[color:var(--color-one-text-dim)]">
+                      {img.description}
+                    </p>
+                  )}
+                  <div className="flex items-center justify-between gap-2 pt-1 text-[11px] text-[color:var(--color-one-text-dim)]">
+                    <span className="truncate">{img.author}</span>
+                    <span style={{ color: 'var(--color-one-accent)' }}>{isZh ? '查看' : 'View'}</span>
                   </div>
                 </div>
               </article>
@@ -432,77 +544,147 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
         )}
       </main>
 
-      {/* Fullscreen High-Res Lightbox Modal */}
-      {lightboxImage && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4 backdrop-blur-xl animate-in fade-in">
-          <div className="relative w-full max-w-5xl flex flex-col max-h-[92vh] bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900/60">
-              <div className="flex items-center gap-2 min-w-0 pr-4">
-                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                  lightboxImage.source === 'NASA' ? 'bg-blue-600 text-white' : 'bg-purple-600 text-white'
-                }`}>
-                  {lightboxImage.source}
-                </span>
-                <h2 className="text-sm sm:text-base font-bold text-white truncate">{lightboxImage.title}</h2>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
+      {/* Immersive Lightbox */}
+      {lightboxImage && lightboxIndex !== null && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col"
+          style={{ background: 'rgba(3,5,8,0.96)', backdropFilter: 'blur(8px)' }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightboxImage.title}
+          onTouchStart={onLightboxTouchStart}
+          onTouchEnd={onLightboxTouchEnd}
+        >
+          {/* top bar */}
+          <div className="flex items-center justify-between gap-3 border-b px-4 py-3 sm:px-6" style={{ borderColor: 'var(--color-one-border)' }}>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <SourceBadge source={lightboxImage.source} />
+              <h2 className="truncate text-sm font-medium text-[color:var(--color-one-text)] sm:text-base">
+                {lightboxImage.title}
+              </h2>
+              <span className="hidden shrink-0 font-mono text-[11px] text-[color:var(--color-one-text-dim)] sm:inline">
+                {lightboxIndex + 1} / {images.length}
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <a
+                href={lightboxImage.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="one-btn one-btn-sm one-btn-secondary"
+                title={isZh ? '下载/查看原图' : 'Open full image'}
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{isZh ? '原图' : 'Full'}</span>
+              </a>
+              {lightboxImage.sourceUrl && (
                 <a
-                  href={lightboxImage.url}
+                  href={lightboxImage.sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 transition-colors cursor-pointer"
-                  title="下载或查看高清大图"
+                  className="one-btn one-btn-sm one-btn-ghost"
+                  title={isZh ? '官方来源' : 'Source'}
                 >
-                  <Download className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">下载大图</span>
+                  <ExternalLink className="h-4 w-4" />
                 </a>
-                {lightboxImage.sourceUrl && (
-                  <a
-                    href={lightboxImage.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-xl border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">官方来源</span>
-                  </a>
-                )}
+              )}
+              <button type="button" onClick={closeLightbox} className="one-btn one-btn-sm one-btn-ghost" aria-label="Close">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* image stage */}
+          <div className="relative flex min-h-0 flex-1 items-center justify-center px-3 py-3 sm:px-12 sm:py-6">
+            {images.length > 1 && (
+              <>
                 <button
-                  onClick={() => setLightboxImage(null)}
-                  className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
-                  title="关闭"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    showPrev();
+                  }}
+                  className="absolute left-2 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border p-2.5 transition hover:bg-[rgba(244,243,238,0.08)] sm:flex"
+                  style={{ borderColor: 'var(--color-one-border)', background: 'rgba(5,7,11,0.5)', color: 'var(--color-one-text)' }}
+                  aria-label="Previous image"
                 >
-                  <X className="h-5 w-5" />
+                  <ChevronLeft className="h-5 w-5" />
                 </button>
-              </div>
-            </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    showNext();
+                  }}
+                  className="absolute right-2 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border p-2.5 transition hover:bg-[rgba(244,243,238,0.08)] sm:flex"
+                  style={{ borderColor: 'var(--color-one-border)', background: 'rgba(5,7,11,0.5)', color: 'var(--color-one-text)' }}
+                  aria-label="Next image"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </>
+            )}
 
-            {/* Modal Image Body */}
-            <div className="flex-1 overflow-auto bg-black flex items-center justify-center p-2 sm:p-4 min-h-[300px]">
-              <img
-                src={lightboxImage.url}
-                alt={lightboxImage.title}
-                className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
-              />
-            </div>
+            <img
+              src={lightboxImage.url}
+              alt={lightboxImage.title}
+              className="max-h-full w-auto max-w-full select-none rounded-lg object-contain"
+              style={{ boxShadow: '0 30px 80px rgba(0,0,0,0.6)' }}
+              draggable={false}
+            />
+          </div>
 
-            {/* Modal Info Footer */}
-            <div className="p-4 border-t border-slate-800 bg-slate-900/80 text-xs text-slate-300 space-y-1.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-3 text-slate-400">
-                  <span>拍摄/制作: <strong className="text-white">{lightboxImage.author}</strong></span>
-                  {lightboxImage.date && <span>日期: <strong className="text-slate-200">{lightboxImage.date}</strong></span>}
+          {/* info footer */}
+          <div
+            className="border-t px-4 py-4 sm:px-6"
+            style={{
+              borderColor: 'var(--color-one-border)',
+              background: 'rgba(14,19,27,0.7)',
+              paddingBottom: 'max(1rem, env(safe-area-inset-bottom))'
+            }}
+          >
+            <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[color:var(--color-one-text-muted)]">
+                  <span>
+                    {isZh ? '作者/来源' : 'Author'}: <span className="text-[color:var(--color-one-text)]">{lightboxImage.author}</span>
+                  </span>
+                  {lightboxImage.date && (
+                    <span>
+                      {isZh ? '日期' : 'Date'}: <span className="text-[color:var(--color-one-text)]">{lightboxImage.date}</span>
+                    </span>
+                  )}
+                  <span className="sm:hidden font-mono text-[color:var(--color-one-text-dim)]">
+                    {lightboxIndex + 1} / {images.length}
+                  </span>
                 </div>
-                <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] text-emerald-400 border border-slate-700">
+                {lightboxImage.description && (
+                  <p className="mt-2 max-h-24 overflow-y-auto text-xs leading-relaxed text-[color:var(--color-one-text-dim)]">
+                    {lightboxImage.description}
+                  </p>
+                )}
+              </div>
+              <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+                <span
+                  className="rounded-md border px-2 py-1 text-[10px]"
+                  style={{ borderColor: 'var(--color-one-border)', color: 'var(--color-one-success)', background: 'rgba(76,195,138,0.08)' }}
+                >
                   {lightboxImage.license}
                 </span>
-              </div>
-              {lightboxImage.description && (
-                <p className="text-slate-400 text-xs leading-relaxed max-h-20 overflow-y-auto">
-                  {lightboxImage.description}
+                {images.length > 1 && (
+                  <div className="flex items-center gap-2 sm:hidden">
+                    <button type="button" onClick={showPrev} className="one-btn one-btn-sm one-btn-secondary" aria-label="Previous">
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={showNext} className="one-btn one-btn-sm one-btn-secondary" aria-label="Next">
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+                <p className="hidden text-[10px] text-[color:var(--color-one-text-dim)] sm:block">
+                  {isZh ? '← → 切换 · Esc 关闭 · 左右滑动' : '← → navigate · Esc close · swipe'}
                 </p>
-              )}
+              </div>
             </div>
           </div>
         </div>
@@ -510,3 +692,41 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
     </div>
   );
 };
+
+function SourceBadge({ source }: { source: AstroImage['source'] }) {
+  const tones: Record<AstroImage['source'], { color: string; bg: string; border: string }> = {
+    NASA: { color: 'var(--color-one-accent)', bg: 'rgba(127,212,255,0.14)', border: 'rgba(127,212,255,0.28)' },
+    'Wikimedia Commons': { color: 'var(--color-one-text)', bg: 'rgba(244,243,238,0.12)', border: 'rgba(244,243,238,0.22)' },
+    'Met Museum': { color: 'var(--color-one-gold)', bg: 'rgba(215,182,118,0.14)', border: 'rgba(215,182,118,0.28)' }
+  };
+  const t = tones[source] || tones.NASA;
+  return (
+    <span
+      className="rounded-md px-2 py-0.5 text-[10px] font-medium backdrop-blur-sm"
+      style={{ color: t.color, background: t.bg, border: `1px solid ${t.border}` }}
+    >
+      {source}
+    </span>
+  );
+}
+
+function GallerySkeleton() {
+  const blocks = Array.from({ length: 8 });
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-hidden>
+      {blocks.map((_, i) => (
+        <div
+          key={i}
+          className="overflow-hidden rounded-2xl border"
+          style={{ borderColor: 'var(--color-one-border)', background: 'rgba(14,19,27,0.45)' }}
+        >
+          <div className="aspect-[4/3] w-full animate-pulse" style={{ background: 'rgba(244,243,238,0.06)' }} />
+          <div className="space-y-2 p-4">
+            <div className="h-3.5 w-4/5 animate-pulse rounded" style={{ background: 'rgba(244,243,238,0.08)' }} />
+            <div className="h-3 w-2/3 animate-pulse rounded" style={{ background: 'rgba(244,243,238,0.05)' }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
