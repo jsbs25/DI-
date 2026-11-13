@@ -3056,50 +3056,53 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               className="absolute inset-0 z-20 cursor-default bg-black/50 backdrop-blur-[2px] md:hidden"
             />
             <aside className="absolute inset-x-3 bottom-3 top-3 z-30 flex select-none flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[rgba(10,14,20,0.98)] backdrop-blur-xl shadow-2xl md:relative md:inset-auto md:z-0 md:w-[360px] md:shrink-0 md:rounded-none md:border-y-0 md:border-r-0 md:border-l md:border-white/10 md:shadow-none">
-            <div className="border-b border-white/[0.07] bg-[#121b25] p-4">
+            <div className="border-b border-white/10 bg-white/[0.02] p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center space-x-2">
-                  <Sparkles className="w-4 h-4 text-purple-400" />
-                  <span className="font-semibold text-sm text-purple-200">Ollama 双模型 AI 伴侣</span>
+                  <Sparkles className="w-4 h-4 text-cyan-300" />
+                  <div>
+                    <span className="block font-semibold text-sm text-slate-100">网页研究伴侣</span>
+                    <span className="block text-[10px] text-slate-400">基于当前页面内容的分析与抽取 · 需可用 AI/Ollama 服务</span>
+                  </div>
                 </div>
-                <button onClick={() => setIsAiPanelOpen(false)} className="text-slate-500 hover:text-slate-300">
+                <button onClick={() => setIsAiPanelOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-white/5 hover:text-slate-200" aria-label="关闭研究伴侣">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
               {/* Ollama Local Connection & Roles Indicator */}
-              <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/30 p-2.5 text-[11px] text-emerald-200">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-[11px] text-slate-300">
                 <div className="flex items-center justify-between font-semibold">
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                    本地 Ollama (127.0.0.1:11434)
+                  <span className="flex items-center gap-1.5 text-slate-200">
+                    <span className={`h-2 w-2 rounded-full ${ollamaStatus.latencyMs && ollamaStatus.latencyMs < 5000 ? "bg-emerald-400" : "bg-slate-500"}`} />
+                    本地 Ollama 状态
                   </span>
                   <button
                     onClick={() => void refreshOllamaStatus()}
                     disabled={isOllamaTesting}
-                    className="text-[10px] text-emerald-300 hover:underline"
+                    className="text-[10px] text-cyan-200 hover:text-cyan-100 disabled:opacity-50"
                   >
-                    {isOllamaTesting ? '检测中…' : `刷新 (${ollamaStatus.latencyMs || 12}ms)`}
+                    {isOllamaTesting ? '检测中…' : `刷新${ollamaStatus.latencyMs ? ` · ${ollamaStatus.latencyMs}ms` : ''}`}
                   </button>
                 </div>
                 <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-300">
                   <div className="flex items-center justify-between">
-                    <span>⚡ 实时对话模型:</span>
-                    <span className="font-mono text-cyan-300">{ollamaStatus.chatModel || 'qwen3:8b'}</span>
+                    <span className="text-slate-400">对话模型</span>
+                    <span className="font-mono text-cyan-200">{ollamaStatus.chatModel || '未检测到'}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>🕷️ 爬虫抽取大模型:</span>
-                    <span className="font-mono text-amber-300">{ollamaStatus.crawlerModel || 'qwen2.5:32b'}</span>
+                    <span className="text-slate-400">抽取模型</span>
+                    <span className="font-mono text-cyan-200">{ollamaStatus.crawlerModel || '未检测到'}</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-1 p-2 bg-[#050a1b] border-b border-slate-800 text-xs">
+            <div className="grid grid-cols-4 gap-1 p-2 bg-white/[0.02] border-b border-white/10 text-xs">
               <button
                 onClick={() => handleRunAiAnalysis('summary')}
                 className={`py-1.5 px-1 rounded-lg font-medium text-center transition-all ${
-                  aiAnalysisType === 'summary' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-slate-800/60'
+                  aiAnalysisType === 'summary' ? 'bg-cyan-400 text-slate-950 font-semibold' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
                 }`}
               >
                 核心总结
@@ -3107,15 +3110,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               <button
                 onClick={() => handleRunAiAnalysis('crawler')}
                 className={`py-1.5 px-1 rounded-lg font-medium text-center transition-all ${
-                  aiAnalysisType === 'crawler' ? 'bg-amber-600 text-white font-bold' : 'text-amber-300/80 hover:bg-slate-800/60'
+                  aiAnalysisType === 'crawler' ? 'bg-cyan-400 text-slate-950 font-semibold' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
                 }`}
               >
-                🕷️ 深度抽取
+                深度抽取
               </button>
               <button
                 onClick={() => handleRunAiAnalysis('entities')}
                 className={`py-1.5 px-1 rounded-lg font-medium text-center transition-all ${
-                  aiAnalysisType === 'entities' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-slate-800/60'
+                  aiAnalysisType === 'entities' ? 'bg-cyan-400 text-slate-950 font-semibold' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
                 }`}
               >
                 知识图谱
@@ -3123,7 +3126,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               <button
                 onClick={() => setAiAnalysisType('qa')}
                 className={`py-1.5 px-1 rounded-lg font-medium text-center transition-all ${
-                  aiAnalysisType === 'qa' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:bg-slate-800/60'
+                  aiAnalysisType === 'qa' ? 'bg-cyan-400 text-slate-950 font-semibold' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
                 }`}
               >
                 深度问答
@@ -3131,13 +3134,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
             </div>
 
             {aiAnalysisType === 'qa' && (
-              <div className="p-3 border-b border-slate-800 bg-slate-900/60 flex items-center space-x-2">
+              <div className="p-3 border-b border-white/10 bg-white/[0.02] flex items-center space-x-2">
                 <input
                   type="text"
                   value={aiQuestion}
                   onChange={e => setAiQuestion(e.target.value)}
                   placeholder="针对当前页面向 AI 提问..."
-                  className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                  className="flex-1 bg-black/20 border border-white/10 rounded-xl px-2.5 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400/40 focus:ring-1 focus:ring-cyan-400/20"
                   onKeyDown={e => {
                     if (e.key === 'Enter' && aiQuestion.trim()) {
                       handleRunAiAnalysis('qa');
@@ -3147,7 +3150,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
                 <button
                   onClick={() => handleRunAiAnalysis('qa')}
                   disabled={!aiQuestion.trim() || isAiLoading}
-                  className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-medium cursor-pointer"
+                  className="px-3 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 text-slate-950 text-xs font-semibold cursor-pointer transition"
                 >
                   提问
                 </button>
@@ -3157,32 +3160,32 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
             <div className="flex-1 p-4 overflow-y-auto text-xs leading-relaxed text-slate-300 space-y-3 font-sans">
               {isAiLoading || isCrawlerExtracting ? (
                 <div className="h-full flex flex-col items-center justify-center space-y-3 text-slate-400">
-                  <RotateCw className="w-6 h-6 animate-spin text-amber-400" />
-                  <span>正在调用本地 Ollama 双模型深度抽取与分析...</span>
+                  <RotateCw className="w-6 h-6 animate-spin text-cyan-300" />
+                  <span className="text-center">正在请求可用的 AI/Ollama 服务进行分析…</span>
                 </div>
               ) : aiOutput ? (
-                <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 whitespace-pre-line shadow-inner">
+                <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-4 whitespace-pre-line leading-relaxed">
                   {aiOutput}
                 </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 space-y-3 p-6">
-                  <Sparkles className="w-8 h-8 text-slate-600" />
-                  <p>点击上方「核心总结」或「🕷️ 深度抽取」，本地 Ollama 将自动深度分析当前页面，提炼核心论据与知识实体。</p>
+                  <Sparkles className="w-8 h-8 text-slate-500" />
+                  <p>选择操作后，将基于当前页面已获取的内容生成总结、实体或问答；深度抽取与任务派发依赖对应后端/本地服务可用性。</p>
                 </div>
               )}
             </div>
 
-            <div className="p-3 border-t border-slate-800 bg-[#08102b] flex items-center justify-between gap-2">
+            <div className="p-3 border-t border-white/10 bg-white/[0.02] flex items-center justify-between gap-2">
               <button
                 onClick={() => handleEnqueueCrawlerTask(activeTab.url, activeTab.title)}
-                className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 text-xs font-semibold transition"
+                className="flex items-center space-x-1.5 px-2.5 py-2 rounded-xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] text-slate-200 text-xs font-medium transition"
               >
-                <Compass className="w-3.5 h-3.5 text-amber-400" />
+                <Compass className="w-3.5 h-3.5 text-cyan-300" />
                 <span>爬虫后台入库</span>
               </button>
               <button
                 onClick={handleSaveToLibrary}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-sm transition-all cursor-pointer"
+                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 text-xs font-semibold transition cursor-pointer"
               >
                 <Bookmark className="w-3.5 h-3.5" />
                 <span>存入数字图书馆</span>
