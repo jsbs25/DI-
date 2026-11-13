@@ -1,29 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
 import { loadAIConversationHistory, saveAIConversationHistory } from '../../utils/aiSessionHistory.ts';
 import {
-  Sparkles,
-  Send,
-  RotateCcw,
-  Copy,
+  Bot,
   Check,
-  Volume2,
-  VolumeX,
-  Mic,
-  MicOff,
-  Cpu,
-  ShieldCheck,
   ChevronDown,
   ChevronRight,
+  Copy,
+  Cpu,
+  Mic,
+  MicOff,
+  RotateCcw,
+  Send,
   Settings2,
-  Terminal,
-  ExternalLink,
-  Bot,
+  Sparkles,
   User as UserIcon,
-  Zap,
-  Globe2
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 
 interface AIHubProps {
@@ -41,8 +36,8 @@ interface Message {
 
 export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const t = translations[lang];
+  const isZh = lang === 'zh';
 
-  // Models state
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [availableModels, setAvailableModels] = useState<
     Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string; isFree?: boolean }>
@@ -54,20 +49,17 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const [isListening, setIsListening] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Custom provider modal / toggle
   const [showConfigDrawer, setShowConfigDrawer] = useState(false);
   const [customApiKey, setCustomApiKey] = useState('');
   const [customBaseUrl, setCustomBaseUrl] = useState('http://localhost:11434/v1');
   const [customModel, setCustomModel] = useState('llama3');
 
-  // Expanded thoughts state map
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Chat message history
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = loadAIConversationHistory('earth-one-ai-hub:v1', (value): value is Message =>
       !!value && typeof value === 'object' &&
@@ -80,19 +72,11 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     return [{
       id: 'msg_welcome',
       role: 'assistant',
-      model: '本地 AI 助手',
-      timestamp: '刚刚',
-      content: lang === 'zh'
-        ? `你好，我是**本地 AI 助手**。
-
-当前使用的模型显示在上方选择器中。回复会优先围绕你的问题，并参考当前对话。
-
-你可以直接提问，也可以明确要求解释、写作或编程。`
-        : `Hello, I'm your **local AI assistant**.
-
-The model in use is shown in the selector above. I’ll focus on your question and use the current conversation as context.
-
-Ask anything, or explicitly request an explanation, writing, or code.`
+      model: isZh ? 'ONE INTELLIGENCE' : 'ONE INTELLIGENCE',
+      timestamp: isZh ? '刚刚' : 'Now',
+      content: isZh
+        ? '欢迎来到 ONE INTELLIGENCE。\n\n你可以在这里进行对话、分析、写作与编程协作。当前可用模型显示在顶部选择器中；若连接本地 Ollama，可使用本地模型离线对话。\n\n请直接输入你的问题。'
+        : 'Welcome to ONE INTELLIGENCE.\n\nUse this space for conversation, analysis, writing, and coding. Available models appear in the selector above; if local Ollama is connected, local models can be used offline.\n\nAsk anything to begin.'
     }];
   });
 
@@ -100,34 +84,31 @@ Ask anything, or explicitly request an explanation, writing, or code.`
     saveAIConversationHistory('earth-one-ai-hub:v1', messages);
   }, [messages]);
 
-  // Load models on mount (server gateway + direct local Ollama probe)
   useEffect(() => {
     fetch('/api/ai/models')
       .then(r => r.json())
       .then(d => {
         if (d.success && Array.isArray(d.models)) {
+          setAvailableModels(d.models);
           const activeDefault = d.models.find((m: any) => m.ollamaRole === 'chat') ||
             d.models.find((m: any) => m.isDefault) ||
             d.models.find((m: any) => m.id.startsWith('ollama:')) ||
             d.models[0];
-          if (activeDefault) {
-            setSelectedModel(activeDefault.id);
-          }
+          if (activeDefault) setSelectedModel(activeDefault.id);
         }
       })
       .catch(() => {});
 
-    // 浏览器直接探测本地电脑上的 Ollama (127.0.0.1:11434)，确保无网络时亦能直连
     fetch('http://127.0.0.1:11434/api/tags')
       .then(r => r.json())
       .then(data => {
         if (data?.models && Array.isArray(data.models) && data.models.length > 0) {
           const localList = data.models.map((m: any, idx: number) => ({
             id: `ollama:${m.name}`,
-            name: `本地电脑 · ${m.name} [离线直连]`,
+            name: `${isZh ? '本地' : 'Local'} · ${m.name}`,
             status: 'active',
             isDefault: idx === data.models.length - 1,
-            apiKeyMasked: '127.0.0.1:11434 免密离线',
+            apiKeyMasked: '127.0.0.1:11434',
             isFree: true
           }));
           setAvailableModels(prev => {
@@ -140,48 +121,36 @@ Ask anything, or explicitly request an explanation, writing, or code.`
         }
       })
       .catch(() => {});
-  }, []);
+  }, [isZh]);
 
-  // Auto-scroll on new message
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  // Focus input
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  // Speech Recognition (Mic)
   const toggleSpeechRecognition = () => {
     if (isListening) {
       recognitionRef.current?.stop();
       setIsListening(false);
       return;
     }
-
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRec) {
-      // Graceful fallback without blocking window.alert
-      return;
-    }
-
+    if (!SpeechRec) return;
     try {
       const rec = new SpeechRec();
       rec.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
       rec.continuous = false;
       rec.interimResults = false;
-
       rec.onstart = () => setIsListening(true);
       rec.onresult = (e: any) => {
         const transcript = e.results[0][0].transcript;
-        if (transcript) {
-          setPromptInput(prev => (prev ? `${prev} ${transcript}` : transcript));
-        }
+        if (transcript) setPromptInput(prev => (prev ? `${prev} ${transcript}` : transcript));
       };
       rec.onerror = () => setIsListening(false);
       rec.onend = () => setIsListening(false);
-
       recognitionRef.current = rec;
       rec.start();
     } catch {
@@ -189,23 +158,18 @@ Ask anything, or explicitly request an explanation, writing, or code.`
     }
   };
 
-  // TTS Speech read aloud
   const speakText = (text: string) => {
     if (!('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
-      // Strip think tags
       const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
       const utterance = new SpeechSynthesisUtterance(clean);
       utterance.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
-      utterance.rate = 1.05;
+      utterance.rate = 1.02;
       window.speechSynthesis.speak(utterance);
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
-  // Copy text helper
   const handleCopy = (id: string, text: string) => {
     try {
       const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -215,141 +179,75 @@ Ask anything, or explicitly request an explanation, writing, or code.`
     } catch {}
   };
 
-  // Send message
   const handleSend = async (overrideText?: string) => {
     const textToSend = (overrideText || promptInput).trim();
     if (!textToSend || isLoading) return;
-
     if (!overrideText) setPromptInput('');
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    const userMsg: Message = {
-      id: `user_${Date.now()}`,
-      role: 'user',
-      content: textToSend,
-      timestamp: nowTime
-    };
-
+    const userMsg: Message = { id: `user_${Date.now()}`, role: 'user', content: textToSend, timestamp: nowTime };
     setMessages(prev => [...prev, userMsg]);
     setIsLoading(true);
     let activeStreamId: string | null = null;
-
     try {
       const shouldStream = /^ollama:qwen3(?::|$)/i.test(selectedModel) && !customApiKey.trim();
       const payload: any = {
         prompt: textToSend,
         modelId: selectedModel,
         mode: 'general',
-        history: messages.slice(-8).map(message => ({
-          role: message.role,
-          content: message.content
-        })),
+        history: messages.slice(-8).map(message => ({ role: message.role, content: message.content })),
         ...(shouldStream ? { stream: true } : {})
       };
-
       if (selectedModel === 'custom' || customApiKey.trim()) {
         payload.apiKey = customApiKey.trim();
         payload.baseUrl = customBaseUrl.trim();
         payload.customModel = customModel.trim();
       }
-
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
       if (shouldStream) {
         activeStreamId = `ai_${Date.now()}`;
-        setMessages(prev => [...prev, {
-          id: activeStreamId!,
-          role: 'assistant',
-          content: '',
-          model: selectedModel,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }]);
+        setMessages(prev => [...prev, { id: activeStreamId!, role: 'assistant', content: '', model: selectedModel, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
         let replyContent = '';
         const streamResult = await readAIStream(res, delta => {
           setStreamingMessageId(activeStreamId);
           replyContent += delta;
-          setMessages(prev => prev.map(message =>
-            message.id === activeStreamId ? { ...message, content: message.content + delta } : message
-          ));
+          setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, content: message.content + delta } : message));
         });
-        setMessages(prev => prev.map(message =>
-          message.id === activeStreamId
-            ? { ...message, model: streamResult.model || selectedModel, tokens: streamResult.tokens }
-            : message
-        ));
+        setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, model: streamResult.model || selectedModel, tokens: streamResult.tokens } : message));
         if (voiceOutput) speakText(replyContent);
         return;
       }
-
       const data = await res.json();
-      const replyContent = data.success && data.reply
-        ? data.reply
-        : (data.error || '没有收到有效回复，请重试。');
-
-      const aiMsg: Message = {
-        id: `ai_${Date.now()}`,
-        role: 'assistant',
-        content: replyContent,
-        model: data.model || selectedModel,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        tokens: data.tokens
-      };
-
+      const replyContent = data.success && data.reply ? data.reply : (data.error || (isZh ? '没有收到有效回复，请重试。' : 'No valid reply received. Please try again.'));
+      const aiMsg: Message = { id: `ai_${Date.now()}`, role: 'assistant', content: replyContent, model: data.model || selectedModel, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), tokens: data.tokens };
       setMessages(prev => [...prev, aiMsg]);
-
-      if (voiceOutput) {
-        speakText(replyContent);
-      }
+      if (voiceOutput) speakText(replyContent);
     } catch (error) {
-      // 离线/无网络保护：浏览器直接尝试直连本地电脑运行的 Ollama (127.0.0.1:11434)
       try {
         const rawModel = selectedModel.startsWith('ollama:') ? selectedModel.slice(7) : (customModel || 'llama3');
         const localRes = await fetch('http://127.0.0.1:11434/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: rawModel,
-            messages: [{ role: 'user', content: textToSend }],
-            stream: false
-          })
+          body: JSON.stringify({ model: rawModel, messages: [{ role: 'user', content: textToSend }], stream: false })
         });
         if (localRes.ok) {
           const lData = await localRes.json();
           const localReply = lData?.message?.content || lData?.response || '';
           if (localReply) {
-            const aiMsg: Message = {
-              id: `ai_${Date.now()}`,
-              role: 'assistant',
-              content: localReply,
-              model: `本地 Ollama (${rawModel}) · 离线直连`,
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            };
-            setMessages(prev => [...prev, aiMsg]);
+            setMessages(prev => [...prev, { id: `ai_${Date.now()}`, role: 'assistant', content: localReply, model: `${isZh ? '本地 Ollama' : 'Local Ollama'} (${rawModel})`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
             if (voiceOutput) speakText(localReply);
             return;
           }
         }
-      } catch {
-        // fall through
-      }
-
-      const errorContent = error instanceof Error ? error.message : '当前为离线/无网络状态。已自动配置本地电脑 Ollama 双模型协同，请确保本地电脑已运行 `ollama serve` (127.0.0.1:11434) 即可完全离线对话。';
+      } catch {}
+      const errorContent = error instanceof Error ? error.message : (isZh ? '请求失败。若使用本地模型，请确认 Ollama 已在本机运行。' : 'Request failed. If using a local model, ensure Ollama is running locally.');
       if (activeStreamId) {
-        setMessages(prev => prev.map(message =>
-          message.id === activeStreamId ? { ...message, content: errorContent } : message
-        ));
+        setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, content: errorContent } : message));
       } else {
-        setMessages(prev => [...prev, {
-          id: `ai_err_${Date.now()}`,
-          role: 'assistant',
-          content: errorContent,
-          model: selectedModel,
-          timestamp: nowTime
-        }]);
+        setMessages(prev => [...prev, { id: `ai_err_${Date.now()}`, role: 'assistant', content: errorContent, model: selectedModel, timestamp: nowTime }]);
       }
     } finally {
       setIsLoading(false);
@@ -358,37 +256,32 @@ Ask anything, or explicitly request an explanation, writing, or code.`
     }
   };
 
-  // Clear chat
   const handleClearChat = () => {
-    if (window.confirm(lang === 'zh' ? '确定清空当前对话历史吗？' : 'Clear conversation history?')) {
-      setMessages([
-        {
-          id: `msg_init_${Date.now()}`,
-          role: 'assistant',
-          model: lang === 'zh' ? '本地 AI 助手' : 'Local AI Assistant',
-          timestamp: '刚刚',
-          content: lang === 'zh' ? '对话已重置。你想聊些什么？' : 'Chat reset. What would you like to talk about?'
-        }
-      ]);
+    if (window.confirm(isZh ? '确定清空当前对话记录吗？' : 'Clear this conversation?')) {
+      setMessages([{
+        id: `msg_init_${Date.now()}`,
+        role: 'assistant',
+        model: 'ONE INTELLIGENCE',
+        timestamp: isZh ? '刚刚' : 'Now',
+        content: isZh ? '对话已重置。你想从哪里开始？' : 'Conversation reset. What would you like to explore?'
+      }]);
     }
   };
 
-  // Quick starter chips
-  const starterChips = lang === 'zh' ? [
-    '🔎 用简单例子解释什么是机器学习',
-    '🗓️ 帮我把一项复杂任务拆成可执行步骤',
-    '💻 写一个带输入校验的 TypeScript 函数',
-    '✍️ 写一段温暖简短的母亲主题文章',
-    '🌐 把“海内存知己，天涯若比邻”自然地翻译成英文'
+  const starterChips = isZh ? [
+    '解释一个复杂概念，并给出简单例子',
+    '把这个任务拆解为可执行步骤',
+    '用 TypeScript 写一个带校验的函数',
+    '润色一段正式邮件',
+    '将一段中文自然翻译成英文',
   ] : [
-    '🔎 Explain machine learning with a simple example',
-    '🗓️ Break a complex task into actionable steps',
-    '💻 Write a TypeScript function with input validation',
-    '✍️ Write a short, warm piece about mothers',
-    '🌐 Translate “A bosom friend afar brings a distant land near” naturally'
+    'Explain a complex concept with a simple example',
+    'Break this task into actionable steps',
+    'Write a TypeScript function with validation',
+    'Polish a formal email',
+    'Translate a paragraph naturally',
   ];
 
-  // Helper to parse <think> block
   const parseThoughtAndAnswer = (content: string) => {
     const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
     if (thinkMatch) {
@@ -399,365 +292,188 @@ Ask anything, or explicitly request an explanation, writing, or code.`
     return { thought: null, answer: content };
   };
 
+  const ollamaConnected = availableModels.some(m => m.id.startsWith('ollama:'));
+
   return (
-    <div className="flex-1 flex flex-col h-[calc(100vh-4rem)] bg-[#030712] text-slate-100 select-none overflow-hidden relative">
-      {/* 1. TOP HEADER TOOLBAR */}
-      <header className="h-14 border-b border-slate-800/80 bg-[#070d1e]/90 backdrop-blur-xl px-4 sm:px-6 flex items-center justify-between shrink-0 z-20">
-        <div className="flex items-center space-x-3 min-w-0">
-          <div className="flex items-center space-x-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 text-white shadow-lg shadow-cyan-500/20">
-              <Bot className="w-4 h-4" />
-            </span>
-            <div className="min-w-0">
-              <div className="flex items-center space-x-2">
-                <span className="font-bold text-sm tracking-wide text-white truncate">
-                  {lang === 'zh' ? '本地 AI 助手' : 'Local AI Assistant'}
-                </span>
-                {availableModels.some(m => m.id.startsWith('ollama:')) ? (
-                  <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse" />
-                    {lang === 'zh' ? '本地 Ollama 已连接' : 'Local Ollama Online'}
-                  </span>
+    <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col px-4 py-4 sm:px-6 md:py-6">
+        <header className="one-surface-subtle mb-4 flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-[var(--color-one-accent)]"><Sparkles className="h-5 w-5" /></span>
+              <div>
+                <h1 className="text-xl font-semibold tracking-[-0.03em] text-white sm:text-2xl">ONE INTELLIGENCE</h1>
+                <p className="text-sm text-[var(--color-one-text-muted)]">{isZh ? '对话、思考与创作协作空间。模型与连接状态以真实可用信息为准。' : 'A space for conversation, thinking, and creation. Models and connectivity reflect real availability.'}</p>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className={`one-badge ${ollamaConnected ? 'one-badge-accent' : 'one-badge-neutral'}`}>
+                <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${ollamaConnected ? 'bg-[var(--color-one-accent)]' : 'bg-[var(--color-one-text-dim)]'}`} />
+                {ollamaConnected ? (isZh ? '本地 Ollama 已检测' : 'Local Ollama detected') : (isZh ? '本地 Ollama 未检测' : 'Local Ollama not detected')}
+              </span>
+              <span className="one-badge one-badge-neutral">{isZh ? `消息 ${messages.length}` : `${messages.length} messages`}</span>
+              <span className="one-badge one-badge-neutral">{isZh ? '本地会话记录已保存' : 'Conversation history saved locally'}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[220px] flex-1 sm:flex-none">
+              <select
+                value={selectedModel}
+                onChange={e => setSelectedModel(e.target.value)}
+                className="h-10 w-full appearance-none rounded-xl border border-white/10 bg-white/[0.03] px-3 pr-9 text-sm text-white outline-none transition focus:border-white/20"
+                aria-label={isZh ? '选择模型' : 'Select model'}
+              >
+                {availableModels.length === 0 ? (
+                  <option value="">{isZh ? '未获取到模型列表' : 'No models loaded'}</option>
                 ) : (
-                  <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mr-1" />
-                    {lang === 'zh' ? '本地 Ollama 未连接' : 'Local Ollama Offline'}
-                  </span>
+                  availableModels.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.isFree ? '• ' : ''}{m.name}
+                    </option>
+                  ))
                 )}
-              </div>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
             </div>
+
+            <button type="button" onClick={() => setVoiceOutput(!voiceOutput)} className={`one-btn one-btn-sm ${voiceOutput ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? '语音朗读' : 'Voice output'}>
+              {voiceOutput ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            </button>
+            <button type="button" onClick={() => setShowConfigDrawer(!showConfigDrawer)} className={`one-btn one-btn-sm ${showConfigDrawer ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? '模型与接口设置' : 'Model settings'}>
+              <Settings2 className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={handleClearChat} className="one-btn one-btn-secondary one-btn-sm" title={isZh ? '清空对话' : 'Clear conversation'}>
+              <RotateCcw className="h-4 w-4" />
+            </button>
           </div>
-        </div>
+        </header>
 
-        {/* Model Switcher & Tools */}
-        <div className="flex items-center space-x-2">
-          {/* Model Selector */}
-          <div className="relative">
-            <select
-              value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value)}
-              className="bg-slate-900 border border-slate-700/80 hover:border-cyan-500/60 text-cyan-200 text-xs rounded-xl px-3 py-1.5 pr-8 font-medium focus:outline-none focus:ring-1 focus:ring-cyan-500 appearance-none cursor-pointer max-w-[240px] truncate"
-            >
-              {availableModels.length === 0 ? (
-                <option value="deepseek-r1-open">DeepSeek-R1 (开源免费直连)</option>
-              ) : (
-                availableModels.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.isFree ? '⚡ ' : ''}{m.name}
-                  </option>
-                ))
-              )}
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 text-cyan-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
-
-          {/* Voice Read Aloud Toggle */}
-          <button
-            type="button"
-            onClick={() => setVoiceOutput(!voiceOutput)}
-            className={`p-2 rounded-xl border text-xs cursor-pointer transition-colors ${
-              voiceOutput
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-sm'
-                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
-            }`}
-            title={voiceOutput ? '已开启语音朗读' : '开启语音朗读'}
-          >
-            {voiceOutput ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-          </button>
-
-          {/* Custom API / Ollama Drawer button */}
-          <button
-            type="button"
-            onClick={() => setShowConfigDrawer(!showConfigDrawer)}
-            className={`p-2 rounded-xl border text-xs cursor-pointer transition-colors ${
-              showConfigDrawer
-                ? 'bg-purple-500/20 text-purple-300 border-purple-500/50'
-                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
-            }`}
-            title="配置本地 Ollama 或自定义模型"
-          >
-            <Settings2 className="w-4 h-4" />
-          </button>
-
-          {/* Clear Chat */}
-          <button
-            type="button"
-            onClick={handleClearChat}
-            className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-900/50 cursor-pointer transition-colors"
-            title="清空对话"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
-
-      {/* 2. CUSTOM PROVIDER / OLLAMA CONFIG DRAWER */}
-      {showConfigDrawer && (
-        <div className="bg-slate-950/95 border-b border-purple-900/40 px-6 py-4 z-20 animate-in slide-in-from-top-2 text-xs">
-          <div className="max-w-4xl mx-auto space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 text-purple-300 font-semibold">
-                <Cpu className="w-4 h-4" />
-                <span>接入本地模型或自定义 OpenAI 兼容接口（如 Ollama / vLLM / DeepSeek）</span>
-              </div>
-              <button
-                onClick={() => setShowConfigDrawer(false)}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
+        {showConfigDrawer && (
+          <div className="one-surface-subtle mb-4 p-4 sm:p-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-white"><Cpu className="h-4 w-4 text-[var(--color-one-accent)]" />{isZh ? '自定义 OpenAI 兼容接口 / 本地 Ollama' : 'Custom OpenAI-compatible endpoint / Local Ollama'}</div>
+              <button onClick={() => setShowConfigDrawer(false)} className="text-xs text-[var(--color-one-text-muted)] hover:text-white">{isZh ? '收起' : 'Close'}</button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1 font-mono">Base URL</label>
-                <input
-                  type="text"
-                  value={customBaseUrl}
-                  onChange={e => setCustomBaseUrl(e.target.value)}
-                  placeholder="http://localhost:11434/v1"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-purple-400"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1 font-mono">模型名称</label>
-                <input
-                  type="text"
-                  value={customModel}
-                  onChange={e => setCustomModel(e.target.value)}
-                  placeholder="llama3 / deepseek-r1 / mistral"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-purple-400"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1 font-mono">API Key（本地 Ollama 可留空）</label>
-                <input
-                  type="password"
-                  value={customApiKey}
-                  onChange={e => setCustomApiKey(e.target.value)}
-                  placeholder="sk-... (选填)"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-purple-400"
-                />
-              </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <label className="block space-y-1.5">
+                <span className="text-xs text-[var(--color-one-text-dim)]">Base URL</span>
+                <input type="text" value={customBaseUrl} onChange={e => setCustomBaseUrl(e.target.value)} className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-white/20" placeholder="http://localhost:11434/v1" />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs text-[var(--color-one-text-dim)]">{isZh ? '模型名称' : 'Model name'}</span>
+                <input type="text" value={customModel} onChange={e => setCustomModel(e.target.value)} className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-white/20" placeholder="llama3 / deepseek-r1" />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs text-[var(--color-one-text-dim)]">API Key</span>
+                <input type="password" value={customApiKey} onChange={e => setCustomApiKey(e.target.value)} className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-white/20" placeholder={isZh ? '本地 Ollama 可留空' : 'Optional for local Ollama'} />
+              </label>
             </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-400">
-              <span>💡 本地运行 <code className="text-purple-300">ollama serve</code> 后选择「本地 / 自定义接口」即可完全离线运行。</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedModel('custom');
-                  setShowConfigDrawer(false);
-                }}
-                className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-semibold cursor-pointer"
-              >
-                立即切换为自定义模型
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 3. MAIN CHAT SCROLL STREAM */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 space-y-6 select-text max-w-4xl mx-auto w-full">
-        {messages.map(msg => {
-          const isUser = msg.role === 'user';
-          const { thought, answer } = parseThoughtAndAnswer(msg.content);
-          const isThoughtOpen = expandedThoughts[msg.id] ?? false;
-
-          return (
-            <div
-              key={msg.id}
-              className={`flex items-start gap-3.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
-            >
-              {/* Avatar */}
-              <div
-                className={`w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 shadow-lg text-xs font-bold ${
-                  isUser
-                    ? 'bg-cyan-500 text-slate-950 font-bold'
-                    : 'bg-gradient-to-tr from-cyan-900/90 to-blue-800/90 text-cyan-200 border border-cyan-400/40 shadow-cyan-950/40'
-                }`}
-              >
-                {isUser ? <UserIcon className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-              </div>
-
-              {/* Message Body */}
-              <div className={`flex flex-col min-w-0 max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
-                {/* Header Tag */}
-                <div className="flex items-center space-x-2 text-[10px] text-slate-400 mb-1 px-1">
-                  <span>{isUser ? '您' : (msg.model || (lang === 'zh' ? '本地 AI 助手' : 'Local AI Assistant'))}</span>
-                  <span>·</span>
-                  <span>{msg.timestamp}</span>
-                </div>
-
-                {/* Content Box */}
-                <div
-                  className={`p-4 sm:p-5 rounded-3xl text-xs sm:text-sm leading-relaxed shadow-xl ${
-                    isUser
-                      ? 'bg-cyan-500 text-slate-950 font-medium rounded-tr-none shadow-cyan-950/30'
-                      : 'bg-[#0b1329]/95 text-slate-200 border border-slate-800/90 rounded-tl-none shadow-black/40'
-                  }`}
-                >
-                  {/* Thought accordion for DeepSeek-R1 models */}
-                  {!isUser && thought && (
-                    <div className="mb-3 rounded-2xl border border-cyan-800/50 bg-cyan-950/30 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedThoughts(prev => ({ ...prev, [msg.id]: !isThoughtOpen }))
-                        }
-                        className="w-full px-3 py-2 flex items-center justify-between text-left text-[11px] font-mono text-cyan-300 hover:bg-cyan-900/20 cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-center space-x-1.5">
-                          <Sparkles className="w-3 h-3 text-cyan-400" />
-                          <span>深度思考过程（Chain-of-Thought）</span>
-                        </div>
-                        {isThoughtOpen ? (
-                          <ChevronDown className="w-3.5 h-3.5" />
-                        ) : (
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                      {isThoughtOpen && (
-                        <div className="p-3 text-[11px] text-cyan-200/80 font-mono bg-black/30 border-t border-cyan-900/40 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
-                          {thought}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Main Answer with pristine Markdown structure */}
-                  <div className="whitespace-pre-wrap break-words leading-relaxed">
-                    {answer}
-                  </div>
-
-                  {/* Action Bar */}
-                  {!isUser && (
-                    <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-                      <div className="flex items-center space-x-3">
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(msg.id, msg.content)}
-                          className="hover:text-cyan-300 flex items-center space-x-1 cursor-pointer transition-colors"
-                        >
-                          {copiedId === msg.id ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-400" />
-                              <span className="text-emerald-400">已复制</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3" />
-                              <span>复制</span>
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => speakText(msg.content)}
-                          className="hover:text-cyan-300 flex items-center space-x-1 cursor-pointer transition-colors"
-                        >
-                          <Volume2 className="w-3 h-3" />
-                          <span>朗读</span>
-                        </button>
-                      </div>
-                      {msg.tokens && (
-                        <span className="font-mono text-[10px] text-slate-500">
-                          {msg.tokens} tokens
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Loading Indicator */}
-        {isLoading && !streamingMessageId && (
-          <div className="flex items-start gap-3.5 animate-in fade-in">
-            <div className="w-9 h-9 rounded-2xl flex items-center justify-center bg-cyan-950 border border-cyan-500/40 text-cyan-400">
-              <Bot className="w-4 h-4 animate-spin" />
-            </div>
-            <div className="p-4 rounded-3xl rounded-tl-none bg-[#0b1329] border border-cyan-500/30 text-cyan-300 text-xs flex items-center space-x-2">
-              <Sparkles className="w-3.5 h-3.5 animate-pulse text-cyan-400" />
-              <span>{lang === 'zh' ? '正在生成回复…' : 'Generating a reply…'}</span>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-one-text-muted)]">
+              <span>{isZh ? '使用本地 Ollama 时请确保服务已运行（默认 127.0.0.1:11434）。' : 'For local Ollama, ensure the service is running (default 127.0.0.1:11434).'}</span>
+              <button type="button" onClick={() => { setSelectedModel('custom'); setShowConfigDrawer(false); }} className="one-btn one-btn-primary one-btn-sm">{isZh ? '使用自定义模型' : 'Use custom model'}</button>
             </div>
           </div>
         )}
 
-        <div ref={chatEndRef} />
-      </div>
+        <div className="one-surface-subtle flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+            <div className="mx-auto max-w-3xl space-y-5">
+              {messages.map(msg => {
+                const isUser = msg.role === 'user';
+                const { thought, answer } = parseThoughtAndAnswer(msg.content);
+                const isThoughtOpen = expandedThoughts[msg.id] ?? false;
+                return (
+                  <div key={msg.id} className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+                    <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border ${isUser ? 'border-white/15 bg-white text-[#0a0d12]' : 'border-[rgba(127,212,255,0.25)] bg-[rgba(127,212,255,0.08)] text-[var(--color-one-accent)]'}`}>
+                      {isUser ? <UserIcon className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                    </div>
+                    <div className={`min-w-0 max-w-[88%] ${isUser ? 'items-end' : 'items-start'}`}>
+                      <div className={`mb-1 flex items-center gap-2 px-1 text-[11px] text-[var(--color-one-text-dim)] ${isUser ? 'justify-end' : 'justify-start'}`}>
+                        <span>{isUser ? (isZh ? '你' : 'You') : (msg.model || 'ONE INTELLIGENCE')}</span>
+                        <span>·</span>
+                        <span>{msg.timestamp}</span>
+                      </div>
+                      <div className={`rounded-2xl px-4 py-3 text-sm leading-7 ${isUser ? 'bg-white text-[#0a0d12]' : 'border border-white/10 bg-white/[0.03] text-[var(--color-one-text)]'}`}>
+                        {!isUser && thought && (
+                          <div className="mb-3 overflow-hidden rounded-xl border border-white/10 bg-black/20">
+                            <button type="button" onClick={() => setExpandedThoughts(prev => ({ ...prev, [msg.id]: !isThoughtOpen }))} className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-[var(--color-one-text-muted)] hover:bg-white/[0.03]">
+                              <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />{isZh ? '思考过程' : 'Reasoning'}</span>
+                              {isThoughtOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            </button>
+                            {isThoughtOpen && <div className="max-h-56 overflow-y-auto border-t border-white/10 p-3 font-mono text-xs leading-6 text-[var(--color-one-text-muted)] whitespace-pre-wrap">{thought}</div>}
+                          </div>
+                        )}
+                        <div className="whitespace-pre-wrap break-words">{answer}</div>
+                        {!isUser && (
+                          <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-2.5 text-[11px] text-[var(--color-one-text-dim)]">
+                            <div className="flex items-center gap-3">
+                              <button type="button" onClick={() => handleCopy(msg.id, msg.content)} className="inline-flex items-center gap-1 hover:text-white">
+                                {copiedId === msg.id ? <><Check className="h-3.5 w-3.5 text-[var(--color-one-success)]" /><span className="text-[var(--color-one-success)]">{isZh ? '已复制' : 'Copied'}</span></> : <><Copy className="h-3.5 w-3.5" /><span>{isZh ? '复制' : 'Copy'}</span></>}
+                              </button>
+                              <button type="button" onClick={() => speakText(msg.content)} className="inline-flex items-center gap-1 hover:text-white">
+                                <Volume2 className="h-3.5 w-3.5" /><span>{isZh ? '朗读' : 'Read'}</span>
+                              </button>
+                            </div>
+                            {msg.tokens ? <span className="font-mono">{msg.tokens} tokens</span> : <span />}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
 
-      {/* 4. BOTTOM COMPOSER & STARTER CHIPS */}
-      <footer className="border-t border-slate-800/80 bg-[#070d1e]/95 backdrop-blur-xl p-3 sm:p-4 shrink-0 z-20">
-        <div className="max-w-4xl mx-auto space-y-2.5">
-          {/* Quick starter chips */}
-          <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none pb-1">
-            <span className="text-[10px] text-slate-400 font-mono shrink-0 uppercase tracking-wider">
-              推荐话题:
-            </span>
-            {starterChips.map((chip, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => handleSend(chip)}
-                className="px-2.5 py-1 rounded-full bg-slate-900/90 hover:bg-slate-800 border border-slate-700/70 hover:border-cyan-500/40 text-[11px] text-slate-300 hover:text-white shrink-0 cursor-pointer transition-all"
-              >
-                {chip}
-              </button>
-            ))}
+              {isLoading && !streamingMessageId && (
+                <div className="flex gap-3">
+                  <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl border border-[rgba(127,212,255,0.25)] bg-[rgba(127,212,255,0.08)] text-[var(--color-one-accent)]"><Bot className="h-4 w-4 animate-pulse" /></div>
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--color-one-text-muted)]">{isZh ? '正在生成回复…' : 'Generating response…'}</div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
           </div>
 
-          {/* Input Box */}
-          <div className="relative flex items-end bg-slate-900/90 border border-slate-700/80 focus-within:border-cyan-500/80 rounded-2xl p-2 shadow-2xl transition-all">
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={promptInput}
-              onChange={e => setPromptInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder={
-                lang === 'zh'
-                  ? '输入任何问题直接对话（支持科学探究、代码编程、跨语言翻译与文章创作，Enter 发送，Shift+Enter 换行）...'
-                  : 'Ask anything to begin dialogue (Enter to send, Shift+Enter for new line)...'
-              }
-              className="flex-1 bg-transparent px-3 py-2 text-xs sm:text-sm text-slate-100 placeholder-slate-500 outline-none resize-none max-h-36 min-h-[40px] leading-relaxed"
-            />
+          <div className="border-t border-white/10 bg-[rgba(5,7,11,0.35)] p-3 sm:p-4">
+            <div className="mx-auto max-w-3xl space-y-3">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                {starterChips.map((chip, idx) => (
+                  <button key={idx} type="button" onClick={() => void handleSend(chip)} className="shrink-0 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs text-[var(--color-one-text-muted)] transition hover:border-white/20 hover:text-white">
+                    {chip}
+                  </button>
+                ))}
+              </div>
 
-            <div className="flex items-center space-x-1.5 pb-1 pr-1 shrink-0">
-              {/* Mic Speech Button */}
-              <button
-                type="button"
-                onClick={toggleSpeechRecognition}
-                className={`p-2 rounded-xl transition-colors cursor-pointer ${
-                  isListening
-                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
-                    : 'text-slate-400 hover:text-cyan-300 hover:bg-slate-800'
-                }`}
-                title={isListening ? '点击停止语音录入' : '语音输入'}
-              >
-                {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </button>
-
-              {/* Send Button */}
-              <button
-                type="button"
-                onClick={() => handleSend()}
-                disabled={!promptInput.trim() || isLoading}
-                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-30 disabled:cursor-not-allowed text-slate-950 font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-cyan-500/20 cursor-pointer transition-all"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">发送</span>
-              </button>
+              <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-2 focus-within:border-white/20">
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  value={promptInput}
+                  onChange={e => setPromptInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void handleSend();
+                    }
+                  }}
+                  placeholder={isZh ? '输入消息…（Enter 发送，Shift+Enter 换行）' : 'Message ONE INTELLIGENCE… (Enter to send, Shift+Enter for newline)'}
+                  className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-white placeholder:text-[var(--color-one-text-dim)] outline-none"
+                />
+                <div className="flex items-center gap-1 pb-0.5 pr-0.5">
+                  <button type="button" onClick={toggleSpeechRecognition} className={`rounded-xl p-2.5 transition ${isListening ? 'bg-[rgba(127,212,255,0.15)] text-[var(--color-one-accent)]' : 'text-[var(--color-one-text-muted)] hover:bg-white/5 hover:text-white'}`} title={isZh ? '语音输入' : 'Voice input'}>
+                    {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                  </button>
+                  <button type="button" onClick={() => void handleSend()} disabled={!promptInput.trim() || isLoading} className="one-btn one-btn-primary one-btn-sm disabled:cursor-not-allowed disabled:opacity-40">
+                    <Send className="h-4 w-4" />
+                    <span className="hidden sm:inline">{isZh ? '发送' : 'Send'}</span>
+                  </button>
+                </div>
+              </div>
+              <p className="text-[11px] text-[var(--color-one-text-dim)]">{isZh ? '回复基于所选模型与当前会话上下文；能力与可用性取决于已配置的真实服务。' : 'Responses depend on the selected model and current conversation context; capabilities reflect configured, available services.'}</p>
             </div>
           </div>
         </div>
-      </footer>
+      </div>
     </div>
   );
 };
