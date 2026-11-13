@@ -36,6 +36,7 @@ import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
 import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
+import { GlobalMiniPlayer } from './components/music/GlobalMiniPlayer.tsx';
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -259,6 +260,7 @@ export default function App() {
           </div>
         </footer>
       )}
+      <GlobalMiniPlayer lang={lang} currentTab={currentTab} onOpenMusic={() => setCurrentTab('venus')} />
       <OfflineIndicator lang={lang} />
     </div>
     </PlayerProvider>
