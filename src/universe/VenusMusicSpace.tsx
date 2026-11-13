@@ -174,7 +174,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   // 1. YouTube 音乐检索
   const searchYouTubeMusic = async (queryOverride?: string) => {
     const q = (queryOverride ?? searchQuery).trim();
-    if (!q) return;
+    if (!q) { showNotice(isZh ? '请输入关键词后再检索。' : 'Please enter a keyword.'); return; }
     setYtSearching(true);
     setCrawlNotice(isZh ? `正在抓取 YouTube 开放音乐：${q}...` : `Crawling YouTube music: ${q}...`);
     try {
@@ -189,34 +189,35 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           setTracks(mapped);
           setCurrentTrackIndex(0);
           setShowEmbedPlayer(true);
-          setCrawlNotice(isZh ? `已从 YouTube 抓取到 ${mapped.length} 条高保真音乐流。` : `Found ${mapped.length} YouTube music tracks.`);
+          setCrawlNotice(isZh ? `YouTube 抓取完成：获取 ${mapped.length} 条可播放结果。` : `YouTube crawl done: ${mapped.length} playable results.`);
         } else {
-          setCrawlNotice(isZh ? '未找到相关 YouTube 音乐。' : 'No YouTube tracks found.');
+          setCrawlNotice(isZh ? 'YouTube 抓取完成：未找到结果（可能受限或无匹配），请更换关键词。' : 'YouTube crawl finished: no results. Try another keyword.');
         }
       } else {
-        setCrawlNotice(isZh ? 'YouTube 音乐检索暂不可用。' : 'YouTube music search unavailable.');
+        setCrawlNotice(isZh ? `YouTube 检索失败：${data?.error || '服务暂不可用'}` : `YouTube search failed: ${data?.error || 'unavailable'}`);
       }
-    } catch {
-      setCrawlNotice(isZh ? 'YouTube 音乐检索超时。' : 'YouTube music search error.');
+    } catch (e: any) {
+      setCrawlNotice(isZh ? `YouTube 检索异常：${e?.message || '网络/超时'}` : `YouTube search error: ${e?.message || 'network/timeout'}`);
     } finally {
       if (mountedRef.current) setYtSearching(false);
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
-      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 4500);
+      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 6000);
     }
   };
 
   // 2. B站 音乐爬虫检索
   const searchBilibiliMusic = async (queryOverride?: string) => {
     const rawQ = (queryOverride ?? searchQuery).trim();
-    if (!rawQ) return;
+    if (!rawQ) { showNotice(isZh ? '请输入关键词后再检索。' : 'Please enter a keyword.'); return; }
     const q = rawQ.includes('音乐') || rawQ.includes('现场') || rawQ.includes('MV') ? rawQ : `${rawQ} 音乐现场`;
     setYtSearching(true);
-    setCrawlNotice(isZh ? `正在爬取 B站 (Bilibili) 音乐与现场：${q}...` : `Crawling Bilibili music: ${q}...`);
+    setCrawlNotice(isZh ? `正在爬取 B站 (Bilibili)：${q}...` : `Crawling Bilibili: ${q}...`);
     try {
       const res = await fetch(`/api/bilibili/search?q=${encodeURIComponent(q)}&limit=14`);
       const data = await res.json();
-      if (data.success && Array.isArray(data.videos) && data.videos.length > 0) {
-        const mapped: MusicTrack[] = data.videos.map((bv: any) => ({
+      const videos = Array.isArray(data.videos) ? data.videos : (Array.isArray(data.results) ? data.results : []);
+      if (data.success && videos.length > 0) {
+        const mapped: MusicTrack[] = videos.map((bv: any) => ({
           id: `bili_${bv.bvid}`,
           title: bv.title || 'Bilibili Music Track',
           artist: bv.author || 'B站UP主',
@@ -227,7 +228,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
           embedUrl: bv.embedUrl || `https://player.bilibili.com/player.html?bvid=${bv.bvid}&page=1&autoplay=1`,
           playable: 'embed',
           source: 'Bilibili',
-          sourceUrl: bv.arcurl || `https://www.bilibili.com/video/${bv.bvid}`,
+          sourceUrl: bv.arcurl || bv.sourceUrl || `https://www.bilibili.com/video/${bv.bvid}`,
           license: 'Bilibili 官方嵌入流',
           crawledAt: new Date().toISOString(),
           bpm: 86,
@@ -236,16 +237,16 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         setTracks(mapped);
         setCurrentTrackIndex(0);
         setShowEmbedPlayer(true);
-        setCrawlNotice(isZh ? `成功爬取并收录 ${mapped.length} 条 B站 音乐与现场，点击即播！` : `Crawled ${mapped.length} Bilibili music tracks!`);
+        setCrawlNotice(isZh ? `B站爬取完成：获取 ${mapped.length} 条可播放结果。` : `Bilibili crawl done: ${mapped.length} results.`);
       } else {
-        setCrawlNotice(isZh ? 'B站未返回对应音乐结果。' : 'No Bilibili music found.');
+        setCrawlNotice(isZh ? `B站爬取完成：未返回结果（${data?.error || '可能受地域/反爬限制'}），请更换关键词或稍后重试。` : `Bilibili finished: no results (${data?.error || 'restricted/unavailable'}).`);
       }
-    } catch {
-      setCrawlNotice(isZh ? 'B站音乐爬虫连接超时。' : 'Bilibili music crawl timeout.');
+    } catch (e: any) {
+      setCrawlNotice(isZh ? `B站爬虫异常：${e?.message || '网络/超时'}` : `Bilibili crawl error: ${e?.message || 'network/timeout'}`);
     } finally {
       if (mountedRef.current) setYtSearching(false);
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
-      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 4500);
+      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 6000);
     }
   };
 
@@ -262,6 +263,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
       ]);
 
       const merged: MusicTrack[] = [];
+      let biliCount = 0;
+      let ytCount = 0;
+      const errs: string[] = [];
 
       // Bilibili tracks
       if (biliRes.status === 'fulfilled' && biliRes.value.success && Array.isArray(biliRes.value.videos)) {
@@ -284,6 +288,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
             description: bv.description
           });
         }
+        biliCount = merged.filter(m => m.source === 'Bilibili').length;
+      } else {
+        errs.push(isZh ? 'B站未返回结果或请求失败' : 'Bilibili failed or empty');
       }
 
       // YouTube tracks
@@ -294,22 +301,26 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
             playable: t.playable === 'embed' || t.playable === 'youtube-embed' || t.embedUrl ? 'embed' : 'audio'
           });
         }
+        ytCount = merged.filter(m => m.source !== 'Bilibili').length;
+      } else {
+        errs.push(isZh ? 'YouTube 未返回结果或请求失败' : 'YouTube failed or empty');
       }
 
       if (merged.length > 0) {
         setTracks(merged);
         setCurrentTrackIndex(0);
         setShowEmbedPlayer(true);
-        setCrawlNotice(isZh ? `双端爬取完成！已汇聚 ${merged.length} 首 B站 & YouTube 音乐流。` : `Dual crawl finished: ${merged.length} tracks.`);
+        const failMsg = errs.length ? `；失败: ${errs.join('；')}` : '';
+        setCrawlNotice(isZh ? `双端爬取完成：B站 ${biliCount} 首，YouTube ${ytCount} 首，共 ${merged.length} 首${failMsg}` : `Dual crawl done: Bilibili ${biliCount}, YouTube ${ytCount}, total ${merged.length}${failMsg ? `; ${errs.join('; ')}` : ''}`);
       } else {
-        setCrawlNotice(isZh ? '双端均未返回结果，请尝试其他关键词。' : 'No tracks found.');
+        setCrawlNotice(isZh ? `双端均未返回结果：${errs.join('；')}` : `No tracks found: ${errs.join('; ')}`);
       }
     } catch {
       setCrawlNotice(isZh ? '网络并发爬取失败。' : 'Dual crawl failed.');
     } finally {
       if (mountedRef.current) setYtSearching(false);
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
-      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 5000);
+      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 7000);
     }
   };
 
@@ -454,19 +465,32 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     handleSelectTrack(prevIdx);
   };
 
-  // Run Fixed Crawler
+  // Run Fixed Crawler (persistent harvest for open sources; realtime search for Bili/YouTube)
   const handleTriggerCrawl = async () => {
     if (crawlerSource === 'bilibili.com') {
-      await searchBilibiliMusic(crawlerKeyword);
+      setIsCrawling(true);
+      setCrawlNotice(isZh ? `正在实时爬取 B站音乐：${crawlerKeyword}...` : `Searching Bilibili: ${crawlerKeyword}...`);
+      try {
+        await searchBilibiliMusic(crawlerKeyword);
+        // searchBilibiliMusic sets its own notice with count; keep it
+      } finally {
+        if (mountedRef.current) setIsCrawling(false);
+      }
       return;
     }
     if (crawlerSource === 'youtube.com/music') {
-      await searchYouTubeMusic(crawlerKeyword);
+      setIsCrawling(true);
+      setCrawlNotice(isZh ? `正在实时爬取 YouTube 音乐：${crawlerKeyword}...` : `Searching YouTube: ${crawlerKeyword}...`);
+      try {
+        await searchYouTubeMusic(crawlerKeyword);
+      } finally {
+        if (mountedRef.current) setIsCrawling(false);
+      }
       return;
     }
 
     setIsCrawling(true);
-    setCrawlNotice(isZh ? `正在定向爬取 ${crawlerSource} 开源音频...` : `Crawling ${crawlerSource}...`);
+    setCrawlNotice(isZh ? `正在向 ${crawlerSource} 发起开放音频抓取（关键词：${crawlerKeyword}）...` : `Crawling ${crawlerSource} (${crawlerKeyword})...`);
     try {
       const res = await fetch('/api/music/crawl', {
         method: 'POST',
@@ -477,22 +501,21 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
         })
       });
       const data = await res.json();
-      if (data.success) {
-        setCrawlNotice(
-          isZh
-            ? `爬取成功！已自动收录 ${data.crawledCount || 2} 首新音轨并完成结构化打标。`
-            : `Crawl successful! Ingested ${data.crawledCount || 2} new tracks.`
-        );
+      const saved = data.savedCount ?? data.crawledCount ?? 0;
+      const errs = Array.isArray(data.errors) ? data.errors.filter(Boolean) : [];
+      if (data.success && saved > 0) {
+        setCrawlNotice(isZh ? `抓取完成：成功获取并保存 ${saved} 首音轨（来源 ${data.source || crawlerSource}）。` : `Crawl done: saved ${saved} tracks from ${data.source || crawlerSource}.`);
         loadTracks(selectedGenre, searchQuery);
       } else {
-        setCrawlNotice(isZh ? '爬取完成，已同步本地缓存库。' : 'Sync completed.');
+        const reason = errs[0] || data.error || data.message || (isZh ? '未获取到可保存数据' : 'No data saved');
+        setCrawlNotice(isZh ? `抓取结束：成功 0，保存 0。原因：${reason}` : `Crawl finished: saved 0. Reason: ${reason}`);
       }
-    } catch {
-      setCrawlNotice(isZh ? '已从金星本地库载入高保真音轨。' : 'Loaded offline tracks.');
+    } catch (e: any) {
+      setCrawlNotice(isZh ? `抓取请求失败：${e?.message || '网络错误'}` : `Crawl request failed: ${e?.message || 'network error'}`);
     } finally {
       if (mountedRef.current) setIsCrawling(false);
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
-      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 5000);
+      noticeTimerRef.current = setTimeout(() => { if (mountedRef.current) setCrawlNotice(null); }, 8000);
     }
   };
 

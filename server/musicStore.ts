@@ -218,54 +218,134 @@ class MusicStore {
   }
 
   /**
-   * 固定网站音乐爬虫模拟与真实收录 (Free Music Archive / Jamendo / Musopen CC)
+   * Real open-audio crawl/harvest from compliant public sources.
+   * Fetches actual metadata + playable/embeddable links and persists new tracks.
+   * Does not bypass access controls; reports failures clearly.
    */
-  public async crawlExternalMusic(sourceDomain: string = 'freemusicarchive.org', keyword: string = 'space ambient'): Promise<{ crawledCount: number; newTracks: MusicTrack[] }> {
+  public async crawlExternalMusic(
+    sourceDomain: string = 'archive.org',
+    keyword: string = 'space ambient'
+  ): Promise<{ success: boolean; crawledCount: number; savedCount: number; newTracks: MusicTrack[]; source: string; keyword: string; errors: string[]; message?: string }> {
     const timeNow = new Date().toISOString();
-    const mockCrawled: MusicTrack[] = [
-      {
-        id: `crawled_${Date.now()}_1`,
-        title: `${keyword.toUpperCase()} · Cosmic Frequency Drift`,
-        artist: 'Open Audio Station Discovery',
-        album: `Crawled from ${sourceDomain}`,
-        genre: 'Ambient Space',
-        durationSeconds: 215,
-        audioUrl: 'https://cdn.freesound.org/previews/387/387537_5121236-lq.mp3',
-        coverUrl: 'https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?w=600&auto=format&fit=crop&q=80',
-        source: `Fixed Web Crawler: ${sourceDomain}`,
-        sourceUrl: `https://${sourceDomain}/search?q=${encodeURIComponent(keyword)}`,
-        license: 'Creative Commons Open Music',
-        crawledAt: timeNow,
-        bpm: 80,
-        description: `金星音频爬虫从 ${sourceDomain} 定向解析抓取并收录的音频轨道。`
-      },
-      {
-        id: `crawled_${Date.now()}_2`,
-        title: `Nocturne in E-flat Major · 星云夜曲`,
-        artist: 'Frédéric Chopin (Open Sound Lab)',
-        album: `Live Ingested from ${sourceDomain}`,
-        genre: 'Neo-Classical',
-        durationSeconds: 260,
-        audioUrl: 'https://cdn.freesound.org/previews/563/563829_11861866-lq.mp3',
-        coverUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
-        source: `Fixed Web Crawler: ${sourceDomain}`,
-        sourceUrl: `https://${sourceDomain}/classical`,
-        license: 'CC0 Public Domain',
-        crawledAt: timeNow,
-        bpm: 64,
-        description: '肖邦降E大调夜曲，经由金星大模型深度音频结构化打标与无损声场重构。'
-      }
-    ];
+    const source = String(sourceDomain || '').trim().toLowerCase();
+    const kw = String(keyword || 'space ambient').trim();
+    const errors: string[] = [];
+    const newTracks: MusicTrack[] = [];
 
-    for (const t of mockCrawled) {
-      if (!this.tracks.some(existing => existing.title === t.title)) {
-        this.tracks.unshift(t);
+    const addTrack = (t: MusicTrack) => {
+      if (!t || !t.id) return;
+      const exists = this.tracks.some(existing => existing.id === t.id || (existing.sourceUrl && t.sourceUrl && existing.sourceUrl === t.sourceUrl));
+      if (!exists) newTracks.push(t);
+    };
+
+    try {
+      if (source.includes('archive.org')) {
+        const q = `(${kw}) AND mediatype:(audio)`;
+        const url = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(q)}&fl[]=identifier,title,creator,licenseurl,description,year&sort[]=downloads+desc&rows=12&page=1&output=json`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(`Internet Archive HTTP ${res.status}`);
+        const data: any = await res.json();
+        const docs = Array.isArray(data?.response?.docs) ? data.response.docs : [];
+        for (const d of docs) {
+          const identifier = String(d?.identifier || '');
+          if (!identifier) continue;
+          try {
+            const metaRes = await fetch(`https://archive.org/metadata/${encodeURIComponent(identifier)}`, { signal: AbortSignal.timeout(8000) });
+            if (!metaRes.ok) continue;
+            const meta: any = await metaRes.json();
+            const files = Array.isArray(meta?.files) ? meta.files : [];
+            const audio = files.find((f: any) => /\.(mp3|ogg|m4a)$/i.test(String(f?.name || '')) && !String(f?.name || '').includes('_spectrogram'));
+            if (!audio?.name) continue;
+            const fileUrl = `https://archive.org/download/${encodeURIComponent(identifier)}/${encodeURIComponent(audio.name)}`;
+            addTrack({
+              id: `ia_${identifier}`,
+              title: String(d?.title || identifier).slice(0, 180),
+              artist: Array.isArray(d?.creator) ? String(d.creator[0] || 'Internet Archive') : (d?.creator ? String(d.creator) : 'Internet Archive'),
+              album: 'Internet Archive Audio',
+              genre: 'Ambient Space',
+              durationSeconds: Number(audio?.length) || 0,
+              audioUrl: fileUrl,
+              coverUrl: `https://archive.org/services/img/${encodeURIComponent(identifier)}`,
+              source: 'Internet Archive',
+              sourceUrl: `https://archive.org/details/${encodeURIComponent(identifier)}`,
+              license: String(d?.licenseurl || 'Rights vary; see item page'),
+              crawledAt: timeNow,
+              description: '从 Internet Archive 公共音频库抓取的可播放直链（具体许可/版权以条目页为准）。'
+            } as any);
+            if (newTracks.length >= 8) break;
+          } catch (e: any) {
+            errors.push(`metadata:${identifier}:${e?.message || 'failed'}`);
+          }
+        }
+        if (docs.length === 0) errors.push('Internet Archive 未返回匹配音频条目。');
+      } else if (source.includes('jamendo')) {
+        // Jamendo public API generally requires client_id; attempt without key is not reliable.
+        errors.push('Jamendo 需要官方 API client_id 才能合规检索；当前环境未配置，无法直接爬取。请使用 Internet Archive/YouTube/Bilibili 来源或在服务端配置 JAMENDO_CLIENT_ID。');
+      } else if (source.includes('freemusicarchive') || source.includes('fma')) {
+        // FMA site/API access varies; use Internet Archive as compliant open fallback and report.
+        const q = `(${kw}) AND mediatype:(audio) AND collection:(freemusicarchive OR netlabels OR audio_music)`;
+        const url = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(q)}&fl[]=identifier,title,creator,licenseurl,description&sort[]=downloads+desc&rows=12&page=1&output=json`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(10000), headers: { Accept: 'application/json' } });
+        if (res.ok) {
+          const data: any = await res.json();
+          const docs = Array.isArray(data?.response?.docs) ? data.response.docs : [];
+          for (const d of docs) {
+            const identifier = String(d?.identifier || '');
+            if (!identifier) continue;
+            try {
+              const metaRes = await fetch(`https://archive.org/metadata/${encodeURIComponent(identifier)}`, { signal: AbortSignal.timeout(8000) });
+              if (!metaRes.ok) continue;
+              const meta: any = await metaRes.json();
+              const files = Array.isArray(meta?.files) ? meta.files : [];
+              const audio = files.find((f: any) => /\.(mp3|ogg|m4a)$/i.test(String(f?.name || '')) && !String(f?.name || '').includes('_spectrogram'));
+              if (!audio?.name) continue;
+              addTrack({
+                id: `ia_${identifier}`,
+                title: String(d?.title || identifier).slice(0, 180),
+                artist: Array.isArray(d?.creator) ? String(d.creator[0] || 'Open Audio') : (d?.creator ? String(d.creator) : 'Open Audio'),
+                album: 'Open Audio (Internet Archive index)',
+                genre: 'Ambient Space',
+                durationSeconds: Number(audio?.length) || 0,
+                audioUrl: `https://archive.org/download/${encodeURIComponent(identifier)}/${encodeURIComponent(audio.name)}`,
+                coverUrl: `https://archive.org/services/img/${encodeURIComponent(identifier)}`,
+                source: 'Internet Archive (FMA/open collections)',
+                sourceUrl: `https://archive.org/details/${encodeURIComponent(identifier)}`,
+                license: String(d?.licenseurl || 'Rights vary; see item page'),
+                crawledAt: timeNow,
+                description: '通过 Internet Archive 开放索引抓取的可播放音频（FMA/开放集合）；许可以条目页为准。'
+              } as any);
+              if (newTracks.length >= 8) break;
+            } catch {}
+          }
+          if (newTracks.length === 0) errors.push('未能从开放索引解析出可播放音频文件。');
+        } else {
+          errors.push(`开放索引访问失败 HTTP ${res.status}`);
+        }
+      } else if (source.includes('bilibili') || source.includes('youtube')) {
+        errors.push('Bilibili/YouTube 请使用页面内“B站专搜/YouTube/双端爬取”进行实时检索与播放（合规嵌入/公开接口），此处为开放音频库持久化爬取入口。');
+      } else {
+        errors.push(`暂不支持来源 ${sourceDomain} 的自动持久化爬取；支持 Internet Archive 等开放来源。`);
       }
+    } catch (err: any) {
+      errors.push(err?.message || String(err));
     }
-    this.save();
+
+    if (newTracks.length > 0) {
+      this.tracks.unshift(...newTracks);
+      this.save();
+    }
+
     return {
-      crawledCount: mockCrawled.length,
-      newTracks: mockCrawled
+      success: newTracks.length > 0,
+      crawledCount: newTracks.length,
+      savedCount: newTracks.length,
+      newTracks,
+      source: sourceDomain,
+      keyword: kw,
+      errors,
+      message: newTracks.length > 0
+        ? `已从 ${sourceDomain} 抓取并保存 ${newTracks.length} 条可播放音频。`
+        : (errors[0] || '未抓取到可保存的音频数据。')
     };
   }
 }
