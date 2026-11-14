@@ -61,6 +61,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
+if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1' || process.env.EARTH_ONE_SERVE_DIST === 'true') {
+  app.set('trust proxy', 1);
+}
 
 // Optional CORS for split web deployment (Pages frontend + separate API). Set CORS_ORIGIN to frontend origin(s), comma-separated.
 app.use((req, res, next) => {
