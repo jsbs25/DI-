@@ -4095,10 +4095,10 @@ async function startServer() {
   }
 
   // Pre-seed Islamic Digital Library classics into Discovery engine
-  seedIslamicLibraryToDiscovery();
+  try { seedIslamicLibraryToDiscovery(); } catch (e) { console.warn('Discovery seed skipped:', e); }
 
   // Start Discovery background maintenance daemon
-  startDiscoveryScheduler();
+  try { startDiscoveryScheduler(); } catch (e) { console.warn('Discovery scheduler not started:', e); }
 }
 
 startServer().catch(err => {

@@ -1,6 +1,27 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import os from 'node:os';
+
+function resolveWritableDataDir(preferred: string): string {
+  try {
+    fs.mkdirSync(preferred, { recursive: true });
+    return preferred;
+  } catch {
+    const fallback = path.join(os.tmpdir(), 'earth-one', 'server_data');
+    try { fs.mkdirSync(fallback, { recursive: true }); } catch {}
+    return fallback;
+  }
+}
+
+function canWritePath(targetPath: string): boolean {
+  try {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Simple in-process async mutex/queue used to serialize state-mutating
@@ -47,13 +68,15 @@ import { normalizePrivacySettings, DEFAULT_PRIVACY_SETTINGS, canViewProfileByPol
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
 import { crawlWebsite } from './webFetcher.ts';
 
-const DATA_DIR = path.resolve(process.env.EARTH_ONE_DATA_DIR || path.join(process.cwd(), 'server_data'));
-const DATA_FILE = path.resolve(process.env.EARTH_ONE_DATA_FILE || path.join(path.dirname(DATA_DIR), 'server_data.json'));
+const DATA_DIR = resolveWritableDataDir(path.resolve(process.env.EARTH_ONE_DATA_DIR || path.join(process.cwd(), 'server_data')));
+const DATA_FILE = process.env.EARTH_ONE_DATA_FILE
+  ? path.resolve(process.env.EARTH_ONE_DATA_FILE)
+  : path.join(path.dirname(DATA_DIR), 'server_data.json');
 // Full-text book content is stored here (one JSON file per book) instead of
 // bloating server_data.json with every chapter's body. This keeps the main
 // store small and makes the atomic whole-file rewrite cheap.
-const BOOKS_DIR = path.resolve(process.env.EARTH_ONE_BOOKS_DIR || path.join(DATA_DIR, 'books'));
-const AVATARS_DIR = path.resolve(process.env.EARTH_ONE_AVATARS_DIR || path.join(DATA_DIR, 'uploads', 'avatars'));
+const BOOKS_DIR = process.env.EARTH_ONE_BOOKS_DIR ? path.resolve(process.env.EARTH_ONE_BOOKS_DIR) : path.join(DATA_DIR, 'books');
+const AVATARS_DIR = process.env.EARTH_ONE_AVATARS_DIR ? path.resolve(process.env.EARTH_ONE_AVATARS_DIR) : path.join(DATA_DIR, 'uploads', 'avatars');
 
 export interface AuthAccount {
   userId: string;
@@ -582,12 +605,12 @@ class DataStore {
     const loaded = this.loadFromDisk();
     if (!loaded) {
       this.initSeedData();
-      this.saveToDisk();
+      try { this.saveToDisk(); } catch {}
     }
     // If for any reason books are empty, always seed them
     if (this.books.length === 0) {
       this.books = [...SEED_BOOKS];
-      this.saveToDisk();
+      try { this.saveToDisk(); } catch {}
     }
   }
 
@@ -657,7 +680,7 @@ class DataStore {
     // we strip it from the main store.
     for (const book of this.books) {
       if (this.hasInlineContent(book) && !fs.existsSync(this.bookContentFile(book.id))) {
-        this.writeBookContent(book);
+        try { this.writeBookContent(book); } catch {}
       }
     }
 
@@ -698,11 +721,19 @@ class DataStore {
       lastSavedAt: new Date().toISOString()
     };
 
-    const dir = path.dirname(DATA_FILE);
-    fs.mkdirSync(dir, { recursive: true });
-    const tmpFile = `${DATA_FILE}.tmp`;
-    fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf-8');
-    fs.renameSync(tmpFile, DATA_FILE);
+    try {
+      const dir = path.dirname(DATA_FILE);
+      fs.mkdirSync(dir, { recursive: true });
+      const tmpFile = `${DATA_FILE}.tmp`;
+      fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf-8');
+      fs.renameSync(tmpFile, DATA_FILE);
+    } catch (err: any) {
+      // Ephemeral/read-only environments (e.g. Enzonic Free without persistent disk):
+      // keep state in-memory and avoid crashing startup/request paths.
+      if (err?.code !== 'EROFS' && err?.code !== 'EPERM' && err?.code !== 'EACCES') {
+        throw err;
+      }
+    }
   }
 
   loadFromDisk(): boolean {
