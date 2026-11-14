@@ -29,7 +29,8 @@ class GlobalAudioEngine {
     if (this.audio) return this.audio;
     const el = document.createElement('audio');
     el.preload = 'metadata';
-    el.crossOrigin = 'anonymous';
+    // Do not force crossOrigin: some valid audio hosts omit CORS headers and would fail to load/play.
+    // Visual analyser is best-effort when CORS allows it.
     // keep it out of layout but in DOM for consistent behavior
     el.style.position = 'fixed';
     el.style.width = '1px';
