@@ -34,9 +34,9 @@ import { getChannelIntegrations } from './server/channelIntegrations.ts';
 import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
 import { getMailProvider, mailStatus } from './server/mailProvider.ts';
 import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE164 } from './server/otp.ts';
-import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers } from './server/messengerWs.ts';
+import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers, isUserViewingConversation } from './server/messengerWs.ts';
 import { addCall, getCallById, listCallsForUser, ensureCallsArray } from './server/calls/index.ts';
-import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus } from './server/calls/service.ts';
+import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus, cleanupStaleCalls } from './server/calls/service.ts';
 import { pushCallSignal, listCallSignalsForUser, clearCallSignals } from './server/calls/signals.ts';
 import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
@@ -1872,6 +1872,7 @@ app.get('/api/messenger/avatar/:userId/:file', (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/calls', (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
+  if (cleanupStaleCalls(store.calls || [])) { try { store.persist(); } catch {} }
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
   const calls = listCallsForUser(store, user.id, limit).map((c: any) => publicCallForUser(c, user.id));
   res.json({ success: true, calls });
@@ -1879,6 +1880,7 @@ app.get('/api/calls', (req, res) => {
 
 app.get('/api/calls/:id', (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
+  if (cleanupStaleCalls(store.calls || [])) { try { store.persist(); } catch {} }
   const call = getCallById(store, req.params.id);
   if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
   res.json({ success: true, call: publicCallForUser(call, user.id) });
@@ -1911,7 +1913,7 @@ app.post('/api/calls/invite', async (req, res) => {
     }
     try { emitCallInviteDelivery(call, user); } catch {}
     try { emitCallEvent(call, 'call_invite', { fromUserId: user.id }); } catch {}
-    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: body?.transport === 'webrtc' });
+    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: body?.transport !== 'livekit' });
     res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to create call' });
@@ -1932,7 +1934,7 @@ app.post('/api/calls/:id/accept', async (req, res) => {
     });
     if (out) return res.status(out.code).json(out.body);
     try { emitCallEvent(call, 'call_accept', { userId: user.id }); } catch {}
-    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport === 'webrtc' });
+    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport !== 'livekit' });
     res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to accept call' });
@@ -2028,7 +2030,7 @@ app.post('/api/calls/:id/token', async (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
   const call = getCallById(store, req.params.id);
   if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
-  const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport === 'webrtc' });
+  const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport !== 'livekit' });
   if (!tok.ok) return res.status(tok.blocked ? 503 : 403).json({ success: false, ...tok });
   res.json({ success: true, ...tok });
 });
@@ -2526,18 +2528,24 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
 
   try {
     let msg: any;
+    let senderMarkedNotifs = 0;
     const cmid = typeof clientMsgId === 'string' && clientMsgId ? clientMsgId : undefined;
     await store.mutate(async () => {
       msg = store.sendMessage(id, text, authUser, translatedContent, translatedTo, { attachments: atts, replyToId: typeof replyToId === 'string' ? replyToId : undefined, clientMsgId: cmid });
+      senderMarkedNotifs = store.markConversationNotificationsRead(authUser.id, id);
       const convNow = store.conversations.find(c => c.id === id);
       const preview = (text || (atts?.length ? '[attachment]' : '')).slice(0, 80);
       for (const uid of (convNow?.participantIds || [])) {
         if (uid === authUser.id) continue;
         if (store.isBlockedEither(uid, authUser.id)) continue;
+        if (isUserViewingConversation(uid, id)) continue;
         emitNotification(uid, { type: 'message_new', title: convNow?.name || authUser.displayName, body: `${authUser.displayName}: ${preview}`, actorId: authUser.id, actorName: authUser.displayName, actorAvatar: authUser.avatar, conversationId: id, data: { messageId: msg.id } });
       }
       store.persist();
     });
+    if (senderMarkedNotifs > 0) {
+      try { wsBroadcastToUser(authUser.id, { type: 'notification_sync', unreadCount: store.getUnreadNotificationCount(authUser.id), conversationId: id }); } catch {}
+    }
     wsBroadcastConversationEvent(id, { type: 'message', conversationId: id, message: msg, clientMsgId });
     res.json({ success: true, message: msg, conversation: store.conversations.find(c => c.id === id) });
   } catch (e:any) {
@@ -2552,14 +2560,22 @@ app.post('/api/conversations/:id/read', async (req, res) => {
   const conv = store.conversations.find(c => c.id === id);
   if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
   const allowReceipt = store.shouldSendReadReceipt(user.id);
-  await store.mutate(async () => { store.markConversationRead(id, user.id, { allowReadReceipt: allowReceipt }); });
+  let markedNotifs = 0;
+  await store.mutate(async () => {
+    const r = store.markConversationRead(id, user.id, { allowReadReceipt: allowReceipt });
+    markedNotifs = r?.markedNotifs || 0;
+  });
+  const unreadNotifCount = store.getUnreadNotificationCount(user.id);
+  if (markedNotifs > 0) {
+    try { wsBroadcastToUser(user.id, { type: 'notification_sync', unreadCount: unreadNotifCount, conversationId: id }); } catch {}
+  }
   const readEvt = { type: 'read', conversationId: id, userId: user.id, readAt: new Date().toISOString() };
   if (allowReceipt) {
     wsBroadcastConversationEvent(id, readEvt);
   } else {
     try { wsBroadcastToUser(user.id, { ...readEvt, selfOnly: true }); } catch {}
   }
-  res.json({ success: true, readReceiptSent: allowReceipt });
+  res.json({ success: true, readReceiptSent: allowReceipt, unreadNotificationCount: unreadNotifCount, markedNotifs });
 });
 
 app.post('/api/conversations/:id/messages/:messageId/recall', async (req, res) => {

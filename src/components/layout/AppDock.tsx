@@ -61,7 +61,7 @@ export const AppDock: React.FC<Props> = ({ currentTab, onSelectTab, lang, hidden
             const Icon = it.icon as any;
             const active = currentTab === it.tab;
             return (
-              <button key={it.tab} onClick={() => onSelectTab(it.tab)} aria-current={active ? 'page' : undefined} className={`flex min-h-[48px] min-w-[48px] flex-1 flex-col items-center justify-center gap-1 rounded-xl transition-colors ${active ? 'text-sky-600 dark:text-sky-300' : 'text-slate-500 dark:text-slate-400 active:text-slate-900 dark:active:text-white'}`}>
+              <button key={it.tab} onClick={() => onSelectTab(it.tab)} title={label(it)} aria-current={active ? 'page' : undefined} className={`flex min-h-[48px] min-w-[48px] flex-1 flex-col items-center justify-center gap-1 rounded-xl transition-colors ${active ? 'text-sky-600 dark:text-sky-300' : 'text-slate-500 dark:text-slate-400 active:text-slate-900 dark:active:text-white'}`}>
                 <span className={`rounded-lg p-1 transition-colors ${active ? 'bg-sky-50 dark:bg-sky-500/20' : ''}`}><Icon className="h-[20px] w-[20px]" /></span>
                 <span className="text-[10px] font-medium leading-none">{label(it)}</span>
               </button>

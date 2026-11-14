@@ -9,7 +9,36 @@ export function isActiveCallStatus(status: string) {
   return status === 'ringing' || status === 'connecting' || status === 'active' || status === 'reconnecting';
 }
 
+export function cleanupStaleCalls(calls: CallRecord[], opts?: { ringTimeoutMs?: number; staleConnectingMs?: number }): boolean {
+  if (!Array.isArray(calls) || calls.length === 0) return false;
+  const ringTimeoutMs = opts?.ringTimeoutMs ?? 65_000;
+  const staleConnectingMs = opts?.staleConnectingMs ?? 180_000;
+  const nowMs = Date.now();
+  const iso = nowIso();
+  let changed = false;
+  for (const c of calls) {
+    if (!c || !isActiveCallStatus(c.status)) continue;
+    const refTs = new Date(c.updatedAt || c.createdAt || 0).getTime();
+    if (!Number.isFinite(refTs)) continue;
+    if (c.status === 'ringing' && nowMs - refTs > ringTimeoutMs) {
+      c.status = 'missed';
+      c.endedAt = iso;
+      c.endReason = 'timeout';
+      c.updatedAt = iso;
+      changed = true;
+    } else if (c.status === 'connecting' && !c.startedAt && nowMs - refTs > staleConnectingMs) {
+      c.status = 'ended';
+      c.endedAt = iso;
+      c.endReason = 'timeout';
+      c.updatedAt = iso;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 export function getActiveCallForUser(calls: CallRecord[], userId: string): CallRecord | null {
+  cleanupStaleCalls(calls);
   return calls.find(c => isActiveCallStatus(c.status) && (c.participantIds || []).includes(userId)) || null;
 }
 
@@ -54,6 +83,9 @@ export function validateInvite(store: any, actorId: string, input: CallInviteInp
       const acc = canUserAccessConversation(store, actorId, conversationId);
       if (!acc.ok) return { ok: false, error: acc.error || 'Forbidden' };
       if (acc.conv?.type !== 'direct' || !(acc.conv.participantIds || []).includes(targetUserId)) return { ok: false, error: 'Conversation does not match direct call target' };
+    } else if (Array.isArray(store.conversations)) {
+      const existing = store.conversations.find((c: any) => c.type === 'direct' && Array.isArray(c.participantIds) && c.participantIds.includes(actorId) && c.participantIds.includes(targetUserId));
+      if (existing?.id) conversationId = existing.id;
     }
     return { ok: true, scope, kind, conversationId: conversationId || undefined, participantIds: [actorId, targetUserId] };
   }
@@ -219,6 +251,32 @@ export function canIssueMediaToken(call: CallRecord, userId: string, store?: any
   return { ok: true };
 }
 
+function getWebRtcIceServers(): RTCIceServer[] {
+  try {
+    const raw = process.env.ICE_SERVERS_JSON;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  const list: RTCIceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.qq.com:3478' },
+    { urls: 'stun:stun.miwifi.com:3478' },
+  ];
+  const turnUrl = process.env.TURN_URL || '';
+  if (turnUrl) {
+    list.push({
+      urls: turnUrl,
+      ...(process.env.TURN_USERNAME ? { username: process.env.TURN_USERNAME } : {}),
+      ...(process.env.TURN_CREDENTIAL ? { credential: process.env.TURN_CREDENTIAL } : {}),
+    });
+  }
+  return list;
+}
+
 export async function issueMediaToken(
   call: CallRecord,
   userId: string,
@@ -238,11 +296,7 @@ export async function issueMediaToken(
         roomName: call.roomName,
         provider: 'webrtc',
         expiresInSec: 3600,
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-        ],
+        iceServers: getWebRtcIceServers(),
       };
     }
     return { ok: false, blocked: true, reason: 'MEDIA_NOT_CONFIGURED', callId: call.id, roomName: call.roomName, provider: 'none' };
@@ -268,10 +322,7 @@ export async function issueMediaToken(
         roomName: call.roomName,
         provider: 'webrtc',
         expiresInSec: 3600,
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-        ],
+        iceServers: getWebRtcIceServers(),
       };
     }
     return { ok: false, blocked: true, reason: 'MEDIA_SDK_UNAVAILABLE', callId: call.id, roomName: call.roomName, provider: 'none' };

@@ -10,25 +10,59 @@ import {
   Minimize2, Maximize2
 } from 'lucide-react';
 import { callApi } from '../../services/calls/api.ts';
-import { createCallMediaSession, type ICallMediaSession, type CallMediaState, friendlyMediaError } from '../../services/calls/media.ts';
+import { createCallMediaSession, type ICallMediaSession, type CallMediaState, friendlyMediaError, unlockCallAudioContext } from '../../services/calls/media.ts';
 
-const CallTrackView: React.FC<{ track?: MediaStreamTrack | null; kind: 'video' | 'audio'; muted?: boolean; className?: string; mirror?: boolean }> = ({ track, kind, muted, className, mirror }) => {
+const CallTrackView: React.FC<{
+  track?: MediaStreamTrack | null;
+  kind: 'video' | 'audio';
+  muted?: boolean;
+  className?: string;
+  mirror?: boolean;
+  playbackRetryTick?: number;
+  onPlaybackBlocked?: (blocked: boolean) => void;
+}> = ({ track, kind, muted, className, mirror, playbackRetryTick = 0, onPlaybackBlocked }) => {
   const ref = React.useRef<HTMLVideoElement & HTMLAudioElement | null>(null);
   React.useEffect(() => {
     const el = ref.current as any;
     if (!el) return;
-    if (track) {
-      try {
-        const stream = new MediaStream([track]);
-        if (el.srcObject !== stream) el.srcObject = stream;
-        const p = el.play?.();
-        if (p && typeof p.catch === 'function') p.catch(() => {});
-      } catch {}
-    } else {
+    if (!track) {
       try { el.srcObject = null; } catch {}
+      return;
     }
-    return () => { try { if (el) el.srcObject = null; } catch {} };
-  }, [track]);
+    const stream = new MediaStream([track]);
+    try {
+      el.muted = !!muted;
+      if (!muted) el.volume = 1;
+      el.srcObject = stream;
+    } catch {}
+    const tryPlay = () => {
+      try {
+        el.muted = !!muted;
+        if (!muted) el.volume = 1;
+        const p = el.play?.();
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            if (kind === 'audio' && !muted) onPlaybackBlocked?.(false);
+          }).catch((err: any) => {
+            if (kind === 'audio' && !muted && (err?.name === 'NotAllowedError' || /NotAllowed/i.test(String(err)))) {
+              onPlaybackBlocked?.(true);
+            }
+          });
+        }
+      } catch {}
+    };
+    tryPlay();
+    const handleUnmute = () => tryPlay();
+    track.addEventListener?.('unmute', handleUnmute);
+    el.addEventListener?.('canplay', handleUnmute);
+    el.addEventListener?.('loadedmetadata', handleUnmute);
+    return () => {
+      track.removeEventListener?.('unmute', handleUnmute);
+      el.removeEventListener?.('canplay', handleUnmute);
+      el.removeEventListener?.('loadedmetadata', handleUnmute);
+      try { if (el) el.srcObject = null; } catch {}
+    };
+  }, [track, kind, muted, playbackRetryTick, onPlaybackBlocked]);
   if (kind === 'audio') return <audio ref={ref as any} autoPlay playsInline muted={!!muted} />;
   return <video ref={ref as any} autoPlay playsInline muted={!!muted} className={className} style={mirror ? { transform: 'scaleX(-1)' } : undefined} />;
 };
@@ -43,6 +77,7 @@ interface GlobalMessengerProps {
   onRefreshConversations?: () => Promise<void> | void;
   onUserUpdate?: (user: User) => void;
   directOpenSeq?: number;
+  isVisible?: boolean;
 }
 
 type FriendUser = { id: string; earthId?: string; username: string; displayName: string; avatar: string; isOnline?: boolean; bio?: string; lastActiveAt?: string };
@@ -57,7 +92,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   integrations = [],
   onRefreshConversations,
   onUserUpdate,
-  directOpenSeq = 0
+  directOpenSeq = 0,
+  isVisible = true,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -103,11 +139,42 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const notifPrefsSaveSeq = useRef(0);
   const notifAlertSeenRef = useRef<Map<string, number>>(new Map());
   const activeConvIdRef = useRef<string>(activeConversationId);
+  const isVisibleRef = useRef<boolean>(isVisible);
+  const mobileShowChatRef = useRef<boolean>(mobileShowChat);
+  const tabRef = useRef<string>(tab);
   const notifPrefsRef = useRef<any>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const notifSoundRef = useRef<HTMLAudioElement | null>(null);
   useEffect(() => { activeConvIdRef.current = activeConversationId; }, [activeConversationId]);
+  useEffect(() => { isVisibleRef.current = isVisible; }, [isVisible]);
+  useEffect(() => { mobileShowChatRef.current = mobileShowChat; }, [mobileShowChat]);
+  useEffect(() => { tabRef.current = tab; }, [tab]);
   useEffect(() => { notifPrefsRef.current = notifPrefs; }, [notifPrefs]);
+  const isDesktopViewport = () => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true);
+  const getViewedConversationId = () => {
+    if (!currentUser) return null;
+    if (!isVisibleRef.current) return null;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return null;
+    const convId = activeConvIdRef.current;
+    if (!convId) return null;
+    if (isDesktopViewport()) return convId;
+    return mobileShowChatRef.current ? convId : null;
+  };
+  const clearConvNotifsLocal = (convId?: string | null) => {
+    if (!convId) return;
+    setNotifications(prev => {
+      let cleared = 0;
+      const next = prev.map(n => {
+        if (n.conversationId === convId && n.type === 'message_new' && !n.read) {
+          cleared++;
+          return { ...n, read: true, readAt: n.readAt || new Date().toISOString() };
+        }
+        return n;
+      });
+      if (cleared > 0) setNotifUnread(u => Math.max(0, u - cleared));
+      return cleared > 0 ? next : prev;
+    });
+  };
   const [friends, setFriends] = useState<FriendUser[]>([]);
   const [incomingReqs, setIncomingReqs] = useState<FriendRequest[]>([]);
   const [outgoingReqs, setOutgoingReqs] = useState<FriendRequest[]>([]);
@@ -163,6 +230,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const mediaSessionRef = useRef<ICallMediaSession | null>(null);
   const mediaJoinedCallIdRef = useRef<string | null>(null);
   const mediaTokenRef = useRef<string | null>(null);
+  const dismissedCallIdsRef = useRef<Set<string>>(new Set());
+  const [audioPlaybackBlocked, setAudioPlaybackBlocked] = useState(false);
+  const [playbackRetryTick, setPlaybackRetryTick] = useState(0);
   const [mediaState, setMediaState] = useState<CallMediaState>({ phase: 'idle', canPlaybackAudio: false, participants: {} });
 
   useEffect(() => {
@@ -282,8 +352,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       });
       setConnError(null);
       lastSyncRef.current = new Date().toISOString();
-      // mark read
-      api(`/api/conversations/${activeConv.id}/read`, { method: 'POST' }).catch(()=>{});
+      if (getViewedConversationId() === activeConv.id) {
+        clearConvNotifsLocal(activeConv.id);
+        api(`/api/conversations/${activeConv.id}/read`, { method: 'POST' })
+          .then((d: any) => { if (typeof d?.unreadNotificationCount === 'number') setNotifUnread(d.unreadNotificationCount); })
+          .catch(() => {});
+      }
     } catch (err: any) {
       if (!quiet) setConnError(err?.status === 401 ? '登录状态已失效。' : (err?.message || '消息加载失败'));
     } finally {
@@ -571,7 +645,23 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         const curIncoming = incomingCallRef.current;
         if (curActive) {
           const updated = calls.find((c: any) => c.id === curActive.id);
-          if (updated) setActiveCall(updated);
+          if (updated) {
+            setActiveCall(updated);
+            if (['ended', 'rejected', 'missed', 'busy', 'failed', 'canceled'].includes(updated.status)) {
+              void cleanupCallMedia(updated.status);
+              setTimeout(() => {
+                setActiveCall((prev: any) => prev?.id === updated.id && ['ended', 'rejected', 'missed', 'busy', 'failed', 'canceled'].includes(prev.status) ? null : prev);
+              }, 1500);
+            }
+          }
+        } else {
+          const resumable = calls.find(
+            (c: any) =>
+              !dismissedCallIdsRef.current.has(c.id) &&
+              ((c.status === 'ringing' && c.initiatorId === currentUser?.id) ||
+                (['connecting', 'active', 'reconnecting'].includes(c.status) && c.participants?.[currentUser?.id || '']?.status === 'joined'))
+          );
+          if (resumable) setActiveCall(resumable);
         }
         const ringingForMe = calls.find(
           (c: any) =>
@@ -583,7 +673,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           setIncomingCall(ringingForMe);
         } else if (curIncoming) {
           const matched = calls.find((c: any) => c.id === curIncoming.id);
-          if (matched && ['ended', 'rejected', 'missed', 'busy', 'failed', 'canceled'].includes(matched.status)) {
+          if (!matched || ['ended', 'rejected', 'missed', 'busy', 'failed', 'canceled'].includes(matched.status)) {
             setIncomingCall(null);
           }
         }
@@ -621,6 +711,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         void loadFriends();
         void loadRequests();
         void pollCalls();
+        try {
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'active_conversation', conversationId: getViewedConversationId() }));
+          }
+        } catch {}
         if (pingTimer) clearInterval(pingTimer);
         pingTimer = setInterval(() => {
           if (ws.readyState === 1) {
@@ -658,7 +753,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         }
         if (type === 'message' && msg.message) {
           const incomingMsg: ChatMessage = msg.message;
-          if (msg.conversationId === activeConvIdRef.current || incomingMsg.conversationId === activeConvIdRef.current) {
+          const targetCid = msg.conversationId || incomingMsg.conversationId;
+          if (targetCid === activeConvIdRef.current) {
             setMessages(prev => {
               const map = new Map(prev.map(m => [m.id, m]));
               map.set(incomingMsg.id, incomingMsg);
@@ -668,8 +764,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 return String(a.id).localeCompare(String(b.id));
               });
             });
-            if (ws.readyState === 1 && incomingMsg.senderId !== currentUser?.id) {
-              try { ws.send(JSON.stringify({ type: 'read', conversationId: activeConvIdRef.current })); } catch {}
+            if (ws.readyState === 1 && incomingMsg.senderId !== currentUser?.id && getViewedConversationId() === targetCid) {
+              clearConvNotifsLocal(targetCid);
+              try { ws.send(JSON.stringify({ type: 'read', conversationId: targetCid })); } catch {}
             }
           }
           void onRefreshConversations?.();
@@ -713,12 +810,22 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           return;
         }
         if (type === 'notification' && msg.notification) {
+          const viewed = getViewedConversationId();
+          if (msg.notification.type === 'message_new' && msg.notification.conversationId && msg.notification.conversationId === viewed) {
+            clearConvNotifsLocal(viewed);
+            if (ws.readyState === 1) {
+              try { ws.send(JSON.stringify({ type: 'read', conversationId: viewed })); } catch {}
+            }
+            return;
+          }
           setNotifications(prev => [msg.notification, ...prev.filter(n => n.id !== msg.notification.id)]);
           if (typeof msg.unreadCount === 'number') setNotifUnread(msg.unreadCount);
           maybeAlertNotification(msg.notification, msg.alert);
           return;
         }
         if (type === 'notification_sync') {
+          if (typeof msg.unreadCount === 'number') setNotifUnread(msg.unreadCount);
+          if (msg.conversationId) clearConvNotifsLocal(msg.conversationId);
           void loadNotifications();
           return;
         }
@@ -760,6 +867,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         if (type === 'call_signal' && msg.callId && msg.fromUserId && msg.signal) {
           if (mediaJoinedCallIdRef.current === msg.callId && mediaSessionRef.current?.handleRemoteSignal) {
             void mediaSessionRef.current.handleRemoteSignal(msg.fromUserId, msg.signal, msg.seq);
+          }
+          return;
+        }
+        if (type === 'call_audio' && msg.callId && msg.fromUserId && msg.pcm) {
+          if (mediaJoinedCallIdRef.current === msg.callId && mediaSessionRef.current?.handleRemoteAudioFrame) {
+            mediaSessionRef.current.handleRemoteAudioFrame(msg.fromUserId, msg.pcm, Number(msg.sampleRate) || 16000);
           }
           return;
         }
@@ -828,6 +941,27 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     return () => { try { off && off(); } catch {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onSelectConversation]);
+
+  useEffect(() => {
+    if (!authed) return;
+    const syncActiveView = () => {
+      const viewed = getViewedConversationId();
+      if (wsRef.current?.readyState === 1) {
+        try { wsRef.current.send(JSON.stringify({ type: 'active_conversation', conversationId: viewed })); } catch {}
+      }
+      if (viewed) {
+        clearConvNotifsLocal(viewed);
+        api(`/api/conversations/${viewed}/read`, { method: 'POST' })
+          .then((d: any) => { if (typeof d?.unreadNotificationCount === 'number') setNotifUnread(d.unreadNotificationCount); })
+          .catch(() => {});
+      }
+    };
+    syncActiveView();
+    const onVis = () => syncActiveView();
+    document.addEventListener('visibilitychange', onVis);
+    return () => { document.removeEventListener('visibilitychange', onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, isVisible, activeConv?.id, mobileShowChat, tab]);
 
   useEffect(() => { if (activeConv?.id && authed) { setMessages([]); setHasMore(false); void fetchMessages(); } }, [activeConv?.id, authed]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length, activeConv?.id]);
@@ -1329,10 +1463,24 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     if (n.type === 'call_invite') {
       const cid = n.data?.callId;
       if (cid) { try { const d = await callApi.get(cid); if (d?.call) setIncomingCall(d.call); } catch { setIncomingCall({ id: cid, kind: n.data?.kind, scope: n.data?.scope, status: 'ringing', conversationId: n.conversationId || n.data?.conversationId }); } }
-      else if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); setMobileShowChat(true); }
+      else if (n.conversationId) {
+        clearConvNotifsLocal(n.conversationId);
+        onSelectConversation(n.conversationId);
+        setTab('chats');
+        setMobileShowChat(true);
+      }
       return;
     }
-    if (n.conversationId) { onSelectConversation(n.conversationId); setTab('chats'); setMobileShowChat(true); return; }
+    if (n.conversationId) {
+      clearConvNotifsLocal(n.conversationId);
+      api(`/api/conversations/${n.conversationId}/read`, { method: 'POST' })
+        .then((d: any) => { if (typeof d?.unreadNotificationCount === 'number') setNotifUnread(d.unreadNotificationCount); })
+        .catch(() => {});
+      onSelectConversation(n.conversationId);
+      setTab('chats');
+      setMobileShowChat(true);
+      return;
+    }
     if (n.type === 'friend_request') { setTab('requests'); void loadRequests(); return; }
     if (n.type === 'friend_accepted' || n.type === 'account_security') {
       if (n.actorId || n.targetUserId) { await openProfile(n.actorId || n.targetUserId); }
@@ -1383,12 +1531,18 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   };
   const canStartCallHere = !!activeConv && authed && (activeConv.type === 'direct' || activeConv.type === 'group') && !!activeConv.id && activeConv.id !== 'conv_global';
 
+  const reportCallError = (msg: string) => {
+    setConnError(msg);
+    setNotice(msg);
+  };
+
   const cleanupCallMedia = async (reason = 'ended') => {
     mediaJoinedCallIdRef.current = null;
     mediaTokenRef.current = null;
     const s = mediaSessionRef.current;
     mediaSessionRef.current = null;
     try { await s?.disconnect(reason); } catch {}
+    setAudioPlaybackBlocked(false);
     setMediaState({ phase: 'idle', canPlaybackAudio: false, participants: {} });
   };
 
@@ -1396,7 +1550,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     try { await callApi.state(callId, patch); } catch {}
   };
 
-  const joinCallMedia = async (call: any, media?: any) => {
+  const joinCallMedia = async (
+    call: any,
+    media?: any,
+    deviceOverrides?: { micEnabled?: boolean; cameraEnabled?: boolean; screenSharing?: boolean },
+    reconnect = false
+  ) => {
     if (!call?.id) return;
     const isTerminal = ['ended','rejected','missed','busy','failed','canceled'].includes(call.status);
     if (isTerminal) return;
@@ -1422,7 +1581,13 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     mediaJoinedCallIdRef.current = call.id;
     const session = createCallMediaSession(info.provider);
     mediaSessionRef.current = session;
+    const initMic = deviceOverrides?.micEnabled !== undefined ? deviceOverrides.micEnabled : callDevices.micEnabled !== false;
+    const initCam = call.kind === 'video'
+      ? (deviceOverrides?.cameraEnabled !== undefined ? deviceOverrides.cameraEnabled : callDevices.cameraEnabled !== false)
+      : false;
     setCallMediaNote(lang==='ar'?'جارٍ الاتصال بوسائط المكالمة…':lang==='en'?'Connecting to call media…':'正在连接音视频通道…');
+    let lastReportedPhase: string | null = null;
+    let lastActiveSyncAt = 0;
     try {
       await session.connect({
         url: info.url,
@@ -1434,27 +1599,57 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         participantIds: call.participantIds || [],
         iceServers: info.iceServers,
         kind: call.kind || 'audio',
-        initialMicEnabled: callDevices.micEnabled !== false,
-        initialCameraEnabled: call.kind === 'video' ? (callDevices.cameraEnabled !== false) : false,
+        initialMicEnabled: initMic,
+        initialCameraEnabled: initCam,
+        reconnect,
         sendSignal: async (toUserId, signal) => {
+          // Send once: prefer open WebSocket for low latency, fallback to HTTP signaling API
           if (wsRef.current?.readyState === 1) {
             try {
               wsRef.current.send(JSON.stringify({ type: 'call_signal', callId: call.id, toUserId, signal }));
+              return;
             } catch {}
           }
           try { await callApi.signal(call.id, { toUserId, signal }); } catch {}
         },
+        sendAudioFrame: (pcm, sampleRate) => {
+          if (wsRef.current?.readyState === 1) {
+            try {
+              wsRef.current.send(JSON.stringify({ type: 'call_audio', callId: call.id, pcm, sampleRate }));
+            } catch {}
+          }
+        },
         pollSignals: (afterSeq) => callApi.signals(call.id, afterSeq),
         onState: (st) => {
           setMediaState(st);
+          const curServerStatus = activeCallRef.current?.status;
+          const phaseChanged = st.phase !== lastReportedPhase;
           if (st.phase === 'connected') {
-            setCallMediaNote(null);
-            void syncCallStateToServer(call.id, { status: 'active', micEnabled: callDevices.micEnabled, cameraEnabled: callDevices.cameraEnabled, screenSharing: callDevices.screenSharing });
+            lastReportedPhase = st.phase;
+            setCallMediaNote(st.error || (st.audioStats?.usingRelay ? '已通过加密语音中继接通（P2P 受限网络自动切换）' : null));
+            const needActiveSync =
+              (phaseChanged && curServerStatus !== 'ringing') ||
+              (curServerStatus === 'connecting' && Date.now() - lastActiveSyncAt > 2500);
+            if (needActiveSync) {
+              lastActiveSyncAt = Date.now();
+              void syncCallStateToServer(call.id, {
+                status: 'active',
+                micEnabled: initMic,
+                cameraEnabled: initCam,
+                screenSharing: deviceOverrides?.screenSharing ?? callDevices.screenSharing,
+              });
+            }
           } else if (st.phase === 'reconnecting') {
             setCallMediaNote(lang==='ar'?'جارٍ إعادة الاتصال بالوسائط…':lang==='en'?'Reconnecting media…':'媒体重连中…');
-            void syncCallStateToServer(call.id, { status: 'reconnecting' });
+            if (phaseChanged) {
+              lastReportedPhase = st.phase;
+              void syncCallStateToServer(call.id, { status: 'reconnecting' });
+            }
           } else if (st.phase === 'failed') {
+            lastReportedPhase = st.phase;
             setCallMediaNote(st.error || (lang==='ar'?'فشل اتصال الوسائط':lang==='en'?'Media connection failed':'媒体连接失败'));
+          } else {
+            lastReportedPhase = st.phase;
           }
           if (st.error) setCallMediaNote(st.error);
         }
@@ -1469,7 +1664,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const startCall = async (kind: 'audio'|'video', overrideTarget?: { targetUserId: string; conversationId?: string }) => {
     if (!authed || callAction) return;
     if (!overrideTarget && !activeConv) return;
-    if (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status)) { setConnError(callErrorText({ message: 'BUSY' })); return; }
+    if (!overrideTarget && activeConv?.type === 'direct' && !activeConv.otherUser?.id) {
+      reportCallError('未找到通话对象用户信息');
+      return;
+    }
+    if (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status)) { reportCallError(callErrorText({ message: 'BUSY' })); return; }
+    void unlockCallAudioContext();
     setCallAction('start'); setCallMediaNote(null); setCallMinimized(false); await cleanupCallMedia('replace');
     try {
       const payload: any = overrideTarget?.targetUserId
@@ -1479,9 +1679,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           : { scope: 'group', kind, conversationId: activeConv?.id };
       const d = await callApi.invite(payload);
       if (d?.call) {
+        const nextDevices = { micEnabled: true, cameraEnabled: kind === 'video', screenSharing: false };
         setActiveCall(d.call);
-        setCallDevices({ micEnabled: true, cameraEnabled: kind === 'video', screenSharing: false });
-        await joinCallMedia(d.call, d.media);
+        setCallDevices(nextDevices);
+        await joinCallMedia(d.call, d.media, nextDevices);
       }
       if (d?.media?.blocked || d?.media?.ok === false) {
         setCallMediaNote(d.media.reason === 'MEDIA_NOT_CONFIGURED' || d.media.reason === 'MEDIA_SDK_UNAVAILABLE'
@@ -1489,33 +1690,40 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           : (d.media.reason || ''));
       }
       setNotice(kind==='video' ? (lang==='ar'?'بدء مكالمة فيديو':lang==='en'?'Video call started':'已发起视频通话') : (lang==='ar'?'بدء مكالمة صوتية':lang==='en'?'Audio call started':'已发起语音通话'));
-    } catch (e: any) { setConnError(callErrorText(e)); }
+    } catch (e: any) { reportCallError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
   const acceptIncomingCall = async () => {
     if (!incomingCall?.id || callAction) return;
+    void unlockCallAudioContext();
     setCallAction('accept'); setCallMediaNote(null); setCallMinimized(false);
     try {
       const d = await callApi.accept(incomingCall.id);
       if (d?.call) {
+        const nextDevices = {
+          micEnabled: d.call.self?.micEnabled ?? true,
+          cameraEnabled: d.call.self?.cameraEnabled ?? (d.call.kind === 'video'),
+          screenSharing: !!d.call.self?.screenSharing,
+        };
         setActiveCall(d.call); setIncomingCall(null);
-        setCallDevices({ micEnabled: d.call.self?.micEnabled ?? true, cameraEnabled: d.call.self?.cameraEnabled ?? (d.call.kind==='video'), screenSharing: !!d.call.self?.screenSharing });
-        await joinCallMedia(d.call, d.media);
+        setCallDevices(nextDevices);
+        await joinCallMedia(d.call, d.media, nextDevices);
       }
       if (d?.media?.blocked || d?.media?.ok === false) setCallMediaNote(lang==='ar'?'تم قبول المكالمة (إشارة). وسائط حقيقية غير متاحة.':lang==='en'?'Call accepted (signaling). Real media unavailable.':'已接听（信令），真实媒体不可用。');
-    } catch (e: any) { setConnError(callErrorText(e)); }
+    } catch (e: any) { reportCallError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
   const rejectIncomingCall = async () => {
     if (!incomingCall?.id || callAction) return;
     setCallAction('reject');
-    try { await callApi.reject(incomingCall.id); setIncomingCall(null); setNotice(lang==='ar'?'تم رفض المكالمة':lang==='en'?'Call rejected':'已拒绝通话'); }
-    catch (e: any) { setConnError(callErrorText(e)); }
+    try { dismissedCallIdsRef.current.add(incomingCall.id); await callApi.reject(incomingCall.id); setIncomingCall(null); setNotice(lang==='ar'?'تم رفض المكالمة':lang==='en'?'Call rejected':'已拒绝通话'); }
+    catch (e: any) { reportCallError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
   const endOrCancelActiveCall = async () => {
     const c = activeCall; if (!c?.id || callAction) return;
     setCallAction('end');
+    dismissedCallIdsRef.current.add(c.id);
     try {
       await cleanupCallMedia('hangup');
       if (c.status === 'ringing' && c.initiatorId === currentUser?.id) await callApi.cancel(c.id);
@@ -1523,14 +1731,15 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       setActiveCall((prev: any) => prev?.id === c.id ? { ...prev, status: 'ended' } : prev);
       setNotice(lang==='ar'?'انتهت المكالمة':lang==='en'?'Call ended':'通话已结束');
       setTimeout(()=>setActiveCall((prev: any) => (prev?.id === c.id && ['ended','rejected','missed','busy','failed','canceled'].includes(prev.status)) ? null : prev), 1500);
-    } catch (e: any) { setConnError(callErrorText(e)); }
+    } catch (e: any) { reportCallError(callErrorText(e)); setActiveCall(null); }
     finally { setCallAction(null); }
   };
   const leaveActiveGroupCall = async () => {
     const c = activeCall; if (!c?.id || c.scope !== 'group' || callAction) return;
     setCallAction('leave');
+    dismissedCallIdsRef.current.add(c.id);
     try { await cleanupCallMedia('leave'); await callApi.leave(c.id); setActiveCall(null); setNotice(lang==='ar'?'غادرت المكالمة':lang==='en'?'Left call':'已离开通话'); }
-    catch (e: any) { setConnError(callErrorText(e)); }
+    catch (e: any) { reportCallError(callErrorText(e)); }
     finally { setCallAction(null); }
   };
   const toggleCallDevice = async (field: 'micEnabled'|'cameraEnabled'|'screenSharing') => {
@@ -1539,7 +1748,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     setCallDevices(next);
     try {
       const session = mediaSessionRef.current;
-      if (session && ['connecting','connected','reconnecting'].includes(mediaState.phase)) {
+      if (session && ['connecting','connected','reconnecting','acquiring'].includes(mediaState.phase)) {
         if (field === 'micEnabled') await session.setMicrophoneEnabled(next.micEnabled);
         if (field === 'cameraEnabled') await session.setCameraEnabled(next.cameraEnabled);
         if (field === 'screenSharing') await session.setScreenShareEnabled(next.screenSharing);
@@ -1556,16 +1765,22 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     setCallAction('token');
     try {
       const d = await callApi.token(c.id);
-      if (d?.ok && d.token) {
-        setCallMediaNote(lang==='ar'?'تم إصدار رمز وسائط، جارٍ الانضمام…':lang==='en'?'Media token issued, joining…':'已签发媒体令牌，正在加入…');
-        await joinCallMedia(c, d);
+      if (d?.ok && (d.token || d.provider === 'webrtc')) {
+        setCallMediaNote(lang==='ar'?'جارٍ إعادة الاتصال بالوسائط…':lang==='en'?'Reconnecting call media…':'正在重新连接音视频通道…');
+        await cleanupCallMedia('replace');
+        await joinCallMedia(c, d, callDevices, true);
       } else {
         setCallMediaNote(d?.reason === 'MEDIA_NOT_CONFIGURED' || d?.reason === 'MEDIA_SDK_UNAVAILABLE' ? (lang==='ar'?'وسائط حقيقية غير متاحة (محظور/غير مُعد).':lang==='en'?'Real media unavailable (blocked/not configured).':'真实媒体不可用（BLOCKED/未配置）。') : (d?.reason || 'blocked'));
       }
     } catch (e: any) { const msg = callErrorText(e); setCallMediaNote(msg); }
     finally { setCallAction(null); }
   };
-  const startCallMediaPlayback = async () => { try { await mediaSessionRef.current?.startAudioPlayback(); } catch {} };
+  const startCallMediaPlayback = async () => {
+    setAudioPlaybackBlocked(false);
+    setPlaybackRetryTick(t => t + 1);
+    await unlockCallAudioContext();
+    try { await mediaSessionRef.current?.startAudioPlayback(); } catch {}
+  };
 
   // Auto-manage media session lifecycle based on call state
   useEffect(() => {
@@ -1591,6 +1806,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const connectWechat = () => { window.location.href = '/api/auth/wechat/start'; };
 
   if (!authed) {
+    if (!isVisible) return null;
     return (
       <div className="w-full h-full min-h-0 p-3 sm:p-6 flex items-center justify-center">
         <div className="w-full max-w-xl rounded-[28px] border border-slate-200 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl p-6 sm:p-8 text-center space-y-3 shadow-lg">
@@ -1603,7 +1819,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   }
 
   return (
-    <div className="w-full h-full min-h-0 p-1.5 sm:p-4 lg:p-5"><div className="mx-auto h-full min-h-0 max-w-[1680px] rounded-[28px] border border-slate-200/90 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl shadow-lg dark:shadow-[0_24px_80px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col lg:flex-row text-slate-900 dark:text-slate-100">
+    <>
+    <div className={isVisible ? 'w-full h-full min-h-0 p-1.5 sm:p-4 lg:p-5' : 'hidden'} aria-hidden={!isVisible}><div className="mx-auto h-full min-h-0 max-w-[1680px] rounded-[28px] border border-slate-200/90 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl shadow-lg dark:shadow-[0_24px_80px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col lg:flex-row text-slate-900 dark:text-slate-100">
       {/* Left rail / list */}
       <aside className={`w-full lg:w-[390px] xl:w-[430px] shrink-0 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-white/10 bg-slate-50/85 dark:bg-[#111b2e]/90 p-3 sm:p-4 flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
         <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10 mb-3 gap-2">
@@ -2272,6 +2489,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         </form>
       </main>
       </div>
+    </div>
 
       {lightbox && (
         <div className="fixed inset-0 z-[60] bg-black/90 flex flex-col" onClick={()=>setLightbox(null)}>
@@ -2517,23 +2735,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         const mediaPhaseLabel = ({ idle: '准备中', acquiring: '打开设备中', connecting: '连接音视频…', connected: '已接通', reconnecting: '重连中…', disconnected: '已断开', failed: '连接异常', blocked: '仅信令' } as any)[mediaPhase] || mediaPhase;
         const isTerminal = ['ended','rejected','missed','busy','failed','canceled'].includes(activeCall.status);
 
-        if (callMinimized) {
-          return (
-            <div className="fixed top-14 right-3 sm:top-20 sm:right-6 z-[85] rounded-2xl border border-cyan-400/30 bg-[#071020]/95 px-3.5 py-2.5 shadow-2xl backdrop-blur-xl flex items-center gap-3">
-              {remoteAudioParticipants.map((p: any) => p.audioTrack ? <CallTrackView key={`aud_${p.identity}`} track={p.audioTrack} kind="audio" /> : null)}
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-white truncate max-w-[110px]">{displayTitle}</p>
-                  <p className="text-[11px] text-cyan-200 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
-                </div>
-              </div>
-              <button type="button" onClick={()=>setCallMinimized(false)} className="min-h-[36px] min-w-[36px] rounded-xl bg-white/[0.06] text-slate-200 inline-flex items-center justify-center" title="展开通话"><Maximize2 className="w-4 h-4"/></button>
-              {!isTerminal && <button type="button" onClick={()=>void endOrCancelActiveCall()} disabled={!!callAction} className="min-h-[36px] min-w-[36px] rounded-xl bg-rose-500 text-white inline-flex items-center justify-center" title="挂断"><PhoneOff className="w-4 h-4"/></button>}
-            </div>
-          );
-        }
-
+        const stats = mediaState.audioStats;
         const tilesToRender = remoteTiles.length
           ? remoteTiles
           : peerIds.map((id: string) => ({
@@ -2548,11 +2750,35 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               screenTrack: null,
             }));
 
-        return (
-          <div className="fixed inset-0 md:inset-6 z-[85] bg-[#060a14]/96 backdrop-blur-2xl flex flex-col justify-between md:rounded-3xl md:border md:border-white/15 md:shadow-2xl overflow-hidden">
-            {/* Hidden audio renderers so remote voice always plays */}
-            {tilesToRender.map((p: any) => p.audioTrack ? <CallTrackView key={`aud_${p.identity}`} track={p.audioTrack} kind="audio" /> : null)}
+        const persistentAudioRenderers = (
+          <div className="fixed w-px h-px opacity-0 pointer-events-none overflow-hidden" aria-hidden="true">
+            {tilesToRender.map((p: any) => p.audioTrack ? <CallTrackView key={`aud_${p.identity}`} track={p.audioTrack} kind="audio" playbackRetryTick={playbackRetryTick} onPlaybackBlocked={setAudioPlaybackBlocked} /> : null)}
+          </div>
+        );
 
+        if (callMinimized) {
+          return (
+            <>
+              {persistentAudioRenderers}
+              <div onPointerDown={() => { void unlockCallAudioContext(); }} className="fixed top-14 right-3 sm:top-20 sm:right-6 z-[85] rounded-2xl border border-cyan-400/30 bg-[#071020]/95 px-3.5 py-2.5 shadow-2xl backdrop-blur-xl flex items-center gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-white truncate max-w-[110px]">{displayTitle}</p>
+                    <p className="text-[11px] text-cyan-200 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
+                  </div>
+                </div>
+                <button type="button" onClick={()=>setCallMinimized(false)} className="min-h-[36px] min-w-[36px] rounded-xl bg-white/[0.06] text-slate-200 inline-flex items-center justify-center" title="展开通话"><Maximize2 className="w-4 h-4"/></button>
+                {!isTerminal && <button type="button" onClick={()=>void endOrCancelActiveCall()} disabled={!!callAction} className="min-h-[36px] min-w-[36px] rounded-xl bg-rose-500 text-white inline-flex items-center justify-center" title="挂断"><PhoneOff className="w-4 h-4"/></button>}
+              </div>
+            </>
+          );
+        }
+
+        return (
+          <>
+          {persistentAudioRenderers}
+          <div onPointerDown={() => { void unlockCallAudioContext(); if (audioPlaybackBlocked || !mediaState.canPlaybackAudio) void startCallMediaPlayback(); }} className="fixed inset-0 md:inset-6 z-[85] bg-[#060a14]/96 backdrop-blur-2xl flex flex-col justify-between md:rounded-3xl md:border md:border-white/15 md:shadow-2xl overflow-hidden">
             {/* Top bar */}
             <div className="flex items-center justify-between gap-3 px-4 pt-[max(0.9rem,env(safe-area-inset-top))] pb-3 border-b border-white/10 bg-black/25 shrink-0">
               <div className="min-w-0">
@@ -2561,7 +2787,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <span className="text-sm font-bold text-white truncate">{displayTitle}</span>
                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/10 text-cyan-200 tabular-nums shrink-0">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</span>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{activeCall.kind === 'video' ? '视频通话' : '语音通话'} · {mediaPhaseLabel}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{activeCall.kind === 'video' ? '视频通话' : '语音通话'} · {mediaPhaseLabel}{stats?.usingRelay ? '（语音中继）' : ''}</p>
               </div>
               <button type="button" onClick={()=>setCallMinimized(true)} className="min-h-[40px] min-w-[40px] rounded-xl border border-white/15 bg-white/5 text-slate-200 inline-flex items-center justify-center" title="最小化"><Minimize2 className="w-4 h-4"/></button>
             </div>
@@ -2610,15 +2836,31 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <div className="space-y-1">
                     <h3 className="text-xl font-bold text-white">{displayTitle}</h3>
                     <p className="text-sm text-cyan-200 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
-                    <p className="text-xs text-slate-400">{mediaPhaseLabel}</p>
+                    <p className="text-xs text-slate-400">{mediaPhaseLabel}{stats?.usingRelay ? '（加密中继）' : ''}</p>
                   </div>
+                  {stats && (
+                    <div className="px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${stats.hasLocalAudio ? (stats.localLevel > 4 ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400') : 'bg-rose-400'}`} />
+                      <span>{stats.hasLocalAudio ? (callDevices.micEnabled ? `麦克风音量 ${stats.localLevel}%` : '已静音') : '未获取到麦克风'}</span>
+                      <span className="text-white/25">|</span>
+                      <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceState}`}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
             {/* Notices + Bottom Controls */}
             <div className="px-4 pt-2 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-black/35 border-t border-white/10 space-y-3 shrink-0">
-              {!mediaState.canPlaybackAudio && ['connected','reconnecting','connecting'].includes(mediaPhase) && remoteAudioParticipants.length > 0 && (
+              {activeCall.kind === 'video' && stats && (
+                <div className="mx-auto w-fit px-3 py-1 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${stats.hasLocalAudio ? (stats.localLevel > 4 ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400') : 'bg-rose-400'}`} />
+                  <span>{stats.hasLocalAudio ? (callDevices.micEnabled ? `麦克风音量 ${stats.localLevel}%` : '已静音') : '未获取到麦克风'}</span>
+                  <span className="text-white/25">|</span>
+                  <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceState}`}</span>
+                </div>
+              )}
+              {(!mediaState.canPlaybackAudio || audioPlaybackBlocked) && ['connected','reconnecting','connecting'].includes(mediaPhase) && (
                 <button type="button" onClick={()=>void startCallMediaPlayback()} className="w-full min-h-[42px] px-3 py-2 rounded-xl border border-amber-500/40 bg-amber-500/15 text-amber-200 text-xs font-medium inline-flex items-center justify-center gap-2"><Volume2 className="w-4 h-4"/>点击开启扬声器声音</button>
               )}
               {(callMediaNote || mediaState.error) && (
@@ -2668,8 +2910,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               </div>
             </div>
           </div>
+          </>
         );
       })()}
-    </div>
+    </>
   );
 };

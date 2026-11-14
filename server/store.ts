@@ -2071,7 +2071,10 @@ class DataStore {
       }
       if (!m.updatedAt) m.updatedAt = now;
     }
+    const markedNotifs = this.markConversationNotificationsRead(userId, conversationId);
+    if (markedNotifs > 0) changed = true;
     if (changed) this.saveToDisk();
+    return { changed, markedNotifs };
   }
 
   createGroupConversation(ownerId: string, name: string, memberIds: string[], avatar?: string): Conversation | null {
@@ -2760,6 +2763,20 @@ class DataStore {
     if (!n) return null;
     if (!n.read) { n.read = true; n.readAt = new Date().toISOString(); }
     return n;
+  }
+
+  markConversationNotificationsRead(userId: string, conversationId: string) {
+    if (!userId || !conversationId) return 0;
+    const now = new Date().toISOString();
+    let count = 0;
+    for (const n of this.notifications) {
+      if (n.userId === userId && n.conversationId === conversationId && n.type === 'message_new' && !n.read) {
+        n.read = true;
+        n.readAt = now;
+        count++;
+      }
+    }
+    return count;
   }
 
   markAllNotificationsRead(userId: string) {

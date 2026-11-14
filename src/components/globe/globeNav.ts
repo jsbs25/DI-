@@ -29,13 +29,14 @@ export type DockItem = { id: string; tab: string; icon: LucideIcon; labelZh: str
 export const DOCK_ITEMS: DockItem[] = [
   { id: 'home', tab: 'globe', icon: Home, labelZh: '首页', labelEn: 'Home', group: 'core' },
   { id: 'discover', tab: 'feed', icon: Compass, labelZh: '发现', labelEn: 'Discover', group: 'core' },
-  { id: 'spaces', tab: 'universe', icon: LayoutGrid, labelZh: '宇宙', labelEn: 'Universe', group: 'core' },
+  { id: 'messages', tab: 'chat', icon: MessageSquare, labelZh: '消息', labelEn: 'Messages', group: 'core' },
   { id: 'music', tab: 'venus', icon: Music2, labelZh: '音乐', labelEn: 'Music', group: 'core' },
   { id: 'intelligence', tab: 'aihub', icon: Sparkles, labelZh: '智能', labelEn: 'AI', group: 'core' },
-  { id: 'messages', tab: 'chat', icon: MessageSquare, labelZh: '消息', labelEn: 'Messages', group: 'core' },
+  { id: 'spaces', tab: 'universe', icon: LayoutGrid, labelZh: '宇宙', labelEn: 'Universe', group: 'core' },
 ];
 
 export const MORE_ITEMS: DockItem[] = [
+  { id: 'spaces', tab: 'universe', icon: LayoutGrid, labelZh: '宇宙', labelEn: 'Universe', group: 'more' },
   { id: 'library', tab: 'library', icon: BookOpen, labelZh: '图书馆', labelEn: 'Library', group: 'more' },
   { id: 'browser', tab: 'browser', icon: Search, labelZh: '浏览器', labelEn: 'Browser', group: 'more' },
   { id: 'knowledge', tab: 'knowledge', icon: Network, labelZh: '知识图谱', labelEn: 'Knowledge', group: 'more' },
