@@ -35,6 +35,7 @@ import { MoonAcademy } from './universe/MoonAcademy.tsx';
 import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
+import { PreviewNotice } from './components/layout/PreviewNotice.tsx';
 import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
 import { GlobalMiniPlayer } from './components/music/GlobalMiniPlayer.tsx';
@@ -189,6 +190,7 @@ export default function App() {
 
   return (
     <PlayerProvider>
+      <PreviewNotice />
     <div className="min-h-screen bg-[var(--color-space-bg)] text-slate-100 font-sans overflow-x-clip">
       {showIntro && <CinematicIntro onComplete={() => setShowIntro(false)} onAuthSuccess={handleAuthSuccess} currentUser={currentUser} />}
       {welcomeToast && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-2xl eo-glass text-cyan-100 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4 text-cyan-400" /><span>{welcomeToast}</span></div>}
