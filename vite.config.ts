@@ -22,12 +22,12 @@ export default defineConfig(() => {
         ],
         manifest: {
           id: '/',
-          name: 'EARTH ONE',
-          short_name: 'EARTH ONE',
+          name: 'ONE — One World. Infinite Possibilities.',
+          short_name: 'ONE',
           description:
-            'The Next Generation Global Digital World - Interactive 3D Digital Globe, Global Social Network, and Multi-Model AI Ecosystem.',
-          theme_color: '#0B0F17',
-          background_color: '#0B0F17',
+            'ONE — One World. Infinite Possibilities. 一个世界，无限可能。',
+          theme_color: '#05070B',
+          background_color: '#05070B',
           display: 'standalone',
           start_url: '/',
           scope: '/',
