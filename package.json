@@ -8,11 +8,12 @@
   },
   "scripts": {
     "dev": "tsx server.ts",
-    "start": "bun server.ts",
+    "start": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "start:node": "node --import tsx server.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -37,7 +38,8 @@
     "ws": "^8.23.0",
     "vite-plugin-pwa": "^2.0.0",
     "tsx": "^4.21.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "esbuild": "^0.28.2"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
@@ -45,7 +47,6 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.28.0",
     "tailwindcss": "^4.3.3"
   }
 }
