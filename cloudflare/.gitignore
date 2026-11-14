@@ -1,0 +1,5 @@
+.wrangler/
+wrangler.toml
+.dev.vars
+.local-data/
+.local-reports/

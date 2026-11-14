@@ -1,0 +1,38 @@
+# EARTH ONE - Cloudflare Worker single-origin deployment (frontend assets + /api + D1)
+# FREE plan only. Do NOT enable paid features, do NOT bind card, do NOT buy domains.
+# This file is a template; copy to wrangler.toml locally for deploy (wrangler.toml is gitignored).
+# Fill <D1_DATABASE_ID> after `npx wrangler login` and free D1 creation/selection.
+
+name = "earthone-api"
+main = "worker/src/index.ts"
+compatibility_date = "2026-11-12"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# Same-origin SPA: static assets from React build (dist/) + Worker handles /api/* first.
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/health", "/ws"]
+
+[vars]
+ENVIRONMENT = "production"
+# Same-origin deployment: browser requests to the workers.dev site are same-origin (no cross-site cookie).
+# Keep CORS whitelist explicit for any allowed dev origins only; do not use "*".
+CORS_ORIGINS = "http://localhost:5173,http://localhost:8787"
+DEV_LOGIN_ENABLED = "false"
+COOKIE_SAMESITE = "Lax"
+# COOKIE_DOMAIN intentionally unset for workers.dev host-only cookie.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "earthone"
+database_id = "<D1_DATABASE_ID>"
+migrations_dir = "migrations"
+
+# Build before deploy (same-origin):
+#   cd /Users/mafucheng/Desktop/EARTH_ONE/earthone
+#   VITE_BASE=/ npm run build
+# Deploy (after wrangler login + free D1 created/migrated):
+#   cd cloudflare && npx wrangler deploy --config wrangler.toml
