@@ -1,35 +1,35 @@
 @import "tailwindcss";
 
 @theme {
-  /* ONE Quiet Futurism tokens */
-  --color-one-bg: #05070b;
-  --color-one-bg-deep: #030508;
-  --color-one-surface: #0e131b;
-  --color-one-surface-soft: #151b26;
-  --color-one-surface-elevated: #1b2230;
-  --color-one-text: #f4f3ee;
-  --color-one-text-muted: #b7bdc8;
-  --color-one-text-dim: #8892a3;
-  --color-one-accent: #7fd4ff;
-  --color-one-accent-soft: rgba(127, 212, 255, 0.14);
-  --color-one-gold: #d7b676;
-  --color-one-gold-soft: rgba(215, 182, 118, 0.14);
-  --color-one-border: rgba(244, 243, 238, 0.1);
-  --color-one-border-strong: rgba(244, 243, 238, 0.16);
+  /* ONE Quiet Futurism tokens (refined: clearer, lighter, calmer) */
+  --color-one-bg: #0b1018;
+  --color-one-bg-deep: #070b12;
+  --color-one-surface: #141a24;
+  --color-one-surface-soft: #1a2230;
+  --color-one-surface-elevated: #202a3a;
+  --color-one-text: #f7f6f2;
+  --color-one-text-muted: #c5cddd;
+  --color-one-text-dim: #98a4ba;
+  --color-one-accent: #8edcff;
+  --color-one-accent-soft: rgba(142, 220, 255, 0.16);
+  --color-one-gold: #e0c48a;
+  --color-one-gold-soft: rgba(224, 196, 138, 0.14);
+  --color-one-border: rgba(247, 246, 242, 0.12);
+  --color-one-border-strong: rgba(247, 246, 242, 0.2);
   --color-one-success: #4cc38a;
   --color-one-warning: #e3b341;
   --color-one-danger: #e07a7a;
 
   /* Legacy compatibility tokens (kept for existing modules; prefer --color-one-* going forward) */
-  --color-space-bg: #05070b;
-  --color-space-bg-soft: #0e131b;
-  --color-hud-surface: rgba(14, 19, 27, 0.72);
-  --color-hud-surface-strong: rgba(21, 27, 38, 0.88);
-  --color-hud-border: rgba(244, 243, 238, 0.1);
-  --color-accent: #7fd4ff;
-  --color-accent-soft: #b9e7ff;
-  --color-text-primary: rgba(244, 243, 238, 0.98);
-  --color-text-secondary: rgba(183, 189, 200, 0.82);
+  --color-space-bg: #0b1018;
+  --color-space-bg-soft: #141a24;
+  --color-hud-surface: rgba(20, 26, 36, 0.78);
+  --color-hud-surface-strong: rgba(26, 34, 48, 0.9);
+  --color-hud-border: rgba(247, 246, 242, 0.12);
+  --color-accent: #8edcff;
+  --color-accent-soft: #c9edff;
+  --color-text-primary: rgba(247, 246, 242, 0.98);
+  --color-text-secondary: rgba(197, 205, 221, 0.86);
   --color-status-ok: #4cc38a;
 
   --radius-one-sm: 12px;
@@ -37,9 +37,9 @@
   --radius-one-lg: 24px;
   --radius-one-xl: 32px;
 
-  --shadow-one-sm: 0 1px 2px rgba(0,0,0,0.35), 0 8px 24px rgba(0,0,0,0.18);
-  --shadow-one-md: 0 2px 8px rgba(0,0,0,0.35), 0 20px 48px rgba(0,0,0,0.24);
-  --shadow-one-lg: 0 8px 24px rgba(0,0,0,0.4), 0 40px 80px rgba(0,0,0,0.28);
+  --shadow-one-sm: 0 1px 2px rgba(0,0,0,0.28), 0 10px 28px rgba(0,0,0,0.16);
+  --shadow-one-md: 0 4px 12px rgba(0,0,0,0.28), 0 24px 52px rgba(0,0,0,0.18);
+  --shadow-one-lg: 0 10px 28px rgba(0,0,0,0.32), 0 44px 84px rgba(0,0,0,0.22);
 
   --ease-one: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-one-fast: 140ms;
@@ -68,9 +68,9 @@
     margin: 0;
     color: var(--color-one-text);
     background:
-      radial-gradient(1200px 600px at 70% -10%, rgba(127, 212, 255, 0.08), transparent 55%),
-      radial-gradient(900px 500px at 10% 0%, rgba(215, 182, 118, 0.05), transparent 50%),
-      linear-gradient(180deg, #070a10 0%, #05070b 45%, #030508 100%);
+      radial-gradient(1200px 680px at 75% -10%, rgba(142, 220, 255, 0.12), transparent 55%),
+      radial-gradient(900px 520px at 5% 0%, rgba(224, 196, 138, 0.08), transparent 50%),
+      linear-gradient(180deg, #101726 0%, #0b1018 48%, #090d14 100%);
     font-family: 'Plus Jakarta Sans', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
     letter-spacing: 0.005em;
   }
@@ -78,7 +78,7 @@
     font-family: 'Tajawal', system-ui, -apple-system, sans-serif;
   }
   ::selection {
-    background: rgba(127, 212, 255, 0.22);
+    background: rgba(142, 220, 255, 0.28);
     color: #ffffff;
   }
 }

@@ -4,6 +4,7 @@ import {
   BookOpen,
   Compass,
   Film,
+  Globe2,
   GraduationCap,
   MessageSquare,
   Music2,
@@ -13,7 +14,6 @@ import {
   Users2,
 } from 'lucide-react';
 import type { Conversation, GlobeCountryStat, GlobeUserNode, Language, Post, User, VideoItem, CreatorArticle } from '../../types/index.ts';
-import { DigitalGlobe } from '../globe/DigitalGlobe.tsx';
 
 type Props = {
   lang: Language;
@@ -32,15 +32,15 @@ type Props = {
 };
 
 const spaces = [
-  { tab: 'venus', zh: 'ONE MUSIC', en: 'ONE MUSIC', descZh: '播放、发现与沉浸聆听', descEn: 'Play, discover, and listen', Icon: Music2 },
-  { tab: 'aihub', zh: 'ONE INTELLIGENCE', en: 'ONE INTELLIGENCE', descZh: '对话、思考与创作辅助', descEn: 'Conversation and intelligent work', Icon: Sparkles },
-  { tab: 'library', zh: 'ONE LIBRARY', en: 'ONE LIBRARY', descZh: '阅读、检索与知识沉淀', descEn: 'Read, search, and learn', Icon: BookOpen },
-  { tab: 'browser', zh: 'ONE BROWSER', en: 'ONE BROWSER', descZh: '探索开放网络与信息', descEn: 'Explore the open web', Icon: Search },
-  { tab: 'video', zh: 'ONE VIDEO', en: 'ONE VIDEO', descZh: '观看与媒体体验', descEn: 'Watch and explore media', Icon: Film },
-  { tab: 'community', zh: 'ONE COMMUNITY', en: 'ONE COMMUNITY', descZh: '连接人与公共空间', descEn: 'People and shared spaces', Icon: Users2 },
-  { tab: 'creator', zh: 'ONE STUDIO', en: 'ONE STUDIO', descZh: '创作与表达', descEn: 'Create and publish', Icon: PenTool },
-  { tab: 'arabic-learning', zh: 'ONE LEARNING', en: 'ONE LEARNING', descZh: '学习与成长路径', descEn: 'Learning and growth', Icon: GraduationCap },
-  { tab: 'feed', zh: 'ONE DISCOVER', en: 'ONE DISCOVER', descZh: '动态、内容与发现', descEn: 'Activity and discovery', Icon: Compass },
+  { tab: 'venus', zh: 'ONE MUSIC', en: 'ONE MUSIC', descZh: '播放、搜索与连续收听', descEn: 'Play, search, and listen continuously', Icon: Music2 },
+  { tab: 'aihub', zh: 'ONE INTELLIGENCE', en: 'ONE INTELLIGENCE', descZh: '对话与智能创作', descEn: 'Conversation and intelligent creation', Icon: Sparkles },
+  { tab: 'library', zh: 'ONE LIBRARY', en: 'ONE LIBRARY', descZh: '阅读与知识检索', descEn: 'Reading and knowledge search', Icon: BookOpen },
+  { tab: 'browser', zh: 'ONE BROWSER', en: 'ONE BROWSER', descZh: '探索开放网络', descEn: 'Explore the open web', Icon: Search },
+  { tab: 'video', zh: 'ONE VIDEO', en: 'ONE VIDEO', descZh: '观看与媒体内容', descEn: 'Watch and explore media', Icon: Film },
+  { tab: 'community', zh: 'ONE COMMUNITY', en: 'ONE COMMUNITY', descZh: '连接人与社区', descEn: 'People and communities', Icon: Users2 },
+  { tab: 'creator', zh: 'ONE STUDIO', en: 'ONE STUDIO', descZh: '创作与发布', descEn: 'Create and publish', Icon: PenTool },
+  { tab: 'arabic-learning', zh: 'ONE LEARNING', en: 'ONE LEARNING', descZh: '学习与成长', descEn: 'Learning and growth', Icon: GraduationCap },
+  { tab: 'feed', zh: 'ONE DISCOVER', en: 'ONE DISCOVER', descZh: '动态与发现', descEn: 'Activity and discovery', Icon: Compass },
 ] as const;
 
 function formatWhen(value?: string) {
@@ -63,95 +63,76 @@ export const OneHome: React.FC<Props> = ({
   videos,
   articles,
   conversations,
-  focusCoordinates,
-  onSelectCountry,
-  onSelectUser,
   onSelectTab,
 }) => {
   const isZh = lang === 'zh';
-  const recentPosts = useMemo(() => posts.slice(0, 4), [posts]);
+  const recentPosts = useMemo(() => posts.slice(0, 3), [posts]);
   const recentConversations = useMemo(
-    () => [...conversations].sort((a, b) => String(b.lastMessageAt || b.lastMessageTime || '').localeCompare(String(a.lastMessageAt || a.lastMessageTime || ''))).slice(0, 4),
+    () => [...conversations].sort((a, b) => String(b.lastMessageAt || b.lastMessageTime || '').localeCompare(String(a.lastMessageAt || a.lastMessageTime || ''))).slice(0, 3),
     [conversations]
   );
-  const recentVideos = useMemo(() => videos.slice(0, 3), [videos]);
-  const recentArticles = useMemo(() => articles.slice(0, 3), [articles]);
+  const recentVideos = useMemo(() => videos.slice(0, 2), [videos]);
+  const recentArticles = useMemo(() => articles.slice(0, 2), [articles]);
 
   return (
     <div className="min-h-[100dvh] bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
-      <section className="relative min-h-[100svh] overflow-hidden border-b border-[var(--color-one-border)]">
-        <div className="absolute inset-0">
-          <DigitalGlobe
-            nodes={nodes}
-            countries={countries}
-            activeCountry={null}
-            currentUserId={currentUser?.id}
-            focusCoordinates={focusCoordinates}
-            onSelectCountry={onSelectCountry}
-            onSelectUser={onSelectUser}
-            onSelectTab={onSelectTab}
-            lang={lang}
-            immersive={false}
-            showGlobeTools={false}
-          />
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#05070B] via-[#05070B]/72 to-[#05070B]/25" />
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#05070B] via-transparent to-[#05070B]/35" />
+      <section className="relative overflow-hidden border-b border-[var(--color-one-border)]">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-24 top-[-10%] h-[420px] w-[420px] rounded-full bg-[rgba(142,220,255,0.14)] blur-[120px]" />
+          <div className="absolute right-[-10%] top-[10%] h-[360px] w-[360px] rounded-full bg-[rgba(224,196,138,0.10)] blur-[120px]" />
+          <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[var(--color-one-bg)] to-transparent" />
         </div>
 
-        <div className="relative z-10 mx-auto flex min-h-[100svh] max-w-[1440px] flex-col justify-between px-5 pb-10 pt-24 sm:px-8 md:pl-[7.5rem] md:pr-10 lg:px-16 lg:pl-[8.5rem]">
-          <div className="max-w-3xl pt-8 sm:pt-12 lg:pt-20">
-            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] uppercase tracking-[0.22em] text-[var(--color-one-text-muted)]">
+        <div className="relative z-10 mx-auto max-w-[1280px] px-5 pb-14 pt-28 sm:px-8 md:pl-[7.5rem] md:pr-10 lg:px-12 lg:pl-[8rem] lg:pt-32">
+          <div className="max-w-3xl">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.04] px-3.5 py-1.5 text-[11px] font-medium tracking-[0.14em] text-[var(--color-one-text-muted)]">
               <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-one-accent)]" />
-              {isZh ? '统一数字世界入口' : 'Unified digital world'}
+              {isZh ? '统一数字世界入口' : 'A unified digital world'}
             </div>
-            <h1 className="text-[clamp(3.2rem,10vw,7.5rem)] font-semibold leading-[0.92] tracking-[-0.04em] text-white">
-              ONE<span className="text-[var(--color-one-accent)]">.</span>
+            <h1 className="text-[clamp(2.8rem,8vw,5.6rem)] font-semibold leading-[0.95] tracking-[-0.045em] text-white">
+              ONE
             </h1>
-            <p className="mt-5 max-w-xl text-[clamp(1.2rem,2.4vw,2rem)] font-light leading-tight tracking-[-0.02em] text-[var(--color-one-text)]">
+            <p className="mt-4 max-w-2xl text-[clamp(1.15rem,2.2vw,1.75rem)] font-medium leading-tight tracking-[-0.02em] text-[var(--color-one-text)]">
               One world. Infinite possibilities.
             </p>
-            <p className="mt-3 max-w-xl text-base text-[var(--color-one-text-muted)] sm:text-lg">
-              一个世界，无限可能。
-            </p>
-            <p className="mt-8 max-w-2xl text-sm leading-7 text-[var(--color-one-text-muted)] sm:text-[15px]">
+            <p className="mt-2 text-base text-[var(--color-one-text-muted)] sm:text-lg">一个世界，无限可能。</p>
+            <p className="mt-6 max-w-2xl text-[15px] leading-7 text-[var(--color-one-text-muted)]">
               {isZh
-                ? '在同一个入口中探索音乐、智能、图书馆、浏览、创作与连接。ONE 将真实功能组织为连续的空间体验，而不是割裂的模块堆叠。'
-                : 'Explore music, intelligence, library, browsing, creation, and connection from one entrance. ONE organizes real capabilities into a continuous spatial experience.'}
+                ? '从一个清晰入口进入音乐、智能、图书馆、浏览、创作与连接。所有空间基于真实功能组织，界面更简洁、更易读、更顺畅。'
+                : 'Enter music, intelligence, library, browsing, creation, and connection from one clear home. Every space maps to real capabilities with a calmer, more readable flow.'}
             </p>
 
-            <div className="mt-10 flex flex-wrap items-center gap-3">
+            <div className="mt-8 flex flex-wrap items-center gap-3">
               <button onClick={() => onSelectTab('venus')} className="one-btn one-btn-primary one-btn-md">
                 <Music2 className="h-4 w-4" />
-                <span>{isZh ? '进入 ONE MUSIC' : 'Open ONE MUSIC'}</span>
+                <span>{isZh ? '打开 ONE MUSIC' : 'Open ONE MUSIC'}</span>
               </button>
-              <button onClick={() => onSelectTab('universe')} className="one-btn one-btn-secondary one-btn-md">
-                <Compass className="h-4 w-4" />
-                <span>{isZh ? '浏览 Spaces' : 'Browse Spaces'}</span>
+              <button onClick={() => onSelectTab('aihub')} className="one-btn one-btn-secondary one-btn-md">
+                <Sparkles className="h-4 w-4" />
+                <span>{isZh ? '打开智能空间' : 'Open Intelligence'}</span>
               </button>
-              <button onClick={() => onSelectTab('feed')} className="one-btn one-btn-ghost one-btn-md">
-                <span>{isZh ? '查看发现' : 'View Discover'}</span>
+              <button onClick={() => onSelectTab('universe')} className="one-btn one-btn-ghost one-btn-md">
+                <span>{isZh ? '浏览全部空间' : 'Browse all spaces'}</span>
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>
           </div>
 
-          <div className="mt-12 grid max-w-4xl grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="one-surface-subtle p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">{isZh ? '空间' : 'Spaces'}</div>
-              <div className="mt-2 text-2xl font-semibold text-white">{spaces.length}</div>
-            </div>
-            <div className="one-surface-subtle p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">{isZh ? '全球节点' : 'Live nodes'}</div>
-              <div className="mt-2 text-2xl font-semibold text-white">{nodes.length}</div>
-            </div>
-            <div className="one-surface-subtle p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">{isZh ? '动态' : 'Posts'}</div>
-              <div className="mt-2 text-2xl font-semibold text-white">{posts.length}</div>
-            </div>
-            <div className="one-surface-subtle p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">{isZh ? '会话' : 'Chats'}</div>
-              <div className="mt-2 text-2xl font-semibold text-white">{conversations.length}</div>
-            </div>
+          <div className="mt-10 grid max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              { label: isZh ? '空间' : 'Spaces', value: spaces.length, icon: Compass },
+              { label: isZh ? '在线节点' : 'Live nodes', value: nodes.length, icon: Globe2 },
+              { label: isZh ? '动态' : 'Posts', value: posts.length, icon: MessageSquare },
+              { label: isZh ? '会话' : 'Chats', value: conversations.length, icon: Users2 },
+            ].map(({ label, value, icon: Icon }) => (
+              <div key={label} className="one-surface-subtle flex items-center gap-3 p-4">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-[var(--color-one-accent)]"><Icon className="h-4 w-4" /></span>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-one-text-dim)]">{label}</div>
+                  <div className="mt-0.5 text-xl font-semibold text-white">{value}</div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
