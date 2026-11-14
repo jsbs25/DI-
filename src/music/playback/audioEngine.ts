@@ -56,7 +56,13 @@ class GlobalAudioEngine {
     el.addEventListener('play', () => this.emit('play'));
     el.addEventListener('error', () => {
       const mediaErr = el.error;
-      const msg = mediaErr ? `Audio error (${mediaErr.code})` : 'Audio playback failed';
+      const codeMap: Record<number, string> = {
+        1: '音频加载已中止',
+        2: '网络异常导致音频流中断，请切换其它曲目或稍后重试',
+        3: '音频解码失败或格式不受支持',
+        4: '当前音频来源不可访问或受域限制',
+      };
+      const msg = mediaErr ? (codeMap[mediaErr.code] || `音频加载失败 (${mediaErr.code})`) : '音频播放失败';
       this.emit('error', msg);
     });
   }

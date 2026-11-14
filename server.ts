@@ -1486,7 +1486,7 @@ app.get('/api/messenger/users/search', (req, res) => {
   if (!user) return;
   const q = typeof req.query.q === 'string' ? req.query.q : '';
   const wantSuggested = req.query.suggested === '1' && !q.trim();
-  let list = store.searchUsers(q, user.id, 40);
+  let list = store.searchUsers(q, user.id, 60);
   if (wantSuggested) {
     const blocked = (store.blockedBy[user.id] || []);
     list = store.users.filter(u => {
@@ -1497,12 +1497,20 @@ app.get('/api/messenger/users/search', (req, res) => {
       if (!priv.searchableByUsername && !priv.searchableById && !priv.searchableByDisplayName) return false;
       const isFriend = store.getFriendIds(user.id).includes(u.id);
       return canViewProfileByPolicy(false, isFriend, false, priv);
-    }).slice(0, 30);
+    });
+    // Put real newly registered users & online users first so site members find each other immediately
+    list.sort((a, b) => {
+      const aReg = !a.id.startsWith('u_') ? 1 : 0;
+      const bReg = !b.id.startsWith('u_') ? 1 : 0;
+      if (aReg !== bReg) return bReg - aReg;
+      return (b.isOnline ? 1 : 0) - (a.isOnline ? 1 : 0);
+    });
+    list = list.slice(0, 60);
   }
   const users = list.map(u => {
     const view = (store.getPublicProfileView(user.id, u.id) as any)?.user;
-    if (view) return view;
-    return toPublicUser(u, { privacy: store.getPrivacySettings(u.id) });
+    const base = view || toPublicUser(u, { privacy: store.getPrivacySettings(u.id) });
+    return { ...base, earthId: (u as any).earthId };
   });
   res.json({ success: true, users });
 });
@@ -1516,7 +1524,7 @@ app.get('/api/messenger/friends', (req, res) => {
     if (!u || store.getAccountStatus(u) === 'deleted') return null;
     const view = (store.getPublicProfileView(user.id, id) as any);
     if (!view || view.restricted) return null; // blocked/unviewable
-    return view.user;
+    return { ...view.user, earthId: (u as any).earthId };
   }).filter(Boolean);
   res.json({ success: true, friends });
 });
@@ -1549,12 +1557,12 @@ app.post('/api/messenger/friend-requests', async (req, res) => {
   const toUserId = typeof req.body?.toUserId === 'string' ? req.body.toUserId : '';
   const message = typeof req.body?.message === 'string' ? req.body.message.slice(0,300) : undefined;
   try {
-    let fr: any; let ntf: any = null;
+    let fr: any; let ntf: any = null; let directConv: any = null;
     await store.mutate(async () => {
       fr = store.sendFriendRequest(user.id, toUserId, message);
-      // auto-accept reverse case returns accepted request; notify accordingly
       if (fr?.status === 'accepted') {
         const fromUser = store.users.find(u => u.id === fr.fromUserId);
+        directConv = store.getOrCreateDirectConversation(fr.fromUserId, fr.toUserId);
         ntf = { type: 'accepted_pair', targetId: fr.toUserId, fromUser };
       } else if (fr?.status === 'pending' && fr.toUserId === toUserId) {
         ntf = emitNotification(toUserId, { type: 'friend_request', title: 'New friend request', body: `${user.displayName} sent you a friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
@@ -1564,9 +1572,12 @@ app.post('/api/messenger/friend-requests', async (req, res) => {
     if (ntf && ntf.notification && ntf.notification.type === 'friend_request') {
       wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
     } else if (ntf && ntf.type === 'accepted_pair') {
-      // reverse auto-accepted: notify both
       wsBroadcastToUser(fr.fromUserId, { type: 'friend_request_updated', request: fr });
       wsBroadcastToUser(fr.toUserId, { type: 'friend_request_updated', request: fr });
+      if (directConv) {
+        wsBroadcastToUser(fr.fromUserId, { type: 'conversation_updated', conversationId: directConv.id });
+        wsBroadcastToUser(fr.toUserId, { type: 'conversation_updated', conversationId: directConv.id });
+      }
       await store.mutate(async () => {
         emitNotification(fr.fromUserId, { type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
         emitNotification(fr.toUserId, { type: 'friend_accepted', title: 'You are now friends', body: `You and ${ntf.fromUser?.displayName || 'user'} are now friends.`, actorId: fr.fromUserId, actorName: ntf.fromUser?.displayName, actorAvatar: ntf.fromUser?.avatar, requestId: fr.id, targetUserId: fr.fromUserId });
@@ -1575,7 +1586,7 @@ app.post('/api/messenger/friend-requests', async (req, res) => {
     } else {
       wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
     }
-    res.json({ success: true, request: fr });
+    res.json({ success: true, request: fr, conversationId: directConv?.id });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to send friend request' });
   }
@@ -1586,10 +1597,11 @@ app.post('/api/messenger/friend-requests/:id/respond', async (req, res) => {
   if (!user) return;
   const accept = !!req.body?.accept;
   try {
-    let fr: any;
+    let fr: any; let directConv: any = null;
     await store.mutate(async () => {
       fr = store.respondFriendRequest(req.params.id, user.id, accept);
       if (accept && fr?.status === 'accepted') {
+        directConv = store.getOrCreateDirectConversation(fr.fromUserId, fr.toUserId);
         emitNotification(fr.fromUserId, { type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
         store.persist();
       } else {
@@ -1599,7 +1611,11 @@ app.post('/api/messenger/friend-requests/:id/respond', async (req, res) => {
     const otherId = fr.fromUserId === user.id ? fr.toUserId : fr.fromUserId;
     wsBroadcastToUser(otherId, { type: 'friend_request_updated', request: fr });
     wsBroadcastToUser(user.id, { type: 'friend_request_updated', request: fr });
-    res.json({ success: true, request: fr });
+    if (directConv) {
+      wsBroadcastToUser(otherId, { type: 'conversation_updated', conversationId: directConv.id });
+      wsBroadcastToUser(user.id, { type: 'conversation_updated', conversationId: directConv.id });
+    }
+    res.json({ success: true, request: fr, conversationId: directConv?.id });
   } catch (e:any) {
     const m = e?.message || 'Failed';
     res.status(m==='Forbidden'?403:m==='Friend request not found'?404:400).json({ success:false, error:m });
@@ -2827,8 +2843,25 @@ app.get('/api/music/tracks', (req, res) => {
 
 async function searchOnlineMusicStreams(query: string): Promise<any[]> {
   if (!query || !query.trim()) return [];
+  const direct = resolveMusicEmbedUrl(query.trim());
+  if (direct) return [direct];
+
   try {
-    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim())}`, {
+    const [ytResults] = await Promise.all([
+      searchYouTubeMusic(query.trim(), 14).catch(() => []),
+    ]);
+    if (ytResults.length > 0) {
+      return ytResults.map((t) => ({
+        ...t,
+        playable: t.playable || (t.embedUrl ? 'embed' : 'audio'),
+      }));
+    }
+  } catch (err) {
+    console.warn('Online music search fallback error:', err);
+  }
+
+  try {
+    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim() + ' music')}`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
@@ -2867,20 +2900,22 @@ async function searchOnlineMusicStreams(query: string): Promise<any[]> {
           videoId,
           title,
           artist,
-          album: 'Cosmic Music Stream',
-          genre: 'Stream',
+          album: 'YouTube Music Stream',
+          genre: 'YouTube',
           durationSeconds,
           durationFormatted: durationText,
+          embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&rel=0`,
+          playable: 'embed',
           coverUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
           source: 'YouTube Music',
           sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
-          license: 'Standard YouTube License (In-Page Stream)',
-          views: v.viewCountText?.simpleText || '0 views',
+          license: 'YouTube official embed',
+          views: v.viewCountText?.simpleText || '',
           bpm: 90
         });
-        if (tracks.length >= 20) break;
+        if (tracks.length >= 16) break;
       }
-      if (tracks.length >= 20) break;
+      if (tracks.length >= 16) break;
     }
     return tracks;
   } catch (err) {
@@ -2900,11 +2935,22 @@ app.get('/api/music/search', async (req, res) => {
   }
 
   try {
-    const onlineTracks = await searchOnlineMusicStreams(queryStr);
+    const direct = resolveMusicEmbedUrl(queryStr);
+    if (direct) {
+      return res.json({
+        success: true,
+        query: queryStr,
+        count: 1,
+        tracks: [direct],
+        mode: 'embed-url',
+      });
+    }
+
     const localResults = musicStore.searchTracks(queryStr, genreStr);
-    const merged = [...onlineTracks, ...localResults];
+    const onlineTracks = await searchOnlineMusicStreams(queryStr);
+    const merged = [...localResults, ...onlineTracks];
     const uniqueTracks = merged.filter((t, idx, self) =>
-      idx === self.findIndex(s => s.id === t.id || (s.videoId && s.videoId === t.videoId))
+      idx === self.findIndex(s => s.id === t.id || (s.videoId && t.videoId && s.videoId === t.videoId))
     );
     res.json({
       success: true,
@@ -2912,7 +2958,7 @@ app.get('/api/music/search', async (req, res) => {
       count: uniqueTracks.length,
       tracks: uniqueTracks
     });
-  } catch (err: any) {
+  } catch {
     const fallbackResults = musicStore.searchTracks(queryStr, genreStr);
     res.json({
       success: true,

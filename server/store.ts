@@ -1943,8 +1943,10 @@ class DataStore {
   searchUsers(query: string, viewerId?: string, limit = 30): User[] {
     const q = query.trim().toLowerCase();
     if (!q) return [];
+    const cleanQ = q.replace(/^@+/, '');
+    const digitsOnly = q.replace(/\D/g, '');
     const blocked = viewerId ? (this.blockedBy[viewerId] || []) : [];
-    return this.users.filter(u => {
+    const matches = this.users.filter(u => {
       if (viewerId && u.id === viewerId) return false;
       if (blocked.includes(u.id)) return false;
       const theirs = this.blockedBy[u.id] || [];
@@ -1953,15 +1955,24 @@ class DataStore {
       if (st === 'deleted') return false;
       const priv = this.getPrivacySettings(u.id);
       const earthId = String((u as any).earthId || '').toLowerCase();
+      const email = String((u as any).email || '').toLowerCase();
+      const phone = String((u as any).phone || '').replace(/\D/g, '');
       const byField = canSearchByField(q, { id: u.id, username: u.username, displayName: u.displayName }, priv);
-      // earthId search supported and follows existing search privacy discoverability (same visibility gate)
-      const byEarthId = !!earthId && earthId.includes(q);
-      if (!byField && !byEarthId) return false;
-      // enforce profile visibility for discoverability via search (respect "仅自己可见" / "仅好友可见")
+      const byEarthId = !!earthId && !!cleanQ && earthId.includes(cleanQ);
+      const byEmail = q.includes('@') && !q.startsWith('@') && !!email && email === q;
+      const byPhone = digitsOnly.length >= 6 && !!phone && phone.endsWith(digitsOnly);
+      if (!byField && !byEarthId && !byEmail && !byPhone) return false;
       const isFriend = viewerId ? this.getFriendIds(viewerId).includes(u.id) : false;
       if (!canViewProfileByPolicy(false, isFriend, false, priv)) return false;
       return true;
-    }).slice(0, limit);
+    });
+    matches.sort((a, b) => {
+      const aReg = !a.id.startsWith('u_') ? 1 : 0;
+      const bReg = !b.id.startsWith('u_') ? 1 : 0;
+      if (aReg !== bReg) return bReg - aReg;
+      return (b.isOnline ? 1 : 0) - (a.isOnline ? 1 : 0);
+    });
+    return matches.slice(0, limit);
   }
 
   getFriendIds(userId: string): string[] {

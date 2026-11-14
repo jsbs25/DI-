@@ -12,7 +12,7 @@ import {
   toQueueItems,
 } from '../types/music.ts';
 import { createInitialState, playerReducer, toPersistedState } from './playerReducer.ts';
-import { loadPersistedPlayerState, savePersistedPlayerState } from './persistence.ts';
+import { clearPersistedPlayerState, loadPersistedPlayerState, savePersistedPlayerState } from './persistence.ts';
 import { getGlobalAudioEngine } from './playback/audioEngine.ts';
 import { getEmbedSrc } from './playback/embedAdapter.ts';
 
@@ -23,6 +23,7 @@ export interface MusicPlayerApi {
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
+  stopPlayback: () => void;
   playTrack: (track: MusicTrack | UnifiedTrack, queue?: Array<MusicTrack | UnifiedTrack>, index?: number) => void;
   playNext: () => void;
   playPrevious: () => void;
@@ -60,8 +61,31 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     if (restoredOnceRef.current) return;
     restoredOnceRef.current = true;
     const snap = loadPersistedPlayerState();
-    if (snap) dispatch({ type: 'RESTORE', snapshot: snap });
-    else dispatch({ type: 'RESTORE', snapshot: { version: 1, queue: [], currentIndex: -1, positionSec: 0, volume: state.volume, muted: state.muted, mode: state.mode, savedAt: Date.now() } as any });
+    if (snap && Array.isArray(snap.queue)) {
+      const cleanedQueue = snap.queue.filter((item) => {
+        const audioUrl = String(item?.track?.playback?.audioUrl || '');
+        const title = String(item?.track?.title || '');
+        return (
+          !audioUrl.includes('soundhelix.com') &&
+          !audioUrl.includes('testmp3testfile') &&
+          !audioUrl.includes('cdn.freesound.org/previews/') &&
+          !title.includes('Test Instrumental') &&
+          !title.includes('Connectivity Check')
+        );
+      });
+      if (cleanedQueue.length > 0) {
+        dispatch({
+          type: 'RESTORE',
+          snapshot: {
+            ...snap,
+            queue: cleanedQueue,
+            currentIndex: Math.min(Math.max(0, snap.currentIndex), cleanedQueue.length - 1),
+          },
+        });
+        return;
+      }
+    }
+    dispatch({ type: 'RESTORE', snapshot: { version: 1, queue: [], currentIndex: -1, positionSec: 0, volume: state.volume, muted: state.muted, mode: state.mode, savedAt: Date.now() } as any });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -169,6 +193,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const play = useCallback(() => dispatch({ type: 'PLAY' }), []);
   const pause = useCallback(() => dispatch({ type: 'PAUSE' }), []);
   const togglePlay = useCallback(() => dispatch({ type: 'TOGGLE_PLAY' }), []);
+  const stopPlayback = useCallback(() => {
+    engine.pause();
+    void engine.load(undefined);
+    lastTrackIdRef.current = undefined;
+    lastKindRef.current = undefined;
+    lastAudioSrcRef.current = undefined;
+    dispatch({ type: 'CLEAR_QUEUE' });
+    clearPersistedPlayerState();
+  }, [engine]);
   const playTrack = useCallback((track: MusicTrack | UnifiedTrack, queue?: Array<MusicTrack | UnifiedTrack>, index?: number) => {
     const t = normalizeToUnifiedTrack(track as any);
     const q = queue ? toQueueItems(queue as any[]) : undefined;
@@ -189,7 +222,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'ADD_TO_QUEUE', items: toQueueItems(tracks as any[]), position });
   }, []);
   const removeFromQueue = useCallback((queueId: string) => dispatch({ type: 'REMOVE_FROM_QUEUE', queueId }), []);
-  const clearQueue = useCallback(() => dispatch({ type: 'CLEAR_QUEUE' }), []);
+  const clearQueue = useCallback(() => {
+    dispatch({ type: 'CLEAR_QUEUE' });
+    clearPersistedPlayerState();
+  }, []);
   const reorderQueue = useCallback((from: number, to: number) => dispatch({ type: 'REORDER_QUEUE', from, to }), []);
   const toggleShuffle = useCallback(() => dispatch({ type: 'TOGGLE_SHUFFLE' }), []);
   const setRepeatMode = useCallback((mode: RepeatMode) => dispatch({ type: 'SET_REPEAT', repeat: mode }), []);
@@ -205,10 +241,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const api = useMemo<MusicPlayerApi>(() => ({
     state,
     currentTrack,
-    play, pause, togglePlay, playTrack, playNext, playPrevious, seek, setVolume, toggleMute,
+    play, pause, togglePlay, stopPlayback, playTrack, playNext, playPrevious, seek, setVolume, toggleMute,
     addToQueue, removeFromQueue, clearQueue, reorderQueue, toggleShuffle, setRepeatMode, switchSource, restorePlayerState,
     setError, getAudioAnalyser, resumeAudioContext,
-  }), [state, currentTrack, play, pause, togglePlay, playTrack, playNext, playPrevious, seek, setVolume, toggleMute, addToQueue, removeFromQueue, clearQueue, reorderQueue, toggleShuffle, setRepeatMode, switchSource, restorePlayerState, setError, getAudioAnalyser, resumeAudioContext]);
+  }), [state, currentTrack, play, pause, togglePlay, stopPlayback, playTrack, playNext, playPrevious, seek, setVolume, toggleMute, addToQueue, removeFromQueue, clearQueue, reorderQueue, toggleShuffle, setRepeatMode, switchSource, restorePlayerState, setError, getAudioAnalyser, resumeAudioContext]);
 
   return <PlayerContext.Provider value={api}>{children}</PlayerContext.Provider>;
 }

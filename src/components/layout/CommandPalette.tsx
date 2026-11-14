@@ -52,36 +52,36 @@ export const CommandPalette: React.FC<Props> = ({ open, onOpenChange, onSelectTa
 
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center pt-[10vh] px-4 sm:px-6">
-      <div className="absolute inset-0 bg-black/55 backdrop-blur-md" onClick={() => onOpenChange(false)} />
-      <Command className="relative w-full max-w-[640px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[rgba(7,10,18,0.92)] shadow-[0_24px_80px_-20px_rgba(0,0,0,0.7)] backdrop-blur-2xl" shouldFilter>
-        <div className="flex items-center gap-3 border-b border-white/[0.06] px-4 py-3.5">
-          <Search className="w-4 h-4 text-slate-500 shrink-0" />
+      <div className="absolute inset-0 bg-slate-900/35 dark:bg-black/55 backdrop-blur-md" onClick={() => onOpenChange(false)} />
+      <Command className="relative w-full max-w-[640px] overflow-hidden rounded-2xl border border-slate-200 dark:border-white/[0.14] bg-white/96 dark:bg-[#162238]/96 shadow-2xl backdrop-blur-2xl" shouldFilter>
+        <div className="flex items-center gap-3 border-b border-slate-200 dark:border-white/[0.08] px-4 py-3.5">
+          <Search className="w-4 h-4 text-slate-400 shrink-0" />
           <Command.Input
             autoFocus
             value={value}
             onValueChange={setValue}
             placeholder={lang === 'zh' ? '搜索功能、页面或关键词…' : 'Search modules or type a query…'}
-            className="flex-1 bg-transparent text-[14px] text-slate-100 placeholder:text-slate-500 outline-none"
+            className="flex-1 bg-transparent text-[14px] text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none"
           />
-          <kbd className="hidden sm:inline-flex items-center rounded-md border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-medium text-slate-500">ESC</kbd>
+          <kbd className="hidden sm:inline-flex items-center rounded-md border border-slate-200 dark:border-white/15 bg-slate-100 dark:bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">ESC</kbd>
         </div>
         <Command.List className="max-h-[52vh] overflow-y-auto p-2">
-          <Command.Empty className="px-3 py-8 text-center text-sm text-slate-500">
+          <Command.Empty className="px-3 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
             {lang === 'zh' ? '无匹配结果，Enter 可全局搜索' : 'No matches — Enter to search globally'}
           </Command.Empty>
           {value.trim() && (
-            <Command.Group heading={lang === 'zh' ? '搜索' : 'Search'} className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-slate-500">
+            <Command.Group heading={lang === 'zh' ? '搜索' : 'Search'} className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-slate-400">
               <Command.Item
                 value={`search ${value}`}
                 onSelect={() => { onSearch(value.trim()); onSelectTab('feed'); onOpenChange(false); }}
-                className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-slate-200 aria-selected:bg-white/[0.07] transition-colors"
+                className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-slate-800 dark:text-slate-200 aria-selected:bg-sky-50 dark:aria-selected:bg-white/[0.08] transition-colors"
               >
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[rgba(78,161,255,0.12)] text-[var(--color-accent-soft)]"><Globe2 className="w-4 h-4" /></span>
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-100 dark:bg-sky-500/20 text-sky-600 dark:text-sky-300"><Globe2 className="w-4 h-4" /></span>
                 <span className="truncate">{lang === 'zh' ? `搜索 “${value.trim()}”` : `Search "${value.trim()}"`}</span>
               </Command.Item>
             </Command.Group>
           )}
-          <Command.Group heading={lang === 'zh' ? '模块' : 'Modules'} className="mt-1 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-slate-500">
+          <Command.Group heading={lang === 'zh' ? '模块' : 'Modules'} className="mt-1 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-slate-400">
             {filtered.map(item => {
               const Icon = item.icon;
               const label = lang === 'zh' ? item.zh : item.en;
@@ -90,9 +90,9 @@ export const CommandPalette: React.FC<Props> = ({ open, onOpenChange, onSelectTa
                   key={item.tab}
                   value={`${label} ${item.tab} ${item.en} ${item.zh}`}
                   onSelect={() => { onSelectTab(item.tab); onOpenChange(false); }}
-                  className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-slate-200 aria-selected:bg-white/[0.07] transition-colors"
+                  className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-slate-800 dark:text-slate-200 aria-selected:bg-sky-50 dark:aria-selected:bg-white/[0.08] transition-colors"
                 >
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/[0.04] text-slate-400"><Icon className="w-4 h-4" /></span>
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 dark:bg-white/[0.06] text-slate-500 dark:text-slate-300"><Icon className="w-4 h-4" /></span>
                   <span className="truncate">{label}</span>
                 </Command.Item>
               );
