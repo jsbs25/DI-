@@ -47,12 +47,13 @@ import { normalizePrivacySettings, DEFAULT_PRIVACY_SETTINGS, canViewProfileByPol
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
 import { crawlWebsite } from './webFetcher.ts';
 
-const DATA_FILE = path.resolve(process.env.EARTH_ONE_DATA_FILE || path.resolve(process.cwd(), 'server_data.json'));
+const DATA_DIR = path.resolve(process.env.EARTH_ONE_DATA_DIR || path.join(process.cwd(), 'server_data'));
+const DATA_FILE = path.resolve(process.env.EARTH_ONE_DATA_FILE || path.join(path.dirname(DATA_DIR), 'server_data.json'));
 // Full-text book content is stored here (one JSON file per book) instead of
 // bloating server_data.json with every chapter's body. This keeps the main
 // store small and makes the atomic whole-file rewrite cheap.
-const BOOKS_DIR = path.resolve(process.cwd(), 'server_data', 'books');
-const AVATARS_DIR = path.resolve(process.cwd(), 'server_data', 'uploads', 'avatars');
+const BOOKS_DIR = path.resolve(process.env.EARTH_ONE_BOOKS_DIR || path.join(DATA_DIR, 'books'));
+const AVATARS_DIR = path.resolve(process.env.EARTH_ONE_AVATARS_DIR || path.join(DATA_DIR, 'uploads', 'avatars'));
 
 export interface AuthAccount {
   userId: string;

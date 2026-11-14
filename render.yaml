@@ -1,0 +1,47 @@
+# Render Blueprint for ONE (独一 ONE) - production single-service deployment
+# Source of truth: GitHub main @ 9670f31 (or latest main). Do NOT create empty production data.
+# IMPORTANT: Attach a Persistent Disk and restore REAL production data to the mount path BEFORE first live use.
+# Do NOT point at a new/empty disk as a substitute for production data.
+
+services:
+  - type: web
+    name: earthone-prod
+    runtime: docker
+    plan: standard # choose plan with sufficient RAM/CPU for Node + Vite-built SPA serving + WS
+    region: singapore # adjust to preferred region
+    branch: main
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/auth/me
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: EARTH_ONE_SERVE_DIST
+        value: "true"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: PORT
+        value: "10000"
+      - key: APP_URL
+        value: https://earthone.xn--dqry4os3s3gb.com
+      - key: VITE_BASE
+        value: /
+      # Persistent storage (mount Render Disk at /var/data and place REAL data there)
+      - key: EARTH_ONE_DATA_DIR
+        value: /var/data/server_data
+      - key: EARTH_ONE_DATA_FILE
+        value: /var/data/server_data.json
+      - key: EARTH_ONE_DISCOVERY_DB_FILE
+        value: /var/data/server_data/discovery.db
+      # Provide the following in Render Dashboard as secrets (do NOT commit values):
+      # - CORS_ORIGIN (if split-origin needed; same-origin default usually empty)
+      # - GEMINI_API_KEY / CUSTOM_BASE_URL / CUSTOM_MODEL / CUSTOM_API_KEY (AI)
+      # - GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / WECHAT_* / WHATSAPP_* / TELEGRAM_BOT_TOKEN (auth/channels as used)
+      # - GOOGLE_BOOKS_API_KEY / EUROPEANA_API_KEY / SERPER_API_KEY (search/library as used)
+      # - Mail/SMS provider secrets if enabled
+      # - Any other secrets required by existing production environment
+    disk:
+      name: earthone-data
+      mountPath: /var/data
+      sizeGB: 20 # adjust based on real uploads/books/db size; must fit existing production data

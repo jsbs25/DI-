@@ -19,7 +19,7 @@ import {
 } from '../types.ts';
 import { normalizeCanonicalUrl, generateResourceId } from '../deduplication/urlNormalizer.ts';
 
-const DB_DIR = path.resolve(process.cwd(), 'server_data');
+const DB_DIR = path.resolve(process.env.EARTH_ONE_DATA_DIR || path.join(process.cwd(), 'server_data'));
 const DB_PATH = process.env.EARTH_ONE_DISCOVERY_DB_FILE || path.join(DB_DIR, 'discovery.db');
 
 export class DiscoveryDatabase {

@@ -1028,7 +1028,7 @@ app.post('/api/users/:id/follow', (req, res) => {
 // -------------------------------------------------------------
 // 1c. MESSENGER ATTACHMENTS (authenticated, permission-checked)
 // -------------------------------------------------------------
-const UPLOAD_DIR = path.resolve(process.cwd(), 'server_data', 'uploads');
+const UPLOAD_DIR = path.resolve(process.env.EARTH_ONE_UPLOADS_DIR || path.join(process.env.EARTH_ONE_DATA_DIR ? path.resolve(process.env.EARTH_ONE_DATA_DIR) : path.join(process.cwd(), 'server_data'), 'uploads'));
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ATT_ID_RE = /^att_[a-zA-Z0-9_-]{6,80}$/;
@@ -1790,7 +1790,7 @@ app.post('/api/messenger/profile/avatar', async (req, res) => {
   try {
     await store.mutate(async () => {
       // remove previous custom avatar files to avoid orphan accumulation/overwrite issues
-      const prevDir = path.join(process.cwd(), 'server_data', 'uploads', 'avatars', user.id);
+      const prevDir = path.join(UPLOAD_DIR, 'avatars', user.id);
       try {
         if (fs.existsSync(prevDir)) {
           for (const f of fs.readdirSync(prevDir)) {
@@ -1836,7 +1836,7 @@ app.get('/api/messenger/avatar/:userId/:file', (req, res) => {
   if (!/^[a-zA-Z0-9_-]{1,120}$/.test(userId) || !/^av_[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/i.test(file)) {
     return res.status(400).json({ success: false, error: 'Invalid avatar path' });
   }
-  const dir = path.resolve(process.cwd(), 'server_data', 'uploads', 'avatars', userId);
+  const dir = path.resolve(UPLOAD_DIR, 'avatars', userId);
   const resolved = path.resolve(dir, file);
   if (!resolved.startsWith(dir + path.sep)) return res.status(403).json({ success: false, error: 'Forbidden' });
   if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: 'Avatar not found' });
