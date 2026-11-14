@@ -420,20 +420,44 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     if (ref.sourceUrl || ref.externalReadUrl) window.open(ref.sourceUrl || ref.externalReadUrl, '_blank', 'noopener,noreferrer');
   };
 
-  const openReader = (book: Book) => {
+  const ensureShelfForReading = async (book: Book): Promise<(BookShelfItem & { book: Book }) | null> => {
+    const existing = shelf.find(i => i.bookId === book.id);
+    if (existing) return existing;
+    try {
+      const res = await fetch('/api/library/shelf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
+        body: JSON.stringify({ bookId: book.id, status: 'reading' })
+      });
+      const data = await res.json();
+      if (data.success && data.item) {
+        const entry = { ...data.item, book } as BookShelfItem & { book: Book };
+        setShelf(prev => prev.some(i => i.bookId === book.id) ? prev.map(i => i.bookId === book.id ? entry : i) : [...prev, entry]);
+        return entry;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return null;
+  };
+
+  const openReader = async (book: Book) => {
     // EPUB books use the epub.js reader; text books use the chapter reader
     if (book.epubUrl) {
       setReadingEpub(book);
+      await ensureShelfForReading(book);
       return;
     }
     const pdf = getBookPdfUrl(book as any) || (book.formatType === 'pdf' ? (book as any).textUrl || book.externalReadUrl : null);
     if (pdf) {
       setPdfReader({ url: pdf, title: book.title, sourceUrl: book.sourceUrl || book.externalReadUrl || pdf });
+      await ensureShelfForReading(book);
       return;
     }
     if (book.chapters && book.chapters.length > 0 && book.chapters.some(ch => ch.content && ch.content.trim().length > 0)) {
       readerReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      const shelfItem = shelf.find(item => item.bookId === book.id);
+      let shelfItem = shelf.find(item => item.bookId === book.id);
+      if (!shelfItem) shelfItem = await ensureShelfForReading(book) || undefined;
       const savedChapterIndex = shelfItem?.lastReadChapterId
         ? book.chapters.findIndex(chapter => chapter.id === shelfItem.lastReadChapterId)
         : -1;
@@ -453,7 +477,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       return;
     }
     const embed = getBookEmbedUrl(book as any);
-    if (embed) { setWebReader({ url: embed.url, title: book.title, sourceUrl: book.sourceUrl || book.externalReadUrl, label: embed.label }); return; }
+    if (embed) { setWebReader({ url: embed.url, title: book.title, sourceUrl: book.sourceUrl || book.externalReadUrl, label: embed.label }); await ensureShelfForReading(book); return; }
     setReaderNotice('该书籍当前没有可在站内阅读的全文（可能仅有元数据/受版权限制/需在来源站点借阅或登录）。请使用“资源来源/官方来源”在合法来源查看。');
   };
 
@@ -480,7 +504,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
   const openShelfBook = async (book: Book) => {
     const full = await loadFullBook(book.id);
-    openReader(full || book);
+    await openReader(full || book);
   };
 
   const closeReader = () => {
@@ -708,7 +732,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
   const saveShelfReadingState = async (book: Book, chapterIndex: number, requestedProgress?: number) => {
     const chapter = book.chapters[chapterIndex];
-    if (!chapter || !shelf.some(item => item.bookId === book.id)) return;
+    if (!chapter) return;
+    if (!shelf.some(item => item.bookId === book.id)) {
+      await ensureShelfForReading(book);
+    }
     const progress = requestedProgress ?? Math.min(99, Math.round(((chapterIndex + 1) / book.chapters.length) * 100));
     try {
       const res = await fetch(`/api/library/shelf/${encodeURIComponent(book.id)}/reading-state`, {
@@ -718,9 +745,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       });
       const data = await res.json();
       if (data.success && data.item) {
-        setShelf(prev => prev.map(item => item.bookId === book.id
-          ? { ...data.item, book: item.book }
-          : item));
+        setShelf(prev => {
+          const bookRef = prev.find(item => item.bookId === book.id)?.book || book;
+          const entry = { ...data.item, book: bookRef };
+          return prev.some(item => item.bookId === book.id) ? prev.map(item => item.bookId === book.id ? entry : item) : [...prev, entry];
+        });
       }
     } catch (e) {
       console.error(e);
@@ -728,7 +757,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   };
 
   const saveEpubProgress = async (bookId: string, progress: number, cfi: string, ownerId?: string) => {
-    if (!ownerId || currentUser?.id !== ownerId || !shelf.some(item => item.bookId === bookId && item.userId === ownerId)) return;
+    if (!ownerId || currentUser?.id !== ownerId) return;
+    if (!shelf.some(item => item.bookId === bookId && item.userId === ownerId)) {
+      const book = readingEpub?.id === bookId ? readingEpub : selectedBook?.id === bookId ? selectedBook : books.find(b => b.id === bookId);
+      if (book) await ensureShelfForReading(book);
+    }
     try {
       const res = await fetch(`/api/library/shelf/${encodeURIComponent(bookId)}/epub-reading-state`, {
         method: 'POST',
@@ -737,9 +770,12 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       });
       const data = await res.json();
       if (data.success && data.item) {
-        setShelf(prev => prev.map(item => item.bookId === bookId
-          ? { ...data.item, book: item.book }
-          : item));
+        setShelf(prev => {
+          const bookRef = prev.find(item => item.bookId === bookId)?.book || readingEpub || selectedBook || books.find(b => b.id === bookId);
+          if (!bookRef) return prev;
+          const entry = { ...data.item, book: bookRef };
+          return prev.some(item => item.bookId === bookId) ? prev.map(item => item.bookId === bookId ? entry : item) : [...prev, entry];
+        });
       }
     } catch (e) {
       console.error(e);
