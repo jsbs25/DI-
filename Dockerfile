@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-bookworm-slim AS build
+# Node 26+ recommended: server uses node:sqlite (DatabaseSync) and is validated on Node 26.x.
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 
 # Install dependencies (no package-lock in repo; keep deterministic enough for deploy)
@@ -13,7 +14,7 @@ ARG VITE_BASE=/
 ENV VITE_BASE=${VITE_BASE}
 RUN npm run build
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV EARTH_ONE_SERVE_DIST=true
@@ -34,9 +35,10 @@ COPY --from=build /app/tsconfig.json ./tsconfig.json
 COPY --from=build /app/vite.config.ts ./vite.config.ts
 COPY --from=build /app/package.json ./package.json
 
-# Persistent data must be mounted here (Render Disk). Do NOT bake production data into image.
+# Persistent data must be mounted at runtime (platform volume). Do NOT bake production data into image.
 RUN mkdir -p /var/data
 VOLUME ["/var/data"]
 
-EXPOSE 10000
-CMD ["sh", "-c", "PORT=${PORT:-10000} npx tsx server.ts"]
+# Platform should inject PORT; default 3000 matches server.ts fallback.
+EXPOSE 3000
+CMD ["sh", "-c", "exec npx tsx server.ts"]

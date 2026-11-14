@@ -353,6 +353,14 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ success: true, user: user || null });
 });
 
+// Lightweight health checks for platform probes / load balancers (no auth, no secrets).
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({ ok: true, service: 'one', env: process.env.NODE_ENV || 'development' });
+});
+app.get('/healthz', (_req, res) => {
+  res.status(200).type('text/plain').send('ok');
+});
+
 app.get('/api/auth/status', (req, res) => {
   const devEnabled = isDevLoginEnabledConfig();
   const devAllowed = isDevQuickLoginAllowed(req);
