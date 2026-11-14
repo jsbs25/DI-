@@ -34,9 +34,8 @@ COPY --from=build /app/tsconfig.json ./tsconfig.json
 COPY --from=build /app/vite.config.ts ./vite.config.ts
 COPY --from=build /app/package.json ./package.json
 
-# Persistent data must be mounted here (Render Disk). Do NOT bake production data into image.
+# Persistent data directory. On Railway, attach a Railway Volume mounted at /var/data. Do NOT bake production data into image.
 RUN mkdir -p /var/data
-VOLUME ["/var/data"]
 
 EXPOSE 10000
 CMD ["sh", "-c", "PORT=${PORT:-10000} npx tsx server.ts"]
