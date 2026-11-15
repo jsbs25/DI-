@@ -57,12 +57,12 @@ function trackFromUrl(input: string): EmbeddableMusicTrack | null {
       id: `bili_${bvid}`,
       title: `Bilibili 音乐 (${bvid})`,
       artist: 'Bilibili',
-      album: 'Bilibili',
+      album: 'Bilibili 官方播放器',
       genre: 'B站音乐',
       durationSeconds: 0,
-      embedUrl: `https://player.bilibili.com/player.html?bvid=${bvid}&page=1&autoplay=1&danmaku=0`,
+      embedUrl: `https://player.bilibili.com/player.html?bvid=${bvid}&page=1&autoplay=0&danmaku=0`,
       coverUrl: '/assets/music/electronic-pulse.jpg',
-      source: 'Bilibili',
+      source: 'Bilibili 官方播放器',
       sourceUrl: `https://www.bilibili.com/video/${bvid}`,
       license: 'Bilibili official embed',
       crawledAt: now,
@@ -75,6 +75,30 @@ function trackFromUrl(input: string): EmbeddableMusicTrack | null {
   let u: URL;
   try { u = new URL(raw); } catch { return null; }
   const host = u.hostname.replace(/^www\./, '').replace(/^m\./, '');
+
+  // NetEase Cloud Music official single-song outchain widget (non-VIP public songs only)
+  if (host === 'music.163.com' || host === 'y.music.163.com') {
+    const songId = u.searchParams.get('id') || (u.hash.match(/song\?id=(\d+)/)?.[1]) || (raw.match(/song[\/?=](\d+)/)?.[1]);
+    if (songId && /^\d+$/.test(songId)) {
+      return {
+        id: `ncm_${songId}`,
+        title: `网易云音乐单曲 (${songId})`,
+        artist: '网易云音乐 (官方外链)',
+        album: '网易云官方外链播放器',
+        genre: '网易云外链',
+        durationSeconds: 0,
+        embedUrl: `https://music.163.com/outchain/player?type=2&id=${songId}&auto=0&height=66`,
+        coverUrl: '/assets/music/neo-classical.jpg',
+        source: '网易云音乐官方外链',
+        sourceUrl: `https://music.163.com/#/song?id=${songId}`,
+        license: 'NetEase official outchain widget (non-VIP tracks only)',
+        crawledAt: now,
+        description: '网易云官方外链播放器；VIP/版权受限曲目无法站内播放，可点击原平台链接打开。',
+        playable: 'embed'
+      };
+    }
+  }
+
   const yt = extractVideoId(raw);
   if (yt) return {
     id: `yt_${yt}`, title: 'YouTube 音乐', artist: 'YouTube', album: 'YouTube (official embed)', genre: 'YouTube', durationSeconds: 0,

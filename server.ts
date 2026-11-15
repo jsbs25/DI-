@@ -42,6 +42,10 @@ import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { searchBilibiliVideos } from './server/bilibiliCrawler.ts';
+import { getRegisteredProviders } from './server/media/providers.ts';
+import { probeDirectMediaUrl, probeEmbedUrl } from './server/media/probe.ts';
+import { CURATED_GLOBAL_CN_MUSIC, enrichMusicTrack, enrichVideoItem, getCombinedEnrichedVideos } from './server/media/catalog.ts';
+import { dispatchUnifiedMusicSearch, dispatchUnifiedVideoSearch, resolveRegionFromRequest } from './server/media/scheduler.ts';
 import { searchOpenImages } from './server/openImageCrawler.ts';
 import { discoveryDb } from './server/discovery/database/db.ts';
 import { executeUnifiedSearch } from './server/discovery/search/unifiedSearchEngine.ts';
@@ -2709,7 +2713,9 @@ app.post('/api/articles/:id/tip', (req, res) => {
 });
 
 app.get('/api/videos', (req, res) => {
-  res.json({ success: true, videos: store.videos });
+  const regionCtx = resolveRegionFromRequest(req);
+  const videos = getCombinedEnrichedVideos(store.videos, regionCtx.region);
+  res.json({ success: true, region: regionCtx.region, mode: regionCtx.mode, videos });
 });
 
 // -------------------------------------------------------------
@@ -2851,136 +2857,135 @@ app.post('/api/ai/translate', async (req, res) => {
 // -------------------------------------------------------------
 // 7b. VENUS PLANET MUSIC UNIVERSE & FIXED AUDIO CRAWLER
 // -------------------------------------------------------------
-app.get('/api/music/tracks', (req, res) => {
-  const { genre } = req.query;
-  const tracks = musicStore.getTracks(typeof genre === 'string' ? genre : undefined);
-  res.json({ success: true, tracks });
+app.get('/api/media/providers', (req, res) => {
+  const regionCtx = resolveRegionFromRequest(req);
+  res.json({
+    success: true,
+    detectedRegion: regionCtx.region,
+    mode: regionCtx.mode,
+    signal: regionCtx.signal,
+    providers: getRegisteredProviders(),
+  });
 });
 
-async function searchOnlineMusicStreams(query: string): Promise<any[]> {
-  if (!query || !query.trim()) return [];
-  const direct = resolveMusicEmbedUrl(query.trim());
-  if (direct) return [direct];
-
-  try {
-    const [ytResults] = await Promise.all([
-      searchYouTubeMusic(query.trim(), 14).catch(() => []),
-    ]);
-    if (ytResults.length > 0) {
-      return ytResults.map((t) => ({
-        ...t,
-        playable: t.playable || (t.embedUrl ? 'embed' : 'audio'),
-      }));
-    }
-  } catch (err) {
-    console.warn('Online music search fallback error:', err);
+app.post('/api/media/probe', async (req, res) => {
+  const { url, playbackType, mediaType } = req.body || {};
+  if (typeof url !== 'string' || !url.trim()) {
+    return res.status(400).json({ success: false, error: 'url is required' });
   }
+  try {
+    const isEmbed = playbackType === 'official_embed';
+    const kind = mediaType === 'video' ? 'video' : 'audio';
+    const outcome = isEmbed
+      ? await probeEmbedUrl(url.trim())
+      : await probeDirectMediaUrl(url.trim(), kind);
+    res.json({ success: true, ...outcome });
+  } catch (err: any) {
+    res.status(500).json({ success: false, ok: false, error: err?.message || 'Probe failed' });
+  }
+});
+
+app.get('/api/media/search', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const mediaType = req.query.mediaType === 'video' ? 'video' : 'music';
+  const genre = typeof req.query.genre === 'string' ? req.query.genre : undefined;
+  const limit = Math.max(4, Math.min(30, Number(req.query.limit) || 18));
+  const regionCtx = resolveRegionFromRequest(req);
 
   try {
-    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim() + ' music')}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-      },
-      signal: AbortSignal.timeout(6000)
+    if (mediaType === 'video') {
+      const result = await dispatchUnifiedVideoSearch({
+        query: q,
+        region: regionCtx.region,
+        limit,
+        storeVideos: getCombinedEnrichedVideos(store.videos, regionCtx.region),
+      });
+      return res.json({
+        success: true,
+        mediaType: 'video',
+        region: regionCtx.region,
+        mode: regionCtx.mode,
+        query: q,
+        count: result.videos.length,
+        videos: result.videos,
+        providersQueried: result.providersQueried,
+      });
+    }
+
+    const result = await dispatchUnifiedMusicSearch({
+      query: q,
+      genre,
+      region: regionCtx.region,
+      limit,
     });
-    if (!res.ok) return [];
-    const html = await res.text();
-    const start = html.indexOf('ytInitialData = ');
-    if (start === -1) return [];
-    const jsonStart = start + 'ytInitialData = '.length;
-    const end = html.indexOf(';</script>', jsonStart);
-    if (end === -1) return [];
-    const jsonStr = html.slice(jsonStart, end);
-    const data = JSON.parse(jsonStr);
-    const sectionList = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
-    const tracks: any[] = [];
-    for (const section of sectionList) {
-      const items = section.itemSectionRenderer?.contents || [];
-      for (const item of items) {
-        const v = item.videoRenderer;
-        if (!v || !v.videoId) continue;
-        const videoId = v.videoId;
-        const title = v.title?.runs?.[0]?.text || 'Untitled Track';
-        const artist = v.ownerText?.runs?.[0]?.text || 'YouTube Music';
-        const durationText = v.lengthText?.simpleText || '3:30';
-        let durationSeconds = 210;
-        const parts = durationText.split(':').map(Number);
-        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-          durationSeconds = parts[0] * 60 + parts[1];
-        } else if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
-          durationSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
-        }
-        tracks.push({
-          id: `yt_${videoId}`,
-          videoId,
-          title,
-          artist,
-          album: 'YouTube Music Stream',
-          genre: 'YouTube',
-          durationSeconds,
-          durationFormatted: durationText,
-          embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&rel=0`,
-          playable: 'embed',
-          coverUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-          source: 'YouTube Music',
-          sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
-          license: 'YouTube official embed',
-          views: v.viewCountText?.simpleText || '',
-          bpm: 90
-        });
-        if (tracks.length >= 16) break;
-      }
-      if (tracks.length >= 16) break;
-    }
-    return tracks;
-  } catch (err) {
-    console.warn('Online music search error:', err);
-    return [];
+    return res.json({
+      success: true,
+      mediaType: 'music',
+      region: regionCtx.region,
+      mode: regionCtx.mode,
+      query: q,
+      count: result.tracks.length,
+      tracks: result.tracks,
+      providersQueried: result.providersQueried,
+      dispatchMode: result.mode,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Unified media search failed' });
   }
-}
+});
+
+app.get('/api/music/tracks', (req, res) => {
+  const { genre } = req.query;
+  const regionCtx = resolveRegionFromRequest(req);
+  const genreStr = typeof genre === 'string' ? genre : undefined;
+  const diskTracks = musicStore.getTracks(genreStr);
+  const curated = !genreStr || genreStr === 'all'
+    ? CURATED_GLOBAL_CN_MUSIC
+    : CURATED_GLOBAL_CN_MUSIC.filter((t) => String(t.genre || '').toLowerCase() === genreStr.toLowerCase());
+  const rawList = regionCtx.region === 'cn' ? [...curated, ...diskTracks] : [...diskTracks, ...curated];
+  const seen = new Set<string>();
+  const tracks = rawList
+    .filter((t) => {
+      if (!t?.id || seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    })
+    .map((t) => enrichMusicTrack(t, regionCtx.region));
+  res.json({ success: true, region: regionCtx.region, tracks });
+});
 
 app.get('/api/music/search', async (req, res) => {
   const { q, genre } = req.query;
   const queryStr = typeof q === 'string' ? q.trim() : '';
   const genreStr = typeof genre === 'string' ? genre : undefined;
-
-  if (!queryStr) {
-    const results = musicStore.searchTracks('', genreStr);
-    return res.json({ success: true, query: '', count: results.length, tracks: results });
-  }
+  const regionCtx = resolveRegionFromRequest(req);
 
   try {
-    const direct = resolveMusicEmbedUrl(queryStr);
-    if (direct) {
-      return res.json({
-        success: true,
-        query: queryStr,
-        count: 1,
-        tracks: [direct],
-        mode: 'embed-url',
-      });
-    }
-
-    const localResults = musicStore.searchTracks(queryStr, genreStr);
-    const onlineTracks = await searchOnlineMusicStreams(queryStr);
-    const merged = [...localResults, ...onlineTracks];
-    const uniqueTracks = merged.filter((t, idx, self) =>
-      idx === self.findIndex(s => s.id === t.id || (s.videoId && t.videoId && s.videoId === t.videoId))
-    );
+    const dispatched = await dispatchUnifiedMusicSearch({
+      query: queryStr,
+      genre: genreStr,
+      region: regionCtx.region,
+      limit: 20,
+    });
     res.json({
       success: true,
+      region: regionCtx.region,
       query: queryStr,
-      count: uniqueTracks.length,
-      tracks: uniqueTracks
+      count: dispatched.tracks.length,
+      tracks: dispatched.tracks,
+      providersQueried: dispatched.providersQueried,
+      mode: dispatched.mode,
     });
   } catch {
-    const fallbackResults = musicStore.searchTracks(queryStr, genreStr);
+    const fallbackResults = musicStore
+      .searchTracks(queryStr, genreStr)
+      .map((t) => enrichMusicTrack(t, regionCtx.region));
     res.json({
       success: true,
+      region: regionCtx.region,
       query: queryStr,
       count: fallbackResults.length,
-      tracks: fallbackResults
+      tracks: fallbackResults,
     });
   }
 });
@@ -2990,10 +2995,12 @@ app.get('/api/music/youtube-search', async (req, res) => {
   if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
   if (q.length > 200) return res.status(400).json({ success: false, error: 'Search query must be 200 characters or fewer' });
   const limit = Math.max(1, Math.min(24, Number(req.query.limit) || 12));
+  const regionCtx = resolveRegionFromRequest(req);
   try {
     const direct = resolveMusicEmbedUrl(q);
-    const tracks = direct ? [direct] : await searchYouTubeMusic(q, limit);
-    res.json({ success: true, query: q, tracks, mode: direct ? 'embed-url' : 'search' });
+    const rawTracks = direct ? [direct] : await searchYouTubeMusic(q, limit);
+    const tracks = rawTracks.map((t) => enrichMusicTrack(t, regionCtx.region));
+    res.json({ success: true, region: regionCtx.region, query: q, tracks, mode: direct ? 'embed-url' : 'search' });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Music search failed' });
   }
@@ -3003,9 +3010,20 @@ app.get('/api/bilibili/search', async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
   const limit = Math.max(1, Math.min(30, Number(req.query.limit) || 20));
+  const regionCtx = resolveRegionFromRequest(req);
   try {
     const results = await searchBilibiliVideos(q, limit);
-    res.json({ success: true, query: q, count: results.length, results, videos: results });
+    const enriched = results.map((b) =>
+      enrichVideoItem(
+        {
+          ...b,
+          embedUrl: `https://player.bilibili.com/player.html?bvid=${b.bvid}&page=1&autoplay=0&danmaku=0`,
+          source: 'Bilibili',
+        },
+        regionCtx.region
+      )
+    );
+    res.json({ success: true, region: regionCtx.region, query: q, count: enriched.length, results: enriched, videos: enriched });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Bilibili search failed' });
   }
@@ -3013,13 +3031,14 @@ app.get('/api/bilibili/search', async (req, res) => {
 
 app.post('/api/music/crawl', async (req, res) => {
   const { sourceDomain, keyword } = req.body || {};
+  const regionCtx = resolveRegionFromRequest(req);
   try {
     const result = await musicStore.crawlExternalMusic(sourceDomain, keyword);
-    // success reflects whether data was actually crawled+saved; errors explain failures/limitations
+    const enrichedNew = (result.newTracks || []).map((t) => enrichMusicTrack(t, regionCtx.region));
     if (!result.success) {
-      return res.status(200).json({ ...result, success: false });
+      return res.status(200).json({ ...result, newTracks: enrichedNew, success: false });
     }
-    res.json({ ...result, success: true });
+    res.json({ ...result, newTracks: enrichedNew, success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Music crawl failed', errors: [err?.message || 'Music crawl failed'], crawledCount: 0, savedCount: 0, newTracks: [] });
   }
