@@ -95,6 +95,8 @@ interface BrowserTab {
   id: string;
   title: string;
   url: string;
+  favicon?: string;
+  loading?: boolean;
   readerMode: boolean;
   content?: string;
   author?: string;
@@ -380,6 +382,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
   const searchResultsScrollRef = useRef<HTMLDivElement | null>(null);
   const searchScrollPositionsRef = useRef<Record<string, number>>({});
   const searchRequestIdRef = useRef(0);
+  const handleNewTabRef = useRef<() => void>(() => {});
+  const handleRestoreClosedTabRef = useRef<() => void>(() => {});
+  const goBackRef = useRef<() => void>(() => {});
+  const goForwardRef = useRef<() => void>(() => {});
+  const handleCloseTabRef = useRef<(id: string, e: any) => void>(() => {});
 
   // Browser-local language (defaults to global app language; user can override)
   const [browserLang, setBrowserLang] = useState<Language>(lang);
@@ -477,7 +484,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
           restoredTabIdsRef.current = new Set(restoredTabs.map(tab => tab.id));
           setTabs(restoredTabs);
           setActiveTabId(activeId);
-          setInputUrl(restoredTabs.find(tab => tab.id === activeId)?.url || restoredTabs[0].url);
+          const restoredUrl = restoredTabs.find(tab => tab.id === activeId)?.url || restoredTabs[0].url;
+          setInputUrl(restoredUrl === JUPITER_HOME_URL || restoredUrl === 'about:blank' ? '' : restoredUrl);
           setHistory(Object.fromEntries(restoredTabs.map(tab => [tab.id, [tab.url]])));
           setHistoryIndex(Object.fromEntries(restoredTabs.map(tab => [tab.id, 0])));
           setSessionRestoreNotice({ kind: 'restoring', restoredCount: restoredTabs.length, failedCount: 0 });
@@ -833,6 +841,56 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
     setBrowserPrintMessage(null);
   }, [activeTabId]);
 
+  useEffect(() => {
+    if (!browserEngine?.onShortcut) return;
+    return browserEngine.onShortcut(({ action }) => {
+      switch (action) {
+        case 'new-tab':
+          handleNewTabRef.current();
+          break;
+        case 'close-tab':
+          if (tabsRef.current.length > 1) handleCloseTabRef.current(activeTabIdRef.current, { stopPropagation: () => {} } as any);
+          break;
+        case 'restore-tab':
+          handleRestoreClosedTabRef.current();
+          break;
+        case 'find':
+          openFindBar();
+          break;
+        case 'focus-address':
+          addressBarRef.current?.focus();
+          addressBarRef.current?.select();
+          break;
+        case 'reload':
+          void browserEngine.reload(activeTabIdRef.current);
+          break;
+        case 'stop':
+          void browserEngine.stop(activeTabIdRef.current);
+          break;
+        case 'back':
+          goBackRef.current();
+          break;
+        case 'forward':
+          goForwardRef.current();
+          break;
+        case 'zoom-in':
+          void browserEngine.changeZoom('in');
+          break;
+        case 'zoom-out':
+          void browserEngine.changeZoom('out');
+          break;
+        case 'zoom-reset':
+          void browserEngine.changeZoom('reset');
+          break;
+        case 'devtools':
+          void browserEngine.toggleDevTools(activeTabIdRef.current);
+          break;
+        default:
+          break;
+      }
+    });
+  }, [browserEngine, openFindBar]);
+
   const recordBrowserVisit = useCallback((tabId: string, url: string, title: string) => {
     if (!isHttpUrl(url)) return;
     const safeTitle = (title || new URL(url).hostname).slice(0, 300);
@@ -909,7 +967,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
       const nextTab = remaining.find(tab => tab.id === closedTab.activeTabId) || remaining[0];
       if (!nextTab) return;
       setActiveTabId(nextTab.id);
-      setInputUrl(closedTab.activeTab?.url || nextTab.url);
+      const nextUrl = closedTab.activeTab?.url || nextTab.url;
+      setInputUrl(nextUrl === JUPITER_HOME_URL || nextUrl === 'about:blank' ? '' : nextUrl);
       setSearchResults([]);
       setBrowserEngineError(null);
     });
@@ -946,11 +1005,17 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
       }
       if (state.navigated && state.url) recordBrowserVisit(state.tabId, state.url, state.title);
       else if (state.url && state.title) updateRecentVisitTitle(state.tabId, state.url, state.title);
-      if (state.url) {
-        setTabs(previous => previous.map(tab => tab.id === state.tabId
-          ? { ...tab, url: state.url, title: state.title || tab.title }
-          : tab));
-        if (state.active || state.tabId === activeTabId) setInputUrl(state.url);
+      setTabs(previous => previous.map(tab => tab.id === state.tabId
+        ? {
+            ...tab,
+            url: state.url || tab.url,
+            title: state.title || tab.title,
+            favicon: state.favicon ?? tab.favicon,
+            loading: state.loading
+          }
+        : tab));
+      if ((state.active || state.tabId === activeTabId) && state.url) {
+        setInputUrl(state.url === JUPITER_HOME_URL || state.url === 'about:blank' ? '' : state.url);
       }
     });
   }, [browserEngine, activeTabId, recordBrowserVisit, updateRecentVisitTitle]);
@@ -1084,7 +1149,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
 
   useEffect(() => {
     if (activeTab) {
-      setInputUrl(activeTab.url);
+      const url = activeTab.url;
+      setInputUrl(url === JUPITER_HOME_URL || url === 'about:blank' ? '' : url);
     }
     // Reset translation whenever the active tab changes
     setTranslatedContent('');
@@ -1321,22 +1387,21 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
 
   const handleNavigate = async (targetUrl: string, fromHistory = false) => {
     if (targetUrl === JUPITER_HOME_URL) {
-      const newId = `tab_${Date.now()}`;
-      const newTab: BrowserTab = {
-        id: newId,
-        title: 'JUPITER',
-        url: JUPITER_HOME_URL,
-        readerMode: false,
-        content: '',
-        author: '',
-        readTime: ''
-      };
-      setTabs(previous => [...previous, newTab]);
-      setActiveTabId(newId);
+      const title = 'JUPITER';
+      if (!fromHistory) {
+        saveCurrentSearchScroll();
+        pushHistory(activeTabId, JUPITER_HOME_URL);
+      }
+      setTabs(previous => previous.map(tab => tab.id === activeTabId
+        ? { ...tab, url: JUPITER_HOME_URL, title, readerMode: !browserEngine, content: '', author: '', readTime: '', crawlerView: false, crawlerData: undefined }
+        : tab));
       setInputUrl('');
       setSearchResults([]);
       setLastSearchQuery('');
       setSearchError(null);
+      setBrowserEngineError(null);
+      setJupiterContentError(null);
+      setIsLoading(false);
       return;
     }
     let cleanUrl = targetUrl.trim();
@@ -1543,10 +1608,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newId);
-    setHistory(prev => ({ ...prev, [newId]: [newTab.url] }));
+    setInputUrl('');
+    setHistory(prev => ({ ...prev, [newId]: [JUPITER_HOME_URL] }));
     setHistoryIndex(prev => ({ ...prev, [newId]: 0 }));
     setSearchResults([]);
-    recordBrowserVisit(newId, newTab.url, newTab.title);
+    setLastSearchQuery('');
+    setSearchError(null);
+    setBrowserEngineError(null);
   };
 
   const handleReorderTabs = (tabIds: string[]) => {
@@ -1610,6 +1678,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
     if (browserEngine) void browserEngine.goForward(activeTabId);
   };
 
+
   useEffect(() => {
     const route = activeTab ? parseJupiterSearchRoute(activeTab.url) : null;
     if (route) {
@@ -1653,6 +1722,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
     if (!route || page < 1 || page > searchPageCount) return;
     void runJupiterSearch(route.query, { ...route, page });
   };
+
+  useEffect(() => { handleNewTabRef.current = handleNewTab; }, [handleNewTab]);
+  useEffect(() => { handleRestoreClosedTabRef.current = handleRestoreClosedTab; }, [handleRestoreClosedTab]);
+  useEffect(() => { goBackRef.current = goBack; }, [goBack]);
+  useEffect(() => { goForwardRef.current = goForward; }, [goForward]);
+  useEffect(() => { handleCloseTabRef.current = handleCloseTab; });
 
   // 星图联动：仅 /jupiter/search 深链时消费 initialQuery；普通进入保持首页，避免地址栏被预填
   useEffect(() => {
@@ -1989,14 +2064,21 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
             <ArrowRight className="w-4 h-4" />
           </button>
           <button
-            onClick={() => browserEngine ? void browserEngine.reload(activeTabId) : void handleNavigate(inputUrl)}
+            onClick={() => {
+              if (browserEngine) {
+                if (isLoading && browserEngineState?.tabId === activeTabId) void browserEngine.stop(activeTabId);
+                else void browserEngine.reload(activeTabId);
+              } else {
+                void handleNavigate(inputUrl);
+              }
+            }}
             className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.07] hover:text-white ${
-              isLoading ? 'animate-spin text-cyan-400' : ''
+              !browserEngine && isLoading ? 'animate-spin text-cyan-400' : ''
             }`}
-            aria-label="重新加载"
-            title="重新加载 (Ctrl+R / F5)"
+            aria-label={isLoading && browserEngine ? '停止加载' : '重新加载'}
+            title={isLoading && browserEngine ? '停止加载 (Esc)' : '重新加载 (Ctrl+R / F5)'}
           >
-            <RotateCw className="w-4 h-4" />
+            {isLoading && browserEngine ? <X className="w-4 h-4" /> : <RotateCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-cyan-400' : ''}`} />}
           </button>
           <button
             onClick={() => handleNavigate(JUPITER_HOME_URL)}
@@ -2051,7 +2133,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
             value={inputUrl}
             onChange={e => setInputUrl(e.target.value)}
             aria-label="输入网址或搜索词"
-            placeholder="搜索或输入网址"
+            placeholder=""
             className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-500 focus:outline-none"
           />
           {inputUrl && (
@@ -2750,48 +2832,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
               </article>
               )
             ) : activeTab.url === JUPITER_HOME_URL ? (
-              <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col items-center justify-center px-4 py-16 text-center sm:py-24">
-                <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[11px] tracking-[0.18em] text-slate-300">
-                  <span className="h-1.5 w-1.5 rounded-full bg-cyan-300/80" aria-hidden="true" />
-                  ONE BROWSER
-                </div>
-                <h1 className="text-balance text-3xl font-semibold tracking-tight text-white sm:text-5xl">Explore Beyond Boundaries.</h1>
-                <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-400 sm:text-base">JUPITER 统一搜索 EARTH 内容与公开网络来源，并以阅读、查看器或{browserEngine ? '原生 Chromium' : '网页预览'}方式打开结果。结果与可用性取决于真实来源与配置。</p>
-                <form
-                  onSubmit={event => {
-                    event.preventDefault();
-                    void handleNavigate(inputUrl);
-                  }}
-                  className="mt-8 w-full max-w-2xl flex items-center gap-3 rounded-2xl border border-white/10 bg-black/25 px-4 py-3.5 transition-all hover:border-white/15 focus-within:border-cyan-400/40 focus-within:ring-2 focus-within:ring-cyan-400/10"
-                >
-                  <Search className="h-5 w-5 shrink-0 text-slate-400" />
-                  <input
-                    value={inputUrl}
-                    onChange={event => setInputUrl(event.target.value)}
-                    aria-label="搜索或输入网址"
-                    placeholder="搜索 EARTH 与互联网，或输入网址"
-                    className="min-w-0 flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-slate-500 sm:text-base"
-                    autoComplete="off"
-                  />
-                  <button type="submit" className="shrink-0 rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300">搜索</button>
-                </form>
-                <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-                  {[
-                    { label: 'NASA Earth', url: 'https://earthobservatory.nasa.gov' },
-                    { label: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Earth' },
-                    { label: 'arXiv', url: 'https://arxiv.org' },
-                    { label: 'Project Gutenberg', url: 'https://www.gutenberg.org' },
-                    { label: 'GitHub', url: 'https://github.com' }
-                  ].map(item => (
-                    <button key={item.url} type="button" onClick={() => void handleNavigate(item.url)} className="rounded-full border border-white/10 bg-white/[0.03] px-3.5 py-2 text-xs text-slate-300 transition hover:border-cyan-400/20 hover:bg-cyan-400/10 hover:text-cyan-100">{item.label}</button>
-                  ))}
-                </div>
-                <div className="mt-10 grid w-full max-w-2xl grid-cols-1 gap-3 text-left sm:grid-cols-3">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><p className="text-xs font-medium text-slate-200">真实搜索</p><p className="mt-1 text-[11px] leading-relaxed text-slate-400">聚合 EARTH 索引与公开搜索源；部分垂类依赖服务端配置。</p></div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><p className="text-xs font-medium text-slate-200">沉浸阅读与查看</p><p className="mt-1 text-[11px] leading-relaxed text-slate-400">网页提取阅读、PDF/图片/音频/视频查看器与可嵌入媒体播放。</p></div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4"><p className="text-xs font-medium text-slate-200">诚实边界</p><p className="mt-1 text-[11px] leading-relaxed text-slate-400">网页预览不等于原生浏览器；受站点策略、CSP 与 iframe 限制。</p></div>
-                </div>
-              </div>
+              <div className="h-full min-h-full w-full" aria-label="新标签页" />
             ) : activeTab.crawlerView ? (
               <div className="mx-auto max-w-4xl rounded-[28px] border border-white/10 bg-[rgba(12,16,23,0.72)] backdrop-blur-xl p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)] sm:p-10">
                 {/* Crawler Inspector Header */}
