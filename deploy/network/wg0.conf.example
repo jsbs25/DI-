@@ -1,0 +1,22 @@
+# /etc/wireguard/wg0.conf (Server Template — DO NOT COMMIT REAL PRIVATE KEYS)
+# Replace <SERVER_PRIVATE_KEY> and <PUBLIC_ETH_IFACE> (e.g. eth0 / ens5) before use.
+
+[Interface]
+Address = 10.66.0.1/16
+ListenPort = 51820
+PrivateKey = <SERVER_PRIVATE_KEY>
+SaveConfig = false
+
+# Enable NAT + TCP MSS clamping for mobile & LTE clients (MTU 1280)
+PostUp = sysctl -w net.ipv4.ip_forward=1
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -s 10.66.0.0/16 -o <PUBLIC_ETH_IFACE> -j MASQUERADE
+PostUp = iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -s 10.66.0.0/16 -o <PUBLIC_ETH_IFACE> -j MASQUERADE
+PostDown = iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+
+# Peers are registered dynamically via:
+#   wg set wg0 peer <CLIENT_PUBLIC_KEY> allowed-ips 10.66.0.X/32
+# See setup-wireguard-node.sh and ONE /api/network/devices
