@@ -70,4 +70,32 @@ try {
   // Some browsers or sandboxed iframes mark window.fetch as non-configurable
 }
 
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  const isCanvasTarget = (el: EventTarget | null) =>
+    el instanceof HTMLElement && el.tagName === 'CANVAS';
+  document.addEventListener(
+    'gesturestart',
+    (e) => {
+      if (!isCanvasTarget(e.target)) e.preventDefault();
+    },
+    { passive: false }
+  );
+  document.addEventListener(
+    'gesturechange',
+    (e) => {
+      if (!isCanvasTarget(e.target)) e.preventDefault();
+    },
+    { passive: false }
+  );
+  document.addEventListener(
+    'touchmove',
+    (e) => {
+      if (e.touches.length > 1 && !isCanvasTarget(e.target)) {
+        e.preventDefault();
+      }
+    },
+    { passive: false }
+  );
+}
+
 createRoot(document.getElementById('root')!).render(<App />);

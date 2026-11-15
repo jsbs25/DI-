@@ -34,14 +34,28 @@ import { getChannelIntegrations } from './server/channelIntegrations.ts';
 import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
 import { getMailProvider, mailStatus } from './server/mailProvider.ts';
 import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE164 } from './server/otp.ts';
-import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers } from './server/messengerWs.ts';
+import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers, isUserViewingConversation } from './server/messengerWs.ts';
 import { addCall, getCallById, listCallsForUser, ensureCallsArray } from './server/calls/index.ts';
-import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus } from './server/calls/service.ts';
+import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus, cleanupStaleCalls, cleanupStaleCallsDetailed, getCommunicationCapabilities } from './server/calls/service.ts';
 import { pushCallSignal, listCallSignalsForUser, clearCallSignals } from './server/calls/signals.ts';
+import {
+  findNetworkNodeById,
+  getNetworkDeviceConfigForUser,
+  getNetworkOverview,
+  listDevicesForUser,
+  listNetworkNodesWithStatus,
+  probeNetworkNode,
+  registerNetworkDevice,
+  revokeNetworkDeviceForUser,
+} from './server/network/service.ts';
 import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { searchBilibiliVideos } from './server/bilibiliCrawler.ts';
+import { getRegisteredProviders } from './server/media/providers.ts';
+import { probeDirectMediaUrl, probeEmbedUrl } from './server/media/probe.ts';
+import { CURATED_GLOBAL_CN_MUSIC, enrichMusicTrack, enrichVideoItem, getCombinedEnrichedVideos } from './server/media/catalog.ts';
+import { dispatchUnifiedMusicSearch, dispatchUnifiedVideoSearch, resolveRegionFromRequest } from './server/media/scheduler.ts';
 import { searchOpenImages } from './server/openImageCrawler.ts';
 import { discoveryDb } from './server/discovery/database/db.ts';
 import { executeUnifiedSearch } from './server/discovery/search/unifiedSearchEngine.ts';
@@ -351,14 +365,6 @@ app.get('/api/account/me', (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const user = getSessionUser(req);
   res.json({ success: true, user: user || null });
-});
-
-// Lightweight health checks for platform probes / load balancers (no auth, no secrets).
-app.get('/api/health', (_req, res) => {
-  res.status(200).json({ ok: true, service: 'one', env: process.env.NODE_ENV || 'development' });
-});
-app.get('/healthz', (_req, res) => {
-  res.status(200).type('text/plain').send('ok');
 });
 
 app.get('/api/auth/status', (req, res) => {
@@ -1337,14 +1343,35 @@ function publicCallForUser(call: any, userId: string) {
   if (!call) return null;
   const users = (call.participantIds || []).map((id: string) => {
     const u = store.users.find((x: any) => x.id === id);
-    return u ? { id: u.id, displayName: u.displayName, username: u.username, avatar: u.avatar } : { id, displayName: id, username: id, avatar: '' };
+    if (!u) return { id, displayName: id, username: id, avatar: '', isOnline: false };
+    const pres = typeof (store as any).getMaskedPresenceForViewer === 'function'
+      ? (store as any).getMaskedPresenceForViewer(id, userId)
+      : { isOnline: !!(u as any).isOnline };
+    return {
+      id: u.id,
+      displayName: u.displayName,
+      username: u.username,
+      avatar: u.avatar,
+      isOnline: !!pres?.isOnline,
+    };
   });
   const p = call.participants?.[userId] || null;
+  const startedMs = call.startedAt ? new Date(call.startedAt).getTime() : 0;
+  const endedMs = call.endedAt ? new Date(call.endedAt).getTime() : 0;
+  const durationSec = startedMs && endedMs && endedMs > startedMs ? Math.round((endedMs - startedMs) / 1000) : 0;
+  const direction = call.initiatorId === userId ? 'outgoing' : 'incoming';
+  const unreadMissed =
+    call.status === 'missed' &&
+    call.initiatorId !== userId &&
+    !(Array.isArray(call.missedSeenBy) && call.missedSeenBy.includes(userId));
   return {
     id: call.id,
     roomName: call.roomName,
     scope: call.scope,
     kind: call.kind,
+    direction,
+    durationSec,
+    unreadMissed,
     conversationId: call.conversationId || null,
     initiatorId: call.initiatorId,
     participantIds: call.participantIds || [],
@@ -1376,6 +1403,45 @@ function emitCallInviteDelivery(call: any, initiator: any) {
   for (const uid of (call.participantIds || [])) {
     if (uid === initiator.id) continue;
     try { emitNotification(uid, { type: 'call_invite', title, body, actorId: initiator.id, actorName: initiator.displayName, actorAvatar: initiator.avatar, conversationId: call.conversationId, data: { callId: call.id, kind: call.kind, scope: call.scope, roomName: call.roomName } }); } catch {}
+  }
+}
+
+function emitMissedCallsEffects(missedCalls: any[]) {
+  if (!Array.isArray(missedCalls) || missedCalls.length === 0) return false;
+  let dirty = false;
+  for (const call of missedCalls) {
+    if (!call || call.missedNotifiedAt) continue;
+    call.missedNotifiedAt = new Date().toISOString();
+    dirty = true;
+    clearCallSignals(call.id);
+    const initiator = store.users.find((u: any) => u.id === call.initiatorId);
+    const title = call.kind === 'video' ? 'Missed video call' : 'Missed audio call';
+    const body = `${initiator?.displayName || 'User'} called you.`;
+    for (const uid of (call.participantIds || [])) {
+      if (uid === call.initiatorId) continue;
+      try {
+        emitNotification(uid, {
+          type: 'call_missed',
+          title,
+          body,
+          actorId: call.initiatorId,
+          actorName: initiator?.displayName || call.initiatorId,
+          actorAvatar: initiator?.avatar || '',
+          conversationId: call.conversationId,
+          data: { callId: call.id, kind: call.kind, scope: call.scope },
+        });
+      } catch {}
+    }
+    try { emitCallEvent(call, 'call_missed', { reason: call.endReason || 'timeout' }); } catch {}
+  }
+  return dirty;
+}
+
+function runCallSweep() {
+  const { changed, newlyMissed } = cleanupStaleCallsDetailed(store.calls || []);
+  const notified = emitMissedCallsEffects(newlyMissed);
+  if (changed || notified) {
+    try { store.persist(); } catch {}
   }
 }
 
@@ -1494,7 +1560,7 @@ app.get('/api/messenger/users/search', (req, res) => {
   if (!user) return;
   const q = typeof req.query.q === 'string' ? req.query.q : '';
   const wantSuggested = req.query.suggested === '1' && !q.trim();
-  let list = store.searchUsers(q, user.id, 40);
+  let list = store.searchUsers(q, user.id, 60);
   if (wantSuggested) {
     const blocked = (store.blockedBy[user.id] || []);
     list = store.users.filter(u => {
@@ -1505,12 +1571,20 @@ app.get('/api/messenger/users/search', (req, res) => {
       if (!priv.searchableByUsername && !priv.searchableById && !priv.searchableByDisplayName) return false;
       const isFriend = store.getFriendIds(user.id).includes(u.id);
       return canViewProfileByPolicy(false, isFriend, false, priv);
-    }).slice(0, 30);
+    });
+    // Put real newly registered users & online users first so site members find each other immediately
+    list.sort((a, b) => {
+      const aReg = !a.id.startsWith('u_') ? 1 : 0;
+      const bReg = !b.id.startsWith('u_') ? 1 : 0;
+      if (aReg !== bReg) return bReg - aReg;
+      return (b.isOnline ? 1 : 0) - (a.isOnline ? 1 : 0);
+    });
+    list = list.slice(0, 60);
   }
   const users = list.map(u => {
     const view = (store.getPublicProfileView(user.id, u.id) as any)?.user;
-    if (view) return view;
-    return toPublicUser(u, { privacy: store.getPrivacySettings(u.id) });
+    const base = view || toPublicUser(u, { privacy: store.getPrivacySettings(u.id) });
+    return { ...base, earthId: (u as any).earthId };
   });
   res.json({ success: true, users });
 });
@@ -1524,7 +1598,7 @@ app.get('/api/messenger/friends', (req, res) => {
     if (!u || store.getAccountStatus(u) === 'deleted') return null;
     const view = (store.getPublicProfileView(user.id, id) as any);
     if (!view || view.restricted) return null; // blocked/unviewable
-    return view.user;
+    return { ...view.user, earthId: (u as any).earthId };
   }).filter(Boolean);
   res.json({ success: true, friends });
 });
@@ -1557,12 +1631,12 @@ app.post('/api/messenger/friend-requests', async (req, res) => {
   const toUserId = typeof req.body?.toUserId === 'string' ? req.body.toUserId : '';
   const message = typeof req.body?.message === 'string' ? req.body.message.slice(0,300) : undefined;
   try {
-    let fr: any; let ntf: any = null;
+    let fr: any; let ntf: any = null; let directConv: any = null;
     await store.mutate(async () => {
       fr = store.sendFriendRequest(user.id, toUserId, message);
-      // auto-accept reverse case returns accepted request; notify accordingly
       if (fr?.status === 'accepted') {
         const fromUser = store.users.find(u => u.id === fr.fromUserId);
+        directConv = store.getOrCreateDirectConversation(fr.fromUserId, fr.toUserId);
         ntf = { type: 'accepted_pair', targetId: fr.toUserId, fromUser };
       } else if (fr?.status === 'pending' && fr.toUserId === toUserId) {
         ntf = emitNotification(toUserId, { type: 'friend_request', title: 'New friend request', body: `${user.displayName} sent you a friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
@@ -1572,9 +1646,12 @@ app.post('/api/messenger/friend-requests', async (req, res) => {
     if (ntf && ntf.notification && ntf.notification.type === 'friend_request') {
       wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
     } else if (ntf && ntf.type === 'accepted_pair') {
-      // reverse auto-accepted: notify both
       wsBroadcastToUser(fr.fromUserId, { type: 'friend_request_updated', request: fr });
       wsBroadcastToUser(fr.toUserId, { type: 'friend_request_updated', request: fr });
+      if (directConv) {
+        wsBroadcastToUser(fr.fromUserId, { type: 'conversation_updated', conversationId: directConv.id });
+        wsBroadcastToUser(fr.toUserId, { type: 'conversation_updated', conversationId: directConv.id });
+      }
       await store.mutate(async () => {
         emitNotification(fr.fromUserId, { type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
         emitNotification(fr.toUserId, { type: 'friend_accepted', title: 'You are now friends', body: `You and ${ntf.fromUser?.displayName || 'user'} are now friends.`, actorId: fr.fromUserId, actorName: ntf.fromUser?.displayName, actorAvatar: ntf.fromUser?.avatar, requestId: fr.id, targetUserId: fr.fromUserId });
@@ -1583,7 +1660,7 @@ app.post('/api/messenger/friend-requests', async (req, res) => {
     } else {
       wsBroadcastToUser(toUserId, { type: 'friend_request', request: { ...fr, fromUser: { id: user.id, username: user.username, displayName: user.displayName, avatar: user.avatar } } });
     }
-    res.json({ success: true, request: fr });
+    res.json({ success: true, request: fr, conversationId: directConv?.id });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to send friend request' });
   }
@@ -1594,10 +1671,11 @@ app.post('/api/messenger/friend-requests/:id/respond', async (req, res) => {
   if (!user) return;
   const accept = !!req.body?.accept;
   try {
-    let fr: any;
+    let fr: any; let directConv: any = null;
     await store.mutate(async () => {
       fr = store.respondFriendRequest(req.params.id, user.id, accept);
       if (accept && fr?.status === 'accepted') {
+        directConv = store.getOrCreateDirectConversation(fr.fromUserId, fr.toUserId);
         emitNotification(fr.fromUserId, { type: 'friend_accepted', title: 'Friend request accepted', body: `${user.displayName} accepted your friend request.`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, requestId: fr.id, targetUserId: user.id });
         store.persist();
       } else {
@@ -1607,7 +1685,11 @@ app.post('/api/messenger/friend-requests/:id/respond', async (req, res) => {
     const otherId = fr.fromUserId === user.id ? fr.toUserId : fr.fromUserId;
     wsBroadcastToUser(otherId, { type: 'friend_request_updated', request: fr });
     wsBroadcastToUser(user.id, { type: 'friend_request_updated', request: fr });
-    res.json({ success: true, request: fr });
+    if (directConv) {
+      wsBroadcastToUser(otherId, { type: 'conversation_updated', conversationId: directConv.id });
+      wsBroadcastToUser(user.id, { type: 'conversation_updated', conversationId: directConv.id });
+    }
+    res.json({ success: true, request: fr, conversationId: directConv?.id });
   } catch (e:any) {
     const m = e?.message || 'Failed';
     res.status(m==='Forbidden'?403:m==='Friend request not found'?404:400).json({ success:false, error:m });
@@ -1862,15 +1944,64 @@ app.get('/api/messenger/avatar/:userId/:file', (req, res) => {
 // -------------------------------------------------------------
 // 1c. CALLS (EARTH ONE-owned signaling/business; media token boundary)
 // -------------------------------------------------------------
+app.get('/api/calls/capabilities', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const capabilities = await getCommunicationCapabilities();
+    res.json({ success: true, capabilities });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to inspect call capabilities' });
+  }
+});
+
+app.post('/api/calls/mark-missed-seen', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    await store.mutate(async () => {
+      let changed = false;
+      for (const c of ensureCallsArray(store)) {
+        if (
+          c.status === 'missed' &&
+          c.initiatorId !== user.id &&
+          (c.participantIds || []).includes(user.id)
+        ) {
+          if (!Array.isArray(c.missedSeenBy)) c.missedSeenBy = [];
+          if (!c.missedSeenBy.includes(user.id)) {
+            c.missedSeenBy.push(user.id);
+            changed = true;
+          }
+        }
+      }
+      if (changed) store.persist();
+    });
+    res.json({ success: true, missedUnreadCount: 0 });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to mark missed calls seen' });
+  }
+});
+
 app.get('/api/calls', (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
+  runCallSweep();
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
-  const calls = listCallsForUser(store, user.id, limit).map((c: any) => publicCallForUser(c, user.id));
-  res.json({ success: true, calls });
+  const filter = String(req.query.filter || 'all');
+  const allUserCalls = listCallsForUser(store, user.id, 100);
+  const missedUnreadCount = allUserCalls.filter(
+    (c: any) =>
+      c.status === 'missed' &&
+      c.initiatorId !== user.id &&
+      !(Array.isArray(c.missedSeenBy) && c.missedSeenBy.includes(user.id))
+  ).length;
+  const filtered = filter === 'missed'
+    ? allUserCalls.filter((c: any) => c.status === 'missed')
+    : allUserCalls;
+  const calls = filtered.slice(0, limit).map((c: any) => publicCallForUser(c, user.id));
+  res.json({ success: true, calls, missedUnreadCount });
 });
 
 app.get('/api/calls/:id', (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
+  runCallSweep();
   const call = getCallById(store, req.params.id);
   if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
   res.json({ success: true, call: publicCallForUser(call, user.id) });
@@ -1903,7 +2034,7 @@ app.post('/api/calls/invite', async (req, res) => {
     }
     try { emitCallInviteDelivery(call, user); } catch {}
     try { emitCallEvent(call, 'call_invite', { fromUserId: user.id }); } catch {}
-    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: body?.transport === 'webrtc' });
+    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: body?.transport !== 'livekit' });
     res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to create call' });
@@ -1924,7 +2055,7 @@ app.post('/api/calls/:id/accept', async (req, res) => {
     });
     if (out) return res.status(out.code).json(out.body);
     try { emitCallEvent(call, 'call_accept', { userId: user.id }); } catch {}
-    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport === 'webrtc' });
+    const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport !== 'livekit' });
     res.json({ success: true, call: publicCallForUser(call, user.id), media: tok });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to accept call' });
@@ -2020,7 +2151,7 @@ app.post('/api/calls/:id/token', async (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
   const call = getCallById(store, req.params.id);
   if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
-  const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport === 'webrtc' });
+  const tok = await issueMediaToken(call, user.id, { store, allowWebRtcFallback: req.body?.transport !== 'livekit' });
   if (!tok.ok) return res.status(tok.blocked ? 503 : 403).json({ success: false, ...tok });
   res.json({ success: true, ...tok });
 });
@@ -2080,6 +2211,105 @@ app.post('/api/calls/:id/state', async (req, res) => {
     res.json({ success: true, call: publicCallForUser(call, user.id) });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to update call state' });
+  }
+});
+
+// -------------------------------------------------------------
+// 1d. ONE NETWORK CENTER (Mode B WireGuard Control Plane + Mode A Overview)
+// -------------------------------------------------------------
+app.get('/api/network/overview', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const overview = await getNetworkOverview(store, user.id);
+    res.json({ success: true, overview });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to inspect network overview' });
+  }
+});
+
+app.get('/api/network/nodes', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+    const nodes = await listNetworkNodesWithStatus({ forceRefresh });
+    res.json({ success: true, configured: nodes.length > 0, nodes });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to load WireGuard nodes' });
+  }
+});
+
+app.post('/api/network/nodes/:id/probe', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const node = findNetworkNodeById(req.params.id);
+  if (!node) return res.status(404).json({ success: false, error: 'WireGuard node not found' });
+  try {
+    const status = await probeNetworkNode(node, { forceRefresh: true });
+    res.json({ success: true, node: status });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to probe node' });
+  }
+});
+
+app.get('/api/network/devices', (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const devices = listDevicesForUser(store, user.id);
+  res.json({ success: true, devices, privateKeysStoredOnServer: false });
+});
+
+app.post('/api/network/devices', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const result = await store.mutate(async () => {
+      const r = registerNetworkDevice(store, user.id, req.body || {});
+      if (r.ok) {
+        store.persist();
+      }
+      return r;
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+    res.status(201).json({ success: true, device: result.device, profile: result.profile });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to register WireGuard device' });
+  }
+});
+
+app.get('/api/network/devices/:id/config', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const result = await store.mutate(async () => {
+      const r = getNetworkDeviceConfigForUser(store, user.id, req.params.id);
+      if (r.ok) {
+        store.persist();
+      }
+      return r;
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+    res.json({ success: true, device: result.device, profile: result.profile });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to build device config' });
+  }
+});
+
+app.delete('/api/network/devices/:id', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const result = await store.mutate(async () => {
+      const r = revokeNetworkDeviceForUser(store, user.id, req.params.id);
+      if (r.ok) {
+        store.persist();
+      }
+      return r;
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+    res.json({ success: true, device: result.device });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to revoke device' });
   }
 });
 
@@ -2518,18 +2748,24 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
 
   try {
     let msg: any;
+    let senderMarkedNotifs = 0;
     const cmid = typeof clientMsgId === 'string' && clientMsgId ? clientMsgId : undefined;
     await store.mutate(async () => {
       msg = store.sendMessage(id, text, authUser, translatedContent, translatedTo, { attachments: atts, replyToId: typeof replyToId === 'string' ? replyToId : undefined, clientMsgId: cmid });
+      senderMarkedNotifs = store.markConversationNotificationsRead(authUser.id, id);
       const convNow = store.conversations.find(c => c.id === id);
       const preview = (text || (atts?.length ? '[attachment]' : '')).slice(0, 80);
       for (const uid of (convNow?.participantIds || [])) {
         if (uid === authUser.id) continue;
         if (store.isBlockedEither(uid, authUser.id)) continue;
+        if (isUserViewingConversation(uid, id)) continue;
         emitNotification(uid, { type: 'message_new', title: convNow?.name || authUser.displayName, body: `${authUser.displayName}: ${preview}`, actorId: authUser.id, actorName: authUser.displayName, actorAvatar: authUser.avatar, conversationId: id, data: { messageId: msg.id } });
       }
       store.persist();
     });
+    if (senderMarkedNotifs > 0) {
+      try { wsBroadcastToUser(authUser.id, { type: 'notification_sync', unreadCount: store.getUnreadNotificationCount(authUser.id), conversationId: id }); } catch {}
+    }
     wsBroadcastConversationEvent(id, { type: 'message', conversationId: id, message: msg, clientMsgId });
     res.json({ success: true, message: msg, conversation: store.conversations.find(c => c.id === id) });
   } catch (e:any) {
@@ -2544,14 +2780,22 @@ app.post('/api/conversations/:id/read', async (req, res) => {
   const conv = store.conversations.find(c => c.id === id);
   if (!conv || !store.canAccessConversation(user.id, conv)) return res.status(403).json({ success: false, error: 'Forbidden' });
   const allowReceipt = store.shouldSendReadReceipt(user.id);
-  await store.mutate(async () => { store.markConversationRead(id, user.id, { allowReadReceipt: allowReceipt }); });
+  let markedNotifs = 0;
+  await store.mutate(async () => {
+    const r = store.markConversationRead(id, user.id, { allowReadReceipt: allowReceipt });
+    markedNotifs = r?.markedNotifs || 0;
+  });
+  const unreadNotifCount = store.getUnreadNotificationCount(user.id);
+  if (markedNotifs > 0) {
+    try { wsBroadcastToUser(user.id, { type: 'notification_sync', unreadCount: unreadNotifCount, conversationId: id }); } catch {}
+  }
   const readEvt = { type: 'read', conversationId: id, userId: user.id, readAt: new Date().toISOString() };
   if (allowReceipt) {
     wsBroadcastConversationEvent(id, readEvt);
   } else {
     try { wsBroadcastToUser(user.id, { ...readEvt, selfOnly: true }); } catch {}
   }
-  res.json({ success: true, readReceiptSent: allowReceipt });
+  res.json({ success: true, readReceiptSent: allowReceipt, unreadNotificationCount: unreadNotifCount, markedNotifs });
 });
 
 app.post('/api/conversations/:id/messages/:messageId/recall', async (req, res) => {
@@ -2685,7 +2929,9 @@ app.post('/api/articles/:id/tip', (req, res) => {
 });
 
 app.get('/api/videos', (req, res) => {
-  res.json({ success: true, videos: store.videos });
+  const regionCtx = resolveRegionFromRequest(req);
+  const videos = getCombinedEnrichedVideos(store.videos, regionCtx.region);
+  res.json({ success: true, region: regionCtx.region, mode: regionCtx.mode, videos });
 });
 
 // -------------------------------------------------------------
@@ -2827,106 +3073,135 @@ app.post('/api/ai/translate', async (req, res) => {
 // -------------------------------------------------------------
 // 7b. VENUS PLANET MUSIC UNIVERSE & FIXED AUDIO CRAWLER
 // -------------------------------------------------------------
-app.get('/api/music/tracks', (req, res) => {
-  const { genre } = req.query;
-  const tracks = musicStore.getTracks(typeof genre === 'string' ? genre : undefined);
-  res.json({ success: true, tracks });
+app.get('/api/media/providers', (req, res) => {
+  const regionCtx = resolveRegionFromRequest(req);
+  res.json({
+    success: true,
+    detectedRegion: regionCtx.region,
+    mode: regionCtx.mode,
+    signal: regionCtx.signal,
+    providers: getRegisteredProviders(),
+  });
 });
 
-async function searchOnlineMusicStreams(query: string): Promise<any[]> {
-  if (!query || !query.trim()) return [];
-  try {
-    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim())}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-      },
-      signal: AbortSignal.timeout(6000)
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-    const start = html.indexOf('ytInitialData = ');
-    if (start === -1) return [];
-    const jsonStart = start + 'ytInitialData = '.length;
-    const end = html.indexOf(';</script>', jsonStart);
-    if (end === -1) return [];
-    const jsonStr = html.slice(jsonStart, end);
-    const data = JSON.parse(jsonStr);
-    const sectionList = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
-    const tracks: any[] = [];
-    for (const section of sectionList) {
-      const items = section.itemSectionRenderer?.contents || [];
-      for (const item of items) {
-        const v = item.videoRenderer;
-        if (!v || !v.videoId) continue;
-        const videoId = v.videoId;
-        const title = v.title?.runs?.[0]?.text || 'Untitled Track';
-        const artist = v.ownerText?.runs?.[0]?.text || 'YouTube Music';
-        const durationText = v.lengthText?.simpleText || '3:30';
-        let durationSeconds = 210;
-        const parts = durationText.split(':').map(Number);
-        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-          durationSeconds = parts[0] * 60 + parts[1];
-        } else if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
-          durationSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
-        }
-        tracks.push({
-          id: `yt_${videoId}`,
-          videoId,
-          title,
-          artist,
-          album: 'Cosmic Music Stream',
-          genre: 'Stream',
-          durationSeconds,
-          durationFormatted: durationText,
-          coverUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-          source: 'YouTube Music',
-          sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
-          license: 'Standard YouTube License (In-Page Stream)',
-          views: v.viewCountText?.simpleText || '0 views',
-          bpm: 90
-        });
-        if (tracks.length >= 20) break;
-      }
-      if (tracks.length >= 20) break;
-    }
-    return tracks;
-  } catch (err) {
-    console.warn('Online music search error:', err);
-    return [];
+app.post('/api/media/probe', async (req, res) => {
+  const { url, playbackType, mediaType } = req.body || {};
+  if (typeof url !== 'string' || !url.trim()) {
+    return res.status(400).json({ success: false, error: 'url is required' });
   }
-}
+  try {
+    const isEmbed = playbackType === 'official_embed';
+    const kind = mediaType === 'video' ? 'video' : 'audio';
+    const outcome = isEmbed
+      ? await probeEmbedUrl(url.trim())
+      : await probeDirectMediaUrl(url.trim(), kind);
+    res.json({ success: true, ...outcome });
+  } catch (err: any) {
+    res.status(500).json({ success: false, ok: false, error: err?.message || 'Probe failed' });
+  }
+});
+
+app.get('/api/media/search', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const mediaType = req.query.mediaType === 'video' ? 'video' : 'music';
+  const genre = typeof req.query.genre === 'string' ? req.query.genre : undefined;
+  const limit = Math.max(4, Math.min(30, Number(req.query.limit) || 18));
+  const regionCtx = resolveRegionFromRequest(req);
+
+  try {
+    if (mediaType === 'video') {
+      const result = await dispatchUnifiedVideoSearch({
+        query: q,
+        region: regionCtx.region,
+        limit,
+        storeVideos: getCombinedEnrichedVideos(store.videos, regionCtx.region),
+      });
+      return res.json({
+        success: true,
+        mediaType: 'video',
+        region: regionCtx.region,
+        mode: regionCtx.mode,
+        query: q,
+        count: result.videos.length,
+        videos: result.videos,
+        providersQueried: result.providersQueried,
+      });
+    }
+
+    const result = await dispatchUnifiedMusicSearch({
+      query: q,
+      genre,
+      region: regionCtx.region,
+      limit,
+    });
+    return res.json({
+      success: true,
+      mediaType: 'music',
+      region: regionCtx.region,
+      mode: regionCtx.mode,
+      query: q,
+      count: result.tracks.length,
+      tracks: result.tracks,
+      providersQueried: result.providersQueried,
+      dispatchMode: result.mode,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Unified media search failed' });
+  }
+});
+
+app.get('/api/music/tracks', (req, res) => {
+  const { genre } = req.query;
+  const regionCtx = resolveRegionFromRequest(req);
+  const genreStr = typeof genre === 'string' ? genre : undefined;
+  const diskTracks = musicStore.getTracks(genreStr);
+  const curated = !genreStr || genreStr === 'all'
+    ? CURATED_GLOBAL_CN_MUSIC
+    : CURATED_GLOBAL_CN_MUSIC.filter((t) => String(t.genre || '').toLowerCase() === genreStr.toLowerCase());
+  const rawList = regionCtx.region === 'cn' ? [...curated, ...diskTracks] : [...diskTracks, ...curated];
+  const seen = new Set<string>();
+  const tracks = rawList
+    .filter((t) => {
+      if (!t?.id || seen.has(t.id)) return false;
+      seen.add(t.id);
+      return true;
+    })
+    .map((t) => enrichMusicTrack(t, regionCtx.region));
+  res.json({ success: true, region: regionCtx.region, tracks });
+});
 
 app.get('/api/music/search', async (req, res) => {
   const { q, genre } = req.query;
   const queryStr = typeof q === 'string' ? q.trim() : '';
   const genreStr = typeof genre === 'string' ? genre : undefined;
-
-  if (!queryStr) {
-    const results = musicStore.searchTracks('', genreStr);
-    return res.json({ success: true, query: '', count: results.length, tracks: results });
-  }
+  const regionCtx = resolveRegionFromRequest(req);
 
   try {
-    const onlineTracks = await searchOnlineMusicStreams(queryStr);
-    const localResults = musicStore.searchTracks(queryStr, genreStr);
-    const merged = [...onlineTracks, ...localResults];
-    const uniqueTracks = merged.filter((t, idx, self) =>
-      idx === self.findIndex(s => s.id === t.id || (s.videoId && s.videoId === t.videoId))
-    );
-    res.json({
-      success: true,
+    const dispatched = await dispatchUnifiedMusicSearch({
       query: queryStr,
-      count: uniqueTracks.length,
-      tracks: uniqueTracks
+      genre: genreStr,
+      region: regionCtx.region,
+      limit: 20,
     });
-  } catch (err: any) {
-    const fallbackResults = musicStore.searchTracks(queryStr, genreStr);
     res.json({
       success: true,
+      region: regionCtx.region,
+      query: queryStr,
+      count: dispatched.tracks.length,
+      tracks: dispatched.tracks,
+      providersQueried: dispatched.providersQueried,
+      mode: dispatched.mode,
+    });
+  } catch {
+    const fallbackResults = musicStore
+      .searchTracks(queryStr, genreStr)
+      .map((t) => enrichMusicTrack(t, regionCtx.region));
+    res.json({
+      success: true,
+      region: regionCtx.region,
       query: queryStr,
       count: fallbackResults.length,
-      tracks: fallbackResults
+      tracks: fallbackResults,
     });
   }
 });
@@ -2936,10 +3211,12 @@ app.get('/api/music/youtube-search', async (req, res) => {
   if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
   if (q.length > 200) return res.status(400).json({ success: false, error: 'Search query must be 200 characters or fewer' });
   const limit = Math.max(1, Math.min(24, Number(req.query.limit) || 12));
+  const regionCtx = resolveRegionFromRequest(req);
   try {
     const direct = resolveMusicEmbedUrl(q);
-    const tracks = direct ? [direct] : await searchYouTubeMusic(q, limit);
-    res.json({ success: true, query: q, tracks, mode: direct ? 'embed-url' : 'search' });
+    const rawTracks = direct ? [direct] : await searchYouTubeMusic(q, limit);
+    const tracks = rawTracks.map((t) => enrichMusicTrack(t, regionCtx.region));
+    res.json({ success: true, region: regionCtx.region, query: q, tracks, mode: direct ? 'embed-url' : 'search' });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Music search failed' });
   }
@@ -2949,9 +3226,20 @@ app.get('/api/bilibili/search', async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
   const limit = Math.max(1, Math.min(30, Number(req.query.limit) || 20));
+  const regionCtx = resolveRegionFromRequest(req);
   try {
     const results = await searchBilibiliVideos(q, limit);
-    res.json({ success: true, query: q, count: results.length, results, videos: results });
+    const enriched = results.map((b) =>
+      enrichVideoItem(
+        {
+          ...b,
+          embedUrl: `https://player.bilibili.com/player.html?bvid=${b.bvid}&page=1&autoplay=0&danmaku=0`,
+          source: 'Bilibili',
+        },
+        regionCtx.region
+      )
+    );
+    res.json({ success: true, region: regionCtx.region, query: q, count: enriched.length, results: enriched, videos: enriched });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Bilibili search failed' });
   }
@@ -2959,13 +3247,14 @@ app.get('/api/bilibili/search', async (req, res) => {
 
 app.post('/api/music/crawl', async (req, res) => {
   const { sourceDomain, keyword } = req.body || {};
+  const regionCtx = resolveRegionFromRequest(req);
   try {
     const result = await musicStore.crawlExternalMusic(sourceDomain, keyword);
-    // success reflects whether data was actually crawled+saved; errors explain failures/limitations
+    const enrichedNew = (result.newTracks || []).map((t) => enrichMusicTrack(t, regionCtx.region));
     if (!result.success) {
-      return res.status(200).json({ ...result, success: false });
+      return res.status(200).json({ ...result, newTracks: enrichedNew, success: false });
     }
-    res.json({ ...result, success: true });
+    res.json({ ...result, newTracks: enrichedNew, success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Music crawl failed', errors: [err?.message || 'Music crawl failed'], crawledCount: 0, savedCount: 0, newTracks: [] });
   }
@@ -4095,10 +4384,16 @@ async function startServer() {
   }
 
   // Pre-seed Islamic Digital Library classics into Discovery engine
-  try { seedIslamicLibraryToDiscovery(); } catch (e) { console.warn('Discovery seed skipped:', e); }
+  seedIslamicLibraryToDiscovery();
 
   // Start Discovery background maintenance daemon
-  try { startDiscoveryScheduler(); } catch (e) { console.warn('Discovery scheduler not started:', e); }
+  startDiscoveryScheduler();
+
+  // Periodic missed-call / stale-ringing cleanup sweep (every 30s)
+  const callSweepInterval = setInterval(() => {
+    try { runCallSweep(); } catch {}
+  }, 30_000);
+  callSweepInterval.unref?.();
 }
 
 startServer().catch(err => {

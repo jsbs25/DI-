@@ -78,44 +78,44 @@ export const TrendingTopicsWidget: React.FC<TrendingTopicsWidgetProps> = ({ onSe
 
   return (
     <div className="space-y-4">
-      <div className="overflow-hidden rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] shadow-[var(--shadow-one-sm)] backdrop-blur-sm">
+      <div className="overflow-hidden rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] shadow-[var(--shadow-one-sm)]">
         <div className="border-b border-[var(--color-one-border)] p-4 sm:p-5">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-[rgba(78,161,255,0.3)] bg-[rgba(78,161,255,0.12)] text-[var(--color-one-accent-soft)]"><TrendingUp className="h-4 w-4" /></div>
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-sky-200 dark:border-sky-400/30 bg-sky-50 dark:bg-sky-500/15 text-[var(--color-one-accent)]"><TrendingUp className="h-4 w-4" /></div>
               <div>
-                <h3 className="text-sm font-semibold text-white">{isZh ? '全球热议主题' : 'Global Trending Topics'}</h3>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{isZh ? '全球热议主题' : 'Global Trending Topics'}</h3>
                 <p className="text-[11px] text-[var(--color-one-text-muted)]">{isZh ? '话题热度与讨论聚合' : 'Topic momentum and discussion'}</p>
               </div>
             </div>
-            <button type="button" onClick={() => setIsLiveStreaming(!isLiveStreaming)} title={isLiveStreaming ? (isZh ? '暂停模拟' : 'Pause simulation') : (isZh ? '恢复模拟' : 'Resume simulation')} className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border transition ${isLiveStreaming ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/15' : 'border-[var(--color-one-border)] bg-white/[0.02] text-[var(--color-one-text-muted)] hover:text-white'}`}>
+            <button type="button" onClick={() => setIsLiveStreaming(!isLiveStreaming)} title={isLiveStreaming ? (isZh ? '暂停模拟' : 'Pause simulation') : (isZh ? '恢复模拟' : 'Resume simulation')} className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border transition ${isLiveStreaming ? 'border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-200' : 'border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text-muted)] hover:text-slate-900 dark:hover:text-white'}`}>
               {isLiveStreaming ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             </button>
           </div>
 
-          <div className="mt-3 flex items-center justify-between rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-2 text-[11px]">
+          <div className="mt-3 flex items-center justify-between rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-2 text-[11px]">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="relative flex h-2 w-2 shrink-0">{isLiveStreaming && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-one-accent)] opacity-60" />}<span className={`relative inline-flex h-2 w-2 rounded-full ${isLiveStreaming ? 'bg-[var(--color-one-accent)]' : 'bg-white/20'}`} /></span>
-              <span className="truncate font-mono text-[10px] font-medium tracking-wide text-[var(--color-one-accent-soft)]">{isZh ? '[实时遥测模拟流]' : '[LIVE SIMULATION DATA]'}</span>
+              <span className="relative flex h-2 w-2 shrink-0">{isLiveStreaming && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-one-accent)] opacity-60" />}<span className={`relative inline-flex h-2 w-2 rounded-full ${isLiveStreaming ? 'bg-[var(--color-one-accent)]' : 'bg-slate-400'}`} /></span>
+              <span className="truncate font-mono text-[10px] font-medium tracking-wide text-sky-700 dark:text-sky-300">{isZh ? '[实时遥测模拟流]' : '[LIVE SIMULATION DATA]'}</span>
             </div>
-            <button type="button" onClick={() => setShowExplanation(!showExplanation)} className="ml-2 inline-flex shrink-0 cursor-pointer items-center gap-0.5 text-[10px] text-[var(--color-one-text-muted)] hover:text-white"><Info className="h-3 w-3" /><span>{showExplanation ? (isZh ? '收起' : 'Hide') : (isZh ? '说明' : 'Audit')}</span></button>
+            <button type="button" onClick={() => setShowExplanation(!showExplanation)} className="ml-2 inline-flex shrink-0 cursor-pointer items-center gap-0.5 text-[10px] text-[var(--color-one-text-muted)] hover:text-slate-900 dark:hover:text-white"><Info className="h-3 w-3" /><span>{showExplanation ? (isZh ? '收起' : 'Hide') : (isZh ? '说明' : 'Audit')}</span></button>
           </div>
           {showExplanation && (
-            <div className="mt-2 space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] p-2.5 text-[11px] leading-relaxed text-[var(--color-one-text-muted)]">
-              <p className="font-medium text-white">{isZh ? '透明度说明' : 'Transparency note'}</p>
+            <div className="mt-2 space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-2.5 text-[11px] leading-relaxed text-[var(--color-one-text-muted)]">
+              <p className="font-medium text-slate-900 dark:text-white">{isZh ? '透明度说明' : 'Transparency note'}</p>
               <p className="text-[10px]">{isZh ? '本组件为客户端遥测模拟（约每3.2秒更新），用于展示话题聚合与动态能力；非真实全球实时用户数据。' : 'Client-side telemetry simulation (~3.2s ticks) demonstrating topic aggregation behavior; not real-time global user data.'}</p>
             </div>
           )}
 
           <div className="relative mt-3">
             <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
-            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder={isZh ? '搜索话题或关键词…' : 'Filter topics, tags, regions…'} className="w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] py-2 pl-8 pr-8 text-xs text-white placeholder:text-[var(--color-one-text-dim)] focus:border-[rgba(78,161,255,0.45)] focus:outline-none" />
-            {searchQuery && <button type="button" onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[var(--color-one-text-muted)] hover:text-white">×</button>}
+            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder={isZh ? '搜索话题或关键词…' : 'Filter topics, tags, regions…'} className="w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] py-2 pl-8 pr-8 text-xs text-slate-900 dark:text-white placeholder:text-[var(--color-one-text-dim)] focus:border-sky-500 focus:outline-none" />
+            {searchQuery && <button type="button" onClick={() => setSearchQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[var(--color-one-text-muted)] hover:text-slate-900 dark:hover:text-white">×</button>}
           </div>
 
           <div className="scrollbar-none mt-3 flex items-center gap-1.5 overflow-x-auto pb-1">
             {categories.map(c => (
-              <button key={c.id} type="button" onClick={() => setActiveCategory(c.id)} className={`min-h-9 cursor-pointer whitespace-nowrap rounded-lg border px-2.5 py-1 text-[11px] font-medium transition ${activeCategory === c.id ? 'border-[rgba(78,161,255,0.35)] bg-[rgba(78,161,255,0.14)] text-white' : 'border-[var(--color-one-border)] bg-white/[0.02] text-[var(--color-one-text-muted)] hover:text-white'}`}>{c.label}</button>
+              <button key={c.id} type="button" onClick={() => setActiveCategory(c.id)} className={`min-h-9 cursor-pointer whitespace-nowrap rounded-lg border px-2.5 py-1 text-[11px] font-medium transition ${activeCategory === c.id ? 'border-sky-400 bg-sky-600 text-white dark:bg-sky-500/25' : 'border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text-muted)] hover:text-slate-900 dark:hover:text-white'}`}>{c.label}</button>
             ))}
           </div>
         </div>
@@ -128,22 +128,22 @@ export const TrendingTopicsWidget: React.FC<TrendingTopicsWidgetProps> = ({ onSe
               const isSelected = selectedTopicTag === topic.tag;
               const isUpdatedRecently = lastUpdatedTopicId === topic.id;
               return (
-                <div key={topic.id} onClick={() => onSelectTopic(topic)} className={`group relative cursor-pointer p-3.5 transition ${isSelected ? 'border-l-2 border-l-[var(--color-one-accent)] bg-[rgba(78,161,255,0.08)]' : 'hover:bg-white/[0.03]'} ${isUpdatedRecently ? 'bg-[rgba(78,161,255,0.06)]' : ''}`}>
+                <div key={topic.id} onClick={() => onSelectTopic(topic)} className={`group relative cursor-pointer p-3.5 transition ${isSelected ? 'border-l-2 border-l-[var(--color-one-accent)] bg-sky-50 dark:bg-sky-500/12' : 'hover:bg-slate-50 dark:hover:bg-white/[0.04]'} ${isUpdatedRecently ? 'bg-sky-50/70 dark:bg-sky-500/8' : ''}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-2 text-[10px] text-[var(--color-one-text-dim)]"><span className="font-mono text-[var(--color-one-accent-soft)]">#{index + 1}</span><span>·</span><span className="truncate">{isZh ? topic.categoryLabelZh : topic.categoryLabel}</span><span>·</span><span className="truncate">{topic.region}</span></div>
+                      <div className="flex items-center gap-2 text-[10px] text-[var(--color-one-text-dim)]"><span className="font-mono text-sky-700 dark:text-sky-300">#{index + 1}</span><span>·</span><span className="truncate">{isZh ? topic.categoryLabelZh : topic.categoryLabel}</span><span>·</span><span className="truncate">{topic.region}</span></div>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-mono text-xs font-semibold text-white transition group-hover:text-[var(--color-one-accent-soft)]">{topic.tag}</span>
-                        {topic.isBreaking && <span className="inline-flex items-center gap-0.5 rounded border border-rose-500/25 bg-rose-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-rose-200"><Flame className="h-2.5 w-2.5" />{isZh ? '热议' : 'HOT'}</span>}
-                        {topic.isHot && !topic.isBreaking && <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-200">{isZh ? '上升' : 'TRENDING'}</span>}
+                        <span className="font-mono text-xs font-semibold text-slate-900 dark:text-white transition group-hover:text-sky-600 dark:group-hover:text-sky-300">{topic.tag}</span>
+                        {topic.isBreaking && <span className="inline-flex items-center gap-0.5 rounded border border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700 dark:text-rose-200"><Flame className="h-2.5 w-2.5" />{isZh ? '热议' : 'HOT'}</span>}
+                        {topic.isHot && !topic.isBreaking && <span className="rounded border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-700 dark:text-amber-200">{isZh ? '上升' : 'TRENDING'}</span>}
                       </div>
                       <p className="line-clamp-1 text-[11px] font-medium text-[var(--color-one-text)]">{isZh ? topic.titleZh : topic.title}</p>
                       <p className="line-clamp-1 text-[10px] text-[var(--color-one-text-muted)]">{topic.latestPostSnippet}</p>
                     </div>
                     <div className="shrink-0 space-y-1 text-right">
-                      <div className="font-mono text-xs font-semibold text-white">{topic.postCount.toLocaleString()}</div>
-                      <div className="flex items-center justify-end gap-0.5 font-mono text-[10px] text-emerald-300"><TrendingUp className="h-3 w-3" /><span>+{topic.growthPercent}%/hr</span></div>
-                      {isSelected ? <span className="inline-block font-mono text-[10px] text-[var(--color-one-accent-soft)]">{isZh ? '已筛选' : 'Active'}</span> : <span className="flex items-center justify-end text-[var(--color-one-text-dim)] transition group-hover:text-[var(--color-one-accent-soft)]"><ArrowUpRight className="h-3 w-3" /></span>}
+                      <div className="font-mono text-xs font-semibold text-slate-900 dark:text-white">{topic.postCount.toLocaleString()}</div>
+                      <div className="flex items-center justify-end gap-0.5 font-mono text-[10px] text-emerald-600 dark:text-emerald-300"><TrendingUp className="h-3 w-3" /><span>+{topic.growthPercent}%/hr</span></div>
+                      {isSelected ? <span className="inline-block font-mono text-[10px] text-sky-600 dark:text-sky-300">{isZh ? '已筛选' : 'Active'}</span> : <span className="flex items-center justify-end text-[var(--color-one-text-dim)] transition group-hover:text-sky-600 dark:group-hover:text-sky-300"><ArrowUpRight className="h-3 w-3" /></span>}
                     </div>
                   </div>
                 </div>
@@ -153,25 +153,25 @@ export const TrendingTopicsWidget: React.FC<TrendingTopicsWidgetProps> = ({ onSe
         </div>
 
         {selectedTopicTag && (
-          <div className="flex items-center justify-between border-t border-[rgba(78,161,255,0.25)] bg-[rgba(78,161,255,0.08)] p-3 text-xs">
-            <span className="truncate font-mono text-[11px] text-white">{isZh ? `已筛选: ${selectedTopicTag}` : `Filtering: ${selectedTopicTag}`}</span>
-            <button type="button" onClick={onClearTopicFilter} className="ml-2 shrink-0 cursor-pointer font-medium text-rose-200 underline hover:text-rose-100">{isZh ? '重置' : 'Clear'}</button>
+          <div className="flex items-center justify-between border-t border-sky-200 dark:border-sky-400/25 bg-sky-50 dark:bg-sky-500/12 p-3 text-xs">
+            <span className="truncate font-mono text-[11px] text-slate-900 dark:text-white">{isZh ? `已筛选: ${selectedTopicTag}` : `Filtering: ${selectedTopicTag}`}</span>
+            <button type="button" onClick={onClearTopicFilter} className="ml-2 shrink-0 cursor-pointer font-medium text-rose-600 dark:text-rose-200 underline">{isZh ? '重置' : 'Clear'}</button>
           </div>
         )}
       </div>
 
-      <div className="space-y-3.5 rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-4 shadow-[var(--shadow-one-sm)] sm:p-5">
+      <div className="space-y-3.5 rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-4 shadow-[var(--shadow-one-sm)] sm:p-5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2"><Radio className="h-4 w-4 animate-pulse text-emerald-300" /><h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-one-text-muted)]">{isZh ? '全球遥测脉搏' : 'Telemetry Pulse'}</h4></div>
+          <div className="flex items-center gap-2"><Radio className="h-4 w-4 animate-pulse text-emerald-600 dark:text-emerald-300" /><h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-one-text-muted)]">{isZh ? '全球遥测脉搏' : 'Telemetry Pulse'}</h4></div>
           <span className="font-mono text-[10px] text-[var(--color-one-text-dim)]">{isZh ? '模拟流' : 'Simulated'}</span>
         </div>
         <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-2.5"><div className="text-[10px] text-[var(--color-one-text-dim)]">{isZh ? '在线节点' : 'Active Nodes'}</div><div className="flex items-center gap-1 font-mono text-sm font-semibold text-white"><span>{(1420 + (simulatedTickCount % 12)).toLocaleString()}</span><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /></div></div>
-          <div className="space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-2.5"><div className="text-[10px] text-[var(--color-one-text-dim)]">{isZh ? '跨国对话' : 'Cross-border Links'}</div><div className="font-mono text-sm font-semibold text-[var(--color-one-accent-soft)]">{(864 + (simulatedTickCount % 8)).toLocaleString()}</div></div>
-          <div className="space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-2.5"><div className="text-[10px] text-[var(--color-one-text-dim)]">{isZh ? 'AI 翻译吞吐' : 'AI Translation'}</div><div className="font-mono text-sm font-semibold text-white">340 {isZh ? '字/秒' : 'w/s'}</div></div>
-          <div className="space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-2.5"><div className="text-[10px] text-[var(--color-one-text-dim)]">{isZh ? '和谐指数' : 'Harmony Index'}</div><div className="font-mono text-sm font-semibold text-emerald-300">96.8%</div></div>
+          <div className="space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-2.5"><div className="text-[10px] text-[var(--color-one-text-dim)]">{isZh ? '在线节点' : 'Active Nodes'}</div><div className="flex items-center gap-1 font-mono text-sm font-semibold text-slate-900 dark:text-white"><span>{(1420 + (simulatedTickCount % 12)).toLocaleString()}</span><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /></div></div>
+          <div className="space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-2.5"><div className="text-[10px] text-[var(--color-one-text-dim)]">{isZh ? '跨国对话' : 'Cross-border Links'}</div><div className="font-mono text-sm font-semibold text-sky-700 dark:text-sky-300">{(864 + (simulatedTickCount % 8)).toLocaleString()}</div></div>
+          <div className="space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-2.5"><div className="text-[10px] text-[var(--color-one-text-dim)]">{isZh ? 'AI 翻译吞吐' : 'AI Translation'}</div><div className="font-mono text-sm font-semibold text-slate-900 dark:text-white">340 {isZh ? '字/秒' : 'w/s'}</div></div>
+          <div className="space-y-1 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-2.5"><div className="text-[10px] text-[var(--color-one-text-dim)]">{isZh ? '和谐指数' : 'Harmony Index'}</div><div className="font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-300">96.8%</div></div>
         </div>
-        <div className="flex items-center justify-between border-t border-[var(--color-one-border)] pt-2 text-[10px] text-[var(--color-one-text-dim)]"><span className="font-mono">ONE · ONE WORLD</span><span className="font-mono text-[var(--color-one-accent-soft)]">195 Countries</span></div>
+        <div className="flex items-center justify-between border-t border-[var(--color-one-border)] pt-2 text-[10px] text-[var(--color-one-text-dim)]"><span className="font-mono">ONE · ONE WORLD</span><span className="font-mono text-sky-700 dark:text-sky-300">195 Countries</span></div>
       </div>
     </div>
   );

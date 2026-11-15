@@ -97,11 +97,71 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   }, [messages]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const headerCanvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+
+  const ORB_SIZE = 44;
+  const clampLauncherPos = useCallback((x: number, y: number) => {
+    if (typeof window === 'undefined') return { x: 16, y: 120 };
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const minX = 10;
+    const maxX = Math.max(minX, vw - ORB_SIZE - 10);
+    const minY = 64;
+    const maxY = Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 78 : 18));
+    return {
+      x: Math.min(Math.max(x, minX), maxX),
+      y: Math.min(Math.max(y, minY), maxY),
+    };
+  }, []);
+
+  const [launcherPos, setLauncherPos] = useState<{ x: number; y: number }>(() => {
+    if (typeof window === 'undefined') return { x: 16, y: 120 };
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const defaultPos = {
+      x: Math.max(10, vw - ORB_SIZE - (vw < 768 ? 14 : 22)),
+      y: Math.max(64, vh - ORB_SIZE - (vw < 768 ? 84 : 22)),
+    };
+    try {
+      const saved = localStorage.getItem('earth-one-ai-launcher-pos:v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
+          const minX = 10;
+          const maxX = Math.max(minX, vw - ORB_SIZE - 10);
+          const minY = 64;
+          const maxY = Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 78 : 18));
+          return {
+            x: Math.min(Math.max(parsed.x, minX), maxX),
+            y: Math.min(Math.max(parsed.y, minY), maxY),
+          };
+        }
+      }
+    } catch {}
+    return defaultPos;
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStateRef = useRef<{
+    active: boolean;
+    pointerId: number | null;
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+    moved: boolean;
+  }>({ active: false, pointerId: null, startX: 0, startY: 0, origX: 0, origY: 0, moved: false });
+  const suppressClickRef = useRef(false);
+
+  useEffect(() => {
+    const onResize = () => {
+      setLauncherPos(prev => clampLauncherPos(prev.x, prev.y));
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [clampLauncherPos]);
 
   useEffect(() => {
     let cancelled = false;
@@ -143,32 +203,38 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
   // 3D Holographic AI Sphere
   useEffect(() => {
+    if (isOpen || !showLauncher) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const size = 56;
+    const size = 44;
     canvas.width = size;
     canvas.height = size;
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-    camera.position.z = 2.4;
+    camera.position.z = 2.35;
 
-    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    } catch {
+      return;
+    }
     renderer.setSize(size, size);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-    const coreGeo = new THREE.IcosahedronGeometry(0.75, 2);
+    const coreGeo = new THREE.IcosahedronGeometry(0.76, 2);
     const coreMat = new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
       wireframe: true,
       transparent: true,
-      opacity: 0.85
+      opacity: 0.88
     });
     const coreMesh = new THREE.Mesh(coreGeo, coreMat);
     scene.add(coreMesh);
 
-    const nucGeo = new THREE.SphereGeometry(0.38, 16, 16);
+    const nucGeo = new THREE.SphereGeometry(0.36, 16, 16);
     const nucMat = new THREE.MeshBasicMaterial({ color: 0x06b6d4 });
     const nucMesh = new THREE.Mesh(nucGeo, nucMat);
     scene.add(nucMesh);
@@ -187,9 +253,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
     return () => {
       cancelAnimationFrame(animFrameRef.current);
+      coreGeo.dispose();
+      coreMat.dispose();
+      nucGeo.dispose();
+      nucMat.dispose();
       renderer.dispose();
     };
-  }, []);
+  }, [isOpen, showLauncher]);
 
   // Speech Synthesis (TTS) - robust with active state
   const speak = useCallback((text: string, msgId?: string) => {
@@ -499,41 +569,113 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     '✍️ Write a short, warm piece about mothers'
   ];
 
-  return (
-    <div id="globe-ai-launcher" className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:bottom-6 right-4 md:right-6 z-40 select-none">
-      {/* Floating 3D Holographic AI Widget Capsule */}
-      {!isOpen && showLauncher && (
-        <button
-          onClick={() => setIsOpen(true)}
-          aria-label="打开 ONE AI 对话"
-          className="group relative flex items-center space-x-3 px-4 py-2.5 rounded-full bg-slate-950/95 hover:bg-slate-900 border border-cyan-400/50 hover:border-cyan-300 backdrop-blur-2xl shadow-2xl shadow-cyan-500/20 cursor-pointer transition-all hover:scale-105 active:scale-95"
-          title={isZh ? "唤醒智能助手 D" : "Open Intelligence D"}
-        >
-          <div className="relative w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-cyan-950/80 border border-cyan-400/50 shadow-inner">
-            <canvas ref={canvasRef} className="w-8 h-8" />
-            <div className="absolute inset-0 rounded-full ring-1 ring-cyan-400/50 pointer-events-none" />
-          </div>
+  const handleOrbPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    dragStateRef.current = {
+      active: true,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: launcherPos.x,
+      origY: launcherPos.y,
+      moved: false,
+    };
+    suppressClickRef.current = false;
+  };
 
-          <div className="text-left">
-            <div className="flex items-center space-x-1.5">
-              <span className="text-xs font-bold font-mono tracking-wider text-cyan-300">
-                {isZh ? '智能助手 D' : 'INTELLIGENCE D'}
-              </span>
-            </div>
-            <div className="text-[10px] text-slate-400 font-medium">
-              {isZh ? '语音与功能导航已就绪' : `${modelName} · Voice Ready`}
-            </div>
-          </div>
-        </button>
+  const handleOrbPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const ds = dragStateRef.current;
+    if (!ds.active || ds.pointerId !== e.pointerId) return;
+    const dx = e.clientX - ds.startX;
+    const dy = e.clientY - ds.startY;
+    if (!ds.moved && Math.hypot(dx, dy) > 5) {
+      ds.moved = true;
+      setIsDragging(true);
+    }
+    if (ds.moved) {
+      setLauncherPos(clampLauncherPos(ds.origX + dx, ds.origY + dy));
+    }
+  };
+
+  const finishOrbDrag = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const ds = dragStateRef.current;
+    if (!ds.active || ds.pointerId !== e.pointerId) return;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {}
+    const wasMoved = ds.moved;
+    ds.active = false;
+    ds.pointerId = null;
+    ds.moved = false;
+    setIsDragging(false);
+    if (wasMoved) {
+      suppressClickRef.current = true;
+      const finalPos = clampLauncherPos(
+        ds.origX + (e.clientX - ds.startX),
+        ds.origY + (e.clientY - ds.startY)
+      );
+      setLauncherPos(finalPos);
+      try {
+        localStorage.setItem('earth-one-ai-launcher-pos:v1', JSON.stringify(finalPos));
+      } catch {}
+      setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 60);
+    }
+  };
+
+  return (
+    <>
+      {/* Compact Draggable 3D Holographic AI Orb */}
+      {!isOpen && showLauncher && (
+        <div
+          id="globe-ai-launcher"
+          style={{ left: `${launcherPos.x}px`, top: `${launcherPos.y}px` }}
+          className="fixed z-40 select-none"
+        >
+          <button
+            type="button"
+            onPointerDown={handleOrbPointerDown}
+            onPointerMove={handleOrbPointerMove}
+            onPointerUp={finishOrbDrag}
+            onPointerCancel={finishOrbDrag}
+            onClick={() => {
+              if (suppressClickRef.current) return;
+              setIsOpen(true);
+            }}
+            style={{ touchAction: 'none' }}
+            aria-label={isZh ? '智能助手 D（可拖动位置，点击打开）' : 'Intelligence D (Drag to move, tap to open)'}
+            title={isZh ? '智能助手 D（可按住拖动位置）' : 'Intelligence D (Drag to move)'}
+            className={`group relative flex h-11 w-11 items-center justify-center rounded-full border border-cyan-400/55 bg-slate-950/90 backdrop-blur-xl shadow-lg shadow-cyan-500/25 transition-transform ${
+              isDragging
+                ? 'scale-110 cursor-grabbing ring-2 ring-cyan-400/60'
+                : 'cursor-grab hover:scale-105 hover:border-cyan-300 active:scale-95'
+            }`}
+          >
+            <canvas ref={canvasRef} className="pointer-events-none h-9 w-9 rounded-full" />
+            <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-cyan-300/60 bg-slate-950 text-[8px] font-bold font-mono text-cyan-300 shadow">
+              D
+            </span>
+          </button>
+        </div>
       )}
 
       {/* Expanded Direct Conversation & Management Console */}
       {isOpen && (
         <div
+          id="globe-ai-console-wrapper"
+          className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:bottom-6 right-3 sm:right-4 md:right-6 z-50 max-w-[calc(100vw-1.5rem)] select-none"
+        >
+        <div
           className={`rounded-3xl bg-slate-950/95 border border-cyan-500/40 backdrop-blur-2xl shadow-2xl shadow-cyan-950/80 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 transition-all duration-200 ${
             isExpanded
-              ? 'fixed inset-4 sm:inset-10 z-50 w-auto h-auto max-w-5xl mx-auto'
-              : 'w-[92vw] sm:w-[440px] h-[600px] max-h-[86vh]'
+              ? 'fixed inset-3 sm:inset-10 z-50 w-auto h-auto max-w-5xl mx-auto'
+              : 'w-[calc(100vw-1.5rem)] max-w-[440px] h-[min(540px,calc(100dvh-9rem))] sm:h-[600px] sm:max-h-[84vh]'
           }`}
         >
           {/* Mission Control Top Bar */}
@@ -1000,7 +1142,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             </div>
           )}
         </div>
+        </div>
       )}
-    </div>
+    </>
   );
 };

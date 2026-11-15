@@ -209,6 +209,47 @@ declare global {
     onFocusAddressBar(listener: (tabId: string) => void): () => void;
     onFocusFind(listener: (tabId: string) => void): () => void;
     onFindResult(listener: (result: EarthOneBrowserFindResult) => void): () => void;
+    getProxyStatus?: () => Promise<EarthOneBrowserProxyStatus>;
+    setProxy?: (config: EarthOneBrowserProxyInput) => Promise<{ success: boolean; error?: string; status?: EarthOneBrowserProxyStatus }>;
+    clearProxy?: () => Promise<{ success: boolean; status?: EarthOneBrowserProxyStatus }>;
+    testProxy?: (probeUrl?: string) => Promise<EarthOneBrowserProxyTestResult>;
+    onProxyStatus?: (listener: (status: EarthOneBrowserProxyStatus) => void) => () => void;
+  }
+
+  type EarthOneBrowserProxyMode = 'direct' | 'http' | 'https' | 'socks5';
+
+  interface EarthOneBrowserProxyInput {
+    mode: EarthOneBrowserProxyMode;
+    host?: string;
+    port?: number | string;
+    username?: string;
+    password?: string;
+    bypassHosts?: string[];
+    label?: string;
+  }
+
+  interface EarthOneBrowserProxyStatus {
+    mode: EarthOneBrowserProxyMode;
+    active: boolean;
+    label?: string;
+    host?: string;
+    port?: number;
+    hasCredentials: boolean;
+    remoteDns: boolean;
+    partition: string;
+    bypassRules: string;
+    isolationNotice: string;
+    updatedAt: string;
+    error?: string;
+  }
+
+  interface EarthOneBrowserProxyTestResult {
+    ok: boolean;
+    status?: number;
+    latencyMs: number;
+    partition: string;
+    proxied: boolean;
+    error?: string;
   }
 
   interface EarthOneDesktopNotificationPayload {

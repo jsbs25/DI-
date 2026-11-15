@@ -103,8 +103,7 @@ export const CreatorHub: React.FC<CreatorHubProps> = ({ articles, onCreateArticl
           {articles.map((art) => (
             <article
               key={art.id}
-              className="group flex flex-col overflow-hidden rounded-2xl border transition-all hover:-translate-y-0.5"
-              style={{ borderColor: 'var(--color-one-border)', background: 'rgba(14,19,27,0.55)' }}
+              className="group flex flex-col overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] shadow-[var(--shadow-one-sm)] transition-all hover:-translate-y-0.5"
             >
               <button
                 type="button"
@@ -118,10 +117,9 @@ export const CreatorHub: React.FC<CreatorHubProps> = ({ articles, onCreateArticl
                   className="h-full w-full object-cover transition-transform duration-500 ease-[var(--ease-one)] group-hover:scale-[1.03]"
                   loading="lazy"
                 />
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/5 to-transparent" />
                 <span
-                  className="absolute left-3 top-3 rounded-md px-2 py-0.5 text-[10px] font-medium"
-                  style={{ background: 'rgba(5,7,11,0.65)', border: '1px solid rgba(244,243,238,0.18)', color: 'var(--color-one-text)' }}
+                  className="absolute left-3 top-3 rounded-md px-2 py-0.5 text-[10px] font-medium bg-black/55 border border-white/25 text-white backdrop-blur-sm"
                 >
                   {art.category}
                 </span>
@@ -179,8 +177,7 @@ export const CreatorHub: React.FC<CreatorHubProps> = ({ articles, onCreateArticl
       {/* Reader */}
       {selectedArticle && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4"
-          style={{ background: 'rgba(5,7,11,0.82)', backdropFilter: 'blur(10px)' }}
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 bg-slate-900/65 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
         >
@@ -226,8 +223,7 @@ export const CreatorHub: React.FC<CreatorHubProps> = ({ articles, onCreateArticl
       {/* Publish composer */}
       {isPublishOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(5,7,11,0.82)', backdropFilter: 'blur(10px)' }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
         >

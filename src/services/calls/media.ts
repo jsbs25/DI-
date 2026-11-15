@@ -8,6 +8,7 @@ import {
   type RemoteTrackPublication,
   type Participant,
   createLocalTracks,
+  VideoPresets,
   type LocalTrack,
 } from 'livekit-client';
 
@@ -27,6 +28,31 @@ export interface CallMediaParticipantView {
   screenTrack?: MediaStreamTrack | null;
 }
 
+export interface AudioOutputOption {
+  deviceId: string;
+  label: string;
+}
+
+export interface CallAudioDiagnostics {
+  localLevel: number;
+  iceState: string;
+  bytesSent: number;
+  bytesReceived: number;
+  usingRelay: boolean;
+  hasLocalAudio: boolean;
+  remoteAudioFrames: number;
+  rttMs?: number;
+  packetLossPct?: number;
+  weakNetwork?: boolean;
+  transportProtocol?: string;
+  iceCandidateType?: string;
+  videoWidth?: number;
+  videoHeight?: number;
+  videoFps?: number;
+  videoBitrateKbps?: number;
+  iceTransportPolicy?: RTCIceTransportPolicy;
+}
+
 export interface CallMediaState {
   phase: CallMediaPhase;
   roomName?: string;
@@ -34,6 +60,11 @@ export interface CallMediaState {
   reason?: string;
   canPlaybackAudio: boolean;
   connectionQuality?: string;
+  weakNetwork?: boolean;
+  audioOutputDevices?: AudioOutputOption[];
+  selectedAudioOutputId?: string;
+  supportsOutputSelection?: boolean;
+  audioStats?: CallAudioDiagnostics;
   participants: Record<string, CallMediaParticipantView>;
 }
 
@@ -46,11 +77,14 @@ export interface CallMediaOptions {
   selfName?: string;
   participantIds?: string[];
   iceServers?: RTCIceServer[];
+  iceTransportPolicy?: RTCIceTransportPolicy;
   kind: 'audio' | 'video';
   initialMicEnabled?: boolean;
   initialCameraEnabled?: boolean;
+  reconnect?: boolean;
   sendSignal?: (toUserId: string | undefined, signal: any) => Promise<void> | void;
   pollSignals?: (afterSeq: number) => Promise<{ signals: any[]; lastSeq: number }>;
+  sendAudioFrame?: (pcmBase64: string, sampleRate: number) => void;
   onState: (state: CallMediaState) => void;
 }
 
@@ -61,9 +95,158 @@ export interface ICallMediaSession {
   setCameraEnabled(enabled: boolean): Promise<void>;
   switchCamera(): Promise<void>;
   setScreenShareEnabled(enabled: boolean): Promise<void>;
+  setAudioOutputDevice?(deviceId: string): Promise<void>;
+  setIceTransportPolicy?(policy: RTCIceTransportPolicy): Promise<void>;
   startAudioPlayback(): Promise<void>;
   disconnect(reason?: string): Promise<void>;
   handleRemoteSignal?(fromUserId: string, signal: any, seq?: number): Promise<void>;
+  handleRemoteAudioFrame?(fromUserId: string, pcmBase64: string, sampleRate: number): void;
+}
+
+export interface IceProbeResult {
+  ok: boolean;
+  hasHost: boolean;
+  hasSrflx: boolean;
+  hasRelay: boolean;
+  hasRelayTcp: boolean;
+  candidateCount: number;
+  protocols: string[];
+  elapsedMs: number;
+  summary: string;
+}
+
+export async function probeIceConnectivity(
+  iceServers?: RTCIceServer[],
+  opts?: { relayOnly?: boolean; timeoutMs?: number }
+): Promise<IceProbeResult> {
+  const started = Date.now();
+  if (typeof RTCPeerConnection === 'undefined') {
+    return {
+      ok: false,
+      hasHost: false,
+      hasSrflx: false,
+      hasRelay: false,
+      hasRelayTcp: false,
+      candidateCount: 0,
+      protocols: [],
+      elapsedMs: 0,
+      summary: '当前环境不支持 RTCPeerConnection ICE 探测',
+    };
+  }
+  const servers: RTCIceServer[] = iceServers?.length
+    ? iceServers
+    : [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+      ];
+  let pc: RTCPeerConnection | null = null;
+  try {
+    pc = new RTCPeerConnection({
+      iceServers: servers,
+      iceTransportPolicy: opts?.relayOnly ? 'relay' : 'all',
+    });
+    pc.createDataChannel('one-ice-probe');
+    let hasHost = false;
+    let hasSrflx = false;
+    let hasRelay = false;
+    let hasRelayTcp = false;
+    let candidateCount = 0;
+    const protocols = new Set<string>();
+
+    const done = new Promise<void>((resolve) => {
+      const timeoutMs = opts?.timeoutMs ?? 3500;
+      const timer = setTimeout(resolve, timeoutMs);
+      if (!pc) {
+        clearTimeout(timer);
+        resolve();
+        return;
+      }
+      pc.onicecandidate = (ev) => {
+        if (!ev.candidate) {
+          clearTimeout(timer);
+          resolve();
+          return;
+        }
+        const candStr = ev.candidate.candidate || '';
+        const type = ev.candidate.type || (/\btyp\s+(host|srflx|prflx|relay)\b/i.exec(candStr)?.[1] || '').toLowerCase();
+        const proto = (ev.candidate.protocol || (/\b(udp|tcp)\b/i.exec(candStr)?.[1] || '')).toLowerCase();
+        candidateCount += 1;
+        if (proto) protocols.add(proto);
+        if (type === 'host') hasHost = true;
+        if (type === 'srflx') hasSrflx = true;
+        if (type === 'relay') {
+          hasRelay = true;
+          if (proto === 'tcp' || proto === 'tls') hasRelayTcp = true;
+        }
+      };
+      pc.onicegatheringstatechange = () => {
+        if (pc?.iceGatheringState === 'complete') {
+          clearTimeout(timer);
+          resolve();
+        }
+      };
+    });
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await done;
+
+    const elapsedMs = Date.now() - started;
+    const parts: string[] = [];
+    if (hasHost) parts.push('本地主机(host)');
+    if (hasSrflx) parts.push('STUN 公网穿透(srflx)');
+    if (hasRelay) parts.push(hasRelayTcp ? 'TURN 中继(含 TCP/TLS)' : 'TURN 中继(UDP)');
+    const summary = parts.length
+      ? `探测完成 (${elapsedMs}ms): ${parts.join(' + ')}`
+      : `未收集到可用候选地址 (${elapsedMs}ms)，可能受防火墙限制`;
+    return {
+      ok: hasHost || hasSrflx || hasRelay,
+      hasHost,
+      hasSrflx,
+      hasRelay,
+      hasRelayTcp,
+      candidateCount,
+      protocols: Array.from(protocols),
+      elapsedMs,
+      summary,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      hasHost: false,
+      hasSrflx: false,
+      hasRelay: false,
+      hasRelayTcp: false,
+      candidateCount: 0,
+      protocols: [],
+      elapsedMs: Date.now() - started,
+      summary: err?.message || 'ICE 探测失败',
+    };
+  } finally {
+    try { pc?.close(); } catch {}
+  }
+}
+
+function supportsSinkIdSelection(): boolean {
+  try {
+    return typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+  } catch {
+    return false;
+  }
+}
+
+async function listAudioOutputOptions(): Promise<AudioOutputOption[]> {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return [];
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const outs = devices.filter((d) => d.kind === 'audiooutput' && d.deviceId);
+    return outs.map((d, idx) => ({
+      deviceId: d.deviceId,
+      label: d.label || (d.deviceId === 'default' ? '系统默认输出' : `音频输出设备 ${idx + 1}`),
+    }));
+  } catch {
+    return [];
+  }
 }
 
 function trackToMedia(t: any): MediaStreamTrack | null {
@@ -146,10 +329,29 @@ export class LiveKitCallSession implements ICallMediaSession {
     if (this.room) await this.disconnect('replace');
     this.disposed = false;
     this.opts = opts;
-    this.state = { phase: 'acquiring', canPlaybackAudio: false, participants: {}, roomName: opts.roomName };
+    const outputs = await listAudioOutputOptions();
+    this.state = {
+      phase: 'acquiring',
+      canPlaybackAudio: false,
+      participants: {},
+      roomName: opts.roomName,
+      supportsOutputSelection: supportsSinkIdSelection(),
+      audioOutputDevices: outputs,
+      selectedAudioOutputId: outputs[0]?.deviceId || 'default',
+    };
     this.emit();
 
-    const room = new Room({ adaptiveStream: true, dynacast: true });
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      videoCaptureDefaults: {
+        resolution: VideoPresets.h720.resolution,
+      },
+      publishDefaults: {
+        simulcast: true,
+        videoCodec: 'vp8',
+      },
+    });
     this.room = room;
 
     room
@@ -162,12 +364,23 @@ export class LiveKitCallSession implements ICallMediaSession {
       .on(RoomEvent.LocalTrackPublished, () => this.refreshParticipants())
       .on(RoomEvent.LocalTrackUnpublished, () => this.refreshParticipants())
       .on(RoomEvent.ActiveSpeakersChanged, () => this.refreshParticipants())
-      .on(RoomEvent.ConnectionQualityChanged, () => this.refreshParticipants())
+      .on(RoomEvent.ConnectionQualityChanged, (quality: any, participant: any) => {
+        if (participant?.isLocal || participant?.identity === room.localParticipant?.identity) {
+          const q = String(quality || '').toLowerCase();
+          this.emit({
+            connectionQuality: q || 'good',
+            weakNetwork: q === 'poor' || q === 'lost',
+          });
+        }
+        this.refreshParticipants();
+      })
+      .on(RoomEvent.Reconnecting, () => this.emit({ phase: 'reconnecting', weakNetwork: true, connectionQuality: 'poor' }))
+      .on(RoomEvent.Reconnected, () => this.emit({ phase: 'connected', weakNetwork: false, connectionQuality: 'good' }))
       .on(RoomEvent.AudioPlaybackStatusChanged, () => this.emit({ canPlaybackAudio: room.canPlaybackAudio }))
       .on(RoomEvent.ConnectionStateChanged, (st: ConnectionState) => {
         if (st === ConnectionState.Connecting) this.emit({ phase: 'connecting' });
-        else if (st === ConnectionState.Connected) this.emit({ phase: 'connected' });
-        else if (st === ConnectionState.Reconnecting) this.emit({ phase: 'reconnecting' });
+        else if (st === ConnectionState.Connected) this.emit({ phase: 'connected', weakNetwork: false });
+        else if (st === ConnectionState.Reconnecting) this.emit({ phase: 'reconnecting', weakNetwork: true });
         else if (st === ConnectionState.Disconnected) this.emit({ phase: 'disconnected' });
       })
       .on(RoomEvent.Disconnected, () => this.emit({ phase: 'disconnected' }));
@@ -189,6 +402,10 @@ export class LiveKitCallSession implements ICallMediaSession {
         this.emit({ error: msg });
       }
       try { await room.startAudio(); } catch {}
+      const refreshedOutputs = await listAudioOutputOptions();
+      if (refreshedOutputs.length) {
+        this.emit({ audioOutputDevices: refreshedOutputs });
+      }
       this.refreshParticipants();
     } catch (e: any) {
       this.emit({ phase: 'failed', error: friendlyMediaError(e) });
@@ -241,6 +458,19 @@ export class LiveKitCallSession implements ICallMediaSession {
     this.refreshParticipants();
   }
 
+  async setAudioOutputDevice(deviceId: string) {
+    const room: any = this.room;
+    this.emit({ selectedAudioOutputId: deviceId });
+    if (!room || !deviceId) return;
+    try {
+      if (typeof room.switchActiveDevice === 'function') {
+        await room.switchActiveDevice('audiooutput', deviceId);
+      }
+    } catch (e: any) {
+      this.emit({ error: friendlyMediaError(e) });
+    }
+  }
+
   async startAudioPlayback() {
     try { await this.room?.startAudio(); this.emit({ canPlaybackAudio: !!this.room?.canPlaybackAudio }); } catch {}
   }
@@ -270,15 +500,80 @@ type PeerEntry = {
   ignoreOffer: boolean;
   isSettingRemoteAnswerPending: boolean;
   pendingIce: RTCIceCandidateInit[];
+  signalChain: Promise<void>;
+  lastOfferAt: number;
   remoteStream: MediaStream;
   audioTrack: MediaStreamTrack | null;
   videoTrack: MediaStreamTrack | null;
 };
 
+let sharedCallAudioCtx: AudioContext | null = null;
+
+function getSharedAudioContext(): AudioContext | null {
+  try {
+    const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return null;
+    if (!sharedCallAudioCtx || sharedCallAudioCtx.state === 'closed') {
+      sharedCallAudioCtx = new Ctx();
+    }
+    return sharedCallAudioCtx;
+  } catch {
+    return null;
+  }
+}
+
+export async function unlockCallAudioContext(): Promise<boolean> {
+  const ctx = getSharedAudioContext();
+  if (!ctx) return false;
+  try {
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    // Play 1-sample silent buffer inside user gesture to unlock iOS/Android/Desktop playback
+    const buf = ctx.createBuffer(1, 1, ctx.sampleRate || 22050);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+    return ctx.state === 'running';
+  } catch {
+    return ctx.state === 'running';
+  }
+}
+
+function int16ToBase64(pcm: Int16Array): string {
+  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) {
+    bin += String.fromCharCode(bytes[i]);
+  }
+  return btoa(bin);
+}
+
+function base64ToFloat32(b64: string): Float32Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+  const out = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768;
+  return out;
+}
+
+export function hasLocalMediaSupport(): boolean {
+  try {
+    return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+  } catch {
+    return false;
+  }
+}
+
 export class WebRTCCallSession implements ICallMediaSession {
   private opts: CallMediaOptions | null = null;
   private state: CallMediaState = { phase: 'idle', canPlaybackAudio: true, participants: {} };
   private disposed = false;
+  private mediaReady = false;
+  private preMediaSignals: Array<{ fromUserId: string; signal: any; seq?: number }> = [];
   private peers = new Map<string, PeerEntry>();
   private localAudioTrack: MediaStreamTrack | null = null;
   private localVideoTrack: MediaStreamTrack | null = null;
@@ -287,9 +582,28 @@ export class WebRTCCallSession implements ICallMediaSession {
   private micEnabled = true;
   private cameraEnabled = false;
   private screenShareEnabled = false;
-  private seenSeq = 0;
+  private pollAfterSeq = 0;
+  private seenSeqs = new Set<number>();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
+  private relayFallbackTimer: ReturnType<typeof setTimeout> | null = null;
   private pollingInFlight = false;
+  private usingRelay = false;
+  private localAudioLevel = 0;
+  private remoteAudioFrames = 0;
+  private webrtcBytesReceived = 0;
+  private captureNode: ScriptProcessorNode | null = null;
+  private captureSrc: MediaStreamAudioSourceNode | null = null;
+  private captureGain: GainNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private analyserData: Uint8Array<ArrayBuffer> | null = null;
+  private nextRelayPlayTime = 0;
+  private iceTransportPolicy: RTCIceTransportPolicy = 'all';
+  private iceRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private lastIceRestartAt = new Map<string, number>();
+  private lastVideoTier: 'high' | 'low' = 'high';
+  private prevVideoBytes = 0;
+  private prevVideoAt = 0;
 
   getState() { return this.state; }
 
@@ -297,6 +611,15 @@ export class WebRTCCallSession implements ICallMediaSession {
     if (this.disposed) return;
     this.state = { ...this.state, ...(patch || {}) };
     try { this.opts?.onState(this.state); } catch {}
+  }
+
+  private findSender(pc: RTCPeerConnection, kind: 'audio' | 'video'): RTCRtpSender | undefined {
+    const direct = pc.getSenders().find((s) => s.track?.kind === kind);
+    if (direct) return direct;
+    const tr = pc.getTransceivers().find(
+      (t) => t.receiver?.track?.kind === kind || t.sender?.track?.kind === kind
+    );
+    return tr?.sender;
   }
 
   private rebuildParticipants(error?: string) {
@@ -344,8 +667,13 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.micEnabled = wantAudio;
     this.cameraEnabled = wantVideo;
 
-    if (!navigator.mediaDevices?.getUserMedia) {
-      this.emit({ error: '当前浏览器环境不支持本地音视频采集（需 HTTPS 或 localhost），将以只收听模式连接。' });
+    if (!hasLocalMediaSupport()) {
+      const insecure = typeof window !== 'undefined' && window.isSecureContext === false;
+      this.emit({
+        error: insecure
+          ? '当前网站通过 HTTP 访问，浏览器安全策略已禁止调用麦克风与摄像头；请使用 HTTPS 或 localhost 打开以启用实时音视频（信令已正常连接）。'
+          : '当前浏览器不支持麦克风/摄像头采集，将以只收听模式连接。',
+      });
       return;
     }
 
@@ -362,15 +690,15 @@ export class WebRTCCallSession implements ICallMediaSession {
       if (this.localVideoTrack) this.localVideoTrack.enabled = this.cameraEnabled;
     } catch (err: any) {
       if (wantVideo && wantAudio) {
-        // Fallback to audio-only when camera is unavailable/denied
         try {
           const audioStream = await navigator.mediaDevices.getUserMedia({
             audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
             video: false,
           });
           this.localAudioTrack = audioStream.getAudioTracks()[0] || null;
+          if (this.localAudioTrack) this.localAudioTrack.enabled = this.micEnabled;
           this.cameraEnabled = false;
-          this.emit({ error: '未检测到可用摄像头，已自动切换为语音通话。' });
+          this.emit({ error: '未检测到可用摄像头或权限受限，已自动切换为语音通话。' });
           return;
         } catch (audioErr: any) {
           this.emit({ error: friendlyMediaError(audioErr) });
@@ -378,6 +706,25 @@ export class WebRTCCallSession implements ICallMediaSession {
         }
       }
       this.emit({ error: friendlyMediaError(err) });
+    }
+  }
+
+  private async createAndSendOffer(peerId: string, entry: PeerEntry, iceRestart = false) {
+    const pc = entry.pc;
+    if (this.disposed || entry.makingOffer) return;
+    if (!iceRestart && pc.signalingState !== 'stable') return;
+    try {
+      entry.makingOffer = true;
+      entry.lastOfferAt = Date.now();
+      const offer = await pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
+      if (this.disposed) return;
+      await pc.setLocalDescription(offer);
+      if (pc.localDescription) {
+        await this.opts?.sendSignal?.(peerId, { type: 'offer', sdp: pc.localDescription.toJSON() });
+      }
+    } catch {
+    } finally {
+      entry.makingOffer = false;
     }
   }
 
@@ -391,7 +738,9 @@ export class WebRTCCallSession implements ICallMediaSession {
         : [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun.cloudflare.com:3478' },
           ],
+      iceTransportPolicy: this.iceTransportPolicy,
     });
     const entry: PeerEntry = {
       pc,
@@ -399,6 +748,8 @@ export class WebRTCCallSession implements ICallMediaSession {
       ignoreOffer: false,
       isSettingRemoteAnswerPending: false,
       pendingIce: [],
+      signalChain: Promise.resolve(),
+      lastOfferAt: 0,
       remoteStream: new MediaStream(),
       audioTrack: null,
       videoTrack: null,
@@ -408,7 +759,6 @@ export class WebRTCCallSession implements ICallMediaSession {
     const selfId = this.opts?.selfUserId || '';
     const polite = selfId < peerId;
 
-    // Add local tracks (or recvonly transceivers so receive works even without mic/cam)
     if (this.localAudioTrack) {
       pc.addTrack(this.localAudioTrack, new MediaStream([this.localAudioTrack]));
     } else {
@@ -428,16 +778,10 @@ export class WebRTCCallSession implements ICallMediaSession {
 
     pc.onnegotiationneeded = async () => {
       if (this.disposed) return;
-      try {
-        entry.makingOffer = true;
-        await pc.setLocalDescription();
-        if (pc.localDescription) {
-          await this.opts?.sendSignal?.(peerId, { type: 'offer', sdp: pc.localDescription.toJSON() });
-        }
-      } catch {
-      } finally {
-        entry.makingOffer = false;
-      }
+      // Avoid initial offer collisions: only impolite peer sends initial offer,
+      // while polite peer triggers offers for subsequent mid-call track changes.
+      if (polite && !pc.remoteDescription) return;
+      await this.createAndSendOffer(peerId, entry, false);
     };
 
     pc.ontrack = (ev) => {
@@ -456,15 +800,58 @@ export class WebRTCCallSession implements ICallMediaSession {
       this.rebuildParticipants();
     };
 
+    const clearRestartTimer = () => {
+      const existingTimer = this.iceRestartTimers.get(peerId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        this.iceRestartTimers.delete(peerId);
+      }
+    };
+
+    const scheduleIceRestart = (delayMs: number) => {
+      if (this.disposed || this.iceRestartTimers.has(peerId)) return;
+      const last = this.lastIceRestartAt.get(peerId) || 0;
+      if (Date.now() - last < 6000) return;
+      const t = setTimeout(async () => {
+        this.iceRestartTimers.delete(peerId);
+        if (this.disposed) return;
+        const st = pc.iceConnectionState;
+        if (st === 'connected' || st === 'completed') return;
+        this.lastIceRestartAt.set(peerId, Date.now());
+        if (!polite) {
+          await this.createAndSendOffer(peerId, entry, true);
+        } else {
+          try { await this.opts?.sendSignal?.(peerId, { type: 'ready', reset: true }); } catch {}
+        }
+      }, delayMs);
+      this.iceRestartTimers.set(peerId, t);
+    };
+
+    const isAnyPeerConnected = () =>
+      Array.from(this.peers.values()).some(
+        (p) => p.pc.connectionState === 'connected' || p.pc.iceConnectionState === 'connected' || p.pc.iceConnectionState === 'completed'
+      );
+
     const syncConnectionPhase = () => {
       if (this.disposed) return;
       const states = Array.from(this.peers.values()).map((p) => p.pc.connectionState);
-      if (states.some((s) => s === 'connected')) {
+      const iceStates = Array.from(this.peers.values()).map((p) => p.pc.iceConnectionState);
+      if (states.some((s) => s === 'connected') || iceStates.some((s) => s === 'connected' || s === 'completed')) {
+        clearRestartTimer();
+        if (this.usingRelay && this.webrtcBytesReceived > 0) this.usingRelay = false;
         this.emit({ phase: 'connected', connectionQuality: 'excellent' });
-      } else if (states.some((s) => s === 'disconnected')) {
+      } else if (this.usingRelay) {
+        this.emit({ phase: 'connected', connectionQuality: 'good' });
+      } else if (states.some((s) => s === 'disconnected') || iceStates.some((s) => s === 'disconnected')) {
         this.emit({ phase: 'reconnecting', connectionQuality: 'poor' });
-      } else if (states.length && states.every((s) => s === 'failed')) {
-        this.emit({ phase: 'failed', error: 'P2P 音视频连接失败，请检查网络或防火墙设置。' });
+        scheduleIceRestart(2200);
+      } else if (states.length && (states.every((s) => s === 'failed') || iceStates.every((s) => s === 'failed'))) {
+        scheduleIceRestart(400);
+        if (this.opts?.sendAudioFrame) {
+          this.activateAudioRelay();
+        } else {
+          this.emit({ phase: 'failed', error: 'P2P 音视频连接失败，请检查网络、防火墙或尝试重连。' });
+        }
       }
       this.rebuildParticipants();
     };
@@ -473,61 +860,426 @@ export class WebRTCCallSession implements ICallMediaSession {
     pc.oniceconnectionstatechange = () => {
       if (this.disposed) return;
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        this.emit({ phase: 'connected', connectionQuality: 'excellent' });
+        clearRestartTimer();
       } else if (pc.iceConnectionState === 'disconnected') {
-        this.emit({ phase: 'reconnecting', connectionQuality: 'poor' });
+        scheduleIceRestart(2200);
+      } else if (pc.iceConnectionState === 'failed') {
+        scheduleIceRestart(400);
+        if (!isAnyPeerConnected() && this.opts?.sendAudioFrame) {
+          this.activateAudioRelay();
+        }
       }
+      syncConnectionPhase();
     };
 
-    if (!polite && (this.localAudioTrack || activeVideo || this.opts?.kind)) {
-      // Trigger initial offer proactively when impolite peer creates connection
+    if (!polite) {
       setTimeout(() => {
         if (!this.disposed && pc.signalingState === 'stable' && !pc.remoteDescription && !entry.makingOffer) {
-          void pc.onnegotiationneeded?.(new Event('negotiationneeded'));
+          void this.createAndSendOffer(peerId, entry, false);
         }
-      }, 60);
+      }, 80);
     }
 
     return entry;
   }
 
+  private startAudioCaptureAndMonitor() {
+    this.stopAudioCapture();
+    if (!this.localAudioTrack) return;
+    try {
+      const ctx = getSharedAudioContext();
+      if (!ctx) return;
+      const src = ctx.createMediaStreamSource(new MediaStream([this.localAudioTrack]));
+      this.captureSrc = src;
+
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      this.analyser = analyser;
+      this.analyserData = new Uint8Array(analyser.frequencyBinCount);
+
+      if (typeof ctx.createScriptProcessor === 'function' && this.opts?.sendAudioFrame) {
+        const proc = ctx.createScriptProcessor(2048, 1, 1);
+        const zeroGain = ctx.createGain();
+        zeroGain.gain.value = 0;
+        src.connect(proc);
+        proc.connect(zeroGain);
+        zeroGain.connect(ctx.destination);
+        this.captureNode = proc;
+        this.captureGain = zeroGain;
+
+        const inRate = ctx.sampleRate || 48000;
+        const outRate = 16000;
+        const ratio = inRate / outRate;
+        let carry: number[] = [];
+
+        proc.onaudioprocess = (ev) => {
+          if (this.disposed || !this.usingRelay || !this.micEnabled || !this.localAudioTrack?.enabled) return;
+          const isP2pFlowing = this.webrtcBytesReceived > 0 && Array.from(this.peers.values()).some(
+            (p) => p.pc.connectionState === 'connected' || p.pc.iceConnectionState === 'connected' || p.pc.iceConnectionState === 'completed'
+          );
+          if (isP2pFlowing) {
+            this.usingRelay = false;
+            return;
+          }
+          const input = ev.inputBuffer.getChannelData(0);
+          for (let i = 0; i < input.length; i++) carry.push(input[i]);
+          const neededIn = Math.floor(640 * ratio); // ~40ms at 16kHz
+          while (carry.length >= neededIn) {
+            const slice = carry.splice(0, neededIn);
+            const pcm = new Int16Array(640);
+            for (let j = 0; j < 640; j++) {
+              const idx = Math.min(slice.length - 1, Math.floor(j * ratio));
+              const sample = Math.max(-1, Math.min(1, slice[idx]));
+              pcm[j] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+            }
+            try { this.opts?.sendAudioFrame?.(int16ToBase64(pcm), outRate); } catch {}
+          }
+        };
+      }
+      if (ctx.state === 'suspended') {
+        void ctx.resume().catch(() => {});
+      }
+    } catch {}
+  }
+
+  private stopAudioCapture() {
+    try { this.captureNode?.disconnect(); } catch {}
+    try { this.captureSrc?.disconnect(); } catch {}
+    try { this.captureGain?.disconnect(); } catch {}
+    try { this.analyser?.disconnect(); } catch {}
+    this.captureNode = null;
+    this.captureSrc = null;
+    this.captureGain = null;
+    this.analyser = null;
+    this.analyserData = null;
+  }
+
+  private activateAudioRelay() {
+    if (this.disposed) return;
+    if (this.usingRelay) {
+      if (this.state.phase !== 'connected') {
+        this.emit({ phase: 'connected', connectionQuality: 'good' });
+      }
+      return;
+    }
+    this.usingRelay = true;
+    const ctx = getSharedAudioContext();
+    if (ctx?.state === 'suspended') {
+      void ctx.resume().catch(() => {});
+    }
+    this.emit({ phase: 'connected', connectionQuality: 'good' });
+  }
+
+  handleRemoteAudioFrame(fromUserId: string, pcmBase64: string, sampleRate: number): void {
+    if (this.disposed || !fromUserId || fromUserId === this.opts?.selfUserId || !pcmBase64) return;
+    const peer = this.peers.get(fromUserId);
+    const peerConnected = !!(peer && (peer.pc.connectionState === 'connected' || peer.pc.iceConnectionState === 'connected' || peer.pc.iceConnectionState === 'completed'));
+    if (peerConnected && this.webrtcBytesReceived > 0) {
+      return; // P2P RTP confirmed flowing
+    }
+    if (!this.usingRelay) {
+      this.activateAudioRelay();
+    }
+    this.remoteAudioFrames += 1;
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      void ctx.resume().catch(() => {});
+      if (ctx.state === 'suspended') {
+        this.emit({ canPlaybackAudio: false });
+        return;
+      }
+    }
+    try {
+      const floatData = base64ToFloat32(pcmBase64);
+      if (!floatData.length) return;
+      const sr = Math.max(8000, Math.min(48000, sampleRate || 16000));
+      const buf = ctx.createBuffer(1, floatData.length, sr);
+      buf.getChannelData(0).set(floatData);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      const now = ctx.currentTime;
+      if (this.nextRelayPlayTime < now || this.nextRelayPlayTime > now + 0.6) {
+        this.nextRelayPlayTime = now + 0.05;
+      }
+      src.start(this.nextRelayPlayTime);
+      this.nextRelayPlayTime += buf.duration;
+      if (!this.state.canPlaybackAudio) this.emit({ canPlaybackAudio: true });
+    } catch {}
+  }
+
+  private async refreshAudioDiagnostics() {
+    if (this.disposed) return;
+    let level = 0;
+    if (this.analyser && this.analyserData && this.micEnabled && this.localAudioTrack?.enabled) {
+      try {
+        this.analyser.getByteTimeDomainData(this.analyserData);
+        let peak = 0;
+        for (let i = 0; i < this.analyserData.length; i++) {
+          const v = Math.abs(this.analyserData[i] - 128) / 128;
+          if (v > peak) peak = v;
+        }
+        level = Math.min(100, Math.round(peak * 220));
+      } catch {}
+    }
+    this.localAudioLevel = level;
+
+    let bytesSent = 0;
+    let bytesReceived = 0;
+    let videoBytesTotal = 0;
+    let iceState = 'new';
+    let rttMs: number | undefined;
+    let packetsReceived = 0;
+    let packetsLost = 0;
+    let transportProtocol: string | undefined;
+    let iceCandidateType: string | undefined;
+    let videoWidth: number | undefined;
+    let videoHeight: number | undefined;
+    let videoFps: number | undefined;
+
+    for (const [, entry] of this.peers.entries()) {
+      iceState = entry.pc.iceConnectionState || entry.pc.connectionState || iceState;
+      try {
+        const stats = await entry.pc.getStats();
+        let selectedPairId: string | null = null;
+        const localCandidates = new Map<string, any>();
+        stats.forEach((rep: any) => {
+          if (rep.type === 'transport' && rep.selectedCandidatePairId) {
+            selectedPairId = rep.selectedCandidatePairId;
+          }
+          if (rep.type === 'local-candidate') {
+            localCandidates.set(rep.id, rep);
+          }
+          if (rep.type === 'outbound-rtp' && (rep.kind === 'audio' || rep.mediaType === 'audio')) {
+            bytesSent += Number(rep.bytesSent || 0);
+          }
+          if (rep.type === 'outbound-rtp' && (rep.kind === 'video' || rep.mediaType === 'video')) {
+            bytesSent += Number(rep.bytesSent || 0);
+            videoBytesTotal += Number(rep.bytesSent || 0);
+            if (typeof rep.frameWidth === 'number' && rep.frameWidth > 0) videoWidth = rep.frameWidth;
+            if (typeof rep.frameHeight === 'number' && rep.frameHeight > 0) videoHeight = rep.frameHeight;
+            if (typeof rep.framesPerSecond === 'number') videoFps = Math.round(rep.framesPerSecond);
+          }
+          if (rep.type === 'inbound-rtp' && (rep.kind === 'audio' || rep.mediaType === 'audio')) {
+            bytesReceived += Number(rep.bytesReceived || 0);
+            packetsReceived += Number(rep.packetsReceived || 0);
+            packetsLost += Math.max(0, Number(rep.packetsLost || 0));
+          }
+          if (rep.type === 'inbound-rtp' && (rep.kind === 'video' || rep.mediaType === 'video')) {
+            bytesReceived += Number(rep.bytesReceived || 0);
+            videoBytesTotal += Number(rep.bytesReceived || 0);
+            packetsReceived += Number(rep.packetsReceived || 0);
+            packetsLost += Math.max(0, Number(rep.packetsLost || 0));
+            if (!videoWidth && typeof rep.frameWidth === 'number' && rep.frameWidth > 0) videoWidth = rep.frameWidth;
+            if (!videoHeight && typeof rep.frameHeight === 'number' && rep.frameHeight > 0) videoHeight = rep.frameHeight;
+            if (videoFps === undefined && typeof rep.framesPerSecond === 'number') videoFps = Math.round(rep.framesPerSecond);
+          }
+          if (rep.type === 'remote-inbound-rtp' && typeof rep.roundTripTime === 'number') {
+            const ms = Math.round(rep.roundTripTime * 1000);
+            rttMs = rttMs === undefined ? ms : Math.max(rttMs, ms);
+          }
+        });
+        stats.forEach((rep: any) => {
+          if (rep.type === 'candidate-pair' && (rep.selected || rep.nominated || rep.id === selectedPairId)) {
+            if (typeof rep.currentRoundTripTime === 'number') {
+              const ms = Math.round(rep.currentRoundTripTime * 1000);
+              rttMs = rttMs === undefined ? ms : Math.max(rttMs, ms);
+            }
+            const lc = localCandidates.get(rep.localCandidateId);
+            if (lc) {
+              transportProtocol = lc.protocol || transportProtocol;
+              iceCandidateType = lc.candidateType || iceCandidateType;
+            }
+          }
+        });
+      } catch {}
+    }
+
+    const nowMs = Date.now();
+    let videoBitrateKbps: number | undefined;
+    if (this.prevVideoAt > 0 && videoBytesTotal >= this.prevVideoBytes) {
+      const dtSec = Math.max(0.25, (nowMs - this.prevVideoAt) / 1000);
+      videoBitrateKbps = Math.round(((videoBytesTotal - this.prevVideoBytes) * 8) / dtSec / 1000);
+    }
+    this.prevVideoBytes = videoBytesTotal;
+    this.prevVideoAt = nowMs;
+
+    const totalPackets = packetsReceived + packetsLost;
+    const packetLossPct = totalPackets > 20 ? Number(((packetsLost / totalPackets) * 100).toFixed(1)) : 0;
+    const weakNetwork =
+      iceState === 'disconnected' ||
+      (typeof rttMs === 'number' && rttMs > 320) ||
+      packetLossPct > 4;
+
+    if (this.opts?.kind === 'video') {
+      const targetTier: 'high' | 'low' = weakNetwork ? 'low' : 'high';
+      if (targetTier !== this.lastVideoTier) {
+        this.lastVideoTier = targetTier;
+        void this.applyVideoBitrateCap(targetTier);
+      }
+    }
+
+    this.webrtcBytesReceived = bytesReceived;
+    const p2pConnected = Array.from(this.peers.values()).some(
+      (p) => p.pc.connectionState === 'connected' || p.pc.iceConnectionState === 'connected' || p.pc.iceConnectionState === 'completed'
+    );
+    if (this.usingRelay && p2pConnected && bytesReceived > 0) {
+      this.usingRelay = false;
+    }
+    const nextConnectionQuality = weakNetwork
+      ? 'poor'
+      : this.usingRelay
+        ? 'good'
+        : p2pConnected
+          ? 'excellent'
+          : this.state.connectionQuality;
+    const nextPhasePatch: Partial<CallMediaState> =
+      this.usingRelay && this.state.phase !== 'connected'
+        ? { phase: 'connected', connectionQuality: nextConnectionQuality }
+        : { connectionQuality: nextConnectionQuality };
+    this.emit({
+      ...nextPhasePatch,
+      weakNetwork,
+      audioStats: {
+        localLevel: this.localAudioLevel,
+        iceState,
+        bytesSent,
+        bytesReceived,
+        usingRelay: this.usingRelay,
+        hasLocalAudio: !!this.localAudioTrack,
+        remoteAudioFrames: this.remoteAudioFrames,
+        rttMs,
+        packetLossPct,
+        weakNetwork,
+        transportProtocol,
+        iceCandidateType,
+        videoWidth,
+        videoHeight,
+        videoFps,
+        videoBitrateKbps,
+        iceTransportPolicy: this.iceTransportPolicy,
+      },
+    });
+  }
+
+  private async applyVideoBitrateCap(tier: 'high' | 'low') {
+    const maxBitrate = tier === 'low' ? 320_000 : 1_200_000;
+    const maxFramerate = tier === 'low' ? 15 : 30;
+    for (const [, entry] of this.peers.entries()) {
+      const sender = this.findSender(entry.pc, 'video');
+      if (!sender || typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') continue;
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].maxBitrate = maxBitrate;
+        params.encodings[0].maxFramerate = maxFramerate;
+        await sender.setParameters(params);
+      } catch {}
+    }
+  }
+
   async connect(opts: CallMediaOptions): Promise<void> {
-    if (this.peers.size > 0 || this.localAudioTrack || this.localVideoTrack) {
+    if (this.peers.size > 0 || this.localAudioTrack || this.localVideoTrack || this.localScreenTrack) {
       await this.disconnect('replace');
     }
     this.disposed = false;
+    this.mediaReady = false;
+    this.preMediaSignals = [];
     this.opts = opts;
-    this.seenSeq = 0;
-    this.state = { phase: 'acquiring', canPlaybackAudio: true, participants: {}, roomName: opts.roomName };
+    this.pollAfterSeq = 0;
+    this.seenSeqs.clear();
+    this.usingRelay = false;
+    this.remoteAudioFrames = 0;
+    this.webrtcBytesReceived = 0;
+    this.nextRelayPlayTime = 0;
+    this.iceTransportPolicy = opts.iceTransportPolicy || 'all';
+    this.lastVideoTier = 'high';
+    this.prevVideoBytes = 0;
+    this.prevVideoAt = 0;
+    const outputs = await listAudioOutputOptions();
+    this.state = {
+      phase: 'acquiring',
+      canPlaybackAudio: true,
+      participants: {},
+      roomName: opts.roomName,
+      supportsOutputSelection: supportsSinkIdSelection(),
+      audioOutputDevices: outputs,
+      selectedAudioOutputId: outputs[0]?.deviceId || 'default',
+    };
     this.emit();
 
     await this.acquireInitialMedia(opts);
     if (this.disposed) return;
 
-    this.emit({ phase: 'connecting' });
+    const refreshedOutputs = await listAudioOutputOptions();
+    if (refreshedOutputs.length) {
+      this.emit({ audioOutputDevices: refreshedOutputs });
+    }
+    this.startAudioCaptureAndMonitor();
+
+    this.mediaReady = true;
+    this.emit({ phase: this.usingRelay ? 'connected' : 'connecting' });
+    if (opts.reconnect && opts.pollSignals) {
+      try {
+        const cur = await opts.pollSignals(Number.MAX_SAFE_INTEGER);
+        if (typeof cur?.lastSeq === 'number' && cur.lastSeq > this.pollAfterSeq) {
+          this.pollAfterSeq = cur.lastSeq;
+        }
+      } catch {}
+    }
     const others = (opts.participantIds || []).filter((id) => id && id !== opts.selfUserId);
     for (const peerId of others) {
       this.getOrCreatePeer(peerId);
     }
     this.rebuildParticipants();
 
-    // Announce readiness so remote peer initiates/re-syncs offer if needed
-    try { await opts.sendSignal?.(undefined, { type: 'ready' }); } catch {}
+    // Flush any remote signals that arrived while waiting for mic/camera permissions
+    if (this.preMediaSignals.length > 0) {
+      const queued = [...this.preMediaSignals];
+      this.preMediaSignals = [];
+      for (const item of queued) {
+        await this.handleRemoteSignal(item.fromUserId, item.signal, item.seq);
+      }
+    }
 
-    // Start resilient polling fallback for SDP/ICE signals
+    // Announce readiness so remote peer initiates/re-syncs offer cleanly
+    try { await opts.sendSignal?.(undefined, { type: 'ready', ...(opts.reconnect ? { reset: true } : {}) }); } catch {}
+
+    // If direct P2P ICE fails to connect within 2.8s (e.g. symmetric NAT without TURN), seamlessly activate WS audio relay
+    if (opts.sendAudioFrame) {
+      this.relayFallbackTimer = setTimeout(() => {
+        if (this.disposed) return;
+        const connected = Array.from(this.peers.values()).some(
+          (p) => p.pc.connectionState === 'connected' || p.pc.iceConnectionState === 'connected' || p.pc.iceConnectionState === 'completed'
+        );
+        if (!connected) {
+          this.activateAudioRelay();
+        }
+      }, 2800);
+    }
+
+    this.statsTimer = setInterval(() => {
+      void this.refreshAudioDiagnostics();
+    }, 600);
+
+    // Resilient polling fallback for SDP/ICE signals
     if (opts.pollSignals) {
       const pull = async () => {
         if (this.disposed || this.pollingInFlight || !opts.pollSignals) return;
         this.pollingInFlight = true;
         try {
-          const d = await opts.pollSignals(this.seenSeq);
+          const d = await opts.pollSignals(this.pollAfterSeq);
           for (const item of d?.signals || []) {
             if (item?.fromUserId && item?.signal) {
               await this.handleRemoteSignal(item.fromUserId, item.signal, item.seq);
             }
           }
-          if (typeof d?.lastSeq === 'number' && d.lastSeq > this.seenSeq) {
-            this.seenSeq = d.lastSeq;
+          if (typeof d?.lastSeq === 'number' && d.lastSeq > this.pollAfterSeq) {
+            this.pollAfterSeq = d.lastSeq;
           }
         } catch {
         } finally {
@@ -535,35 +1287,41 @@ export class WebRTCCallSession implements ICallMediaSession {
         }
       };
       void pull();
-      this.pollTimer = setInterval(() => { void pull(); }, 1200);
+      this.pollTimer = setInterval(() => { void pull(); }, 1000);
     }
   }
 
   async handleRemoteSignal(fromUserId: string, signal: any, seq?: number): Promise<void> {
     if (this.disposed || !fromUserId || fromUserId === this.opts?.selfUserId || !signal) return;
+    if (!this.mediaReady) {
+      if (typeof seq === 'number' && this.preMediaSignals.some((x) => x.seq === seq)) return;
+      this.preMediaSignals.push({ fromUserId, signal, seq });
+      return;
+    }
     if (typeof seq === 'number') {
-      if (seq <= this.seenSeq) return;
-      this.seenSeq = seq;
+      if (this.seenSeqs.has(seq)) return;
+      this.seenSeqs.add(seq);
     }
 
     const entry = this.getOrCreatePeer(fromUserId);
+    entry.signalChain = entry.signalChain
+      .then(() => this.processPeerSignal(fromUserId, entry, signal))
+      .catch(() => {});
+    await entry.signalChain;
+  }
+
+  private async processPeerSignal(fromUserId: string, entry: PeerEntry, signal: any): Promise<void> {
+    if (this.disposed) return;
     const pc = entry.pc;
     const selfId = this.opts?.selfUserId || '';
     const polite = selfId < fromUserId;
 
     if (signal.type === 'ready') {
-      // Remote peer just entered call media; impolite peer sends a fresh offer if not connected
-      if (!polite && pc.connectionState !== 'connected' && !entry.makingOffer) {
-        try {
-          entry.makingOffer = true;
-          const offer = await pc.createOffer({ iceRestart: pc.iceConnectionState === 'failed' });
-          await pc.setLocalDescription(offer);
-          if (pc.localDescription) {
-            await this.opts?.sendSignal?.(fromUserId, { type: 'offer', sdp: pc.localDescription.toJSON() });
-          }
-        } catch {
-        } finally {
-          entry.makingOffer = false;
+      if (signal.reset) entry.pendingIce = [];
+      if (!polite && (signal.reset || pc.connectionState !== 'connected') && !entry.makingOffer) {
+        const recentlyOffered = Date.now() - entry.lastOfferAt < 350;
+        if (signal.reset || !recentlyOffered || pc.remoteDescription) {
+          await this.createAndSendOffer(fromUserId, entry, !!pc.remoteDescription || !!signal.reset);
         }
       }
       return;
@@ -578,6 +1336,16 @@ export class WebRTCCallSession implements ICallMediaSession {
       entry.ignoreOffer = !polite && offerCollision;
       if (entry.ignoreOffer) return;
 
+      if (desc.type === 'answer' && pc.signalingState !== 'have-local-offer') {
+        return;
+      }
+
+      if (offerCollision && polite && pc.signalingState === 'have-local-offer') {
+        try {
+          await pc.setLocalDescription({ type: 'rollback' });
+        } catch {}
+      }
+
       entry.isSettingRemoteAnswerPending = desc.type === 'answer';
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(desc));
@@ -585,14 +1353,14 @@ export class WebRTCCallSession implements ICallMediaSession {
         entry.isSettingRemoteAnswerPending = false;
       }
 
-      // Flush buffered ICE candidates now that remote description is set
       while (entry.pendingIce.length > 0) {
         const cand = entry.pendingIce.shift()!;
         try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch {}
       }
 
       if (desc.type === 'offer') {
-        await pc.setLocalDescription();
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
         if (pc.localDescription) {
           await this.opts?.sendSignal?.(fromUserId, { type: 'answer', sdp: pc.localDescription.toJSON() });
         }
@@ -607,48 +1375,53 @@ export class WebRTCCallSession implements ICallMediaSession {
         } else {
           await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
         }
-      } catch (err) {
-        if (!entry.ignoreOffer) throw err;
+      } catch {
       }
     }
   }
 
   private async replaceVideoTrackOnPeers(newTrack: MediaStreamTrack | null) {
     for (const [peerId, entry] of this.peers.entries()) {
-      const sender = entry.pc.getSenders().find((s) => s.track?.kind === 'video');
+      const sender = this.findSender(entry.pc, 'video');
       if (sender) {
         await sender.replaceTrack(newTrack);
+        const tr = entry.pc.getTransceivers().find((t) => t.sender === sender);
+        if (tr && newTrack && tr.direction === 'recvonly') {
+          try { tr.direction = 'sendrecv'; } catch {}
+          await this.createAndSendOffer(peerId, entry, false);
+        }
       } else if (newTrack) {
         entry.pc.addTrack(newTrack, new MediaStream([newTrack]));
-        // Renego handled by onnegotiationneeded or trigger explicitly
-        if (entry.pc.signalingState === 'stable') {
-          try {
-            entry.makingOffer = true;
-            await entry.pc.setLocalDescription();
-            if (entry.pc.localDescription) {
-              await this.opts?.sendSignal?.(peerId, { type: 'offer', sdp: entry.pc.localDescription.toJSON() });
-            }
-          } catch {
-          } finally {
-            entry.makingOffer = false;
-          }
-        }
+        await this.createAndSendOffer(peerId, entry, false);
       }
     }
   }
 
   async setMicrophoneEnabled(enabled: boolean) {
     this.micEnabled = enabled;
-    if (enabled && !this.localAudioTrack && navigator.mediaDevices?.getUserMedia) {
+    if (enabled && !this.localAudioTrack && hasLocalMediaSupport()) {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const s = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        });
         const t = s.getAudioTracks()[0] || null;
         if (t) {
           this.localAudioTrack = t;
-          for (const [, entry] of this.peers.entries()) {
-            const sender = entry.pc.getSenders().find((sd) => sd.track?.kind === 'audio');
-            if (sender) await sender.replaceTrack(t);
-            else entry.pc.addTrack(t, new MediaStream([t]));
+          this.startAudioCaptureAndMonitor();
+          for (const [peerId, entry] of this.peers.entries()) {
+            const sender = this.findSender(entry.pc, 'audio');
+            if (sender) {
+              await sender.replaceTrack(t);
+              const tr = entry.pc.getTransceivers().find((x) => x.sender === sender);
+              if (tr && tr.direction === 'recvonly') {
+                try { tr.direction = 'sendrecv'; } catch {}
+                await this.createAndSendOffer(peerId, entry, false);
+              }
+            } else {
+              entry.pc.addTrack(t, new MediaStream([t]));
+              await this.createAndSendOffer(peerId, entry, false);
+            }
           }
         }
       } catch (e: any) {
@@ -661,7 +1434,7 @@ export class WebRTCCallSession implements ICallMediaSession {
 
   async setCameraEnabled(enabled: boolean) {
     this.cameraEnabled = enabled;
-    if (enabled && !this.localVideoTrack && navigator.mediaDevices?.getUserMedia) {
+    if (enabled && !this.localVideoTrack && hasLocalMediaSupport()) {
       try {
         const s = await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -682,7 +1455,7 @@ export class WebRTCCallSession implements ICallMediaSession {
   }
 
   async switchCamera() {
-    if (!navigator.mediaDevices?.getUserMedia) return;
+    if (!hasLocalMediaSupport()) return;
     this.facingMode = this.facingMode === 'user' ? 'environment' : 'user';
     try {
       const old = this.localVideoTrack;
@@ -730,16 +1503,59 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.rebuildParticipants();
   }
 
+  async setAudioOutputDevice(deviceId: string) {
+    this.emit({ selectedAudioOutputId: deviceId || 'default' });
+  }
+
+  async setIceTransportPolicy(policy: RTCIceTransportPolicy) {
+    this.iceTransportPolicy = policy;
+    for (const [peerId, entry] of this.peers.entries()) {
+      try {
+        if (typeof entry.pc.setConfiguration === 'function') {
+          entry.pc.setConfiguration({
+            iceServers: this.opts?.iceServers?.length
+              ? this.opts.iceServers
+              : [
+                  { urls: 'stun:stun.l.google.com:19302' },
+                  { urls: 'stun:stun1.l.google.com:19302' },
+                  { urls: 'stun:stun.cloudflare.com:3478' },
+                ],
+            iceTransportPolicy: policy,
+          });
+        }
+        await this.createAndSendOffer(peerId, entry, true);
+      } catch {}
+    }
+    this.emit({ phase: 'reconnecting' });
+  }
+
   async startAudioPlayback() {
-    this.emit({ canPlaybackAudio: true });
+    const unlocked = await unlockCallAudioContext();
+    this.emit({ canPlaybackAudio: unlocked || true });
   }
 
   async disconnect(reason = 'leave') {
     this.disposed = reason !== 'replace';
+    this.mediaReady = false;
+    this.preMediaSignals = [];
+    this.usingRelay = false;
+    this.seenSeqs.clear();
+    for (const t of this.iceRestartTimers.values()) clearTimeout(t);
+    this.iceRestartTimers.clear();
+    this.lastIceRestartAt.clear();
+    if (this.relayFallbackTimer) {
+      clearTimeout(this.relayFallbackTimer);
+      this.relayFallbackTimer = null;
+    }
+    if (this.statsTimer) {
+      clearInterval(this.statsTimer);
+      this.statsTimer = null;
+    }
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    this.stopAudioCapture();
     for (const [, entry] of this.peers.entries()) {
       try { entry.pc.close(); } catch {}
     }
@@ -764,7 +1580,7 @@ export function createCallMediaSession(provider?: string): ICallMediaSession {
 export function friendlyMediaError(e: any): string {
   const name = String(e?.name || '');
   const msg = String(e?.message || e || '');
-  if (name === 'NotAllowedError' || /Permission denied|not allowed/i.test(msg)) return '麦克风/摄像头权限被拒绝，请在浏览器设置中允许访问。';
+  if (name === 'NotAllowedError' || /Permission denied|not allowed/i.test(msg)) return '麦克风/摄像头权限被拒绝，请在浏览器地址栏允许访问。';
   if (name === 'NotFoundError' || /Requested device not found/i.test(msg)) return '未检测到可用的麦克风或摄像头设备。';
   if (name === 'NotReadableError' || /Could not start|Device in use/i.test(msg)) return '麦克风/摄像头正被其他应用占用。';
   if (name === 'OverconstrainedError') return '当前设备不支持所请求的摄像头分辨率或模式。';

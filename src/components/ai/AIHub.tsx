@@ -300,9 +300,9 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         <header className="one-surface-subtle mb-4 flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-[var(--color-one-accent)]"><Sparkles className="h-5 w-5" /></span>
+              <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/15 bg-sky-50 dark:bg-sky-500/15 text-[var(--color-one-accent)]"><Sparkles className="h-5 w-5" /></span>
               <div>
-                <h1 className="text-xl font-semibold tracking-[-0.03em] text-white sm:text-2xl">ONE INTELLIGENCE</h1>
+                <h1 className="text-xl font-semibold tracking-[-0.03em] text-slate-900 dark:text-white sm:text-2xl">ONE INTELLIGENCE</h1>
                 <p className="text-sm text-[var(--color-one-text-muted)]">{isZh ? '对话、思考与创作协作空间。模型与连接状态以真实可用信息为准。' : 'A space for conversation, thinking, and creation. Models and connectivity reflect real availability.'}</p>
               </div>
             </div>
@@ -317,11 +317,11 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[220px] flex-1 sm:flex-none">
+            <div className="relative min-w-0 w-full sm:w-auto sm:min-w-[220px] sm:flex-none">
               <select
                 value={selectedModel}
                 onChange={e => setSelectedModel(e.target.value)}
-                className="h-10 w-full appearance-none rounded-xl border border-white/10 bg-white/[0.03] px-3 pr-9 text-sm text-white outline-none transition focus:border-white/20"
+                className="h-10 w-full appearance-none rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 pr-9 text-sm text-slate-900 dark:text-white outline-none transition focus:border-sky-500"
                 aria-label={isZh ? '选择模型' : 'Select model'}
               >
                 {availableModels.length === 0 ? (
@@ -352,21 +352,21 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         {showConfigDrawer && (
           <div className="one-surface-subtle mb-4 p-4 sm:p-5">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-white"><Cpu className="h-4 w-4 text-[var(--color-one-accent)]" />{isZh ? '自定义 OpenAI 兼容接口 / 本地 Ollama' : 'Custom OpenAI-compatible endpoint / Local Ollama'}</div>
-              <button onClick={() => setShowConfigDrawer(false)} className="text-xs text-[var(--color-one-text-muted)] hover:text-white">{isZh ? '收起' : 'Close'}</button>
+              <div className="flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-white"><Cpu className="h-4 w-4 text-[var(--color-one-accent)]" />{isZh ? '自定义 OpenAI 兼容接口 / 本地 Ollama' : 'Custom OpenAI-compatible endpoint / Local Ollama'}</div>
+              <button onClick={() => setShowConfigDrawer(false)} className="text-xs text-[var(--color-one-text-muted)] hover:text-slate-900 dark:hover:text-white">{isZh ? '收起' : 'Close'}</button>
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <label className="block space-y-1.5">
                 <span className="text-xs text-[var(--color-one-text-dim)]">Base URL</span>
-                <input type="text" value={customBaseUrl} onChange={e => setCustomBaseUrl(e.target.value)} className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-white/20" placeholder="http://localhost:11434/v1" />
+                <input type="text" value={customBaseUrl} onChange={e => setCustomBaseUrl(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="http://localhost:11434/v1" />
               </label>
               <label className="block space-y-1.5">
                 <span className="text-xs text-[var(--color-one-text-dim)]">{isZh ? '模型名称' : 'Model name'}</span>
-                <input type="text" value={customModel} onChange={e => setCustomModel(e.target.value)} className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-white/20" placeholder="llama3 / deepseek-r1" />
+                <input type="text" value={customModel} onChange={e => setCustomModel(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="llama3 / deepseek-r1" />
               </label>
               <label className="block space-y-1.5">
                 <span className="text-xs text-[var(--color-one-text-dim)]">API Key</span>
-                <input type="password" value={customApiKey} onChange={e => setCustomApiKey(e.target.value)} className="h-10 w-full rounded-xl border border-white/10 bg-white/[0.03] px-3 text-sm text-white outline-none focus:border-white/20" placeholder={isZh ? '本地 Ollama 可留空' : 'Optional for local Ollama'} />
+                <input type="password" value={customApiKey} onChange={e => setCustomApiKey(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder={isZh ? '本地 Ollama 可留空' : 'Optional for local Ollama'} />
               </label>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-one-text-muted)]">
@@ -385,7 +385,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                 const isThoughtOpen = expandedThoughts[msg.id] ?? false;
                 return (
                   <div key={msg.id} className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                    <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border ${isUser ? 'border-white/15 bg-white text-[#0a0d12]' : 'border-[rgba(127,212,255,0.25)] bg-[rgba(127,212,255,0.08)] text-[var(--color-one-accent)]'}`}>
+                    <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border ${isUser ? 'border-sky-600 bg-sky-600 text-white' : 'border-sky-200 dark:border-sky-400/30 bg-sky-50 dark:bg-sky-500/15 text-[var(--color-one-accent)]'}`}>
                       {isUser ? <UserIcon className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                     </div>
                     <div className={`min-w-0 max-w-[88%] ${isUser ? 'items-end' : 'items-start'}`}>
@@ -394,24 +394,24 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                         <span>·</span>
                         <span>{msg.timestamp}</span>
                       </div>
-                      <div className={`rounded-2xl px-4 py-3 text-sm leading-7 ${isUser ? 'bg-white text-[#0a0d12]' : 'border border-white/10 bg-white/[0.03] text-[var(--color-one-text)]'}`}>
+                      <div className={`rounded-2xl px-4 py-3 text-sm leading-7 ${isUser ? 'bg-sky-600 text-white shadow-sm' : 'border border-slate-200 dark:border-white/12 bg-slate-50 dark:bg-white/[0.04] text-slate-900 dark:text-slate-100'}`}>
                         {!isUser && thought && (
-                          <div className="mb-3 overflow-hidden rounded-xl border border-white/10 bg-black/20">
-                            <button type="button" onClick={() => setExpandedThoughts(prev => ({ ...prev, [msg.id]: !isThoughtOpen }))} className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-[var(--color-one-text-muted)] hover:bg-white/[0.03]">
+                          <div className="mb-3 overflow-hidden rounded-xl border border-slate-200 dark:border-white/12 bg-white dark:bg-black/20">
+                            <button type="button" onClick={() => setExpandedThoughts(prev => ({ ...prev, [msg.id]: !isThoughtOpen }))} className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-[var(--color-one-text-muted)] hover:bg-slate-50 dark:hover:bg-white/[0.03]">
                               <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />{isZh ? '思考过程' : 'Reasoning'}</span>
                               {isThoughtOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                             </button>
-                            {isThoughtOpen && <div className="max-h-56 overflow-y-auto border-t border-white/10 p-3 font-mono text-xs leading-6 text-[var(--color-one-text-muted)] whitespace-pre-wrap">{thought}</div>}
+                            {isThoughtOpen && <div className="max-h-56 overflow-y-auto border-t border-slate-200 dark:border-white/10 p-3 font-mono text-xs leading-6 text-[var(--color-one-text-muted)] whitespace-pre-wrap">{thought}</div>}
                           </div>
                         )}
                         <div className="whitespace-pre-wrap break-words">{answer}</div>
                         {!isUser && (
-                          <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-2.5 text-[11px] text-[var(--color-one-text-dim)]">
+                          <div className="mt-3 flex items-center justify-between border-t border-slate-200 dark:border-white/10 pt-2.5 text-[11px] text-[var(--color-one-text-dim)]">
                             <div className="flex items-center gap-3">
-                              <button type="button" onClick={() => handleCopy(msg.id, msg.content)} className="inline-flex items-center gap-1 hover:text-white">
+                              <button type="button" onClick={() => handleCopy(msg.id, msg.content)} className="inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-white">
                                 {copiedId === msg.id ? <><Check className="h-3.5 w-3.5 text-[var(--color-one-success)]" /><span className="text-[var(--color-one-success)]">{isZh ? '已复制' : 'Copied'}</span></> : <><Copy className="h-3.5 w-3.5" /><span>{isZh ? '复制' : 'Copy'}</span></>}
                               </button>
-                              <button type="button" onClick={() => speakText(msg.content)} className="inline-flex items-center gap-1 hover:text-white">
+                              <button type="button" onClick={() => speakText(msg.content)} className="inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-white">
                                 <Volume2 className="h-3.5 w-3.5" /><span>{isZh ? '朗读' : 'Read'}</span>
                               </button>
                             </div>
@@ -426,25 +426,25 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
 
               {isLoading && !streamingMessageId && (
                 <div className="flex gap-3">
-                  <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl border border-[rgba(127,212,255,0.25)] bg-[rgba(127,212,255,0.08)] text-[var(--color-one-accent)]"><Bot className="h-4 w-4 animate-pulse" /></div>
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-[var(--color-one-text-muted)]">{isZh ? '正在生成回复…' : 'Generating response…'}</div>
+                  <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl border border-sky-200 dark:border-sky-400/30 bg-sky-50 dark:bg-sky-500/15 text-[var(--color-one-accent)]"><Bot className="h-4 w-4 animate-pulse" /></div>
+                  <div className="rounded-2xl border border-slate-200 dark:border-white/12 bg-slate-50 dark:bg-white/[0.04] px-4 py-3 text-sm text-[var(--color-one-text-muted)]">{isZh ? '正在生成回复…' : 'Generating response…'}</div>
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
           </div>
 
-          <div className="border-t border-white/10 bg-[rgba(5,7,11,0.35)] p-3 sm:p-4">
+          <div className="border-t border-slate-200 dark:border-white/10 bg-[var(--color-one-surface-soft)]/70 p-3 sm:p-4">
             <div className="mx-auto max-w-3xl space-y-3">
               <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                 {starterChips.map((chip, idx) => (
-                  <button key={idx} type="button" onClick={() => void handleSend(chip)} className="shrink-0 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs text-[var(--color-one-text-muted)] transition hover:border-white/20 hover:text-white">
+                  <button key={idx} type="button" onClick={() => void handleSend(chip)} className="shrink-0 rounded-full border border-slate-200 dark:border-white/15 bg-white dark:bg-white/[0.05] px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 transition hover:border-sky-400 hover:text-slate-900 dark:hover:text-white">
                     {chip}
                   </button>
                 ))}
               </div>
 
-              <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-2 focus-within:border-white/20">
+              <div className="flex items-end gap-2 rounded-2xl border border-slate-200 dark:border-white/15 bg-white dark:bg-[#0f1829] p-2 focus-within:border-sky-500 shadow-sm">
                 <textarea
                   ref={inputRef}
                   rows={1}
@@ -457,10 +457,10 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                     }
                   }}
                   placeholder={isZh ? '输入消息…（Enter 发送，Shift+Enter 换行）' : 'Message ONE INTELLIGENCE… (Enter to send, Shift+Enter for newline)'}
-                  className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-white placeholder:text-[var(--color-one-text-dim)] outline-none"
+                  className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                 />
                 <div className="flex items-center gap-1 pb-0.5 pr-0.5">
-                  <button type="button" onClick={toggleSpeechRecognition} className={`rounded-xl p-2.5 transition ${isListening ? 'bg-[rgba(127,212,255,0.15)] text-[var(--color-one-accent)]' : 'text-[var(--color-one-text-muted)] hover:bg-white/5 hover:text-white'}`} title={isZh ? '语音输入' : 'Voice input'}>
+                  <button type="button" onClick={toggleSpeechRecognition} className={`rounded-xl p-2.5 transition ${isListening ? 'bg-sky-50 dark:bg-sky-500/20 text-[var(--color-one-accent)]' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'}`} title={isZh ? '语音输入' : 'Voice input'}>
                     {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                   </button>
                   <button type="button" onClick={() => void handleSend()} disabled={!promptInput.trim() || isLoading} className="one-btn one-btn-primary one-btn-sm disabled:cursor-not-allowed disabled:opacity-40">

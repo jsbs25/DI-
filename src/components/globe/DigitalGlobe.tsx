@@ -57,6 +57,7 @@ interface DigitalGlobeProps {
   lang: Language;
   immersive?: boolean;
   onImmersiveChange?: (v: boolean) => void;
+  hideHeroOverlay?: boolean;
 }
 
 const EARTH_RADIUS = 4.5;
@@ -75,7 +76,8 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   onToggleGlobeTools,
   lang,
   immersive = false,
-  onImmersiveChange
+  onImmersiveChange,
+  hideHeroOverlay = false
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const t = translations[lang] || translations.zh;
@@ -174,6 +176,14 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     if (immersive) {
       setAutoRotate(false);
       stateRef.current.autoRotate = false;
+    }
+    const ctrl = stateRef.current.controls;
+    const dom = stateRef.current.renderer?.domElement;
+    if (ctrl) {
+      ctrl.enableZoom = Boolean(immersive);
+    }
+    if (dom) {
+      dom.style.touchAction = immersive ? 'none' : 'pan-y';
     }
   }, [immersive]);
 
@@ -485,7 +495,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
     // 2. Scene, Camera, Renderer
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x010308);
+    scene.background = new THREE.Color(0x0c1e3d);
     stateRef.current.scene = scene;
 
     const width = container.clientWidth || window.innerWidth;
@@ -515,7 +525,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     renderer.setSize(width, height);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.06;
+    renderer.toneMappingExposure = 1.24;
 
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
@@ -526,11 +536,11 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     const starField = buildStarField(starCount);
     scene.add(starField);
 
-    // 4. LIGHTING
+    // 4. LIGHTING — bright sunlit orbital illumination
     const sunDirection = new THREE.Vector3(-0.62, 0.32, 0.72).normalize();
-    const ambientLight = new THREE.AmbientLight(0x283850, 0.68);
+    const ambientLight = new THREE.AmbientLight(0x7ba7db, 1.25);
     scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xfff8ee, 1.35);
+    const directionalLight = new THREE.DirectionalLight(0xfffaf2, 1.65);
     directionalLight.position.copy(sunDirection).multiplyScalar(30);
     scene.add(directionalLight);
 
@@ -579,8 +589,8 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         uNightMap: { value: nightTexture },
         uNormalMap: { value: normalTexture },
         uSunDirection: { value: sunDirection },
-        uDayIntensity: { value: 0.98 },
-        uNightIntensity: { value: 1.05 },
+        uDayIntensity: { value: 1.32 },
+        uNightIntensity: { value: 1.12 },
         uNormalStrength: { value: 0.38 }
       }
     });
@@ -703,7 +713,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
 
     // 6. ORBIT CONTROLS — smooth zoom + damped rotation + non-fighting drag
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableZoom = true;
+    controls.enableZoom = Boolean(immersive);
     controls.zoomSpeed = 0.75;
     controls.minDistance = 6.6;
     controls.maxDistance = 28.0;
@@ -782,6 +792,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     };
 
     const dom = renderer.domElement;
+    dom.style.touchAction = immersive ? 'none' : 'pan-y';
     window.addEventListener('mousemove', onPointerMove);
     window.addEventListener('touchmove', onPointerMove, { passive: true });
     dom.addEventListener('click', onClick);
@@ -980,6 +991,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       )}
 
       {/* 2. RESTRAINED HERO & LAYER DISCLOSURE OVERLAY */}
+      {!hideHeroOverlay && (
       <div
         className={`relative z-10 h-full min-h-[100dvh] max-w-[1680px] mx-auto px-5 sm:px-8 md:pl-28 lg:pl-32 flex flex-col justify-start md:justify-between pt-20 sm:pt-24 pb-20 md:pb-8 pointer-events-none transition-opacity duration-500 ${
           immersive ? 'opacity-0 pointer-events-none' : 'opacity-100'
@@ -1254,8 +1266,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* 3. RIGHT FLOATING VERTICAL ACTION RAIL (Desktop, on-demand when tools expanded) */}
+      {!hideHeroOverlay && (
       <aside
         id="globe-controls-rail"
         style={{ display: showGlobeTools && !immersive ? undefined : 'none' }}
@@ -1324,6 +1338,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           </button>
         </div>
       </aside>
+      )}
 
       {/* Clear Always-Accessible Exit Button in Immersive Mode (Desktop + Mobile) */}
       {immersive && (
@@ -1345,8 +1360,8 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         <div
           className="fixed z-40 pointer-events-none px-4 py-3 rounded-2xl bg-slate-950/92 border border-cyan-400/40 text-slate-100 shadow-2xl text-xs max-w-xs"
           style={{
-            left: `${hoverPosition.x + 16}px`,
-            top: `${hoverPosition.y - 25}px`
+            left: `${Math.min(hoverPosition.x + 16, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 260)}px`,
+            top: `${Math.max(16, hoverPosition.y - 25)}px`
           }}
         >
           <div className="flex items-center space-x-3 mb-1">

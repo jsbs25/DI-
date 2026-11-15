@@ -39,11 +39,13 @@ import {
   Layers,
   Activity,
   FileText,
-  Share2
+  Share2,
+  Server
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { BrowserFrame, GoogleGIcon } from './BrowserFrame.tsx';
 import { BrowserPrivacyPanel } from './BrowserPrivacyPanel.tsx';
+import { BrowserProxyModal } from './BrowserProxyModal.tsx';
 import { getJupiterDocumentSource, isRemotePdfUrl, toJupiterDocumentRoute } from './pdfDocumentUrl.ts';
 import { getJupiterImageSource, isRemoteImageUrl, toJupiterImageRoute } from './imageDocumentUrl.ts';
 import { getJupiterAudioSource, isRemoteAudioUrl, toJupiterAudioRoute } from './audioDocumentUrl.ts';
@@ -145,6 +147,7 @@ interface BrowserFindStatus {
 interface WebBrowserProps {
   lang: Language;
   initialQuery?: string;
+  openProxySeq?: number;
   onBackToUniverse?: () => void;
   onBackToGlobe?: () => void;
 }
@@ -367,7 +370,7 @@ function getInitialBrowserUrl(): string {
   return fallback;
 }
 
-export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBackToUniverse, onBackToGlobe }) => {
+export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, openProxySeq, onBackToUniverse, onBackToGlobe }) => {
   const [initialUrl] = useState(getInitialBrowserUrl);
   const initialPreset = PRESET_PAGES[initialUrl];
   const browserEngine = typeof window === 'undefined' ? undefined : window.earthOneBrowser;
@@ -621,6 +624,13 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
   const [browserPermissionState, setBrowserPermissionState] = useState<EarthOneBrowserPermissionState>({ pending: [], grants: [] });
   const [isPermissionsOpen, setIsPermissionsOpen] = useState(false);
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
+  const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
+  useEffect(() => {
+    if (openProxySeq && openProxySeq > 0) {
+      setIsProxyModalOpen(true);
+    }
+  }, [openProxySeq]);
+  const [proxyStatus, setProxyStatus] = useState<EarthOneBrowserProxyStatus | null>(null);
   const [sessionRestoreNotice, setSessionRestoreNotice] = useState<{
     kind: 'restoring' | 'restored' | 'failed';
     restoredCount: number;
@@ -983,6 +993,23 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
   }, [browserEngine]);
 
   useEffect(() => {
+    if (!browserEngine?.getProxyStatus) return;
+    let cancelled = false;
+    void browserEngine.getProxyStatus().then((st) => {
+      if (!cancelled && st) setProxyStatus(st);
+    }).catch(() => {});
+    const unsub = browserEngine.onProxyStatus
+      ? browserEngine.onProxyStatus((st) => {
+          if (!cancelled && st) setProxyStatus(st);
+        })
+      : undefined;
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, [browserEngine]);
+
+  useEffect(() => {
     if (!browserEngine && activeTab) recordBrowserVisit(activeTab.id, activeTab.url, activeTab.title);
   }, [browserEngine, activeTab?.id, activeTab?.url, activeTab?.title, recordBrowserVisit]);
 
@@ -1020,7 +1047,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
     const syncViewport = () => {
       const element = nativeViewportRef.current;
       const mobileAiOverlay = isAiPanelOpen && window.innerWidth < 768;
-      if (!element || !activeTab || activeTab.readerMode || lastSearchQuery || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || isDownloadsOpen || isPrivacyOpen || mobileAiOverlay) {
+      if (!element || !activeTab || activeTab.readerMode || lastSearchQuery || searchResults.length > 0 || isSearching || isSavedDrawerOpen || isBrowserDataOpen || isDownloadsOpen || isPrivacyOpen || isProxyModalOpen || mobileAiOverlay) {
         void browserEngine.setBounds(null);
         return;
       }
@@ -1043,7 +1070,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
       document.removeEventListener('scroll', scheduleSync, true);
       void browserEngine.setBounds(null);
     };
-  }, [browserEngine, activeTabId, activeTab?.readerMode, lastSearchQuery, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isPrivacyOpen, isAiPanelOpen]);
+  }, [browserEngine, activeTabId, activeTab?.readerMode, lastSearchQuery, searchResults.length, isSearching, isSavedDrawerOpen, isBrowserDataOpen, isDownloadsOpen, isPrivacyOpen, isProxyModalOpen, isAiPanelOpen]);
 
   const pushHistory = (tabId: string, url: string) => {
     const stack = history[tabId] || [];
@@ -2267,6 +2294,21 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
               <span>站点权限 ({browserPermissionState.grants.reduce((sum, grant) => sum + grant.permissions.length, 0)})</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setIsProxyModalOpen(true)}
+            aria-label="ONE 内置浏览器代理设置 (Mode A)"
+            title="Mode A · 内置浏览器隔离代理（不影响通话/聊天或系统流量）"
+            className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition ${
+              proxyStatus?.active
+                ? 'border-emerald-400/45 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25'
+                : 'border-white/[0.07] bg-white/[0.035] text-slate-300 hover:bg-white/[0.08]'
+            }`}
+          >
+            <Server className={`h-3.5 w-3.5 ${proxyStatus?.active ? 'text-emerald-300' : 'text-cyan-300'}`} />
+            <span>{proxyStatus?.active ? `代理 · ${proxyStatus.mode.toUpperCase()}` : '浏览器代理'}</span>
+          </button>
 
           {/* 3-Way Mode Switcher: Live Web / Reader Mode / Crawler Scraper */}
           <div className="inline-flex h-9 items-center rounded-full border border-white/[0.08] bg-white/[0.035] p-0.5 text-xs">
@@ -3582,6 +3624,15 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
           }}
           onClear={handleClearBrowsingData}
           onClose={() => setIsPrivacyOpen(false)}
+        />
+      )}
+
+      {isProxyModalOpen && (
+        <BrowserProxyModal
+          browserEngine={browserEngine}
+          proxyStatus={proxyStatus}
+          onStatusChange={setProxyStatus}
+          onClose={() => setIsProxyModalOpen(false)}
         />
       )}
     </div>

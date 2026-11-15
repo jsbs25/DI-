@@ -1,27 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import os from 'node:os';
-
-function resolveWritableDataDir(preferred: string): string {
-  try {
-    fs.mkdirSync(preferred, { recursive: true });
-    return preferred;
-  } catch {
-    const fallback = path.join(os.tmpdir(), 'earth-one', 'server_data');
-    try { fs.mkdirSync(fallback, { recursive: true }); } catch {}
-    return fallback;
-  }
-}
-
-function canWritePath(targetPath: string): boolean {
-  try {
-    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Simple in-process async mutex/queue used to serialize state-mutating
@@ -68,15 +47,13 @@ import { normalizePrivacySettings, DEFAULT_PRIVACY_SETTINGS, canViewProfileByPol
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
 import { crawlWebsite } from './webFetcher.ts';
 
-const DATA_DIR = resolveWritableDataDir(path.resolve(process.env.EARTH_ONE_DATA_DIR || path.join(process.cwd(), 'server_data')));
-const DATA_FILE = process.env.EARTH_ONE_DATA_FILE
-  ? path.resolve(process.env.EARTH_ONE_DATA_FILE)
-  : path.join(path.dirname(DATA_DIR), 'server_data.json');
+const DATA_DIR = path.resolve(process.env.EARTH_ONE_DATA_DIR || path.join(process.cwd(), 'server_data'));
+const DATA_FILE = path.resolve(process.env.EARTH_ONE_DATA_FILE || path.join(path.dirname(DATA_DIR), 'server_data.json'));
 // Full-text book content is stored here (one JSON file per book) instead of
 // bloating server_data.json with every chapter's body. This keeps the main
 // store small and makes the atomic whole-file rewrite cheap.
-const BOOKS_DIR = process.env.EARTH_ONE_BOOKS_DIR ? path.resolve(process.env.EARTH_ONE_BOOKS_DIR) : path.join(DATA_DIR, 'books');
-const AVATARS_DIR = process.env.EARTH_ONE_AVATARS_DIR ? path.resolve(process.env.EARTH_ONE_AVATARS_DIR) : path.join(DATA_DIR, 'uploads', 'avatars');
+const BOOKS_DIR = path.resolve(process.env.EARTH_ONE_BOOKS_DIR || path.join(DATA_DIR, 'books'));
+const AVATARS_DIR = path.resolve(process.env.EARTH_ONE_AVATARS_DIR || path.join(DATA_DIR, 'uploads', 'avatars'));
 
 export interface AuthAccount {
   userId: string;
@@ -605,12 +582,12 @@ class DataStore {
     const loaded = this.loadFromDisk();
     if (!loaded) {
       this.initSeedData();
-      try { this.saveToDisk(); } catch {}
+      this.saveToDisk();
     }
     // If for any reason books are empty, always seed them
     if (this.books.length === 0) {
       this.books = [...SEED_BOOKS];
-      try { this.saveToDisk(); } catch {}
+      this.saveToDisk();
     }
   }
 
@@ -680,7 +657,7 @@ class DataStore {
     // we strip it from the main store.
     for (const book of this.books) {
       if (this.hasInlineContent(book) && !fs.existsSync(this.bookContentFile(book.id))) {
-        try { this.writeBookContent(book); } catch {}
+        this.writeBookContent(book);
       }
     }
 
@@ -713,6 +690,7 @@ class DataStore {
       notificationPrefs: this.notificationPrefs,
       privacySettings: this.privacySettings,
       calls: (this as any).calls || [],
+      networkPeers: (this as any).networkPeers || [],
       nextEarthSequence: this.nextEarthSequence,
       earthIdMap: this.earthIdMap,
       currentUser: this.currentUser,
@@ -721,19 +699,11 @@ class DataStore {
       lastSavedAt: new Date().toISOString()
     };
 
-    try {
-      const dir = path.dirname(DATA_FILE);
-      fs.mkdirSync(dir, { recursive: true });
-      const tmpFile = `${DATA_FILE}.tmp`;
-      fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf-8');
-      fs.renameSync(tmpFile, DATA_FILE);
-    } catch (err: any) {
-      // Ephemeral/read-only environments (e.g. Enzonic Free without persistent disk):
-      // keep state in-memory and avoid crashing startup/request paths.
-      if (err?.code !== 'EROFS' && err?.code !== 'EPERM' && err?.code !== 'EACCES') {
-        throw err;
-      }
-    }
+    const dir = path.dirname(DATA_FILE);
+    fs.mkdirSync(dir, { recursive: true });
+    const tmpFile = `${DATA_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf-8');
+    fs.renameSync(tmpFile, DATA_FILE);
   }
 
   loadFromDisk(): boolean {
@@ -782,6 +752,7 @@ class DataStore {
       this.notificationPrefs = data.notificationPrefs && typeof data.notificationPrefs === 'object' ? data.notificationPrefs : {};
       this.privacySettings = data.privacySettings && typeof data.privacySettings === 'object' ? data.privacySettings : {};
       (this as any).calls = Array.isArray(data.calls) ? data.calls : [];
+      (this as any).networkPeers = Array.isArray(data.networkPeers) ? data.networkPeers : [];
       this.nextEarthSequence = Number.isFinite(data.nextEarthSequence) ? Math.max(100001, Math.floor(data.nextEarthSequence)) : 100001;
       this.earthIdMap = data.earthIdMap && typeof data.earthIdMap === 'object' ? data.earthIdMap : {};
       this.currentUser = data.currentUser || this.users[0];
@@ -1974,8 +1945,10 @@ class DataStore {
   searchUsers(query: string, viewerId?: string, limit = 30): User[] {
     const q = query.trim().toLowerCase();
     if (!q) return [];
+    const cleanQ = q.replace(/^@+/, '');
+    const digitsOnly = q.replace(/\D/g, '');
     const blocked = viewerId ? (this.blockedBy[viewerId] || []) : [];
-    return this.users.filter(u => {
+    const matches = this.users.filter(u => {
       if (viewerId && u.id === viewerId) return false;
       if (blocked.includes(u.id)) return false;
       const theirs = this.blockedBy[u.id] || [];
@@ -1984,15 +1957,24 @@ class DataStore {
       if (st === 'deleted') return false;
       const priv = this.getPrivacySettings(u.id);
       const earthId = String((u as any).earthId || '').toLowerCase();
+      const email = String((u as any).email || '').toLowerCase();
+      const phone = String((u as any).phone || '').replace(/\D/g, '');
       const byField = canSearchByField(q, { id: u.id, username: u.username, displayName: u.displayName }, priv);
-      // earthId search supported and follows existing search privacy discoverability (same visibility gate)
-      const byEarthId = !!earthId && earthId.includes(q);
-      if (!byField && !byEarthId) return false;
-      // enforce profile visibility for discoverability via search (respect "仅自己可见" / "仅好友可见")
+      const byEarthId = !!earthId && !!cleanQ && earthId.includes(cleanQ);
+      const byEmail = q.includes('@') && !q.startsWith('@') && !!email && email === q;
+      const byPhone = digitsOnly.length >= 6 && !!phone && phone.endsWith(digitsOnly);
+      if (!byField && !byEarthId && !byEmail && !byPhone) return false;
       const isFriend = viewerId ? this.getFriendIds(viewerId).includes(u.id) : false;
       if (!canViewProfileByPolicy(false, isFriend, false, priv)) return false;
       return true;
-    }).slice(0, limit);
+    });
+    matches.sort((a, b) => {
+      const aReg = !a.id.startsWith('u_') ? 1 : 0;
+      const bReg = !b.id.startsWith('u_') ? 1 : 0;
+      if (aReg !== bReg) return bReg - aReg;
+      return (b.isOnline ? 1 : 0) - (a.isOnline ? 1 : 0);
+    });
+    return matches.slice(0, limit);
   }
 
   getFriendIds(userId: string): string[] {
@@ -2091,7 +2073,10 @@ class DataStore {
       }
       if (!m.updatedAt) m.updatedAt = now;
     }
+    const markedNotifs = this.markConversationNotificationsRead(userId, conversationId);
+    if (markedNotifs > 0) changed = true;
     if (changed) this.saveToDisk();
+    return { changed, markedNotifs };
   }
 
   createGroupConversation(ownerId: string, name: string, memberIds: string[], avatar?: string): Conversation | null {
@@ -2780,6 +2765,20 @@ class DataStore {
     if (!n) return null;
     if (!n.read) { n.read = true; n.readAt = new Date().toISOString(); }
     return n;
+  }
+
+  markConversationNotificationsRead(userId: string, conversationId: string) {
+    if (!userId || !conversationId) return 0;
+    const now = new Date().toISOString();
+    let count = 0;
+    for (const n of this.notifications) {
+      if (n.userId === userId && n.conversationId === conversationId && n.type === 'message_new' && !n.read) {
+        n.read = true;
+        n.readAt = now;
+        count++;
+      }
+    }
+    return count;
   }
 
   markAllNotificationsRead(userId: string) {

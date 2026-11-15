@@ -28,99 +28,131 @@ const MUSIC_FILE = path.join(DATA_DIR, 'venus_music_catalog.json');
 const SEED_TRACKS: MusicTrack[] = [
   {
     id: 'venus_track_01',
-    title: 'SoundHelix Song 1 (Test Instrumental)',
-    artist: 'T. Schürger / SoundHelix',
-    album: 'SoundHelix Examples',
-    genre: 'Electronic',
-    durationSeconds: 372,
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-    coverUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&auto=format&fit=crop&q=80',
-    source: 'SoundHelix',
-    sourceUrl: 'https://www.soundhelix.com/audio-examples',
-    license: 'Free to use (see SoundHelix terms)',
+    title: 'Clair de Lune',
+    artist: 'Claude Debussy (Public Domain Performance)',
+    album: 'Suite Bergamasque',
+    genre: 'Neo-Classical',
+    durationSeconds: 374,
+    audioUrl: 'https://archive.org/download/ClairDeLunedebussy/2009-03-30-clairdelune.mp3',
+    coverUrl: '/assets/music/neo-classical.jpg',
+    source: 'Internet Archive',
+    sourceUrl: 'https://archive.org/details/ClairDeLunedebussy',
+    license: 'Public Domain',
     crawledAt: '2026-11-14T00:00:00Z',
-    bpm: 96,
-    description: 'SoundHelix 示例音频直链，可用于播放器功能验证（非伪造播放）。'
+    bpm: 68,
+    description: '德彪西经典钢琴名曲《月光》，清澈空灵的新古典钢琴演奏直链。'
   },
   {
     id: 'venus_track_02',
-    title: 'SoundHelix Song 2 (Test Instrumental)',
-    artist: 'T. Schürger / SoundHelix',
-    album: 'SoundHelix Examples',
-    genre: 'Electronic',
-    durationSeconds: 425,
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-    coverUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
-    source: 'SoundHelix',
-    sourceUrl: 'https://www.soundhelix.com/audio-examples',
-    license: 'Free to use (see SoundHelix terms)',
+    title: 'Gymnopédie No. 1',
+    artist: 'Erik Satie',
+    album: 'Trois Gymnopédies',
+    genre: 'Neo-Classical',
+    durationSeconds: 243,
+    audioUrl: 'https://archive.org/download/GymnopedieNo.1/Gymnopedie%20No.1.mp3',
+    coverUrl: '/assets/music/neo-classical.jpg',
+    source: 'Internet Archive',
+    sourceUrl: 'https://archive.org/details/GymnopedieNo.1',
+    license: 'Public Domain',
     crawledAt: '2026-11-14T00:00:00Z',
-    bpm: 104,
-    description: 'SoundHelix 示例音频直链。'
+    bpm: 72,
+    description: '埃里克·萨蒂《吉诺佩蒂第1号》，安静澄澈的钢琴独奏。'
   },
   {
     id: 'venus_track_03',
-    title: 'SoundHelix Song 3 (Test Instrumental)',
-    artist: 'T. Schürger / SoundHelix',
-    album: 'SoundHelix Examples',
+    title: 'What Did I Miss',
+    artist: 'Lee Rosevere',
+    album: 'Promise',
     genre: 'Ambient Space',
-    durationSeconds: 343,
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-    coverUrl: 'https://images.unsplash.com/photo-1614728894747-a83421e2b9c9?w=600&auto=format&fit=crop&q=80',
-    source: 'SoundHelix',
-    sourceUrl: 'https://www.soundhelix.com/audio-examples',
-    license: 'Free to use (see SoundHelix terms)',
+    durationSeconds: 124,
+    audioUrl: 'https://archive.org/download/lee-rosevere-promise/Lee%20Rosevere%20-%20Promise%20-%2001%20-%20What%20did%20i%20miss.mp3',
+    coverUrl: '/assets/music/ambient-space.jpg',
+    source: 'Internet Archive',
+    sourceUrl: 'https://archive.org/details/lee-rosevere-promise',
+    license: 'CC BY 4.0',
     crawledAt: '2026-11-14T00:00:00Z',
-    bpm: 90,
-    description: 'SoundHelix 示例音频直链。'
+    bpm: 76,
+    description: 'Lee Rosevere《Promise》专辑开篇，温柔开阔的空间氛围声景。'
   },
   {
     id: 'venus_track_04',
-    title: 'SoundHelix Song 8 (Test Instrumental)',
-    artist: 'T. Schürger / SoundHelix',
-    album: 'SoundHelix Examples',
+    title: 'Chisato Sumiyoshi',
+    artist: 'Mabisyo',
+    album: 'Lo-Fi For Reading Manga',
     genre: 'Lofi Chill',
-    durationSeconds: 326,
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
-    coverUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80',
-    source: 'SoundHelix',
-    sourceUrl: 'https://www.soundhelix.com/audio-examples',
-    license: 'Free to use (see SoundHelix terms)',
+    durationSeconds: 99,
+    audioUrl: 'https://archive.org/download/lo-fi-for-reading-manga-wk9vgr/Mabisyo%20-%20Lo-Fi%20For%20Reading%20Manga%20-%2001%20Chisato%20Sumiyoshi.mp3',
+    coverUrl: '/assets/music/lofi-horizon.jpg',
+    source: 'Internet Archive',
+    sourceUrl: 'https://archive.org/details/lo-fi-for-reading-manga-wk9vgr',
+    license: 'CC BY 4.0',
     crawledAt: '2026-11-14T00:00:00Z',
-    bpm: 82,
-    description: 'SoundHelix 示例音频直链。'
+    bpm: 84,
+    description: '适合专注与阅读的柔和 Lo-Fi 节拍与温暖采样。'
   },
   {
     id: 'venus_track_05',
-    title: 'Arcade Room Ambience',
-    artist: 'Google Actions Sound Library',
-    album: 'Ambiences',
-    genre: 'Ambient Space',
-    durationSeconds: 60,
-    audioUrl: 'https://actions.google.com/sounds/v1/ambiences/arcade_room.ogg',
-    coverUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
-    source: 'Google Actions Sound Library',
-    sourceUrl: 'https://developers.google.com/assistant/tools/sound-library/ambiences',
-    license: 'Google sound library (see terms)',
+    title: 'We Are One',
+    artist: 'John Gabantin',
+    album: 'Section 27 Netlabel S27-043',
+    genre: 'Electronic',
+    durationSeconds: 196,
+    audioUrl: 'https://archive.org/download/s27-043WeAreOne-Section27Netlabel/1-01JohnGabantin.mp3',
+    coverUrl: '/assets/music/electronic-pulse.jpg',
+    source: 'Internet Archive',
+    sourceUrl: 'https://archive.org/details/s27-043WeAreOne-Section27Netlabel',
+    license: 'Creative Commons',
     crawledAt: '2026-11-14T00:00:00Z',
-    bpm: 70,
-    description: 'Google 开放音效库氛围音频直链。'
+    bpm: 118,
+    description: '富有层次感的电子合成器律动与清新旋律编曲。'
   },
   {
     id: 'venus_track_06',
-    title: 'MP3 Test File (Connectivity Check)',
-    artist: 'Internet Archive',
-    album: 'Test Audio',
+    title: 'Things',
+    artist: 'Adam & Alma',
+    album: 'Back To The Sea',
     genre: 'Acoustic',
-    durationSeconds: 27,
-    audioUrl: 'https://archive.org/download/testmp3testfile/mpthreetest.mp3',
-    coverUrl: 'https://images.unsplash.com/photo-1465847899084-d164df4dedc6?w=600&auto=format&fit=crop&q=80',
+    durationSeconds: 428,
+    audioUrl: 'https://archive.org/download/Back_To_The_Sea-8076/Adam__Alma_-_01_-_Things.mp3',
+    coverUrl: '/assets/music/lofi-horizon.jpg',
     source: 'Internet Archive',
-    sourceUrl: 'https://archive.org/details/testmp3testfile',
-    license: 'See item page',
+    sourceUrl: 'https://archive.org/details/Back_To_The_Sea-8076',
+    license: 'CC BY-NC-SA',
     crawledAt: '2026-11-14T00:00:00Z',
-    bpm: 0,
-    description: 'Internet Archive 可访问的短音频直链，用于验证真实播放链路。'
+    bpm: 88,
+    description: '原声木吉他与细腻氛围融合的海岸系长篇器乐。'
+  },
+  {
+    id: 'venus_track_07',
+    title: 'Emotions Leading To Nowhere',
+    artist: 'Jared C. Balogh',
+    album: 'Drifting Soul',
+    genre: 'Cyberpunk',
+    durationSeconds: 427,
+    audioUrl: 'https://archive.org/download/45rpm053-2012JaredC.Balogh-DriftingSoul/01Jared_C_Balog_-_Emotions_leading_To_Howhere.mp3',
+    coverUrl: '/assets/music/electronic-pulse.jpg',
+    source: 'Internet Archive',
+    sourceUrl: 'https://archive.org/details/45rpm053-2012JaredC.Balogh-DriftingSoul',
+    license: 'Creative Commons',
+    crawledAt: '2026-11-14T00:00:00Z',
+    bpm: 110,
+    description: '脉冲合成波与深邃脉冲贝斯交织的未来主义电子音景。'
+  },
+  {
+    id: 'venus_track_08',
+    title: 'Dummy',
+    artist: 'Jahzzar',
+    album: 'Grab Bag',
+    genre: 'Ambient Space',
+    durationSeconds: 234,
+    audioUrl: 'https://archive.org/download/Grab_Bag-12446/01_-_Dummy.mp3',
+    coverUrl: '/assets/music/ambient-space.jpg',
+    source: 'Internet Archive',
+    sourceUrl: 'https://archive.org/details/Grab_Bag-12446',
+    license: 'CC BY-SA 4.0',
+    crawledAt: '2026-11-14T00:00:00Z',
+    bpm: 108,
+    description: '独立音乐人 Jahzzar 创作的轻盈现代电子氛围曲目。'
   }
 ];
 
@@ -140,10 +172,20 @@ class MusicStore {
         const raw = fs.readFileSync(MUSIC_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Refresh known-broken legacy freesound seed URLs (404) with current seeds.
-          const hasBrokenSeed = parsed.some((t: any) => typeof t?.audioUrl === 'string' && t.audioUrl.includes('cdn.freesound.org/previews/'));
-          this.tracks = hasBrokenSeed ? [...SEED_TRACKS] : parsed;
-          if (hasBrokenSeed) this.save();
+          // Refresh legacy test stubs (SoundHelix/Freesound/MP3 Test) with real curated music seeds.
+          const hasLegacyTestStub = parsed.some((t: any) => {
+            const url = String(t?.audioUrl || '');
+            const title = String(t?.title || '');
+            return (
+              url.includes('cdn.freesound.org/previews/') ||
+              url.includes('soundhelix.com') ||
+              url.includes('testmp3testfile') ||
+              title.includes('Test Instrumental') ||
+              title.includes('Connectivity Check')
+            );
+          });
+          this.tracks = hasLegacyTestStub ? [...SEED_TRACKS] : parsed;
+          if (hasLegacyTestStub) this.save();
           return;
         }
       }

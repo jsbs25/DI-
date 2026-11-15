@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import type { CallRecord, CallInviteInput, CallKind, CallParticipantState, CallScope } from './types.ts';
+import type { CallRecord, CallInviteInput, CallKind, CallParticipantState, CallScope, CallCapabilitiesInfo } from './types.ts';
 
 export function nowIso() { return new Date().toISOString(); }
 export function makeCallId() { return `call_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`; }
@@ -9,7 +9,53 @@ export function isActiveCallStatus(status: string) {
   return status === 'ringing' || status === 'connecting' || status === 'active' || status === 'reconnecting';
 }
 
+export function cleanupStaleCallsDetailed(
+  calls: CallRecord[],
+  opts?: { ringTimeoutMs?: number; staleConnectingMs?: number }
+): { changed: boolean; newlyMissed: CallRecord[] } {
+  if (!Array.isArray(calls) || calls.length === 0) return { changed: false, newlyMissed: [] };
+  const ringTimeoutMs = opts?.ringTimeoutMs ?? 65_000;
+  const staleConnectingMs = opts?.staleConnectingMs ?? 180_000;
+  const nowMs = Date.now();
+  const iso = nowIso();
+  let changed = false;
+  const newlyMissed: CallRecord[] = [];
+  for (const c of calls) {
+    if (!c || !isActiveCallStatus(c.status)) continue;
+    const refTs = new Date(c.updatedAt || c.createdAt || 0).getTime();
+    if (!Number.isFinite(refTs)) continue;
+    if (c.status === 'ringing' && nowMs - refTs > ringTimeoutMs) {
+      c.status = 'missed';
+      c.endedAt = iso;
+      c.endReason = 'timeout';
+      c.updatedAt = iso;
+      if (c.participants && typeof c.participants === 'object') {
+        for (const p of Object.values(c.participants)) {
+          if (p && p.userId !== c.initiatorId && (p.status === 'ringing' || p.status === 'invited')) {
+            p.status = 'missed';
+            p.leftAt = iso;
+          }
+        }
+      }
+      changed = true;
+      newlyMissed.push(c);
+    } else if (c.status === 'connecting' && !c.startedAt && nowMs - refTs > staleConnectingMs) {
+      c.status = 'ended';
+      c.endedAt = iso;
+      c.endReason = 'timeout';
+      c.updatedAt = iso;
+      changed = true;
+    }
+  }
+  return { changed, newlyMissed };
+}
+
+export function cleanupStaleCalls(calls: CallRecord[], opts?: { ringTimeoutMs?: number; staleConnectingMs?: number }): boolean {
+  return cleanupStaleCallsDetailed(calls, opts).changed;
+}
+
 export function getActiveCallForUser(calls: CallRecord[], userId: string): CallRecord | null {
+  cleanupStaleCalls(calls);
   return calls.find(c => isActiveCallStatus(c.status) && (c.participantIds || []).includes(userId)) || null;
 }
 
@@ -54,6 +100,9 @@ export function validateInvite(store: any, actorId: string, input: CallInviteInp
       const acc = canUserAccessConversation(store, actorId, conversationId);
       if (!acc.ok) return { ok: false, error: acc.error || 'Forbidden' };
       if (acc.conv?.type !== 'direct' || !(acc.conv.participantIds || []).includes(targetUserId)) return { ok: false, error: 'Conversation does not match direct call target' };
+    } else if (Array.isArray(store.conversations)) {
+      const existing = store.conversations.find((c: any) => c.type === 'direct' && Array.isArray(c.participantIds) && c.participantIds.includes(actorId) && c.participantIds.includes(targetUserId));
+      if (existing?.id) conversationId = existing.id;
     }
     return { ok: true, scope, kind, conversationId: conversationId || undefined, participantIds: [actorId, targetUserId] };
   }
@@ -219,6 +268,135 @@ export function canIssueMediaToken(call: CallRecord, userId: string, store?: any
   return { ok: true };
 }
 
+export function getWebRtcIceServers(): RTCIceServer[] {
+  try {
+    const raw = process.env.ICE_SERVERS_JSON;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  const list: RTCIceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.qq.com:3478' },
+    { urls: 'stun:stun.miwifi.com:3478' },
+  ];
+  const turnUrlsRaw = [process.env.TURN_URLS || '', process.env.TURN_URL || '']
+    .join(',')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const uniqueTurnUrls = Array.from(new Set(turnUrlsRaw));
+  if (uniqueTurnUrls.length > 0) {
+    list.push({
+      urls: uniqueTurnUrls.length === 1 ? uniqueTurnUrls[0] : uniqueTurnUrls,
+      ...(process.env.TURN_USERNAME ? { username: process.env.TURN_USERNAME } : {}),
+      ...(process.env.TURN_CREDENTIAL ? { credential: process.env.TURN_CREDENTIAL } : {}),
+    });
+  }
+  return list;
+}
+
+let cachedLivekitProbe: { url: string; healthy: boolean; checkedAt: number } | null = null;
+
+async function probeLiveKitHealth(rawUrl: string): Promise<boolean> {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) return false;
+  const now = Date.now();
+  if (cachedLivekitProbe && cachedLivekitProbe.url === trimmed && now - cachedLivekitProbe.checkedAt < 15_000) {
+    return cachedLivekitProbe.healthy;
+  }
+  const httpUrl = trimmed
+    .replace(/^wss:\/\//i, 'https://')
+    .replace(/^ws:\/\//i, 'http://')
+    .replace(/\/+$/, '');
+  let healthy = false;
+  try {
+    const res = await fetch(`${httpUrl}/`, { method: 'GET', signal: AbortSignal.timeout(2500) });
+    healthy = res.status < 500;
+  } catch {
+    healthy = false;
+  }
+  cachedLivekitProbe = { url: trimmed, healthy, checkedAt: now };
+  return healthy;
+}
+
+export async function getCommunicationCapabilities(): Promise<CallCapabilitiesInfo> {
+  const apiKey = (process.env.LIVEKIT_API_KEY || '').trim();
+  const apiSecret = (process.env.LIVEKIT_API_SECRET || '').trim();
+  const publicUrl = (process.env.LIVEKIT_PUBLIC_URL || process.env.LIVEKIT_URL || process.env.LIVEKIT_WS_URL || '').trim();
+  const internalUrl = (process.env.LIVEKIT_URL || process.env.LIVEKIT_WS_URL || publicUrl).trim();
+  const livekitUrlPresent = !!publicUrl;
+  const livekitConfigured = !!(apiKey && apiSecret && publicUrl);
+  const livekitHealthy = livekitConfigured ? await probeLiveKitHealth(internalUrl) : false;
+
+  const iceServers = getWebRtcIceServers();
+  let turnConfigured = false;
+  let turnTcpConfigured = false;
+  let turnTlsConfigured = false;
+  let stunCount = 0;
+  for (const s of iceServers) {
+    const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+    for (const u of urls) {
+      const lower = String(u || '').toLowerCase();
+      if (lower.startsWith('stun:')) stunCount++;
+      if (lower.startsWith('turn:') || lower.startsWith('turns:')) {
+        turnConfigured = true;
+        if (lower.startsWith('turns:')) {
+          turnTlsConfigured = true;
+          turnTcpConfigured = true;
+        } else if (lower.includes('transport=tcp')) {
+          turnTcpConfigured = true;
+        }
+      }
+    }
+  }
+
+  return {
+    mode: livekitConfigured && livekitHealthy ? 'livekit' : 'webrtc-p2p',
+    livekitConfigured,
+    livekitHealthy,
+    livekitUrlPresent,
+    turnConfigured,
+    turnTcpConfigured,
+    turnTlsConfigured,
+    stunCount,
+    iceServersCount: iceServers.length,
+    features: {
+      audio: true,
+      video: true,
+      screenShare: true,
+      multiParty: true,
+      switchCamera: true,
+      outputSelection: true,
+      wsAudioRelayFallback: true,
+    },
+    backgroundCapabilities: {
+      web: {
+        reliableInBackground: false,
+        reason: '普通网页关闭或浏览器后台挂起后会中断 WebSocket，无法稳定唤醒来电。',
+      },
+      pwa: {
+        reliableInBackground: false,
+        reason: 'PWA 仅支持在页面打开或 Web Push 下弹出普通通知，受限于浏览器沙盒，无法替代系统电话接听界面。',
+      },
+      nativeIos: {
+        supported: false,
+        mechanism: 'APNs VoIP + CallKit（规划于原生阶段接入）',
+        status: '待集成（需 iOS 原生工程）',
+      },
+      nativeAndroid: {
+        supported: false,
+        mechanism: 'FCM 高优先级推送 + Foreground Service（规划于原生阶段接入）',
+        status: '待集成（需 Android 原生工程）',
+      },
+    },
+    checkedAt: nowIso(),
+  };
+}
+
 export async function issueMediaToken(
   call: CallRecord,
   userId: string,
@@ -226,9 +404,9 @@ export async function issueMediaToken(
 ): Promise<import('./types.ts').CallTokenResponse> {
   const perm = canIssueMediaToken(call, userId, opts?.store);
   if (!perm.ok) return { ok: false, reason: perm.error, provider: 'none' };
-  const apiKey = process.env.LIVEKIT_API_KEY || '';
-  const apiSecret = process.env.LIVEKIT_API_SECRET || '';
-  const url = process.env.LIVEKIT_URL || process.env.LIVEKIT_WS_URL || '';
+  const apiKey = (process.env.LIVEKIT_API_KEY || '').trim();
+  const apiSecret = (process.env.LIVEKIT_API_SECRET || '').trim();
+  const url = (process.env.LIVEKIT_PUBLIC_URL || process.env.LIVEKIT_URL || process.env.LIVEKIT_WS_URL || '').trim();
   if (!apiKey || !apiSecret || !url) {
     if (opts?.allowWebRtcFallback) {
       call.mediaProvider = 'webrtc';
@@ -238,11 +416,7 @@ export async function issueMediaToken(
         roomName: call.roomName,
         provider: 'webrtc',
         expiresInSec: 3600,
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-        ],
+        iceServers: getWebRtcIceServers(),
       };
     }
     return { ok: false, blocked: true, reason: 'MEDIA_NOT_CONFIGURED', callId: call.id, roomName: call.roomName, provider: 'none' };
@@ -251,7 +425,6 @@ export async function issueMediaToken(
     // @ts-ignore - optional dependency
     const mod: any = await import('livekit-server-sdk');
     const AccessToken = mod.AccessToken || mod.default?.AccessToken;
-    const VideoGrant = mod.VideoGrant; // type-only in some builds
     if (!AccessToken) throw new Error('livekit-server-sdk AccessToken unavailable');
     const at = new AccessToken(apiKey, apiSecret, { identity: String(userId), ttl: '10m' });
     // Grant is bound to this EARTH ONE user identity and this specific call room.
@@ -268,10 +441,7 @@ export async function issueMediaToken(
         roomName: call.roomName,
         provider: 'webrtc',
         expiresInSec: 3600,
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-        ],
+        iceServers: getWebRtcIceServers(),
       };
     }
     return { ok: false, blocked: true, reason: 'MEDIA_SDK_UNAVAILABLE', callId: call.id, roomName: call.roomName, provider: 'none' };

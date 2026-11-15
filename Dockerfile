@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1
 
-# Node 22 (Enzonic-supported). App uses node:sqlite (DatabaseSync), available on Node 22.x.
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
@@ -35,10 +34,8 @@ COPY --from=build /app/tsconfig.json ./tsconfig.json
 COPY --from=build /app/vite.config.ts ./vite.config.ts
 COPY --from=build /app/package.json ./package.json
 
-# Persistent data must be mounted at runtime (platform volume). Do NOT bake production data into image.
+# Persistent data directory. On Railway, attach a Railway Volume mounted at /var/data. Do NOT bake production data into image.
 RUN mkdir -p /var/data
-VOLUME ["/var/data"]
 
-# Platform should inject PORT; default 3000 matches server.ts fallback.
-EXPOSE 3000
-CMD ["sh", "-c", "exec npx tsx server.ts"]
+EXPOSE 10000
+CMD ["sh", "-c", "PORT=${PORT:-10000} npx tsx server.ts"]

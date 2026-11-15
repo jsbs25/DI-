@@ -57,8 +57,10 @@ export function canViewProfileByPolicy(isSelf: boolean, isFriend: boolean, block
 export function canSearchByField(query: string, target: { id: string; username: string; displayName: string }, targetPrivacy: PrivacySettings) {
   const q = query.trim().toLowerCase();
   if (!q) return false;
-  const byUsername = targetPrivacy.searchableByUsername && String(target.username || '').toLowerCase().includes(q);
-  const byId = targetPrivacy.searchableById && String(target.id || '').toLowerCase().includes(q);
-  const byName = targetPrivacy.searchableByDisplayName && String(target.displayName || '').toLowerCase().includes(q);
+  const cleanQ = q.replace(/^@+/, '');
+  if (!cleanQ) return false;
+  const byUsername = targetPrivacy.searchableByUsername && String(target.username || '').toLowerCase().includes(cleanQ);
+  const byId = targetPrivacy.searchableById && String(target.id || '').toLowerCase().includes(cleanQ);
+  const byName = targetPrivacy.searchableByDisplayName && String(target.displayName || '').toLowerCase().includes(cleanQ);
   return byUsername || byId || byName;
 }

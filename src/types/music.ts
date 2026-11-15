@@ -1,3 +1,12 @@
+import type {
+  MediaAvailabilityStatus,
+  MediaCopyrightStatus,
+  MediaPlaybackType,
+  MediaProviderId,
+  MediaRegionAvailability,
+  MediaSourceDescriptor,
+} from './media.ts';
+
 export type PlaybackKind = 'audio' | 'embed' | 'none';
 
 export type RepeatMode = 'off' | 'one' | 'all';
@@ -22,6 +31,13 @@ export interface MusicTrack {
   videoId?: string;
   durationFormatted?: string;
   views?: string;
+  providerId?: MediaProviderId;
+  providerName?: string;
+  regionAvailability?: MediaRegionAvailability;
+  playbackType?: MediaPlaybackType;
+  copyrightStatus?: MediaCopyrightStatus;
+  availabilityStatus?: MediaAvailabilityStatus;
+  mediaSources?: MediaSourceDescriptor[];
   [key: string]: unknown;
 }
 
@@ -36,6 +52,10 @@ export interface MusicSource {
   license?: string;
   playable?: boolean;
   unavailableReason?: string;
+  regionAvailability?: MediaRegionAvailability;
+  playbackType?: MediaPlaybackType;
+  copyrightStatus?: MediaCopyrightStatus;
+  availabilityStatus?: MediaAvailabilityStatus;
 }
 
 export interface PlaybackInfo {
@@ -45,6 +65,9 @@ export interface PlaybackInfo {
   provider?: string;
   sourceLabel?: string;
   sourceUrl?: string;
+  playbackType?: MediaPlaybackType;
+  regionAvailability?: MediaRegionAvailability;
+  copyrightStatus?: MediaCopyrightStatus;
 }
 
 export interface UnifiedTrack {
@@ -96,6 +119,7 @@ export interface PlayerState {
   mode: PlaybackMode;
   activeSourceId?: string;
   error: PlaybackError | null;
+  fallbackNotice?: string | null;
   shuffleOrder: string[];
   shuffleCursor: number;
   restored: boolean;
@@ -149,6 +173,9 @@ export function normalizeToUnifiedTrack(input: MusicTrack | UnifiedTrack, indexH
         provider: primary.provider,
         sourceLabel: primary.label,
         sourceUrl: primary.url || raw.sourceUrl,
+        playbackType: primary.playbackType,
+        regionAvailability: primary.regionAvailability,
+        copyrightStatus: primary.copyrightStatus,
       }
     : { kind: 'none' };
 
@@ -181,29 +208,62 @@ function availabilityFromPlayback(kind: PlaybackKind): UnifiedTrack['availabilit
 
 function buildSourcesFromRaw(raw: MusicTrack): MusicSource[] {
   const sources: MusicSource[] = [];
+  if (Array.isArray(raw.mediaSources) && raw.mediaSources.length > 0) {
+    for (const ms of raw.mediaSources) {
+      const kind: PlaybackKind = ms.directAudioUrl
+        ? 'audio'
+        : ms.embedUrl && ms.playbackType !== 'external_redirect'
+          ? 'embed'
+          : 'none';
+      sources.push({
+        id: ms.id,
+        label: ms.providerName,
+        url: ms.officialUrl,
+        kind,
+        audioUrl: ms.directAudioUrl,
+        embedUrl: ms.embedUrl,
+        provider: ms.providerId,
+        license: ms.copyrightLabel || raw.license,
+        playable: kind !== 'none' && ms.availabilityStatus !== 'unavailable',
+        unavailableReason: ms.unavailableReason,
+        regionAvailability: ms.regionAvailability,
+        playbackType: ms.playbackType,
+        copyrightStatus: ms.copyrightStatus,
+        availabilityStatus: ms.availabilityStatus,
+      });
+    }
+  }
   const baseLabel = raw.source || 'Source';
   if (raw.audioUrl) {
     sources.push({
       id: `${raw.id || 'track'}:audio`,
-      label: baseLabel,
+      label: raw.providerName || baseLabel,
       url: raw.sourceUrl,
       kind: 'audio',
       audioUrl: raw.audioUrl,
-      provider: guessProvider(raw.sourceUrl || raw.audioUrl || raw.source),
+      provider: raw.providerId || guessProvider(raw.sourceUrl || raw.audioUrl || raw.source),
       license: raw.license,
       playable: true,
+      regionAvailability: raw.regionAvailability,
+      playbackType: raw.playbackType || 'legal_direct_audio',
+      copyrightStatus: raw.copyrightStatus,
+      availabilityStatus: raw.availabilityStatus || 'available',
     });
   }
   if (raw.embedUrl) {
     sources.push({
       id: `${raw.id || 'track'}:embed`,
-      label: baseLabel,
+      label: raw.providerName || baseLabel,
       url: raw.sourceUrl || raw.embedUrl,
       kind: 'embed',
       embedUrl: raw.embedUrl,
-      provider: guessProvider(raw.sourceUrl || raw.embedUrl || raw.source),
+      provider: raw.providerId || guessProvider(raw.sourceUrl || raw.embedUrl || raw.source),
       license: raw.license,
       playable: true,
+      regionAvailability: raw.regionAvailability,
+      playbackType: raw.playbackType || 'official_embed',
+      copyrightStatus: raw.copyrightStatus,
+      availabilityStatus: raw.availabilityStatus || 'available',
     });
   }
   if (!sources.length) {
@@ -212,10 +272,12 @@ function buildSourcesFromRaw(raw: MusicTrack): MusicSource[] {
       label: baseLabel,
       url: raw.sourceUrl,
       kind: 'none',
-      provider: guessProvider(raw.sourceUrl || raw.source),
+      provider: raw.providerId || guessProvider(raw.sourceUrl || raw.source),
       license: raw.license,
       playable: false,
       unavailableReason: 'No playable audio or embed URL',
+      playbackType: 'external_redirect',
+      availabilityStatus: 'requires_redirect',
     });
   }
   return dedupeSources(sources);
@@ -225,7 +287,7 @@ function dedupeSources(sources: MusicSource[]): MusicSource[] {
   const seen = new Set<string>();
   const out: MusicSource[] = [];
   for (const s of sources) {
-    const key = `${s.kind}|${s.audioUrl || ''}|${s.embedUrl || ''}|${s.url || ''}`;
+    const key = `${s.kind}|${s.audioUrl || ''}|${s.embedUrl || ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(s);
@@ -234,6 +296,10 @@ function dedupeSources(sources: MusicSource[]): MusicSource[] {
 }
 
 function pickPrimarySource(sources: MusicSource[], kind: PlaybackKind, raw: MusicTrack): MusicSource | undefined {
+  if (Array.isArray(raw.mediaSources) && raw.mediaSources.length > 0) {
+    const firstPlayable = sources.find(s => s.kind !== 'none' && s.playable !== false);
+    if (firstPlayable) return firstPlayable;
+  }
   if (kind === 'embed') return sources.find(s => s.kind === 'embed') || sources[0];
   if (kind === 'audio') return sources.find(s => s.kind === 'audio') || sources[0];
   if (raw.embedUrl) return sources.find(s => s.kind === 'embed');
@@ -244,7 +310,17 @@ function pickPrimarySource(sources: MusicSource[], kind: PlaybackKind, raw: Musi
 function fallbackPlayback(t: UnifiedTrack): PlaybackInfo {
   const s = t.sources.find(x => x.kind === 'audio') || t.sources.find(x => x.kind === 'embed') || t.sources[0];
   if (!s) return { kind: 'none' };
-  return { kind: s.kind, audioUrl: s.audioUrl, embedUrl: s.embedUrl, provider: s.provider, sourceLabel: s.label, sourceUrl: s.url };
+  return {
+    kind: s.kind,
+    audioUrl: s.audioUrl,
+    embedUrl: s.embedUrl,
+    provider: s.provider,
+    sourceLabel: s.label,
+    sourceUrl: s.url,
+    playbackType: s.playbackType,
+    regionAvailability: s.regionAvailability,
+    copyrightStatus: s.copyrightStatus,
+  };
 }
 
 export function guessProvider(input?: string): string | undefined {

@@ -48,6 +48,8 @@ export interface CallRecord {
     multiParty: boolean;
     switchCamera: boolean;
   };
+  missedSeenBy?: string[];
+  missedNotifiedAt?: string;
   metadata?: Record<string, any>;
 }
 
@@ -71,3 +73,32 @@ export interface CallTokenResponse {
   provider?: 'livekit' | 'webrtc' | 'none';
   iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }>;
 }
+
+export interface CallCapabilitiesInfo {
+  mode: 'livekit' | 'webrtc-p2p';
+  livekitConfigured: boolean;
+  livekitHealthy: boolean;
+  livekitUrlPresent: boolean;
+  turnConfigured: boolean;
+  turnTcpConfigured: boolean;
+  turnTlsConfigured: boolean;
+  stunCount: number;
+  iceServersCount: number;
+  features: {
+    audio: boolean;
+    video: boolean;
+    screenShare: boolean;
+    multiParty: boolean;
+    switchCamera: boolean;
+    outputSelection: boolean;
+    wsAudioRelayFallback: boolean;
+  };
+  backgroundCapabilities: {
+    web: { reliableInBackground: boolean; reason: string };
+    pwa: { reliableInBackground: boolean; reason: string };
+    nativeIos: { supported: boolean; mechanism: string; status: string };
+    nativeAndroid: { supported: boolean; mechanism: string; status: string };
+  };
+  checkedAt: string;
+}
+

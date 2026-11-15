@@ -41,43 +41,94 @@ export interface EmbeddableMusicTrack {
   playable: 'embed' | 'audio';
 }
 
+function extractBvid(input: string): string | null {
+  const m = String(input || '').match(/\b(BV[0-9A-Za-z]{8,14})\b/);
+  return m ? m[1] : null;
+}
+
 function trackFromUrl(input: string): EmbeddableMusicTrack | null {
   const raw = String(input || '').trim();
+  const now = new Date().toISOString();
+
+  // Direct Bilibili BV ID or URL
+  const bvid = extractBvid(raw);
+  if (bvid && (raw === bvid || raw.toLowerCase().includes('bilibili.com') || raw.toLowerCase().includes('b23.tv'))) {
+    return {
+      id: `bili_${bvid}`,
+      title: `Bilibili 音乐 (${bvid})`,
+      artist: 'Bilibili',
+      album: 'Bilibili 官方播放器',
+      genre: 'B站音乐',
+      durationSeconds: 0,
+      embedUrl: `https://player.bilibili.com/player.html?bvid=${bvid}&page=1&autoplay=0&danmaku=0`,
+      coverUrl: '/assets/music/electronic-pulse.jpg',
+      source: 'Bilibili 官方播放器',
+      sourceUrl: `https://www.bilibili.com/video/${bvid}`,
+      license: 'Bilibili official embed',
+      crawledAt: now,
+      description: 'B站官方嵌入播放器；版权与清晰度由来源提供。',
+      playable: 'embed'
+    };
+  }
+
   if (!/^https?:\/\//i.test(raw)) return null;
   let u: URL;
   try { u = new URL(raw); } catch { return null; }
   const host = u.hostname.replace(/^www\./, '').replace(/^m\./, '');
-  const now = new Date().toISOString();
+
+  // NetEase Cloud Music official single-song outchain widget (non-VIP public songs only)
+  if (host === 'music.163.com' || host === 'y.music.163.com') {
+    const songId = u.searchParams.get('id') || (u.hash.match(/song\?id=(\d+)/)?.[1]) || (raw.match(/song[\/?=](\d+)/)?.[1]);
+    if (songId && /^\d+$/.test(songId)) {
+      return {
+        id: `ncm_${songId}`,
+        title: `网易云音乐单曲 (${songId})`,
+        artist: '网易云音乐 (官方外链)',
+        album: '网易云官方外链播放器',
+        genre: '网易云外链',
+        durationSeconds: 0,
+        embedUrl: `https://music.163.com/outchain/player?type=2&id=${songId}&auto=0&height=66`,
+        coverUrl: '/assets/music/neo-classical.jpg',
+        source: '网易云音乐官方外链',
+        sourceUrl: `https://music.163.com/#/song?id=${songId}`,
+        license: 'NetEase official outchain widget (non-VIP tracks only)',
+        crawledAt: now,
+        description: '网易云官方外链播放器；VIP/版权受限曲目无法站内播放，可点击原平台链接打开。',
+        playable: 'embed'
+      };
+    }
+  }
+
   const yt = extractVideoId(raw);
   if (yt) return {
     id: `yt_${yt}`, title: 'YouTube 音乐', artist: 'YouTube', album: 'YouTube (official embed)', genre: 'YouTube', durationSeconds: 0,
-    embedUrl: `https://www.youtube-nocookie.com/embed/${yt}`, coverUrl: `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`,
+    embedUrl: `https://www.youtube-nocookie.com/embed/${yt}?enablejsapi=1&rel=0`, coverUrl: `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`,
     source: 'YouTube', sourceUrl: `https://www.youtube.com/watch?v=${yt}`, license: 'YouTube terms / rights vary by video', crawledAt: now,
     description: '官方嵌入播放；版权/可用性由来源控制。', playable: 'embed'
   };
   if (host === 'soundcloud.com' || host === 'on.soundcloud.com' || host === 'w.soundcloud.com') return {
     id: `sc_${Buffer.from(raw).toString('base64url').slice(0, 24)}`, title: 'SoundCloud 音轨', artist: 'SoundCloud', album: 'SoundCloud (official widget)', genre: 'SoundCloud', durationSeconds: 0,
-    embedUrl: `https://w.soundcloud.com/player/?url=${encodeURIComponent(u.href)}&auto_play=false&show_artwork=true&visual=true`,
-    coverUrl: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=600&auto=format&fit=crop&q=80',
+    embedUrl: `https://w.soundcloud.com/player/?url=${encodeURIComponent(u.href)}&auto_play=true&show_artwork=true&visual=true`,
+    coverUrl: '/assets/music/lofi-horizon.jpg',
     source: 'SoundCloud', sourceUrl: u.href, license: 'SoundCloud terms / rights vary by track', crawledAt: now,
     description: 'SoundCloud 官方 widget 嵌入；版权/可用性由来源控制。', playable: 'embed'
   };
   if (host === 'mixcloud.com' && u.pathname.split('/').filter(Boolean).length >= 2) return {
     id: `mc_${Buffer.from(raw).toString('base64url').slice(0, 24)}`, title: 'Mixcloud', artist: 'Mixcloud', album: 'Mixcloud (official widget)', genre: 'Mixcloud', durationSeconds: 0,
     embedUrl: `https://www.mixcloud.com/widget/iframe/?hide_cover=1&feed=${encodeURIComponent(u.pathname)}`,
-    coverUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=80',
+    coverUrl: '/assets/music/electronic-pulse.jpg',
     source: 'Mixcloud', sourceUrl: u.href, license: 'Mixcloud terms / rights vary', crawledAt: now,
     description: 'Mixcloud 官方 widget 嵌入。', playable: 'embed'
   };
   if (host === 'bandcamp.com' || host.endsWith('.bandcamp.com')) return {
     id: `bc_${Buffer.from(raw).toString('base64url').slice(0, 24)}`, title: 'Bandcamp', artist: host, album: 'Bandcamp (official page)', genre: 'Bandcamp', durationSeconds: 0,
-    embedUrl: u.href, coverUrl: 'https://images.unsplash.com/photo-1514320291840-2e0a9bf2a9ae?w=600&auto=format&fit=crop&q=80',
+    embedUrl: u.href, coverUrl: '/assets/music/neo-classical.jpg',
     source: 'Bandcamp', sourceUrl: u.href, license: 'Bandcamp terms / rights vary', crawledAt: now,
     description: 'Bandcamp 页面/嵌入；若站点限制 iframe，请用原始来源打开。', playable: 'embed'
   };
   if (/\.(mp3|ogg|wav|m4a)(\?|$)/i.test(u.pathname) && (u.protocol === 'https:' || u.protocol === 'http:')) return {
     id: `au_${Buffer.from(raw).toString('base64url').slice(0, 24)}`, title: decodeURIComponent(u.pathname.split('/').pop() || 'Audio'), artist: host, album: host, genre: 'Direct Audio', durationSeconds: 0,
-    audioUrl: u.href, coverUrl: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=600&auto=format&fit=crop&q=80',
+    audioUrl: u.href, coverUrl: '/assets/music/ambient-space.jpg',
     source: host, sourceUrl: u.href, license: 'Rights vary by source; direct link only', crawledAt: now,
     description: '直接音频链接播放；版权/可用性由来源控制。', playable: 'audio'
   };
@@ -138,7 +189,7 @@ async function searchYouTubeKeyword(query: string, limit = 8): Promise<Embeddabl
         album: 'YouTube (official embed)',
         genre: 'YouTube',
         durationSeconds: typeof it?.duration === 'number' ? it.duration : 0,
-        embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`,
+        embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&rel=0`,
         coverUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
         source: 'YouTube',
         sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
@@ -192,7 +243,7 @@ async function searchYouTubeMusicDirect(query: string, limit = 8): Promise<Embed
           album: 'YouTube Music Stream',
           genre: 'Streaming Music',
           durationSeconds,
-          embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`,
+          embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&rel=0`,
           coverUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
           source: 'YouTube Music',
           sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,

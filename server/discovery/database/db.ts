@@ -6,7 +6,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import fs from 'fs';
-import os from 'node:os';
 import {
   ResourceItem,
   PlanetId,
@@ -20,18 +19,7 @@ import {
 } from '../types.ts';
 import { normalizeCanonicalUrl, generateResourceId } from '../deduplication/urlNormalizer.ts';
 
-function resolveWritableDataDir(preferred: string): string {
-  try {
-    fs.mkdirSync(preferred, { recursive: true });
-    return preferred;
-  } catch {
-    const fallback = path.join(os.tmpdir(), 'earth-one', 'server_data');
-    fs.mkdirSync(fallback, { recursive: true });
-    return fallback;
-  }
-}
-
-const DB_DIR = resolveWritableDataDir(path.resolve(process.env.EARTH_ONE_DATA_DIR || path.join(process.cwd(), 'server_data')));
+const DB_DIR = path.resolve(process.env.EARTH_ONE_DATA_DIR || path.join(process.cwd(), 'server_data'));
 const DB_PATH = process.env.EARTH_ONE_DISCOVERY_DB_FILE || path.join(DB_DIR, 'discovery.db');
 
 export class DiscoveryDatabase {
@@ -41,23 +29,10 @@ export class DiscoveryDatabase {
     const finalPath = customPath || DB_PATH;
     const dir = path.dirname(finalPath);
     if (!fs.existsSync(dir)) {
-      try {
-        fs.mkdirSync(dir, { recursive: true });
-      } catch {
-        const fallbackDir = path.join(os.tmpdir(), 'earth-one', 'server_data');
-        fs.mkdirSync(fallbackDir, { recursive: true });
-      }
+      fs.mkdirSync(dir, { recursive: true });
     }
-    const dbPath = (() => {
-      try {
-        fs.mkdirSync(path.dirname(finalPath), { recursive: true });
-        return finalPath;
-      } catch {
-        return path.join(os.tmpdir(), 'earth-one', 'server_data', path.basename(finalPath || 'discovery.db'));
-      }
-    })();
 
-    this.db = new DatabaseSync(dbPath);
+    this.db = new DatabaseSync(finalPath);
     this.initPragmas();
     this.initTables();
     this.seedInitialResources();
@@ -802,12 +777,5 @@ export class DiscoveryDatabase {
   }
 }
 
-// Global Singleton Instance (lazy to avoid crashing server startup on read-only filesystems)
-let _discoveryDb: DiscoveryDatabase | null = null;
-export const discoveryDb: DiscoveryDatabase = new Proxy({} as DiscoveryDatabase, {
-  get(_target, prop) {
-    if (!_discoveryDb) _discoveryDb = new DiscoveryDatabase();
-    const value = (_discoveryDb as any)[prop];
-    return typeof value === 'function' ? value.bind(_discoveryDb) : value;
-  }
-});
+// Global Singleton Instance
+export const discoveryDb = new DiscoveryDatabase();
