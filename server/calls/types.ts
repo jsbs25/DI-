@@ -80,8 +80,10 @@ export interface CallCapabilitiesInfo {
   livekitHealthy: boolean;
   livekitUrlPresent: boolean;
   turnConfigured: boolean;
+  turnTcpConfigured: boolean;
   turnTlsConfigured: boolean;
   stunCount: number;
+  iceServersCount: number;
   features: {
     audio: boolean;
     video: boolean;

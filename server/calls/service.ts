@@ -334,6 +334,7 @@ export async function getCommunicationCapabilities(): Promise<CallCapabilitiesIn
 
   const iceServers = getWebRtcIceServers();
   let turnConfigured = false;
+  let turnTcpConfigured = false;
   let turnTlsConfigured = false;
   let stunCount = 0;
   for (const s of iceServers) {
@@ -341,8 +342,15 @@ export async function getCommunicationCapabilities(): Promise<CallCapabilitiesIn
     for (const u of urls) {
       const lower = String(u || '').toLowerCase();
       if (lower.startsWith('stun:')) stunCount++;
-      if (lower.startsWith('turn:') || lower.startsWith('turns:')) turnConfigured = true;
-      if (lower.startsWith('turns:')) turnTlsConfigured = true;
+      if (lower.startsWith('turn:') || lower.startsWith('turns:')) {
+        turnConfigured = true;
+        if (lower.startsWith('turns:')) {
+          turnTlsConfigured = true;
+          turnTcpConfigured = true;
+        } else if (lower.includes('transport=tcp')) {
+          turnTcpConfigured = true;
+        }
+      }
     }
   }
 
@@ -352,8 +360,10 @@ export async function getCommunicationCapabilities(): Promise<CallCapabilitiesIn
     livekitHealthy,
     livekitUrlPresent,
     turnConfigured,
+    turnTcpConfigured,
     turnTlsConfigured,
     stunCount,
+    iceServersCount: iceServers.length,
     features: {
       audio: true,
       video: true,

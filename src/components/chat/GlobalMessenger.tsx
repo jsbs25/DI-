@@ -7,7 +7,7 @@ import {
   Wifi, WifiOff, RefreshCw, Info, Crown, Shield, LogOut, UserMinus,
   Download, ChevronLeft, ChevronRight, FileText, AlertTriangle, Eye, Copy,
   Bell, CheckCheck, User as UserIcon, Settings, Volume2, Phone, PhoneOff, Video, Mic, MicOff, VideoOff, Monitor, MonitorOff,
-  Minimize2, Maximize2
+  Minimize2, Maximize2, ShieldCheck
 } from 'lucide-react';
 import { callApi } from '../../services/calls/api.ts';
 import { createCallMediaSession, type ICallMediaSession, type CallMediaState, friendlyMediaError, unlockCallAudioContext } from '../../services/calls/media.ts';
@@ -1866,6 +1866,22 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     });
   };
 
+  const toggleForceTurnRelay = async () => {
+    const session = mediaSessionRef.current;
+    if (!session?.setIceTransportPolicy) return;
+    const nextPolicy: RTCIceTransportPolicy = mediaState.audioStats?.iceTransportPolicy === 'relay' ? 'all' : 'relay';
+    try {
+      await session.setIceTransportPolicy(nextPolicy);
+      setCallMediaNote(
+        nextPolicy === 'relay'
+          ? '已切换至强制 TURN 中继模式（适用于 UDP 受限网络）'
+          : '已恢复智能 P2P / TURN 自动协商模式'
+      );
+    } catch (e: any) {
+      setCallMediaNote(friendlyMediaError(e));
+    }
+  };
+
   // Ringtone / ringback lifecycle synced with signaling & DND preferences
   useEffect(() => {
     const incomingRinging =
@@ -2979,11 +2995,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                     <p className="text-xs text-slate-400">{mediaPhaseLabel}{stats?.usingRelay ? '（加密中继）' : ''}</p>
                   </div>
                   {stats && (
-                    <div className="px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex items-center gap-2 tabular-nums">
+                    <div className="px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex flex-wrap items-center justify-center gap-2 tabular-nums">
                       <span className={`w-2 h-2 rounded-full ${stats.hasLocalAudio ? (stats.localLevel > 4 ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400') : 'bg-rose-400'}`} />
                       <span>{stats.hasLocalAudio ? (callDevices.micEnabled ? `麦克风音量 ${stats.localLevel}%` : '已静音') : '未获取到麦克风'}</span>
                       <span className="text-white/25">|</span>
-                      <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceState}`}</span>
+                      <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceCandidateType || stats.iceState}${stats.transportProtocol ? `/${stats.transportProtocol.toUpperCase()}` : ''}`}</span>
                       {typeof stats.rttMs === 'number' && <><span className="text-white/25">|</span><span>{stats.rttMs} ms</span></>}
                     </div>
                   )}
@@ -2994,11 +3010,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             {/* Notices + Bottom Controls */}
             <div className="px-4 pt-2 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-black/35 border-t border-white/10 space-y-3 shrink-0">
               {activeCall.kind === 'video' && stats && (
-                <div className="mx-auto w-fit px-3 py-1 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex items-center gap-2 tabular-nums">
+                <div className="mx-auto w-fit px-3 py-1 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex flex-wrap items-center justify-center gap-2 tabular-nums">
                   <span className={`w-2 h-2 rounded-full ${stats.hasLocalAudio ? (stats.localLevel > 4 ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400') : 'bg-rose-400'}`} />
                   <span>{stats.hasLocalAudio ? (callDevices.micEnabled ? `麦克风音量 ${stats.localLevel}%` : '已静音') : '未获取到麦克风'}</span>
                   <span className="text-white/25">|</span>
-                  <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceState}`}</span>
+                  <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceCandidateType || stats.iceState}${stats.transportProtocol ? `/${stats.transportProtocol.toUpperCase()}` : ''}`}</span>
+                  {stats.videoWidth && stats.videoHeight && <><span className="text-white/25">|</span><span>{stats.videoWidth}×{stats.videoHeight}{typeof stats.videoBitrateKbps === 'number' ? ` · ${stats.videoBitrateKbps}kbps` : ''}</span></>}
                   {typeof stats.rttMs === 'number' && <><span className="text-white/25">|</span><span>{stats.rttMs} ms</span></>}
                 </div>
               )}
@@ -3049,6 +3066,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                       <RefreshCw className="w-5 h-5"/>
                       <span>重连</span>
                     </button>
+                    {callCapabilities?.turnConfigured && mediaSessionRef.current?.setIceTransportPolicy && (
+                      <button type="button" onClick={()=>void toggleForceTurnRelay()} className={`min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex flex-col items-center justify-center gap-1 text-[11px] font-medium ${stats?.iceTransportPolicy === 'relay' ? 'border-amber-400/50 bg-amber-500/20 text-amber-200' : 'border-white/15 bg-white/10 text-slate-200'}`}>
+                        <ShieldCheck className="w-5 h-5"/>
+                        <span>{stats?.iceTransportPolicy === 'relay' ? 'TURN中继中' : 'TURN中继'}</span>
+                      </button>
+                    )}
                   </>
                 )}
                 {activeCall.scope === 'group' && ['connecting','active','reconnecting'].includes(activeCall.status) && (

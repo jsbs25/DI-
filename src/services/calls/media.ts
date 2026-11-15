@@ -8,6 +8,7 @@ import {
   type RemoteTrackPublication,
   type Participant,
   createLocalTracks,
+  VideoPresets,
   type LocalTrack,
 } from 'livekit-client';
 
@@ -45,6 +46,11 @@ export interface CallAudioDiagnostics {
   weakNetwork?: boolean;
   transportProtocol?: string;
   iceCandidateType?: string;
+  videoWidth?: number;
+  videoHeight?: number;
+  videoFps?: number;
+  videoBitrateKbps?: number;
+  iceTransportPolicy?: RTCIceTransportPolicy;
 }
 
 export interface CallMediaState {
@@ -71,6 +77,7 @@ export interface CallMediaOptions {
   selfName?: string;
   participantIds?: string[];
   iceServers?: RTCIceServer[];
+  iceTransportPolicy?: RTCIceTransportPolicy;
   kind: 'audio' | 'video';
   initialMicEnabled?: boolean;
   initialCameraEnabled?: boolean;
@@ -89,10 +96,135 @@ export interface ICallMediaSession {
   switchCamera(): Promise<void>;
   setScreenShareEnabled(enabled: boolean): Promise<void>;
   setAudioOutputDevice?(deviceId: string): Promise<void>;
+  setIceTransportPolicy?(policy: RTCIceTransportPolicy): Promise<void>;
   startAudioPlayback(): Promise<void>;
   disconnect(reason?: string): Promise<void>;
   handleRemoteSignal?(fromUserId: string, signal: any, seq?: number): Promise<void>;
   handleRemoteAudioFrame?(fromUserId: string, pcmBase64: string, sampleRate: number): void;
+}
+
+export interface IceProbeResult {
+  ok: boolean;
+  hasHost: boolean;
+  hasSrflx: boolean;
+  hasRelay: boolean;
+  hasRelayTcp: boolean;
+  candidateCount: number;
+  protocols: string[];
+  elapsedMs: number;
+  summary: string;
+}
+
+export async function probeIceConnectivity(
+  iceServers?: RTCIceServer[],
+  opts?: { relayOnly?: boolean; timeoutMs?: number }
+): Promise<IceProbeResult> {
+  const started = Date.now();
+  if (typeof RTCPeerConnection === 'undefined') {
+    return {
+      ok: false,
+      hasHost: false,
+      hasSrflx: false,
+      hasRelay: false,
+      hasRelayTcp: false,
+      candidateCount: 0,
+      protocols: [],
+      elapsedMs: 0,
+      summary: '当前环境不支持 RTCPeerConnection ICE 探测',
+    };
+  }
+  const servers: RTCIceServer[] = iceServers?.length
+    ? iceServers
+    : [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+      ];
+  let pc: RTCPeerConnection | null = null;
+  try {
+    pc = new RTCPeerConnection({
+      iceServers: servers,
+      iceTransportPolicy: opts?.relayOnly ? 'relay' : 'all',
+    });
+    pc.createDataChannel('one-ice-probe');
+    let hasHost = false;
+    let hasSrflx = false;
+    let hasRelay = false;
+    let hasRelayTcp = false;
+    let candidateCount = 0;
+    const protocols = new Set<string>();
+
+    const done = new Promise<void>((resolve) => {
+      const timeoutMs = opts?.timeoutMs ?? 3500;
+      const timer = setTimeout(resolve, timeoutMs);
+      if (!pc) {
+        clearTimeout(timer);
+        resolve();
+        return;
+      }
+      pc.onicecandidate = (ev) => {
+        if (!ev.candidate) {
+          clearTimeout(timer);
+          resolve();
+          return;
+        }
+        const candStr = ev.candidate.candidate || '';
+        const type = ev.candidate.type || (/\btyp\s+(host|srflx|prflx|relay)\b/i.exec(candStr)?.[1] || '').toLowerCase();
+        const proto = (ev.candidate.protocol || (/\b(udp|tcp)\b/i.exec(candStr)?.[1] || '')).toLowerCase();
+        candidateCount += 1;
+        if (proto) protocols.add(proto);
+        if (type === 'host') hasHost = true;
+        if (type === 'srflx') hasSrflx = true;
+        if (type === 'relay') {
+          hasRelay = true;
+          if (proto === 'tcp' || proto === 'tls') hasRelayTcp = true;
+        }
+      };
+      pc.onicegatheringstatechange = () => {
+        if (pc?.iceGatheringState === 'complete') {
+          clearTimeout(timer);
+          resolve();
+        }
+      };
+    });
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await done;
+
+    const elapsedMs = Date.now() - started;
+    const parts: string[] = [];
+    if (hasHost) parts.push('本地主机(host)');
+    if (hasSrflx) parts.push('STUN 公网穿透(srflx)');
+    if (hasRelay) parts.push(hasRelayTcp ? 'TURN 中继(含 TCP/TLS)' : 'TURN 中继(UDP)');
+    const summary = parts.length
+      ? `探测完成 (${elapsedMs}ms): ${parts.join(' + ')}`
+      : `未收集到可用候选地址 (${elapsedMs}ms)，可能受防火墙限制`;
+    return {
+      ok: hasHost || hasSrflx || hasRelay,
+      hasHost,
+      hasSrflx,
+      hasRelay,
+      hasRelayTcp,
+      candidateCount,
+      protocols: Array.from(protocols),
+      elapsedMs,
+      summary,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      hasHost: false,
+      hasSrflx: false,
+      hasRelay: false,
+      hasRelayTcp: false,
+      candidateCount: 0,
+      protocols: [],
+      elapsedMs: Date.now() - started,
+      summary: err?.message || 'ICE 探测失败',
+    };
+  } finally {
+    try { pc?.close(); } catch {}
+  }
 }
 
 function supportsSinkIdSelection(): boolean {
@@ -209,7 +341,17 @@ export class LiveKitCallSession implements ICallMediaSession {
     };
     this.emit();
 
-    const room = new Room({ adaptiveStream: true, dynacast: true });
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      videoCaptureDefaults: {
+        resolution: VideoPresets.h720.resolution,
+      },
+      publishDefaults: {
+        simulcast: true,
+        videoCodec: 'vp8',
+      },
+    });
     this.room = room;
 
     room
@@ -456,6 +598,12 @@ export class WebRTCCallSession implements ICallMediaSession {
   private analyser: AnalyserNode | null = null;
   private analyserData: Uint8Array<ArrayBuffer> | null = null;
   private nextRelayPlayTime = 0;
+  private iceTransportPolicy: RTCIceTransportPolicy = 'all';
+  private iceRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private lastIceRestartAt = new Map<string, number>();
+  private lastVideoTier: 'high' | 'low' = 'high';
+  private prevVideoBytes = 0;
+  private prevVideoAt = 0;
 
   getState() { return this.state; }
 
@@ -592,6 +740,7 @@ export class WebRTCCallSession implements ICallMediaSession {
             { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun.cloudflare.com:3478' },
           ],
+      iceTransportPolicy: this.iceTransportPolicy,
     });
     const entry: PeerEntry = {
       pc,
@@ -651,6 +800,33 @@ export class WebRTCCallSession implements ICallMediaSession {
       this.rebuildParticipants();
     };
 
+    const clearRestartTimer = () => {
+      const existingTimer = this.iceRestartTimers.get(peerId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        this.iceRestartTimers.delete(peerId);
+      }
+    };
+
+    const scheduleIceRestart = (delayMs: number) => {
+      if (this.disposed || this.iceRestartTimers.has(peerId)) return;
+      const last = this.lastIceRestartAt.get(peerId) || 0;
+      if (Date.now() - last < 6000) return;
+      const t = setTimeout(async () => {
+        this.iceRestartTimers.delete(peerId);
+        if (this.disposed) return;
+        const st = pc.iceConnectionState;
+        if (st === 'connected' || st === 'completed') return;
+        this.lastIceRestartAt.set(peerId, Date.now());
+        if (!polite) {
+          await this.createAndSendOffer(peerId, entry, true);
+        } else {
+          try { await this.opts?.sendSignal?.(peerId, { type: 'ready', reset: true }); } catch {}
+        }
+      }, delayMs);
+      this.iceRestartTimers.set(peerId, t);
+    };
+
     const isAnyPeerConnected = () =>
       Array.from(this.peers.values()).some(
         (p) => p.pc.connectionState === 'connected' || p.pc.iceConnectionState === 'connected' || p.pc.iceConnectionState === 'completed'
@@ -661,13 +837,16 @@ export class WebRTCCallSession implements ICallMediaSession {
       const states = Array.from(this.peers.values()).map((p) => p.pc.connectionState);
       const iceStates = Array.from(this.peers.values()).map((p) => p.pc.iceConnectionState);
       if (states.some((s) => s === 'connected') || iceStates.some((s) => s === 'connected' || s === 'completed')) {
+        clearRestartTimer();
         if (this.usingRelay && this.webrtcBytesReceived > 0) this.usingRelay = false;
         this.emit({ phase: 'connected', connectionQuality: 'excellent' });
       } else if (this.usingRelay) {
         this.emit({ phase: 'connected', connectionQuality: 'good' });
       } else if (states.some((s) => s === 'disconnected') || iceStates.some((s) => s === 'disconnected')) {
         this.emit({ phase: 'reconnecting', connectionQuality: 'poor' });
+        scheduleIceRestart(2200);
       } else if (states.length && (states.every((s) => s === 'failed') || iceStates.every((s) => s === 'failed'))) {
+        scheduleIceRestart(400);
         if (this.opts?.sendAudioFrame) {
           this.activateAudioRelay();
         } else {
@@ -680,8 +859,15 @@ export class WebRTCCallSession implements ICallMediaSession {
     pc.onconnectionstatechange = syncConnectionPhase;
     pc.oniceconnectionstatechange = () => {
       if (this.disposed) return;
-      if (pc.iceConnectionState === 'failed' && !isAnyPeerConnected() && this.opts?.sendAudioFrame) {
-        this.activateAudioRelay();
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        clearRestartTimer();
+      } else if (pc.iceConnectionState === 'disconnected') {
+        scheduleIceRestart(2200);
+      } else if (pc.iceConnectionState === 'failed') {
+        scheduleIceRestart(400);
+        if (!isAnyPeerConnected() && this.opts?.sendAudioFrame) {
+          this.activateAudioRelay();
+        }
       }
       syncConnectionPhase();
     };
@@ -842,12 +1028,16 @@ export class WebRTCCallSession implements ICallMediaSession {
 
     let bytesSent = 0;
     let bytesReceived = 0;
+    let videoBytesTotal = 0;
     let iceState = 'new';
     let rttMs: number | undefined;
     let packetsReceived = 0;
     let packetsLost = 0;
     let transportProtocol: string | undefined;
     let iceCandidateType: string | undefined;
+    let videoWidth: number | undefined;
+    let videoHeight: number | undefined;
+    let videoFps: number | undefined;
 
     for (const [, entry] of this.peers.entries()) {
       iceState = entry.pc.iceConnectionState || entry.pc.connectionState || iceState;
@@ -865,10 +1055,26 @@ export class WebRTCCallSession implements ICallMediaSession {
           if (rep.type === 'outbound-rtp' && (rep.kind === 'audio' || rep.mediaType === 'audio')) {
             bytesSent += Number(rep.bytesSent || 0);
           }
+          if (rep.type === 'outbound-rtp' && (rep.kind === 'video' || rep.mediaType === 'video')) {
+            bytesSent += Number(rep.bytesSent || 0);
+            videoBytesTotal += Number(rep.bytesSent || 0);
+            if (typeof rep.frameWidth === 'number' && rep.frameWidth > 0) videoWidth = rep.frameWidth;
+            if (typeof rep.frameHeight === 'number' && rep.frameHeight > 0) videoHeight = rep.frameHeight;
+            if (typeof rep.framesPerSecond === 'number') videoFps = Math.round(rep.framesPerSecond);
+          }
           if (rep.type === 'inbound-rtp' && (rep.kind === 'audio' || rep.mediaType === 'audio')) {
             bytesReceived += Number(rep.bytesReceived || 0);
             packetsReceived += Number(rep.packetsReceived || 0);
             packetsLost += Math.max(0, Number(rep.packetsLost || 0));
+          }
+          if (rep.type === 'inbound-rtp' && (rep.kind === 'video' || rep.mediaType === 'video')) {
+            bytesReceived += Number(rep.bytesReceived || 0);
+            videoBytesTotal += Number(rep.bytesReceived || 0);
+            packetsReceived += Number(rep.packetsReceived || 0);
+            packetsLost += Math.max(0, Number(rep.packetsLost || 0));
+            if (!videoWidth && typeof rep.frameWidth === 'number' && rep.frameWidth > 0) videoWidth = rep.frameWidth;
+            if (!videoHeight && typeof rep.frameHeight === 'number' && rep.frameHeight > 0) videoHeight = rep.frameHeight;
+            if (videoFps === undefined && typeof rep.framesPerSecond === 'number') videoFps = Math.round(rep.framesPerSecond);
           }
           if (rep.type === 'remote-inbound-rtp' && typeof rep.roundTripTime === 'number') {
             const ms = Math.round(rep.roundTripTime * 1000);
@@ -891,12 +1097,29 @@ export class WebRTCCallSession implements ICallMediaSession {
       } catch {}
     }
 
+    const nowMs = Date.now();
+    let videoBitrateKbps: number | undefined;
+    if (this.prevVideoAt > 0 && videoBytesTotal >= this.prevVideoBytes) {
+      const dtSec = Math.max(0.25, (nowMs - this.prevVideoAt) / 1000);
+      videoBitrateKbps = Math.round(((videoBytesTotal - this.prevVideoBytes) * 8) / dtSec / 1000);
+    }
+    this.prevVideoBytes = videoBytesTotal;
+    this.prevVideoAt = nowMs;
+
     const totalPackets = packetsReceived + packetsLost;
     const packetLossPct = totalPackets > 20 ? Number(((packetsLost / totalPackets) * 100).toFixed(1)) : 0;
     const weakNetwork =
       iceState === 'disconnected' ||
       (typeof rttMs === 'number' && rttMs > 320) ||
       packetLossPct > 4;
+
+    if (this.opts?.kind === 'video') {
+      const targetTier: 'high' | 'low' = weakNetwork ? 'low' : 'high';
+      if (targetTier !== this.lastVideoTier) {
+        this.lastVideoTier = targetTier;
+        void this.applyVideoBitrateCap(targetTier);
+      }
+    }
 
     this.webrtcBytesReceived = bytesReceived;
     const p2pConnected = Array.from(this.peers.values()).some(
@@ -932,8 +1155,31 @@ export class WebRTCCallSession implements ICallMediaSession {
         weakNetwork,
         transportProtocol,
         iceCandidateType,
+        videoWidth,
+        videoHeight,
+        videoFps,
+        videoBitrateKbps,
+        iceTransportPolicy: this.iceTransportPolicy,
       },
     });
+  }
+
+  private async applyVideoBitrateCap(tier: 'high' | 'low') {
+    const maxBitrate = tier === 'low' ? 320_000 : 1_200_000;
+    const maxFramerate = tier === 'low' ? 15 : 30;
+    for (const [, entry] of this.peers.entries()) {
+      const sender = this.findSender(entry.pc, 'video');
+      if (!sender || typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') continue;
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].maxBitrate = maxBitrate;
+        params.encodings[0].maxFramerate = maxFramerate;
+        await sender.setParameters(params);
+      } catch {}
+    }
   }
 
   async connect(opts: CallMediaOptions): Promise<void> {
@@ -950,6 +1196,10 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.remoteAudioFrames = 0;
     this.webrtcBytesReceived = 0;
     this.nextRelayPlayTime = 0;
+    this.iceTransportPolicy = opts.iceTransportPolicy || 'all';
+    this.lastVideoTier = 'high';
+    this.prevVideoBytes = 0;
+    this.prevVideoAt = 0;
     const outputs = await listAudioOutputOptions();
     this.state = {
       phase: 'acquiring',
@@ -1257,6 +1507,28 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.emit({ selectedAudioOutputId: deviceId || 'default' });
   }
 
+  async setIceTransportPolicy(policy: RTCIceTransportPolicy) {
+    this.iceTransportPolicy = policy;
+    for (const [peerId, entry] of this.peers.entries()) {
+      try {
+        if (typeof entry.pc.setConfiguration === 'function') {
+          entry.pc.setConfiguration({
+            iceServers: this.opts?.iceServers?.length
+              ? this.opts.iceServers
+              : [
+                  { urls: 'stun:stun.l.google.com:19302' },
+                  { urls: 'stun:stun1.l.google.com:19302' },
+                  { urls: 'stun:stun.cloudflare.com:3478' },
+                ],
+            iceTransportPolicy: policy,
+          });
+        }
+        await this.createAndSendOffer(peerId, entry, true);
+      } catch {}
+    }
+    this.emit({ phase: 'reconnecting' });
+  }
+
   async startAudioPlayback() {
     const unlocked = await unlockCallAudioContext();
     this.emit({ canPlaybackAudio: unlocked || true });
@@ -1268,6 +1540,9 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.preMediaSignals = [];
     this.usingRelay = false;
     this.seenSeqs.clear();
+    for (const t of this.iceRestartTimers.values()) clearTimeout(t);
+    this.iceRestartTimers.clear();
+    this.lastIceRestartAt.clear();
     if (this.relayFallbackTimer) {
       clearTimeout(this.relayFallbackTimer);
       this.relayFallbackTimer = null;

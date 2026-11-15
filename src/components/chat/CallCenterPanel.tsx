@@ -11,7 +11,9 @@ import {
   CheckCheck,
   ShieldCheck,
   Info,
+  Activity,
 } from 'lucide-react';
+import { probeIceConnectivity, type IceProbeResult } from '../../services/calls/media.ts';
 
 export interface CallLogEntry {
   id: string;
@@ -37,8 +39,10 @@ export interface CallCapabilitiesSummary {
   livekitConfigured: boolean;
   livekitHealthy: boolean;
   turnConfigured: boolean;
+  turnTcpConfigured?: boolean;
   turnTlsConfigured: boolean;
   stunCount: number;
+  iceServersCount?: number;
   backgroundCapabilities?: {
     web?: { reliableInBackground: boolean; reason: string };
     pwa?: { reliableInBackground: boolean; reason: string };
@@ -116,6 +120,19 @@ export const CallCenterPanel: React.FC<CallCenterPanelProps> = ({
 }) => {
   const [subFilter, setSubFilter] = useState<'all' | 'missed' | 'contacts'>('all');
   const [showBgNote, setShowBgNote] = useState(false);
+  const [iceProbing, setIceProbing] = useState(false);
+  const [iceProbeResult, setIceProbeResult] = useState<IceProbeResult | null>(null);
+
+  const runIceDiagnostic = async () => {
+    if (iceProbing) return;
+    setIceProbing(true);
+    try {
+      const res = await probeIceConnectivity(undefined, { timeoutMs: 3200 });
+      setIceProbeResult(res);
+    } finally {
+      setIceProbing(false);
+    }
+  };
 
   const L = (zh: string, en: string, ar: string) => (lang === 'ar' ? ar : lang === 'en' ? en : zh);
 
@@ -178,12 +195,23 @@ export const CallCenterPanel: React.FC<CallCenterPanelProps> = ({
               <span aria-hidden="true"> · </span>
               {capabilities?.turnTlsConfigured
                 ? 'TURN/TLS'
-                : capabilities?.turnConfigured
-                  ? 'TURN Relay'
-                  : `STUN (${capabilities?.stunCount ?? 5})`}
+                : capabilities?.turnTcpConfigured
+                  ? 'TURN/TCP'
+                  : capabilities?.turnConfigured
+                    ? 'TURN Relay'
+                    : `STUN (${capabilities?.stunCount ?? 5})`}
             </p>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => void runIceDiagnostic()}
+              disabled={iceProbing}
+              className="min-h-[32px] min-w-[32px] rounded-lg border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center disabled:opacity-40"
+              title={L('探测通话网络连通性 (ICE/STUN/TURN)', 'Probe ICE/STUN/TURN connectivity', 'فحص اتصال ICE')}
+            >
+              <Activity className={`w-3.5 h-3.5 ${iceProbing ? 'animate-pulse text-cyan-500' : ''}`} />
+            </button>
             <button
               type="button"
               onClick={() => setShowBgNote((v) => !v)}
@@ -203,6 +231,15 @@ export const CallCenterPanel: React.FC<CallCenterPanelProps> = ({
             </button>
           </div>
         </div>
+
+        {iceProbeResult && (
+          <div className={`rounded-lg px-2.5 py-2 text-[11px] border tabular-nums ${iceProbeResult.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200'}`}>
+            <p className="font-medium">{iceProbeResult.summary}</p>
+            <p className="opacity-80 mt-0.5">
+              {L(`收集候选 ${iceProbeResult.candidateCount} 个 · 协议: ${iceProbeResult.protocols.join('/') || '无'}`, `Candidates: ${iceProbeResult.candidateCount} · Protocols: ${iceProbeResult.protocols.join('/') || 'none'}`, `المرشحات: ${iceProbeResult.candidateCount}`)}
+            </p>
+          </div>
+        )}
 
         {showBgNote && (
           <div className="rounded-lg bg-slate-50 dark:bg-black/25 border border-slate-200/80 dark:border-white/10 p-2.5 text-[11px] text-slate-600 dark:text-slate-300 space-y-1 leading-relaxed">
