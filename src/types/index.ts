@@ -207,6 +207,10 @@ export interface VideoItem {
   title: string;
   description: string;
   videoUrl: string;
+  embedUrl?: string;
+  sourceUrl?: string;
+  source?: string;
+  bvid?: string;
   thumbnailUrl: string;
   duration: string;
   viewsCount: number;
@@ -215,6 +219,13 @@ export interface VideoItem {
   category: string;
   countryName: string;
   createdAt: string;
+  providerId?: import('./media.ts').MediaProviderId;
+  providerName?: string;
+  regionAvailability?: import('./media.ts').MediaRegionAvailability;
+  playbackType?: import('./media.ts').MediaPlaybackType;
+  copyrightStatus?: import('./media.ts').MediaCopyrightStatus;
+  availabilityStatus?: import('./media.ts').MediaAvailabilityStatus;
+  mediaSources?: import('./media.ts').MediaSourceDescriptor[];
 }
 
 export interface Community {

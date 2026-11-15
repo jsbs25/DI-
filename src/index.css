@@ -104,7 +104,16 @@ html.dark {
     width: 100%;
     max-width: 100%;
     overflow-x: clip;
-    overscroll-behavior-x: none;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+  }
+  @media (max-width: 768px) {
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
   }
   html {
     background-color: var(--color-one-bg);

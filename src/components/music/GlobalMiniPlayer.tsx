@@ -130,9 +130,22 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
                   {formatSeconds(state.positionSec)} / {formatSeconds(duration)}
                 </span>
               </div>
+              {state.fallbackNotice && !state.error && (
+                <div className="mt-1 truncate text-[11px] text-amber-700 dark:text-amber-300">
+                  {state.fallbackNotice}
+                </div>
+              )}
               {state.error && (
-                <div className="mt-1 truncate text-[11px] text-red-600 dark:text-red-400">
-                  {state.error.message}
+                <div className="mt-1 flex items-center gap-2 text-[11px] text-red-600 dark:text-red-400">
+                  <span className="truncate">{state.error.message}</span>
+                  {currentTrack && currentTrack.sources.length > 1 && (
+                    <button
+                      onClick={() => player.tryFallbackSource(isZh ? '从悬浮栏切换备用源' : 'Switch source')}
+                      className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 hover:bg-red-200 dark:bg-red-500/20 dark:text-red-200"
+                    >
+                      {isZh ? '切备用源' : 'Switch'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>

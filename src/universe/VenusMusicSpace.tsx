@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  ArrowRightLeft,
   Disc3,
   ExternalLink,
+  Globe,
   ListMusic,
   Loader2,
   Maximize2,
@@ -11,6 +13,7 @@ import {
   Pause,
   Play,
   Radio,
+  RefreshCw,
   Repeat,
   Search,
   Shuffle,
@@ -25,8 +28,18 @@ import {
   Youtube,
 } from 'lucide-react';
 import { Language } from '../types/index.ts';
+import type { MediaRegionMode, ResolvedRegion } from '../types/media.ts';
 import type { MusicTrack } from '../types/music.ts';
 import { useMusicPlayer } from '../music/useMusicPlayer.ts';
+import {
+  formatPlaybackTypeBadge,
+  getConnectivitySnapshot,
+  getEffectiveMediaRegion,
+  getMediaRegionMode,
+  probeClientMediaConnectivity,
+  setMediaRegionMode,
+  subscribeMediaScheduler,
+} from '../services/media/scheduler.ts';
 
 interface VenusMusicSpaceProps {
   lang: Language;
@@ -111,10 +124,20 @@ function normalizeServerTrack(t: any): MusicTrack {
     typeof t?.coverUrl === 'string' && t.coverUrl.trim() && !t.coverUrl.includes('images.unsplash.com')
       ? t.coverUrl
       : DEFAULT_COVER;
+  const resolvedPlayable =
+    t?.playable === 'audio'
+      ? 'audio'
+      : t?.playable === 'embed' || t?.playable === 'youtube-embed'
+        ? 'embed'
+        : hasAudio
+          ? 'audio'
+          : hasEmbed
+            ? 'embed'
+            : undefined;
   return {
     ...t,
     coverUrl,
-    playable: hasEmbed ? 'embed' : hasAudio ? 'audio' : undefined,
+    playable: resolvedPlayable,
   };
 }
 
@@ -152,6 +175,10 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   const [notice, setNotice] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
 
+  const [regionMode, setRegionModeState] = useState<MediaRegionMode>(() => getMediaRegionMode());
+  const [effectiveRegion, setEffectiveRegion] = useState<ResolvedRegion>(() => getEffectiveMediaRegion());
+  const [conn, setConn] = useState(() => getConnectivitySnapshot());
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const embedIframeRef = useRef<HTMLIFrameElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -169,24 +196,33 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
   useEffect(() => {
     mountedRef.current = true;
+    void probeClientMediaConnectivity();
+    const unsub = subscribeMediaScheduler(() => {
+      if (!mountedRef.current) return;
+      setRegionModeState(getMediaRegionMode());
+      setEffectiveRegion(getEffectiveMediaRegion());
+      setConn(getConnectivitySnapshot());
+    });
     return () => {
       mountedRef.current = false;
+      unsub();
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
       loadAbortRef.current?.abort();
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
   }, []);
 
-  const loadTracks = async (genre = 'all', query = '') => {
+  const loadTracks = async (genre = 'all', query = '', regionOverride?: ResolvedRegion) => {
     loadAbortRef.current?.abort();
     const controller = new AbortController();
     loadAbortRef.current = controller;
     const timeout = setTimeout(() => controller.abort(), 12000);
+    const activeRegion = regionOverride || effectiveRegion;
     if (mountedRef.current) setLoading(true);
     try {
       const endpoint = query.trim()
-        ? `/api/music/search?q=${encodeURIComponent(query)}&genre=${encodeURIComponent(genre)}`
-        : `/api/music/tracks?genre=${encodeURIComponent(genre)}`;
+        ? `/api/media/search?mediaType=music&q=${encodeURIComponent(query)}&genre=${encodeURIComponent(genre)}&region=${activeRegion}`
+        : `/api/music/tracks?genre=${encodeURIComponent(genre)}&region=${activeRegion}`;
       const res = await fetch(endpoint, { signal: controller.signal });
       const data = await res.json();
       if (!mountedRef.current) return;
@@ -210,12 +246,12 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   const searchYouTubeMusic = async (queryOverride?: string, autoPlayFirst = false) => {
     const q = (queryOverride ?? searchQuery).trim();
     if (!q) {
-      showNotice(isZh ? '请输入关键词或链接后再检索。' : 'Enter a keyword or URL first.');
+      showNotice(isZh ? '请输入关键词或链接（如 B站 BV / 网易云单曲外链 / YouTube）后再检索。' : 'Enter a keyword or URL first.');
       return;
     }
     setSearching(true);
     try {
-      const res = await fetch(`/api/music/youtube-search?q=${encodeURIComponent(q)}&limit=16`);
+      const res = await fetch(`/api/music/youtube-search?q=${encodeURIComponent(q)}&limit=16&region=${effectiveRegion}`);
       const data = await res.json();
       if (!mountedRef.current) return;
       if (data.success && Array.isArray(data.tracks)) {
@@ -313,57 +349,36 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
 
     setSearching(true);
     try {
-      const [biliRes, ytRes] = await Promise.allSettled([
-        fetch(`/api/bilibili/search?q=${encodeURIComponent(q + ' 音乐')}&limit=8`).then(r => r.json()),
-        fetch(`/api/music/youtube-search?q=${encodeURIComponent(q)}&limit=10`).then(r => r.json()),
-      ]);
+      const res = await fetch(
+        `/api/media/search?mediaType=music&q=${encodeURIComponent(q)}&genre=${encodeURIComponent(
+          selectedGenre === 'bilibili_live' || selectedGenre === 'youtube_music' ? 'all' : selectedGenre
+        )}&region=${effectiveRegion}&limit=20`
+      );
+      const data = await res.json();
+      if (!mountedRef.current) return;
 
-      const merged: MusicTrack[] = [];
-      let biliCount = 0;
-      let ytCount = 0;
-
-      if (ytRes.status === 'fulfilled' && ytRes.value.success && Array.isArray(ytRes.value.tracks)) {
-        for (const t of ytRes.value.tracks) {
-          const norm = normalizeServerTrack(t);
-          if (norm.audioUrl || norm.embedUrl) merged.push(norm);
-        }
-        ytCount = merged.length;
-      }
-
-      if (biliRes.status === 'fulfilled' && biliRes.value.success && Array.isArray(biliRes.value.videos)) {
-        for (const bv of biliRes.value.videos) {
-          merged.push({
-            id: `bili_${bv.bvid}`,
-            title: bv.title || 'Bilibili Track',
-            artist: bv.author || 'Bilibili',
-            album: 'Bilibili',
-            genre: 'B站音乐',
-            durationSeconds: parseMinutesDuration(bv.duration),
-            coverUrl: bv.pic || '/assets/music/electronic-pulse.jpg',
-            embedUrl: `https://player.bilibili.com/player.html?bvid=${bv.bvid}&page=1&autoplay=1&danmaku=0`,
-            playable: 'embed',
-            source: 'Bilibili',
-            sourceUrl: bv.arcurl || `https://www.bilibili.com/video/${bv.bvid}`,
-            license: 'Bilibili official embed',
-            crawledAt: new Date().toISOString(),
-            bpm: 90,
-            description: bv.description,
-          });
-        }
-        biliCount = merged.length - ytCount;
-      }
-
-      if (merged.length > 0) {
-        setTracks(merged);
+      if (data.success && Array.isArray(data.tracks) && data.tracks.length > 0) {
+        const mapped = data.tracks
+          .map(normalizeServerTrack)
+          .filter((t: MusicTrack) => Boolean(t.audioUrl || t.embedUrl));
+        setTracks(mapped);
+        const provSummary = Array.isArray(data.providersQueried)
+          ? data.providersQueried
+              .filter((x: any) => x.count > 0)
+              .map((x: any) => `${x.providerId}:${x.count}`)
+              .join(' · ')
+          : '';
         showNotice(
-          isZh ? `找到 ${merged.length} 首（在线 ${ytCount} · B站 ${biliCount}）` : `Found ${merged.length} tracks`,
-          3000
+          isZh
+            ? `智能调度找到 ${mapped.length} 首${provSummary ? ` (${provSummary})` : ''}`
+            : `Found ${mapped.length} tracks`,
+          3400
         );
       } else {
         await loadTracks('all', q);
       }
     } catch {
-      showNotice(isZh ? '多源检索失败，已显示本地曲库。' : 'Search failed.');
+      showNotice(isZh ? '多源检索失败，已回退本地曲库。' : 'Search failed.');
     } finally {
       if (mountedRef.current) setSearching(false);
     }
@@ -376,10 +391,10 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     } else if (selectedGenre === 'youtube_music') {
       void searchYouTubeMusic(q || 'lofi chill beats', false);
     } else {
-      void loadTracks(selectedGenre, q);
+      void loadTracks(selectedGenre, q, effectiveRegion);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGenre]);
+  }, [selectedGenre, effectiveRegion]);
 
   // Smooth slim audio spectrum visualizer
   useEffect(() => {
@@ -530,29 +545,67 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
             </div>
           </div>
 
-          <div className="flex items-center gap-1 rounded-full border border-slate-200/90 bg-white p-1 shadow-2xs dark:border-white/10 dark:bg-white/5">
-            <button
-              onClick={() => setView('discover')}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
-                view === 'discover'
-                  ? 'bg-sky-600 text-white shadow-2xs dark:bg-white dark:text-slate-900'
-                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-              }`}
-            >
-              <Radio className="h-3.5 w-3.5" />
-              {isZh ? '曲库精选' : 'Discover'}
-            </button>
-            <button
-              onClick={() => setView('queue')}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
-                view === 'queue'
-                  ? 'bg-sky-600 text-white shadow-2xs dark:bg-white dark:text-slate-900'
-                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-              }`}
-            >
-              <ListMusic className="h-3.5 w-3.5" />
-              {isZh ? `队列 (${queue.length})` : `Queue (${queue.length})`}
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Region Scheduler Pill */}
+            <div className="inline-flex items-center rounded-full border border-slate-200/90 bg-white p-1 text-[11px] shadow-2xs dark:border-white/10 dark:bg-white/5">
+              {(
+                [
+                  { id: 'auto', zh: '智能', en: 'Auto' },
+                  { id: 'cn', zh: '中国大陆', en: 'CN' },
+                  { id: 'overseas', zh: '海外', en: 'Global' },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => {
+                    setMediaRegionMode(m.id);
+                    setRegionModeState(m.id);
+                    setEffectiveRegion(m.id === 'auto' ? conn.recommendedRegion : m.id);
+                  }}
+                  data-testid={`music-region-${m.id}`}
+                  className={`rounded-full px-2.5 py-1 font-medium transition ${
+                    regionMode === m.id
+                      ? 'bg-sky-600 text-white dark:bg-sky-500'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  {isZh ? m.zh : m.en}
+                </button>
+              ))}
+              <button
+                onClick={() => void probeClientMediaConnectivity(true)}
+                className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] text-slate-500 hover:text-sky-600 dark:text-slate-400"
+                title={isZh ? '检测当前网络连通性' : 'Probe connectivity'}
+              >
+                {conn.probing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Globe className="h-3 w-3 text-sky-600" />}
+                <span>{effectiveRegion === 'cn' ? 'CN' : 'Global'}</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1 rounded-full border border-slate-200/90 bg-white p-1 shadow-2xs dark:border-white/10 dark:bg-white/5">
+              <button
+                onClick={() => setView('discover')}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
+                  view === 'discover'
+                    ? 'bg-sky-600 text-white shadow-2xs dark:bg-white dark:text-slate-900'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+                }`}
+              >
+                <Radio className="h-3.5 w-3.5" />
+                {isZh ? '曲库精选' : 'Discover'}
+              </button>
+              <button
+                onClick={() => setView('queue')}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
+                  view === 'queue'
+                    ? 'bg-sky-600 text-white shadow-2xs dark:bg-white dark:text-slate-900'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+                }`}
+              >
+                <ListMusic className="h-3.5 w-3.5" />
+                {isZh ? `队列 (${queue.length})` : `Queue (${queue.length})`}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -629,8 +682,10 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
                     }`}
                   />
                   <span className="text-[11px] font-medium text-sky-600 dark:text-sky-400 truncate">
-                    {currentTrack?.source || (isZh ? '准备就绪' : 'Ready')}
-                    {currentTrack?.genre ? ` · ${currentTrack.genre}` : ''}
+                    {currentTrack?.playback.sourceLabel || currentTrack?.source || (isZh ? '准备就绪' : 'Ready')}
+                    {currentTrack?.playback.playbackType
+                      ? ` · ${formatPlaybackTypeBadge(currentTrack.playback.playbackType, isZh).label}`
+                      : ''}
                   </span>
                 </div>
                 {currentTrack?.sourceUrl && (
@@ -651,8 +706,52 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
               </h2>
               <p className="mt-0.5 truncate text-xs font-medium text-slate-500 dark:text-slate-400">
                 {currentTrack?.artist || (isZh ? '从右侧曲库点击播放或全网搜歌' : 'Click any track from the list')}
-                {currentTrack?.album ? ` · ${currentTrack.album}` : ''}
+                {currentTrack?.license ? ` · ${currentTrack.license}` : ''}
               </p>
+
+              {/* Manual Source Switcher + Fallback Trigger */}
+              {currentTrack && currentTrack.sources.length > 0 && (
+                <div className="mt-3 flex flex-wrap items-center gap-1.5" data-testid="music-source-switcher">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
+                    <ArrowRightLeft className="h-3 w-3" />
+                    {isZh ? '音源：' : 'Source:'}
+                  </span>
+                  {currentTrack.sources
+                    .filter((s) => s.kind !== 'none')
+                    .map((src) => {
+                      const activeSrc = p.activeSourceId === src.id || (!p.activeSourceId && currentTrack.sources[0]?.id === src.id);
+                      return (
+                        <button
+                          key={src.id}
+                          onClick={() => player.switchSource(src.id)}
+                          data-testid={`music-source-btn-${src.provider || src.id}`}
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium transition ${
+                            activeSrc
+                              ? 'bg-sky-600 text-white dark:bg-sky-500'
+                              : 'border border-slate-200 bg-slate-50 text-slate-600 hover:border-sky-300 dark:border-white/10 dark:bg-white/5 dark:text-slate-300'
+                          }`}
+                        >
+                          {src.label}
+                        </button>
+                      );
+                    })}
+                  {currentTrack.sources.filter((s) => s.kind !== 'none').length > 1 && (
+                    <button
+                      onClick={() => {
+                        const ok = player.tryFallbackSource(isZh ? '手动切换备用音源' : 'Manual fallback');
+                        if (!ok) {
+                          showNotice(isZh ? '已无其他可用备用源，请点击右上角外部图标打开原平台。' : 'No more backup sources.');
+                        }
+                      }}
+                      data-testid="music-fallback-btn"
+                      className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-300"
+                    >
+                      <RefreshCw className="h-2.5 w-2.5" />
+                      {isZh ? '切备用源' : 'Backup'}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Slim Frameless Spectrum */}
@@ -749,9 +848,35 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
               />
             </div>
 
+            {p.fallbackNotice && (
+              <div
+                data-testid="music-fallback-notice"
+                className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/15 dark:text-amber-200"
+              >
+                <span>{p.fallbackNotice}</span>
+                <button onClick={() => player.clearFallbackNotice()} className="shrink-0 p-0.5">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
             {p.error && (
-              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/25 dark:bg-red-500/15 dark:text-red-200">
-                {p.error.message}
+              <div
+                data-testid="music-error-banner"
+                className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/25 dark:bg-red-500/15 dark:text-red-200"
+              >
+                <div>{p.error.message}</div>
+                {currentTrack?.sourceUrl && (
+                  <a
+                    href={currentTrack.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1.5 inline-flex items-center gap-1 font-semibold underline"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    {isZh ? '前往原平台收听' : 'Open on Original Platform'}
+                  </a>
+                )}
               </div>
             )}
           </section>
@@ -905,15 +1030,15 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-3 shrink-0">
+                          <div className="flex items-center gap-2 shrink-0">
                             <span
                               className={`hidden sm:inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${
                                 isTrackEmbed
-                                  ? 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300'
+                                  ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'
                                   : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
                               }`}
                             >
-                              {isTrackEmbed ? (track.source || (isZh ? '视频' : 'Video')) : 'Hi-Res'}
+                              {formatPlaybackTypeBadge(track.playbackType || (isTrackEmbed ? 'official_embed' : 'legal_direct_audio'), isZh).label}
                             </span>
                             <span className="w-11 text-right text-xs font-medium tabular-nums text-slate-400 dark:text-slate-500">
                               {track.durationSeconds ? formatSeconds(track.durationSeconds) : '--:--'}

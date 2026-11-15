@@ -31,6 +31,8 @@ export type PlayerAction =
   | { type: 'REORDER_QUEUE'; from: number; to: number }
   | { type: 'SET_ERROR'; error: PlaybackError | null }
   | { type: 'SWITCH_SOURCE'; sourceId: string }
+  | { type: 'FALLBACK_SOURCE'; sourceId: string; notice: string }
+  | { type: 'CLEAR_FALLBACK_NOTICE' }
   | { type: 'RESTORE'; snapshot: PersistedPlayerState }
   | { type: 'SYNC_QUEUE'; queue: QueueItem[]; index?: number; keepTrackId?: string };
 
@@ -46,6 +48,7 @@ export function createInitialState(): PlayerState {
     mode: { shuffle: false, repeat: 'off' },
     activeSourceId: undefined,
     error: null,
+    fallbackNotice: null,
     shuffleOrder: [],
     shuffleCursor: -1,
     restored: false,
@@ -120,6 +123,9 @@ function applySource(track: UnifiedTrack, sourceId?: string): UnifiedTrack {
       provider: src.provider,
       sourceLabel: src.label,
       sourceUrl: src.url || track.sourceUrl,
+      playbackType: src.playbackType,
+      regionAvailability: src.regionAvailability,
+      copyrightStatus: src.copyrightStatus,
     },
     availability: src.kind === 'audio' ? 'playable' : src.kind === 'embed' ? 'embed-only' : 'unavailable',
     source: src.label || track.source,
@@ -161,6 +167,7 @@ export function playerReducer(state: PlayerState, action: PlayerAction): PlayerS
         durationSec: track.durationSeconds || 0,
         activeSourceId: sourceId,
         error: playable ? null : { code: 'unavailable', message: 'Track is not playable', at: Date.now(), trackId: track.id },
+        fallbackNotice: null,
         shuffleOrder,
         shuffleCursor,
       };
@@ -292,8 +299,31 @@ export function playerReducer(state: PlayerState, action: PlayerAction): PlayerS
       if (!current) return state;
       const track = applySource(current, action.sourceId);
       const sourceId = resolveActiveSourceId(track, action.sourceId);
-      return { ...withUpdatedCurrentTrack(state, track), activeSourceId: sourceId, error: track.playback.kind === 'none' ? { code: 'unavailable', message: 'Selected source unavailable', at: Date.now(), trackId: track.id } : null };
+      return {
+        ...withUpdatedCurrentTrack(state, track),
+        activeSourceId: sourceId,
+        isPlaying: track.playback.kind !== 'none' ? true : false,
+        positionSec: 0,
+        fallbackNotice: null,
+        error: track.playback.kind === 'none' ? { code: 'unavailable', message: 'Selected source unavailable', at: Date.now(), trackId: track.id } : null,
+      };
     }
+    case 'FALLBACK_SOURCE': {
+      const current = getActiveTrack(state);
+      if (!current) return state;
+      const track = applySource(current, action.sourceId);
+      const sourceId = resolveActiveSourceId(track, action.sourceId);
+      return {
+        ...withUpdatedCurrentTrack(state, track),
+        activeSourceId: sourceId,
+        isPlaying: track.playback.kind !== 'none',
+        positionSec: 0,
+        fallbackNotice: action.notice,
+        error: track.playback.kind === 'none' ? { code: 'unavailable', message: 'Backup source unavailable', at: Date.now(), trackId: track.id } : null,
+      };
+    }
+    case 'CLEAR_FALLBACK_NOTICE':
+      return { ...state, fallbackNotice: null };
     case 'RESTORE': {
       try {
         const snap = action.snapshot;

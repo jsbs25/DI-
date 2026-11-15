@@ -366,6 +366,21 @@ export function enrichMusicTrack(track: any, region: ResolvedRegion = 'overseas'
   };
 }
 
+const LIVE_OPEN_VIDEO_REPLACEMENTS: Record<string, { directVideoUrl: string; providerName: string; officialUrl: string; copyrightLabel: string }> = {
+  vid_1: {
+    directVideoUrl: 'https://archive.org/download/MSFC-0601215/0601215.mp4',
+    providerName: 'Internet Archive / NASA (公版 MP4 直链)',
+    officialUrl: 'https://archive.org/details/MSFC-0601215',
+    copyrightLabel: 'NASA Public Domain (video/mp4)',
+  },
+  vid_2: {
+    directVideoUrl: 'https://archive.org/download/BigBuckBunny_124/Content%2Fbig_buck_bunny_720p_surround.mp4',
+    providerName: 'Internet Archive / Blender CC BY 3.0 (MP4 直链)',
+    officialUrl: 'https://archive.org/details/BigBuckBunny_124',
+    copyrightLabel: 'CC BY 3.0 (Blender Foundation)',
+  },
+};
+
 export function buildSourcesForVideo(video: any): MediaSourceDescriptor[] {
   if (Array.isArray(video?.mediaSources) && video.mediaSources.length > 0) {
     return video.mediaSources as MediaSourceDescriptor[];
@@ -378,25 +393,28 @@ export function buildSourcesForVideo(video: any): MediaSourceDescriptor[] {
 
   if (rawVideoUrl) {
     const resolved = resolveMediaCdnUrl(rawVideoUrl);
-    const providerId = inferProviderIdFromUrl(resolved);
-    const isGoogleSample = resolved.includes('commondatastorage.googleapis.com');
+    const isDeadGoogleSample = resolved.includes('commondatastorage.googleapis.com/gtv-videos-bucket/sample/');
+    const replacement = isDeadGoogleSample ? LIVE_OPEN_VIDEO_REPLACEMENTS[String(video?.id || '')] : undefined;
+    const effectiveDirectUrl = replacement ? replacement.directVideoUrl : resolved;
+    const providerId = replacement ? 'internet-archive' : inferProviderIdFromUrl(effectiveDirectUrl);
     const isOneNative = providerId === 'one-native';
+
     sources.push({
       id: `${video.id}:video:${providerId}`,
       providerId,
-      providerName: isOneNative
-        ? 'ONE 自有高清视频'
-        : isGoogleSample
-          ? 'Google Cloud 公版示例视频 (海外直连)'
+      providerName: replacement
+        ? replacement.providerName
+        : isOneNative
+          ? 'ONE 自有高清视频'
           : providerDisplayName(providerId, video.source),
       mediaType: 'video',
-      regionAvailability: isOneNative ? 'global' : isGoogleSample ? 'overseas' : regionForProvider(providerId),
+      regionAvailability: isOneNative ? 'global' : isDeadGoogleSample && !replacement ? 'overseas' : regionForProvider(providerId),
       playbackType: isOneNative ? 'one_owned_media' : 'legal_direct_video',
-      officialUrl: rawSourceUrl || resolved,
-      directVideoUrl: resolved,
-      copyrightStatus: isOneNative ? 'one_owned' : 'creative_commons',
-      copyrightLabel: isOneNative ? 'ONE 创作者直传' : '开放演示授权',
-      availabilityStatus: 'available',
+      officialUrl: replacement ? replacement.officialUrl : (rawSourceUrl || effectiveDirectUrl),
+      directVideoUrl: effectiveDirectUrl,
+      copyrightStatus: replacement ? 'public_domain' : isOneNative ? 'one_owned' : 'creative_commons',
+      copyrightLabel: replacement ? replacement.copyrightLabel : isOneNative ? 'ONE 创作者直传' : '开放演示授权',
+      availabilityStatus: isDeadGoogleSample && !replacement ? 'unavailable' : 'available',
     });
   }
 
