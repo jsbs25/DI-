@@ -1,0 +1,22 @@
+# Copy this file to livekit.yaml and replace placeholder secrets & domains before running.
+port: 7880
+log_level: info
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: true
+  # Optional when behind NAT with a static public IP:
+  # node_ip: 203.0.113.10
+
+keys:
+  # Replace BOTH key ID and strong random secret (do NOT commit real keys)
+  ONE_LIVEKIT_API_KEY: REPLACE_WITH_STRONG_RANDOM_SECRET_AT_LEAST_32_CHARS
+
+# Optional built-in TURN (if not using dedicated coturn below, or keep disabled when coturn handles 3478/5349):
+turn:
+  enabled: false
+  # domain: turn.yourdomain.com
+  # tls_port: 5349
+  # udp_port: 3478

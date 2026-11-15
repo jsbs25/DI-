@@ -36,7 +36,7 @@ import { getMailProvider, mailStatus } from './server/mailProvider.ts';
 import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE164 } from './server/otp.ts';
 import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers, isUserViewingConversation } from './server/messengerWs.ts';
 import { addCall, getCallById, listCallsForUser, ensureCallsArray } from './server/calls/index.ts';
-import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus, cleanupStaleCalls } from './server/calls/service.ts';
+import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus, cleanupStaleCalls, cleanupStaleCallsDetailed, getCommunicationCapabilities } from './server/calls/service.ts';
 import { pushCallSignal, listCallSignalsForUser, clearCallSignals } from './server/calls/signals.ts';
 import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
@@ -1333,14 +1333,35 @@ function publicCallForUser(call: any, userId: string) {
   if (!call) return null;
   const users = (call.participantIds || []).map((id: string) => {
     const u = store.users.find((x: any) => x.id === id);
-    return u ? { id: u.id, displayName: u.displayName, username: u.username, avatar: u.avatar } : { id, displayName: id, username: id, avatar: '' };
+    if (!u) return { id, displayName: id, username: id, avatar: '', isOnline: false };
+    const pres = typeof (store as any).getMaskedPresenceForViewer === 'function'
+      ? (store as any).getMaskedPresenceForViewer(id, userId)
+      : { isOnline: !!(u as any).isOnline };
+    return {
+      id: u.id,
+      displayName: u.displayName,
+      username: u.username,
+      avatar: u.avatar,
+      isOnline: !!pres?.isOnline,
+    };
   });
   const p = call.participants?.[userId] || null;
+  const startedMs = call.startedAt ? new Date(call.startedAt).getTime() : 0;
+  const endedMs = call.endedAt ? new Date(call.endedAt).getTime() : 0;
+  const durationSec = startedMs && endedMs && endedMs > startedMs ? Math.round((endedMs - startedMs) / 1000) : 0;
+  const direction = call.initiatorId === userId ? 'outgoing' : 'incoming';
+  const unreadMissed =
+    call.status === 'missed' &&
+    call.initiatorId !== userId &&
+    !(Array.isArray(call.missedSeenBy) && call.missedSeenBy.includes(userId));
   return {
     id: call.id,
     roomName: call.roomName,
     scope: call.scope,
     kind: call.kind,
+    direction,
+    durationSec,
+    unreadMissed,
     conversationId: call.conversationId || null,
     initiatorId: call.initiatorId,
     participantIds: call.participantIds || [],
@@ -1372,6 +1393,45 @@ function emitCallInviteDelivery(call: any, initiator: any) {
   for (const uid of (call.participantIds || [])) {
     if (uid === initiator.id) continue;
     try { emitNotification(uid, { type: 'call_invite', title, body, actorId: initiator.id, actorName: initiator.displayName, actorAvatar: initiator.avatar, conversationId: call.conversationId, data: { callId: call.id, kind: call.kind, scope: call.scope, roomName: call.roomName } }); } catch {}
+  }
+}
+
+function emitMissedCallsEffects(missedCalls: any[]) {
+  if (!Array.isArray(missedCalls) || missedCalls.length === 0) return false;
+  let dirty = false;
+  for (const call of missedCalls) {
+    if (!call || call.missedNotifiedAt) continue;
+    call.missedNotifiedAt = new Date().toISOString();
+    dirty = true;
+    clearCallSignals(call.id);
+    const initiator = store.users.find((u: any) => u.id === call.initiatorId);
+    const title = call.kind === 'video' ? 'Missed video call' : 'Missed audio call';
+    const body = `${initiator?.displayName || 'User'} called you.`;
+    for (const uid of (call.participantIds || [])) {
+      if (uid === call.initiatorId) continue;
+      try {
+        emitNotification(uid, {
+          type: 'call_missed',
+          title,
+          body,
+          actorId: call.initiatorId,
+          actorName: initiator?.displayName || call.initiatorId,
+          actorAvatar: initiator?.avatar || '',
+          conversationId: call.conversationId,
+          data: { callId: call.id, kind: call.kind, scope: call.scope },
+        });
+      } catch {}
+    }
+    try { emitCallEvent(call, 'call_missed', { reason: call.endReason || 'timeout' }); } catch {}
+  }
+  return dirty;
+}
+
+function runCallSweep() {
+  const { changed, newlyMissed } = cleanupStaleCallsDetailed(store.calls || []);
+  const notified = emitMissedCallsEffects(newlyMissed);
+  if (changed || notified) {
+    try { store.persist(); } catch {}
   }
 }
 
@@ -1874,17 +1934,64 @@ app.get('/api/messenger/avatar/:userId/:file', (req, res) => {
 // -------------------------------------------------------------
 // 1c. CALLS (EARTH ONE-owned signaling/business; media token boundary)
 // -------------------------------------------------------------
+app.get('/api/calls/capabilities', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const capabilities = await getCommunicationCapabilities();
+    res.json({ success: true, capabilities });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to inspect call capabilities' });
+  }
+});
+
+app.post('/api/calls/mark-missed-seen', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    await store.mutate(async () => {
+      let changed = false;
+      for (const c of ensureCallsArray(store)) {
+        if (
+          c.status === 'missed' &&
+          c.initiatorId !== user.id &&
+          (c.participantIds || []).includes(user.id)
+        ) {
+          if (!Array.isArray(c.missedSeenBy)) c.missedSeenBy = [];
+          if (!c.missedSeenBy.includes(user.id)) {
+            c.missedSeenBy.push(user.id);
+            changed = true;
+          }
+        }
+      }
+      if (changed) store.persist();
+    });
+    res.json({ success: true, missedUnreadCount: 0 });
+  } catch (e: any) {
+    res.status(400).json({ success: false, error: e?.message || 'Failed to mark missed calls seen' });
+  }
+});
+
 app.get('/api/calls', (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
-  if (cleanupStaleCalls(store.calls || [])) { try { store.persist(); } catch {} }
+  runCallSweep();
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
-  const calls = listCallsForUser(store, user.id, limit).map((c: any) => publicCallForUser(c, user.id));
-  res.json({ success: true, calls });
+  const filter = String(req.query.filter || 'all');
+  const allUserCalls = listCallsForUser(store, user.id, 100);
+  const missedUnreadCount = allUserCalls.filter(
+    (c: any) =>
+      c.status === 'missed' &&
+      c.initiatorId !== user.id &&
+      !(Array.isArray(c.missedSeenBy) && c.missedSeenBy.includes(user.id))
+  ).length;
+  const filtered = filter === 'missed'
+    ? allUserCalls.filter((c: any) => c.status === 'missed')
+    : allUserCalls;
+  const calls = filtered.slice(0, limit).map((c: any) => publicCallForUser(c, user.id));
+  res.json({ success: true, calls, missedUnreadCount });
 });
 
 app.get('/api/calls/:id', (req, res) => {
   const user = requireSessionUser(req, res); if (!user) return;
-  if (cleanupStaleCalls(store.calls || [])) { try { store.persist(); } catch {} }
+  runCallSweep();
   const call = getCallById(store, req.params.id);
   if (!call || !(call.participantIds || []).includes(user.id)) return res.status(404).json({ success: false, error: 'Call not found' });
   res.json({ success: true, call: publicCallForUser(call, user.id) });
@@ -4172,6 +4279,12 @@ async function startServer() {
 
   // Start Discovery background maintenance daemon
   startDiscoveryScheduler();
+
+  // Periodic missed-call / stale-ringing cleanup sweep (every 30s)
+  const callSweepInterval = setInterval(() => {
+    try { runCallSweep(); } catch {}
+  }, 30_000);
+  callSweepInterval.unref?.();
 }
 
 startServer().catch(err => {

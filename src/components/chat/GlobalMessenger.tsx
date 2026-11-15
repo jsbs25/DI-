@@ -11,17 +11,29 @@ import {
 } from 'lucide-react';
 import { callApi } from '../../services/calls/api.ts';
 import { createCallMediaSession, type ICallMediaSession, type CallMediaState, friendlyMediaError, unlockCallAudioContext } from '../../services/calls/media.ts';
+import { startIncomingRingtone, startOutgoingRingback, stopCallTones } from '../../services/calls/ringtone.ts';
+import { CallCenterPanel, type CallLogEntry, type CallCapabilitiesSummary } from './CallCenterPanel.tsx';
 
 const CallTrackView: React.FC<{
   track?: MediaStreamTrack | null;
   kind: 'video' | 'audio';
   muted?: boolean;
+  sinkId?: string;
   className?: string;
   mirror?: boolean;
   playbackRetryTick?: number;
   onPlaybackBlocked?: (blocked: boolean) => void;
-}> = ({ track, kind, muted, className, mirror, playbackRetryTick = 0, onPlaybackBlocked }) => {
+}> = ({ track, kind, muted, sinkId, className, mirror, playbackRetryTick = 0, onPlaybackBlocked }) => {
   const ref = React.useRef<HTMLVideoElement & HTMLAudioElement | null>(null);
+  React.useEffect(() => {
+    const el = ref.current as any;
+    if (!el || kind !== 'audio' || !sinkId) return;
+    try {
+      if (typeof el.setSinkId === 'function') {
+        void el.setSinkId(sinkId).catch(() => {});
+      }
+    } catch {}
+  }, [sinkId, kind, track]);
   React.useEffect(() => {
     const el = ref.current as any;
     if (!el) return;
@@ -34,6 +46,9 @@ const CallTrackView: React.FC<{
       el.muted = !!muted;
       if (!muted) el.volume = 1;
       el.srcObject = stream;
+      if (kind === 'audio' && sinkId && typeof el.setSinkId === 'function') {
+        void el.setSinkId(sinkId).catch(() => {});
+      }
     } catch {}
     const tryPlay = () => {
       try {
@@ -62,7 +77,7 @@ const CallTrackView: React.FC<{
       el.removeEventListener?.('loadedmetadata', handleUnmute);
       try { if (el) el.srcObject = null; } catch {}
     };
-  }, [track, kind, muted, playbackRetryTick, onPlaybackBlocked]);
+  }, [track, kind, muted, sinkId, playbackRetryTick, onPlaybackBlocked]);
   if (kind === 'audio') return <audio ref={ref as any} autoPlay playsInline muted={!!muted} />;
   return <video ref={ref as any} autoPlay playsInline muted={!!muted} className={className} style={mirror ? { transform: 'scaleX(-1)' } : undefined} />;
 };
@@ -113,7 +128,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [showIntegrations, setShowIntegrations] = useState(false);
   const [connError, setConnError] = useState<string | null>(null);
   const [wsStatus, setWsStatus] = useState<'off' | 'connecting' | 'open' | 'closed'>('off');
-  const [tab, setTab] = useState<'chats' | 'friends' | 'requests' | 'search' | 'msgsearch' | 'notifs' | 'privacy'>('chats');
+  const [tab, setTab] = useState<'chats' | 'calls' | 'friends' | 'requests' | 'search' | 'msgsearch' | 'notifs' | 'privacy'>('chats');
   const [userSearch, setUserSearch] = useState('');
   const [searchResults, setSearchResults] = useState<FriendUser[]>([]);
   const [suggestedLoading, setSuggestedLoading] = useState(false);
@@ -234,6 +249,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [audioPlaybackBlocked, setAudioPlaybackBlocked] = useState(false);
   const [playbackRetryTick, setPlaybackRetryTick] = useState(0);
   const [mediaState, setMediaState] = useState<CallMediaState>({ phase: 'idle', canPlaybackAudio: false, participants: {} });
+  const [callLogs, setCallLogs] = useState<CallLogEntry[]>([]);
+  const [missedUnreadCount, setMissedUnreadCount] = useState(0);
+  const [callCapabilities, setCallCapabilities] = useState<CallCapabilitiesSummary | null>(null);
+  const [callsLoading, setCallsLoading] = useState(false);
+  const [speakerMode, setSpeakerMode] = useState<'speaker' | 'earpiece'>('speaker');
 
   useEffect(() => {
     if (directOpenSeq > 0) {
@@ -627,7 +647,35 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     finally { setNotifLoading(false); }
   };
 
-  useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); void loadNotifications(); void loadNotifPrefs(); void loadPrivacy(); } }, [authed, currentUser?.id]);
+  const loadCallLogs = async () => {
+    if (!authed) return;
+    setCallsLoading(true);
+    try {
+      const d = await callApi.list();
+      if (Array.isArray(d?.calls)) setCallLogs(d.calls);
+      if (typeof d?.missedUnreadCount === 'number') setMissedUnreadCount(d.missedUnreadCount);
+    } catch {}
+    finally { setCallsLoading(false); }
+  };
+
+  const loadCallCapabilities = async () => {
+    if (!authed) return;
+    try {
+      const d = await callApi.capabilities();
+      if (d?.capabilities) setCallCapabilities(d.capabilities);
+    } catch {}
+  };
+
+  const markMissedCallsSeen = async () => {
+    if (!authed) return;
+    try {
+      await callApi.markMissedSeen();
+      setMissedUnreadCount(0);
+      setCallLogs((prev) => prev.map((c) => (c.unreadMissed ? { ...c, unreadMissed: false } : c)));
+    } catch {}
+  };
+
+  useEffect(() => { if (authed) { void onRefreshConversations?.(); void loadFriends(); void loadRequests(); void loadBlocked(); void loadRecent(); void loadNotifications(); void loadNotifPrefs(); void loadPrivacy(); void loadCallLogs(); void loadCallCapabilities(); } }, [authed, currentUser?.id]);
 
   // Real-time WebSocket (/ws) + resilient fallback sync & call polling
   useEffect(() => {
@@ -641,6 +689,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       try {
         const d = await callApi.list();
         const calls: any[] = Array.isArray(d?.calls) ? d.calls : [];
+        setCallLogs(calls);
+        if (typeof d?.missedUnreadCount === 'number') setMissedUnreadCount(d.missedUnreadCount);
         const curActive = activeCallRef.current;
         const curIncoming = incomingCallRef.current;
         if (curActive) {
@@ -838,6 +888,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             setIncomingCall(msg.call);
             void ensureAudioUnlocked();
           }
+          void loadCallLogs();
           return;
         }
         if (type === 'call_accept' || type === 'call_state' || type === 'call_leave') {
@@ -847,9 +898,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               setIncomingCall(null);
             }
           }
+          if (type === 'call_leave') void loadCallLogs();
           return;
         }
-        if (type === 'call_reject' || type === 'call_cancel' || type === 'call_end') {
+        if (type === 'call_reject' || type === 'call_cancel' || type === 'call_end' || type === 'call_missed') {
           if (msg.call) {
             if (incomingCallRef.current?.id === msg.call.id) setIncomingCall(null);
             if (activeCallRef.current?.id === msg.call.id) {
@@ -862,6 +914,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               }
             }
           }
+          void loadCallLogs();
           return;
         }
         if (type === 'call_signal' && msg.callId && msg.fromUserId && msg.signal) {
@@ -1460,6 +1513,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   };
   const openNotification = async (n: any) => {
     if (!n.read) void markNotifRead(n.id);
+    if (n.type === 'call_missed') {
+      setTab('calls');
+      setMobileShowChat(false);
+      void loadCallLogs();
+      return;
+    }
     if (n.type === 'call_invite') {
       const cid = n.data?.callId;
       if (cid) { try { const d = await callApi.get(cid); if (d?.call) setIncomingCall(d.call); } catch { setIncomingCall({ id: cid, kind: n.data?.kind, scope: n.data?.scope, status: 'ringing', conversationId: n.conversationId || n.data?.conversationId }); } }
@@ -1661,7 +1720,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     }
   };
 
-  const startCall = async (kind: 'audio'|'video', overrideTarget?: { targetUserId: string; conversationId?: string }) => {
+  const startCall = async (kind: 'audio'|'video', overrideTarget?: { targetUserId?: string; conversationId?: string }) => {
     if (!authed || callAction) return;
     if (!overrideTarget && !activeConv) return;
     if (!overrideTarget && activeConv?.type === 'direct' && !activeConv.otherUser?.id) {
@@ -1674,15 +1733,18 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     try {
       const payload: any = overrideTarget?.targetUserId
         ? { scope: 'direct', kind, targetUserId: overrideTarget.targetUserId, ...(overrideTarget.conversationId ? { conversationId: overrideTarget.conversationId } : {}) }
-        : activeConv?.type === 'direct'
-          ? { scope: 'direct', kind, targetUserId: activeConv.otherUser?.id, conversationId: activeConv.id }
-          : { scope: 'group', kind, conversationId: activeConv?.id };
+        : overrideTarget?.conversationId
+          ? { scope: 'group', kind, conversationId: overrideTarget.conversationId }
+          : activeConv?.type === 'direct'
+            ? { scope: 'direct', kind, targetUserId: activeConv.otherUser?.id, conversationId: activeConv.id }
+            : { scope: 'group', kind, conversationId: activeConv?.id };
       const d = await callApi.invite(payload);
       if (d?.call) {
         const nextDevices = { micEnabled: true, cameraEnabled: kind === 'video', screenSharing: false };
         setActiveCall(d.call);
         setCallDevices(nextDevices);
         await joinCallMedia(d.call, d.media, nextDevices);
+        void loadCallLogs();
       }
       if (d?.media?.blocked || d?.media?.ok === false) {
         setCallMediaNote(d.media.reason === 'MEDIA_NOT_CONFIGURED' || d.media.reason === 'MEDIA_SDK_UNAVAILABLE'
@@ -1782,12 +1844,61 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     try { await mediaSessionRef.current?.startAudioPlayback(); } catch {}
   };
 
+  const toggleAudioOutput = async () => {
+    const devices = mediaState.audioOutputDevices || [];
+    if (devices.length > 1 && mediaState.supportsOutputSelection && mediaSessionRef.current?.setAudioOutputDevice) {
+      const currentId = mediaState.selectedAudioOutputId || devices[0]?.deviceId;
+      const idx = Math.max(0, devices.findIndex((d) => d.deviceId === currentId));
+      const next = devices[(idx + 1) % devices.length];
+      await mediaSessionRef.current.setAudioOutputDevice(next.deviceId);
+      setSpeakerMode((m) => (m === 'speaker' ? 'earpiece' : 'speaker'));
+      setCallMediaNote(`音频输出已切换至：${next.label}`);
+      return;
+    }
+    setSpeakerMode((prev) => {
+      const next = prev === 'speaker' ? 'earpiece' : 'speaker';
+      setCallMediaNote(
+        next === 'speaker'
+          ? '已切换为扬声器优先（移动端浏览器需配合系统音量/蓝牙路由）'
+          : '已切换为听筒/耳机优先模式'
+      );
+      return next;
+    });
+  };
+
+  // Ringtone / ringback lifecycle synced with signaling & DND preferences
+  useEffect(() => {
+    const incomingRinging =
+      !!incomingCall &&
+      incomingCall.initiatorId !== currentUser?.id &&
+      ['ringing', 'connecting'].includes(incomingCall.status) &&
+      (!activeCall || activeCall.id !== incomingCall.id);
+    const outgoingRinging =
+      !!activeCall &&
+      activeCall.initiatorId === currentUser?.id &&
+      activeCall.status === 'ringing';
+    const dndMuted = isDndActiveLocal(notifPrefsRef.current);
+
+    if (dndMuted) {
+      stopCallTones();
+      return;
+    }
+    if (incomingRinging) {
+      startIncomingRingtone();
+    } else if (outgoingRinging) {
+      startOutgoingRingback();
+    } else {
+      stopCallTones();
+    }
+  }, [incomingCall?.id, incomingCall?.status, activeCall?.id, activeCall?.status, activeCall?.initiatorId, currentUser?.id]);
+
   // Auto-manage media session lifecycle based on call state
   useEffect(() => {
     const c = activeCall;
     const terminal = c && ['ended','rejected','missed','busy','failed','canceled'].includes(c.status);
     if (!c || terminal) {
       void cleanupCallMedia(terminal ? 'ended' : 'clear');
+      if (terminal) void loadCallLogs();
       return;
     }
     // join when we are in a joinable call and have no media session yet (e.g. caller sees callee accepted via WS)
@@ -1800,7 +1911,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   }, [activeCall?.id, activeCall?.status]);
 
   // Cleanup on unmount
-  useEffect(() => { return () => { void cleanupCallMedia('unmount'); }; }, []);
+  useEffect(() => { return () => { stopCallTones(); void cleanupCallMedia('unmount'); }; }, []);
 
   const connectGoogle = () => { window.location.href = '/api/auth/google/start'; };
   const connectWechat = () => { window.location.href = '/api/auth/wechat/start'; };
@@ -1855,9 +1966,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         </div>
 
         {notice && <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-400/25 dark:bg-sky-400/10 dark:text-sky-100 flex items-center justify-between gap-2"><span className="min-w-0">{notice}</span><button onClick={()=>setNotice(null)} className="text-sky-600 dark:text-sky-200 p-1 shrink-0">×</button></div>}
-        <div className="grid grid-cols-5 gap-1.5 mb-2.5 text-xs">
+        <div className="grid grid-cols-6 gap-1 mb-2.5 text-xs">
           {([
             { k: 'chats', label: lang==='ar'?'المحادثات':lang==='en'?'Chats':'会话' },
+            { k: 'calls', label: lang==='ar'?'المكالمات':lang==='en'?'Calls':'通话', badge: missedUnreadCount, tone: 'rose' },
             { k: 'friends', label: lang==='ar'?'الأصدقاء':lang==='en'?'Friends':'好友', badge: friends.length > 0 ? friends.length : 0, tone: 'slate' },
             { k: 'requests', label: lang==='ar'?'الطلبات':lang==='en'?'Requests':'申请', badge: incomingReqs.length, tone: 'rose' },
             { k: 'search', label: lang==='ar'?'إضافة':lang==='en'?'Add':'找人' },
@@ -1867,15 +1979,16 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               key={item.k}
               onClick={()=>{
                 setTab(item.k);
+                if (item.k === 'calls') { void loadCallLogs(); void loadCallCapabilities(); }
                 if (item.k === 'notifs') void loadNotifications();
                 if (item.k === 'requests') void loadRequests();
                 if (item.k === 'friends') void loadFriends();
               }}
-              className={`relative min-h-[38px] px-1 py-1.5 rounded-xl border font-medium whitespace-nowrap transition-colors flex items-center justify-center ${tab===item.k?'bg-sky-600 border-sky-600 text-white shadow-xs dark:bg-sky-500/25 dark:border-sky-400/45 dark:text-sky-50':'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:bg-white/[0.03] dark:border-white/10 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-white/[0.06]'}`}
+              className={`relative min-h-[38px] px-0.5 py-1.5 rounded-xl border font-medium whitespace-nowrap transition-colors flex items-center justify-center ${tab===item.k?'bg-sky-600 border-sky-600 text-white shadow-xs dark:bg-sky-500/25 dark:border-sky-400/45 dark:text-sky-50':'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:bg-white/[0.03] dark:border-white/10 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-white/[0.06]'}`}
             >
               <span>{item.label}</span>
               {!!(item as any).badge && (item as any).badge > 0 && (
-                <span className={`ml-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] leading-4 font-semibold ${(item as any).tone === 'rose' ? 'bg-rose-500 text-white' : (tab===item.k ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-700 dark:bg-white/[0.08] dark:text-slate-300')}`}>
+                <span className={`ml-0.5 min-w-[15px] h-4 px-1 rounded-full text-[10px] leading-4 font-semibold ${(item as any).tone === 'rose' ? 'bg-rose-500 text-white' : (tab===item.k ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-700 dark:bg-white/[0.08] dark:text-slate-300')}`}>
                   {(item as any).badge > 99 ? '99+' : (item as any).badge}
                 </span>
               )}
@@ -1921,6 +2034,33 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               {sorted.length===0 && <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.02] px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400 space-y-2"><p>暂无会话</p><button type="button" onClick={()=>setTab('search')} className="inline-flex items-center gap-1 rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white"><UserPlus className="w-3.5 h-3.5"/>去添加好友聊天</button></div>}
             </div>
           </>
+        )}
+
+        {tab === 'calls' && (
+          <CallCenterPanel
+            currentUserId={currentUser?.id || ''}
+            lang={lang}
+            callLogs={callLogs}
+            missedUnreadCount={missedUnreadCount}
+            capabilities={callCapabilities}
+            friends={friends}
+            recentConvs={recentConvs}
+            conversations={conversations}
+            loading={callsLoading}
+            callAction={callAction}
+            onRefresh={() => { void loadCallLogs(); void loadCallCapabilities(); }}
+            onMarkMissedSeen={() => { void markMissedCallsSeen(); }}
+            onStartCall={(kind, target) => { void startCall(kind, target); }}
+            onOpenChat={(userId, conversationId) => {
+              if (conversationId) {
+                onSelectConversation(conversationId);
+                setTab('chats');
+                setMobileShowChat(true);
+              } else if (userId) {
+                void openDirect(userId);
+              }
+            }}
+          />
         )}
 
         {tab === 'friends' && (
@@ -2752,7 +2892,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
         const persistentAudioRenderers = (
           <div className="fixed w-px h-px opacity-0 pointer-events-none overflow-hidden" aria-hidden="true">
-            {tilesToRender.map((p: any) => p.audioTrack ? <CallTrackView key={`aud_${p.identity}`} track={p.audioTrack} kind="audio" playbackRetryTick={playbackRetryTick} onPlaybackBlocked={setAudioPlaybackBlocked} /> : null)}
+            {tilesToRender.map((p: any) => p.audioTrack ? <CallTrackView key={`aud_${p.identity}`} track={p.audioTrack} kind="audio" sinkId={mediaState.selectedAudioOutputId} playbackRetryTick={playbackRetryTick} onPlaybackBlocked={setAudioPlaybackBlocked} /> : null)}
           </div>
         );
 
@@ -2839,11 +2979,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                     <p className="text-xs text-slate-400">{mediaPhaseLabel}{stats?.usingRelay ? '（加密中继）' : ''}</p>
                   </div>
                   {stats && (
-                    <div className="px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex items-center gap-2">
+                    <div className="px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex items-center gap-2 tabular-nums">
                       <span className={`w-2 h-2 rounded-full ${stats.hasLocalAudio ? (stats.localLevel > 4 ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400') : 'bg-rose-400'}`} />
                       <span>{stats.hasLocalAudio ? (callDevices.micEnabled ? `麦克风音量 ${stats.localLevel}%` : '已静音') : '未获取到麦克风'}</span>
                       <span className="text-white/25">|</span>
                       <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceState}`}</span>
+                      {typeof stats.rttMs === 'number' && <><span className="text-white/25">|</span><span>{stats.rttMs} ms</span></>}
                     </div>
                   )}
                 </div>
@@ -2853,11 +2994,22 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             {/* Notices + Bottom Controls */}
             <div className="px-4 pt-2 pb-[max(1.25rem,env(safe-area-inset-bottom))] bg-black/35 border-t border-white/10 space-y-3 shrink-0">
               {activeCall.kind === 'video' && stats && (
-                <div className="mx-auto w-fit px-3 py-1 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex items-center gap-2">
+                <div className="mx-auto w-fit px-3 py-1 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex items-center gap-2 tabular-nums">
                   <span className={`w-2 h-2 rounded-full ${stats.hasLocalAudio ? (stats.localLevel > 4 ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400') : 'bg-rose-400'}`} />
                   <span>{stats.hasLocalAudio ? (callDevices.micEnabled ? `麦克风音量 ${stats.localLevel}%` : '已静音') : '未获取到麦克风'}</span>
                   <span className="text-white/25">|</span>
                   <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceState}`}</span>
+                  {typeof stats.rttMs === 'number' && <><span className="text-white/25">|</span><span>{stats.rttMs} ms</span></>}
+                </div>
+              )}
+              {(mediaPhase === 'reconnecting' || mediaState.weakNetwork || stats?.weakNetwork) && (
+                <div className="mx-auto max-w-md px-3 py-2 rounded-xl border border-amber-400/40 bg-amber-500/15 text-amber-100 text-xs flex items-center justify-center gap-2 tabular-nums">
+                  <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span>
+                    {mediaPhase === 'reconnecting'
+                      ? '网络波动或切换中，正在自动重连音视频通道…'
+                      : `当前网络较弱${typeof stats?.rttMs === 'number' ? ` (延迟 ${stats.rttMs}ms${stats.packetLossPct ? ` · 丢包 ${stats.packetLossPct}%` : ''})` : ''}，通话质量可能下降`}
+                  </span>
                 </div>
               )}
               {(!mediaState.canPlaybackAudio || audioPlaybackBlocked) && ['connected','reconnecting','connecting'].includes(mediaPhase) && (
@@ -2872,6 +3024,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                     <button type="button" onClick={()=>void toggleCallDevice('micEnabled')} className={`min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex flex-col items-center justify-center gap-1 text-[11px] font-medium ${callDevices.micEnabled ? 'border-white/15 bg-white/10 text-white' : 'border-rose-500/50 bg-rose-500/20 text-rose-200'}`}>
                       {callDevices.micEnabled ? <Mic className="w-5 h-5"/> : <MicOff className="w-5 h-5"/>}
                       <span>{callDevices.micEnabled ? '麦克风' : '已静音'}</span>
+                    </button>
+                    <button type="button" onClick={()=>void toggleAudioOutput()} className={`min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex flex-col items-center justify-center gap-1 text-[11px] font-medium ${speakerMode === 'speaker' ? 'border-cyan-400/35 bg-cyan-400/12 text-cyan-100' : 'border-white/15 bg-white/10 text-slate-200'}`}>
+                      <Volume2 className="w-5 h-5"/>
+                      <span>{(mediaState.audioOutputDevices?.length || 0) > 1 && mediaState.supportsOutputSelection ? '切换输出' : (speakerMode === 'speaker' ? '扬声器' : '听筒模式')}</span>
                     </button>
                     {activeCall.kind === 'video' && (
                       <>

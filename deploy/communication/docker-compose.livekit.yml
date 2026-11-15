@@ -1,0 +1,47 @@
+# ONE Communication — Self-Hosted LiveKit SFU + coturn TURN Stack
+# License summary:
+# - livekit/livekit-server: Apache-2.0
+# - coturn/coturn: BSD-3-Clause
+# - caddy: Apache-2.0
+#
+# Run on a dedicated Linux VPS with root/host networking and public ports open:
+# - 80/tcp, 443/tcp (Caddy TLS proxy -> LiveKit WSS)
+# - 7881/tcp (LiveKit RTC over TCP fallback)
+# - 50000-60000/udp (LiveKit WebRTC media)
+# - 3478/udp, 3478/tcp (coturn STUN/TURN)
+# - 5349/tcp (coturn TURNS over TLS)
+# - 49152-49999/udp (coturn relay ephemeral ports; disjoint from 50000-60000)
+
+services:
+  livekit:
+    image: livekit/livekit-server:v1.8.4
+    container_name: one-livekit
+    restart: unless-stopped
+    network_mode: host
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+
+  coturn:
+    image: coturn/coturn:4.6.3-alpine
+    container_name: one-coturn
+    restart: unless-stopped
+    network_mode: host
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - caddy_data:/etc/letsencrypt-certs:ro
+
+  caddy:
+    image: caddy:2.9-alpine
+    container_name: one-livekit-caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

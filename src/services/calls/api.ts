@@ -15,7 +15,9 @@ export async function apiCall(path: string, options: RequestInit = {}) {
 }
 
 export const callApi = {
-  list: () => apiCall('/api/calls'),
+  list: (filter?: 'all' | 'missed') => apiCall(filter ? `/api/calls?filter=${encodeURIComponent(filter)}` : '/api/calls'),
+  capabilities: () => apiCall('/api/calls/capabilities'),
+  markMissedSeen: () => apiCall('/api/calls/mark-missed-seen', { method: 'POST', body: '{}' }),
   get: (id: string) => apiCall(`/api/calls/${id}`),
   invite: (payload: any) => apiCall('/api/calls/invite', { method: 'POST', body: JSON.stringify({ transport: 'webrtc', ...payload }) }),
   accept: (id: string) => apiCall(`/api/calls/${id}/accept`, { method: 'POST', body: JSON.stringify({ transport: 'webrtc' }) }),

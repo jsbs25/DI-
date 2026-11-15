@@ -27,6 +27,11 @@ export interface CallMediaParticipantView {
   screenTrack?: MediaStreamTrack | null;
 }
 
+export interface AudioOutputOption {
+  deviceId: string;
+  label: string;
+}
+
 export interface CallAudioDiagnostics {
   localLevel: number;
   iceState: string;
@@ -35,6 +40,11 @@ export interface CallAudioDiagnostics {
   usingRelay: boolean;
   hasLocalAudio: boolean;
   remoteAudioFrames: number;
+  rttMs?: number;
+  packetLossPct?: number;
+  weakNetwork?: boolean;
+  transportProtocol?: string;
+  iceCandidateType?: string;
 }
 
 export interface CallMediaState {
@@ -44,6 +54,10 @@ export interface CallMediaState {
   reason?: string;
   canPlaybackAudio: boolean;
   connectionQuality?: string;
+  weakNetwork?: boolean;
+  audioOutputDevices?: AudioOutputOption[];
+  selectedAudioOutputId?: string;
+  supportsOutputSelection?: boolean;
   audioStats?: CallAudioDiagnostics;
   participants: Record<string, CallMediaParticipantView>;
 }
@@ -74,10 +88,33 @@ export interface ICallMediaSession {
   setCameraEnabled(enabled: boolean): Promise<void>;
   switchCamera(): Promise<void>;
   setScreenShareEnabled(enabled: boolean): Promise<void>;
+  setAudioOutputDevice?(deviceId: string): Promise<void>;
   startAudioPlayback(): Promise<void>;
   disconnect(reason?: string): Promise<void>;
   handleRemoteSignal?(fromUserId: string, signal: any, seq?: number): Promise<void>;
   handleRemoteAudioFrame?(fromUserId: string, pcmBase64: string, sampleRate: number): void;
+}
+
+function supportsSinkIdSelection(): boolean {
+  try {
+    return typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+  } catch {
+    return false;
+  }
+}
+
+async function listAudioOutputOptions(): Promise<AudioOutputOption[]> {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return [];
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const outs = devices.filter((d) => d.kind === 'audiooutput' && d.deviceId);
+    return outs.map((d, idx) => ({
+      deviceId: d.deviceId,
+      label: d.label || (d.deviceId === 'default' ? '系统默认输出' : `音频输出设备 ${idx + 1}`),
+    }));
+  } catch {
+    return [];
+  }
 }
 
 function trackToMedia(t: any): MediaStreamTrack | null {
@@ -160,7 +197,16 @@ export class LiveKitCallSession implements ICallMediaSession {
     if (this.room) await this.disconnect('replace');
     this.disposed = false;
     this.opts = opts;
-    this.state = { phase: 'acquiring', canPlaybackAudio: false, participants: {}, roomName: opts.roomName };
+    const outputs = await listAudioOutputOptions();
+    this.state = {
+      phase: 'acquiring',
+      canPlaybackAudio: false,
+      participants: {},
+      roomName: opts.roomName,
+      supportsOutputSelection: supportsSinkIdSelection(),
+      audioOutputDevices: outputs,
+      selectedAudioOutputId: outputs[0]?.deviceId || 'default',
+    };
     this.emit();
 
     const room = new Room({ adaptiveStream: true, dynacast: true });
@@ -176,12 +222,23 @@ export class LiveKitCallSession implements ICallMediaSession {
       .on(RoomEvent.LocalTrackPublished, () => this.refreshParticipants())
       .on(RoomEvent.LocalTrackUnpublished, () => this.refreshParticipants())
       .on(RoomEvent.ActiveSpeakersChanged, () => this.refreshParticipants())
-      .on(RoomEvent.ConnectionQualityChanged, () => this.refreshParticipants())
+      .on(RoomEvent.ConnectionQualityChanged, (quality: any, participant: any) => {
+        if (participant?.isLocal || participant?.identity === room.localParticipant?.identity) {
+          const q = String(quality || '').toLowerCase();
+          this.emit({
+            connectionQuality: q || 'good',
+            weakNetwork: q === 'poor' || q === 'lost',
+          });
+        }
+        this.refreshParticipants();
+      })
+      .on(RoomEvent.Reconnecting, () => this.emit({ phase: 'reconnecting', weakNetwork: true, connectionQuality: 'poor' }))
+      .on(RoomEvent.Reconnected, () => this.emit({ phase: 'connected', weakNetwork: false, connectionQuality: 'good' }))
       .on(RoomEvent.AudioPlaybackStatusChanged, () => this.emit({ canPlaybackAudio: room.canPlaybackAudio }))
       .on(RoomEvent.ConnectionStateChanged, (st: ConnectionState) => {
         if (st === ConnectionState.Connecting) this.emit({ phase: 'connecting' });
-        else if (st === ConnectionState.Connected) this.emit({ phase: 'connected' });
-        else if (st === ConnectionState.Reconnecting) this.emit({ phase: 'reconnecting' });
+        else if (st === ConnectionState.Connected) this.emit({ phase: 'connected', weakNetwork: false });
+        else if (st === ConnectionState.Reconnecting) this.emit({ phase: 'reconnecting', weakNetwork: true });
         else if (st === ConnectionState.Disconnected) this.emit({ phase: 'disconnected' });
       })
       .on(RoomEvent.Disconnected, () => this.emit({ phase: 'disconnected' }));
@@ -203,6 +260,10 @@ export class LiveKitCallSession implements ICallMediaSession {
         this.emit({ error: msg });
       }
       try { await room.startAudio(); } catch {}
+      const refreshedOutputs = await listAudioOutputOptions();
+      if (refreshedOutputs.length) {
+        this.emit({ audioOutputDevices: refreshedOutputs });
+      }
       this.refreshParticipants();
     } catch (e: any) {
       this.emit({ phase: 'failed', error: friendlyMediaError(e) });
@@ -253,6 +314,19 @@ export class LiveKitCallSession implements ICallMediaSession {
       await room.localParticipant.setScreenShareEnabled(enabled);
     } catch (e: any) { this.emit({ error: friendlyMediaError(e) }); }
     this.refreshParticipants();
+  }
+
+  async setAudioOutputDevice(deviceId: string) {
+    const room: any = this.room;
+    this.emit({ selectedAudioOutputId: deviceId });
+    if (!room || !deviceId) return;
+    try {
+      if (typeof room.switchActiveDevice === 'function') {
+        await room.switchActiveDevice('audiooutput', deviceId);
+      }
+    } catch (e: any) {
+      this.emit({ error: friendlyMediaError(e) });
+    }
   }
 
   async startAudioPlayback() {
@@ -769,20 +843,61 @@ export class WebRTCCallSession implements ICallMediaSession {
     let bytesSent = 0;
     let bytesReceived = 0;
     let iceState = 'new';
+    let rttMs: number | undefined;
+    let packetsReceived = 0;
+    let packetsLost = 0;
+    let transportProtocol: string | undefined;
+    let iceCandidateType: string | undefined;
+
     for (const [, entry] of this.peers.entries()) {
       iceState = entry.pc.iceConnectionState || entry.pc.connectionState || iceState;
       try {
         const stats = await entry.pc.getStats();
+        let selectedPairId: string | null = null;
+        const localCandidates = new Map<string, any>();
         stats.forEach((rep: any) => {
+          if (rep.type === 'transport' && rep.selectedCandidatePairId) {
+            selectedPairId = rep.selectedCandidatePairId;
+          }
+          if (rep.type === 'local-candidate') {
+            localCandidates.set(rep.id, rep);
+          }
           if (rep.type === 'outbound-rtp' && (rep.kind === 'audio' || rep.mediaType === 'audio')) {
             bytesSent += Number(rep.bytesSent || 0);
           }
           if (rep.type === 'inbound-rtp' && (rep.kind === 'audio' || rep.mediaType === 'audio')) {
             bytesReceived += Number(rep.bytesReceived || 0);
+            packetsReceived += Number(rep.packetsReceived || 0);
+            packetsLost += Math.max(0, Number(rep.packetsLost || 0));
+          }
+          if (rep.type === 'remote-inbound-rtp' && typeof rep.roundTripTime === 'number') {
+            const ms = Math.round(rep.roundTripTime * 1000);
+            rttMs = rttMs === undefined ? ms : Math.max(rttMs, ms);
+          }
+        });
+        stats.forEach((rep: any) => {
+          if (rep.type === 'candidate-pair' && (rep.selected || rep.nominated || rep.id === selectedPairId)) {
+            if (typeof rep.currentRoundTripTime === 'number') {
+              const ms = Math.round(rep.currentRoundTripTime * 1000);
+              rttMs = rttMs === undefined ? ms : Math.max(rttMs, ms);
+            }
+            const lc = localCandidates.get(rep.localCandidateId);
+            if (lc) {
+              transportProtocol = lc.protocol || transportProtocol;
+              iceCandidateType = lc.candidateType || iceCandidateType;
+            }
           }
         });
       } catch {}
     }
+
+    const totalPackets = packetsReceived + packetsLost;
+    const packetLossPct = totalPackets > 20 ? Number(((packetsLost / totalPackets) * 100).toFixed(1)) : 0;
+    const weakNetwork =
+      iceState === 'disconnected' ||
+      (typeof rttMs === 'number' && rttMs > 320) ||
+      packetLossPct > 4;
+
     this.webrtcBytesReceived = bytesReceived;
     const p2pConnected = Array.from(this.peers.values()).some(
       (p) => p.pc.connectionState === 'connected' || p.pc.iceConnectionState === 'connected' || p.pc.iceConnectionState === 'completed'
@@ -790,12 +905,20 @@ export class WebRTCCallSession implements ICallMediaSession {
     if (this.usingRelay && p2pConnected && bytesReceived > 0) {
       this.usingRelay = false;
     }
+    const nextConnectionQuality = weakNetwork
+      ? 'poor'
+      : this.usingRelay
+        ? 'good'
+        : p2pConnected
+          ? 'excellent'
+          : this.state.connectionQuality;
     const nextPhasePatch: Partial<CallMediaState> =
       this.usingRelay && this.state.phase !== 'connected'
-        ? { phase: 'connected', connectionQuality: 'good' }
-        : {};
+        ? { phase: 'connected', connectionQuality: nextConnectionQuality }
+        : { connectionQuality: nextConnectionQuality };
     this.emit({
       ...nextPhasePatch,
+      weakNetwork,
       audioStats: {
         localLevel: this.localAudioLevel,
         iceState,
@@ -804,6 +927,11 @@ export class WebRTCCallSession implements ICallMediaSession {
         usingRelay: this.usingRelay,
         hasLocalAudio: !!this.localAudioTrack,
         remoteAudioFrames: this.remoteAudioFrames,
+        rttMs,
+        packetLossPct,
+        weakNetwork,
+        transportProtocol,
+        iceCandidateType,
       },
     });
   }
@@ -822,12 +950,25 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.remoteAudioFrames = 0;
     this.webrtcBytesReceived = 0;
     this.nextRelayPlayTime = 0;
-    this.state = { phase: 'acquiring', canPlaybackAudio: true, participants: {}, roomName: opts.roomName };
+    const outputs = await listAudioOutputOptions();
+    this.state = {
+      phase: 'acquiring',
+      canPlaybackAudio: true,
+      participants: {},
+      roomName: opts.roomName,
+      supportsOutputSelection: supportsSinkIdSelection(),
+      audioOutputDevices: outputs,
+      selectedAudioOutputId: outputs[0]?.deviceId || 'default',
+    };
     this.emit();
 
     await this.acquireInitialMedia(opts);
     if (this.disposed) return;
 
+    const refreshedOutputs = await listAudioOutputOptions();
+    if (refreshedOutputs.length) {
+      this.emit({ audioOutputDevices: refreshedOutputs });
+    }
     this.startAudioCaptureAndMonitor();
 
     this.mediaReady = true;
@@ -1110,6 +1251,10 @@ export class WebRTCCallSession implements ICallMediaSession {
       await this.replaceVideoTrackOnPeers(this.cameraEnabled ? this.localVideoTrack : null);
     }
     this.rebuildParticipants();
+  }
+
+  async setAudioOutputDevice(deviceId: string) {
+    this.emit({ selectedAudioOutputId: deviceId || 'default' });
   }
 
   async startAudioPlayback() {
