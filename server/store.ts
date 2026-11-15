@@ -690,6 +690,7 @@ class DataStore {
       notificationPrefs: this.notificationPrefs,
       privacySettings: this.privacySettings,
       calls: (this as any).calls || [],
+      networkPeers: (this as any).networkPeers || [],
       nextEarthSequence: this.nextEarthSequence,
       earthIdMap: this.earthIdMap,
       currentUser: this.currentUser,
@@ -751,6 +752,7 @@ class DataStore {
       this.notificationPrefs = data.notificationPrefs && typeof data.notificationPrefs === 'object' ? data.notificationPrefs : {};
       this.privacySettings = data.privacySettings && typeof data.privacySettings === 'object' ? data.privacySettings : {};
       (this as any).calls = Array.isArray(data.calls) ? data.calls : [];
+      (this as any).networkPeers = Array.isArray(data.networkPeers) ? data.networkPeers : [];
       this.nextEarthSequence = Number.isFinite(data.nextEarthSequence) ? Math.max(100001, Math.floor(data.nextEarthSequence)) : 100001;
       this.earthIdMap = data.earthIdMap && typeof data.earthIdMap === 'object' ? data.earthIdMap : {};
       this.currentUser = data.currentUser || this.users[0];

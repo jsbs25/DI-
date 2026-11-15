@@ -38,6 +38,16 @@ import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, bro
 import { addCall, getCallById, listCallsForUser, ensureCallsArray } from './server/calls/index.ts';
 import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus, cleanupStaleCalls, cleanupStaleCallsDetailed, getCommunicationCapabilities } from './server/calls/service.ts';
 import { pushCallSignal, listCallSignalsForUser, clearCallSignals } from './server/calls/signals.ts';
+import {
+  findNetworkNodeById,
+  getNetworkDeviceConfigForUser,
+  getNetworkOverview,
+  listDevicesForUser,
+  listNetworkNodesWithStatus,
+  probeNetworkNode,
+  registerNetworkDevice,
+  revokeNetworkDeviceForUser,
+} from './server/network/service.ts';
 import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -2201,6 +2211,105 @@ app.post('/api/calls/:id/state', async (req, res) => {
     res.json({ success: true, call: publicCallForUser(call, user.id) });
   } catch (e:any) {
     res.status(400).json({ success: false, error: e?.message || 'Failed to update call state' });
+  }
+});
+
+// -------------------------------------------------------------
+// 1d. ONE NETWORK CENTER (Mode B WireGuard Control Plane + Mode A Overview)
+// -------------------------------------------------------------
+app.get('/api/network/overview', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const overview = await getNetworkOverview(store, user.id);
+    res.json({ success: true, overview });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to inspect network overview' });
+  }
+});
+
+app.get('/api/network/nodes', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+    const nodes = await listNetworkNodesWithStatus({ forceRefresh });
+    res.json({ success: true, configured: nodes.length > 0, nodes });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to load WireGuard nodes' });
+  }
+});
+
+app.post('/api/network/nodes/:id/probe', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const node = findNetworkNodeById(req.params.id);
+  if (!node) return res.status(404).json({ success: false, error: 'WireGuard node not found' });
+  try {
+    const status = await probeNetworkNode(node, { forceRefresh: true });
+    res.json({ success: true, node: status });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to probe node' });
+  }
+});
+
+app.get('/api/network/devices', (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  const devices = listDevicesForUser(store, user.id);
+  res.json({ success: true, devices, privateKeysStoredOnServer: false });
+});
+
+app.post('/api/network/devices', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const result = await store.mutate(async () => {
+      const r = registerNetworkDevice(store, user.id, req.body || {});
+      if (r.ok) {
+        store.persist();
+      }
+      return r;
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+    res.status(201).json({ success: true, device: result.device, profile: result.profile });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to register WireGuard device' });
+  }
+});
+
+app.get('/api/network/devices/:id/config', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const result = await store.mutate(async () => {
+      const r = getNetworkDeviceConfigForUser(store, user.id, req.params.id);
+      if (r.ok) {
+        store.persist();
+      }
+      return r;
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+    res.json({ success: true, device: result.device, profile: result.profile });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to build device config' });
+  }
+});
+
+app.delete('/api/network/devices/:id', async (req, res) => {
+  const user = requireSessionUser(req, res); if (!user) return;
+  try {
+    const result = await store.mutate(async () => {
+      const r = revokeNetworkDeviceForUser(store, user.id, req.params.id);
+      if (r.ok) {
+        store.persist();
+      }
+      return r;
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+    res.json({ success: true, device: result.device });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Failed to revoke device' });
   }
 });
 
