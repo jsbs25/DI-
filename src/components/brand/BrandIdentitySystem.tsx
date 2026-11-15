@@ -192,7 +192,7 @@ export const BrandIdentitySystem: React.FC<BrandIdentitySystemProps> = ({ lang, 
       : '阶段四 · 独一 ONE 标志稳定呈现 (1300–1600ms)';
 
   return (
-    <div className="min-h-screen bg-[#0B0C0E] text-[#F7F5F0] pb-24">
+    <div className="min-h-[100dvh] bg-[#0B0C0E] text-[#F7F5F0] pb-24">
       {/* Museum / Institutional Editorial Header */}
       <div className="border-b border-white/10 bg-[#0B0C0E]/95">
         <div className="max-w-7xl mx-auto px-5 sm:px-8 pt-8 pb-6">

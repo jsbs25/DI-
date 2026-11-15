@@ -550,7 +550,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
   return (
     <section
       dir={isRtl ? 'rtl' : 'ltr'}
-      className="min-h-[calc(100vh-4rem)] w-full px-4 pb-16 pt-6 text-[color:var(--color-one-text)] sm:px-6 lg:px-10"
+      className="min-h-[calc(100dvh-4rem)] w-full px-4 pb-16 pt-6 text-[color:var(--color-one-text)] sm:px-6 lg:px-10"
       style={{ background: 'transparent' }}
     >
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6">

@@ -851,7 +851,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const readerLineHeight = { lineHeight: lineHeight };
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-1 flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+    <div className="flex min-h-[calc(100dvh-4rem)] flex-1 flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
       {/* ONE LIBRARY header */}
       <header className="sticky top-[58px] z-30 border-b border-[var(--color-one-border)] bg-[color:var(--color-one-bg-elevated)]/88 backdrop-blur-xl md:top-16">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:px-8 md:flex-row md:items-center md:justify-between">

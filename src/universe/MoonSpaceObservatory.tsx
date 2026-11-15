@@ -232,7 +232,7 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
 
   return (
     <div
-      className="min-h-screen text-[color:var(--color-one-text)]"
+      className="min-h-[100dvh] text-[color:var(--color-one-text)]"
       style={{
         background:
           'radial-gradient(1200px 700px at 50% -10%, rgba(127,212,255,0.08), transparent 55%), radial-gradient(900px 500px at 80% 20%, rgba(183,189,200,0.06), transparent 50%), linear-gradient(180deg, #030508 0%, #05070b 40%, #030508 100%)'

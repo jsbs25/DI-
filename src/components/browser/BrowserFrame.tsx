@@ -16,6 +16,8 @@ export interface BrowserFrameTab {
   id: string;
   title: string;
   url: string;
+  favicon?: string;
+  loading?: boolean;
 }
 
 interface BrowserFrameProps {
@@ -53,7 +55,7 @@ export function BrowserFrame({
   return (
     <section
       aria-label="ONE BROWSER — JUPITER"
-      className="flex min-h-[calc(100vh-8rem)] flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,14,20,0.98),rgba(7,10,15,0.98))] shadow-[0_32px_100px_rgba(0,0,0,0.45)] ring-1 ring-white/[0.03]"
+      className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,14,20,0.98),rgba(7,10,15,0.98))] shadow-[0_32px_100px_rgba(0,0,0,0.45)] ring-1 ring-white/[0.03]"
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-white/[0.02] px-3 pt-2 sm:gap-3 sm:px-4 backdrop-blur-xl">
         <div aria-hidden="true" className="hidden shrink-0 items-center gap-1.5 pl-0.5 sm:flex" title="ONE BROWSER">
@@ -105,12 +107,16 @@ export function BrowserFrame({
                   onClick={() => onSelectTab(tab.id)}
                   className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
                 >
-                  {tab.url.includes('google.com') || tab.title.toLowerCase().includes('google') ? (
+                  {tab.loading ? (
+                    <span className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-cyan-400/30 border-t-cyan-400 animate-spin" aria-hidden="true" />
+                  ) : tab.favicon ? (
+                    <img src={tab.favicon} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  ) : tab.url.includes('google.com') || tab.title.toLowerCase().includes('google') ? (
                     <GoogleGIcon className="h-3.5 w-3.5 shrink-0" />
                   ) : (
                     <Globe className={`h-3.5 w-3.5 shrink-0 ${selected ? 'text-cyan-300' : 'text-slate-500'}`} />
                   )}
-                  <span className="truncate">{tab.title}</span>
+                  <span className="truncate">{tab.title || tab.url || 'New Tab'}</span>
                 </button>
                 <button
                   type="button"

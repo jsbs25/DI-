@@ -965,7 +965,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   const latestQuake = earthquakes[0];
 
   return (
-    <div className="relative w-full h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100vh-4rem)] flex-1 overflow-x-clip bg-[#010308] select-none md:overflow-hidden">
+    <div className="relative w-full h-full min-h-[calc(100svh-7rem)] md:min-h-[calc(100dvh-4rem)] flex-1 overflow-x-clip bg-[#010308] select-none md:overflow-hidden">
       {/* 1. LIVE THREE.JS 3D WEBGL ENGINE */}
       <div
         ref={mountRef}
@@ -1081,19 +1081,19 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             <div className="px-3 py-2.5 rounded-xl border border-white/10 bg-slate-950/75">
               <div className="text-[10px] text-slate-500 uppercase tracking-wider">{t.onlineUsers}</div>
               <div className="text-sm sm:text-base font-semibold font-mono tabular-nums text-slate-100 mt-0.5">
-                {nodes.length > 0 ? nodes.length.toLocaleString() : '1,280'}
+                {nodes.filter(n => n.isOnline).length.toLocaleString()}
               </div>
             </div>
             <div className="px-3 py-2.5 rounded-xl border border-white/10 bg-slate-950/75">
               <div className="text-[10px] text-slate-500 uppercase tracking-wider">{t.activeNodes}</div>
               <div className="text-sm sm:text-base font-semibold font-mono tabular-nums text-slate-100 mt-0.5">
-                {countries.length > 0 ? countries.length : '196'}
+                {countries.length.toLocaleString()}
               </div>
             </div>
             <div className="px-3 py-2.5 rounded-xl border border-white/10 bg-slate-950/75">
               <div className="text-[10px] text-slate-500 uppercase tracking-wider">{t.registeredCitizens}</div>
               <div className="text-sm sm:text-base font-semibold font-mono tabular-nums text-slate-100 mt-0.5">
-                368,420
+                {(countries.reduce((sum, c) => sum + (c.userCount || 0), 0) || nodes.length).toLocaleString()}
               </div>
             </div>
           </div>

@@ -218,7 +218,7 @@ export default function App() {
 
   return (
     <PlayerProvider>
-    <div className="min-h-screen w-full max-w-full bg-[var(--color-one-bg)] text-[var(--color-one-text)] font-sans overflow-x-clip transition-colors">
+    <div className="min-h-[100dvh] w-full max-w-full bg-[var(--color-one-bg)] text-[var(--color-one-text)] font-sans overflow-x-clip transition-colors">
       {showIntro && <CinematicIntro onComplete={() => { setShowIntro(false); try { localStorage.setItem('earth-one-intro-seen', '1'); } catch {} }} onAuthSuccess={handleAuthSuccess} currentUser={currentUser} />}
       {welcomeToast && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-2xl eo-glass text-sky-700 dark:text-cyan-100 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4 text-sky-500 dark:text-cyan-400" /><span>{welcomeToast}</span></div>}
 
@@ -269,16 +269,16 @@ export default function App() {
         )}
 
         {currentTab === 'universe' && <div className="h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] bg-[#101c33] text-slate-100"><UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
-        {currentTab === 'saturn' && <div className="min-h-screen w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
-        {currentTab === 'venus' && <div className="min-h-screen w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('globe')} /></div>}
-        {currentTab === 'mercury' && <div className="min-h-screen w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} /></div>}
+        {currentTab === 'saturn' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
+        {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('globe')} /></div>}
+        {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} /></div>}
         {currentTab === 'feed' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} lang={lang} /></div>}
         <div className={currentTab === 'chat' ? 'h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(4.65rem+env(safe-area-inset-bottom))] md:pb-0 flex flex-col min-h-0' : 'contents'}><GlobalMessenger conversations={conversations} activeConversationId={activeConversationId} onSelectConversation={setActiveConversationId} currentUser={currentUser} lang={lang} integrations={integrations} onRefreshConversations={refreshConversations} onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }} directOpenSeq={directOpenSeq} isVisible={currentTab === 'chat'} /></div>
         {currentTab === 'aihub' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><AIHub lang={lang} /></div>}
-        <div className={currentTab === 'library' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-screen w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[#121e36] text-slate-100"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} /></div></div>
-        {currentTab === 'moon' && <div className="min-h-screen w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
-        {currentTab === 'arabic-learning' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-screen"><ArabicLearningHub lang={lang} onOpenLibrary={() => setCurrentTab('library')} /></div>}
-        {currentTab === 'knowledge' && <div className="min-h-screen w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
+        <div className={currentTab === 'library' ? 'contents' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[#121e36] text-slate-100"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} /></div></div>
+        {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
+        {currentTab === 'arabic-learning' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><ArabicLearningHub lang={lang} onOpenLibrary={() => setCurrentTab('library')} /></div>}
+        {currentTab === 'knowledge' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
         <div className={currentTab === 'browser' ? 'contents h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className="h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(4.65rem+env(safe-area-inset-bottom))] md:pb-0 flex flex-col min-h-0 bg-[#121e36] text-slate-100"><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
         {currentTab === 'network' && (
           <OneNetworkCenter
@@ -290,14 +290,14 @@ export default function App() {
             onOpenCalls={() => setCurrentTab('chat')}
           />
         )}
-        {currentTab === 'crawler' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-screen"><CrawlerDashboard lang={lang} /></div>}
+        {currentTab === 'crawler' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><CrawlerDashboard lang={lang} /></div>}
         {currentTab === 'creator' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
         {currentTab === 'video' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><VideoCenter videos={videos} lang={lang} /></div>}
-        {currentTab === 'game' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-screen"><GameCenter currentUser={currentUser} lang={lang} /></div>}
+        {currentTab === 'game' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><GameCenter currentUser={currentUser} lang={lang} /></div>}
         {currentTab === 'community' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
-        {currentTab === 'academy' && <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonAcademy lang={lang} currentUser={currentUser} onBack={() => setCurrentTab('universe')} /></div>}
+        {currentTab === 'academy' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonAcademy lang={lang} currentUser={currentUser} onBack={() => setCurrentTab('universe')} /></div>}
         {currentTab === 'settings' && (
-          <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
+          <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
             <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
               <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'设置与安全':'Settings & Security'}</h1>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'ONE 当前未提供独立的全局设置页面。账户、安全、隐私与绑定等真实能力已在「账户与安全」中提供。':'ONE does not currently provide a standalone global settings page. Real account, security, privacy, and linking controls are available in Account & Security.'}</p>
@@ -310,7 +310,7 @@ export default function App() {
           </div>
         )}
         {currentTab === 'profile' && (
-          <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
+          <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
             <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
               <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'个人主页':'Profile'}</h1>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'你的个人资料与地球信标通过真实资料面板管理（非独立路由页）。':'Your profile and globe beacon are managed via the real profile panel (no standalone route page).'}</p>
@@ -323,7 +323,7 @@ export default function App() {
           </div>
         )}
         {currentTab === 'call' && (
-          <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
+          <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
             <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
               <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'通话':'Calls'}</h1>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'当前没有独立的通话模块页面。通话能力（如可用）集成在消息/会话体验中，并依赖真实设备权限与连接状态；本路由不提供伪造通话界面。':'There is no standalone call module page. Call capabilities, where available, are integrated into messaging/conversations and depend on real device permissions and connectivity; this route does not provide a fabricated call UI.'}</p>
@@ -334,7 +334,7 @@ export default function App() {
             </div>
           </div>
         )}
-        {currentTab === 'brand' && <div className="min-h-screen pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><BrandIdentitySystem lang={lang} onBackToGlobe={() => setCurrentTab('globe')} /></div>}
+        {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><BrandIdentitySystem lang={lang} onBackToGlobe={() => setCurrentTab('globe')} /></div>}
       </main>
 
       {!isSpaceExperience && <div className="md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0"><LuxuryAdBanner lang={lang} /></div>}

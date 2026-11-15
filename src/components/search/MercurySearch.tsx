@@ -98,7 +98,7 @@ export const MercurySearch: React.FC<MercurySearchProps> = ({ lang, onBack, onOp
   };
 
   return (
-    <div className="min-h-screen bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+    <div className="min-h-[100dvh] bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
       <header className="border-b border-[var(--color-one-border)] bg-[color:var(--color-one-bg-elevated)]/70 px-4 py-6 backdrop-blur-xl sm:px-8">
         <div className="mx-auto max-w-4xl">
           <button onClick={onBack} className="mb-5 inline-flex min-h-11 items-center gap-1.5 rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] px-4 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">

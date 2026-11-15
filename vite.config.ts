@@ -26,8 +26,8 @@ export default defineConfig(() => {
           short_name: 'ONE',
           description:
             'ONE — One World. Infinite Possibilities. 一个世界，无限可能。',
-          theme_color: '#05070B',
-          background_color: '#05070B',
+          theme_color: '#f4f7fb',
+          background_color: '#f4f7fb',
           display: 'standalone',
           start_url: '/',
           scope: '/',
