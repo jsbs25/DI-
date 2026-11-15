@@ -36,6 +36,7 @@ import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
 import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
+import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
 import { PlayerProvider, usePlayerContext } from './music/PlayerContext.tsx';
 
 function MusicRouteGuard({ currentTab }: { currentTab: string }) {
@@ -76,7 +77,7 @@ export default function App() {
   const t = translations[lang] || translations.zh;
   const normalizeModule = (m: string | null | undefined): string => {
     const raw = (m || '').trim().toLowerCase();
-    const alias: Record<string, string> = { search: 'mercury', ai: 'aihub', games: 'game', studio: 'creator', academy: 'academy', learning: 'arabic-learning', arabic: 'arabic-learning', messages: 'chat', discover: 'feed', home: 'globe' };
+    const alias: Record<string, string> = { search: 'mercury', ai: 'aihub', games: 'game', studio: 'creator', academy: 'academy', learning: 'arabic-learning', arabic: 'arabic-learning', messages: 'chat', discover: 'feed', home: 'globe', vpn: 'network', proxy: 'network' };
     return alias[raw] || raw || 'globe';
   };
   const [currentTab, setCurrentTab] = useState<string>(() => {
@@ -113,11 +114,12 @@ export default function App() {
   const [knowledgeFocusNodeId, setKnowledgeFocusNodeId] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<any[]>([]);
   const [directOpenSeq, setDirectOpenSeq] = useState(0);
+  const [browserOpenProxySeq, setBrowserOpenProxySeq] = useState(0);
 
   useEffect(() => { document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'; document.documentElement.lang = lang; }, [lang]);
 
   const isViewportWorkspace = ['universe', 'chat', 'browser'].includes(currentTab);
-  const isSpaceExperience = isViewportWorkspace || ['globe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge', 'settings', 'profile', 'call'].includes(currentTab);
+  const isSpaceExperience = isViewportWorkspace || ['globe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge', 'network', 'settings', 'profile', 'call'].includes(currentTab);
   useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
 
   useEffect(() => {
@@ -277,7 +279,17 @@ export default function App() {
         {currentTab === 'moon' && <div className="min-h-screen w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
         {currentTab === 'arabic-learning' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-screen"><ArabicLearningHub lang={lang} onOpenLibrary={() => setCurrentTab('library')} /></div>}
         {currentTab === 'knowledge' && <div className="min-h-screen w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
-        <div className={currentTab === 'browser' ? 'contents h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className="h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(4.65rem+env(safe-area-inset-bottom))] md:pb-0 flex flex-col min-h-0 bg-[#121e36] text-slate-100"><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
+        <div className={currentTab === 'browser' ? 'contents h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className="h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(4.65rem+env(safe-area-inset-bottom))] md:pb-0 flex flex-col min-h-0 bg-[#121e36] text-slate-100"><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
+        {currentTab === 'network' && (
+          <OneNetworkCenter
+            lang={lang}
+            onOpenBrowserProxy={() => {
+              setBrowserOpenProxySeq((s) => s + 1);
+              setCurrentTab('browser');
+            }}
+            onOpenCalls={() => setCurrentTab('chat')}
+          />
+        )}
         {currentTab === 'crawler' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-screen"><CrawlerDashboard lang={lang} /></div>}
         {currentTab === 'creator' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
         {currentTab === 'video' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><VideoCenter videos={videos} lang={lang} /></div>}

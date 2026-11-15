@@ -147,6 +147,7 @@ interface BrowserFindStatus {
 interface WebBrowserProps {
   lang: Language;
   initialQuery?: string;
+  openProxySeq?: number;
   onBackToUniverse?: () => void;
   onBackToGlobe?: () => void;
 }
@@ -369,7 +370,7 @@ function getInitialBrowserUrl(): string {
   return fallback;
 }
 
-export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBackToUniverse, onBackToGlobe }) => {
+export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, openProxySeq, onBackToUniverse, onBackToGlobe }) => {
   const [initialUrl] = useState(getInitialBrowserUrl);
   const initialPreset = PRESET_PAGES[initialUrl];
   const browserEngine = typeof window === 'undefined' ? undefined : window.earthOneBrowser;
@@ -624,6 +625,11 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, onBa
   const [isPermissionsOpen, setIsPermissionsOpen] = useState(false);
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
+  useEffect(() => {
+    if (openProxySeq && openProxySeq > 0) {
+      setIsProxyModalOpen(true);
+    }
+  }, [openProxySeq]);
   const [proxyStatus, setProxyStatus] = useState<EarthOneBrowserProxyStatus | null>(null);
   const [sessionRestoreNotice, setSessionRestoreNotice] = useState<{
     kind: 'restoring' | 'restored' | 'failed';

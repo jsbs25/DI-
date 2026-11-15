@@ -543,7 +543,7 @@ export async function getNetworkOverview(store: any, userId: string): Promise<Ne
       scope: 'one-browser-only',
       engine: 'electron-webcontentsview-session-proxy',
       isolatedPartition: 'persist:one-browser',
-      supportsProtocols: ['http', 'https', 'socks5', 'pac'],
+      supportsProtocols: ['http', 'https', 'socks5'],
       note: '仅作用于 ONE Electron 桌面端内置浏览器标签页（persist:one-browser 会话），不接管 ONE 通信中心，不修改宿主机全局系统代理。',
     },
     modeB: {

@@ -21,6 +21,7 @@ import {
   PenTool,
   Orbit,
   Globe2,
+  Shield,
 } from 'lucide-react';
 
 export type DockItem = { id: string; tab: string; icon: LucideIcon; labelZh: string; labelEn: string; group?: string };
@@ -39,6 +40,7 @@ export const MORE_ITEMS: DockItem[] = [
   { id: 'spaces', tab: 'universe', icon: LayoutGrid, labelZh: '宇宙', labelEn: 'Universe', group: 'more' },
   { id: 'library', tab: 'library', icon: BookOpen, labelZh: '图书馆', labelEn: 'Library', group: 'more' },
   { id: 'browser', tab: 'browser', icon: Search, labelZh: '浏览器', labelEn: 'Browser', group: 'more' },
+  { id: 'network', tab: 'network', icon: Shield, labelZh: '网络中心', labelEn: 'Network', group: 'more' },
   { id: 'knowledge', tab: 'knowledge', icon: Network, labelZh: '知识图谱', labelEn: 'Knowledge', group: 'more' },
   { id: 'learning', tab: 'arabic-learning', icon: GraduationCap, labelZh: '语言学习', labelEn: 'Learning', group: 'more' },
   { id: 'creator', tab: 'creator', icon: PenTool, labelZh: '创作中心', labelEn: 'Studio', group: 'more' },

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Command } from 'cmdk';
-import { Search, Home, Orbit, Sparkles, MessageSquare, BookOpen, Film, Users2, GraduationCap, Globe2, Compass, Network, PenTool, Gamepad2, Radar, Music2, Moon, Palette } from 'lucide-react';
+import { Search, Home, Orbit, Sparkles, MessageSquare, BookOpen, Film, Users2, GraduationCap, Globe2, Compass, Network, PenTool, Gamepad2, Radar, Music2, Moon, Palette, Shield } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
 
 type Props = {
@@ -19,6 +19,7 @@ const ITEMS = [
   { tab: 'aihub', zh: 'ONE INTELLIGENCE', en: 'ONE INTELLIGENCE', icon: Sparkles },
   { tab: 'library', zh: 'ONE LIBRARY', en: 'ONE LIBRARY', icon: BookOpen },
   { tab: 'browser', zh: 'ONE BROWSER', en: 'ONE BROWSER', icon: Search },
+  { tab: 'network', zh: 'ONE NETWORK · 代理与 VPN', en: 'ONE NETWORK · Proxy & VPN', icon: Shield },
   { tab: 'chat', zh: '消息', en: 'Messages', icon: MessageSquare },
   { tab: 'video', zh: 'ONE VIDEO', en: 'ONE VIDEO', icon: Film },
   { tab: 'community', zh: 'ONE COMMUNITY', en: 'ONE COMMUNITY', icon: Users2 },

@@ -89,7 +89,7 @@ export interface NetworkOverview {
     scope: 'one-browser-only';
     engine: 'electron-webcontentsview-session-proxy';
     isolatedPartition: 'persist:one-browser';
-    supportsProtocols: Array<'http' | 'https' | 'socks5' | 'pac'>;
+    supportsProtocols: Array<'http' | 'https' | 'socks5'>;
     note: string;
   };
   modeB: {
