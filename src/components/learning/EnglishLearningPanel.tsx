@@ -126,7 +126,7 @@ export const EnglishLearningPanel: React.FC<Props> = ({ lang }) => {
   };
 
   const meaningOf = (item: EnglishLearningItem) => (isZh ? item.meaningZh : isAr ? item.meaningAr : item.meaningEn);
-  const exampleMeaningOf = (item: EnglishLearningItem) => (isZh ? item.exampleZh : isAr ? item.exampleAr : item.exampleEn);
+  const exampleMeaningOf = (item: EnglishLearningItem) => (isZh ? item.exampleZh : isAr ? item.exampleAr : '');
 
   return (
     <div className="space-y-5">
