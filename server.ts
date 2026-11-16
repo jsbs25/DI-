@@ -4303,6 +4303,127 @@ app.post('/api/learning/arabic/islamic-libraries/crawl', async (req, res) => {
 });
 
 // -------------------------------------------------------------
+// 8b3. ENGLISH LEARNING ENGINE (Dictionary, Phonetics & Corpus)
+// -------------------------------------------------------------
+app.get('/api/learning/english/lookup', async (req, res) => {
+  const rawWord = typeof req.query.word === 'string' ? req.query.word.trim().toLowerCase() : '';
+  const word = rawWord.replace(/[^a-z'-]/g, '');
+  if (!word) {
+    return res.status(400).json({ success: false, error: 'Valid English word is required' });
+  }
+
+  try {
+    const [dictRes, relRes] = await Promise.allSettled([
+      fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`, {
+        signal: AbortSignal.timeout(4500),
+      }),
+      fetch(`https://api.datamuse.com/words?ml=${encodeURIComponent(word)}&max=8`, {
+        signal: AbortSignal.timeout(4000),
+      }),
+    ]);
+
+    let phonetic: string | undefined;
+    let audioUrl: string | undefined;
+    let meanings: Array<{
+      partOfSpeech: string;
+      definitions: Array<{ definition: string; example?: string }>;
+    }> = [];
+
+    if (dictRes.status === 'fulfilled' && dictRes.value.ok) {
+      const json = await dictRes.value.json();
+      if (Array.isArray(json) && json[0]) {
+        const entry = json[0];
+        const phonetics = Array.isArray(entry.phonetics) ? entry.phonetics : [];
+        phonetic =
+          entry.phonetic ||
+          phonetics.find((p: any) => typeof p?.text === 'string' && p.text)?.text;
+        audioUrl = phonetics.find((p: any) => typeof p?.audio === 'string' && p.audio)?.audio;
+        if (Array.isArray(entry.meanings)) {
+          meanings = entry.meanings.slice(0, 4).map((m: any) => ({
+            partOfSpeech: String(m.partOfSpeech || 'term'),
+            definitions: Array.isArray(m.definitions)
+              ? m.definitions.slice(0, 3).map((d: any) => ({
+                  definition: String(d.definition || ''),
+                  example: typeof d.example === 'string' ? d.example : undefined,
+                }))
+              : [],
+          }));
+        }
+      }
+    }
+
+    let related: string[] = [];
+    if (relRes.status === 'fulfilled' && relRes.value.ok) {
+      const relJson = await relRes.value.json();
+      if (Array.isArray(relJson)) {
+        related = relJson
+          .map((item: any) => String(item?.word || ''))
+          .filter((w: string) => w && w !== word)
+          .slice(0, 8);
+      }
+    }
+
+    if (meanings.length === 0) {
+      return res.json({
+        success: true,
+        entry: {
+          word,
+          phonetic: phonetic || undefined,
+          audioUrl,
+          meanings: [],
+          related,
+          source: 'fallback',
+        },
+      });
+    }
+
+    return res.json({
+      success: true,
+      entry: {
+        word,
+        phonetic,
+        audioUrl,
+        meanings,
+        related,
+        source: 'live',
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Dictionary lookup failed' });
+  }
+});
+
+app.get('/api/learning/english/reading', async (req, res) => {
+  const topic = typeof req.query.topic === 'string' ? req.query.topic.trim() : 'Astronomy';
+  try {
+    const wikiRes = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topic)}`,
+      {
+        headers: { 'User-Agent': 'EarthOneLanguageEngine/1.0' },
+        signal: AbortSignal.timeout(4500),
+      }
+    );
+    if (wikiRes.ok) {
+      const data = await wikiRes.json();
+      if (data?.extract) {
+        return res.json({
+          success: true,
+          article: {
+            title: String(data.title || topic),
+            description: String(data.description || 'Encyclopedia Corpus'),
+            extract: String(data.extract),
+            sourceUrl: data.content_urls?.desktop?.page || undefined,
+          },
+        });
+      }
+    }
+    return res.json({ success: false, error: 'Article unavailable' });
+  } catch {
+    return res.json({ success: false, error: 'Reading corpus fetch timeout' });
+  }
+});
+
+// -------------------------------------------------------------
 // 8c. GLOBAL UNIFIED SEARCH (across all modules)
 // -------------------------------------------------------------
 app.get('/api/search/global', (req, res) => {

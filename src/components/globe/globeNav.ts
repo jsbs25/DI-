@@ -4,8 +4,6 @@ import {
   Compass,
   LayoutGrid,
   Search,
-  Bell,
-  User,
   Sparkles,
   BookOpen,
   GraduationCap,
@@ -30,19 +28,18 @@ export type DockItem = { id: string; tab: string; icon: LucideIcon; labelZh: str
 export const DOCK_ITEMS: DockItem[] = [
   { id: 'home', tab: 'globe', icon: Home, labelZh: '首页', labelEn: 'Home', group: 'core' },
   { id: 'discover', tab: 'feed', icon: Compass, labelZh: '发现', labelEn: 'Discover', group: 'core' },
-  { id: 'messages', tab: 'chat', icon: MessageSquare, labelZh: '消息', labelEn: 'Messages', group: 'core' },
+  { id: 'messages', tab: 'chat', icon: MessageSquare, labelZh: '信息', labelEn: 'Messages', group: 'core' },
   { id: 'music', tab: 'venus', icon: Music2, labelZh: '音乐', labelEn: 'Music', group: 'core' },
-  { id: 'intelligence', tab: 'aihub', icon: Sparkles, labelZh: '智能', labelEn: 'AI', group: 'core' },
-  { id: 'spaces', tab: 'universe', icon: LayoutGrid, labelZh: '宇宙', labelEn: 'Universe', group: 'core' },
+  { id: 'learning', tab: 'arabic-learning', icon: GraduationCap, labelZh: '语言学习', labelEn: 'Learning', group: 'core' },
 ];
 
 export const MORE_ITEMS: DockItem[] = [
   { id: 'spaces', tab: 'universe', icon: LayoutGrid, labelZh: '宇宙', labelEn: 'Universe', group: 'more' },
+  { id: 'intelligence', tab: 'aihub', icon: Sparkles, labelZh: '智能', labelEn: 'AI', group: 'more' },
   { id: 'library', tab: 'library', icon: BookOpen, labelZh: '图书馆', labelEn: 'Library', group: 'more' },
   { id: 'browser', tab: 'browser', icon: Search, labelZh: '浏览器', labelEn: 'Browser', group: 'more' },
   { id: 'network', tab: 'network', icon: Shield, labelZh: '网络中心', labelEn: 'Network', group: 'more' },
   { id: 'knowledge', tab: 'knowledge', icon: Network, labelZh: '知识图谱', labelEn: 'Knowledge', group: 'more' },
-  { id: 'learning', tab: 'arabic-learning', icon: GraduationCap, labelZh: '语言学习', labelEn: 'Learning', group: 'more' },
   { id: 'creator', tab: 'creator', icon: PenTool, labelZh: '创作中心', labelEn: 'Studio', group: 'more' },
   { id: 'video', tab: 'video', icon: Film, labelZh: '影视视频', labelEn: 'Video', group: 'more' },
   { id: 'community', tab: 'community', icon: Users2, labelZh: '社区', labelEn: 'Community', group: 'more' },

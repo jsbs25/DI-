@@ -1,18 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import {
-  ExternalLink,
-  Mic,
-  MicOff,
-  PhoneOff,
-  RotateCcw,
-  Send,
-  Volume2,
-  X,
-} from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
-import { loadAIConversationHistory, saveAIConversationHistory } from '../../utils/aiSessionHistory.ts';
 
 interface HolographicAICompanionProps {
   lang: Language;
@@ -25,11 +14,9 @@ interface HolographicAICompanionProps {
   placement?: 'center-bottom' | 'corner';
 }
 
-interface MessageItem {
-  id: string;
-  sender: 'ai' | 'user';
-  text: string;
-  time: string;
+interface HistoryTurn {
+  role: 'user' | 'model';
+  parts: [{ text: string }];
 }
 
 type VoicePhase =
@@ -38,7 +25,6 @@ type VoicePhase =
   | 'listening'
   | 'thinking'
   | 'speaking'
-  | 'muted'
   | 'error';
 
 function downsampleFloatTo16kPcmBase64(input: Float32Array, sourceRate: number): string {
@@ -78,45 +64,14 @@ function decodePcm24kBase64ToFloat(base64: string): Float32Array {
 export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   lang,
   onExploreUniverse,
-  onOpenAIHub,
   onNavigateTab,
   showLauncher = true,
   placement = 'corner',
 }) => {
   const isZh = lang === 'zh';
-  const [isOpen, setIsOpen] = useState(false);
   const [phase, setPhase] = useState<VoicePhase>('idle');
-  const [engineMode, setEngineMode] = useState<'live' | 'fallback'>('live');
-  const [isMuted, setIsMuted] = useState(false);
-  const [showTextInput, setShowTextInput] = useState(true);
   const [voiceActive, setVoiceActive] = useState(false);
-  const [inputMsg, setInputMsg] = useState('');
-  const [liveUserCaption, setLiveUserCaption] = useState('');
-  const [liveAiCaption, setLiveAiCaption] = useState('');
-  const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [modelId, setModelId] = useState('gemini-2.5-flash');
-
-  const initialGreeting = isZh
-    ? '直接在下方输入即可对话，或点击麦克风开启实时语音。支持指令如「打开信息与通话」、「进入品牌规划」。'
-    : 'Type below to chat right away, or tap the mic for live voice. Try "open messages" or "brand planning".';
-
-  const [messages, setMessages] = useState<MessageItem[]>(() => {
-    const saved = loadAIConversationHistory(
-      'earth-one-ai-companion:v1',
-      (value): value is MessageItem =>
-        !!value &&
-        typeof value === 'object' &&
-        typeof (value as MessageItem).id === 'string' &&
-        ((value as MessageItem).sender === 'ai' || (value as MessageItem).sender === 'user') &&
-        typeof (value as MessageItem).text === 'string' &&
-        typeof (value as MessageItem).time === 'string'
-    );
-    return saved.length ? saved.slice(-24) : [];
-  });
-
-  useEffect(() => {
-    saveAIConversationHistory('earth-one-ai-companion:v1', messages.slice(-24));
-  }, [messages]);
 
   // Fetch default backend chat model for fallback streaming
   useEffect(() => {
@@ -137,10 +92,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
   // Launcher Orb 3D canvas & drag positioning
   const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const hudWaveCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const chatBottomRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
   const ORB_SIZE = 46;
   const clampLauncherPos = useCallback((x: number, y: number) => {
     if (typeof window === 'undefined') return { x: 16, y: 120 };
@@ -208,7 +159,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
   }, [clampLauncherPos]);
 
-  // Audio & Real-time Voice Refs (never stale in audio callbacks)
+  // Audio & Real-time Voice Refs (never stale inside WebGL / WebAudio callbacks)
+  const phaseRef = useRef<VoicePhase>('idle');
+  phaseRef.current = phase;
   const sessionActiveRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -219,24 +172,20 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const activeAudioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef(0);
-  const isMutedRef = useRef(false);
   const micRmsRef = useRef(0);
   const liveReadyRef = useRef(false);
   const recognitionRef = useRef<any>(null);
   const isSendingFallbackRef = useRef(false);
   const isTtsSpeakingRef = useRef(false);
   const pendingUserTranscriptRef = useRef('');
-  const pendingAiTranscriptRef = useRef('');
   const modelIdRef = useRef(modelId);
-  const messagesRef = useRef(messages);
+  const historyRef = useRef<HistoryTurn[]>([]);
 
-  isMutedRef.current = isMuted;
   modelIdRef.current = modelId;
-  messagesRef.current = messages;
 
-  // Render subtle 3D wireframe sphere on floating launcher orb
+  // Render audio-reactive 3D wireframe sphere directly inside the compact launcher
   useEffect(() => {
-    if (isOpen || !showLauncher) return;
+    if (!showLauncher) return;
     const canvas = orbCanvasRef.current;
     if (!canvas) return;
 
@@ -272,6 +221,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     const nucMesh = new THREE.Mesh(nucGeo, nucMat);
     scene.add(nucMesh);
 
+    const bins = new Uint8Array(32);
+    const colorTarget = new THREE.Color(0x8ecfff);
     let rafId = 0;
     let t = 0;
     let active = true;
@@ -279,13 +230,41 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     const animate = () => {
       if (!active || document.hidden) return;
       rafId = requestAnimationFrame(animate);
-      t += 0.025;
-      coreMesh.rotation.y += 0.018;
-      coreMesh.rotation.x += 0.008;
-      const s = 1 + Math.sin(t * 2.6) * 0.08;
+
+      const currentPhase = phaseRef.current;
+      let audioLevel = Math.min(1, micRmsRef.current * 4.5);
+
+      if (outAnalyserRef.current && activeAudioSourcesRef.current.size > 0) {
+        outAnalyserRef.current.getByteFrequencyData(bins);
+        let sum = 0;
+        for (let i = 0; i < 16; i++) sum += bins[i];
+        audioLevel = Math.max(audioLevel, Math.min(1, sum / (16 * 140)));
+      } else if (isTtsSpeakingRef.current) {
+        audioLevel = Math.max(audioLevel, 0.35 + 0.2 * Math.sin(t * 9));
+      }
+
+      if (currentPhase === 'listening') {
+        colorTarget.setHex(0x4ade80);
+      } else if (currentPhase === 'speaking') {
+        colorTarget.setHex(0xe5c17d);
+      } else if (currentPhase === 'connecting' || currentPhase === 'thinking') {
+        colorTarget.setHex(0x69b8ff);
+      } else if (currentPhase === 'error') {
+        colorTarget.setHex(0xf87171);
+      } else {
+        colorTarget.setHex(0x8ecfff);
+      }
+      coreMat.color.lerp(colorTarget, 0.14);
+
+      const speedBoost = sessionActiveRef.current ? 1 + audioLevel * 1.4 : 1;
+      t += 0.025 * speedBoost;
+      coreMesh.rotation.y += 0.018 * speedBoost;
+      coreMesh.rotation.x += 0.008 * speedBoost;
+      const s = 1 + Math.sin(t * 2.6) * 0.08 + audioLevel * 0.28;
       nucMesh.scale.set(s, s, s);
       renderer.render(scene, camera);
     };
+
     const onVis = () => {
       if (!document.hidden && active) {
         cancelAnimationFrame(rafId);
@@ -305,91 +284,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       nucMat.dispose();
       renderer.dispose();
     };
-  }, [isOpen, showLauncher, placement]);
-
-  // Real audio-driven waveform visualizer when open
-  useEffect(() => {
-    if (!isOpen) return;
-    const canvas = hudWaveCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const bars = 28;
-    const smoothed = new Float32Array(bars);
-    const bins = new Uint8Array(64);
-    let rafId = 0;
-    let alive = true;
-
-    const renderWave = () => {
-      if (!alive) return;
-      rafId = requestAnimationFrame(renderWave);
-
-      const w = canvas.width;
-      const h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-
-      let outFftReady = false;
-      const outAnalyser = outAnalyserRef.current;
-      if (outAnalyser && activeAudioSourcesRef.current.size > 0) {
-        outAnalyser.getByteFrequencyData(bins);
-        for (let i = 0; i < bars; i++) {
-          if ((bins[i] || 0) > 2) {
-            outFftReady = true;
-            break;
-          }
-        }
-      }
-
-      const micEnergy = isMutedRef.current ? 0 : Math.min(1, micRmsRef.current * 4.5);
-      const barW = 2.5;
-      const gap = (w - bars * barW) / Math.max(1, bars - 1);
-
-      for (let i = 0; i < bars; i++) {
-        let target = 0.08;
-        if (outFftReady) {
-          target = Math.max(0.12, (bins[i % 24] || 0) / 255);
-        } else if (micEnergy > 0.02) {
-          const centerFactor = 1 - Math.abs(i - bars / 2) / (bars / 2);
-          target = Math.max(0.1, micEnergy * (0.45 + 0.55 * centerFactor));
-        } else if (isTtsSpeakingRef.current) {
-          const centerFactor = 1 - Math.abs(i - bars / 2) / (bars / 2);
-          target = 0.25 + 0.35 * centerFactor;
-        }
-        smoothed[i] += (target - smoothed[i]) * 0.28;
-        const barH = Math.max(3, smoothed[i] * h);
-        const x = i * (barW + gap);
-        const y = (h - barH) / 2;
-
-        ctx.fillStyle = outFftReady || isTtsSpeakingRef.current
-          ? '#C4A876'
-          : micEnergy > 0.02
-          ? '#2E8B74'
-          : 'rgba(157, 165, 178, 0.35)';
-        ctx.fillRect(x, y, barW, barH);
-      }
-    };
-
-    renderWave();
-    return () => {
-      alive = false;
-      cancelAnimationFrame(rafId);
-    };
-  }, [isOpen]);
-
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, liveUserCaption, liveAiCaption, isOpen]);
-
-  const appendMessage = useCallback((sender: 'ai' | 'user', text: string) => {
-    const clean = text.trim();
-    if (!clean) return;
-    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setMessages((prev) => [
-      ...prev.slice(-23),
-      { id: `${sender}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, sender, text: clean, time: nowTime },
-    ]);
-  }, []);
+  }, [showLauncher, placement]);
 
   // Voice navigation intent router
   const detectAndNavigateIntent = useCallback(
@@ -412,6 +307,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         targetTab = 'venus';
       } else if (lower.includes('图书馆') || lower.includes('看书') || lower.includes('library')) {
         targetTab = 'library';
+      } else if (lower.includes('语言学习') || lower.includes('学英语') || lower.includes('学习') || lower.includes('language') || lower.includes('english')) {
+        targetTab = 'arabic-learning';
+      } else if (lower.includes('发现') || lower.includes('discover')) {
+        targetTab = 'feed';
+      } else if (lower.includes('智能') || lower.includes('ai')) {
+        targetTab = 'aihub';
       } else if (lower.includes('浏览器') || lower.includes('browser')) {
         targetTab = 'browser';
       }
@@ -513,9 +414,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
     micRmsRef.current = 0;
     pendingUserTranscriptRef.current = '';
-    pendingAiTranscriptRef.current = '';
-    setLiveUserCaption('');
-    setLiveAiCaption('');
     setVoiceActive(false);
     setPhase('idle');
   }, [stopOutputAudio]);
@@ -559,14 +457,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     source.onended = () => {
       activeAudioSourcesRef.current.delete(source);
       if (activeAudioSourcesRef.current.size === 0 && sessionActiveRef.current) {
-        setPhase(isMutedRef.current ? 'muted' : 'listening');
+        setPhase('listening');
       }
     };
 
     source.start(startAt);
   }, []);
 
-  // Fallback TTS helper for environments without Gemini Live server key
   const speakFallbackReply = useCallback(
     (text: string, onDone?: () => void) => {
       const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/```[\s\S]*?```/g, '').trim();
@@ -584,12 +481,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         setPhase('speaking');
         utt.onend = () => {
           isTtsSpeakingRef.current = false;
-          if (sessionActiveRef.current) setPhase(isMutedRef.current ? 'muted' : 'listening');
+          if (sessionActiveRef.current) setPhase('listening');
           onDone?.();
         };
         utt.onerror = () => {
           isTtsSpeakingRef.current = false;
-          if (sessionActiveRef.current) setPhase(isMutedRef.current ? 'muted' : 'listening');
+          if (sessionActiveRef.current) setPhase('listening');
           onDone?.();
         };
         window.speechSynthesis.speak(utt);
@@ -601,7 +498,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     [isZh]
   );
 
-  // Fallback streaming turn handler (supports both normal text chat and active voice session)
   const runFallbackTurn = useCallback(
     async (userText: string, resumeSpeechAfter?: () => void) => {
       const clean = userText.trim();
@@ -609,16 +505,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       isSendingFallbackRef.current = true;
       const shouldSpeak = sessionActiveRef.current;
 
-      appendMessage('user', clean);
-      setLiveUserCaption('');
+      historyRef.current = [...historyRef.current.slice(-5), { role: 'user', parts: [{ text: clean }] }];
       setPhase('thinking');
 
-      // Check local navigation intent first for instantaneous jump
       const navTab = detectAndNavigateIntent(clean);
       if (navTab) {
         const navReply = isZh ? '好的，已为您切换画面。' : 'Done, navigating now.';
-        appendMessage('ai', navReply);
-        setLiveAiCaption('');
+        historyRef.current = [...historyRef.current.slice(-5), { role: 'model', parts: [{ text: navReply }] }];
         if (shouldSpeak) {
           speakFallbackReply(navReply, () => {
             isSendingFallbackRef.current = false;
@@ -641,22 +534,17 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             mode: 'general',
             stream: true,
             useSearchGrounding: true,
-            history: messagesRef.current.slice(-6).map((m) => ({
-              role: m.sender === 'user' ? 'user' : 'model',
-              parts: [{ text: m.text }],
-            })),
+            history: historyRef.current.slice(-6),
           }),
         });
 
         let fullReply = '';
         await readAIStream(res, (delta) => {
           fullReply += delta;
-          setLiveAiCaption(fullReply);
         });
 
         const finalText = fullReply.trim() || (isZh ? '我明白了，请继续说。' : 'Got it, please continue.');
-        appendMessage('ai', finalText);
-        setLiveAiCaption('');
+        historyRef.current = [...historyRef.current.slice(-5), { role: 'model', parts: [{ text: finalText }] }];
         if (shouldSpeak) {
           speakFallbackReply(finalText, () => {
             isSendingFallbackRef.current = false;
@@ -667,21 +555,17 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           setPhase('idle');
         }
       } catch {
-        const errMsg = isZh ? 'AI 对话连接波动，请再试一次。' : 'Connection interrupted, please try again.';
-        appendMessage('ai', errMsg);
-        setLiveAiCaption('');
         isSendingFallbackRef.current = false;
-        if (sessionActiveRef.current) setPhase(isMutedRef.current ? 'muted' : 'listening');
+        if (sessionActiveRef.current) setPhase('listening');
         else setPhase('idle');
         resumeSpeechAfter?.();
       }
     },
-    [appendMessage, detectAndNavigateIntent, isZh, speakFallbackReply]
+    [detectAndNavigateIntent, isZh, speakFallbackReply]
   );
 
   // Continuous browser SpeechRecognition fallback when Gemini Live WS isn't available
   const startContinuousSpeechFallback = useCallback(() => {
-    setEngineMode('fallback');
     if (wsRef.current) {
       try {
         wsRef.current.close();
@@ -691,18 +575,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) {
-      setShowTextInput(true);
-      setPhase('listening');
-      setStatusNotice(
-        isZh
-          ? '当前浏览器不支持免按连续语音识别，可在下方直接输入对话'
-          : 'Continuous speech recognition unavailable in this browser; type below'
-      );
+      setPhase('error');
       return;
     }
 
     const launchRecognizer = () => {
-      if (!sessionActiveRef.current || isMutedRef.current || isTtsSpeakingRef.current || isSendingFallbackRef.current) {
+      if (!sessionActiveRef.current || isTtsSpeakingRef.current || isSendingFallbackRef.current) {
         return;
       }
       try {
@@ -716,7 +594,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         };
 
         rec.onresult = (e: any) => {
-          if (!sessionActiveRef.current || isMutedRef.current) return;
+          if (!sessionActiveRef.current) return;
           let interim = '';
           let finalSegment = '';
           for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -727,17 +605,15 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               interim += res[0].transcript;
             }
           }
-          if (interim) {
-            setLiveUserCaption(interim);
-            // Barge-in if user starts speaking
-            if (isTtsSpeakingRef.current) stopOutputAudio();
+          if (interim && isTtsSpeakingRef.current) {
+            stopOutputAudio();
           }
           if (finalSegment.trim()) {
             try {
               rec.stop();
             } catch {}
             void runFallbackTurn(finalSegment.trim(), () => {
-              if (sessionActiveRef.current && !isMutedRef.current) {
+              if (sessionActiveRef.current) {
                 setTimeout(launchRecognizer, 180);
               }
             });
@@ -746,20 +622,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
         rec.onerror = (e: any) => {
           if (e?.error === 'not-allowed') {
-            setShowTextInput(true);
-            setStatusNotice(
-              isZh ? '麦克风权限被拒绝，可在浏览器地址栏开启或使用下方输入框' : 'Microphone blocked; enable mic or type below'
-            );
+            setPhase('error');
           }
         };
 
         rec.onend = () => {
-          if (
-            sessionActiveRef.current &&
-            !isMutedRef.current &&
-            !isTtsSpeakingRef.current &&
-            !isSendingFallbackRef.current
-          ) {
+          if (sessionActiveRef.current && !isTtsSpeakingRef.current && !isSendingFallbackRef.current) {
             setTimeout(launchRecognizer, 260);
           }
         };
@@ -767,24 +635,20 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         recognitionRef.current = rec;
         rec.start();
       } catch {
-        setShowTextInput(true);
+        setPhase('error');
       }
     };
 
     launchRecognizer();
   }, [isZh, runFallbackTurn, stopOutputAudio]);
 
-  // One-click instant full-duplex voice activation (runs directly inside user gesture click!)
+  // One-click instant full-duplex voice activation in place (no popup / no expansion!)
   const startInstantVoiceSession = useCallback(async () => {
     stopSessionResources();
     sessionActiveRef.current = true;
     setVoiceActive(true);
     setPhase('connecting');
-    setStatusNotice(null);
-    setLiveUserCaption('');
-    setLiveAiCaption('');
 
-    // Prepare 24kHz Output AudioContext + Analyser inside user click gesture
     let outCtx: AudioContext;
     try {
       outCtx = new AudioContext({ sampleRate: 24000 });
@@ -792,7 +656,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       outCtx = new AudioContext();
     }
     const outAnalyser = outCtx.createAnalyser();
-    outAnalyser.fftSize = 128;
+    outAnalyser.fftSize = 64;
     outAnalyser.connect(outCtx.destination);
     outputAudioCtxRef.current = outCtx;
     outAnalyserRef.current = outAnalyser;
@@ -801,7 +665,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       void outCtx.resume();
     }
 
-    // Request Mic immediately in gesture
     let stream: MediaStream | null = null;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -812,11 +675,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         },
       });
     } catch {
-      setShowTextInput(true);
-      setPhase('listening');
-      setStatusNotice(
-        isZh ? '未获取到麦克风权限，可先在下方输入或重新开启麦克风' : 'Microphone unavailable; type below or enable mic'
-      );
+      sessionActiveRef.current = false;
+      setVoiceActive(false);
+      setPhase('error');
+      setTimeout(() => {
+        if (!sessionActiveRef.current) setPhase('idle');
+      }, 2800);
       return;
     }
 
@@ -827,7 +691,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
     micStreamRef.current = stream;
 
-    // Input AudioContext for mic RMS level + 16kHz PCM encoding
     let inCtx: AudioContext;
     try {
       inCtx = new AudioContext({ sampleRate: 16000 });
@@ -848,7 +711,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     processor.connect(inCtx.destination);
 
     processor.onaudioprocess = (event) => {
-      if (!sessionActiveRef.current || isMutedRef.current) {
+      if (!sessionActiveRef.current) {
         micRmsRef.current = 0;
         return;
       }
@@ -857,8 +720,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       for (let i = 0; i < channelData.length; i += 4) {
         sum += channelData[i] * channelData[i];
       }
-      const rms = Math.sqrt(sum / (channelData.length / 4));
-      micRmsRef.current = rms;
+      micRmsRef.current = Math.sqrt(sum / (channelData.length / 4));
 
       if (wsRef.current?.readyState === WebSocket.OPEN && liveReadyRef.current) {
         const base64Pcm = downsampleFloatTo16kPcmBase64(channelData, inCtx.sampleRate);
@@ -866,7 +728,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       }
     };
 
-    // Connect Gemini Live WS relay
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${proto}//${window.location.host}/ws/ai-live`);
     wsRef.current = ws;
@@ -884,8 +745,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         if (msg.type === 'ready') {
           clearTimeout(fallbackTimer);
           liveReadyRef.current = true;
-          setEngineMode('live');
-          setPhase(isMutedRef.current ? 'muted' : 'listening');
+          setPhase('listening');
           return;
         }
 
@@ -902,42 +762,22 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
         if (msg.type === 'inputTranscript' && typeof msg.text === 'string') {
           pendingUserTranscriptRef.current += msg.text;
-          setLiveUserCaption(pendingUserTranscriptRef.current);
-          return;
-        }
-
-        if (msg.type === 'outputTranscript' && typeof msg.text === 'string') {
-          pendingAiTranscriptRef.current += msg.text;
-          setLiveAiCaption(pendingAiTranscriptRef.current);
           return;
         }
 
         if (msg.type === 'interrupted') {
           stopOutputAudio();
-          if (pendingAiTranscriptRef.current.trim()) {
-            appendMessage('ai', pendingAiTranscriptRef.current);
-            pendingAiTranscriptRef.current = '';
-          }
-          setLiveAiCaption('');
-          setPhase(isMutedRef.current ? 'muted' : 'listening');
+          setPhase('listening');
           return;
         }
 
         if (msg.type === 'turnComplete') {
           if (pendingUserTranscriptRef.current.trim()) {
-            const finalizedUser = pendingUserTranscriptRef.current.trim();
-            appendMessage('user', finalizedUser);
-            detectAndNavigateIntent(finalizedUser);
+            detectAndNavigateIntent(pendingUserTranscriptRef.current.trim());
             pendingUserTranscriptRef.current = '';
-            setLiveUserCaption('');
-          }
-          if (pendingAiTranscriptRef.current.trim()) {
-            appendMessage('ai', pendingAiTranscriptRef.current.trim());
-            pendingAiTranscriptRef.current = '';
-            setLiveAiCaption('');
           }
           if (activeAudioSourcesRef.current.size === 0) {
-            setPhase(isMutedRef.current ? 'muted' : 'listening');
+            setPhase('listening');
           }
         }
       } catch {
@@ -959,72 +799,20 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       }
     };
   }, [
-    appendMessage,
     detectAndNavigateIntent,
-    isZh,
     playPcm24kChunk,
     startContinuousSpeechFallback,
     stopOutputAudio,
     stopSessionResources,
   ]);
 
-  // Triggered on single click of floating AI -> opens directly into instant chat (no extra page navigation!)
+  // Single click directly toggles automatic in-place voice conversation (never pops open or expands!)
   const handleLauncherClick = () => {
     if (suppressClickRef.current) return;
-    setIsOpen(true);
-    setShowTextInput(true);
-    setStatusNotice(null);
-    setTimeout(() => inputRef.current?.focus(), 80);
-  };
-
-  const handleToggleVoice = () => {
     if (voiceActive || sessionActiveRef.current) {
       stopSessionResources();
     } else {
-      setIsMuted(false);
       void startInstantVoiceSession();
-    }
-  };
-
-  const handleClose = () => {
-    stopSessionResources();
-    setIsOpen(false);
-  };
-
-  const toggleMute = () => {
-    const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    isMutedRef.current = nextMuted;
-    if (nextMuted) {
-      setPhase('muted');
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-      }
-    } else {
-      setPhase('listening');
-      if (engineMode === 'fallback' && !isTtsSpeakingRef.current && !isSendingFallbackRef.current) {
-        startContinuousSpeechFallback();
-      }
-    }
-  };
-
-  const handleSendText = () => {
-    const text = inputMsg.trim();
-    if (!text) return;
-    setInputMsg('');
-    if (wsRef.current?.readyState === WebSocket.OPEN && liveReadyRef.current) {
-      appendMessage('user', text);
-      detectAndNavigateIntent(text);
-      wsRef.current.send(JSON.stringify({ type: 'text', text }));
-      setPhase('thinking');
-    } else {
-      void runFallbackTurn(text, () => {
-        if (sessionActiveRef.current && !isMutedRef.current && engineMode === 'fallback') {
-          startContinuousSpeechFallback();
-        }
-      });
     }
   };
 
@@ -1088,281 +876,82 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     }
   };
 
-  const phaseLabel = (() => {
+  const activePillLabel = (() => {
+    if (!voiceActive && phase !== 'error') return 'One.';
     switch (phase) {
       case 'connecting':
-        return isZh ? '正在接通实时语音…' : 'Connecting live voice…';
+        return isZh ? 'One. · 连接中' : 'One. · Connecting';
       case 'listening':
-        return isZh ? '正在聆听 · 直接开口说话' : 'Listening · Speak naturally';
+        return isZh ? 'One. · 聆听中' : 'One. · Listening';
       case 'thinking':
-        return isZh ? '正在思考回复…' : 'Thinking…';
+        return isZh ? 'One. · 思考中' : 'One. · Thinking';
       case 'speaking':
-        return isZh ? 'AI 正在回答 · 说话可随时打断' : 'Speaking · Interrupt anytime';
-      case 'muted':
-        return isZh ? '麦克风已静音' : 'Microphone muted';
+        return isZh ? 'One. · 对话中' : 'One. · Speaking';
+      case 'error':
+        return isZh ? 'One. · 需麦克风' : 'One. · Mic Needed';
       default:
-        return isZh ? '直接对话 · 点击麦克风可语音通话' : 'Direct chat · Tap mic for voice';
+        return 'One.';
     }
   })();
 
-  return (
-    <>
-      {/* Floating AI Launcher: Centered directly under the 01 Logo on Home, or draggable corner orb on sub-pages */}
-      {!isOpen && showLauncher && (
-        placement === 'center-bottom' ? (
-          <div
-            id="globe-ai-launcher"
-            className="fixed bottom-[calc(5.2rem+env(safe-area-inset-bottom))] md:bottom-7 left-1/2 -translate-x-1/2 z-40 select-none"
-          >
-            <button
-              type="button"
-              onClick={handleLauncherClick}
-              aria-label={isZh ? '点击立即与 EARTH ONE AI 直接聊天' : 'Open EARTH ONE AI direct chat'}
-              className="group inline-flex h-12 items-center gap-3 rounded-full border border-white/18 bg-[#070B16]/80 backdrop-blur-2xl pl-2 pr-4 shadow-[0_14px_38px_rgba(0,0,0,0.68)] transition-all hover:scale-[1.02] hover:border-[#8ECFFF]/60 active:scale-95 cursor-pointer"
-            >
-              <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white/[0.04] border border-white/12">
-                <canvas ref={orbCanvasRef} className="pointer-events-none h-8 w-8 rounded-full" />
-              </span>
-              <span className="flex flex-col items-start text-left">
-                <span className="text-xs font-semibold tracking-wide text-[#F7F5F0]">
-                  {isZh ? '问问 EARTH ONE AI' : 'Ask EARTH ONE AI'}
-                </span>
-                <span className="text-[10px] text-[#8FA8C8] leading-tight">
-                  {isZh ? '点击直接对话 / 语音' : 'Tap to chat or speak'}
-                </span>
-              </span>
-              <span className="ml-1 flex h-7 w-7 items-center justify-center rounded-full bg-[#69B8FF]/18 text-[#9AD6FF] group-hover:bg-[#69B8FF]/28 transition-colors">
-                <Mic className="h-3.5 w-3.5" />
-              </span>
-            </button>
-          </div>
-        ) : (
-          <div
-            id="globe-ai-launcher"
-            style={{ left: `${launcherPos.x}px`, top: `${launcherPos.y}px` }}
-            className="fixed z-40 select-none"
-          >
-            <button
-              type="button"
-              onPointerDown={handleOrbPointerDown}
-              onPointerMove={handleOrbPointerMove}
-              onPointerUp={finishOrbDrag}
-              onPointerCancel={finishOrbDrag}
-              onClick={handleLauncherClick}
-              style={{ touchAction: 'none' }}
-              aria-label={isZh ? '点击立即与 EARTH ONE AI 对话' : 'Tap to chat with EARTH ONE AI'}
-              title={isZh ? '点击直接对话（可拖动）' : 'Tap to chat (drag to move)'}
-              className={`group relative flex h-12 w-12 items-center justify-center rounded-full border border-white/20 bg-[#070B16]/82 backdrop-blur-2xl shadow-[0_10px_28px_rgba(0,0,0,0.48)] transition-transform ${
-                isDragging
-                  ? 'scale-110 cursor-grabbing ring-2 ring-[#8ECFFF]/60'
-                  : 'cursor-pointer hover:scale-105 hover:border-[#8ECFFF]/80 active:scale-95'
-              }`}
-            >
-              <canvas ref={orbCanvasRef} className="pointer-events-none h-10 w-10 rounded-full" />
-              <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-white/25 bg-[#070B16] text-[#8ECFFF] shadow">
-                <Mic className="h-2.5 w-2.5" />
-              </span>
-            </button>
-          </div>
-        )
-      )}
+  const activeBorderClass =
+    phase === 'listening'
+      ? 'border-emerald-400/75 shadow-[0_0_24px_rgba(52,211,153,0.32)]'
+      : phase === 'speaking'
+      ? 'border-[#E5C17D]/80 shadow-[0_0_24px_rgba(229,193,125,0.34)]'
+      : phase === 'connecting' || phase === 'thinking'
+      ? 'border-[#69B8FF]/80 shadow-[0_0_24px_rgba(105,184,255,0.32)]'
+      : phase === 'error'
+      ? 'border-rose-400/75 shadow-[0_0_20px_rgba(248,113,113,0.28)]'
+      : 'border-white/18 shadow-[0_14px_38px_rgba(0,0,0,0.68)] hover:border-[#8ECFFF]/60';
 
-      {/* Sleek Apple-Grade Instant Floating Chat + Optional Live Voice Console */}
-      {isOpen && (
-        <div
-          id="globe-ai-console-wrapper"
-          className={
-            placement === 'center-bottom'
-              ? 'fixed bottom-[calc(5.15rem+env(safe-area-inset-bottom))] md:bottom-7 left-1/2 -translate-x-1/2 z-50 w-[min(440px,calc(100vw-1.25rem))] select-none'
-              : 'fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:bottom-6 right-3 sm:right-5 z-50 w-[min(390px,calc(100vw-1.5rem))] select-none'
-          }
-        >
-          <div className="rounded-2xl border border-white/16 bg-[#070B16]/88 backdrop-blur-2xl saturate-150 text-[#F7F5F0] shadow-[0_24px_60px_rgba(0,0,0,0.72)] flex flex-col overflow-hidden">
-            {/* Compact Header */}
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${
-                    phase === 'speaking'
-                      ? 'bg-[#C4A876]'
-                      : phase === 'listening'
-                      ? 'bg-[#2E8B74]'
-                      : phase === 'connecting' || phase === 'thinking'
-                      ? 'bg-[#69B8FF]'
-                      : 'bg-[#8ECFFF]/65'
-                  }`}
-                />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold tracking-wide text-[#F7F5F0]">
-                      EARTH ONE AI
-                    </span>
-                    {voiceActive && (
-                      <span className="font-mono text-[10px] uppercase text-[#8ECFFF]">
-                        {engineMode === 'live' ? 'LIVE PCM' : 'VOICE'}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-[#9DA5B2] truncate">{phaseLabel}</p>
-                </div>
-              </div>
+  if (!showLauncher) return null;
 
-              <div className="flex items-center gap-1">
-                {messages.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setMessages([])}
-                    className="flex h-8 w-8 items-center justify-center rounded-xl text-[#9DA5B2] hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
-                    title={isZh ? '清空记录' : 'Clear history'}
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                  </button>
-                )}
-                {onOpenAIHub && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleClose();
-                      onOpenAIHub();
-                    }}
-                    className="flex h-8 w-8 items-center justify-center rounded-xl text-[#9DA5B2] hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
-                    title={isZh ? '进入完整 AI 工作台' : 'Full AI Workspace'}
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className="flex h-8 w-8 items-center justify-center rounded-xl text-[#9DA5B2] hover:bg-white/[0.08] hover:text-rose-400 transition-colors cursor-pointer"
-                  title={isZh ? '关闭对话' : 'Close'}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Voice Waveform Strip (shown smoothly when Live Voice is toggled active) */}
-            {voiceActive && (
-              <div className="border-b border-white/10 bg-white/[0.03] px-4 py-2.5 flex items-center justify-between gap-3">
-                <canvas
-                  ref={hudWaveCanvasRef}
-                  width={210}
-                  height={26}
-                  className="h-6 w-[210px] shrink-0"
-                />
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={toggleMute}
-                    className={`inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[11px] border cursor-pointer ${
-                      isMuted
-                        ? 'border-rose-500/40 bg-rose-500/15 text-rose-300'
-                        : 'border-[#2E8B74]/50 bg-[#2E8B74]/18 text-[#F7F5F0]'
-                    }`}
-                  >
-                    {isMuted ? <MicOff className="h-3 w-3" /> : <Mic className="h-3 w-3 text-[#2E8B74]" />}
-                    <span>{isMuted ? (isZh ? '静音' : 'Muted') : (isZh ? '聆听中' : 'Live')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={stopOutputAudio}
-                    className="inline-flex h-7 items-center gap-1 rounded-lg border border-white/14 px-2 text-[11px] text-[#9DA5B2] hover:text-white cursor-pointer"
-                    title={isZh ? '打断播报' : 'Stop audio'}
-                  >
-                    <Volume2 className="h-3 w-3" />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Direct Conversation Feed */}
-            <div className="max-h-56 overflow-y-auto px-4 py-3 space-y-2.5 text-xs">
-              {messages.length === 0 && !liveUserCaption && !liveAiCaption && (
-                <p className="text-[11px] text-[#8E98A6] leading-relaxed">
-                  {initialGreeting}
-                </p>
-              )}
-
-              {messages.slice(-10).map((m) => (
-                <div
-                  key={m.id}
-                  className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}
-                >
-                  <div
-                    className={`max-w-[88%] rounded-xl px-3 py-2 leading-relaxed ${
-                      m.sender === 'user'
-                        ? 'bg-[#69B8FF]/20 border border-[#69B8FF]/35 text-[#F7F5F0]'
-                        : 'bg-white/[0.06] border border-white/10 text-[#DCE4F0]'
-                    }`}
-                  >
-                    <p className="whitespace-pre-wrap">{m.text}</p>
-                  </div>
-                </div>
-              ))}
-
-              {liveUserCaption && (
-                <div className="flex flex-col items-end">
-                  <div className="max-w-[88%] rounded-xl px-3 py-2 bg-[#2E8B74]/20 border border-[#2E8B74]/35 text-[#B5EFE0]">
-                    {liveUserCaption}
-                  </div>
-                </div>
-              )}
-
-              {liveAiCaption && (
-                <div className="flex flex-col items-start">
-                  <div className="max-w-[88%] rounded-xl px-3 py-2 bg-white/[0.06] border border-white/10 text-[#F7F5F0]">
-                    <p className="whitespace-pre-wrap">{liveAiCaption}</p>
-                  </div>
-                </div>
-              )}
-
-              {statusNotice && (
-                <p className="text-[11px] text-[#C4A876]">{statusNotice}</p>
-              )}
-              <div ref={chatBottomRef} />
-            </div>
-
-            {/* Always-Ready Direct Input + One-Tap Live Voice Bar */}
-            {showTextInput && (
-              <div className="flex items-center gap-2 border-t border-white/10 bg-white/[0.03] px-3 py-2.5">
-                <button
-                  type="button"
-                  onClick={handleToggleVoice}
-                  className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-colors cursor-pointer ${
-                    voiceActive
-                      ? 'border-rose-500/60 bg-rose-500/20 text-rose-300'
-                      : 'border-white/14 bg-white/[0.04] text-[#9AD6FF] hover:border-[#8ECFFF]'
-                  }`}
-                  title={voiceActive ? (isZh ? '挂断语音' : 'End voice') : (isZh ? '开启实时语音' : 'Start live voice')}
-                >
-                  {voiceActive ? <PhoneOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                </button>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={inputMsg}
-                  onChange={(e) => setInputMsg(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSendText();
-                  }}
-                  placeholder={isZh ? '直接输入问题，回车发送…' : 'Ask anything, press Enter…'}
-                  className="flex-1 min-w-0 rounded-xl border border-white/14 bg-[#03050B]/85 px-3 py-2 text-xs text-[#F7F5F0] placeholder-[#7B8698] focus:border-[#8ECFFF] focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleSendText}
-                  disabled={!inputMsg.trim()}
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#8ECFFF] text-[#03050B] hover:bg-[#B2DFFF] disabled:opacity-35 transition-colors cursor-pointer"
-                  title={isZh ? '发送' : 'Send'}
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </>
+  return placement === 'center-bottom' ? (
+    <div
+      id="globe-ai-launcher"
+      className="fixed bottom-[calc(5.2rem+env(safe-area-inset-bottom))] md:bottom-7 left-1/2 -translate-x-1/2 z-40 select-none"
+    >
+      <button
+        type="button"
+        onClick={handleLauncherClick}
+        aria-label="One."
+        aria-pressed={voiceActive}
+        className={`group inline-flex h-11 items-center gap-2.5 rounded-full border bg-[#070B16]/82 backdrop-blur-2xl pl-2 pr-4 transition-all hover:scale-[1.03] active:scale-95 cursor-pointer ${activeBorderClass}`}
+      >
+        <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] border border-white/12">
+          <canvas ref={orbCanvasRef} className="pointer-events-none h-7 w-7 rounded-full" />
+        </span>
+        <span className="text-xs font-semibold tracking-[0.14em] text-[#F7F5F0] whitespace-nowrap">
+          {activePillLabel}
+        </span>
+      </button>
+    </div>
+  ) : (
+    <div
+      id="globe-ai-launcher"
+      style={{ left: `${launcherPos.x}px`, top: `${launcherPos.y}px` }}
+      className="fixed z-40 select-none"
+    >
+      <button
+        type="button"
+        onPointerDown={handleOrbPointerDown}
+        onPointerMove={handleOrbPointerMove}
+        onPointerUp={finishOrbDrag}
+        onPointerCancel={finishOrbDrag}
+        onClick={handleLauncherClick}
+        style={{ touchAction: 'none' }}
+        aria-label="One."
+        aria-pressed={voiceActive}
+        title={activePillLabel}
+        className={`group relative flex h-12 w-12 items-center justify-center rounded-full border bg-[#070B16]/82 backdrop-blur-2xl transition-transform ${activeBorderClass} ${
+          isDragging
+            ? 'scale-110 cursor-grabbing ring-2 ring-[#8ECFFF]/60'
+            : 'cursor-pointer hover:scale-105 active:scale-95'
+        }`}
+      >
+        <canvas ref={orbCanvasRef} className="pointer-events-none h-10 w-10 rounded-full" />
+      </button>
+    </div>
   );
 };

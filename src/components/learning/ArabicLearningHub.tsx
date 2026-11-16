@@ -39,6 +39,7 @@ import {
   type IslamicLibraryCategory,
   type IslamicLibrarySource
 } from './islamicLibraryData.ts';
+import { EnglishLearningSection } from './EnglishLearningSection.tsx';
 
 const STORAGE_KEY = 'earth_one_arabic_learning_v1';
 const DAILY_NEW_LIMIT = 5;
@@ -89,8 +90,8 @@ type Copy = {
 
 const COPY: Record<Language, Copy> = {
   zh: {
-    title: '阿拉伯语与伊斯兰古籍研习',
-    subtitle: '从字母基础到各大伊斯兰数字图书馆典籍，连接全球阿拉伯语古典文献与语言智慧。',
+    title: '语言学习中心',
+    subtitle: '集成英语实时词典与听说引擎、阿拉伯语基础发音研习及全球伊斯兰数字图书馆。',
     practice: '今日复习',
     alphabet: '字母表',
     library: '伊斯兰数字图书馆',
@@ -131,9 +132,9 @@ const COPY: Record<Language, Copy> = {
     final: '词尾'
   },
   en: {
-    title: 'Arabic Learning & Islamic Library',
+    title: 'Language Learning Center',
     subtitle:
-      'From alphabet fundamentals to major Islamic digital libraries, accessing classical Arabic literature and linguistic wisdom.',
+      'Integrated English learning engine, Arabic fundamentals, and classical digital library repositories.',
     practice: "Today's review",
     alphabet: 'Alphabet',
     library: 'Islamic Digital Library',
@@ -174,8 +175,8 @@ const COPY: Record<Language, Copy> = {
     final: 'Final'
   },
   ar: {
-    title: 'تعلّم العربية والمكتبات الإسلامية',
-    subtitle: 'من أساسيات الحروف الهجائية إلى كبريات المكتبات الإسلامية الرقمية والمخطوطات التراثية الأصيلة.',
+    title: 'مركز تعلّم اللغات',
+    subtitle: 'محرك اللغة الإنجليزية المتكامل، وأساسيات العربية، والمكتبات الإسلامية الرقمية العالمية.',
     practice: 'مراجعة اليوم',
     alphabet: 'الأبجدية',
     library: 'المكتبات الإسلامية الرقمية',
@@ -216,8 +217,8 @@ const COPY: Record<Language, Copy> = {
     final: 'آخر الكلمة'
   },
   es: {
-    title: 'Aprendizaje de árabe y biblioteca islámica',
-    subtitle: 'Desde los conceptos básicos del alfabeto hasta las principales bibliotecas digitales islámicas.',
+    title: 'Centro de Aprendizaje de Idiomas',
+    subtitle: 'Motor integrado de inglés, fundamentos de árabe y bibliotecas digitales islámicas.',
     practice: 'Repaso de hoy',
     alphabet: 'Alfabeto',
     library: 'Biblioteca Islámica Digital',
@@ -258,8 +259,8 @@ const COPY: Record<Language, Copy> = {
     final: 'Final'
   },
   fr: {
-    title: 'Apprentissage de l’arabe et bibliothèque islamique',
-    subtitle: 'De l’alphabet aux grandes bibliothèques numériques islamiques et manuscrits classiques.',
+    title: 'Centre d’apprentissage des langues',
+    subtitle: 'Moteur d’anglais intégré, bases d’arabe et bibliothèques numériques islamiques.',
     practice: 'Révision du jour',
     alphabet: 'Alphabet',
     library: 'Bibliothèque islamique',
@@ -300,8 +301,8 @@ const COPY: Record<Language, Copy> = {
     final: 'Finale'
   },
   ru: {
-    title: 'Изучение арабского и исламская библиотека',
-    subtitle: 'От основ алфавита до крупнейших исламских электронных библиотек и рукописей.',
+    title: 'Центр изучения языков',
+    subtitle: 'Английский движок, основы арабского языка и мировые исламские электронные библиотеки.',
     practice: 'Повторение на сегодня',
     alphabet: 'Алфавит',
     library: 'Исламская библиотека',
@@ -348,7 +349,7 @@ interface ArabicLearningHubProps {
   onOpenLibrary: () => void;
 }
 
-type MainTab = 'letters' | 'islamic_library';
+type MainTab = 'english_engine' | 'letters' | 'islamic_library';
 type View = 'home' | 'alphabet' | 'practice';
 
 function readSavedProgress(): ArabicStudyState {
@@ -365,7 +366,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
   const isRtl = lang === 'ar';
 
   // Navigation state
-  const [mainTab, setMainTab] = useState<MainTab>('islamic_library');
+  const [mainTab, setMainTab] = useState<MainTab>('english_engine');
   const [study, setStudy] = useState<ArabicStudyState>(readSavedProgress);
   const [view, setView] = useState<View>('home');
   const [selectedLetterId, setSelectedLetterId] = useState<string>(ARABIC_LETTERS[0].id);
@@ -581,8 +582,8 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
               </div>
               <div>
                 <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="one-badge one-badge-gold">ONE · LEARNING</span>
-                  <span className="one-badge one-badge-neutral">5 LIBRARIES</span>
+                  <span className="one-badge one-badge-gold">语言学习中心</span>
+                  <span className="one-badge one-badge-neutral">ENGLISH ENGINE · ARABIC</span>
                 </div>
                 <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-3xl">
                   {t.title}
@@ -607,27 +608,24 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setMainTab('islamic_library')}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${
-                mainTab === 'islamic_library'
+              onClick={() => setMainTab('english_engine')}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer ${
+                mainTab === 'english_engine'
                   ? 'text-[color:var(--color-one-text)]'
                   : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
               }`}
               style={
-                mainTab === 'islamic_library'
+                mainTab === 'english_engine'
                   ? {
-                      background: 'rgba(215,182,118,0.14)',
-                      border: '1px solid rgba(215,182,118,0.28)',
-                      color: 'var(--color-one-gold)'
+                      background: 'rgba(127,212,255,0.14)',
+                      border: '1px solid rgba(127,212,255,0.32)',
+                      color: 'var(--color-one-accent)'
                     }
                   : { border: '1px solid transparent' }
               }
             >
-              <BookMarked className="h-4 w-4" />
-              <span>{lang === 'zh' ? '各大伊斯兰数字图书馆与古籍爬虫' : t.library}</span>
-              <span className="rounded-md px-1.5 py-0.5 text-[11px] font-mono" style={{ background: 'rgba(244,243,238,0.08)' }}>
-                {libraryBooks.length}
-              </span>
+              <Sparkles className="h-4 w-4" />
+              <span>{lang === 'zh' ? '英语学习引擎' : 'English Engine'}</span>
             </button>
 
             <button
@@ -636,7 +634,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                 setMainTab('letters');
                 setView('home');
               }}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer ${
                 mainTab === 'letters'
                   ? ''
                   : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
@@ -652,18 +650,50 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
               }
             >
               <GraduationCap className="h-4 w-4" />
-              <span>{lang === 'zh' ? '字母发音与间隔记忆复习' : `${t.alphabet} · ${t.practice}`}</span>
+              <span>{lang === 'zh' ? '阿拉伯语字母与发音' : `${t.alphabet} · ${t.practice}`}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMainTab('islamic_library')}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer ${
+                mainTab === 'islamic_library'
+                  ? 'text-[color:var(--color-one-text)]'
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
+              }`}
+              style={
+                mainTab === 'islamic_library'
+                  ? {
+                      background: 'rgba(215,182,118,0.14)',
+                      border: '1px solid rgba(215,182,118,0.28)',
+                      color: 'var(--color-one-gold)'
+                    }
+                  : { border: '1px solid transparent' }
+              }
+            >
+              <BookMarked className="h-4 w-4" />
+              <span>{lang === 'zh' ? '伊斯兰数字图书馆' : t.library}</span>
+              <span className="rounded-md px-1.5 py-0.5 text-[11px] font-mono" style={{ background: 'rgba(244,243,238,0.08)' }}>
+                {libraryBooks.length}
+              </span>
             </button>
           </div>
 
           <div className="hidden items-center gap-3 pr-2 text-xs text-[color:var(--color-one-text-dim)] sm:flex">
             <span className="inline-flex items-center gap-2">
               <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--color-one-success)]" />
-              <span>CRAWLER ACTIVE</span>
+              <span>{mainTab === 'english_engine' ? 'ENGLISH ENGINE READY' : 'CRAWLER ACTIVE'}</span>
             </span>
-            <span className="font-mono tracking-wide">SHAMELA · WAQFEYA · NOOR · ARCHIVE</span>
+            <span className="font-mono tracking-wide">
+              {mainTab === 'english_engine' ? 'LEXICON · IPA · AI COACH · CORPUS' : 'SHAMELA · WAQFEYA · NOOR · ARCHIVE'}
+            </span>
           </div>
         </div>
+
+        {/* ============================================================= */}
+        {/* TAB 0: ENGLISH LEARNING ENGINE                                */}
+        {/* ============================================================= */}
+        {mainTab === 'english_engine' && <EnglishLearningSection lang={lang} />}
 
         {/* ============================================================= */}
         {/* TAB 1: ISLAMIC DIGITAL LIBRARIES & MANUSCRIPT CRAWLER          */}
