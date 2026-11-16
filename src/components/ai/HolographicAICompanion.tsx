@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
-  ExternalLink,
   Mic,
   MicOff,
   PhoneOff,
@@ -18,7 +17,6 @@ interface HolographicAICompanionProps {
   lang: Language;
   onFlyTo?: (lat: number, lng: number) => void;
   onExploreUniverse?: () => void;
-  onOpenAIHub?: () => void;
   onNavigateTab?: (tab: string) => void;
   currentTab?: string;
   showLauncher?: boolean;
@@ -78,7 +76,6 @@ function decodePcm24kBase64ToFloat(base64: string): Float32Array {
 export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   lang,
   onExploreUniverse,
-  onOpenAIHub,
   onNavigateTab,
   showLauncher = true,
   placement = 'corner',
@@ -126,7 +123,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       .then((data) => {
         if (cancelled || !data?.success || !Array.isArray(data.models)) return;
         const preferred =
-          data.models.find((m: { id: string; isDefault?: boolean }) => m.isDefault) || data.models[0];
+          data.models.find((m: any) => m.id === 'deepseek-r1-open') ||
+          data.models.find((m: any) => m.ollamaRole === 'chat') ||
+          data.models.find((m: any) => m.isDefault) ||
+          data.models[0];
         if (preferred?.id) setModelId(preferred.id);
       })
       .catch(() => {});
@@ -1218,19 +1218,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                     <RotateCcw className="h-3.5 w-3.5" />
                   </button>
                 )}
-                {onOpenAIHub && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleClose();
-                      onOpenAIHub();
-                    }}
-                    className="flex h-8 w-8 items-center justify-center rounded-xl text-[#9DA5B2] hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
-                    title={isZh ? '进入完整 AI 工作台' : 'Full AI Workspace'}
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </button>
-                )}
+
                 <button
                   type="button"
                   onClick={handleClose}

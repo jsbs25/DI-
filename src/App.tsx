@@ -406,7 +406,7 @@ export default function App() {
       {currentUser && <AccountSecurityModal isOpen={isSecurityModalOpen} onClose={() => setIsSecurityModalOpen(false)} currentUser={currentUser} onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }} />}
       {currentUser && <OnboardingModal isOpen={isOnboardingModalOpen} user={currentUser} onComplete={handleOnboardingComplete} lang={lang} />}
 
-      <HolographicAICompanion lang={lang} showLauncher={!immersive} placement={currentTab === 'globe' ? 'center-bottom' : 'corner'} onFlyTo={(lat, lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} onExploreUniverse={() => setCurrentTab('universe')} onOpenAIHub={() => setCurrentTab('aihub')} onNavigateTab={tab => setCurrentTab(tab)} currentTab={currentTab} />
+      <HolographicAICompanion lang={lang} showLauncher={!immersive} placement={currentTab === 'globe' ? 'center-bottom' : 'corner'} onFlyTo={(lat, lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} onExploreUniverse={() => setCurrentTab('universe')} onNavigateTab={tab => setCurrentTab(tab)} currentTab={currentTab} />
 
       {!isSpaceExperience && (
         <footer className="w-full border-t border-slate-200 dark:border-white/10 bg-white/80 dark:bg-[#101a2e]/80 py-5 px-4 text-xs text-slate-500 dark:text-slate-400 md:pl-24">
