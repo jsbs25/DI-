@@ -20,7 +20,7 @@ ENV EARTH_ONE_SERVE_DIST=true
 
 # Runtime deps + tsx for TypeScript server entry
 COPY package.json bun.lock* ./
-RUN npm install --legacy-peer-deps.
+RUN npm install --force
 
 # App runtime files
 COPY --from=build /app/dist ./dist
