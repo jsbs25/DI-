@@ -330,6 +330,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 pendingAutoplayResumeRef.current = false;
                 engine.unlockPlayback();
                 void engine.resumeContext();
+                if (stateRef.current.muted) dispatch({ type: 'TOGGLE_MUTE' });
+                if (stateRef.current.volume <= 0.01) dispatch({ type: 'SET_VOLUME', volume: 0.88 });
                 dispatch({ type: 'PLAY' });
               }
             };
@@ -361,6 +363,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   const play = useCallback(() => {
     setUserStopped(false);
+    if (stateRef.current.muted) dispatch({ type: 'TOGGLE_MUTE' });
+    if (stateRef.current.volume <= 0.01) dispatch({ type: 'SET_VOLUME', volume: 0.88 });
     dispatch({ type: 'PLAY' });
   }, [setUserStopped]);
 
@@ -402,6 +406,9 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const playTrack = useCallback((track: MusicTrack | UnifiedTrack, queue?: Array<MusicTrack | UnifiedTrack>, index?: number) => {
     setUserStopped(false);
     consecutiveFailuresRef.current = 0;
+    // Avoid silent playback caused by previously persisted mute/zero volume
+    if (stateRef.current.muted) dispatch({ type: 'TOGGLE_MUTE' });
+    if (stateRef.current.volume <= 0.01) dispatch({ type: 'SET_VOLUME', volume: 0.88 });
     const region = getEffectiveMediaRegion();
     const norm = normalizeToUnifiedTrack(track as any);
     const orderedSources = sortClientMusicSources(norm.sources, region);

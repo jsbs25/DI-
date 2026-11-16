@@ -3382,12 +3382,21 @@ app.get('/api/music/tracks', (req, res) => {
   const seen = new Set<string>();
   const tracks = diskTracks
     .filter((t) => {
-      if (!t?.id || !t?.audioUrl || seen.has(t.id)) return false;
+      if (!t?.id || seen.has(t.id)) return false;
+      const audioUrl = String((t as any).audioUrl || '').trim();
+      const embedUrl = String((t as any).embedUrl || '').trim();
+      const hasReal = (!!audioUrl && /^https?:\/\//i.test(audioUrl)) || /player\.bilibili\.com|youtube(?:-nocookie)?\.com\/embed\//i.test(embedUrl);
+      if (!hasReal) return false;
       seen.add(t.id);
       return true;
     })
     .map((t) => enrichMusicTrack(t, regionCtx.region))
-    .filter((t) => Boolean(t.audioUrl) && t.availabilityStatus !== 'unavailable' && t.playbackType !== 'external_redirect');
+    .filter((t) => {
+      if (t.availabilityStatus === 'unavailable' || t.playbackType === 'external_redirect') return false;
+      const audioUrl = String(t.audioUrl || t.directAudioUrl || '').trim();
+      const embedUrl = String(t.embedUrl || '').trim();
+      return (!!audioUrl && /^https?:\/\//i.test(audioUrl)) || /player\.bilibili\.com|youtube(?:-nocookie)?\.com\/embed\//i.test(embedUrl);
+    });
   res.json({ success: true, region: regionCtx.region, tracks });
 });
 

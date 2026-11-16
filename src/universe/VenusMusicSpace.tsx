@@ -120,6 +120,15 @@ function isPlayableDirectAudio(t: MusicTrack): boolean {
   );
 }
 
+function isRealPlayableMusic(t: MusicTrack): boolean {
+  if (!t || t.availabilityStatus === 'unavailable' || t.playbackType === 'external_redirect') return false;
+  if (isPlayableDirectAudio(t)) return true;
+  const embed = String((t as any)?.embedUrl || (t as any)?.playback?.embedUrl || '');
+  if (!embed) return false;
+  // Only accept real official embeds (YouTube/Bilibili) - no fake/placeholder
+  return /player\.bilibili\.com|youtube(?:-nocookie)?\.com\/embed\//i.test(embed);
+}
+
 function handleCoverError(e: React.SyntheticEvent<HTMLImageElement>) {
   const img = e.currentTarget;
   if (img.dataset.fallbackApplied) return;
@@ -188,8 +197,10 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
   const visibleTracks = useMemo(() => {
     return tracks.filter((t) => {
       if (player.failedTrackIds.has(t.id)) return false;
-      if (t.availabilityStatus === 'unavailable' || t.playbackType === 'external_redirect') return false;
-      return allowEmbedMode ? Boolean(t.audioUrl || t.embedUrl) : isPlayableDirectAudio(t);
+      if (!isRealPlayableMusic(t)) return false;
+      const hay = `${t.title || ''} ${t.artist || ''} ${t.album || ''}`.toLowerCase();
+      if (/speech|sermon|podcast|audiobook|lecture|news|noise|test|sample/i.test(hay)) return false;
+      return allowEmbedMode ? Boolean(t.audioUrl || (t as any).embedUrl) : isRealPlayableMusic(t);
     });
   }, [tracks, allowEmbedMode, player.failedTrackIds]);
 
@@ -210,7 +221,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
       if (data.success && Array.isArray(data.tracks)) {
         const normalized = data.tracks
           .map(normalizeServerTrack)
-          .filter((t: MusicTrack) => isPlayableDirectAudio(t) && !player.isTrackFailed(t.id));
+          .filter((t: MusicTrack) => isRealPlayableMusic(t) && !player.isTrackFailed(t.id));
         setTracks(normalized.length > 0 ? normalized : OFFLINE_FALLBACK_TRACKS);
       } else {
         setTracks(OFFLINE_FALLBACK_TRACKS);
@@ -278,7 +289,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
       if (data.success && Array.isArray(data.tracks)) {
         const mapped = data.tracks
           .map(normalizeServerTrack)
-          .filter((t: MusicTrack) => isPlayableDirectAudio(t) && !player.isTrackFailed(t.id));
+          .filter((t: MusicTrack) => isRealPlayableMusic(t) && !player.isTrackFailed(t.id));
         if (mapped.length > 0) {
           setTracks(mapped);
           showNotice(isZh ? `已找到 ${mapped.length} 首可播放曲目` : `Found ${mapped.length} playable tracks`, 2400);
@@ -344,11 +355,22 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
         let combined: MusicTrack[] = mergedRaw
           .map(normalizeServerTrack)
           .filter((t) => {
-            if (!t?.id || seen.has(t.id) || player.isTrackFailed(t.id)) return false;
-            seen.add(t.id);
-            return isPlayableDirectAudio(t);
+            const key = String(t?.audioUrl || (t as any)?.embedUrl || t?.id || '');
+            if (!t?.id || !key || seen.has(key) || player.isTrackFailed(t.id)) return false;
+            if (!isRealPlayableMusic(t)) return false;
+            const hay = `${t.title || ''} ${t.artist || ''} ${t.album || ''}`.toLowerCase();
+            if (/speech|sermon|podcast|audiobook|lecture|news|noise|test|sample/i.test(hay)) return false;
+            seen.add(key);
+            return true;
           });
 
+        if (combined.length === 0) {
+          const fallbackSearch = await fetch(`/api/media/search?mediaType=music&q=${encodeURIComponent(kw || 'ambient piano')}&region=${effectiveRegion}&limit=20`).then(r=>r.json()).catch(()=>null);
+          const fallbackRaw = Array.isArray(fallbackSearch?.tracks) ? fallbackSearch.tracks : [];
+          combined = fallbackRaw
+            .map(normalizeServerTrack)
+            .filter((t: MusicTrack) => isRealPlayableMusic(t) && !player.isTrackFailed(t.id) && !/speech|sermon|podcast|audiobook|lecture|news|noise|test|sample/i.test(`${t.title || ''} ${t.artist || ''} ${t.album || ''}`.toLowerCase()));
+        }
         if (combined.length === 0) {
           combined = OFFLINE_FALLBACK_TRACKS.filter((t) => !player.isTrackFailed(t.id));
         }
@@ -395,22 +417,124 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGenre, effectiveRegion]);
 
-  // Auto-play verified playable track as soon as Music opens (unless user/AI explicitly stopped)
+  // Auto-play / daily recommend when Music opens (unless user/AI explicitly stopped)
   useEffect(() => {
     if (didAutoStartRef.current || loading || searching || crawlOverrideRef.current || quickAction) return;
-    if (visibleTracks.length === 0) return;
     didAutoStartRef.current = true;
     if (p.isPlaying || player.userStopped) return;
 
-    player.unlockAudio();
-    const existingIdx = currentTrack ? visibleTracks.findIndex((t) => t.id === currentTrack.id) : -1;
-    if (existingIdx >= 0 && currentTrack?.playback.kind === 'audio') {
-      void player.resumeAudioContext();
-      player.play();
-    } else {
-      player.playTrack(visibleTracks[0], visibleTracks, 0);
-      void player.resumeAudioContext();
+    const DAILY_QUERIES = [
+      'piano ambient', 'lofi chill', 'acoustic instrumental', 'neo classical',
+      'space ambient', 'calm electronic', 'soft jazz instrumental', 'meditation music',
+      'study focus music', 'relaxing guitar'
+    ];
+    const daySeed = Math.floor(Date.now() / 86400000);
+    const pick = (arr: string[]) => arr[daySeed % arr.length] || arr[0];
+
+    const startDaily = async () => {
+      try {
+        const kw = pick(DAILY_QUERIES);
+        const [catalogRes, searchRes, crawlRes] = await Promise.allSettled([
+          fetch(`/api/music/tracks?genre=all&region=${effectiveRegion}`).then((r) => r.json()),
+          fetch(`/api/media/search?mediaType=music&q=${encodeURIComponent(kw)}&region=${effectiveRegion}&limit=24`).then((r) => r.json()),
+          fetch('/api/music/crawl', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword: kw, sourceDomain: 'archive.org' }),
+          }).then((r) => r.json()),
+        ]);
+        if (!mountedRef.current || player.userStopped) return;
+        const catalogRaw = catalogRes.status === 'fulfilled' && Array.isArray(catalogRes.value?.tracks) ? catalogRes.value.tracks : [];
+        const searchRaw = searchRes.status === 'fulfilled' && Array.isArray(searchRes.value?.tracks) ? searchRes.value.tracks : [];
+        const crawledRaw = crawlRes.status === 'fulfilled' && Array.isArray(crawlRes.value?.newTracks) ? crawlRes.value.newTracks : [];
+        const mergedRaw = [...catalogRaw, ...searchRaw, ...crawledRaw];
+        const seen = new Set<string>();
+        const combined: MusicTrack[] = mergedRaw
+          .map(normalizeServerTrack)
+          .filter((t) => {
+            const key = String(t?.audioUrl || (t as any)?.embedUrl || t?.id || '');
+            if (!t?.id || !key || seen.has(key) || player.isTrackFailed(t.id)) return false;
+            if (!isRealPlayableMusic(t)) return false;
+            const hay = `${t.title || ''} ${t.artist || ''} ${t.album || ''}`.toLowerCase();
+            if (/speech|sermon|podcast|audiobook|lecture|news|noise|test|sample/i.test(hay)) return false;
+            seen.add(key);
+            return true;
+          });
+        const pool = combined.length > 0 ? combined : OFFLINE_FALLBACK_TRACKS.filter((t) => !player.isTrackFailed(t.id));
+        if (!mountedRef.current || pool.length === 0) return;
+        setTracks(pool);
+        const audioPool = pool.filter(isPlayableDirectAudio);
+        const playPool = audioPool.length > 0 ? audioPool : pool;
+        const idx = Math.floor(Math.random() * Math.min(playPool.length, 10));
+        const chosen = playPool[idx] || playPool[0];
+        player.unlockAudio();
+        if (isPlayableDirectAudio(chosen)) {
+          player.playTrack(chosen, pool, pool.findIndex((x) => x.id === chosen.id));
+          void player.resumeAudioContext();
+        } else {
+          // real embed (e.g. Bilibili/YouTube) - open in player stage
+          setAllowEmbedMode(true);
+          player.playTrack(chosen, pool, pool.findIndex((x) => x.id === chosen.id));
+          setShowEmbedStage(true);
+        }
+        showNotice(isZh ? `今日推荐：${chosen.title} · ${chosen.artist}` : `Daily pick: ${chosen.title} · ${chosen.artist}`, 3200);
+      } catch {
+        if (!mountedRef.current || player.userStopped) return;
+        const pool = OFFLINE_FALLBACK_TRACKS.filter((t) => !player.isTrackFailed(t.id));
+        if (pool.length === 0) return;
+        setTracks(pool);
+        const chosen = pool[0];
+        player.unlockAudio();
+        player.playTrack(chosen, pool, 0);
+        void player.resumeAudioContext();
+      }
+    };
+
+    if (visibleTracks.length > 0) {
+      const existingIdx = currentTrack ? visibleTracks.findIndex((t) => t.id === currentTrack.id) : -1;
+      const currentAsMusic = currentTrack ? ({
+        id: currentTrack.id,
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        album: currentTrack.album || '',
+        coverUrl: currentTrack.coverUrl,
+        durationSeconds: currentTrack.durationSeconds,
+        audioUrl: currentTrack.playback?.audioUrl,
+        embedUrl: (currentTrack.playback as any)?.embedUrl,
+        source: currentTrack.source,
+        sourceUrl: currentTrack.sourceUrl,
+        license: currentTrack.license,
+        playable: currentTrack.playback?.kind === 'audio' ? 'audio' : currentTrack.playback?.kind === 'embed' ? 'embed' : undefined,
+      } as MusicTrack) : null;
+      if (existingIdx >= 0 && currentTrack && currentAsMusic && isRealPlayableMusic(currentAsMusic)) {
+        player.unlockAudio();
+        if (currentTrack.playback?.kind === 'audio') {
+          void player.resumeAudioContext();
+          player.play();
+        } else {
+          setAllowEmbedMode(true);
+          setShowEmbedStage(true);
+        }
+        return;
+      }
+      const audioPool = visibleTracks.filter(isPlayableDirectAudio);
+      const playPool = audioPool.length > 0 ? audioPool : visibleTracks.filter(isRealPlayableMusic);
+      if (playPool.length > 0) {
+        const idx = Math.floor(Math.random() * Math.min(playPool.length, 8));
+        const chosen = playPool[idx] || playPool[0];
+        player.unlockAudio();
+        if (isPlayableDirectAudio(chosen)) {
+          player.playTrack(chosen, visibleTracks, visibleTracks.findIndex((x) => x.id === chosen.id));
+          void player.resumeAudioContext();
+        } else {
+          setAllowEmbedMode(true);
+          player.playTrack(chosen, visibleTracks, visibleTracks.findIndex((x) => x.id === chosen.id));
+          setShowEmbedStage(true);
+        }
+        return;
+      }
     }
+    void startDaily();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, searching, visibleTracks.length, quickAction]);
 
