@@ -20,7 +20,7 @@ ENV EARTH_ONE_SERVE_DIST=true
 
 # Runtime deps + tsx for TypeScript server entry
 COPY package.json bun.lock* ./
-RUN npm install --omit=dev --no-audit --no-fund && npm install tsx --no-audit --no-fund
+RUN npm install --omit=dev --no-audit --no-fund --legacy-peer-deps && npm install tsx--no-audit--no-fund--legacy-peer-deps
 
 # App runtime files
 COPY --from=build /app/dist ./dist
