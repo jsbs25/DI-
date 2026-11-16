@@ -60,11 +60,14 @@ const PLACE_COORDS: Array<{ names: string[]; lat: number; lng: number; zh: strin
 ];
 
 function extractMusicQuery(raw: string): string {
-  let cleaned = raw
-    .replace(/(我想|我要|帮我|请帮我|给我|麻烦|随便|随机|自动|去|爬取|爬群|爬一首|爬点|找一首|找点|播放|放一首|放首|来一首|来首|听一首|听首|听歌|听音乐|听点歌|听|放歌|放音乐|开音乐|play|some|song|music|listen to|track)/gi, ' ')
+  const cleaned = raw
+    .replace(
+      /(我想|我要|帮我|请帮我|给我|麻烦|请|能不能|可以|随便|随机|自动|去|打开那个|打开|开启|开一下|进入|切换到|切到|调出|爬取|爬群|爬一首|爬点|找一首|找点|播放|放一首|放首|来一首|来首|听一首|听首|听歌|听音乐|听点歌|放歌|放音乐|开音乐|那个|首歌|歌曲|音乐|曲子|曲|play|open|start|launch|some|song|music|listen to|track)/gi,
+      ' '
+    )
     .replace(/[，。！？、,.!?]/g, ' ')
     .trim();
-  if (cleaned.length <= 1 || /^(歌|音乐|曲子|曲)$/i.test(cleaned)) {
+  if (cleaned.length <= 1 || /^(歌|音乐|曲子|曲|一下)$/i.test(cleaned)) {
     return '';
   }
   return cleaned;
@@ -106,8 +109,12 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
     return { type: 'play_music', control: 'resume', reply: isZh ? '好的，继续为您播放。' : 'Resuming playback.' };
   }
 
-  // 2. Crawl & Play Music
-  if (/听歌|放歌|放音乐|听音乐|放一首|听一首|来一首|来首歌|爬.*歌|play.*(song|music)|listen to music/i.test(raw)) {
+  // 2. Crawl & Play Music (supports "打开音乐", "打开那个音乐", "放首歌", "听歌", "我想听轻音乐", etc.)
+  if (
+    /听歌|听首歌|放歌|放首歌|放音乐|听音乐|播放音乐|开音乐|打开.*音乐|开启.*音乐|进入.*音乐|去.*音乐|放一首|听一首|来一首|来首歌|爬.*歌|play.*(song|music)|open.*music|listen to music/i.test(
+      raw
+    )
+  ) {
     const query = extractMusicQuery(raw);
     return {
       type: 'play_music',
@@ -115,11 +122,11 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
       crawl: true,
       reply: query
         ? isZh
-          ? `好的，正在自动搜索并爬取「${query}」为您播放。`
-          : `Crawling and playing ${query} for you.`
+          ? `好的，正在打开音乐并为您播放「${query}」。`
+          : `Opening music and playing ${query} for you.`
         : isZh
-          ? '好的，正在为您自动爬取并播放一首歌曲。'
-          : 'Crawling and playing a track for you now.',
+          ? '好的，已为您打开音乐并自动挑选歌曲播放。'
+          : 'Opening music and playing a track for you now.',
     };
   }
 
@@ -188,10 +195,10 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
 
   // 7. Full-Website Module Navigation
   const navRules: Array<{ test: RegExp; tab: string; zh: string; en: string }> = [
-    { test: /语言学习|学英语|英语引擎|阿拉伯语|arabic|english learning|language center/i, tab: 'arabic-learning', zh: '语言学习中心', en: 'Language Center' },
+    { test: /多邻国|多林国|语言学习|学英语|学语言|英语引擎|阿拉伯语|duolingo|arabic|english learning|language center/i, tab: 'arabic-learning', zh: '语言学习中心', en: 'Language Center' },
     { test: /信息与通话|信息|消息|通话|私信|发消息|chat|messenger|message/i, tab: 'chat', zh: '信息与通话', en: 'Messages' },
     { test: /发现|动态|广场|feed|discover/i, tab: 'feed', zh: '发现动态', en: 'Discover' },
-    { test: /音乐馆|音乐空间|music/i, tab: 'venus', zh: '音乐空间', en: 'Music Space' },
+    { test: /音乐馆|音乐空间|音乐中心|音乐|music/i, tab: 'venus', zh: '音乐空间', en: 'Music Space' },
     { test: /影视中心|视频中心/i, tab: 'video', zh: '影视视频中心', en: 'Video Center' },
     { test: /图书馆|看书|读书|library/i, tab: 'library', zh: '世界数字图书馆', en: 'Digital Library' },
     { test: /宇宙|星空|太阳系|universe/i, tab: 'universe', zh: '3D 宇宙引擎', en: 'Universe Engine' },

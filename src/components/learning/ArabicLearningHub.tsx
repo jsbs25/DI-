@@ -40,6 +40,7 @@ import {
   type IslamicLibrarySource
 } from './islamicLibraryData.ts';
 import { EnglishLearningSection } from './EnglishLearningSection.tsx';
+import { DuolingoImmersionPlatform } from './DuolingoImmersionPlatform.tsx';
 
 const STORAGE_KEY = 'earth_one_arabic_learning_v1';
 const DAILY_NEW_LIMIT = 5;
@@ -91,7 +92,7 @@ type Copy = {
 const COPY: Record<Language, Copy> = {
   zh: {
     title: '语言学习中心',
-    subtitle: '集成英语实时词典与听说引擎、阿拉伯语基础发音研习及全球伊斯兰数字图书馆。',
+    subtitle: '部署多邻国多语言沉浸学习平台，联动实时英语引擎、阿拉伯语研习与全球数字图书馆。',
     practice: '今日复习',
     alphabet: '字母表',
     library: '伊斯兰数字图书馆',
@@ -347,9 +348,10 @@ const COPY: Record<Language, Copy> = {
 interface ArabicLearningHubProps {
   lang: Language;
   onOpenLibrary: () => void;
+  onOpenUrlInBrowser?: (url: string) => void;
 }
 
-type MainTab = 'english_engine' | 'letters' | 'islamic_library';
+type MainTab = 'duolingo_platform' | 'english_engine' | 'letters' | 'islamic_library';
 type View = 'home' | 'alphabet' | 'practice';
 
 function readSavedProgress(): ArabicStudyState {
@@ -361,12 +363,12 @@ function readSavedProgress(): ArabicStudyState {
   }
 }
 
-export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOpenLibrary }) => {
+export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOpenLibrary, onOpenUrlInBrowser }) => {
   const t = COPY[lang] || COPY.en;
   const isRtl = lang === 'ar';
 
-  // Navigation state
-  const [mainTab, setMainTab] = useState<MainTab>('english_engine');
+  // Navigation state — default to Duolingo Multi-Language Immersion Platform
+  const [mainTab, setMainTab] = useState<MainTab>('duolingo_platform');
   const [study, setStudy] = useState<ArabicStudyState>(readSavedProgress);
   const [view, setView] = useState<View>('home');
   const [selectedLetterId, setSelectedLetterId] = useState<string>(ARABIC_LETTERS[0].id);
@@ -581,14 +583,15 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                 <Library className="h-6 w-6" />
               </div>
               <div>
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="one-badge one-badge-gold">语言学习中心</span>
-                  <span className="one-badge one-badge-neutral">ENGLISH ENGINE · ARABIC</span>
+                <div className="mb-1 flex items-center gap-2 text-xs font-medium text-[color:var(--color-one-gold)]">
+                  <span>{lang === 'zh' ? '多邻国 · 多语言沉浸学习平台' : 'MULTI-LANGUAGE IMMERSION'}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-[color:var(--color-one-text-dim)]">EN / AR / ES / FR / JA</span>
                 </div>
                 <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-3xl">
                   {t.title}
                 </h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-[color:var(--color-one-text-muted)]">
+                <p className="mt-1.5 max-w-2xl text-sm leading-6 text-[color:var(--color-one-text-muted)]">
                   {t.subtitle}
                 </p>
               </div>
@@ -605,11 +608,33 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
 
         {/* Primary tabs */}
         <div className="one-surface-subtle flex flex-col gap-3 p-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setMainTab('duolingo_platform')}
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                mainTab === 'duolingo_platform'
+                  ? ''
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
+              }`}
+              style={
+                mainTab === 'duolingo_platform'
+                  ? {
+                      background: 'rgba(16, 185, 129, 0.14)',
+                      border: '1px solid rgba(16, 185, 129, 0.34)',
+                      color: 'var(--color-one-success)'
+                    }
+                  : { border: '1px solid transparent' }
+              }
+            >
+              <GraduationCap className="h-4 w-4" />
+              <span>{lang === 'zh' ? '多邻国沉浸平台' : 'Duolingo Immersion'}</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setMainTab('english_engine')}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 mainTab === 'english_engine'
                   ? 'text-[color:var(--color-one-text)]'
                   : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
@@ -625,7 +650,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
               }
             >
               <Sparkles className="h-4 w-4" />
-              <span>{lang === 'zh' ? '英语学习引擎' : 'English Engine'}</span>
+              <span>{lang === 'zh' ? '实时英语引擎' : 'English Engine'}</span>
             </button>
 
             <button
@@ -634,7 +659,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                 setMainTab('letters');
                 setView('home');
               }}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 mainTab === 'letters'
                   ? ''
                   : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
@@ -649,14 +674,14 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                   : { border: '1px solid transparent' }
               }
             >
-              <GraduationCap className="h-4 w-4" />
-              <span>{lang === 'zh' ? '阿拉伯语字母与发音' : `${t.alphabet} · ${t.practice}`}</span>
+              <BookOpen className="h-4 w-4" />
+              <span>{lang === 'zh' ? '阿语字母与复习' : `${t.alphabet} · ${t.practice}`}</span>
             </button>
 
             <button
               type="button"
               onClick={() => setMainTab('islamic_library')}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 mainTab === 'islamic_library'
                   ? 'text-[color:var(--color-one-text)]'
                   : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
@@ -673,26 +698,23 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
             >
               <BookMarked className="h-4 w-4" />
               <span>{lang === 'zh' ? '伊斯兰数字图书馆' : t.library}</span>
-              <span className="rounded-md px-1.5 py-0.5 text-[11px] font-mono" style={{ background: 'rgba(244,243,238,0.08)' }}>
-                {libraryBooks.length}
+              <span className="text-[11px] font-mono tabular-nums opacity-75">
+                ({libraryBooks.length})
               </span>
             </button>
           </div>
-
-          <div className="hidden items-center gap-3 pr-2 text-xs text-[color:var(--color-one-text-dim)] sm:flex">
-            <span className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--color-one-success)]" />
-              <span>{mainTab === 'english_engine' ? 'ENGLISH ENGINE READY' : 'CRAWLER ACTIVE'}</span>
-            </span>
-            <span className="font-mono tracking-wide">
-              {mainTab === 'english_engine' ? 'LEXICON · IPA · AI COACH · CORPUS' : 'SHAMELA · WAQFEYA · NOOR · ARCHIVE'}
-            </span>
-          </div>
         </div>
 
-        {/* ============================================================= */}
-        {/* TAB 0: ENGLISH LEARNING ENGINE                                */}
-        {/* ============================================================= */}
+        {/* TAB 0: DUOLINGO MULTI-LANGUAGE IMMERSION PLATFORM */}
+        {mainTab === 'duolingo_platform' && (
+          <DuolingoImmersionPlatform
+            lang={lang}
+            onOpenEnglishEngine={() => setMainTab('english_engine')}
+            onOpenUrlInBrowser={onOpenUrlInBrowser}
+          />
+        )}
+
+        {/* TAB 1: ENGLISH LEARNING ENGINE */}
         {mainTab === 'english_engine' && <EnglishLearningSection lang={lang} />}
 
         {/* ============================================================= */}

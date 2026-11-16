@@ -3,7 +3,11 @@ import * as THREE from 'three';
 import { Language } from '../../types/index.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
 import { useOptionalPlayerContext } from '../../music/PlayerContext.tsx';
-import { resolveNaturalAgentAction, type OneAgentAction } from '../../utils/oneAgentController.ts';
+import {
+  parseInstantAgentAction,
+  resolveNaturalAgentAction,
+  type OneAgentAction,
+} from '../../utils/oneAgentController.ts';
 
 interface HolographicAICompanionProps {
   lang: Language;
@@ -196,6 +200,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const isSendingFallbackRef = useRef(false);
   const isTtsSpeakingRef = useRef(false);
   const pendingUserTranscriptRef = useRef('');
+  const transcriptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastExecutedActionRef = useRef<{ key: string; at: number }>({ key: '', at: 0 });
   const modelIdRef = useRef(modelId);
   const historyRef = useRef<HistoryTurn[]>([]);
 
@@ -307,8 +313,23 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   // Execute structured full-website action triggered by voice
   const runAgentAction = useCallback(
     async (text: string): Promise<OneAgentAction> => {
+      const normalizedKey = text.trim().toLowerCase();
+      const now = Date.now();
+      if (
+        normalizedKey &&
+        lastExecutedActionRef.current.key === normalizedKey &&
+        now - lastExecutedActionRef.current.at < 3500
+      ) {
+        return { type: 'none' };
+      }
+
       const action = await resolveNaturalAgentAction(text, isZh);
       if (action.type === 'none') return action;
+
+      lastExecutedActionRef.current = { key: normalizedKey, at: now };
+      if (action.type === 'play_music' && !action.control) {
+        player?.unlockAudio();
+      }
 
       if (action.type === 'play_music') {
         if (action.control === 'next') {
@@ -459,6 +480,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
     micRmsRef.current = 0;
     pendingUserTranscriptRef.current = '';
+    if (transcriptTimerRef.current) {
+      clearTimeout(transcriptTimerRef.current);
+      transcriptTimerRef.current = null;
+    }
     setVoiceActive(false);
     setPhase('idle');
   }, [stopOutputAudio]);
@@ -646,6 +671,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           if (sessionActiveRef.current) setPhase('listening');
         };
 
+        let interimActionTimer: ReturnType<typeof setTimeout> | null = null;
+
         rec.onresult = (e: any) => {
           if (!sessionActiveRef.current) return;
           let interim = '';
@@ -661,6 +688,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           if (interim && isTtsSpeakingRef.current) {
             stopOutputAudio();
           }
+          if (interimActionTimer) {
+            clearTimeout(interimActionTimer);
+            interimActionTimer = null;
+          }
           if (finalSegment.trim()) {
             try {
               rec.stop();
@@ -670,6 +701,21 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                 setTimeout(launchRecognizer, 180);
               }
             });
+            return;
+          }
+          const trimmedInterim = interim.trim();
+          if (trimmedInterim && parseInstantAgentAction(trimmedInterim, isZh)) {
+            interimActionTimer = setTimeout(() => {
+              if (!sessionActiveRef.current || isSendingFallbackRef.current) return;
+              try {
+                rec.stop();
+              } catch {}
+              void runFallbackTurn(trimmedInterim, () => {
+                if (sessionActiveRef.current) {
+                  setTimeout(launchRecognizer, 180);
+                }
+              });
+            }, 900);
           }
         };
 
@@ -815,6 +861,22 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
         if (msg.type === 'inputTranscript' && typeof msg.text === 'string') {
           pendingUserTranscriptRef.current += msg.text;
+          if (transcriptTimerRef.current) clearTimeout(transcriptTimerRef.current);
+          transcriptTimerRef.current = setTimeout(() => {
+            const buffered = pendingUserTranscriptRef.current.trim();
+            if (!buffered) return;
+            void runAgentAction(buffered).then((action) => {
+              if (action.type !== 'none') {
+                pendingUserTranscriptRef.current = '';
+              }
+              if (
+                (action.type === 'play_music' && !action.control) ||
+                action.type === 'watch_documentary'
+              ) {
+                stopOutputAudio();
+              }
+            });
+          }, 520);
           return;
         }
 
@@ -825,6 +887,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         }
 
         if (msg.type === 'turnComplete') {
+          if (transcriptTimerRef.current) {
+            clearTimeout(transcriptTimerRef.current);
+            transcriptTimerRef.current = null;
+          }
           if (pendingUserTranscriptRef.current.trim()) {
             const finalized = pendingUserTranscriptRef.current.trim();
             pendingUserTranscriptRef.current = '';
@@ -873,6 +939,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     if (voiceActive || sessionActiveRef.current) {
       stopSessionResources();
     } else {
+      player?.unlockAudio();
       void startInstantVoiceSession();
     }
   };

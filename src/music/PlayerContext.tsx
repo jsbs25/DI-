@@ -47,6 +47,7 @@ export interface MusicPlayerApi {
   setError: (error: PlaybackError | null) => void;
   getAudioAnalyser: () => AnalyserNode | null;
   resumeAudioContext: () => Promise<void>;
+  unlockAudio: () => void;
 }
 
 const PlayerContext = createContext<MusicPlayerApi | null>(null);
@@ -388,6 +389,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const setError = useCallback((error: PlaybackError | null) => dispatch({ type: 'SET_ERROR', error }), []);
   const getAudioAnalyser = useCallback(() => engine.getAnalyser(), [engine]);
   const resumeAudioContext = useCallback(() => engine.resumeContext(), [engine]);
+  const unlockAudio = useCallback(() => engine.unlockPlayback(), [engine]);
 
   const api = useMemo<MusicPlayerApi>(
     () => ({
@@ -416,6 +418,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setError,
       getAudioAnalyser,
       resumeAudioContext,
+      unlockAudio,
     }),
     [
       state,
@@ -443,6 +446,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setError,
       getAudioAnalyser,
       resumeAudioContext,
+      unlockAudio,
     ]
   );
 

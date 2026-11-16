@@ -1,31 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
-  ArrowRightLeft,
   Disc3,
   ExternalLink,
-  Globe,
   ListMusic,
   Loader2,
   Maximize2,
   Minimize2,
-  Music2,
   Pause,
   Play,
-  Radio,
   RefreshCw,
   Repeat,
   Search,
   Shuffle,
   SkipBack,
   SkipForward,
-  Sparkles,
   Trash2,
-  Tv,
   Volume2,
   VolumeX,
   X,
-  Youtube,
 } from 'lucide-react';
 import { Language } from '../types/index.ts';
 import type { MediaRegionMode, ResolvedRegion } from '../types/media.ts';
@@ -66,7 +59,7 @@ const OFFLINE_FALLBACK_TRACKS: MusicTrack[] = [
   {
     id: 'venus_track_01',
     title: 'Clair de Lune',
-    artist: 'Claude Debussy (Public Domain)',
+    artist: 'Claude Debussy',
     album: 'Suite Bergamasque',
     genre: 'Neo-Classical',
     durationSeconds: 374,
@@ -160,6 +153,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchEngine, setSearchEngine] = useState<'all' | 'bilibili' | 'youtube'>('all');
   const [selectedGenre, setSelectedGenre] = useState('all');
   const [view, setView] = useState<'discover' | 'queue'>('discover');
 
@@ -229,7 +223,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
         : `/api/music/tracks?genre=${encodeURIComponent(genre)}&region=${activeRegion}`;
       const res = await fetch(endpoint, { signal: controller.signal });
       const data = await res.json();
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || controller.signal.aborted) return;
       if (data.success && Array.isArray(data.tracks)) {
         const normalized = data.tracks
           .map(normalizeServerTrack)
@@ -239,18 +233,18 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
         setTracks([]);
       }
     } catch {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || controller.signal.aborted) return;
       setTracks(OFFLINE_FALLBACK_TRACKS);
     } finally {
       clearTimeout(timeout);
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current && !controller.signal.aborted) setLoading(false);
     }
   };
 
   const searchYouTubeMusic = async (queryOverride?: string, autoPlayFirst = false) => {
     const q = (queryOverride ?? searchQuery).trim();
     if (!q) {
-      showNotice(isZh ? '请输入关键词或链接（如 B站 BV / 网易云单曲外链 / YouTube）后再检索。' : 'Enter a keyword or URL first.');
+      showNotice(isZh ? '请输入关键词或链接后再检索。' : 'Enter a keyword or URL first.');
       return;
     }
     setSearching(true);
@@ -268,7 +262,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
             player.playTrack(mapped[0], mapped, 0);
             setShowEmbedStage(true);
           }
-          showNotice(isZh ? `已加载 ${mapped.length} 首曲目` : `Loaded ${mapped.length} tracks`, 2600);
+          showNotice(isZh ? `已加载 ${mapped.length} 首曲目` : `Loaded ${mapped.length} tracks`, 2400);
         } else {
           showNotice(isZh ? '未找到可播放的结果，请更换关键词。' : 'No playable tracks found.');
         }
@@ -315,7 +309,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
           playable: 'embed',
           source: 'Bilibili',
           sourceUrl: bv.arcurl || bv.sourceUrl || `https://www.bilibili.com/video/${bv.bvid}`,
-          license: 'Bilibili official embed',
+          license: 'Bilibili',
           crawledAt: new Date().toISOString(),
           bpm: 92,
           description: bv.description || '',
@@ -325,7 +319,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
           player.playTrack(mapped[0], mapped, 0);
           setShowEmbedStage(true);
         }
-        showNotice(isZh ? `已加载 ${mapped.length} 条 B站音乐` : `Loaded ${mapped.length} Bilibili tracks`, 2600);
+        showNotice(isZh ? `已加载 ${mapped.length} 条 B站音乐` : `Loaded ${mapped.length} Bilibili tracks`, 2400);
       } else {
         showNotice(isZh ? 'B站暂无匹配结果，请换个关键词试试。' : 'No Bilibili results found.');
       }
@@ -339,13 +333,20 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
     }
   };
 
-  const searchDualMusic = async (queryOverride?: string) => {
-    const q = (queryOverride ?? searchQuery).trim();
+  const executeUnifiedSearch = async () => {
+    const q = searchQuery.trim();
+    if (searchEngine === 'bilibili') {
+      await searchBilibiliMusic(q || '轻音乐 纯音乐', false);
+      return;
+    }
+    if (searchEngine === 'youtube') {
+      await searchYouTubeMusic(q || 'lofi chill beats', false);
+      return;
+    }
     if (!q) {
       void loadTracks(selectedGenre === 'bilibili_live' || selectedGenre === 'youtube_music' ? 'all' : selectedGenre, '');
       return;
     }
-
     if (isUrlOrBvidQuery(q)) {
       await searchYouTubeMusic(q, true);
       return;
@@ -366,46 +367,23 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
           .map(normalizeServerTrack)
           .filter((t: MusicTrack) => Boolean(t.audioUrl || t.embedUrl));
         setTracks(mapped);
-        const provSummary = Array.isArray(data.providersQueried)
-          ? data.providersQueried
-              .filter((x: any) => x.count > 0)
-              .map((x: any) => `${x.providerId}:${x.count}`)
-              .join(' · ')
-          : '';
-        showNotice(
-          isZh
-            ? `智能调度找到 ${mapped.length} 首${provSummary ? ` (${provSummary})` : ''}`
-            : `Found ${mapped.length} tracks`,
-          3400
-        );
+        showNotice(isZh ? `已匹配 ${mapped.length} 首曲目` : `Found ${mapped.length} tracks`, 2600);
       } else {
         await loadTracks('all', q);
       }
     } catch {
-      showNotice(isZh ? '多源检索失败，已回退本地曲库。' : 'Search failed.');
+      showNotice(isZh ? '多源检索失败，已显示本地曲库。' : 'Search failed.');
     } finally {
       if (mountedRef.current) setSearching(false);
     }
   };
 
-  useEffect(() => {
-    if (crawlOverrideRef.current) return;
-    const q = searchQuery.trim();
-    if (selectedGenre === 'bilibili_live') {
-      void searchBilibiliMusic(q || '轻音乐 纯音乐', false);
-    } else if (selectedGenre === 'youtube_music') {
-      void searchYouTubeMusic(q || 'lofi chill beats', false);
-    } else {
-      void loadTracks(selectedGenre, q, effectiveRegion);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGenre, effectiveRegion]);
-
-  // Autonomous One. Agent Action: crawl external music + search + play immediately
+  // Run quickAction BEFORE loadTracks so crawlOverrideRef blocks initial catalog race cleanly
   useEffect(() => {
     if (!quickAction || quickAction.seq === handledQuickSeqRef.current) return;
     handledQuickSeqRef.current = quickAction.seq;
     crawlOverrideRef.current = true;
+    loadAbortRef.current?.abort();
 
     const runAutoCrawlAndPlay = async () => {
       const kw = (quickAction.query || '').trim();
@@ -415,9 +393,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
       showNotice(
         isZh
           ? kw
-            ? `One. 正在自动爬取并检索「${kw}」…`
-            : 'One. 正在自动爬取歌曲并准备为您播放…'
-          : 'One. is crawling and selecting a track for you…',
+            ? `One. 正在自动检索「${kw}」并准备播放…`
+            : 'One. 正在自动抓取歌曲并播放…'
+          : 'One. is finding and playing a track for you…',
         4500
       );
 
@@ -426,7 +404,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
           fetch('/api/music/crawl', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ keyword: kw || 'ambient space piano' }),
+            body: JSON.stringify({ keyword: kw || 'ambient space piano', query: kw || 'ambient space piano' }),
           }).then((r) => r.json()),
           fetch(
             kw
@@ -444,7 +422,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
             ? catalogRes.value.tracks
             : [];
 
-        const mergedRaw = [...crawledRaw, ...catalogRaw];
+        const mergedRaw = [...catalogRaw, ...crawledRaw];
         const seen = new Set<string>();
         let combined: MusicTrack[] = mergedRaw
           .map(normalizeServerTrack)
@@ -473,18 +451,20 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
         const chosen = combined[chosenIdx] || combined[0];
 
         setShowEmbedStage(true);
+        player.unlockAudio();
         player.playTrack(chosen, combined, chosenIdx);
         void player.resumeAudioContext();
         showNotice(
           isZh
-            ? `One. 已为您自动爬取并播放：${chosen.title} — ${chosen.artist}`
-            : `One. playing: ${chosen.title} — ${chosen.artist}`,
+            ? `One. 正在播放：${chosen.title} · ${chosen.artist}`
+            : `One. playing: ${chosen.title} · ${chosen.artist}`,
           4500
         );
       } catch {
         if (!mountedRef.current) return;
         setTracks(OFFLINE_FALLBACK_TRACKS);
         const fallback = OFFLINE_FALLBACK_TRACKS[0];
+        player.unlockAudio();
         player.playTrack(fallback, OFFLINE_FALLBACK_TRACKS, 0);
         void player.resumeAudioContext();
       } finally {
@@ -500,6 +480,19 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quickAction]);
 
+  useEffect(() => {
+    if (crawlOverrideRef.current) return;
+    const q = searchQuery.trim();
+    if (selectedGenre === 'bilibili_live') {
+      void searchBilibiliMusic(q || '轻音乐 纯音乐', false);
+    } else if (selectedGenre === 'youtube_music') {
+      void searchYouTubeMusic(q || 'lofi chill beats', false);
+    } else {
+      void loadTracks(selectedGenre, q, effectiveRegion);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGenre, effectiveRegion]);
+
   // Smooth slim audio spectrum visualizer
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -511,7 +504,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
       animFrameRef.current = requestAnimationFrame(render);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const bars = 36;
+      const bars = 32;
       const gap = 3;
       const w = (canvas.width - gap * (bars - 1)) / bars;
       const isDark = document.documentElement.classList.contains('dark');
@@ -531,7 +524,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
       }
 
       const now = Date.now() * 0.0044;
-      const bpmFactor = Math.max(0.7, Math.min(1.6, ((currentTrack?.bpm || 90) / 90)));
+      const bpmFactor = Math.max(0.7, Math.min(1.6, (currentTrack?.bpm || 90) / 90));
 
       for (let i = 0; i < bars; i++) {
         let ratio: number;
@@ -543,23 +536,20 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
           const env = 0.62 + 0.38 * Math.sin((i / bars) * Math.PI);
           ratio = Math.max(0.14, Math.min(0.92, (0.46 + 0.24 * wave1 + 0.16 * wave2) * env));
         } else {
-          ratio = 0.1 + 0.04 * Math.sin(i * 0.5);
+          ratio = 0.08 + 0.03 * Math.sin(i * 0.5);
         }
 
-        const h = Math.max(3, ratio * canvas.height * 0.88);
+        const h = Math.max(2, ratio * canvas.height * 0.85);
         const x = i * (w + gap);
         const y = canvas.height - h;
 
-        const g = ctx.createLinearGradient(0, y, 0, canvas.height);
-        if (isPlaying) {
-          g.addColorStop(0, isDark ? '#38bdf8' : '#0284c7');
-          g.addColorStop(1, isDark ? 'rgba(56,189,248,0.16)' : 'rgba(2,132,199,0.14)');
-        } else {
-          g.addColorStop(0, isDark ? 'rgba(148,163,184,0.34)' : 'rgba(148,163,184,0.42)');
-          g.addColorStop(1, isDark ? 'rgba(148,163,184,0.08)' : 'rgba(148,163,184,0.1)');
-        }
-
-        ctx.fillStyle = g;
+        ctx.fillStyle = isPlaying
+          ? isDark
+            ? 'rgba(56, 189, 248, 0.72)'
+            : 'rgba(2, 132, 199, 0.72)'
+          : isDark
+            ? 'rgba(148, 163, 184, 0.25)'
+            : 'rgba(148, 163, 184, 0.32)';
         ctx.beginPath();
         ctx.roundRect(x, y, w, h, [2, 2, 0, 0]);
         ctx.fill();
@@ -603,6 +593,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
       return;
     }
 
+    player.unlockAudio();
     await player.resumeAudioContext();
     player.togglePlay();
   };
@@ -611,6 +602,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
     const track = tracks[index];
     if (!track) return;
     setShowEmbedStage(true);
+    player.unlockAudio();
     player.playTrack(track, tracks, index);
     if (!(track.playable === 'embed' || track.embedUrl)) {
       void player.resumeAudioContext();
@@ -626,111 +618,97 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
 
   return (
     <div className="w-full max-w-full bg-[var(--color-one-bg)] text-[var(--color-one-text)] transition-colors">
-      <div className="mx-auto w-full max-w-[1320px] px-3 pb-6 pt-3 sm:px-6 md:px-8 md:pt-5">
-        {/* Studio Header */}
-        <header className="mb-4 flex flex-wrap items-center justify-between gap-2.5 sm:mb-5 sm:gap-3">
-          <div className="flex items-center gap-3">
+      <div className="mx-auto w-full max-w-[1280px] px-4 pb-8 pt-4 sm:px-6 md:px-8">
+        {/* Clean 3-Zone Header */}
+        <header className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-4 dark:border-white/10">
+          <div className="flex items-center gap-4 min-w-0">
             <button
+              type="button"
               onClick={handleCloseMusic}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 shadow-2xs transition hover:border-slate-300 hover:text-slate-900 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:text-white"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-white whitespace-nowrap shrink-0"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
-              <span>{isZh ? '关闭并返回' : 'Exit Music'}</span>
+              <span>{isZh ? '退出' : 'Exit'}</span>
             </button>
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400">
-                <Music2 className="h-4.5 w-4.5" />
-              </span>
-              <div>
-                <h1 className="text-lg font-bold tracking-[-0.02em] text-slate-900 dark:text-white sm:text-xl">
-                  ONE MUSIC
-                </h1>
-              </div>
-            </div>
+            <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0">
+              ONE Music
+            </h1>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Region Scheduler Pill */}
-            <div className="inline-flex items-center rounded-full border border-slate-200/90 bg-white p-1 text-[11px] shadow-2xs dark:border-white/10 dark:bg-white/5">
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Segmented View Toggle */}
+            <div className="inline-flex items-center rounded-lg bg-slate-100 p-1 dark:bg-white/6">
+              <button
+                type="button"
+                onClick={() => setView('discover')}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition whitespace-nowrap ${
+                  view === 'discover'
+                    ? 'bg-white text-slate-900 shadow-2xs dark:bg-white/14 dark:text-white'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                }`}
+              >
+                {isZh ? '曲库' : 'Library'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('queue')}
+                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition whitespace-nowrap tabular-nums ${
+                  view === 'queue'
+                    ? 'bg-white text-slate-900 shadow-2xs dark:bg-white/14 dark:text-white'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                }`}
+              >
+                <ListMusic className="h-3.5 w-3.5" />
+                <span>{isZh ? `队列 ${queue.length}` : `Queue ${queue.length}`}</span>
+              </button>
+            </div>
+
+            {/* Clean Single-Row Region Mode Switch */}
+            <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 text-[11px] dark:border-white/12 dark:bg-white/5">
               {(
                 [
-                  { id: 'auto', zh: '智能', en: 'Auto' },
-                  { id: 'cn', zh: '中国大陆', en: 'CN' },
-                  { id: 'overseas', zh: '海外', en: 'Global' },
+                  { id: 'auto', zh: '自动', en: 'Auto' },
+                  { id: 'cn', zh: 'CN', en: 'CN' },
+                  { id: 'overseas', zh: '全球', en: 'Global' },
                 ] as const
               ).map((m) => (
                 <button
                   key={m.id}
+                  type="button"
                   onClick={() => {
                     setMediaRegionMode(m.id);
                     setRegionModeState(m.id);
                     setEffectiveRegion(m.id === 'auto' ? conn.recommendedRegion : m.id);
                   }}
                   data-testid={`music-region-${m.id}`}
-                  className={`rounded-full px-2.5 py-1 font-medium transition ${
+                  className={`rounded-md px-2.5 py-1 font-medium transition whitespace-nowrap ${
                     regionMode === m.id
                       ? 'bg-sky-600 text-white dark:bg-sky-500'
-                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-300'
                   }`}
                 >
                   {isZh ? m.zh : m.en}
                 </button>
               ))}
-              <button
-                onClick={() => void probeClientMediaConnectivity(true)}
-                className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] text-slate-500 hover:text-sky-600 dark:text-slate-400"
-                title={isZh ? '检测当前网络连通性' : 'Probe connectivity'}
-              >
-                {conn.probing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Globe className="h-3 w-3 text-sky-600" />}
-                <span>{effectiveRegion === 'cn' ? 'CN' : 'Global'}</span>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-1 rounded-full border border-slate-200/90 bg-white p-1 shadow-2xs dark:border-white/10 dark:bg-white/5">
-              <button
-                onClick={() => setView('discover')}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
-                  view === 'discover'
-                    ? 'bg-sky-600 text-white shadow-2xs dark:bg-white dark:text-slate-900'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-                }`}
-              >
-                <Radio className="h-3.5 w-3.5" />
-                {isZh ? '曲库精选' : 'Discover'}
-              </button>
-              <button
-                onClick={() => setView('queue')}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
-                  view === 'queue'
-                    ? 'bg-sky-600 text-white shadow-2xs dark:bg-white dark:text-slate-900'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-                }`}
-              >
-                <ListMusic className="h-3.5 w-3.5" />
-                {isZh ? `队列 (${queue.length})` : `Queue (${queue.length})`}
-              </button>
             </div>
           </div>
         </header>
 
         {notice && (
-          <div className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50/90 px-3.5 py-2 text-xs text-sky-900 dark:border-sky-400/20 dark:bg-sky-500/10 dark:text-sky-100">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-3.5 w-3.5 shrink-0 text-sky-600 dark:text-sky-400" />
-              <span>{notice}</span>
-            </div>
-            <button onClick={() => setNotice(null)} className="text-sky-600 dark:text-sky-300 p-0.5">
+          <div className="mb-5 flex items-center justify-between gap-2 rounded-xl border border-sky-200/80 bg-sky-50/70 px-4 py-2.5 text-xs text-sky-900 dark:border-sky-400/20 dark:bg-sky-500/10 dark:text-sky-100">
+            <span className="truncate">{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} className="shrink-0 opacity-70 hover:opacity-100">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
         )}
 
-        {/* Balanced 2-Column Studio Grid */}
-        <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(320px,360px)_minmax(0,1fr)] xl:grid-cols-[minmax(360px,400px)_minmax(0,1fr)]">
-          {/* Left Sticky Now-Playing Deck */}
-          <section className="w-full min-w-0 lg:sticky lg:top-20 rounded-3xl border border-slate-200/90 bg-white/95 p-4 shadow-sm dark:border-white/12 dark:bg-[#162238]/95 sm:p-5 lg:p-6">
-            {/* Unified Media Stage: smoothly shows EITHER 16:9 video embed OR crisp cover art (never duplicate stacked boxes) */}
-            <div className="relative w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-slate-100 shadow-md dark:border-white/10 dark:bg-slate-900">
+        {/* Balanced 2-Column Editorial Listening Room */}
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(320px,360px)_minmax(0,1fr)]">
+          {/* Left Sticky Calm Player Deck */}
+          <section className="w-full min-w-0 lg:sticky lg:top-20 rounded-2xl border border-slate-200/90 bg-white p-5 dark:border-white/12 dark:bg-[#162238] sm:p-6">
+            {/* Media Stage */}
+            <div className="relative w-full overflow-hidden rounded-xl border border-slate-200/70 bg-slate-100 dark:border-white/10 dark:bg-slate-900">
               {isEmbed && rawEmbedSrc && showEmbedStage ? (
                 <div className="aspect-video w-full bg-slate-950">
                   <iframe
@@ -745,7 +723,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                   />
                 </div>
               ) : (
-                <div className="mx-auto aspect-square w-full max-w-[220px] sm:max-w-[280px] lg:max-w-none overflow-hidden">
+                <div className="mx-auto aspect-square w-full max-w-[240px] lg:max-w-none overflow-hidden">
                   {currentTrack?.coverUrl ? (
                     <img
                       src={currentTrack.coverUrl}
@@ -753,12 +731,12 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                       referrerPolicy="no-referrer"
                       onError={handleCoverError}
                       className={`h-full w-full object-cover transition duration-700 ${
-                        isPlaying ? 'scale-[1.03]' : 'scale-100'
+                        isPlaying ? 'scale-[1.02]' : 'scale-100'
                       }`}
                     />
                   ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-slate-400 dark:text-slate-500">
-                      <Disc3 className={`h-12 w-12 ${isPlaying ? 'animate-spin' : ''}`} />
+                      <Disc3 className={`h-11 w-11 ${isPlaying ? 'animate-spin' : ''}`} />
                       <span className="text-xs font-medium tracking-wider">ONE MUSIC</span>
                     </div>
                   )}
@@ -767,8 +745,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
 
               {isEmbed && rawEmbedSrc && (
                 <button
+                  type="button"
                   onClick={() => setShowEmbedStage((s) => !s)}
-                  className="absolute right-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-slate-900/75 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur-md transition hover:bg-slate-900"
+                  className="absolute right-2.5 top-2.5 inline-flex items-center gap-1 rounded-lg bg-slate-900/75 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur-md transition hover:bg-slate-900"
                 >
                   {showEmbedStage ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
                   <span>{showEmbedStage ? (isZh ? '切回封面' : 'Cover') : (isZh ? '观看视频' : 'Video')}</span>
@@ -776,94 +755,90 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
               )}
             </div>
 
-            {/* Track Metadata */}
-            <div className="mt-4">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span
-                    className={`h-2 w-2 rounded-full shrink-0 ${
-                      isPlaying ? 'animate-pulse bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
-                    }`}
-                  />
-                  <span className="text-[11px] font-medium text-sky-600 dark:text-sky-400 truncate">
-                    {currentTrack?.playback.sourceLabel || currentTrack?.source || (isZh ? '准备就绪' : 'Ready')}
-                    {currentTrack?.playback.playbackType
-                      ? ` · ${formatPlaybackTypeBadge(currentTrack.playback.playbackType, isZh).label}`
-                      : ''}
-                  </span>
+            {/* Unboxed Clean Track Metadata */}
+            <div className="mt-5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h2 className="truncate text-lg font-semibold tracking-tight text-slate-900 dark:text-white">
+                    {currentTrack?.title || (isZh ? '选择一首歌曲' : 'Select a track')}
+                  </h2>
+                  <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                    <span>{currentTrack?.artist || (isZh ? '从右侧曲库点击播放' : 'Pick from the library')}</span>
+                    {(currentTrack?.playback.sourceLabel || currentTrack?.source) && (
+                      <>
+                        <span className="mx-1.5" aria-hidden="true">·</span>
+                        <span>{currentTrack.playback.sourceLabel || currentTrack.source}</span>
+                      </>
+                    )}
+                    {currentTrack?.playback.playbackType && (
+                      <>
+                        <span className="mx-1.5" aria-hidden="true">·</span>
+                        <span>{formatPlaybackTypeBadge(currentTrack.playback.playbackType, isZh).label}</span>
+                      </>
+                    )}
+                  </p>
                 </div>
                 {currentTrack?.sourceUrl && (
                   <a
                     href={currentTrack.sourceUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-sky-600 dark:hover:text-sky-300 shrink-0"
-                    title={isZh ? '访问原页面' : 'Source'}
+                    className="mt-0.5 text-slate-400 hover:text-sky-600 dark:hover:text-sky-300 shrink-0"
+                    title={isZh ? '访问原页面' : 'Open source'}
                   >
-                    <ExternalLink className="h-3.5 w-3.5" />
+                    <ExternalLink className="h-4 w-4" />
                   </a>
                 )}
               </div>
 
-              <h2 className="mt-1.5 line-clamp-1 text-lg font-bold tracking-[-0.02em] text-slate-900 dark:text-white">
-                {currentTrack?.title || (isZh ? '选择一首歌曲开始聆听' : 'Choose a track')}
-              </h2>
-              <p className="mt-0.5 truncate text-xs font-medium text-slate-500 dark:text-slate-400">
-                {currentTrack?.artist || (isZh ? '从右侧曲库点击播放或全网搜歌' : 'Click any track from the list')}
-                {currentTrack?.license ? ` · ${currentTrack.license}` : ''}
-              </p>
-
-              {/* Manual Source Switcher + Fallback Trigger */}
-              {currentTrack && currentTrack.sources.length > 0 && (
-                <div className="mt-3 flex flex-wrap items-center gap-1.5" data-testid="music-source-switcher">
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
-                    <ArrowRightLeft className="h-3 w-3" />
-                    {isZh ? '音源：' : 'Source:'}
-                  </span>
+              {/* Understated Source Switch Line (only shown if alternatives exist) */}
+              {currentTrack && currentTrack.sources.filter((s) => s.kind !== 'none').length > 1 && (
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400" data-testid="music-source-switcher">
+                  <span>{isZh ? '音源:' : 'Source:'}</span>
                   {currentTrack.sources
                     .filter((s) => s.kind !== 'none')
-                    .map((src) => {
-                      const activeSrc = p.activeSourceId === src.id || (!p.activeSourceId && currentTrack.sources[0]?.id === src.id);
+                    .map((src, idx) => {
+                      const activeSrc = p.activeSourceId === src.id || (!p.activeSourceId && idx === 0);
                       return (
                         <button
                           key={src.id}
+                          type="button"
                           onClick={() => player.switchSource(src.id)}
                           data-testid={`music-source-btn-${src.provider || src.id}`}
-                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium transition ${
+                          className={`transition ${
                             activeSrc
-                              ? 'bg-sky-600 text-white dark:bg-sky-500'
-                              : 'border border-slate-200 bg-slate-50 text-slate-600 hover:border-sky-300 dark:border-white/10 dark:bg-white/5 dark:text-slate-300'
+                              ? 'font-semibold text-sky-600 dark:text-sky-400 underline underline-offset-4'
+                              : 'hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
                           {src.label}
                         </button>
                       );
                     })}
-                  {currentTrack.sources.filter((s) => s.kind !== 'none').length > 1 && (
-                    <button
-                      onClick={() => {
-                        const ok = player.tryFallbackSource(isZh ? '手动切换备用音源' : 'Manual fallback');
-                        if (!ok) {
-                          showNotice(isZh ? '已无其他可用备用源，请点击右上角外部图标打开原平台。' : 'No more backup sources.');
-                        }
-                      }}
-                      data-testid="music-fallback-btn"
-                      className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-400/25 dark:bg-amber-500/10 dark:text-amber-300"
-                    >
-                      <RefreshCw className="h-2.5 w-2.5" />
-                      {isZh ? '切备用源' : 'Backup'}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ok = player.tryFallbackSource(isZh ? '手动切换备用音源' : 'Manual fallback');
+                      if (!ok) {
+                        showNotice(isZh ? '已无其他备用源，请点击右上角外链打开原平台。' : 'No more backup sources.');
+                      }
+                    }}
+                    data-testid="music-fallback-btn"
+                    className="ml-auto inline-flex items-center gap-1 text-slate-400 hover:text-amber-600 dark:hover:text-amber-400"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    <span>{isZh ? '备用' : 'Backup'}</span>
+                  </button>
                 </div>
               )}
             </div>
 
-            {/* Slim Frameless Spectrum */}
-            <div className="mt-3.5 w-full overflow-hidden">
-              <canvas ref={canvasRef} width={360} height={34} className="block h-8 w-full max-w-full" />
+            {/* Minimal Spectrum */}
+            <div className="mt-4 w-full overflow-hidden">
+              <canvas ref={canvasRef} width={360} height={28} className="block h-7 w-full max-w-full" />
             </div>
 
-            {/* Progress Bar */}
+            {/* Scrubber */}
             <div className="mt-2 flex items-center gap-2.5 text-[11px] font-medium tabular-nums text-slate-500 dark:text-slate-400">
               <span>{formatSeconds(currentTime)}</span>
               <input
@@ -871,94 +846,97 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                 min={0}
                 max={duration || 100}
                 value={Math.min(currentTime, duration || 100)}
-                onChange={e => {
+                onChange={(e) => {
                   const t = parseFloat(e.target.value);
                   if (currentTrack?.playback?.kind === 'audio') player.seek(t);
                 }}
                 disabled={!(currentTrack?.playback?.kind === 'audio')}
-                className="h-1.5 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-sky-600 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-white/15 dark:accent-sky-400"
+                className="h-1 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-sky-600 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-white/15 dark:accent-sky-400"
               />
               <span>{formatSeconds(duration || currentTrack?.durationSeconds || 0)}</span>
             </div>
 
-            {/* Centered Transport Controls */}
-            <div className="mt-4 flex items-center justify-center gap-3">
-              <button
-                onClick={() => player.toggleShuffle()}
-                title={isZh ? '随机播放' : 'Shuffle'}
-                className={`rounded-full p-2 transition ${
-                  isShuffle
-                    ? 'bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400'
-                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/8'
-                }`}
-              >
-                <Shuffle className="h-4 w-4" />
-              </button>
+            {/* Clean Transport Controls + Inline Volume */}
+            <div className="mt-5 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => player.toggleMute()}
+                  title={isMuted ? (isZh ? '取消静音' : 'Unmute') : (isZh ? '静音' : 'Mute')}
+                  className="rounded-lg p-1.5 text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                >
+                  {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={isMuted ? 0 : volume}
+                  onChange={(e) => player.setVolume(parseFloat(e.target.value))}
+                  className="hidden sm:block h-1 w-16 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-sky-600 dark:bg-white/15 dark:accent-sky-400"
+                />
+              </div>
 
-              <button
-                onClick={() => player.playPrevious()}
-                title={isZh ? '上一首' : 'Previous'}
-                className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/8"
-              >
-                <SkipBack className="h-4.5 w-4.5" />
-              </button>
-
-              <button
-                onClick={() => void togglePlay()}
-                title={isPlaying ? (isZh ? '暂停' : 'Pause') : (isZh ? '播放' : 'Play')}
-                className="flex h-12 w-12 items-center justify-center rounded-full bg-sky-600 text-white shadow-md shadow-sky-600/25 transition hover:scale-105 hover:bg-sky-500 dark:bg-white dark:text-slate-900"
-              >
-                {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="ml-0.5 h-5 w-5 fill-current" />}
-              </button>
-
-              <button
-                onClick={() => player.playNext()}
-                title={isZh ? '下一首' : 'Next'}
-                className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/8"
-              >
-                <SkipForward className="h-4.5 w-4.5" />
-              </button>
-
-              <button
-                onClick={() => player.setRepeatMode(isLoop ? 'off' : 'one')}
-                title={isZh ? '单曲循环' : 'Repeat One'}
-                className={`rounded-full p-2 transition ${
-                  isLoop
-                    ? 'bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400'
-                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/8'
-                }`}
-              >
-                <Repeat className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Volume Row */}
-            <div className="mt-4 flex items-center justify-center gap-2 border-t border-slate-100 pt-3.5 dark:border-white/8">
-              <button
-                onClick={() => player.toggleMute()}
-                title={isMuted ? (isZh ? '取消静音' : 'Unmute') : (isZh ? '静音' : 'Mute')}
-                className="rounded-lg p-1 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
-              >
-                {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={isMuted ? 0 : volume}
-                onChange={e => player.setVolume(parseFloat(e.target.value))}
-                className="h-1.5 w-32 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-sky-600 dark:bg-white/15 dark:accent-sky-400"
-              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => player.toggleShuffle()}
+                  title={isZh ? '随机播放' : 'Shuffle'}
+                  className={`rounded-lg p-2 transition ${
+                    isShuffle
+                      ? 'text-sky-600 dark:text-sky-400'
+                      : 'text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Shuffle className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => player.playPrevious()}
+                  title={isZh ? '上一首' : 'Previous'}
+                  className="rounded-lg p-2 text-slate-600 transition hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+                >
+                  <SkipBack className="h-4.5 w-4.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void togglePlay()}
+                  title={isPlaying ? (isZh ? '暂停' : 'Pause') : (isZh ? '播放' : 'Play')}
+                  className="flex h-11 w-11 items-center justify-center rounded-full bg-sky-600 text-white transition hover:bg-sky-500 dark:bg-white dark:text-slate-900"
+                >
+                  {isPlaying ? <Pause className="h-4.5 w-4.5 fill-current" /> : <Play className="ml-0.5 h-4.5 w-4.5 fill-current" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => player.playNext()}
+                  title={isZh ? '下一首' : 'Next'}
+                  className="rounded-lg p-2 text-slate-600 transition hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
+                >
+                  <SkipForward className="h-4.5 w-4.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => player.setRepeatMode(isLoop ? 'off' : 'one')}
+                  title={isZh ? '单曲循环' : 'Repeat One'}
+                  className={`rounded-lg p-2 transition ${
+                    isLoop
+                      ? 'text-sky-600 dark:text-sky-400'
+                      : 'text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Repeat className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             {p.fallbackNotice && (
               <div
                 data-testid="music-fallback-notice"
-                className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/15 dark:text-amber-200"
+                className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-800 dark:border-amber-400/25 dark:bg-amber-500/12 dark:text-amber-200"
               >
                 <span>{p.fallbackNotice}</span>
-                <button onClick={() => player.clearFallbackNotice()} className="shrink-0 p-0.5">
+                <button type="button" onClick={() => player.clearFallbackNotice()} className="shrink-0">
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -967,7 +945,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
             {p.error && (
               <div
                 data-testid="music-error-banner"
-                className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/25 dark:bg-red-500/15 dark:text-red-200"
+                className="mt-4 rounded-lg border border-red-200 bg-red-50/90 px-3 py-2 text-xs text-red-700 dark:border-red-500/25 dark:bg-red-500/12 dark:text-red-200"
               >
                 <div>{p.error.message}</div>
                 {currentTrack?.sourceUrl && (
@@ -975,7 +953,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                     href={currentTrack.sourceUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-1.5 inline-flex items-center gap-1 font-semibold underline"
+                    className="mt-1 inline-flex items-center gap-1 font-medium underline"
                   >
                     <ExternalLink className="h-3 w-3" />
                     {isZh ? '前往原平台收听' : 'Open on Original Platform'}
@@ -985,26 +963,26 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
             )}
           </section>
 
-          {/* Right Airy Library & Tracklist */}
-          <section className="w-full min-w-0 rounded-3xl border border-slate-200/90 bg-white/95 p-4 shadow-sm dark:border-white/12 dark:bg-[#162238]/95 sm:p-5 lg:p-6">
+          {/* Right Clean Library / Queue */}
+          <section className="w-full min-w-0 rounded-2xl border border-slate-200/90 bg-white p-5 dark:border-white/12 dark:bg-[#162238] sm:p-6">
             {view === 'discover' ? (
               <>
-                {/* Search Bar + Quick Source Buttons */}
-                <div className="flex flex-col gap-2.5 sm:flex-row">
+                {/* Unified Single-Row Search Bar */}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <div className="relative min-w-0 flex-1">
                     <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <input
                       value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') void searchDualMusic();
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void executeUnifiedSearch();
                       }}
                       placeholder={
                         isZh
                           ? '搜索歌名、歌手，或粘贴 B站 BV / YouTube 链接…'
-                          : 'Search songs, artists, or paste a Bilibili/YouTube link…'
+                          : 'Search tracks, artists, or paste Bilibili/YouTube URL…'
                       }
-                      className="h-10 w-full rounded-full border border-slate-200 bg-slate-50/90 pl-10 pr-8 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-sky-500 focus:bg-white dark:border-white/12 dark:bg-white/5 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-sky-400"
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-10 pr-8 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-sky-500 focus:bg-white dark:border-white/12 dark:bg-white/5 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-sky-400"
                     />
                     {searchQuery && (
                       <button
@@ -1022,46 +1000,44 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                       </button>
                     )}
                   </div>
-                  <div className="flex flex-wrap gap-1.5 shrink-0">
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <select
+                      aria-label={isZh ? '检索源' : 'Source'}
+                      value={searchEngine}
+                      onChange={(e) => setSearchEngine(e.target.value as 'all' | 'bilibili' | 'youtube')}
+                      className="h-10 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 outline-none dark:border-white/12 dark:bg-white/6 dark:text-slate-200"
+                    >
+                      <option value="all">{isZh ? '全网曲库' : 'All Sources'}</option>
+                      <option value="bilibili">B站</option>
+                      <option value="youtube">YouTube</option>
+                    </select>
+
                     <button
-                      onClick={() => void searchDualMusic()}
+                      type="button"
+                      onClick={() => void executeUnifiedSearch()}
                       disabled={searching}
-                      className="inline-flex h-10 items-center gap-1.5 rounded-full bg-sky-600 px-3.5 sm:px-4 text-xs font-semibold text-white shadow-2xs transition hover:bg-sky-500 disabled:opacity-45 dark:bg-white dark:text-slate-900"
+                      className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-sky-600 px-4 text-xs font-semibold text-white transition hover:bg-sky-500 disabled:opacity-45 dark:bg-white dark:text-slate-900 whitespace-nowrap"
                     >
                       {searching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                      {isZh ? '搜全网' : 'Search'}
-                    </button>
-                    <button
-                      onClick={() => void searchBilibiliMusic(undefined, false)}
-                      disabled={searching || !searchQuery.trim()}
-                      className="inline-flex h-10 items-center gap-1 rounded-full border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-40 dark:border-white/12 dark:bg-white/5 dark:text-slate-200"
-                    >
-                      <Tv className="h-3.5 w-3.5 text-pink-500" />
-                      B站
-                    </button>
-                    <button
-                      onClick={() => void searchYouTubeMusic(undefined, false)}
-                      disabled={searching || !searchQuery.trim()}
-                      className="inline-flex h-10 items-center gap-1 rounded-full border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-40 dark:border-white/12 dark:bg-white/5 dark:text-slate-200"
-                    >
-                      <Youtube className="h-3.5 w-3.5 text-red-500" />
-                      YT
+                      <span>{isZh ? '搜索' : 'Search'}</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Single Horizontal Scrollable Genre Strip */}
-                <div className="mt-4 flex w-full max-w-full items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {GENRE_FILTERS.map(g => {
+                {/* Single-Row Clean Tab Genre Strip */}
+                <div className="mt-4 flex w-full max-w-full items-center gap-1 overflow-x-auto border-b border-slate-200/80 pb-2 dark:border-white/10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {GENRE_FILTERS.map((g) => {
                     const active = selectedGenre === g.id;
                     return (
                       <button
                         key={g.id}
+                        type="button"
                         onClick={() => setSelectedGenre(g.id)}
-                        className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
+                        className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition ${
                           active
-                            ? 'bg-slate-900 text-white shadow-2xs dark:bg-sky-500 dark:text-white'
-                            : 'bg-slate-100/80 text-slate-600 hover:bg-slate-200/70 hover:text-slate-900 dark:bg-white/6 dark:text-slate-300 dark:hover:bg-white/12 dark:hover:text-white'
+                            ? 'bg-slate-900 text-white dark:bg-sky-500/20 dark:text-sky-300'
+                            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/6 dark:hover:text-white'
                         }`}
                       >
                         {isZh ? g.zh : g.en}
@@ -1070,29 +1046,29 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                   })}
                 </div>
 
-                {/* Hairline-Divided Airy Tracklist */}
-                <div className="mt-4 max-h-[55vh] lg:max-h-[62vh] overflow-y-auto divide-y divide-slate-100 dark:divide-white/8 pr-1">
+                {/* Clean Hairline-Divided Tracklist (No Pill Clutter) */}
+                <div className="mt-2 max-h-[58vh] lg:max-h-[62vh] overflow-y-auto divide-y divide-slate-100 dark:divide-white/8 pr-1">
                   {loading || searching ? (
                     <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500 dark:text-slate-400">
                       <Loader2 className="h-4 w-4 animate-spin text-sky-600 dark:text-sky-400" />
-                      {isZh ? '正在载入音乐曲库…' : 'Loading music catalog…'}
+                      <span>{isZh ? '正在载入曲目…' : 'Loading tracks…'}</span>
                     </div>
                   ) : tracks.length === 0 ? (
                     <div className="py-14 text-center text-sm text-slate-500 dark:text-slate-400">
-                      {isZh ? '暂无匹配曲目，试试切换分类或全网搜歌。' : 'No tracks found.'}
+                      {isZh ? '暂无匹配曲目，请尝试更换关键词。' : 'No tracks found.'}
                     </div>
                   ) : (
                     tracks.map((track, idx) => {
                       const isCurrent = currentTrack?.id === track.id;
-                      const isTrackEmbed = Boolean(track.embedUrl || track.playable === 'embed');
                       return (
                         <button
                           key={track.id}
+                          type="button"
                           onClick={() => handleSelectTrack(idx)}
-                          className={`group flex w-full items-center gap-3.5 rounded-xl px-2.5 py-2.5 text-left transition ${
+                          className={`group flex w-full items-center gap-3.5 px-2 py-3 text-left transition ${
                             isCurrent
-                              ? 'bg-sky-50/90 dark:bg-sky-500/12'
-                              : 'hover:bg-slate-50 dark:hover:bg-white/[0.04]'
+                              ? 'bg-sky-50/75 dark:bg-sky-500/10'
+                              : 'hover:bg-slate-50/90 dark:hover:bg-white/[0.04]'
                           }`}
                         >
                           <span className="w-6 shrink-0 text-center text-xs font-medium tabular-nums text-slate-400 dark:text-slate-500">
@@ -1115,14 +1091,11 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                               onError={handleCoverError}
                               className="h-full w-full object-cover"
                             />
-                            <span className="absolute inset-0 flex items-center justify-center bg-slate-900/35 text-white opacity-0 transition group-hover:opacity-100">
-                              <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />
-                            </span>
                           </div>
 
                           <div className="min-w-0 flex-1">
                             <div
-                              className={`truncate text-sm font-semibold ${
+                              className={`truncate text-sm font-medium ${
                                 isCurrent ? 'text-sky-700 dark:text-sky-300' : 'text-slate-900 dark:text-white'
                               }`}
                             >
@@ -1134,17 +1107,9 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span
-                              className={`hidden sm:inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                                isTrackEmbed
-                                  ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300'
-                                  : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
-                              }`}
-                            >
-                              {formatPlaybackTypeBadge(track.playbackType || (isTrackEmbed ? 'official_embed' : 'legal_direct_audio'), isZh).label}
-                            </span>
-                            <span className="w-11 text-right text-xs font-medium tabular-nums text-slate-400 dark:text-slate-500">
+                          <div className="flex items-center gap-3 shrink-0 text-xs tabular-nums text-slate-400 dark:text-slate-500">
+                            <span className="hidden sm:inline">{track.source || (track.embedUrl ? 'Embed' : 'Audio')}</span>
+                            <span className="w-11 text-right">
                               {track.durationSeconds ? formatSeconds(track.durationSeconds) : '--:--'}
                             </span>
                           </div>
@@ -1157,23 +1122,24 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
             ) : (
               <>
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-white/8">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    {isZh ? '播放队列' : 'Play Queue'} ({queue.length})
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white tabular-nums">
+                    {isZh ? `播放队列 (${queue.length})` : `Play Queue (${queue.length})`}
                   </h3>
                   {queue.length > 0 && (
                     <button
+                      type="button"
                       onClick={() => player.clearQueue()}
-                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50 hover:text-red-600 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-red-300"
+                      className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-300"
                     >
-                      <Trash2 className="h-3 w-3" />
-                      {isZh ? '清空队列' : 'Clear'}
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>{isZh ? '清空队列' : 'Clear'}</span>
                     </button>
                   )}
                 </div>
                 <div className="mt-2 max-h-[62vh] divide-y divide-slate-100 overflow-y-auto dark:divide-white/8 pr-1">
                   {queue.length === 0 ? (
                     <div className="py-14 text-center text-sm text-slate-500 dark:text-slate-400">
-                      {isZh ? '播放队列为空，去曲库精选选一首歌吧。' : 'Queue is empty.'}
+                      {isZh ? '播放队列为空，去曲库选一首歌吧。' : 'Queue is empty.'}
                     </div>
                   ) : (
                     queue.map((item, i) => {
@@ -1182,11 +1148,12 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                       return (
                         <button
                           key={item.queueId}
-                          onClick={() => player.playTrack(t, queue.map(q => q.track), i)}
-                          className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition ${
+                          type="button"
+                          onClick={() => player.playTrack(t, queue.map((q) => q.track), i)}
+                          className={`flex w-full items-center gap-3.5 px-2 py-3 text-left transition ${
                             active
-                              ? 'bg-sky-50/90 dark:bg-sky-500/12'
-                              : 'hover:bg-slate-50 dark:hover:bg-white/[0.04]'
+                              ? 'bg-sky-50/75 dark:bg-sky-500/10'
+                              : 'hover:bg-slate-50/90 dark:hover:bg-white/[0.04]'
                           }`}
                         >
                           <span className="w-6 shrink-0 text-center text-xs font-medium tabular-nums text-slate-400">
@@ -1201,15 +1168,13 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
                           />
                           <div className="min-w-0 flex-1">
                             <div
-                              className={`truncate text-sm font-semibold ${
+                              className={`truncate text-sm font-medium ${
                                 active ? 'text-sky-700 dark:text-sky-300' : 'text-slate-900 dark:text-white'
                               }`}
                             >
                               {t.title}
                             </div>
-                            <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-                              {t.artist}
-                            </div>
+                            <div className="truncate text-xs text-slate-500 dark:text-slate-400">{t.artist}</div>
                           </div>
                         </button>
                       );

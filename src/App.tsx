@@ -337,7 +337,18 @@ export default function App() {
         {currentTab === 'aihub' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><AIHub lang={lang} /></div>}
         <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[#121e36] text-slate-100"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} /></div></div>
         {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
-        {currentTab === 'arabic-learning' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><ArabicLearningHub lang={lang} onOpenLibrary={() => setCurrentTab('library')} /></div>}
+        {currentTab === 'arabic-learning' && (
+          <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]">
+            <ArabicLearningHub
+              lang={lang}
+              onOpenLibrary={() => setCurrentTab('library')}
+              onOpenUrlInBrowser={(url) => {
+                setBrowserQuickSearch({ seq: Date.now(), query: url });
+                setCurrentTab('browser');
+              }}
+            />
+          </div>
+        )}
         {currentTab === 'knowledge' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
         <div className={currentTab === 'browser' ? 'block h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className={`h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] ${isMobileKeyboardOpen ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(4.65rem+env(safe-area-inset-bottom))]'} md:pb-0 flex flex-col min-h-0 bg-[#121e36] text-slate-100`}><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} quickSearchRequest={browserQuickSearch} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
         {currentTab === 'network' && (

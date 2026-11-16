@@ -164,6 +164,28 @@ class GlobalAudioEngine {
     } catch {}
   }
 
+  unlockPlayback() {
+    try {
+      const el = this.element;
+      if (el && !this.currentSrc) {
+        // Touch playback readiness inside gesture without audible sound
+        el.muted = true;
+        const p = el.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            el.pause();
+            el.muted = false;
+          }).catch(() => {
+            el.muted = false;
+          });
+        } else {
+          el.muted = false;
+        }
+      }
+      void this.resumeContext();
+    } catch {}
+  }
+
   getCurrentSrc() { return this.currentSrc; }
   getElement() { return this.audio; }
 }

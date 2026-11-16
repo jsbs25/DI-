@@ -3089,6 +3089,27 @@ app.post('/api/ai/agent-command', async (req, res) => {
   const lang = req.body?.lang === 'en' ? 'en' : 'zh';
   if (!text) return res.json({ success: true, action: { type: 'none' } });
 
+  const isZh = lang === 'zh';
+  // Fast deterministic intent match before calling LLM
+  if (/下一首|切歌|next song/i.test(text)) {
+    return res.json({ success: true, action: { type: 'play_music', control: 'next', reply: isZh ? '已切换到下一首。' : 'Next track.' } });
+  }
+  if (/上一首|previous song/i.test(text)) {
+    return res.json({ success: true, action: { type: 'play_music', control: 'prev', reply: isZh ? '已切回上一首。' : 'Previous track.' } });
+  }
+  if (/暂停音乐|停止音乐|pause music/i.test(text)) {
+    return res.json({ success: true, action: { type: 'play_music', control: 'pause', reply: isZh ? '已暂停音乐。' : 'Music paused.' } });
+  }
+  if (/听歌|放歌|打开.*音乐|放音乐|听音乐|play.*music|open.*music/i.test(text)) {
+    return res.json({ success: true, action: { type: 'play_music', query: '', crawl: true, reply: isZh ? '正在打开音乐并为您播放。' : 'Opening music.' } });
+  }
+  if (/纪录片|记录片|documentary/i.test(text)) {
+    return res.json({ success: true, action: { type: 'watch_documentary', query: '宇宙 纪录片', platform: 'all', randomPick: true, reply: isZh ? '正在打开影院播放纪录片。' : 'Opening documentary.' } });
+  }
+  if (/多邻国|语言学习|学英语|duolingo|language/i.test(text)) {
+    return res.json({ success: true, action: { type: 'navigate_tab', tab: 'arabic-learning', reply: isZh ? '已打开语言学习中心。' : 'Opening Language Center.' } });
+  }
+
   const systemPrompt = `You are the web-control planner for ONE. Given user speech, return ONLY valid JSON (no markdown) deciding whether the user wants to control the website, or {"type":"none"} if it is normal conversation.
 Allowed actions:
 - {"type":"play_music","query":"optional song/mood","crawl":true,"reply":"short confirmation in ${lang}"}
