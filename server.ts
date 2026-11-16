@@ -3009,6 +3009,7 @@ app.post('/api/ai/chat', async (req, res) => {
 
   const systemInstructions: Record<string, string> = {
     general: 'You are a general-purpose assistant, not a branded persona. Answer the current question directly in the user’s language. For follow-ups, prioritize the latest relevant conversation turns and honor the user’s constraints. Do not introduce unrelated themes or claim abilities you do not have. Keep simple answers concise; expand only when the user asks. Be accurate and say when uncertain.',
+    companion: '你是 One.，EARTH ONE 的语音智能助手，由 DeepSeek 驱动。用自然、温暖、有情绪感和同理心的语气与用户实时对话，像懂用户当下处境的伙伴一样回应；能理解用户正在做什么（会收到当前界面上下文），回答直接、简洁、口语化，适合语音播报。用户下达任务或指令时优先立刻给出明确执行结果/方案，不拖沓不说教；遇到不确定就坦诚说明并给出可行建议。用用户使用的语言回答。',
     translator: 'You are the Project Earth Polyglot Translator. Translate with native fidelity, preserving emotional nuance and cultural context.',
     writer: 'You are the Project Earth Creator Assistant. Help author eloquent global essays, articles, poetry, and stories.',
     tutor: 'You are the Project Earth International Language Coach. Help the user master natural conversation, idioms, and pronunciation.'
@@ -3097,7 +3098,9 @@ app.post('/api/ai/agent-command', async (req, res) => {
     return res.json({ success: true, action: { type: 'navigate_tab', tab: 'arabic-learning', reply: isZh ? '好的，已打开语言学习中心。' : 'Opening Language Center.' } });
   }
 
-  const systemPrompt = `You are the web-control planner for ONE. Given user speech, return ONLY valid JSON (no markdown) deciding whether the user wants to control the website, or {"type":"none"} if it is normal conversation.
+  const systemPrompt = `You are the web-control planner for ONE. Given user speech, return ONLY valid JSON (no markdown).
+Return a control action ONLY when the user clearly asks to control the website/app (play/stop music, open/navigate to a specific section, search web, watch documentary, change theme/language).
+For greetings, feelings, questions, chit-chat, explanations, or anything conversational/uncertain, you MUST return {"type":"none"} so the assistant can answer naturally. Be conservative: when in doubt return {"type":"none"}.
 Allowed actions:
 - {"type":"play_music","query":"optional song/mood","crawl":true,"reply":"short confirmation in ${lang}"}
 - {"type":"play_music","control":"next"|"prev"|"pause"|"resume","reply":"short confirmation in ${lang}"}

@@ -9,8 +9,6 @@ import { GlobalFeed } from './components/social/GlobalFeed.tsx';
 import { GlobalMessenger, type MessengerQuickAction } from './components/chat/GlobalMessenger.tsx';
 import { AIHub } from './components/ai/AIHub.tsx';
 import { CreatorHub } from './components/creator/CreatorHub.tsx';
-import { VideoCenter } from './components/video/VideoCenter.tsx';
-import { GameCenter } from './components/games/GameCenter.tsx';
 import { CommunityList } from './components/community/CommunityList.tsx';
 import { UserProfileModal } from './components/profile/UserProfileModal.tsx';
 import { LuxuryAdBanner } from './components/commercial/LuxuryAdBanner.tsx';
@@ -34,8 +32,6 @@ import { MoonAcademy } from './universe/MoonAcademy.tsx';
 import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
-import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
-import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
 import { GlobalMiniPlayer } from './components/music/GlobalMiniPlayer.tsx';
 import type { SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
@@ -89,7 +85,6 @@ export default function App() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [articles, setArticles] = useState<CreatorArticle[]>([]);
-  const [videos, setVideos] = useState<VideoItem[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
@@ -136,13 +131,9 @@ export default function App() {
   }, []);
 
   const isViewportWorkspace = ['universe', 'chat', 'browser'].includes(currentTab);
-  const isSpaceExperience = isViewportWorkspace || ['globe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge', 'network', 'settings', 'profile', 'call'].includes(currentTab);
+  const isSpaceExperience = isViewportWorkspace || ['globe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge', 'call'].includes(currentTab);
   useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
 
-  useEffect(() => {
-    if (currentTab === 'settings') setIsSecurityModalOpen(true);
-    if (currentTab === 'profile' && currentUser) setProfileModalUser(currentUser);
-  }, [currentTab, currentUser]);
 
 
   const refreshConversations = async () => { try { const res = await fetch('/api/conversations'); const data = await res.json(); if (data.success) setConversations(data.conversations || []); } catch {} };
@@ -207,24 +198,6 @@ export default function App() {
   const handleEnterPlanet = (planetId: string) => { const eco = getPlanetEcosystem(planetId); if (!eco || !eco.available) return; setCurrentTab(eco.tab); setBrowserInitialQuery(null); };
 
   if (!currentUser) {
-    if (currentTab === 'brand') {
-      return (
-        <>
-          <OfflineIndicator lang={lang} />
-          <BrandIdentitySystem
-            lang={lang}
-            onBackToGlobe={() => {
-              setCurrentTab('globe');
-              try {
-                const url = new URL(window.location.href);
-                url.searchParams.delete('module');
-                window.history.replaceState({}, '', url.pathname + url.search);
-              } catch {}
-            }}
-          />
-        </>
-      );
-    }
     return (
       <>
         <OfflineIndicator lang={lang} />
@@ -340,61 +313,10 @@ export default function App() {
         )}
         {currentTab === 'knowledge' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
         <div className={currentTab === 'browser' ? 'block h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className={`h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] ${isMobileKeyboardOpen ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(4.65rem+env(safe-area-inset-bottom))]'} md:pb-0 flex flex-col min-h-0 bg-[#121e36] text-slate-100`}><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} quickSearchRequest={browserQuickSearch} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
-        {currentTab === 'network' && (
-          <OneNetworkCenter
-            lang={lang}
-            onOpenBrowserProxy={() => {
-              setBrowserOpenProxySeq((s) => s + 1);
-              setCurrentTab('browser');
-            }}
-            onOpenCalls={() => setCurrentTab('chat')}
-          />
-        )}
         {currentTab === 'crawler' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><CrawlerDashboard lang={lang} /></div>}
         {currentTab === 'creator' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
-        {currentTab === 'video' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><VideoCenter videos={videos} lang={lang} /></div>}
-        {currentTab === 'game' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><GameCenter currentUser={currentUser} lang={lang} /></div>}
         {currentTab === 'community' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
         {currentTab === 'academy' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonAcademy lang={lang} currentUser={currentUser} onBack={() => setCurrentTab('universe')} /></div>}
-        {currentTab === 'settings' && (
-          <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
-            <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
-              <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'设置与安全':'Settings & Security'}</h1>
-              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'ONE 当前未提供独立的全局设置页面。账户、安全、隐私与绑定等真实能力已在「账户与安全」中提供。':'ONE does not currently provide a standalone global settings page. Real account, security, privacy, and linking controls are available in Account & Security.'}</p>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => setIsSecurityModalOpen(true)} className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">Account &amp; Security</button>
-                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.06] text-slate-800 dark:text-slate-100 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-white/[0.12]">{lang==='zh'?'个人资料':'Profile'}</button>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='zh'?'状态：独立设置模块未实现；已开放能力均为真实功能。':'Status: standalone settings module not implemented; exposed controls are real.'}</p>
-            </div>
-          </div>
-        )}
-        {currentTab === 'profile' && (
-          <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
-            <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
-              <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'个人主页':'Profile'}</h1>
-              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'你的个人资料与地球信标通过真实资料面板管理（非独立路由页）。':'Your profile and globe beacon are managed via the real profile panel (no standalone route page).'}</p>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">{lang==='zh'?'打开个人资料':'Open profile'}</button>
-                <button onClick={() => setIsOnboardingModalOpen(true)} className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.06] text-slate-800 dark:text-slate-100 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-white/[0.12]">{lang==='zh'?'编辑地球信标':'Edit beacon'}</button>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='zh'?'状态：独立 profile 页面未实现；以上入口为真实功能。':'Status: standalone profile page not implemented; entries above are real.'}</p>
-            </div>
-          </div>
-        )}
-        {currentTab === 'call' && (
-          <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
-            <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
-              <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'通话':'Calls'}</h1>
-              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'当前没有独立的通话模块页面。通话能力（如可用）集成在消息/会话体验中，并依赖真实设备权限与连接状态；本路由不提供伪造通话界面。':'There is no standalone call module page. Call capabilities, where available, are integrated into messaging/conversations and depend on real device permissions and connectivity; this route does not provide a fabricated call UI.'}</p>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => setCurrentTab('chat')} className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">{lang==='zh'?'打开消息':'Open messages'}</button>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='zh'?'状态：独立 call 模块未实现；多端/设备通话需真实环境验证。':'Status: standalone call module not implemented; multi-device calling requires real-environment verification.'}</p>
-            </div>
-          </div>
-        )}
-        {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><BrandIdentitySystem lang={lang} onBackToGlobe={() => setCurrentTab('globe')} /></div>}
       </main>
 
       <AppDock currentTab={currentTab} lang={lang} hidden={(currentTab === 'globe' && immersive) || (isMobileKeyboardOpen && isViewportWorkspace)} onSelectTab={(tab) => { setCurrentTab(tab); if (tab !== 'browser') setBrowserInitialQuery(null); }} />
