@@ -2,18 +2,18 @@
   {
     "id": "venus_track_01",
     "title": "Clair de Lune",
-    "artist": "Claude Debussy (Public Domain Performance)",
+    "artist": "Claude Debussy",
     "album": "Suite Bergamasque",
     "genre": "Neo-Classical",
     "durationSeconds": 374,
     "audioUrl": "https://archive.org/download/ClairDeLunedebussy/2009-03-30-clairdelune.mp3",
     "coverUrl": "/assets/music/neo-classical.jpg",
-    "source": "Internet Archive",
+    "source": "ONE Music",
     "sourceUrl": "https://archive.org/details/ClairDeLunedebussy",
     "license": "Public Domain",
     "crawledAt": "2026-11-14T00:00:00Z",
     "bpm": 68,
-    "description": "德彪西经典钢琴名曲《月光》，清澈空灵的新古典钢琴演奏直链。"
+    "description": "德彪西经典钢琴名曲《月光》，清澈空灵的新古典钢琴演奏。"
   },
   {
     "id": "venus_track_02",
@@ -24,7 +24,7 @@
     "durationSeconds": 243,
     "audioUrl": "https://archive.org/download/GymnopedieNo.1/Gymnopedie%20No.1.mp3",
     "coverUrl": "/assets/music/neo-classical.jpg",
-    "source": "Internet Archive",
+    "source": "ONE Music",
     "sourceUrl": "https://archive.org/details/GymnopedieNo.1",
     "license": "Public Domain",
     "crawledAt": "2026-11-14T00:00:00Z",
@@ -40,12 +40,12 @@
     "durationSeconds": 124,
     "audioUrl": "https://archive.org/download/lee-rosevere-promise/Lee%20Rosevere%20-%20Promise%20-%2001%20-%20What%20did%20i%20miss.mp3",
     "coverUrl": "/assets/music/ambient-space.jpg",
-    "source": "Internet Archive",
+    "source": "ONE Music",
     "sourceUrl": "https://archive.org/details/lee-rosevere-promise",
     "license": "CC BY 4.0",
     "crawledAt": "2026-11-14T00:00:00Z",
     "bpm": 76,
-    "description": "Lee Rosevere《Promise》专辑开篇，温柔开阔的空间氛围声景。"
+    "description": "Lee Rosevere 温柔开阔的空间氛围声景。"
   },
   {
     "id": "venus_track_04",
@@ -56,12 +56,12 @@
     "durationSeconds": 99,
     "audioUrl": "https://archive.org/download/lo-fi-for-reading-manga-wk9vgr/Mabisyo%20-%20Lo-Fi%20For%20Reading%20Manga%20-%2001%20Chisato%20Sumiyoshi.mp3",
     "coverUrl": "/assets/music/lofi-horizon.jpg",
-    "source": "Internet Archive",
+    "source": "ONE Music",
     "sourceUrl": "https://archive.org/details/lo-fi-for-reading-manga-wk9vgr",
     "license": "CC BY 4.0",
     "crawledAt": "2026-11-14T00:00:00Z",
     "bpm": 84,
-    "description": "适合专注与阅读的柔和 Lo-Fi 节拍与温暖采样。"
+    "description": "适合专注与阅读的柔和 Lo-Fi 节拍。"
   },
   {
     "id": "venus_track_05",
@@ -72,7 +72,7 @@
     "durationSeconds": 196,
     "audioUrl": "https://archive.org/download/s27-043WeAreOne-Section27Netlabel/1-01JohnGabantin.mp3",
     "coverUrl": "/assets/music/electronic-pulse.jpg",
-    "source": "Internet Archive",
+    "source": "ONE Music",
     "sourceUrl": "https://archive.org/details/s27-043WeAreOne-Section27Netlabel",
     "license": "Creative Commons",
     "crawledAt": "2026-11-14T00:00:00Z",
@@ -88,12 +88,12 @@
     "durationSeconds": 428,
     "audioUrl": "https://archive.org/download/Back_To_The_Sea-8076/Adam__Alma_-_01_-_Things.mp3",
     "coverUrl": "/assets/music/lofi-horizon.jpg",
-    "source": "Internet Archive",
+    "source": "ONE Music",
     "sourceUrl": "https://archive.org/details/Back_To_The_Sea-8076",
     "license": "CC BY-NC-SA",
     "crawledAt": "2026-11-14T00:00:00Z",
     "bpm": 88,
-    "description": "原声木吉他与细腻氛围融合的海岸系长篇器乐。"
+    "description": "原声木吉他与细腻氛围融合的海岸系器乐。"
   },
   {
     "id": "venus_track_07",
@@ -104,12 +104,12 @@
     "durationSeconds": 427,
     "audioUrl": "https://archive.org/download/45rpm053-2012JaredC.Balogh-DriftingSoul/01Jared_C_Balog_-_Emotions_leading_To_Howhere.mp3",
     "coverUrl": "/assets/music/electronic-pulse.jpg",
-    "source": "Internet Archive",
+    "source": "ONE Music",
     "sourceUrl": "https://archive.org/details/45rpm053-2012JaredC.Balogh-DriftingSoul",
     "license": "Creative Commons",
     "crawledAt": "2026-11-14T00:00:00Z",
     "bpm": 110,
-    "description": "脉冲合成波与深邃脉冲贝斯交织的未来主义电子音景。"
+    "description": "脉冲合成波与深邃贝斯交织的电子音景。"
   },
   {
     "id": "venus_track_08",
@@ -120,11 +120,75 @@
     "durationSeconds": 234,
     "audioUrl": "https://archive.org/download/Grab_Bag-12446/01_-_Dummy.mp3",
     "coverUrl": "/assets/music/ambient-space.jpg",
-    "source": "Internet Archive",
+    "source": "ONE Music",
     "sourceUrl": "https://archive.org/details/Grab_Bag-12446",
     "license": "CC BY-SA 4.0",
     "crawledAt": "2026-11-14T00:00:00Z",
     "bpm": 108,
     "description": "独立音乐人 Jahzzar 创作的轻盈现代电子氛围曲目。"
+  },
+  {
+    "id": "ia_mia049",
+    "title": "Lifelong Fiction",
+    "artist": "Aphilas",
+    "album": "Instrumentally Ill EP",
+    "genre": "Lofi Chill",
+    "durationSeconds": 351,
+    "audioUrl": "https://archive.org/download/mia049/mia49a_aphilas_-_lifelong_fiction.mp3",
+    "coverUrl": "/assets/music/lofi-horizon.jpg",
+    "source": "ONE Music",
+    "sourceUrl": "https://archive.org/details/mia049",
+    "license": "Creative Commons",
+    "crawledAt": "2026-11-16T15:26:20.599Z",
+    "bpm": 86,
+    "description": "Aphilas 经典纯器乐 Lo-Fi 节奏氛围曲目。"
+  },
+  {
+    "id": "ia_HGFortuneNFG",
+    "title": "A Hole in Twilight",
+    "artist": "H.G. Fortune & Inner Dreamer",
+    "album": "Atmospheric Ambient",
+    "genre": "Ambient Space",
+    "durationSeconds": 280,
+    "audioUrl": "https://archive.org/download/HGFortuneNFG/LB-A_Hole_in_Twilight.mp3",
+    "coverUrl": "/assets/music/ambient-space.jpg",
+    "source": "ONE Music",
+    "sourceUrl": "https://archive.org/details/HGFortuneNFG",
+    "license": "Creative Commons",
+    "crawledAt": "2026-11-16T15:26:20.599Z",
+    "bpm": 74,
+    "description": "空灵宇宙氛围合成器长篇声景。"
+  },
+  {
+    "id": "ia_Modulator_ESP_Zeta_Reticuli",
+    "title": "Zeta Reticuli",
+    "artist": "Modulator ESP",
+    "album": "Cosmic Electronic",
+    "genre": "Electronic",
+    "durationSeconds": 360,
+    "audioUrl": "https://archive.org/download/Modulator_ESP_Zeta_Reticuli/Modulator_ESP_Zeta_Reticuli_1_192kbps_mp3.mp3",
+    "coverUrl": "/assets/music/electronic-pulse.jpg",
+    "source": "ONE Music",
+    "sourceUrl": "https://archive.org/details/Modulator_ESP_Zeta_Reticuli",
+    "license": "Creative Commons",
+    "crawledAt": "2026-11-16T15:26:20.599Z",
+    "bpm": 102,
+    "description": "Modulator ESP 深空电子冥想器乐。"
+  },
+  {
+    "id": "ia_upupdowndownleftrightleftrightbaslectremix",
+    "title": "I Need A Quarter",
+    "artist": "Hidden Fortress",
+    "album": "Select Remix Vol. 1",
+    "genre": "Cyberpunk",
+    "durationSeconds": 236,
+    "audioUrl": "https://archive.org/download/upupdowndownleftrightleftrightbaslectremix/01INeedAQuartrer.mp3",
+    "coverUrl": "/assets/music/electronic-pulse.jpg",
+    "source": "ONE Music",
+    "sourceUrl": "https://archive.org/details/upupdowndownleftrightleftrightbaslectremix",
+    "license": "Creative Commons",
+    "crawledAt": "2026-11-16T15:26:20.599Z",
+    "bpm": 116,
+    "description": "8-bit 复古未来主义合成波节拍。"
   }
 ]

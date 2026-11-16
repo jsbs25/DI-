@@ -1101,7 +1101,7 @@ export const DuolingoImmersionPlatform: React.FC<{
       </div>
 
       {/* Multi-Language Switcher */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:pb-0">
         {IMMERSION_COURSES.map((c) => {
           const active = c.id === progress.activeCourse;
           const completedInCourse = c.units.filter((u) => progress.completedUnitIds.includes(u.id)).length;
@@ -1110,7 +1110,7 @@ export const DuolingoImmersionPlatform: React.FC<{
               key={c.id}
               type="button"
               onClick={() => setProgress((prev) => ({ ...prev, activeCourse: c.id }))}
-              className={`flex items-center gap-2.5 rounded-xl border px-4 py-2.5 text-left transition cursor-pointer ${
+              className={`flex min-h-[44px] shrink-0 items-center gap-2.5 rounded-xl border px-4 py-2 text-left transition cursor-pointer ${
                 active
                   ? 'border-[color:var(--color-one-accent)] bg-[color:var(--color-one-accent-soft)]'
                   : 'border-[color:var(--color-one-border)] bg-[color:var(--color-one-surface)] hover:bg-[color:var(--color-one-surface-soft)]'
@@ -1136,7 +1136,7 @@ export const DuolingoImmersionPlatform: React.FC<{
       </div>
 
       {/* Course Path / Units */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {course.units.map((unit) => {
           const done = progress.completedUnitIds.includes(unit.id);
           return (
@@ -1172,7 +1172,7 @@ export const DuolingoImmersionPlatform: React.FC<{
               <button
                 type="button"
                 onClick={() => startUnit(unit)}
-                className={`mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition ${
+                className={`mt-5 inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition ${
                   done
                     ? 'border border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15'
                     : 'text-white hover:opacity-95'

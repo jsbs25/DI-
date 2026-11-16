@@ -1,6 +1,6 @@
 /**
  * EARTH ONE - Planet Classifier & AI Intent Understanding
- * Combines fast rule heuristics with local Ollama (Qwen3:8B) reasoning.
+ * Combines fast rule heuristics with DeepSeek reasoning.
  */
 import { PlanetId, ResourceType, AIIntentResult, ResourceItem } from '../types.ts';
 import { aiGateway } from '../../aiGateway.ts';
@@ -130,7 +130,7 @@ export async function parseNaturalLanguageIntent(userPrompt: string): Promise<AI
 
   try {
     const res = await aiGateway.generateContent(
-      'qwen-2.5-open',
+      aiGateway.getChatModelId(),
       promptTrimmed,
       systemInstructions
     );
@@ -192,7 +192,7 @@ ${itemsExcerpt}
 2. 指出哪个资源最匹配、是否免费，以及来自哪个星球。`;
 
   try {
-    const res = await aiGateway.generateContent('qwen-2.5-open', prompt);
+    const res = await aiGateway.generateContent(aiGateway.getChatModelId(), prompt);
     return res.content || '';
   } catch {
     const top = results[0];

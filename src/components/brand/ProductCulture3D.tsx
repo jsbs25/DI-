@@ -613,7 +613,7 @@ export const ProductCulture3D: React.FC<ProductCulture3DProps> = ({
           <button
             type="button"
             onClick={() => setExpanded((e) => !e)}
-            className={`inline-flex h-9 items-center gap-1.5 px-3.5 text-[11px] font-medium transition-colors cursor-pointer ${
+            className={`inline-flex h-10 md:h-9 items-center gap-1.5 px-3.5 text-[11px] font-medium transition-colors cursor-pointer ${
               expanded
                 ? 'bg-[#69B8FF]/20 text-[#D7EEFF]'
                 : 'text-[#C2CFDF] hover:bg-white/[0.08] hover:text-white'
@@ -627,7 +627,7 @@ export const ProductCulture3D: React.FC<ProductCulture3DProps> = ({
           <button
             type="button"
             onClick={() => resetViewRef.current?.()}
-            className="inline-flex h-9 w-9 items-center justify-center text-[#C2CFDF] hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+            className="inline-flex h-10 w-10 md:h-9 md:w-9 items-center justify-center text-[#C2CFDF] hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
             title={isZh ? '重置视角' : 'Reset View'}
           >
             <RotateCcw className="h-3.5 w-3.5" />
@@ -637,7 +637,7 @@ export const ProductCulture3D: React.FC<ProductCulture3DProps> = ({
             <button
               type="button"
               onClick={() => onImmersiveChange(false)}
-              className="h-9 px-3.5 bg-[#F7F5F0] text-[11px] font-medium text-[#020308] hover:bg-[#EAE5DC] transition-colors cursor-pointer whitespace-nowrap"
+              className="h-10 md:h-9 px-3.5 bg-[#F7F5F0] text-[11px] font-medium text-[#020308] hover:bg-[#EAE5DC] transition-colors cursor-pointer whitespace-nowrap"
             >
               {isZh ? '退出' : 'Exit'}
             </button>

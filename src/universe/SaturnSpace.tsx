@@ -766,7 +766,7 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack, quickAct
               <button
                 key={ch.key}
                 onClick={() => onChannel(ch)}
-                className="rounded-full px-3.5 py-1.5 text-xs font-medium transition-all"
+                className="min-h-[40px] rounded-full px-3.5 py-2 text-xs font-medium transition-all"
                 style={
                   active
                     ? {
@@ -949,7 +949,7 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack, quickAct
                       <button
                         type="button"
                         onClick={() => setPlayingVideo(video)}
-                        className="inline-flex items-center gap-1.5 text-xs font-medium transition"
+                        className="inline-flex min-h-[40px] items-center gap-1.5 px-1 text-xs font-medium transition"
                         style={{ color: 'var(--color-one-gold)' }}
                       >
                         <Play className="h-3.5 w-3.5 fill-current" />
@@ -960,7 +960,7 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack, quickAct
                         <button
                           type="button"
                           onClick={() => toggleWatchlist(video)}
-                          className="rounded-lg p-1.5 transition hover:bg-[rgba(244,243,238,0.06)]"
+                          className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg transition hover:bg-[rgba(244,243,238,0.06)]"
                           style={{ color: bookmarked ? 'var(--color-one-gold)' : 'var(--color-one-text-dim)' }}
                           title={bookmarked ? (isZh ? '已在观影单' : 'In watchlist') : (isZh ? '加入观影单' : 'Add to watchlist')}
                         >
@@ -969,7 +969,7 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack, quickAct
                         <button
                           type="button"
                           onClick={() => setCinemaVideo(video)}
-                          className="rounded-lg p-1.5 text-[color:var(--color-one-text-dim)] transition hover:bg-[rgba(244,243,238,0.06)] hover:text-[color:var(--color-one-text)]"
+                          className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg text-[color:var(--color-one-text-dim)] transition hover:bg-[rgba(244,243,238,0.06)] hover:text-[color:var(--color-one-text)]"
                           title={isZh ? '影院模式' : 'Cinema mode'}
                         >
                           <Maximize2 className="h-4 w-4" />

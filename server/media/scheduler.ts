@@ -211,15 +211,32 @@ export async function dispatchUnifiedMusicSearch(options: {
     { providerId: 'youtube-and-archive', count: ytIaRes.rows.length, ok: ytIaRes.ok, reason: (ytIaRes as any).reason }
   );
 
-  // Order merged tracks cleanly by region priority
+  // Order merged tracks cleanly: directly playable audio first, then verified official embeds
   const rawMerged =
     options.region === 'cn'
-      ? [...biliRes.rows, ...localEnriched, ...jamRes.rows, ...wmRes.rows, ...ytIaRes.rows]
+      ? [...localEnriched, ...jamRes.rows, ...wmRes.rows, ...ytIaRes.rows, ...biliRes.rows]
       : [...localEnriched, ...ytIaRes.rows, ...wmRes.rows, ...jamRes.rows, ...biliRes.rows];
+
+  const isPlayableTrack = (item: any): boolean => {
+    if (!item) return false;
+    if (item.availabilityStatus === 'unavailable' || item.playbackType === 'external_redirect') return false;
+    const hasAudio = typeof item.audioUrl === 'string' && item.audioUrl.trim().length > 0;
+    const hasEmbed = typeof item.embedUrl === 'string' && item.embedUrl.trim().length > 0 && item.playable !== 'none';
+    return hasAudio || hasEmbed;
+  };
+
+  // Sort direct audio tracks before embed-only items so background playback works across tabs
+  const sortedMerged = [...rawMerged]
+    .filter(isPlayableTrack)
+    .sort((a, b) => {
+      const aAudio = a.audioUrl ? 0 : 1;
+      const bAudio = b.audioUrl ? 0 : 1;
+      return aAudio - bAudio;
+    });
 
   const seen = new Set<string>();
   const deduped: any[] = [];
-  for (const item of rawMerged) {
+  for (const item of sortedMerged) {
     const key = String(item.sourceUrl || item.id || '');
     if (!key || seen.has(key)) continue;
     seen.add(key);

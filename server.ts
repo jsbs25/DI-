@@ -7,7 +7,6 @@ import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import dotenv from 'dotenv';
 import { createHash, randomBytes } from 'node:crypto';
-import { GoogleGenAI } from '@google/genai';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
@@ -104,22 +103,7 @@ app.use((req, res, next) => {
   return express.json({ limit: '20mb' })(req, res, next);
 });
 
-// Initialize Gemini client if API key is provided
-let aiClient: GoogleGenAI | null = null;
-if (process.env.GEMINI_API_KEY) {
-  try {
-    aiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build'
-        }
-      }
-    });
-  } catch (err) {
-    console.warn('Failed to initialize GoogleGenAI client:', err);
-  }
-}
+// All AI generation, translation, and voice intelligence use DeepSeek via aiGateway.
 
 // Resolve only an explicitly valid session. Keep the legacy guest fallback
 // separate so identity endpoints never expose another visitor's active user.
@@ -2741,19 +2725,19 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
   let translatedTo: string | undefined;
   if (autoTranslate && targetLanguage && text) {
     try {
-      if (aiClient) {
-        const response = await aiClient.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: `Translate the following chat message to ${targetLanguage}. Maintain conversational nuance, warmth, and friendly tone. Return ONLY the translated string without commentary:\n"${text}"`
-        });
-        translatedContent = response.text ? response.text.trim() : undefined;
+      const dsRes = await aiGateway.generateContent(
+        aiGateway.getChatModelId(),
+        `Translate the following chat message to ${targetLanguage}. Maintain conversational nuance, warmth, and friendly tone. Return ONLY the translated string without commentary:\n"${text}"`
+      );
+      if (dsRes.success && dsRes.content?.trim()) {
+        translatedContent = dsRes.content.trim();
         translatedTo = targetLanguage;
       } else {
         translatedContent = `[Translated to ${targetLanguage}]: ${text}`;
         translatedTo = targetLanguage;
       }
     } catch (err) {
-      console.warn('AI translation fallback:', err);
+      console.warn('DeepSeek translation fallback:', err);
       translatedContent = text;
     }
   }
@@ -3031,7 +3015,7 @@ app.post('/api/ai/chat', async (req, res) => {
   };
 
   const systemPrompt = systemInstructions[mode] || systemInstructions.general;
-  const shouldStream = stream === true && /^ollama:qwen3(?::|$)/i.test(resolvedModelId);
+  const shouldStream = stream === true;
   if (shouldStream) {
     res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -3047,15 +3031,15 @@ app.post('/api/ai/chat', async (req, res) => {
       if (result.success) {
         res.write(`${JSON.stringify({ done: true, tokens: result.tokens, model: resolvedModelId })}\n`);
       } else {
-        res.write(`${JSON.stringify({ error: result.errorMessage || 'AI 服务当前不可用，请稍后重试。' })}\n`);
+        res.write(`${JSON.stringify({ error: result.errorMessage || 'DeepSeek 服务当前不可用，请稍后重试。' })}\n`);
       }
     } catch (error) {
-      res.write(`${JSON.stringify({ error: error instanceof Error ? error.message : 'AI 服务当前不可用，请稍后重试。' })}\n`);
+      res.write(`${JSON.stringify({ error: error instanceof Error ? error.message : 'DeepSeek 服务当前不可用，请稍后重试。' })}\n`);
     }
     return res.end();
   }
 
-  const usesStructuredHistory = /^ollama:qwen3(?::|$)/i.test(resolvedModelId);
+  const usesStructuredHistory = resolvedModelId.startsWith('deepseek') || /^ollama:qwen3(?::|$)/i.test(resolvedModelId);
   const result = await aiGateway.generateContent(
     resolvedModelId,
     usesStructuredHistory ? userPrompt : contextualPrompt,
@@ -3090,24 +3074,27 @@ app.post('/api/ai/agent-command', async (req, res) => {
   if (!text) return res.json({ success: true, action: { type: 'none' } });
 
   const isZh = lang === 'zh';
-  // Fast deterministic intent match before calling LLM
-  if (/下一首|切歌|next song/i.test(text)) {
-    return res.json({ success: true, action: { type: 'play_music', control: 'next', reply: isZh ? '已切换到下一首。' : 'Next track.' } });
+  // Fast deterministic intent match before calling DeepSeek
+  if (/下一首|换首歌|换一首|切歌|下一曲|next song|next track/i.test(text)) {
+    return res.json({ success: true, action: { type: 'play_music', control: 'next', reply: isZh ? '好的，已切换到下一首。' : 'Next track.' } });
   }
-  if (/上一首|previous song/i.test(text)) {
-    return res.json({ success: true, action: { type: 'play_music', control: 'prev', reply: isZh ? '已切回上一首。' : 'Previous track.' } });
+  if (/上一首|上一曲|previous song|previous track/i.test(text)) {
+    return res.json({ success: true, action: { type: 'play_music', control: 'prev', reply: isZh ? '好的，已切回上一首。' : 'Previous track.' } });
   }
-  if (/暂停音乐|停止音乐|pause music/i.test(text)) {
-    return res.json({ success: true, action: { type: 'play_music', control: 'pause', reply: isZh ? '已暂停音乐。' : 'Music paused.' } });
+  if (/停止播放|停止音乐|暂停播放|暂停音乐|别放了|别播了|不要放了|不听了|不要听了|关掉音乐|关闭音乐|把音乐关|把歌关|把音乐停|把歌停|停下|暂停|stop playing|stop music|pause music/i.test(text)) {
+    return res.json({ success: true, action: { type: 'play_music', control: 'stop', reply: isZh ? '好的，已停止播放音乐。' : 'Playback stopped.' } });
   }
-  if (/听歌|放歌|打开.*音乐|放音乐|听音乐|play.*music|open.*music/i.test(text)) {
-    return res.json({ success: true, action: { type: 'play_music', query: '', crawl: true, reply: isZh ? '正在打开音乐并为您播放。' : 'Opening music.' } });
+  if (/继续播放|继续放|接着播|接着放|恢复播放|继续听|resume music|continue playing/i.test(text)) {
+    return res.json({ success: true, action: { type: 'play_music', control: 'resume', reply: isZh ? '好的，继续为您播放音乐。' : 'Resuming playback.' } });
+  }
+  if (/听歌|放歌|放音乐|听音乐|播放音乐|打开.*音乐|来首歌|来一首|放一首|找首歌|我要听|我想听.*(歌|音乐|曲)|play.*music|open.*music/i.test(text)) {
+    return res.json({ success: true, action: { type: 'play_music', query: '', crawl: true, reply: isZh ? '好的，已打开音乐并自动为您播放。' : 'Opening music.' } });
   }
   if (/纪录片|记录片|documentary/i.test(text)) {
-    return res.json({ success: true, action: { type: 'watch_documentary', query: '宇宙 纪录片', platform: 'all', randomPick: true, reply: isZh ? '正在打开影院播放纪录片。' : 'Opening documentary.' } });
+    return res.json({ success: true, action: { type: 'watch_documentary', query: '宇宙 纪录片', platform: 'all', randomPick: true, reply: isZh ? '好的，正在打开影院播放纪录片。' : 'Opening documentary.' } });
   }
-  if (/多邻国|语言学习|学英语|duolingo|language/i.test(text)) {
-    return res.json({ success: true, action: { type: 'navigate_tab', tab: 'arabic-learning', reply: isZh ? '已打开语言学习中心。' : 'Opening Language Center.' } });
+  if (/多邻国|多林国|语言学习|学英语|学语言|duolingo|language/i.test(text)) {
+    return res.json({ success: true, action: { type: 'navigate_tab', tab: 'arabic-learning', reply: isZh ? '好的，已打开语言学习中心。' : 'Opening Language Center.' } });
   }
 
   const systemPrompt = `You are the web-control planner for ONE. Given user speech, return ONLY valid JSON (no markdown) deciding whether the user wants to control the website, or {"type":"none"} if it is normal conversation.
@@ -3142,7 +3129,7 @@ app.post('/api/ai/translate', async (req, res) => {
   if (!text) return res.status(400).json({ success: false, error: 'Text required' });
 
   const prompt = `Translate the following text to ${targetLang}. Return ONLY the direct natural translation:\n"${text}"`;
-  const result = await aiGateway.generateContent('', prompt);
+  const result = await aiGateway.generateContent(aiGateway.getChatModelId(), prompt);
 
   if (result.success) {
     res.json({ success: true, translation: result.content.trim() });
@@ -3236,18 +3223,15 @@ app.get('/api/music/tracks', (req, res) => {
   const regionCtx = resolveRegionFromRequest(req);
   const genreStr = typeof genre === 'string' ? genre : undefined;
   const diskTracks = musicStore.getTracks(genreStr);
-  const curated = !genreStr || genreStr === 'all'
-    ? CURATED_GLOBAL_CN_MUSIC
-    : CURATED_GLOBAL_CN_MUSIC.filter((t) => String(t.genre || '').toLowerCase() === genreStr.toLowerCase());
-  const rawList = regionCtx.region === 'cn' ? [...curated, ...diskTracks] : [...diskTracks, ...curated];
   const seen = new Set<string>();
-  const tracks = rawList
+  const tracks = diskTracks
     .filter((t) => {
-      if (!t?.id || seen.has(t.id)) return false;
+      if (!t?.id || !t?.audioUrl || seen.has(t.id)) return false;
       seen.add(t.id);
       return true;
     })
-    .map((t) => enrichMusicTrack(t, regionCtx.region));
+    .map((t) => enrichMusicTrack(t, regionCtx.region))
+    .filter((t) => Boolean(t.audioUrl) && t.availabilityStatus !== 'unavailable' && t.playbackType !== 'external_redirect');
   res.json({ success: true, region: regionCtx.region, tracks });
 });
 

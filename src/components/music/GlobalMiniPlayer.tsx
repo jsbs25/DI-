@@ -32,9 +32,7 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
   const title = currentTrack?.title || '';
   const artist = currentTrack?.artist || '';
   const cover = currentTrack?.coverUrl || DEFAULT_COVER;
-  const canShow = !!currentTrack || state.queue.length > 0;
-
-  const bottomOffset = 'calc(env(safe-area-inset-bottom) + 4.4rem)';
+  const canShow = (!!currentTrack || state.queue.length > 0) && !player.userStopped;
 
   if (!canShow) return null;
   if (currentTab === 'venus') return null;
@@ -83,8 +81,7 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
       )}
 
       <div
-        className="pointer-events-auto fixed left-3 right-3 z-40 md:left-[6.5rem] md:right-6"
-        style={{ bottom: bottomOffset }}
+        className="pointer-events-auto fixed bottom-[calc(env(safe-area-inset-bottom)+4.6rem)] left-3 right-3 z-30 md:bottom-5 md:left-[6rem] md:right-20"
         aria-label="ONE MUSIC mini player"
       >
         <div className="mx-auto max-w-[1100px] rounded-2xl border border-slate-200/90 bg-white/92 px-3 py-2.5 shadow-lg backdrop-blur-xl dark:border-white/15 dark:bg-[#162238]/92 sm:px-4">
@@ -154,7 +151,7 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
               {isEmbed && (
                 <button
                   onClick={() => setShowEmbed(s => !s)}
-                  className={`hidden rounded-lg p-2 transition sm:inline-flex ${
+                  className={`hidden min-h-[40px] min-w-[40px] items-center justify-center rounded-lg p-2 transition sm:inline-flex ${
                     showEmbed
                       ? 'bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400'
                       : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white'
@@ -166,7 +163,7 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
               )}
               <button
                 onClick={() => player.playPrevious()}
-                className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+                className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
                 title={isZh ? '上一首' : 'Previous'}
               >
                 <SkipBack className="h-4 w-4" />
@@ -178,17 +175,18 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
                     onOpenMusic();
                     return;
                   }
+                  player.unlockAudio();
                   void player.resumeAudioContext();
                   player.togglePlay();
                 }}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600 text-white shadow-xs transition hover:bg-sky-500 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-600 text-white shadow-xs transition hover:bg-sky-500 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
                 title={state.isPlaying ? (isZh ? '暂停' : 'Pause') : (isZh ? '播放' : 'Play')}
               >
                 {state.isPlaying && !isEmbed ? <Pause className="h-4 w-4 fill-current" /> : <Play className="ml-0.5 h-4 w-4 fill-current" />}
               </button>
               <button
                 onClick={() => player.playNext()}
-                className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+                className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
                 title={isZh ? '下一首' : 'Next'}
               >
                 <SkipForward className="h-4 w-4" />
@@ -196,7 +194,7 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
 
               <button
                 onClick={() => player.setRepeatMode(state.mode.repeat === 'one' ? 'off' : 'one')}
-                className={`hidden rounded-lg p-2 transition sm:inline-flex ${
+                className={`hidden min-h-[40px] min-w-[40px] items-center justify-center rounded-lg transition sm:inline-flex ${
                   state.mode.repeat === 'one'
                     ? 'bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400'
                     : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white'
@@ -207,7 +205,7 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
               </button>
               <button
                 onClick={() => player.toggleMute()}
-                className="hidden rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 md:inline-flex dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+                className="hidden min-h-[40px] min-w-[40px] items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 md:inline-flex dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
                 title={state.muted ? 'Unmute' : 'Mute'}
               >
                 {state.muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
@@ -222,6 +220,15 @@ export const GlobalMiniPlayer: React.FC<Props> = ({ lang, currentTab, onOpenMusi
                 className="hidden h-1 w-20 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-sky-600 md:block dark:bg-white/15 dark:accent-sky-400"
                 aria-label={isZh ? '音量' : 'Volume'}
               />
+              <button
+                type="button"
+                onClick={() => player.stopAndHold()}
+                className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-rose-600 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-rose-400"
+                title={isZh ? '停止播放' : 'Stop music'}
+                aria-label={isZh ? '停止播放' : 'Stop music'}
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
           </div>
         </div>

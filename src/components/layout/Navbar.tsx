@@ -110,7 +110,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-3 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.75rem,env(safe-area-inset-top))]">
-      <div className="pointer-events-auto mx-auto flex h-12 w-full max-w-[1280px] items-center justify-between gap-2 rounded-2xl border border-slate-900/10 dark:border-white/[0.14] bg-white/80 dark:bg-[#0B0D14]/76 backdrop-blur-2xl saturate-150 px-2.5 sm:px-3.5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] dark:shadow-[0_14px_38px_rgba(0,0,0,0.45)]">
+      <div className="pointer-events-auto mx-auto flex min-h-12 w-full max-w-[1280px] items-center justify-between gap-2 rounded-2xl border border-slate-900/10 dark:border-white/[0.14] bg-white/80 dark:bg-[#0B0D14]/76 backdrop-blur-2xl saturate-150 px-2.5 py-1 sm:px-3.5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] dark:shadow-[0_14px_38px_rgba(0,0,0,0.45)]">
         {/* Left: Fixed Brand Anchor */}
         <div className="flex shrink-0 items-center gap-1.5">
           <button
@@ -195,13 +195,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={onToggleTheme}
               title={theme === 'dark' ? (lang === 'zh' ? '切换明亮模式' : 'Switch to Light mode') : (lang === 'zh' ? '切换深空模式' : 'Switch to Dark mode')}
               aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-600 dark:text-[#C4A876] transition-colors hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-white cursor-pointer"
+              className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 dark:text-[#C4A876] transition-colors hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-white cursor-pointer"
             >
               {theme === 'dark' ? <Sun className="h-4 w-4 text-[#C4A876]" /> : <Moon className="h-4 w-4 text-slate-700" />}
             </button>
           )}
           <div ref={langMenuRef} className="relative">
-            <button type="button" aria-expanded={langMenuOpen} aria-haspopup="menu" onClick={() => { setLangMenuOpen(v => !v); setUserDropdownOpen(false); }} className="flex h-9 items-center gap-0.5 rounded-xl px-2 text-[11px] font-medium text-slate-600 dark:text-[#B9C1CD] transition-colors hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-white cursor-pointer"><span className="uppercase">{lang}</span><ChevronDown className="h-3 w-3 text-slate-400" /></button>
+            <button type="button" aria-expanded={langMenuOpen} aria-haspopup="menu" onClick={() => { setLangMenuOpen(v => !v); setUserDropdownOpen(false); }} className="flex h-10 items-center gap-0.5 rounded-xl px-2 text-[11px] font-medium text-slate-600 dark:text-[#B9C1CD] transition-colors hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-white cursor-pointer"><span className="uppercase">{lang}</span><ChevronDown className="h-3 w-3 text-slate-400" /></button>
             {langMenuOpen && (
               <div role="menu" className="absolute right-0 mt-2 w-40 rounded-2xl border border-slate-200 dark:border-white/[0.14] bg-white/96 dark:bg-[#0B0D14]/96 py-1.5 shadow-2xl backdrop-blur-2xl">
                 {languages.map(l => (
@@ -218,7 +218,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 aria-expanded={userDropdownOpen}
                 aria-haspopup="menu"
                 onClick={() => { setUserDropdownOpen(v => !v); setLangMenuOpen(false); }}
-                className="flex h-9 items-center gap-2 rounded-full border border-slate-900/12 dark:border-white/[0.14] bg-slate-900/[0.04] dark:bg-white/[0.07] p-1 sm:pr-2.5 transition hover:border-[#247864]/50 dark:hover:border-[#C4A876]/60 cursor-pointer"
+                className="flex h-10 items-center gap-2 rounded-full border border-slate-900/12 dark:border-white/[0.14] bg-slate-900/[0.04] dark:bg-white/[0.07] p-1 sm:pr-2.5 transition hover:border-[#247864]/50 dark:hover:border-[#C4A876]/60 cursor-pointer"
               >
                 <span className="relative h-7 w-7 shrink-0">
                   <img src={currentUser.avatar} alt={currentUser.displayName} className="h-7 w-7 rounded-full object-cover" />

@@ -27,6 +27,7 @@ export type PlayerAction =
   | { type: 'PREVIOUS' }
   | { type: 'ADD_TO_QUEUE'; items: QueueItem[]; position?: 'next' | 'end' }
   | { type: 'REMOVE_FROM_QUEUE'; queueId: string }
+  | { type: 'REMOVE_TRACK_ID'; trackId: string }
   | { type: 'CLEAR_QUEUE' }
   | { type: 'REORDER_QUEUE'; from: number; to: number }
   | { type: 'SET_ERROR'; error: PlaybackError | null }
@@ -274,7 +275,37 @@ export function playerReducer(state: PlayerState, action: PlayerAction): PlayerS
       const currentQueueId = queue[currentIndex]?.queueId;
       const shuffleOrder = state.mode.shuffle ? state.shuffleOrder.filter(id => id !== action.queueId) : [];
       const shuffleCursor = state.mode.shuffle ? indexOfQueueIdFromOrder(shuffleOrder, currentQueueId) : -1;
-      return { ...state, queue, currentIndex, isPlaying, positionSec, shuffleOrder, shuffleCursor };
+      return { ...state, queue, currentIndex, isPlaying, positionSec, error: null, shuffleOrder, shuffleCursor };
+    }
+    case 'REMOVE_TRACK_ID': {
+      const removedIds = new Set(state.queue.filter(q => q.track.id === action.trackId).map(q => q.queueId));
+      if (removedIds.size === 0) return state;
+      const activeId = state.queue[state.currentIndex]?.track.id;
+      const queue = state.queue.filter(q => q.track.id !== action.trackId);
+      if (queue.length === 0) {
+        return { ...createInitialState(), volume: state.volume, muted: state.muted, mode: state.mode, restored: state.restored };
+      }
+      const removedBefore = state.queue.slice(0, Math.max(0, state.currentIndex)).filter(q => q.track.id === action.trackId).length;
+      let currentIndex = Math.max(0, state.currentIndex - removedBefore);
+      if (currentIndex >= queue.length) currentIndex = 0;
+      const wasActiveRemoved = activeId === action.trackId;
+      const positionSec = wasActiveRemoved ? 0 : state.positionSec;
+      const nextTrack = queue[currentIndex]?.track;
+      const isPlaying = wasActiveRemoved ? (state.isPlaying && !!nextTrack && nextTrack.playback.kind !== 'none') : state.isPlaying;
+      const currentQueueId = queue[currentIndex]?.queueId;
+      const shuffleOrder = state.mode.shuffle ? state.shuffleOrder.filter(id => !removedIds.has(id)) : [];
+      const shuffleCursor = state.mode.shuffle ? indexOfQueueIdFromOrder(shuffleOrder, currentQueueId) : -1;
+      return {
+        ...state,
+        queue,
+        currentIndex,
+        isPlaying,
+        positionSec,
+        durationSec: wasActiveRemoved ? (nextTrack?.durationSeconds || 0) : state.durationSec,
+        error: null,
+        shuffleOrder,
+        shuffleCursor,
+      };
     }
     case 'CLEAR_QUEUE':
       return { ...createInitialState(), volume: state.volume, muted: state.muted, mode: state.mode, restored: state.restored };

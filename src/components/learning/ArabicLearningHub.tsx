@@ -608,11 +608,11 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
 
         {/* Primary tabs */}
         <div className="one-surface-subtle flex flex-col gap-3 p-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:pb-0">
             <button
               type="button"
               onClick={() => setMainTab('duolingo_platform')}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 mainTab === 'duolingo_platform'
                   ? ''
                   : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
@@ -634,7 +634,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
             <button
               type="button"
               onClick={() => setMainTab('english_engine')}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 mainTab === 'english_engine'
                   ? 'text-[color:var(--color-one-text)]'
                   : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
@@ -659,7 +659,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                 setMainTab('letters');
                 setView('home');
               }}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 mainTab === 'letters'
                   ? ''
                   : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
@@ -681,7 +681,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
             <button
               type="button"
               onClick={() => setMainTab('islamic_library')}
-              className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 mainTab === 'islamic_library'
                   ? 'text-[color:var(--color-one-text)]'
                   : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'

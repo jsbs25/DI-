@@ -24,10 +24,14 @@ import {
 export interface MusicPlayerApi {
   state: PlayerState;
   currentTrack: UnifiedTrack | null;
+  userStopped: boolean;
+  failedTrackIds: Set<string>;
+  isTrackFailed: (trackId: string) => boolean;
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
   stopPlayback: () => void;
+  stopAndHold: () => void;
   playTrack: (track: MusicTrack | UnifiedTrack, queue?: Array<MusicTrack | UnifiedTrack>, index?: number) => void;
   playNext: () => void;
   playPrevious: () => void;
@@ -54,6 +58,31 @@ const PlayerContext = createContext<MusicPlayerApi | null>(null);
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(playerReducer, undefined, createInitialState);
+  const [userStopped, setUserStoppedState] = React.useState(false);
+  const [failedTrackIds, setFailedTrackIds] = React.useState<Set<string>>(() => new Set());
+  const userStoppedRef = useRef(false);
+  const failedTrackIdsRef = useRef<Set<string>>(new Set());
+  const consecutiveFailuresRef = useRef(0);
+  const pendingAutoplayResumeRef = useRef(false);
+
+  const setUserStopped = useCallback((v: boolean) => {
+    userStoppedRef.current = v;
+    setUserStoppedState(v);
+    if (v) {
+      pendingAutoplayResumeRef.current = false;
+    }
+  }, []);
+
+  const markTrackFailed = useCallback((trackId: string) => {
+    if (!trackId) return;
+    if (failedTrackIdsRef.current.has(trackId)) return;
+    const next = new Set(failedTrackIdsRef.current);
+    next.add(trackId);
+    failedTrackIdsRef.current = next;
+    setFailedTrackIds(next);
+  }, []);
+
+  const isTrackFailed = useCallback((trackId: string) => failedTrackIdsRef.current.has(trackId), []);
   const engine = useMemo(() => getGlobalAudioEngine(), []);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -94,6 +123,28 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const pruneFailedTrackAndAdvance = useCallback(
+    (trackId: string | undefined, reason: string) => {
+      if (!trackId) return;
+      markTrackFailed(trackId);
+      consecutiveFailuresRef.current += 1;
+      if (consecutiveFailuresRef.current >= 5) {
+        dispatch({
+          type: 'SET_ERROR',
+          error: {
+            code: 'play_failed',
+            message: `网络连接受限（${reason}），请检查网络后再试。`,
+            at: Date.now(),
+            trackId,
+          },
+        });
+        return;
+      }
+      dispatch({ type: 'REMOVE_TRACK_ID', trackId });
+    },
+    [markTrackFailed]
+  );
+
   useEffect(() => {
     if (restoredOnceRef.current) return;
     restoredOnceRef.current = true;
@@ -103,12 +154,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       const cleanedQueue = snap.queue.filter((item) => {
         const audioUrl = String(item?.track?.playback?.audioUrl || '');
         const title = String(item?.track?.title || '');
+        const hasAudio = Boolean(audioUrl);
         return (
+          hasAudio &&
           !audioUrl.includes('soundhelix.com') &&
           !audioUrl.includes('testmp3testfile') &&
           !audioUrl.includes('cdn.freesound.org/previews/') &&
           !title.includes('Test Instrumental') &&
-          !title.includes('Connectivity Check')
+          !title.includes('Connectivity Check') &&
+          !title.includes('Greatest Speeches') &&
+          !title.includes('Air Conditioner') &&
+          !title.includes('Conet Project')
         );
       });
       if (cleanedQueue.length > 0) {
@@ -141,6 +197,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const offTime = engine.on('time', (current, duration) => {
+      consecutiveFailuresRef.current = 0;
       if (stallTimerRef.current) {
         clearTimeout(stallTimerRef.current);
         stallTimerRef.current = null;
@@ -149,6 +206,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       if (Number.isFinite(duration) && duration > 0) dispatch({ type: 'SET_DURATION', durationSec: duration });
     });
     const offLoaded = engine.on('loaded', () => {
+      consecutiveFailuresRef.current = 0;
       if (stallTimerRef.current) {
         clearTimeout(stallTimerRef.current);
         stallTimerRef.current = null;
@@ -167,15 +225,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
       const switched = attemptFallback(msg);
       if (!switched) {
-        dispatch({
-          type: 'SET_ERROR',
-          error: {
-            code: 'play_failed',
-            message: `${msg}；暂无其他可用站内备用源，请切换地区模式或打开原平台页面。`,
-            at: Date.now(),
-            trackId: getActiveTrack(stateRef.current)?.id,
-          },
-        });
+        pruneFailedTrackAndAdvance(getActiveTrack(stateRef.current)?.id, msg);
       }
     });
     const offPlay = engine.on('play', () => {});
@@ -189,7 +239,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       offPlay();
       offPause();
     };
-  }, [engine, attemptFallback]);
+  }, [engine, attemptFallback, pruneFailedTrackAndAdvance]);
 
   const currentTrack = getActiveTrack(state);
 
@@ -255,15 +305,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           if (cur.isPlaying && getActiveTrack(cur)?.playback.audioUrl === audioSrc && (!curEl || curEl.readyState < 2)) {
             const switched = attemptFallback('音频连接超时');
             if (!switched) {
-              dispatch({
-                type: 'SET_ERROR',
-                error: {
-                  code: 'load_failed',
-                  message: '音频直链连接超时，当前曲目无其他备用源，请打开原平台或切换地区通道。',
-                  at: Date.now(),
-                  trackId,
-                },
-              });
+              pruneFailedTrackAndAdvance(trackId, '音频连接超时');
             }
           }
         }, 8000);
@@ -275,16 +317,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           if (elNow?.error) {
             const switched = attemptFallback('音频无法加载');
             if (!switched) {
-              dispatch({
-                type: 'SET_ERROR',
-                error: { code: 'play_failed', message: '音频加载失败，请切换音源或打开原平台。', at: Date.now(), trackId },
-              });
+              pruneFailedTrackAndAdvance(trackId, '音频无法加载');
             }
           } else {
-            dispatch({
-              type: 'SET_ERROR',
-              error: { code: 'play_failed', message: '请再次点击播放或切换其它音源', at: Date.now(), trackId },
-            });
+            // Browser blocked unprompted autoplay: pause silently and auto-resume on first user gesture
+            pendingAutoplayResumeRef.current = true;
+            dispatch({ type: 'PAUSE' });
+            const resumeOnGesture = () => {
+              window.removeEventListener('pointerdown', resumeOnGesture, true);
+              window.removeEventListener('keydown', resumeOnGesture, true);
+              if (pendingAutoplayResumeRef.current && !userStoppedRef.current && stateRef.current.queue.length > 0) {
+                pendingAutoplayResumeRef.current = false;
+                engine.unlockPlayback();
+                void engine.resumeContext();
+                dispatch({ type: 'PLAY' });
+              }
+            };
+            window.addEventListener('pointerdown', resumeOnGesture, { once: true, capture: true });
+            window.addEventListener('keydown', resumeOnGesture, { once: true, capture: true });
           }
         }
       });
@@ -294,7 +344,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     lastTrackIdRef.current = trackId;
     lastKindRef.current = kind;
-  }, [engine, currentTrack, state.isPlaying, state.volume, state.muted, state.currentIndex, state.restored, state.activeSourceId, attemptFallback]);
+  }, [engine, currentTrack, state.isPlaying, state.volume, state.muted, state.currentIndex, state.restored, state.activeSourceId, attemptFallback, pruneFailedTrackAndAdvance]);
 
   useEffect(() => {
     if (!state.restored) return;
@@ -309,14 +359,37 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [state]);
 
-  const play = useCallback(() => dispatch({ type: 'PLAY' }), []);
+  const play = useCallback(() => {
+    setUserStopped(false);
+    dispatch({ type: 'PLAY' });
+  }, [setUserStopped]);
+
   const pause = useCallback(() => dispatch({ type: 'PAUSE' }), []);
-  const togglePlay = useCallback(() => dispatch({ type: 'TOGGLE_PLAY' }), []);
+
+  const togglePlay = useCallback(() => {
+    if (!stateRef.current.isPlaying) {
+      setUserStopped(false);
+    }
+    dispatch({ type: 'TOGGLE_PLAY' });
+  }, [setUserStopped]);
+
+  const stopAndHold = useCallback(() => {
+    if (stallTimerRef.current) {
+      clearTimeout(stallTimerRef.current);
+      stallTimerRef.current = null;
+    }
+    setUserStopped(true);
+    engine.pause();
+    dispatch({ type: 'PAUSE' });
+    dispatch({ type: 'CLEAR_FALLBACK_NOTICE' });
+  }, [engine, setUserStopped]);
+
   const stopPlayback = useCallback(() => {
     if (stallTimerRef.current) {
       clearTimeout(stallTimerRef.current);
       stallTimerRef.current = null;
     }
+    setUserStopped(true);
     engine.pause();
     void engine.load(undefined);
     lastTrackIdRef.current = undefined;
@@ -324,9 +397,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     lastAudioSrcRef.current = undefined;
     dispatch({ type: 'CLEAR_QUEUE' });
     clearPersistedPlayerState();
-  }, [engine]);
+  }, [engine, setUserStopped]);
 
   const playTrack = useCallback((track: MusicTrack | UnifiedTrack, queue?: Array<MusicTrack | UnifiedTrack>, index?: number) => {
+    setUserStopped(false);
+    consecutiveFailuresRef.current = 0;
     const region = getEffectiveMediaRegion();
     const norm = normalizeToUnifiedTrack(track as any);
     const orderedSources = sortClientMusicSources(norm.sources, region);
@@ -350,12 +425,24 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           sourceUrl: best.url || norm.sourceUrl,
         }
       : norm;
-    const q = queue ? toQueueItems(queue as any[]) : undefined;
-    dispatch({ type: 'PLAY_TRACK', track: t, queue: q, index, sourceId: best?.id, play: true });
-  }, []);
+    const filteredQueue = queue
+      ? queue.filter((item: any) => !failedTrackIdsRef.current.has(String(item?.id || '')))
+      : undefined;
+    const q = filteredQueue && filteredQueue.length > 0 ? toQueueItems(filteredQueue as any[]) : undefined;
+    const resolvedIndex = q ? Math.max(0, q.findIndex((item) => item.track.id === t.id)) : index;
+    dispatch({ type: 'PLAY_TRACK', track: t, queue: q, index: resolvedIndex, sourceId: best?.id, play: true });
+  }, [setUserStopped]);
 
-  const playNext = useCallback(() => dispatch({ type: 'NEXT' }), []);
-  const playPrevious = useCallback(() => dispatch({ type: 'PREVIOUS' }), []);
+  const playNext = useCallback(() => {
+    setUserStopped(false);
+    dispatch({ type: 'NEXT' });
+  }, [setUserStopped]);
+
+  const playPrevious = useCallback(() => {
+    setUserStopped(false);
+    dispatch({ type: 'PREVIOUS' });
+  }, [setUserStopped]);
+
   const seek = useCallback(
     (sec: number) => {
       const t = getActiveTrack({ ...state } as any);
@@ -373,13 +460,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const removeFromQueue = useCallback((queueId: string) => dispatch({ type: 'REMOVE_FROM_QUEUE', queueId }), []);
   const clearQueue = useCallback(() => {
+    setUserStopped(true);
     dispatch({ type: 'CLEAR_QUEUE' });
     clearPersistedPlayerState();
-  }, []);
+  }, [setUserStopped]);
   const reorderQueue = useCallback((from: number, to: number) => dispatch({ type: 'REORDER_QUEUE', from, to }), []);
   const toggleShuffle = useCallback(() => dispatch({ type: 'TOGGLE_SHUFFLE' }), []);
   const setRepeatMode = useCallback((mode: RepeatMode) => dispatch({ type: 'SET_REPEAT', repeat: mode }), []);
-  const switchSource = useCallback((sourceId: string) => dispatch({ type: 'SWITCH_SOURCE', sourceId }), []);
+  const switchSource = useCallback((sourceId: string) => {
+    setUserStopped(false);
+    dispatch({ type: 'SWITCH_SOURCE', sourceId });
+  }, [setUserStopped]);
   const tryFallbackSource = useCallback((reason = '用户手动切换备用源') => attemptFallback(reason), [attemptFallback]);
   const clearFallbackNotice = useCallback(() => dispatch({ type: 'CLEAR_FALLBACK_NOTICE' }), []);
   const restorePlayerState = useCallback(() => {
@@ -395,10 +486,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     () => ({
       state,
       currentTrack,
+      userStopped,
+      failedTrackIds,
+      isTrackFailed,
       play,
       pause,
       togglePlay,
       stopPlayback,
+      stopAndHold,
       playTrack,
       playNext,
       playPrevious,
@@ -423,10 +518,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [
       state,
       currentTrack,
+      userStopped,
+      failedTrackIds,
+      isTrackFailed,
       play,
       pause,
       togglePlay,
       stopPlayback,
+      stopAndHold,
       playTrack,
       playNext,
       playPrevious,

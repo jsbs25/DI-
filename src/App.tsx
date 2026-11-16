@@ -36,20 +36,9 @@ import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
 import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
 import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
-import { PlayerProvider, usePlayerContext } from './music/PlayerContext.tsx';
+import { PlayerProvider } from './music/PlayerContext.tsx';
+import { GlobalMiniPlayer } from './components/music/GlobalMiniPlayer.tsx';
 import type { SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
-
-function MusicRouteGuard({ currentTab }: { currentTab: string }) {
-  const { stopPlayback } = usePlayerContext();
-  const prevTabRef = React.useRef(currentTab);
-  useEffect(() => {
-    if (prevTabRef.current === 'venus' && currentTab !== 'venus') {
-      stopPlayback();
-    }
-    prevTabRef.current = currentTab;
-  }, [currentTab, stopPlayback]);
-  return null;
-}
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -465,7 +454,7 @@ export default function App() {
           </div>
         </footer>
       )}
-      <MusicRouteGuard currentTab={currentTab} />
+      <GlobalMiniPlayer lang={lang} currentTab={currentTab} onOpenMusic={() => setCurrentTab('venus')} />
       <OfflineIndicator lang={lang} />
     </div>
     </PlayerProvider>

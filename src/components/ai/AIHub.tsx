@@ -38,7 +38,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const t = translations[lang];
   const isZh = lang === 'zh';
 
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<string>('deepseek-r1-open');
   const [availableModels, setAvailableModels] = useState<
     Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string; isFree?: boolean }>
   >([]);
@@ -51,8 +51,8 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
 
   const [showConfigDrawer, setShowConfigDrawer] = useState(false);
   const [customApiKey, setCustomApiKey] = useState('');
-  const [customBaseUrl, setCustomBaseUrl] = useState('http://localhost:11434/v1');
-  const [customModel, setCustomModel] = useState('llama3');
+  const [customBaseUrl, setCustomBaseUrl] = useState('https://api.deepseek.com/v1');
+  const [customModel, setCustomModel] = useState('deepseek-chat');
 
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
 
@@ -72,11 +72,11 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     return [{
       id: 'msg_welcome',
       role: 'assistant',
-      model: isZh ? 'ONE INTELLIGENCE' : 'ONE INTELLIGENCE',
+      model: 'DeepSeek',
       timestamp: isZh ? '刚刚' : 'Now',
       content: isZh
-        ? '欢迎来到 ONE INTELLIGENCE。\n\n你可以在这里进行对话、分析、写作与编程协作。当前可用模型显示在顶部选择器中；若连接本地 Ollama，可使用本地模型离线对话。\n\n请直接输入你的问题。'
-        : 'Welcome to ONE INTELLIGENCE.\n\nUse this space for conversation, analysis, writing, and coding. Available models appear in the selector above; if local Ollama is connected, local models can be used offline.\n\nAsk anything to begin.'
+        ? '欢迎来到 DeepSeek 智能工作台。\n\n全站已全面切换至 DeepSeek 深度推理与高速对话引擎（DeepSeek-R1 / DeepSeek-V3），支持多轮对话、代码分析、写作与翻译。\n\n请直接输入你的问题。'
+        : 'Welcome to DeepSeek Intelligence Hub.\n\nAll AI features are powered by DeepSeek (DeepSeek-R1 / DeepSeek-V3) for conversation, reasoning, coding, and writing.\n\nAsk anything to begin.'
     }];
   });
 
@@ -90,9 +90,9 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
       .then(d => {
         if (d.success && Array.isArray(d.models)) {
           setAvailableModels(d.models);
-          const activeDefault = d.models.find((m: any) => m.ollamaRole === 'chat') ||
-            d.models.find((m: any) => m.isDefault) ||
-            d.models.find((m: any) => m.id.startsWith('ollama:')) ||
+          const activeDefault =
+            d.models.find((m: any) => m.isDefault && m.id.startsWith('deepseek')) ||
+            d.models.find((m: any) => m.id.startsWith('deepseek')) ||
             d.models[0];
           if (activeDefault) setSelectedModel(activeDefault.id);
         }
@@ -103,21 +103,23 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
       .then(r => r.json())
       .then(data => {
         if (data?.models && Array.isArray(data.models) && data.models.length > 0) {
-          const localList = data.models.map((m: any, idx: number) => ({
-            id: `ollama:${m.name}`,
-            name: `${isZh ? '本地' : 'Local'} · ${m.name}`,
-            status: 'active',
-            isDefault: idx === data.models.length - 1,
-            apiKeyMasked: '127.0.0.1:11434',
-            isFree: true
-          }));
-          setAvailableModels(prev => {
-            const ids = new Set(prev.map(p => p.id));
-            const newOnes = localList.filter((l: any) => !ids.has(l.id));
-            return [...newOnes, ...prev];
-          });
-          const chatOllama = localList[localList.length - 1];
-          if (chatOllama) setSelectedModel(chatOllama.id);
+          const localList = data.models
+            .filter((m: any) => String(m?.name || '').toLowerCase().includes('deepseek'))
+            .map((m: any) => ({
+              id: `ollama:${m.name}`,
+              name: `${isZh ? '本地 DeepSeek' : 'Local DeepSeek'} · ${m.name}`,
+              status: 'active',
+              isDefault: false,
+              apiKeyMasked: '127.0.0.1:11434',
+              isFree: true
+            }));
+          if (localList.length > 0) {
+            setAvailableModels(prev => {
+              const ids = new Set(prev.map(p => p.id));
+              const newOnes = localList.filter((l: any) => !ids.has(l.id));
+              return [...prev, ...newOnes];
+            });
+          }
         }
       })
       .catch(() => {});
@@ -189,7 +191,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     setIsLoading(true);
     let activeStreamId: string | null = null;
     try {
-      const shouldStream = /^ollama:qwen3(?::|$)/i.test(selectedModel) && !customApiKey.trim();
+      const shouldStream = !customApiKey.trim();
       const payload: any = {
         prompt: textToSend,
         modelId: selectedModel,
@@ -227,7 +229,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
       if (voiceOutput) speakText(replyContent);
     } catch (error) {
       try {
-        const rawModel = selectedModel.startsWith('ollama:') ? selectedModel.slice(7) : (customModel || 'llama3');
+        const rawModel = selectedModel.startsWith('ollama:') ? selectedModel.slice(7) : (customModel || 'deepseek-r1');
         const localRes = await fetch('http://127.0.0.1:11434/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -295,37 +297,39 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const ollamaConnected = availableModels.some(m => m.id.startsWith('ollama:'));
 
   return (
-    <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
-      <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col px-4 py-4 sm:px-6 md:py-6">
+    <div className="flex min-h-[calc(100dvh-5.5rem)] md:min-h-[calc(100dvh-4.5rem)] flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col px-3 py-3 sm:px-6 md:py-6">
         <header className="one-surface-subtle mb-4 flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/15 bg-sky-50 dark:bg-sky-500/15 text-[var(--color-one-accent)]"><Sparkles className="h-5 w-5" /></span>
-              <div>
-                <h1 className="text-xl font-semibold tracking-[-0.03em] text-slate-900 dark:text-white sm:text-2xl">ONE INTELLIGENCE</h1>
-                <p className="text-sm text-[var(--color-one-text-muted)]">{isZh ? '对话、思考与创作协作空间。模型与连接状态以真实可用信息为准。' : 'A space for conversation, thinking, and creation. Models and connectivity reflect real availability.'}</p>
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/15 bg-sky-50 dark:bg-sky-500/15 text-[var(--color-one-accent)]"><Sparkles className="h-5 w-5" /></span>
+              <div className="min-w-0">
+                <h1 className="text-xl font-semibold tracking-[-0.03em] text-slate-900 dark:text-white sm:text-2xl">DeepSeek Intelligence</h1>
+                <p className="text-sm text-[var(--color-one-text-muted)]">{isZh ? '全站 AI 已统一接入 DeepSeek 深度推理与高速对话引擎。' : 'All platform intelligence is unified on DeepSeek reasoning and chat engines.'}</p>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-              <span className={`one-badge ${ollamaConnected ? 'one-badge-accent' : 'one-badge-neutral'}`}>
-                <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${ollamaConnected ? 'bg-[var(--color-one-accent)]' : 'bg-[var(--color-one-text-dim)]'}`} />
-                {ollamaConnected ? (isZh ? '本地 Ollama 已检测' : 'Local Ollama detected') : (isZh ? '本地 Ollama 未检测' : 'Local Ollama not detected')}
+              <span className="one-badge one-badge-accent">
+                <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-[var(--color-one-accent)]" />
+                DeepSeek Active
               </span>
+              {ollamaConnected && (
+                <span className="one-badge one-badge-neutral">{isZh ? '本地 DeepSeek Ollama 已连接' : 'Local DeepSeek Ollama'}</span>
+              )}
               <span className="one-badge one-badge-neutral">{isZh ? `消息 ${messages.length}` : `${messages.length} messages`}</span>
-              <span className="one-badge one-badge-neutral">{isZh ? '本地会话记录已保存' : 'Conversation history saved locally'}</span>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-0 w-full sm:w-auto sm:min-w-[220px] sm:flex-none">
+            <div className="relative min-w-0 flex-1 sm:w-auto sm:min-w-[230px] sm:flex-none">
               <select
                 value={selectedModel}
                 onChange={e => setSelectedModel(e.target.value)}
-                className="h-10 w-full appearance-none rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 pr-9 text-sm text-slate-900 dark:text-white outline-none transition focus:border-sky-500"
-                aria-label={isZh ? '选择模型' : 'Select model'}
+                className="h-11 w-full appearance-none rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 pr-9 text-sm text-slate-900 dark:text-white outline-none transition focus:border-sky-500"
+                aria-label={isZh ? '选择 DeepSeek 模型' : 'Select DeepSeek model'}
               >
                 {availableModels.length === 0 ? (
-                  <option value="">{isZh ? '未获取到模型列表' : 'No models loaded'}</option>
+                  <option value="deepseek-r1-open">DeepSeek-R1</option>
                 ) : (
                   availableModels.map(m => (
                     <option key={m.id} value={m.id}>
@@ -337,13 +341,13 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
             </div>
 
-            <button type="button" onClick={() => setVoiceOutput(!voiceOutput)} className={`one-btn one-btn-sm ${voiceOutput ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? '语音朗读' : 'Voice output'}>
+            <button type="button" onClick={() => setVoiceOutput(!voiceOutput)} className={`one-btn min-h-[44px] min-w-[44px] px-3 ${voiceOutput ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? '语音朗读' : 'Voice output'}>
               {voiceOutput ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </button>
-            <button type="button" onClick={() => setShowConfigDrawer(!showConfigDrawer)} className={`one-btn one-btn-sm ${showConfigDrawer ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? '模型与接口设置' : 'Model settings'}>
+            <button type="button" onClick={() => setShowConfigDrawer(!showConfigDrawer)} className={`one-btn min-h-[44px] min-w-[44px] px-3 ${showConfigDrawer ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? 'DeepSeek 接口设置' : 'DeepSeek settings'}>
               <Settings2 className="h-4 w-4" />
             </button>
-            <button type="button" onClick={handleClearChat} className="one-btn one-btn-secondary one-btn-sm" title={isZh ? '清空对话' : 'Clear conversation'}>
+            <button type="button" onClick={handleClearChat} className="one-btn one-btn-secondary min-h-[44px] min-w-[44px] px-3" title={isZh ? '清空对话' : 'Clear conversation'}>
               <RotateCcw className="h-4 w-4" />
             </button>
           </div>
@@ -352,26 +356,26 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         {showConfigDrawer && (
           <div className="one-surface-subtle mb-4 p-4 sm:p-5">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-white"><Cpu className="h-4 w-4 text-[var(--color-one-accent)]" />{isZh ? '自定义 OpenAI 兼容接口 / 本地 Ollama' : 'Custom OpenAI-compatible endpoint / Local Ollama'}</div>
+              <div className="flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-white"><Cpu className="h-4 w-4 text-[var(--color-one-accent)]" />{isZh ? 'DeepSeek 官方 API / 本地 DeepSeek Ollama 配置' : 'DeepSeek API / Local DeepSeek Ollama'}</div>
               <button onClick={() => setShowConfigDrawer(false)} className="text-xs text-[var(--color-one-text-muted)] hover:text-slate-900 dark:hover:text-white">{isZh ? '收起' : 'Close'}</button>
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <label className="block space-y-1.5">
                 <span className="text-xs text-[var(--color-one-text-dim)]">Base URL</span>
-                <input type="text" value={customBaseUrl} onChange={e => setCustomBaseUrl(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="http://localhost:11434/v1" />
+                <input type="text" value={customBaseUrl} onChange={e => setCustomBaseUrl(e.target.value)} className="h-11 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="https://api.deepseek.com/v1" />
               </label>
               <label className="block space-y-1.5">
                 <span className="text-xs text-[var(--color-one-text-dim)]">{isZh ? '模型名称' : 'Model name'}</span>
-                <input type="text" value={customModel} onChange={e => setCustomModel(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="llama3 / deepseek-r1" />
+                <input type="text" value={customModel} onChange={e => setCustomModel(e.target.value)} className="h-11 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="deepseek-chat / deepseek-reasoner" />
               </label>
               <label className="block space-y-1.5">
-                <span className="text-xs text-[var(--color-one-text-dim)]">API Key</span>
-                <input type="password" value={customApiKey} onChange={e => setCustomApiKey(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder={isZh ? '本地 Ollama 可留空' : 'Optional for local Ollama'} />
+                <span className="text-xs text-[var(--color-one-text-dim)]">DeepSeek API Key</span>
+                <input type="password" value={customApiKey} onChange={e => setCustomApiKey(e.target.value)} className="h-11 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder={isZh ? '留空自动走 DeepSeek 免费直连' : 'Optional — leave empty for built-in DeepSeek'} />
               </label>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-one-text-muted)]">
-              <span>{isZh ? '使用本地 Ollama 时请确保服务已运行（默认 127.0.0.1:11434）。' : 'For local Ollama, ensure the service is running (default 127.0.0.1:11434).'}</span>
-              <button type="button" onClick={() => { setSelectedModel('custom'); setShowConfigDrawer(false); }} className="one-btn one-btn-primary one-btn-sm">{isZh ? '使用自定义模型' : 'Use custom model'}</button>
+              <span>{isZh ? '支持 DeepSeek 官方密钥（api.deepseek.com）或本地 DeepSeek Ollama（127.0.0.1:11434）。' : 'Supports official DeepSeek API or local DeepSeek Ollama.'}</span>
+              <button type="button" onClick={() => { setSelectedModel('custom'); setShowConfigDrawer(false); }} className="one-btn one-btn-primary one-btn-md">{isZh ? '应用 DeepSeek 自定义配置' : 'Apply DeepSeek config'}</button>
             </div>
           </div>
         )}

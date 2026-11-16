@@ -204,16 +204,16 @@ export function scoreSourceForRegion(source: MediaSourceDescriptor, region: Reso
   const explicit = region === 'cn' ? source.priorityCn : source.priorityOverseas;
   if (typeof explicit === 'number') return explicit;
 
-  if (source.availabilityStatus === 'unavailable') return 999;
+  if (source.availabilityStatus === 'unavailable' || source.playbackType === 'external_redirect') return 999;
 
   if (region === 'cn') {
     if (source.providerId === 'one-native') return 5;
-    if (source.providerId === 'bilibili') return 10;
-    if (source.providerId === 'netease-outchain') return 14;
+    if (source.playbackType === 'legal_direct_audio' && source.directAudioUrl) return 8;
+    if (source.providerId === 'bilibili') return 14;
+    if (source.providerId === 'netease-outchain') return 18;
     if (source.providerId === 'jamendo') return 18;
-    if (source.regionAvailability === 'global' && source.playbackType === 'legal_direct_audio') return 22;
     if (source.regionAvailability === 'cn') return 25;
-    if (source.providerId === 'internet-archive' || source.providerId === 'fma') return 55;
+    if (source.providerId === 'internet-archive' || source.providerId === 'fma') return 35;
     if (source.providerId === 'youtube') return 85;
     return 70;
   }
@@ -228,7 +228,6 @@ export function scoreSourceForRegion(source: MediaSourceDescriptor, region: Reso
   if (source.providerId === 'youtube') return 18;
   if (source.providerId === 'bilibili') return 28;
   if (source.playbackType === 'official_embed') return 30;
-  if (source.playbackType === 'external_redirect') return 90;
   return 50;
 }
 
