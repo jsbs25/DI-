@@ -91,14 +91,14 @@ export const KnowledgeUniverse: React.FC<KnowledgeUniverseProps> = ({ lang, onOp
   const nodeTypeLabel = (c: string) => (isZh ? typeLabel[c]?.zh : typeLabel[c]?.en) || c;
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-8 pb-20 sm:px-6 lg:px-8">
-      <header className="mx-auto mb-10 max-w-3xl text-center">
-        <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-1 text-[11px] font-medium text-[var(--color-one-text-muted)]">
+    <div className="mx-auto w-full max-w-7xl px-4 py-5 pb-16 sm:px-6 lg:px-8">
+      <header className="mx-auto mb-7 max-w-3xl text-center">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-1 text-[11px] font-medium text-[var(--color-one-text-muted)]">
           <Network className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
           <span>ONE KNOWLEDGE</span>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-5xl">{t.knowledgeTab}</h1>
-        <p className="mt-3 text-sm leading-relaxed text-[var(--color-one-text-muted)] sm:text-base">
+        <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">{t.knowledgeTab}</h1>
+        <p className="mt-2 text-xs leading-relaxed text-[var(--color-one-text-muted)] sm:text-sm">
           {isZh ? '沿着文明、人物、地点、语言与思想之间的真实联系，探索人类知识网络。' : 'Explore the human knowledge network through real connections between civilizations, people, places, languages, and ideas.'}
         </p>
 

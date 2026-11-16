@@ -34,7 +34,11 @@ import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
 import { GlobalMiniPlayer } from './components/music/GlobalMiniPlayer.tsx';
-import type { SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
+import { GameCenter } from './components/games/GameCenter.tsx';
+import { VideoCenter } from './components/video/VideoCenter.tsx';
+import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
+import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
+import type { GameId, OneAgentAction, SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -85,6 +89,7 @@ export default function App() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [articles, setArticles] = useState<CreatorArticle[]>([]);
+  const [videos, setVideos] = useState<VideoItem[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
@@ -104,6 +109,8 @@ export default function App() {
   const [venusQuickAction, setVenusQuickAction] = useState<VenusAgentAction | null>(null);
   const [saturnQuickAction, setSaturnQuickAction] = useState<SaturnAgentAction | null>(null);
   const [browserQuickSearch, setBrowserQuickSearch] = useState<{ seq: number; query: string } | null>(null);
+  const [mercuryQuickSearch, setMercuryQuickSearch] = useState<{ seq: number; query: string } | null>(null);
+  const [gameQuickLaunch, setGameQuickLaunch] = useState<{ seq: number; game: GameId } | null>(null);
 
   useEffect(() => { document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'; document.documentElement.lang = lang; }, [lang]);
 
@@ -197,6 +204,86 @@ export default function App() {
   };
   const handleEnterPlanet = (planetId: string) => { const eco = getPlanetEcosystem(planetId); if (!eco || !eco.available) return; setCurrentTab(eco.tab); setBrowserInitialQuery(null); };
 
+  const handleExecuteSiteAction = (action: OneAgentAction) => {
+    switch (action.type) {
+      case 'navigate_tab': {
+        const nextTab = normalizeModule(action.tab);
+        setCurrentTab(nextTab);
+        if (nextTab !== 'browser') setBrowserInitialQuery(null);
+        break;
+      }
+      case 'fly_to':
+        setFocusCoordinates({ lat: action.lat, lng: action.lng, timestamp: Date.now() });
+        setCurrentTab('globe');
+        break;
+      case 'play_music':
+        setVenusQuickAction({
+          seq: Date.now(),
+          kind: 'crawl_and_play',
+          query: action.query,
+        });
+        setCurrentTab('venus');
+        break;
+      case 'watch_documentary':
+        setSaturnQuickAction({
+          seq: Date.now(),
+          query: action.query,
+          platform: action.platform,
+          autoPlayRandom: action.randomPick ?? true,
+        });
+        setCurrentTab('saturn');
+        break;
+      case 'browser_search':
+        setBrowserQuickSearch({ seq: Date.now(), query: action.query });
+        setCurrentTab('browser');
+        break;
+      case 'mercury_search':
+        setMercuryQuickSearch({ seq: Date.now(), query: action.query });
+        setCurrentTab('mercury');
+        break;
+      case 'open_game':
+        setGameQuickLaunch({ seq: Date.now(), game: action.game });
+        setCurrentTab('game');
+        break;
+      case 'messenger_action':
+        if (action.action === 'open_calls') {
+          handleOpenCallCenterFromHome();
+        } else if (action.action === 'start_audio_call') {
+          handleQuickCall('audio', { conversationId: activeConversationId });
+        } else if (action.action === 'start_video_call') {
+          handleQuickCall('video', { conversationId: activeConversationId });
+        } else {
+          setMessengerQuickAction({ seq: Date.now(), kind: 'open_chat', conversationId: activeConversationId });
+          setCurrentTab('chat');
+        }
+        break;
+      case 'create_post':
+        if (action.content.trim()) {
+          void handleCreatePost({ content: action.content.trim(), category: action.category || 'thought' });
+        }
+        setCurrentTab('feed');
+        break;
+      case 'set_theme':
+        setTheme(action.theme);
+        break;
+      case 'set_language':
+        setLang(action.lang);
+        break;
+      case 'set_immersive':
+        if (action.immersive) setCurrentTab('globe');
+        setImmersive(action.immersive);
+        break;
+      case 'open_command_palette':
+        setCommandOpen(true);
+        break;
+      case 'replay_intro':
+        setShowIntro(true);
+        break;
+      default:
+        break;
+    }
+  };
+
   if (!currentUser) {
     return (
       <>
@@ -280,7 +367,7 @@ export default function App() {
         {currentTab === 'universe' && <div className="h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] bg-[#101c33] text-slate-100"><UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
         {currentTab === 'saturn' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} quickAction={saturnQuickAction} /></div>}
         {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('globe')} quickAction={venusQuickAction} /></div>}
-        {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} /></div>}
+        {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} quickSearch={mercuryQuickSearch} /></div>}
         {currentTab === 'feed' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} lang={lang} /></div>}
         <GlobalMessenger
           conversations={conversations}
@@ -317,6 +404,10 @@ export default function App() {
         {currentTab === 'creator' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
         {currentTab === 'community' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
         {currentTab === 'academy' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonAcademy lang={lang} currentUser={currentUser} onBack={() => setCurrentTab('universe')} /></div>}
+        {currentTab === 'game' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><GameCenter currentUser={currentUser} lang={lang} quickLaunch={gameQuickLaunch} /></div>}
+        {currentTab === 'video' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><VideoCenter videos={videos} lang={lang} /></div>}
+        {currentTab === 'network' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><OneNetworkCenter lang={lang} onOpenBrowserProxy={() => { setBrowserOpenProxySeq(s => s + 1); setCurrentTab('browser'); }} onOpenCalls={handleOpenCallCenterFromHome} /></div>}
+        {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><BrandIdentitySystem lang={lang} onBackToGlobe={() => setCurrentTab('globe')} /></div>}
       </main>
 
       <AppDock currentTab={currentTab} lang={lang} hidden={(currentTab === 'globe' && immersive) || (isMobileKeyboardOpen && isViewportWorkspace)} onSelectTab={(tab) => { setCurrentTab(tab); if (tab !== 'browser') setBrowserInitialQuery(null); }} />
@@ -332,6 +423,7 @@ export default function App() {
         lang={lang}
         showLauncher={!immersive}
         placement={currentTab === 'globe' ? 'center-bottom' : 'corner'}
+        onExecuteAction={handleExecuteSiteAction}
         onFlyTo={(lat, lng) => {
           setFocusCoordinates({ lat, lng, timestamp: Date.now() });
           setCurrentTab('globe');
@@ -366,6 +458,11 @@ export default function App() {
         onSetTheme={setTheme}
         onSetLang={setLang}
         currentTab={currentTab}
+        siteContext={{
+          theme,
+          immersive,
+          userName: currentUser?.displayName,
+        }}
       />
 
       {!isSpaceExperience && (

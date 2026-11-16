@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Language, User } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import { SpaceFlight3D } from './SpaceFlight3D.tsx';
@@ -20,12 +20,19 @@ import {
 interface GameCenterProps {
   currentUser: User | null;
   lang: Language;
+  quickLaunch?: { seq: number; game: 'flight' | 'gravity' | 'chess' | 'gomoku' | 'trivia' } | null;
 }
 
-export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => {
+export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang, quickLaunch }) => {
   const t = translations[lang] || translations.zh;
 
   const [activeGame, setActiveGame] = useState<'flight' | 'gravity' | 'chess' | 'gomoku' | 'trivia'>('flight');
+
+  useEffect(() => {
+    if (quickLaunch?.game) {
+      setActiveGame(quickLaunch.game);
+    }
+  }, [quickLaunch]);
 
   // -------------------------------------------------------------
   // 1. GOMOKU (Five-in-a-Row) Interactive Game State
@@ -206,15 +213,15 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
   ];
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-8 px-4 py-8 sm:px-6">
-      <div className="flex flex-col justify-between gap-4 border-b border-[var(--color-one-border)] pb-6 sm:flex-row sm:items-center">
+    <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-5 sm:px-6">
+      <div className="flex flex-col justify-between gap-4 border-b border-[var(--color-one-border)] pb-4 sm:flex-row sm:items-center">
         <div>
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-1 text-[11px] font-medium text-[var(--color-one-text-muted)]">
-            <Gamepad2 className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
+          <div className="mb-1.5 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-2.5 py-0.5 text-[11px] font-medium text-[var(--color-one-text-muted)]">
+            <Gamepad2 className="h-3 w-3 text-[var(--color-one-accent)]" />
             <span>ONE GAMES · {lang === 'zh' ? '互动与探索' : 'Play & Explore'}</span>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight text-white">{t.gameTab}</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-one-text-muted)]">
+          <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">{t.gameTab}</h1>
+          <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-[var(--color-one-text-muted)] sm:text-sm">
             {lang === 'zh' ? '体验 3D 太空穿梭、引力沙盒、国际象棋、五子棋与全球知识问答等真实互动模块。' : 'Explore 3D space flight, gravity sandbox, chess, gomoku, and global trivia experiences.'}
           </p>
         </div>

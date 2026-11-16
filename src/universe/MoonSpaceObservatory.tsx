@@ -250,26 +250,26 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
         />
       </div>
 
-      <header className="relative z-10 mx-auto w-full max-w-[1440px] px-4 pb-6 pt-6 sm:px-6 lg:px-10 lg:pt-8">
+      <header className="relative z-10 mx-auto w-full max-w-[1440px] px-4 pb-4 pt-4 sm:px-6 lg:px-10 lg:pt-5">
         <button
           onClick={onBack}
-          className="one-btn one-btn-sm one-btn-ghost mb-5 -ml-2"
+          className="one-btn one-btn-sm one-btn-ghost mb-3 -ml-2"
         >
           <ArrowLeft className="h-4 w-4" />
           <span>{isZh ? '返回太阳系' : 'Back to Solar System'}</span>
         </button>
 
-        <div className="one-surface-elevated relative overflow-hidden px-5 py-6 sm:px-7 sm:py-8">
+        <div className="one-surface-elevated relative overflow-hidden px-4 py-4 sm:px-6 sm:py-5">
           <div
             aria-hidden
-            className="pointer-events-none absolute -right-16 top-1/2 h-72 w-72 -translate-y-1/2 rounded-full opacity-20 blur-3xl"
+            className="pointer-events-none absolute -right-16 top-1/2 h-60 w-60 -translate-y-1/2 rounded-full opacity-15 blur-3xl"
             style={{ background: 'radial-gradient(circle, rgba(244,243,238,0.5), transparent 70%)' }}
           />
-          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-3xl">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="one-badge one-badge-neutral inline-flex items-center gap-1.5">
-                  <Moon className="h-3.5 w-3.5" />
+                  <Moon className="h-3 w-3" />
                   ONE · OBSERVATORY
                 </span>
                 <span className="one-badge one-badge-accent inline-flex items-center gap-1.5 normal-case tracking-normal">
@@ -277,13 +277,13 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
                   NASA / Wikimedia / Met · {isZh ? '开放影像直连' : 'Open imagery'}
                 </span>
               </div>
-              <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-4xl lg:text-5xl">
+              <h1 className="text-xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-2xl">
                 ONE OBSERVATORY
               </h1>
-              <p className="mt-1 text-sm font-medium tracking-[0.18em] text-[color:var(--color-one-text-muted)] sm:text-base">
+              <p className="mt-1 text-xs font-medium tracking-[0.14em] text-[color:var(--color-one-text-muted)]">
                 Explore the Universe.
               </p>
-              <p className="mt-4 max-w-2xl text-sm leading-7 text-[color:var(--color-one-text-muted)]">
+              <p className="mt-2 max-w-2xl text-xs leading-relaxed text-[color:var(--color-one-text-muted)] sm:text-sm">
                 {isZh
                   ? '月球是人类眺望宇宙的天然观测台。直连 NASA 官方图库、维基共享资源与大都会艺术博物馆公版星图，以影像为主体沉浸探索深空。'
                   : 'A lunar vantage on deep space. Search open imagery from NASA, Wikimedia Commons, and the Met—images first, exploration immersive.'}

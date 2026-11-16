@@ -13,14 +13,14 @@ export const CommunityList: React.FC<CommunityListProps> = ({ communities, onTog
   const t = translations[lang];
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
-      <div className="border-b border-[var(--color-one-border)] pb-5">
-        <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3 py-1 text-[11px] font-medium text-[var(--color-one-text-muted)]">
-          <Users2 className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
+    <div className="mx-auto w-full max-w-5xl space-y-5 px-4 py-5 sm:px-6">
+      <div className="border-b border-[var(--color-one-border)] pb-4">
+        <div className="mb-1.5 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--color-one-text-muted)]">
+          <Users2 className="h-3 w-3 text-[var(--color-one-accent)]" />
           <span>{lang === 'zh' ? 'ONE 社区 · 真实共创空间' : 'ONE COMMUNITY · Real Collectives'}</span>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">{t.communityTab}</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-one-text-muted)]">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white sm:text-2xl">{t.communityTab}</h1>
+        <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-[var(--color-one-text-muted)] sm:text-sm">
           {lang === 'zh'
             ? '加入围绕语言、文化、科学与创作的真实社区，与全球用户协作与交流。'
             : 'Join real communities around language, culture, science, and creation to collaborate with people worldwide.'}

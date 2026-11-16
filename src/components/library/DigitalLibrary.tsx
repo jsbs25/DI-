@@ -922,10 +922,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 <Sparkles className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
                 <span>开放馆藏 · 真实检索 · 诚实阅读能力</span>
               </div>
-              <h2 className="max-w-2xl text-3xl font-semibold leading-[1.08] tracking-tight text-white sm:text-5xl">
+              <h2 className="max-w-2xl text-2xl font-semibold leading-tight tracking-tight text-white sm:text-3xl">
                 一个世界，无数思想。
               </h2>
-              <p className="mt-4 max-w-xl text-sm leading-relaxed text-[var(--color-one-text-muted)] sm:text-base">
+              <p className="mt-2.5 max-w-xl text-xs leading-relaxed text-[var(--color-one-text-muted)] sm:text-sm">
                 在 ONE LIBRARY 中检索与阅读真实的公开图书与文献资源。汇聚 Project Gutenberg、Open Library、Internet Archive、arXiv 等来源，保留原始入口、权利标注与可用阅读方式。
               </p>
 

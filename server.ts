@@ -11,6 +11,8 @@ import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
 import { aiGateway } from './server/aiGateway.ts';
+import { createGeminiClient, GEMINI_FAST_MODEL, GEMINI_TEXT_MODEL } from './server/geminiClient.ts';
+import { ONE_SITE_TOOLS } from './server/siteTools.ts';
 import { buildConversationPrompt, normalizeConversationHistory } from './server/aiConversation.ts';
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
@@ -28,7 +30,7 @@ import {
   getKnowledgeNodeByCountry
 } from './server/knowledgeGraph.ts';
 import { musicStore } from './server/musicStore.ts';
-import { resolveMusicEmbedUrl, searchYouTubeMusic } from './server/youtubeMusicSearch.ts';
+import { resolveMusicEmbedUrl, searchYouTubeMusic, searchYouTubeVideos as searchYouTubeCinema } from './server/youtubeMusicSearch.ts';
 import { getChannelIntegrations } from './server/channelIntegrations.ts';
 import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
 import { getMailProvider, mailStatus } from './server/mailProvider.ts';
@@ -404,6 +406,28 @@ app.post('/api/auth/dev-login', async (req, res) => {
     });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e?.message || 'Dev login failed' });
+  }
+});
+
+app.post('/api/auth/guest-preview', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ success: false, error: 'Preview guest sign-in is disabled in production.' });
+  }
+  const user = store.users.find(u => u.id === 'user_cn_1') || store.users[0];
+  if (!user) return res.status(404).json({ success: false, error: 'Demo explorer account not found.' });
+  try {
+    await store.mutate(async () => {
+      const token = randomBytes(32).toString('hex');
+      (store as any).sessions.set(token, user.id);
+      user.isOnline = true;
+      (user as any).lastActiveAt = new Date().toISOString();
+      (store as any).currentUser = user;
+      store.persist();
+      setSessionCookie(req, res, token);
+      res.json({ success: true, user: store.getSelfProfileView(user.id) || user, token });
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message || 'Guest preview failed' });
   }
 });
 
@@ -3008,8 +3032,8 @@ app.post('/api/ai/chat', async (req, res) => {
   const contextualPrompt = buildConversationPrompt(userPrompt, conversationHistory);
 
   const systemInstructions: Record<string, string> = {
-    general: 'You are a general-purpose assistant, not a branded persona. Answer the current question directly in the user’s language. For follow-ups, prioritize the latest relevant conversation turns and honor the user’s constraints. Do not introduce unrelated themes or claim abilities you do not have. Keep simple answers concise; expand only when the user asks. Be accurate and say when uncertain.',
-    companion: '你是 One.，EARTH ONE 的语音智能助手，由 DeepSeek 驱动。用自然、温暖、有情绪感和同理心的语气与用户实时对话，像懂用户当下处境的伙伴一样回应；能理解用户正在做什么（会收到当前界面上下文），回答直接、简洁、口语化，适合语音播报。用户下达任务或指令时优先立刻给出明确执行结果/方案，不拖沓不说教；遇到不确定就坦诚说明并给出可行建议。用用户使用的语言回答。',
+    general: 'You are a concise, helpful assistant. Answer the current question directly in the user’s language. Keep simple answers concise; expand only when asked. Be accurate and state uncertainty plainly.',
+    companion: '你是 One.，EARTH ONE 的低延迟语音与全站控制助手（由后端 Gemini 极速引擎驱动）。用自然、简短的口语（1到2句话）回答，禁止输出 Markdown 符号或长段说教，方便实时语音播报与随时打断。用用户使用的语言回答。',
     translator: 'You are the Project Earth Polyglot Translator. Translate with native fidelity, preserving emotional nuance and cultural context.',
     writer: 'You are the Project Earth Creator Assistant. Help author eloquent global essays, articles, poetry, and stories.',
     tutor: 'You are the Project Earth International Language Coach. Help the user master natural conversation, idioms, and pronunciation.'
@@ -3032,10 +3056,10 @@ app.post('/api/ai/chat', async (req, res) => {
       if (result.success) {
         res.write(`${JSON.stringify({ done: true, tokens: result.tokens, model: resolvedModelId })}\n`);
       } else {
-        res.write(`${JSON.stringify({ error: result.errorMessage || 'DeepSeek 服务当前不可用，请稍后重试。' })}\n`);
+        res.write(`${JSON.stringify({ error: result.errorMessage || 'AI 服务当前不可用，请检查配置或稍后重试。' })}\n`);
       }
     } catch (error) {
-      res.write(`${JSON.stringify({ error: error instanceof Error ? error.message : 'DeepSeek 服务当前不可用，请稍后重试。' })}\n`);
+      res.write(`${JSON.stringify({ error: error instanceof Error ? error.message : 'AI 服务当前不可用，请稍后重试。' })}\n`);
     }
     return res.end();
   }
@@ -3096,6 +3120,135 @@ app.post('/api/ai/agent-command', async (req, res) => {
   }
   if (/多邻国|多林国|语言学习|学英语|学语言|duolingo|language/i.test(text)) {
     return res.json({ success: true, action: { type: 'navigate_tab', tab: 'arabic-learning', reply: isZh ? '好的，已打开语言学习中心。' : 'Opening Language Center.' } });
+  }
+
+  const gemini = createGeminiClient();
+  if (gemini) {
+    try {
+      const siteContext = req.body?.context ? JSON.stringify(req.body.context) : '{}';
+      let resp: any = null;
+      for (const m of [GEMINI_FAST_MODEL, GEMINI_TEXT_MODEL]) {
+        try {
+          resp = await gemini.models.generateContent({
+            model: m,
+            contents: text,
+            config: {
+              tools: [{ functionDeclarations: ONE_SITE_TOOLS }],
+              systemInstruction: `You are the full-website action planner for EARTH ONE (language=${lang}, context=${siteContext}). If the user is clearly asking to control, open, navigate, play/stop music, watch a documentary, search web/index, fly the 3D globe, launch a game, open chat/calls, post to feed, or toggle theme/language/immersive mode/command palette, call the matching tool function. If the user is only chatting or asking a general question, do NOT call any tool.`,
+            },
+          });
+          if (resp) break;
+        } catch (err: any) {
+          if (!/503|429|UNAVAILABLE|overloaded|high demand/i.test(String(err?.message || err))) {
+            throw err;
+          }
+        }
+      }
+      if (!resp) return res.json({ success: true, action: { type: 'none' } });
+      const call = resp.functionCalls?.[0];
+      if (call && call.name) {
+        const args = (call.args || {}) as Record<string, any>;
+        let mappedAction: Record<string, any> = { type: 'none' };
+        switch (call.name) {
+          case 'navigate_tab':
+            mappedAction = {
+              type: 'navigate_tab',
+              tab: String(args.tab || 'globe'),
+              reply: isZh ? `好的，已为您打开对应页面。` : `Opening ${String(args.tab || 'globe')}.`,
+            };
+            break;
+          case 'fly_to_location':
+            mappedAction = {
+              type: 'fly_to',
+              lat: Number(args.lat) || 39.9,
+              lng: Number(args.lng) || 116.4,
+              place: String(args.placeName || ''),
+              reply: isZh ? `好的，正在带您飞往${String(args.placeName || '目的地')}。` : `Flying to ${String(args.placeName || 'destination')}.`,
+            };
+            break;
+          case 'control_music':
+            if (args.control === 'play_query') {
+              mappedAction = {
+                type: 'play_music',
+                query: String(args.query || ''),
+                crawl: true,
+                reply: isZh ? `好的，正在播放音乐${args.query ? `「${args.query}」` : ''}。` : `Playing music.`,
+              };
+            } else {
+              mappedAction = {
+                type: 'play_music',
+                control: String(args.control || 'stop'),
+                reply: isZh ? '好的，已执行音乐控制。' : 'Music control executed.',
+              };
+            }
+            break;
+          case 'watch_cinema':
+            mappedAction = {
+              type: 'watch_documentary',
+              query: String(args.query || '宇宙 纪录片'),
+              platform: String(args.platform || 'all'),
+              randomPick: args.randomPick !== false,
+              reply: isZh ? `好的，正在打开影院并搜索「${String(args.query || '纪录片')}」。` : `Opening cinema for ${String(args.query || 'documentary')}.`,
+            };
+            break;
+          case 'browser_action':
+            mappedAction = {
+              type: 'browser_search',
+              query: String(args.queryOrUrl || ''),
+              reply: isZh ? `好的，正在宇宙浏览器中打开「${String(args.queryOrUrl || '')}」。` : `Opening in Cosmic Browser.`,
+            };
+            break;
+          case 'search_global_index':
+            mappedAction = {
+              type: 'mercury_search',
+              query: String(args.query || ''),
+              reply: isZh ? `好的，正在水星全网索引中搜索「${String(args.query || '')}」。` : `Searching global index for ${String(args.query || '')}.`,
+            };
+            break;
+          case 'open_game':
+            mappedAction = {
+              type: 'open_game',
+              game: String(args.game || 'flight'),
+              reply: isZh ? '好的，正在进入火星游戏宇宙。' : 'Launching game in Game Center.',
+            };
+            break;
+          case 'open_messenger_or_call':
+            mappedAction = {
+              type: 'messenger_action',
+              action: String(args.action || 'open_chat'),
+              reply: isZh ? '好的，已为您打开信息与通话中心。' : 'Opening Messages & Calls.',
+            };
+            break;
+          case 'publish_global_post':
+            mappedAction = {
+              type: 'create_post',
+              content: String(args.content || ''),
+              category: String(args.category || 'thought'),
+              reply: isZh ? '好的，已为您发布到全球动态广场。' : 'Published to Global Feed.',
+            };
+            break;
+          case 'set_site_preferences':
+            if (args.theme === 'dark' || args.theme === 'light') {
+              mappedAction = { type: 'set_theme', theme: args.theme, reply: isZh ? `已切换为${args.theme === 'dark' ? '深色' : '浅色'}模式。` : `Switched to ${args.theme} mode.` };
+            } else if (args.lang === 'zh' || args.lang === 'en') {
+              mappedAction = { type: 'set_language', lang: args.lang, reply: args.lang === 'zh' ? '已切换为中文。' : 'Switched to English.' };
+            } else if (typeof args.immersive === 'boolean') {
+              mappedAction = { type: 'set_immersive', immersive: args.immersive, reply: isZh ? (args.immersive ? '已进入沉浸地球模式。' : '已退出沉浸模式。') : 'Updated immersive mode.' };
+            } else if (args.openCommandPalette) {
+              mappedAction = { type: 'open_command_palette', reply: isZh ? '已打开全局命令面板。' : 'Opening Command Palette.' };
+            } else if (args.replayIntro) {
+              mappedAction = { type: 'replay_intro', reply: isZh ? '正在重播开场导览。' : 'Replaying intro.' };
+            }
+            break;
+        }
+        if (mappedAction.type !== 'none') {
+          return res.json({ success: true, action: mappedAction });
+        }
+      }
+      return res.json({ success: true, action: { type: 'none' } });
+    } catch {
+      // fall through to gateway fallback
+    }
   }
 
   const systemPrompt = `You are the web-control planner for ONE. Given user speech, return ONLY valid JSON (no markdown).
@@ -3310,6 +3463,20 @@ app.get('/api/bilibili/search', async (req, res) => {
     res.json({ success: true, region: regionCtx.region, query: q, count: enriched.length, results: enriched, videos: enriched });
   } catch (err: any) {
     res.status(502).json({ success: false, error: err.message || 'Bilibili search failed' });
+  }
+});
+
+app.get('/api/video/youtube-search', async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (!q) return res.status(400).json({ success: false, error: 'Search query required' });
+  if (q.length > 200) return res.status(400).json({ success: false, error: 'Search query must be 200 characters or fewer' });
+  const limit = Math.max(1, Math.min(24, Number(req.query.limit) || 16));
+  const regionCtx = resolveRegionFromRequest(req);
+  try {
+    const videos = await searchYouTubeCinema(q, limit);
+    res.json({ success: true, region: regionCtx.region, query: q, count: videos.length, videos });
+  } catch (err: any) {
+    res.status(502).json({ success: false, error: err?.message || 'YouTube search failed' });
   }
 });
 

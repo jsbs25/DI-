@@ -290,3 +290,105 @@ export async function searchYouTubeMusic(query: string, limit = 12): Promise<Emb
 export function resolveMusicEmbedUrl(input: string): EmbeddableMusicTrack | null {
   return trackFromUrl(input);
 }
+
+export interface SearchableYouTubeVideo {
+  videoId: string;
+  title: string;
+  author: string;
+  durationText?: string;
+  durationSeconds?: number;
+  publishedText?: string;
+  views?: number;
+  viewsText?: string;
+  coverUrl: string;
+  embedUrl: string;
+}
+
+export async function searchYouTubeVideos(query: string, limit = 18): Promise<SearchableYouTubeVideo[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const results: SearchableYouTubeVideo[] = [];
+  const seen = new Set<string>();
+
+  try {
+    const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const start = html.indexOf('ytInitialData = ');
+      if (start !== -1) {
+        const jsonStart = start + 'ytInitialData = '.length;
+        const end = html.indexOf(';</script>', jsonStart);
+        if (end !== -1) {
+          const data = JSON.parse(html.slice(jsonStart, end));
+          const sectionList = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+          for (const section of sectionList) {
+            const items = section.itemSectionRenderer?.contents || [];
+            for (const item of items) {
+              const v = item.videoRenderer;
+              if (!v?.videoId || seen.has(v.videoId)) continue;
+              seen.add(v.videoId);
+              const durationText: string | undefined = v.lengthText?.simpleText || undefined;
+              let durationSeconds: number | undefined;
+              if (durationText) {
+                const parts = durationText.split(':').map(Number);
+                if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                  durationSeconds = parts[0] * 60 + parts[1];
+                } else if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+                  durationSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                }
+              }
+              const viewText: string | undefined = v.shortViewCountText?.simpleText || v.viewCountText?.simpleText || undefined;
+              results.push({
+                videoId: v.videoId,
+                title: String(v.title?.runs?.[0]?.text || 'YouTube Video'),
+                author: String(v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || 'YouTube'),
+                durationText,
+                durationSeconds,
+                publishedText: v.publishedTimeText?.simpleText || undefined,
+                viewsText: viewText,
+                coverUrl: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+                embedUrl: `https://www.youtube-nocookie.com/embed/${v.videoId}?autoplay=1&rel=0`,
+              });
+              if (results.length >= limit) break;
+            }
+            if (results.length >= limit) break;
+          }
+        }
+      }
+    }
+  } catch {
+    // Fallback to Piped instances below
+  }
+
+  if (results.length === 0) {
+    for (const instance of PIPED_INSTANCES) {
+      const data = await fetchJson(`${instance}/search?q=${encodeURIComponent(q)}&filter=videos`, 5500);
+      const list = Array.isArray(data?.items) ? data.items : [];
+      for (const it of list) {
+        const videoId = extractVideoId(it?.url || '') || extractVideoId(`https://youtube.com${it?.url || ''}`);
+        if (!videoId || seen.has(videoId)) continue;
+        seen.add(videoId);
+        results.push({
+          videoId,
+          title: String(it?.title || 'YouTube Video'),
+          author: String(it?.uploaderName || it?.uploader || 'YouTube'),
+          durationSeconds: typeof it?.duration === 'number' ? it.duration : undefined,
+          publishedText: it?.uploadedDate || undefined,
+          views: typeof it?.views === 'number' ? it.views : undefined,
+          coverUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`,
+        });
+        if (results.length >= limit) break;
+      }
+      if (results.length > 0) break;
+    }
+  }
+
+  return results;
+}

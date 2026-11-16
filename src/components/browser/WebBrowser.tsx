@@ -2547,7 +2547,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
                   {!isSearching && <span>{searchResults.length} 条结果</span>}
                   <span className="text-slate-500">{searchCategory === 'all' ? 'EARTH 内容与公开网页' : 'EARTH 内容与对应外部搜索源'}</span>
                 </div>
-                <h1 className="text-2xl font-semibold tracking-tight text-white leading-snug sm:text-4xl">
+                <h1 className="text-xl font-semibold tracking-tight text-white leading-snug sm:text-2xl">
                   “{lastSearchQuery}”
                 </h1>
                 <nav aria-label="JUPITER 搜索分类" className="mt-4 flex gap-2 overflow-x-auto pb-1">
@@ -2721,7 +2721,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
                         {jupiterContent.duration && <span>· {jupiterContent.duration}</span>}
                         {jupiterContent.createdAt && <span>· {new Date(jupiterContent.createdAt).toLocaleDateString()}</span>}
                       </div>
-                      <h1 className="text-2xl font-semibold leading-snug text-white sm:text-4xl">{jupiterContent.title}</h1>
+                      <h1 className="text-xl font-semibold leading-snug text-white sm:text-2xl">{jupiterContent.title}</h1>
                       {jupiterContent.summary && <p className="mt-4 text-sm leading-7 text-slate-300">{jupiterContent.summary}</p>}
                     </div>
                     {jupiterContent.kind === 'video' && jupiterContent.mediaUrl && isHttpUrl(jupiterContent.mediaUrl) ? (
@@ -2764,8 +2764,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
                   <span className="h-1.5 w-1.5 rounded-full bg-cyan-300/80" aria-hidden="true" />
                   ONE BROWSER
                 </div>
-                <h1 className="text-balance text-3xl font-semibold tracking-tight text-white sm:text-5xl">Explore Beyond Boundaries.</h1>
-                <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-400 sm:text-base">JUPITER 统一搜索 EARTH 内容与公开网络来源，并以阅读、查看器或{browserEngine ? '原生 Chromium' : '网页预览'}方式打开结果。结果与可用性取决于真实来源与配置。</p>
+                <h1 className="text-balance text-2xl font-semibold tracking-tight text-white sm:text-3xl">Explore Beyond Boundaries.</h1>
+                <p className="mt-2.5 max-w-xl text-xs leading-relaxed text-slate-400 sm:text-sm">JUPITER 统一搜索 EARTH 内容与公开网络来源，并以阅读、查看器或{browserEngine ? '原生 Chromium' : '网页预览'}方式打开结果。结果与可用性取决于真实来源与配置。</p>
                 <form
                   onSubmit={event => {
                     event.preventDefault();

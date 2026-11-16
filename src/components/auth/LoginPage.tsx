@@ -45,6 +45,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
     try { return await res.json(); } catch { return {}; }
   };
 
+  const handleGuestPreview = async () => {
+    if (loading) return;
+    setErrorMsg(null);
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/guest-preview', { method: 'POST' });
+      const data = await parseJsonSafe(res);
+      if (res.ok && data?.success && data?.user) {
+        onAuthSuccess(data.user, data.token || '', false);
+      } else {
+        setErrorMsg(data?.error || L('预览入口暂不可用，请注册或登录。', 'Preview entry unavailable, please sign in or register.'));
+      }
+    } catch {
+      setErrorMsg(L('网络错误，请重试。', 'Network error, please try again.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loading) return;
@@ -277,6 +296,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
               {loading ? L('处理中…', 'Please wait…', 'يرجى الانتظار…') : (mode === 'login' ? L('登录', 'Sign in', 'تسجيل الدخول') : L('创建账号', 'Create account', 'إنشاء حساب'))}
             </button>
           </form>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={handleGuestPreview}
+            className="w-full h-10 mt-3 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.04] text-slate-700 dark:text-slate-200 text-xs font-medium hover:bg-slate-100 dark:hover:bg-white/[0.08] transition disabled:opacity-50 cursor-pointer"
+          >
+            {L('一键体验完整 EARTH ONE 数字世界（访客预览）', 'Enter EARTH ONE Instant Preview', 'دخول فوري لمعاينة EARTH ONE')}
+          </button>
 
           <div className="mt-5 text-sm text-slate-500 dark:text-slate-400">
             {mode === 'login' ? (

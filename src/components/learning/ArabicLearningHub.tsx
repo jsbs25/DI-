@@ -710,7 +710,6 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
           <DuolingoImmersionPlatform
             lang={lang}
             onOpenEnglishEngine={() => setMainTab('english_engine')}
-            onOpenUrlInBrowser={onOpenUrlInBrowser}
           />
         )}
 
