@@ -92,6 +92,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           setAvailableModels(d.models);
           const activeDefault = d.models.find((m: any) => m.ollamaRole === 'chat') ||
             d.models.find((m: any) => m.isDefault) ||
+            d.models.find((m: any) => m.id === 'deepseek-r1-open') ||
             d.models.find((m: any) => m.id.startsWith('ollama:')) ||
             d.models[0];
           if (activeDefault) setSelectedModel(activeDefault.id);
@@ -295,7 +296,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const ollamaConnected = availableModels.some(m => m.id.startsWith('ollama:'));
 
   return (
-    <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col px-4 py-4 sm:px-6 md:py-6">
         <header className="one-surface-subtle mb-4 flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
@@ -321,7 +322,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
               <select
                 value={selectedModel}
                 onChange={e => setSelectedModel(e.target.value)}
-                className="h-10 w-full appearance-none rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 pr-9 text-sm text-slate-900 dark:text-white outline-none transition focus:border-sky-500"
+                className="h-10 w-full appearance-none rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 pr-9 text-base md:text-sm text-slate-900 dark:text-white outline-none transition focus:border-sky-500"
                 aria-label={isZh ? '选择模型' : 'Select model'}
               >
                 {availableModels.length === 0 ? (
@@ -358,15 +359,15 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <label className="block space-y-1.5">
                 <span className="text-xs text-[var(--color-one-text-dim)]">Base URL</span>
-                <input type="text" value={customBaseUrl} onChange={e => setCustomBaseUrl(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="http://localhost:11434/v1" />
+                <input type="text" value={customBaseUrl} onChange={e => setCustomBaseUrl(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-base md:text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="http://localhost:11434/v1" />
               </label>
               <label className="block space-y-1.5">
                 <span className="text-xs text-[var(--color-one-text-dim)]">{isZh ? '模型名称' : 'Model name'}</span>
-                <input type="text" value={customModel} onChange={e => setCustomModel(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="llama3 / deepseek-r1" />
+                <input type="text" value={customModel} onChange={e => setCustomModel(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-base md:text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="llama3 / deepseek-r1" />
               </label>
               <label className="block space-y-1.5">
                 <span className="text-xs text-[var(--color-one-text-dim)]">API Key</span>
-                <input type="password" value={customApiKey} onChange={e => setCustomApiKey(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder={isZh ? '本地 Ollama 可留空' : 'Optional for local Ollama'} />
+                <input type="password" value={customApiKey} onChange={e => setCustomApiKey(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-base md:text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder={isZh ? '本地 Ollama 可留空' : 'Optional for local Ollama'} />
               </label>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-one-text-muted)]">
@@ -457,7 +458,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                     }
                   }}
                   placeholder={isZh ? '输入消息…（Enter 发送，Shift+Enter 换行）' : 'Message ONE INTELLIGENCE… (Enter to send, Shift+Enter for newline)'}
-                  className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
+                  className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2.5 text-base md:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                 />
                 <div className="flex items-center gap-1 pb-0.5 pr-0.5">
                   <button type="button" onClick={toggleSpeechRecognition} className={`rounded-xl p-2.5 transition ${isListening ? 'bg-sky-50 dark:bg-sky-500/20 text-[var(--color-one-accent)]' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'}`} title={isZh ? '语音输入' : 'Voice input'}>
