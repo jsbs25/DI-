@@ -26,8 +26,8 @@ export default defineConfig(() => {
           short_name: 'ONE',
           description:
             'ONE — One World. Infinite Possibilities. 一个世界，无限可能。',
-          theme_color: '#f4f7fb',
-          background_color: '#f4f7fb',
+          theme_color: '#05070B',
+          background_color: '#05070B',
           display: 'standalone',
           start_url: '/',
           scope: '/',
@@ -53,7 +53,7 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+          maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           navigateFallbackDenylist: [/^\/api\//, /^\/ws/],
           runtimeCaching: [
@@ -101,6 +101,17 @@ export default defineConfig(() => {
     },
     optimizeDeps: {
       include: ['react', 'react-dom', 'react-dom/client'],
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/three/')) return 'vendor-three';
+            if (id.includes('node_modules/livekit-client/')) return 'vendor-livekit';
+            if (id.includes('node_modules/lucide-react/')) return 'vendor-icons';
+          },
+        },
+      },
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

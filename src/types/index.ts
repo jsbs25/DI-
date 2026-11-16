@@ -104,11 +104,12 @@ export type ChatMessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'fai
 
 export interface ChatAttachment {
   id: string;
-  type: 'image' | 'file';
+  type: 'image' | 'file' | 'audio';
   name: string;
   url: string;
   size?: number;
   mimeType?: string;
+  durationSec?: number;
 }
 
 export interface ChatMessage {
@@ -130,6 +131,7 @@ export interface ChatMessage {
   deliveredTo?: string[];
   readBy?: string[];
   replyToId?: string;
+  reactions?: Record<string, string[]>;
   editedAt?: string;
   deletedFor?: string[];
   recalled?: boolean;

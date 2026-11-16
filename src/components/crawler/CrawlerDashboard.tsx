@@ -254,7 +254,7 @@ export const CrawlerDashboard: React.FC<CrawlerDashboardProps> = ({ lang }) => {
   const pendingPages = pages.filter(p => p.status === 'pending_review');
 
   return (
-    <div className="flex min-h-[calc(100dvh-4rem)] flex-1 flex-col bg-[var(--color-one-bg)] p-4 text-[var(--color-one-text)] sm:p-8">
+    <div className="flex min-h-[calc(100vh-4rem)] flex-1 flex-col bg-[var(--color-one-bg)] p-4 text-[var(--color-one-text)] sm:p-8">
       {actionNotice && (
         <div className="fixed left-1/2 top-20 z-50 flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-[var(--color-one-border-strong)] bg-[color:var(--color-one-bg-elevated)] px-5 py-3 text-xs font-medium text-white shadow-[var(--shadow-one-lg)] backdrop-blur-md">
           <Sparkles className="h-4 w-4 shrink-0 text-[var(--color-one-accent)]" />

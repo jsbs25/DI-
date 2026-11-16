@@ -455,6 +455,10 @@ export function usePlayerContext(): MusicPlayerApi {
   return ctx;
 }
 
+export function useOptionalPlayerContext(): MusicPlayerApi | null {
+  return useContext(PlayerContext);
+}
+
 export function isTrackEmbeddable(track: UnifiedTrack | null | undefined): boolean {
   return !!getEmbedSrc(track);
 }

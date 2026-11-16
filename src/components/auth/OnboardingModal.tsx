@@ -129,8 +129,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl space-y-6 p-6 sm:p-8 animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-contain">
+      <div className="w-full max-w-xl max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl space-y-5 sm:space-y-6 p-5 sm:p-8 animate-in fade-in duration-300">
         {/* Top Progress Indicator */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs font-mono text-cyan-400">

@@ -238,6 +238,31 @@ export function attachMessengerWs(wss: WebSocketServer) {
         return;
       }
 
+      if (type === 'react') {
+        const convId = String(msg.conversationId || '');
+        const messageId = String(msg.messageId || '');
+        const emoji = String(msg.emoji || '');
+        if (!convId || !messageId || !emoji) return;
+        try {
+          let updated: any;
+          await store.mutate(async () => {
+            updated = store.toggleMessageReaction(user.id, convId, messageId, emoji);
+          });
+          const conv = store.conversations.find(c => c.id === convId);
+          if (conv && updated) {
+            broadcastToUsers(conv.participantIds || [], {
+              type: 'message_reaction',
+              conversationId: convId,
+              messageId: updated.id,
+              reactions: updated.reactions || {},
+              userId: user.id,
+              emoji,
+            });
+          }
+        } catch {}
+        return;
+      }
+
       if (type === 'call_audio') {
         const callId = String(msg.callId || '');
         const pcm = typeof msg.pcm === 'string' ? msg.pcm : '';

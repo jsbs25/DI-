@@ -1,5 +1,6 @@
 import { getApiBase, wsUrl } from '../../apiBase.ts';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Conversation, ChatMessage, User, Language, ChannelIntegration } from '../../types/index.ts';
 import {
   Send, Languages, Sparkles, MessageCircle, Globe, Search, Plug, ShieldAlert,
@@ -82,6 +83,13 @@ const CallTrackView: React.FC<{
   return <video ref={ref as any} autoPlay playsInline muted={!!muted} className={className} style={mirror ? { transform: 'scaleX(-1)' } : undefined} />;
 };
 
+export interface MessengerQuickAction {
+  seq: number;
+  kind: 'audio' | 'video' | 'open_calls' | 'open_chat';
+  targetUserId?: string;
+  conversationId?: string;
+}
+
 interface GlobalMessengerProps {
   conversations: Conversation[];
   activeConversationId: string;
@@ -93,6 +101,8 @@ interface GlobalMessengerProps {
   onUserUpdate?: (user: User) => void;
   directOpenSeq?: number;
   isVisible?: boolean;
+  workspaceClassName?: string;
+  quickAction?: MessengerQuickAction | null;
 }
 
 type FriendUser = { id: string; earthId?: string; username: string; displayName: string; avatar: string; isOnline?: boolean; bio?: string; lastActiveAt?: string };
@@ -109,6 +119,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   onUserUpdate,
   directOpenSeq = 0,
   isVisible = true,
+  workspaceClassName,
+  quickAction = null,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -255,6 +267,24 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [callsLoading, setCallsLoading] = useState(false);
   const [speakerMode, setSpeakerMode] = useState<'speaker' | 'earpiece'>('speaker');
 
+  // Enhanced communication states: voice messages, reactions, quoted jump, in-chat search
+  const QUICK_REACTIONS = ['👍', '❤️', '🔥', '👏', '✨', '😂'] as const;
+  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
+  const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
+  const msgElRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [inChatSearchOpen, setInChatSearchOpen] = useState(false);
+  const [inChatQuery, setInChatQuery] = useState('');
+  const [inChatResults, setInChatResults] = useState<ChatMessage[]>([]);
+  const [inChatSearching, setInChatSearching] = useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [voiceSeconds, setVoiceSeconds] = useState(0);
+  const [voiceSending, setVoiceSending] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceChunksRef = useRef<BlobPart[]>([]);
+  const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastQuickActionSeqRef = useRef(0);
+
   useEffect(() => {
     if (directOpenSeq > 0) {
       setTab('chats');
@@ -262,7 +292,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     }
   }, [directOpenSeq]);
 
-  type PendingUpload = { id: string; file: File; name: string; size: number; mimeType: string; kind: 'image' | 'file'; previewUrl?: string; progress: number; status: 'queued' | 'uploading' | 'sending' | 'error' | 'done'; error?: string; uploadedAttachment?: any };
+  type PendingUpload = { id: string; file: File; name: string; size: number; mimeType: string; kind: 'image' | 'file' | 'audio'; previewUrl?: string; progress: number; status: 'queued' | 'uploading' | 'sending' | 'error' | 'done'; error?: string; uploadedAttachment?: any };
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [lightbox, setLightbox] = useState<{ items: { url: string; name: string }[]; index: number } | null>(null);
@@ -273,7 +303,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   useEffect(() => () => { for (const p of pendingUploadsRef.current) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); }, []);
 
   const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-  const ALLOWED_MIME = new Set(['image/png','image/jpeg','image/gif','image/webp','application/pdf','text/plain','application/zip','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
+  const ALLOWED_MIME = new Set(['image/png','image/jpeg','image/gif','image/webp','audio/webm','audio/ogg','audio/mp4','audio/mpeg','audio/wav','application/pdf','text/plain','application/zip','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
   const BLOCKED_EXTS = new Set(['.html','.htm','.svg','.xml','.js','.mjs','.cjs','.sh','.bat','.cmd','.ps1','.exe','.msi','.apk','.php','.jsp','.asp','.aspx']);
   const formatBytes = (n?: number) => {
     if (!n && n !== 0) return '';
@@ -285,9 +315,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const validateLocalFile = (file: File): string | null => {
     const ext = fileExt(file.name);
     if (ext && BLOCKED_EXTS.has(ext)) return '文件类型不允许';
-    const mime = (file.type || '').toLowerCase();
+    const mime = (file.type || '').toLowerCase().split(';')[0].trim();
     const allowedByMime = ALLOWED_MIME.has(mime) || (ext === '.docx' && mime === 'application/zip');
-    const allowedByExt = ['.png','.jpg','.jpeg','.gif','.webp','.pdf','.txt','.zip','.doc','.docx'].includes(ext);
+    const allowedByExt = ['.png','.jpg','.jpeg','.gif','.webp','.webm','.ogg','.oga','.m4a','.mp3','.wav','.pdf','.txt','.zip','.doc','.docx'].includes(ext);
     if (!allowedByMime && !allowedByExt) return '文件类型不允许';
     if (file.size > MAX_UPLOAD_BYTES) return '文件过大（最大 10MB）';
     if (file.size <= 0) return '空文件';
@@ -732,6 +762,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
     const connect = () => {
       if (stopped) return;
+      if (wsRef.current && (wsRef.current.readyState === 0 || wsRef.current.readyState === 1)) return;
+      if (reconnectRef.current) {
+        clearTimeout(reconnectRef.current);
+        reconnectRef.current = null;
+      }
       setWsStatus('connecting');
       const tkn = token();
       const base = wsUrl('/ws');
@@ -744,9 +779,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         return;
       }
       wsRef.current = ws;
+      let lastPongAt = Date.now();
 
       ws.onopen = () => {
         if (stopped) { try { ws.close(); } catch {} return; }
+        lastPongAt = Date.now();
         const wasReconnecting = reconnectAttemptRef.current > 0;
         reconnectAttemptRef.current = 0;
         setWsStatus('open');
@@ -768,14 +805,20 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         } catch {}
         if (pingTimer) clearInterval(pingTimer);
         pingTimer = setInterval(() => {
+          if (stopped || wsRef.current !== ws) return;
+          if (Date.now() - lastPongAt > 42000) {
+            try { ws.close(); } catch {}
+            return;
+          }
           if (ws.readyState === 1) {
             try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
           }
-        }, 25000);
+        }, 18000);
       };
 
       ws.onmessage = (ev) => {
         if (stopped) return;
+        lastPongAt = Date.now();
         let msg: any;
         try { msg = JSON.parse(String(ev.data)); } catch { return; }
         const type = msg?.type;
@@ -844,8 +887,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           return;
         }
         if (type === 'recall' && msg.messageId) {
-          setMessages(prev => prev.map(m => m.id === msg.messageId ? { ...m, recalled: true, content: '消息已撤回', translatedContent: undefined, attachments: [] } : m));
+          setMessages(prev => prev.map(m => m.id === msg.messageId ? { ...m, recalled: true, content: '消息已撤回', translatedContent: undefined, attachments: [], reactions: undefined } : m));
           void onRefreshConversations?.();
+          return;
+        }
+        if (type === 'message_reaction' && msg.messageId) {
+          setMessages(prev => prev.map(m => m.id === msg.messageId ? { ...m, reactions: msg.reactions && Object.keys(msg.reactions).length ? msg.reactions : undefined } : m));
           return;
         }
         if (type === 'conversation_updated') {
@@ -954,20 +1001,38 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         void pollCalls();
       }
     }, 3500);
-    const onOnline = () => {
-      if (!stopped) {
-        void syncSince();
-        void pollCalls();
-        if (!wsRef.current || wsRef.current.readyState !== 1) connect();
+    const resumeConnection = () => {
+      if (stopped) return;
+      void syncSince();
+      void pollCalls();
+      const cur = wsRef.current;
+      if (!cur || cur.readyState >= 2) {
+        reconnectAttemptRef.current = 0;
+        connect();
+      } else if (cur.readyState === 1) {
+        try { cur.send(JSON.stringify({ type: 'ping' })); } catch {
+          try { cur.close(); } catch {}
+        }
       }
     };
+    const onOnline = () => resumeConnection();
+    const onVisibilityResume = () => {
+      if (document.visibilityState === 'visible') resumeConnection();
+    };
+    const onPageShow = () => resumeConnection();
     window.addEventListener('online', onOnline);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('focus', onOnline);
+    document.addEventListener('visibilitychange', onVisibilityResume);
     return () => {
       stopped = true;
       if (pingTimer) clearInterval(pingTimer);
       clearInterval(syncTimer);
       clearInterval(callTimer);
       window.removeEventListener('online', onOnline);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('focus', onOnline);
+      document.removeEventListener('visibilitychange', onVisibilityResume);
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
       try { wsRef.current?.close(); } catch {}
       wsRef.current = null;
@@ -1422,6 +1487,140 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   const recallMessage = async (msg: ChatMessage) => { try { await api(`/api/conversations/${msg.conversationId}/messages/${msg.id}/recall`, { method: 'POST' }); } catch (e:any) { setConnError(e?.message || '撤回失败'); } };
   const deleteForMe = async (msg: ChatMessage) => { try { await api(`/api/conversations/${msg.conversationId}/messages/${msg.id}/delete`, { method: 'POST' }); setMessages(prev => prev.filter(m => m.id !== msg.id)); } catch (e:any) { setConnError(e?.message || '删除失败'); } };
+
+  const toggleReaction = async (msg: ChatMessage, emoji: string) => {
+    setReactionPickerMsgId(null);
+    const uid = currentUser?.id;
+    if (!uid || !msg?.id) return;
+    // Optimistic reaction update
+    setMessages(prev => prev.map(m => {
+      if (m.id !== msg.id) return m;
+      const cur: Record<string, string[]> = { ...(m.reactions || {}) };
+      const list = Array.isArray(cur[emoji]) ? [...cur[emoji]] : [];
+      const i = list.indexOf(uid);
+      if (i >= 0) list.splice(i, 1);
+      else list.push(uid);
+      if (list.length) cur[emoji] = list;
+      else delete cur[emoji];
+      return { ...m, reactions: Object.keys(cur).length ? cur : undefined };
+    }));
+    if (wsRef.current?.readyState === 1) {
+      try {
+        wsRef.current.send(JSON.stringify({ type: 'react', conversationId: msg.conversationId, messageId: msg.id, emoji }));
+        return;
+      } catch {}
+    }
+    try {
+      const d = await api(`/api/conversations/${msg.conversationId}/messages/${msg.id}/react`, { method: 'POST', body: JSON.stringify({ emoji }) });
+      if (d?.reactions) {
+        setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, reactions: Object.keys(d.reactions).length ? d.reactions : undefined } : m));
+      }
+    } catch (e: any) {
+      setConnError(e?.message || '回应失败');
+    }
+  };
+
+  const scrollToMessage = (messageId: string) => {
+    const el = msgElRefs.current[messageId];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightMsgId(messageId);
+    setTimeout(() => setHighlightMsgId(cur => cur === messageId ? null : cur), 1800);
+  };
+
+  const runInChatSearch = async (queryText: string) => {
+    const q = queryText.trim();
+    if (!activeConv?.id || !q) { setInChatResults([]); return; }
+    setInChatSearching(true);
+    try {
+      const d = await api(`/api/conversations/${activeConv.id}/search?q=${encodeURIComponent(q)}`);
+      setInChatResults(Array.isArray(d.messages) ? d.messages : []);
+    } catch {
+      setInChatResults([]);
+    } finally {
+      setInChatSearching(false);
+    }
+  };
+
+  const stopVoiceRecordingCleanup = () => {
+    if (voiceTimerRef.current) { clearInterval(voiceTimerRef.current); voiceTimerRef.current = null; }
+    try { voiceStreamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
+    voiceStreamRef.current = null;
+    mediaRecorderRef.current = null;
+    voiceChunksRef.current = [];
+    setIsRecordingVoice(false);
+    setVoiceSeconds(0);
+  };
+
+  const startVoiceRecording = async () => {
+    if (!activeConv || !authed || isRecordingVoice || voiceSending) return;
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setConnError('当前浏览器不支持语音录制');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferredTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+      const picked = preferredTypes.find(t => { try { return MediaRecorder.isTypeSupported(t); } catch { return false; } }) || '';
+      const rec = picked ? new MediaRecorder(stream, { mimeType: picked }) : new MediaRecorder(stream);
+      voiceStreamRef.current = stream;
+      mediaRecorderRef.current = rec;
+      voiceChunksRef.current = [];
+      rec.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) voiceChunksRef.current.push(ev.data);
+      };
+      rec.start(250);
+      setIsRecordingVoice(true);
+      setVoiceSeconds(0);
+      voiceTimerRef.current = setInterval(() => {
+        setVoiceSeconds(s => s + 1);
+      }, 1000);
+    } catch (e: any) {
+      setConnError(friendlyMediaError(e));
+      stopVoiceRecordingCleanup();
+    }
+  };
+
+  const sendVoiceRecording = async () => {
+    const rec = mediaRecorderRef.current;
+    const conv = activeConv;
+    if (!rec || !conv) { stopVoiceRecordingCleanup(); return; }
+    const duration = Math.max(1, voiceSeconds);
+    setVoiceSending(true);
+    try {
+      const blob: Blob = await new Promise((resolve) => {
+        rec.onstop = () => {
+          const rawMime = (rec.mimeType || 'audio/webm').split(';')[0].trim();
+          resolve(new Blob(voiceChunksRef.current, { type: rawMime }));
+        };
+        try { rec.stop(); } catch { resolve(new Blob(voiceChunksRef.current, { type: 'audio/webm' })); }
+      });
+      stopVoiceRecordingCleanup();
+      if (!blob.size) { setVoiceSending(false); return; }
+      const mime = blob.type || 'audio/webm';
+      const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : mime.includes('wav') ? 'wav' : 'webm';
+      const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
+      const att = await uploadOne(file, conv.id, () => {});
+      att.durationSec = duration;
+      const clientId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+      const optimistic: ChatMessage = {
+        id: clientId, conversationId: conv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
+        senderAvatar: currentUser?.avatar || '', senderCountry: currentUser?.location?.countryCode || 'UN', content: '',
+        createdAt: new Date().toISOString(), status: 'sending', readBy: [currentUser?.id || ''], deliveredTo: [], attachments: [att]
+      } as any;
+      pendingClientIds.current.add(clientId);
+      setMessages(prev => [...prev, optimistic]);
+      const data = await api(`/api/conversations/${conv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '', attachments: [att], clientMsgId: clientId }) });
+      pendingClientIds.current.delete(clientId);
+      if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
+      await onRefreshConversations?.();
+    } catch (e: any) {
+      setConnError(e?.message || '语音发送失败');
+      stopVoiceRecordingCleanup();
+    } finally {
+      setVoiceSending(false);
+    }
+  };
   const clearConversationForMe = async () => {
     if (!activeConv) return;
     if (!window.confirm(lang==='ar'?'سيؤدي هذا إلى إزالة سجل هذه المحادثة من عرضك فقط (وليس للطرف الآخر). هل تريد المتابعة؟':lang==='en'?'This will remove this conversation history from your view only (not for others). Continue?':'这将仅从你的视图中清除此会话记录（不会删除对方记录）。继续吗？')) return;
@@ -1927,29 +2126,57 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   }, [activeCall?.id, activeCall?.status]);
 
   // Cleanup on unmount
-  useEffect(() => { return () => { stopCallTones(); void cleanupCallMedia('unmount'); }; }, []);
+  useEffect(() => { return () => { stopCallTones(); stopVoiceRecordingCleanup(); void cleanupCallMedia('unmount'); }; }, []);
+
+  // Quick-action bridge from OneHome / external entry points
+  useEffect(() => {
+    if (!quickAction || !quickAction.seq || quickAction.seq === lastQuickActionSeqRef.current || !authed) return;
+    lastQuickActionSeqRef.current = quickAction.seq;
+    if (quickAction.kind === 'open_calls') {
+      setTab('calls');
+      setMobileShowChat(false);
+      void loadCallLogs();
+      void loadCallCapabilities();
+      return;
+    }
+    if (quickAction.kind === 'open_chat') {
+      if (quickAction.conversationId) onSelectConversation(quickAction.conversationId);
+      setTab('chats');
+      setMobileShowChat(true);
+      return;
+    }
+    if (quickAction.kind === 'audio' || quickAction.kind === 'video') {
+      if (quickAction.conversationId) onSelectConversation(quickAction.conversationId);
+      void startCall(quickAction.kind, {
+        targetUserId: quickAction.targetUserId,
+        conversationId: quickAction.conversationId,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quickAction?.seq, authed]);
 
   const connectGoogle = () => { window.location.href = '/api/auth/google/start'; };
   const connectWechat = () => { window.location.href = '/api/auth/wechat/start'; };
 
   if (!authed) {
-    if (!isVisible) return null;
     return (
-      <div className="w-full h-full min-h-0 p-3 sm:p-6 flex items-center justify-center">
-        <div className="w-full max-w-xl rounded-[28px] border border-slate-200 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl p-6 sm:p-8 text-center space-y-3 shadow-lg">
-          <div className="mx-auto w-12 h-12 rounded-2xl border border-sky-200 dark:border-sky-400/25 bg-sky-50 dark:bg-sky-400/10 flex items-center justify-center"><MessageCircle className="w-5 h-5 text-sky-600 dark:text-sky-300" /></div>
-          <h2 className="text-lg sm:text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">ONE MESSENGER</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">正在同步登录状态与会话上下文…</p>
+      <div className={isVisible ? (workspaceClassName || 'w-full h-full min-h-0 flex flex-col') : 'hidden'} aria-hidden={!isVisible}>
+        <div className="w-full h-full min-h-0 p-3 sm:p-6 flex items-center justify-center">
+          <div className="w-full max-w-xl rounded-[28px] border border-slate-200 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl p-6 sm:p-8 text-center space-y-3 shadow-lg">
+            <div className="mx-auto w-12 h-12 rounded-2xl border border-sky-200 dark:border-sky-400/25 bg-sky-50 dark:bg-sky-400/10 flex items-center justify-center"><MessageCircle className="w-5 h-5 text-sky-600 dark:text-sky-300" /></div>
+            <h2 className="text-lg sm:text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">ONE MESSENGER</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">正在同步登录状态与会话上下文…</p>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <>
-    <div className={isVisible ? 'w-full h-full min-h-0 p-1.5 sm:p-4 lg:p-5' : 'hidden'} aria-hidden={!isVisible}><div className="mx-auto h-full min-h-0 max-w-[1680px] rounded-[28px] border border-slate-200/90 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl shadow-lg dark:shadow-[0_24px_80px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col lg:flex-row text-slate-900 dark:text-slate-100">
+    <div className={isVisible ? (workspaceClassName || 'w-full h-full min-h-0 flex flex-col') : 'hidden'} aria-hidden={!isVisible}>
+    <div className="w-full h-full min-h-0 p-1.5 sm:p-4 lg:p-5"><div className="mx-auto h-full min-h-0 max-w-[1680px] rounded-[22px] sm:rounded-[28px] border border-slate-200/90 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl shadow-lg dark:shadow-[0_24px_80px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col lg:flex-row text-slate-900 dark:text-slate-100">
       {/* Left rail / list */}
-      <aside className={`w-full lg:w-[390px] xl:w-[430px] shrink-0 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-white/10 bg-slate-50/85 dark:bg-[#111b2e]/90 p-3 sm:p-4 flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex" : "flex"}`}>
+      <aside className={`w-full lg:w-[390px] xl:w-[430px] border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-white/10 bg-slate-50/85 dark:bg-[#111b2e]/90 p-3 sm:p-4 flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex lg:shrink-0" : "flex flex-1 lg:flex-initial lg:shrink-0"}`}>
         <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10 mb-3 gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-9 h-9 rounded-xl border border-sky-200 dark:border-sky-400/20 bg-sky-50 dark:bg-sky-400/10 flex items-center justify-center shrink-0"><MessageCircle className="w-4 h-4 text-sky-600 dark:text-sky-300" /></div>
@@ -2506,6 +2733,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               </>
             )}
             {activeConv?.type === 'group' && <button type="button" onClick={()=>{ setShowGroupPanel(v=>!v); if (!showGroupPanel) void loadGroupDetail(activeConv.id); }} className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center" title="群信息"><Info className="w-4 h-4"/></button>}
+            <button type="button" onClick={()=>{ setInChatSearchOpen(v=>!v); setInChatResults([]); }} className={`min-h-[38px] min-w-[38px] rounded-xl border inline-flex items-center justify-center ${inChatSearchOpen?'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-200':'border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06]'}`} title="会话内查找"><Search className="w-4 h-4"/></button>
             <button type="button" onClick={()=>setShowTranslateBar(v=>!v)} className={`sm:hidden min-h-[38px] min-w-[38px] rounded-xl border inline-flex items-center justify-center ${autoTranslate?'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-200':'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'}`} title="实时翻译"><Languages className="w-4 h-4"/></button>
             <div className="hidden sm:flex items-center gap-1.5">
               <Languages className="w-4 h-4 text-sky-600 dark:text-sky-300" />
@@ -2515,6 +2743,32 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             <button type="button" onClick={()=>void fetchMessages(false)} className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center" title="刷新"><RefreshCw className="w-4 h-4"/></button>
           </div>
         </div>
+
+        {inChatSearchOpen && (
+          <div className="px-3 py-2 bg-white dark:bg-black/25 border-b border-slate-200 dark:border-white/10 space-y-2 shrink-0">
+            <div className="flex items-center gap-2">
+              <input
+                value={inChatQuery}
+                onChange={e => { setInChatQuery(e.target.value); void runInChatSearch(e.target.value); }}
+                placeholder="在当前会话中查找消息或附件…"
+                className="flex-1 min-h-[36px] px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-white/[0.06] border border-slate-200 dark:border-white/10 text-xs text-slate-900 dark:text-slate-100 outline-none focus:border-sky-400"
+              />
+              <button type="button" onClick={()=>{ setInChatSearchOpen(false); setInChatQuery(''); setInChatResults([]); }} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"><X className="w-4 h-4"/></button>
+            </div>
+            {inChatQuery.trim() && (
+              <div className="max-h-36 overflow-y-auto space-y-1 text-xs">
+                {inChatSearching && <p className="text-slate-400 py-1">查找中…</p>}
+                {!inChatSearching && inChatResults.length === 0 && <p className="text-slate-400 py-1">未找到匹配消息</p>}
+                {inChatResults.map(r => (
+                  <button key={r.id} type="button" onClick={() => scrollToMessage(r.id)} className="w-full text-left px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-white/[0.04] hover:bg-sky-50 dark:hover:bg-sky-500/15 flex items-center justify-between gap-2">
+                    <span className="truncate text-slate-700 dark:text-slate-200"><b>{r.senderName}:</b> {r.content || '[附件]'}</span>
+                    <span className="text-[10px] text-slate-400 shrink-0 tabular-nums">{new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {showTranslateBar && (
           <div className="sm:hidden px-3 py-2 bg-white dark:bg-black/20 border-b border-slate-200 dark:border-white/10 flex items-center justify-between gap-2 text-xs">
@@ -2527,25 +2781,40 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 min-h-0">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 space-y-3 min-h-0">
           {hasMore && <div className="text-center"><button disabled={loadingMore} onClick={async()=>{ if(!messages[0]) return; setLoadingMore(true); await fetchMessages(true, messages[0].id); setLoadingMore(false); }} className="text-[11px] px-3 py-1 rounded-full border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06]">加载更早消息</button></div>}
           {connError && <div className="rounded-xl border border-amber-300 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-200 flex items-center justify-between gap-2"><span>{connError}</span><button onClick={()=>{setConnError(null); void fetchMessages(false);}} className="px-2 py-1 rounded bg-amber-200 dark:bg-amber-800/50">重试</button></div>}
           {messages.map(msg => {
             const isMe = msg.senderId === currentUser?.id;
             const showOrig = !!showOriginalMap[msg.id];
+            const quotedMsg = msg.replyToId ? messages.find(x => x.id === msg.replyToId) : null;
+            const reactionEntries = Object.entries(msg.reactions || {}).filter(([, ids]) => Array.isArray(ids) && ids.length > 0);
             if (msg.recalled) return <div key={msg.id} className="text-center text-[11px] text-slate-400 dark:text-slate-500 py-1">消息已撤回</div>;
             return (
-              <div key={msg.id} className={`flex items-start gap-2.5 ${isMe?'flex-row-reverse':''}`}>
+              <div
+                key={msg.id}
+                ref={el => { msgElRefs.current[msg.id] = el; }}
+                className={`flex items-start gap-2.5 transition-all duration-300 rounded-xl p-1 -m-1 ${isMe?'flex-row-reverse':''} ${highlightMsgId===msg.id?'bg-sky-500/10 ring-2 ring-sky-400/50':''}`}
+              >
                 <img src={msg.senderAvatar} className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-white/10 mt-1"/>
                 <div className={`max-w-[min(42rem,88%)] sm:max-w-[min(42rem,85%)] ${isMe?'items-end':'items-start'}`}>
                   <div className={`flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mb-1 ${isMe?'justify-end':''}`}><span className="font-semibold text-slate-700 dark:text-slate-300">{msg.senderName}</span><span>{new Date(msg.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span></div>
                   <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-xs space-y-2 ${isMe?'bg-gradient-to-r from-sky-600 to-cyan-600 text-white rounded-tr-none':'bg-white dark:bg-white/[0.08] text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-white/10 rounded-tl-none'}`}>
-                    {msg.replyToId && <div className="text-[11px] opacity-80 border-l-2 border-current/40 pl-2">回复消息</div>}
+                    {msg.replyToId && (
+                      <button
+                        type="button"
+                        onClick={() => quotedMsg && scrollToMessage(quotedMsg.id)}
+                        className="w-full text-left text-[11px] opacity-90 border-l-2 border-current/45 pl-2 py-0.5 rounded-r bg-black/10 dark:bg-white/5 hover:opacity-100"
+                      >
+                        <span className="font-semibold block truncate">{quotedMsg ? quotedMsg.senderName : '引用消息'}</span>
+                        <span className="block truncate opacity-80">{quotedMsg ? (quotedMsg.recalled ? '消息已撤回' : (quotedMsg.content || '[附件/语音]')) : '跳转原消息'}</span>
+                      </button>
+                    )}
                     {msg.attachments && msg.attachments.length>0 && (() => {
                       const imgs = (msg.attachments || []).filter(a => a.type === 'image');
                       return (
                         <div className="space-y-2">
-                          {msg.attachments.map((a, idx) => a.type === 'image' ? (
+                          {msg.attachments.map((a) => a.type === 'image' ? (
                             <div key={a.id} className="space-y-1">
                               {imgErrors[a.id] ? (
                                 <div className="text-xs rounded-lg border border-rose-400/40 bg-rose-950/30 px-3 py-2 flex items-center justify-between gap-2"><span className="inline-flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5"/>图片加载失败</span><button onClick={()=>setImgErrors(m=>{const n={...m}; delete n[a.id]; return n;})} className="underline">重试</button></div>
@@ -2555,6 +2824,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                                 </button>
                               )}
                               <div className="flex items-center justify-between gap-2 text-[10px] opacity-80"><span className="truncate">{a.name}</span><button onClick={()=>void downloadAttachment(a)} className="inline-flex items-center gap-1 underline shrink-0"><Download className="w-3 h-3"/>{dlState[a.id]==='downloading'?'下载中…':dlState[a.id]==='error'?'重试下载':'下载'}</button></div>
+                            </div>
+                          ) : (a.type === 'audio' || (a.mimeType || '').startsWith('audio/')) ? (
+                            <div key={a.id} className="rounded-xl border border-current/20 bg-black/10 dark:bg-black/25 p-2.5 space-y-1.5 min-w-[210px] sm:min-w-[260px]">
+                              <div className="flex items-center justify-between gap-2 text-[11px] opacity-90">
+                                <span className="inline-flex items-center gap-1 font-medium"><Mic className="w-3.5 h-3.5"/>语音消息{a.durationSec ? ` (${formatDuration(a.durationSec)})` : ''}</span>
+                                <span className="text-[10px] opacity-75">{formatBytes(a.size)}</span>
+                              </div>
+                              <audio controls preload="metadata" src={authFileUrl(a.url)} className="w-full h-8" />
                             </div>
                           ) : (
                             <div key={a.id} className="rounded-xl border border-current/15 bg-black/5 dark:bg-black/20 p-2.5 space-y-2">
@@ -2579,11 +2856,39 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                     ) : (
                       <div><p className="whitespace-pre-wrap break-words">{msg.content || (msg.attachments?.length?'':'')}</p>{msg.translatedContent && <div className="mt-1 text-[10px] opacity-80 text-right"><button onClick={()=>setShowOriginalMap(p=>({...p,[msg.id]:!p[msg.id]}))} className="underline">译文</button></div>}</div>
                     )}
-                    <div className={`flex items-center gap-2 text-[10px] opacity-80 ${isMe?'justify-end':''}`}>
+                    {reactionEntries.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {reactionEntries.map(([emoji, userIds]) => {
+                          const reacted = currentUser?.id ? userIds.includes(currentUser.id) : false;
+                          return (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => void toggleReaction(msg, emoji)}
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] border transition ${reacted ? 'bg-white/25 border-white/50 text-current font-semibold' : 'bg-black/10 dark:bg-white/10 border-current/20 opacity-90 hover:opacity-100'}`}
+                            >
+                              <span>{emoji}</span>
+                              <span className="tabular-nums">{userIds.length}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className={`relative flex items-center gap-2 text-[10px] opacity-80 ${isMe?'justify-end':''}`}>
                       {isMe && <span>{msg.status==='read'?'已读':msg.status==='delivered'?'已送达':msg.status==='failed'?<button onClick={()=>void retrySend(msg)} className="underline text-amber-200 hover:text-amber-100">失败·重试</button>:msg.status==='sending'?'发送中':'已发送'}</span>}
-                      <button onClick={()=>setReplyTo(msg)} className="hover:underline inline-flex items-center gap-0.5"><Reply className="w-3 h-3"/>回复</button>
-                      {isMe && !msg.recalled && <button onClick={()=>void recallMessage(msg)} className="hover:underline inline-flex items-center gap-0.5"><Undo2 className="w-3 h-3"/>撤回</button>}
-                      <button onClick={()=>void deleteForMe(msg)} className="hover:underline inline-flex items-center gap-0.5"><Trash2 className="w-3 h-3"/>删除</button>
+                      <button type="button" onClick={()=>setReactionPickerMsgId(cur => cur === msg.id ? null : msg.id)} className="hover:underline inline-flex items-center gap-0.5" title="表情回应">😊回应</button>
+                      <button type="button" onClick={()=>setReplyTo(msg)} className="hover:underline inline-flex items-center gap-0.5"><Reply className="w-3 h-3"/>回复</button>
+                      {isMe && !msg.recalled && <button type="button" onClick={()=>void recallMessage(msg)} className="hover:underline inline-flex items-center gap-0.5"><Undo2 className="w-3 h-3"/>撤回</button>}
+                      <button type="button" onClick={()=>void deleteForMe(msg)} className="hover:underline inline-flex items-center gap-0.5"><Trash2 className="w-3 h-3"/>删除</button>
+                      {reactionPickerMsgId === msg.id && (
+                        <div className={`absolute bottom-full mb-1.5 z-20 flex items-center gap-1 rounded-xl border border-slate-200 dark:border-white/15 bg-white dark:bg-slate-900 px-2 py-1 shadow-lg ${isMe ? 'right-0' : 'left-0'}`}>
+                          {QUICK_REACTIONS.map(em => (
+                            <button key={em} type="button" onClick={() => void toggleReaction(msg, em)} className="w-7 h-7 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-sm flex items-center justify-center">
+                              {em}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2626,27 +2931,44 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               </div>
             </div>
           )}
-          <div className="flex items-end gap-1.5 sm:gap-2">
-            <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
-            <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
-            <button type="button" onClick={()=>imageInputRef.current?.click()} title="发送图片" className="min-h-[44px] min-w-[40px] px-2.5 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0"><ImagePlus className="w-4 h-4"/></button>
-            <button type="button" onClick={()=>fileInputRef.current?.click()} title="发送文件" className="min-h-[44px] min-w-[40px] px-2.5 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0"><Paperclip className="w-4 h-4"/></button>
-            <textarea
-              value={inputText}
-              onChange={e=>{ setInputText(e.target.value); sendTyping(true); }}
-              onBlur={()=>sendTyping(false)}
-              onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); void handleSendMessage(); } }}
-              placeholder="输入消息…"
-              rows={1}
-              className="flex-1 min-h-[44px] max-h-28 resize-none px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[rgba(15,20,28,0.72)] border border-slate-200 dark:border-white/10 text-base sm:text-sm text-slate-900 dark:text-slate-100 outline-none focus:border-sky-400"
-            />
-            <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-3.5 sm:px-4 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 h-[44px] shrink-0"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
-          </div>
+          {isRecordingVoice ? (
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/10 px-3 py-2">
+              <div className="flex items-center gap-2 text-xs text-rose-700 dark:text-rose-200">
+                <Mic className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+                <span className="font-semibold tabular-nums">{formatDuration(voiceSeconds)}</span>
+                <span>正在录制语音消息…</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={stopVoiceRecordingCleanup} className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/15 bg-white dark:bg-white/10 text-xs text-slate-700 dark:text-slate-200">取消</button>
+                <button type="button" onClick={() => void sendVoiceRecording()} disabled={voiceSending} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-40">{voiceSending ? '发送中…' : '发送语音'}</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-end gap-1.5 sm:gap-2">
+              <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
+              <button type="button" onClick={()=>imageInputRef.current?.click()} title="发送图片" className="min-h-[44px] min-w-[38px] px-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0"><ImagePlus className="w-4 h-4"/></button>
+              <button type="button" onClick={()=>fileInputRef.current?.click()} title="发送文件" className="min-h-[44px] min-w-[38px] px-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0"><Paperclip className="w-4 h-4"/></button>
+              <button type="button" onClick={()=>void startVoiceRecording()} disabled={!activeConv || voiceSending} title="录制语音消息" className="min-h-[44px] min-w-[38px] px-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0 disabled:opacity-40"><Mic className="w-4 h-4"/></button>
+              <textarea
+                value={inputText}
+                onChange={e=>{ setInputText(e.target.value); sendTyping(true); }}
+                onBlur={()=>sendTyping(false)}
+                onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); void handleSendMessage(); } }}
+                placeholder="输入消息…"
+                rows={1}
+                className="flex-1 min-h-[44px] max-h-28 resize-none px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[rgba(15,20,28,0.72)] border border-slate-200 dark:border-white/10 text-base sm:text-sm text-slate-900 dark:text-slate-100 outline-none focus:border-sky-400"
+              />
+              <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-3.5 sm:px-4 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 h-[44px] shrink-0"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
+            </div>
+          )}
         </form>
       </main>
       </div>
     </div>
 
+      {typeof document !== 'undefined' ? createPortal(
+        <>
       {lightbox && (
         <div className="fixed inset-0 z-[60] bg-black/90 flex flex-col" onClick={()=>setLightbox(null)}>
           <div className="flex items-center justify-between p-3 text-slate-200" onClick={e=>e.stopPropagation()}>
@@ -2667,8 +2989,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       )}
 
       {selectedProfile && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 dark:bg-black/70 backdrop-blur-xs flex items-center justify-center p-4" onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }}>
-          <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-white dark:bg-[#0f172a] border border-slate-200 dark:border-white/10 p-5 space-y-4 shadow-xl" dir={lang==='ar'?'rtl':'ltr'} onClick={e=>e.stopPropagation()}>
+        <div className="fixed inset-0 z-[65] bg-slate-900/50 dark:bg-black/70 backdrop-blur-xs flex items-center justify-center p-4" onClick={()=>{ setSelectedProfile(null); setAvatarPreview(null); setProfileMode('view'); }}>
+          <div className="w-full max-w-md max-h-[85dvh] overflow-y-auto overscroll-contain rounded-2xl bg-white dark:bg-[#0f172a] border border-slate-200 dark:border-white/10 p-5 space-y-4 shadow-xl" dir={lang==='ar'?'rtl':'ltr'} onClick={e=>e.stopPropagation()}>
             {(() => {
               const u = selectedProfile.user || {};
               const isSelf = !!selectedProfile.isSelf || u.id === currentUser?.id;
@@ -3092,6 +3414,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           </>
         );
       })()}
-    </>
+        </>,
+        document.body
+      ) : null}
+    </div>
   );
 };

@@ -349,7 +349,7 @@ export const OneNetworkCenter: React.FC<OneNetworkCenterProps> = ({
           {/* Mode A Card */}
           <section className="rounded-3xl border border-slate-200 dark:border-white/12 bg-white dark:bg-[#162238] p-5 sm:p-6 flex flex-col justify-between gap-4 shadow-sm">
             <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-300">
                     <Globe className="w-5 h-5" />
@@ -410,7 +410,7 @@ export const OneNetworkCenter: React.FC<OneNetworkCenterProps> = ({
           {/* Mode B Card */}
           <section className="rounded-3xl border border-slate-200 dark:border-white/12 bg-white dark:bg-[#162238] p-5 sm:p-6 flex flex-col justify-between gap-4 shadow-sm">
             <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5">
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
                     <ShieldCheck className="w-5 h-5" />

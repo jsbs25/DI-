@@ -2123,7 +2123,7 @@ class DataStore {
     const msg = this.messages.find(m => m.id === messageId && m.conversationId === conversationId);
     if (!msg) throw new Error('Message not found');
     if (msg.senderId !== userId) throw new Error('Forbidden');
-    msg.recalled = true; msg.recalledAt = new Date().toISOString(); msg.content = ''; msg.translatedContent = undefined; msg.attachments = []; msg.updatedAt = msg.recalledAt;
+    msg.recalled = true; msg.recalledAt = new Date().toISOString(); msg.content = ''; msg.translatedContent = undefined; msg.attachments = []; msg.reactions = undefined; msg.updatedAt = msg.recalledAt;
     const conv = this.conversations.find(c => c.id === conversationId);
     if (conv) { conv.lastMessage = 'Message recalled'; conv.lastMessageAt = msg.recalledAt; }
     this.saveToDisk();
@@ -2134,6 +2134,32 @@ class DataStore {
     const msg = this.messages.find(m => m.id === messageId && m.conversationId === conversationId);
     if (!msg) throw new Error('Message not found');
     msg.deletedFor = Array.from(new Set([...(msg.deletedFor||[]), userId]));
+    this.saveToDisk();
+    return msg;
+  }
+
+  toggleMessageReaction(userId: string, conversationId: string, messageId: string, rawEmoji: string) {
+    const conv = this.conversations.find(c => c.id === conversationId);
+    if (!conv || !this.canAccessConversation(userId, conv)) throw new Error('Forbidden');
+    const msg = this.messages.find(m => m.id === messageId && m.conversationId === conversationId);
+    if (!msg || msg.recalled) throw new Error('Message not found');
+    const emoji = String(rawEmoji || '').trim();
+    if (!emoji || emoji.length > 16) throw new Error('Invalid reaction');
+    const current: Record<string, string[]> = { ...(msg.reactions || {}) };
+    const list = Array.isArray(current[emoji]) ? [...current[emoji]] : [];
+    const idx = list.indexOf(userId);
+    if (idx >= 0) {
+      list.splice(idx, 1);
+    } else {
+      list.push(userId);
+    }
+    if (list.length > 0) {
+      current[emoji] = list;
+    } else {
+      delete current[emoji];
+    }
+    msg.reactions = Object.keys(current).length ? current : undefined;
+    msg.updatedAt = new Date().toISOString();
     this.saveToDisk();
     return msg;
   }

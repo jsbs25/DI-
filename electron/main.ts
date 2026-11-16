@@ -5,8 +5,10 @@
 // - Mode A Built-in Browser Proxy (setProxy + closeAllConnections + socks5h remote DNS + main-process proxy auth)
 // - Native OS desktop notifications forwarding click events back into ONE Messenger
 
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   ONE_BROWSER_SESSION_PARTITION,
   validateProxyInput,
@@ -15,7 +17,8 @@ import {
   type ValidatedBrowserProxy,
 } from './proxyConfig.ts';
 
-
+const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electron = require('electron');
 const { app, BrowserWindow, WebContentsView, session, ipcMain, dialog, shell, Notification } = electron;
 
@@ -30,10 +33,8 @@ interface TabEntry {
   view: any;
   url: string;
   title: string;
-  favicon: string;
   loading: boolean;
   navigated: boolean;
-  canStop: boolean;
   zoomPercent: number;
   connectionStatus: 'unknown' | 'unencrypted' | 'encrypted' | 'certificate-error';
   certificateErrorCode: string | null;
@@ -109,9 +110,7 @@ function emitTabState(tab: TabEntry) {
     active: tab.tabId === activeTabId,
     url,
     title: tab.title || url,
-    favicon: tab.favicon || '',
     loading: tab.loading,
-    canStop: tab.canStop || tab.loading,
     navigated: tab.navigated,
     canGoBack: wc.canGoBack(),
     canGoForward: wc.canGoForward(),
@@ -209,10 +208,8 @@ function createOrGetTab(tabId: string, initialUrl?: string): TabEntry {
     view,
     url: initialUrl || 'about:blank',
     title: 'New Tab',
-    favicon: '',
     loading: false,
     navigated: false,
-    canStop: false,
     zoomPercent: 100,
     connectionStatus: 'unknown',
     certificateErrorCode: null,
@@ -226,59 +223,18 @@ function createOrGetTab(tabId: string, initialUrl?: string): TabEntry {
   } catch {}
 
   const wc = view.webContents;
-  const findTabByWc = (id: number) => Array.from(tabs.values()).find(t => t.view?.webContents?.id === id) || null;
-
-  wc.on('render-process-gone', (_ev: unknown, details: any) => {
-    const reason = details?.reason || 'unknown';
-    console.error('[browser-tab] render-process-gone', { tabId, reason, details });
-    entry.loading = false;
-    entry.canStop = false;
-    entry.certificateErrorCode = null;
-    sendToMain('browser:tab-crashed', {
-      tabId,
-      active: tabId === activeTabId,
-      reason,
-      exitCode: details?.exitCode ?? null,
-      url: entry.url || '',
-      title: entry.title || '',
-      canReload: true,
-    });
-    emitTabState(entry);
-  });
-
-  wc.on('unresponsive', () => {
-    console.warn('[browser-tab] unresponsive', { tabId, url: entry.url });
-    sendToMain('browser:tab-unresponsive', { tabId, url: entry.url || '', title: entry.title || '' });
-  });
-  wc.on('responsive', () => {
-    sendToMain('browser:tab-responsive', { tabId, url: entry.url || '' });
-  });
-
   wc.on('did-start-loading', () => {
     entry.loading = true;
-    entry.canStop = true;
     emitTabState(entry);
   });
   wc.on('did-stop-loading', () => {
     entry.loading = false;
-    entry.canStop = false;
-    emitTabState(entry);
-  });
-  wc.on('did-fail-load', (_ev: unknown, errorCode: number, errorDescription: string, validatedURL: string, isMainFrame: boolean) => {
-    if (!isMainFrame || errorCode === -3) return; // ignore subframes and aborted loads
-    entry.loading = false;
-    entry.canStop = false;
-    entry.title = entry.title || validatedURL || entry.url;
     emitTabState(entry);
   });
   wc.on('page-title-updated', (_ev: unknown, title: string) => {
     entry.title = title || entry.url;
     emitTabState(entry);
     persistSessionSnapshot();
-  });
-  wc.on('page-favicon-updated', (_ev: unknown, favicons: string[]) => {
-    entry.favicon = Array.isArray(favicons) && favicons[0] ? favicons[0] : '';
-    emitTabState(entry);
   });
   wc.on('did-navigate', (_ev: unknown, url: string) => {
     entry.url = url;
@@ -556,15 +512,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('browser:selectTab', (_ev: unknown, tabId: string, url: string) => {
-    const isInternal = url === 'jupiter://home' || url === 'about:blank';
-    const tab = createOrGetTab(tabId, isAllowedWebUrl(url) ? url : (isInternal ? url : undefined));
-    if (isInternal) {
-      tab.url = url;
-      tab.title = 'JUPITER';
-      tab.loading = false;
-      tab.navigated = false;
-      try { if (tab.view?.webContents && !tab.view.webContents.isDestroyed()) tab.view.webContents.stop(); } catch {}
-    }
+    const tab = createOrGetTab(tabId, isAllowedWebUrl(url) ? url : undefined);
     activeTabId = tab.tabId;
     syncActiveViewLayout();
     emitTabState(tab);
@@ -602,55 +550,8 @@ function registerIpcHandlers() {
     const tab = tabs.get(tabId);
     if (tab?.view?.webContents?.canGoForward()) tab.view.webContents.goForward();
   });
-  ipcMain.handle('browser:recoverTab', async (_ev: unknown, tabId: string) => {
-    const tab = tabs.get(tabId);
-    if (!tab) return { success: false, error: 'Tab not found' };
-    try {
-      const wc = tab.view?.webContents;
-      if (wc && !wc.isDestroyed()) {
-        await wc.loadURL(tab.url || 'about:blank');
-      } else {
-        // recreate view if destroyed
-        const url = tab.url || 'about:blank';
-        try { mainWindow?.contentView?.removeChildView(tab.view); } catch {}
-        tabs.delete(tabId);
-        tabOrder = tabOrder.filter(id => id !== tabId);
-        const recreated = createOrGetTab(tabId, isAllowedWebUrl(url) ? url : undefined);
-        activeTabId = tabId;
-        syncActiveViewLayout();
-        emitTabState(recreated);
-      }
-      return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err?.message || 'Recover failed' };
-    }
-  });
   ipcMain.handle('browser:reload', (_ev: unknown, tabId: string) => {
-    const tab = tabs.get(tabId);
-    if (!tab?.view?.webContents || tab.view.webContents.isDestroyed()) return;
-    tab.view.webContents.reload();
-  });
-  ipcMain.handle('browser:stop', (_ev: unknown, tabId: string) => {
-    const tab = tabs.get(tabId);
-    if (!tab?.view?.webContents || tab.view.webContents.isDestroyed()) return;
-    tab.view.webContents.stop();
-    tab.loading = false;
-    tab.canStop = false;
-    emitTabState(tab);
-  });
-  ipcMain.handle('browser:openDevTools', (_ev: unknown, tabId?: string) => {
-    const id = tabId || activeTabId;
-    const tab = id ? tabs.get(id) : null;
-    if (tab?.view?.webContents && !tab.view.webContents.isDestroyed()) {
-      tab.view.webContents.openDevTools({ mode: 'detach' });
-    }
-  });
-  ipcMain.handle('browser:toggleDevTools', (_ev: unknown, tabId?: string) => {
-    const id = tabId || activeTabId;
-    const tab = id ? tabs.get(id) : null;
-    if (tab?.view?.webContents && !tab.view.webContents.isDestroyed()) {
-      tab.view.webContents.toggleDevTools();
-    }
+    tabs.get(tabId)?.view?.webContents?.reload();
   });
 
   ipcMain.handle('browser:changeZoom', (_ev: unknown, action: 'in' | 'out' | 'reset') => {
@@ -751,85 +652,9 @@ function registerIpcHandlers() {
   });
 }
 
-function createApplicationMenu() {
-  const { Menu } = require('electron');
-  const template: any[] = [
-    ...(process.platform === 'darwin' ? [{
-      label: app.name,
-      submenu: [
-        { role: 'about' },
-        { type: 'separator' },
-        { role: 'services' },
-        { type: 'separator' },
-        { role: 'hide' },
-        { role: 'hideOthers' },
-        { role: 'unhide' },
-        { type: 'separator' },
-        { role: 'quit' }
-      ]
-    }] : []),
-    {
-      label: 'File',
-      submenu: [
-        { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => sendToMain('browser:shortcut', { action: 'new-tab' }) },
-        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => sendToMain('browser:shortcut', { action: 'close-tab' }) },
-        { label: 'Restore Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', click: () => sendToMain('browser:shortcut', { action: 'restore-tab' }) },
-        { type: 'separator' },
-        { role: process.platform === 'darwin' ? 'close' : 'quit' }
-      ]
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
-        { type: 'separator' },
-        { label: 'Find in Page', accelerator: 'CmdOrCtrl+F', click: () => sendToMain('browser:shortcut', { action: 'find' }) },
-        { label: 'Focus Address Bar', accelerator: 'CmdOrCtrl+L', click: () => sendToMain('browser:shortcut', { action: 'focus-address' }) }
-      ]
-    },
-    {
-      label: 'View',
-      submenu: [
-        { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: () => sendToMain('browser:shortcut', { action: 'reload' }) },
-        { label: 'Stop', accelerator: 'Escape', click: () => sendToMain('browser:shortcut', { action: 'stop' }) },
-        { type: 'separator' },
-        { label: 'Back', accelerator: process.platform === 'darwin' ? 'Cmd+[' : 'Alt+Left', click: () => sendToMain('browser:shortcut', { action: 'back' }) },
-        { label: 'Forward', accelerator: process.platform === 'darwin' ? 'Cmd+]' : 'Alt+Right', click: () => sendToMain('browser:shortcut', { action: 'forward' }) },
-        { type: 'separator' },
-        { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', click: () => sendToMain('browser:shortcut', { action: 'zoom-in' }) },
-        { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: () => sendToMain('browser:shortcut', { action: 'zoom-out' }) },
-        { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: () => sendToMain('browser:shortcut', { action: 'zoom-reset' }) },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-        { label: 'Toggle Developer Tools', accelerator: process.platform === 'darwin' ? 'Alt+Cmd+I' : 'Ctrl+Shift+I', click: () => sendToMain('browser:shortcut', { action: 'devtools' }) }
-      ]
-    },
-    { role: 'windowMenu' }
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
-
 app.whenReady().then(() => {
-  createApplicationMenu();
   // Strictly isolated persistent Chromium session partition ONLY for ONE Built-in Browser tabs
   browserSession = session.fromPartition(ONE_BROWSER_SESSION_PARTITION);
-
-  app.on('child-process-gone', (_ev: unknown, details: any) => {
-    console.error('[app] child-process-gone', details);
-    try { sendToMain('browser:child-process-gone', { type: details?.type, reason: details?.reason, serviceName: details?.serviceName }); } catch {}
-  });
-  app.on('render-process-gone', (_ev: unknown, contents: any, details: any) => {
-    try {
-      const wcId = contents?.id;
-      const tab = Array.from(tabs.values()).find(t => t.view?.webContents?.id === wcId);
-      if (!tab) return;
-      console.error('[app] render-process-gone(tab)', { tabId: tab.tabId, reason: details?.reason, details });
-      tab.loading = false; tab.canStop = false;
-      sendToMain('browser:tab-crashed', { tabId: tab.tabId, active: tab.tabId === activeTabId, reason: details?.reason || 'unknown', exitCode: details?.exitCode ?? null, url: tab.url || '', title: tab.title || '', canReload: true });
-      emitTabState(tab);
-    } catch (e) { console.error(e); }
-  });
 
   // Runtime permission isolation on browserSession
   browserSession.setPermissionRequestHandler((_wc: unknown, permission: string, callback: (allow: boolean) => void, details: any) => {
@@ -912,7 +737,7 @@ app.whenReady().then(() => {
     backgroundColor: '#04070e',
     title: 'ONE · EARTH ONE',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
+      preload: path.join(__dirname, 'preload.ts'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

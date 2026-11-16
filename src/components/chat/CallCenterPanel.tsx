@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Info,
   Activity,
+  Mic,
 } from 'lucide-react';
 import { probeIceConnectivity, type IceProbeResult } from '../../services/calls/media.ts';
 
@@ -122,6 +123,7 @@ export const CallCenterPanel: React.FC<CallCenterPanelProps> = ({
   const [showBgNote, setShowBgNote] = useState(false);
   const [iceProbing, setIceProbing] = useState(false);
   const [iceProbeResult, setIceProbeResult] = useState<IceProbeResult | null>(null);
+  const [deviceCheck, setDeviceCheck] = useState<{ mics: number; cams: number; speakers: number; note: string; ok: boolean } | null>(null);
 
   const runIceDiagnostic = async () => {
     if (iceProbing) return;
@@ -131,6 +133,43 @@ export const CallCenterPanel: React.FC<CallCenterPanelProps> = ({
       setIceProbeResult(res);
     } finally {
       setIceProbing(false);
+    }
+  };
+
+  const runDeviceCheck = async () => {
+    try {
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        setDeviceCheck({
+          mics: 0,
+          cams: 0,
+          speakers: 0,
+          ok: false,
+          note: lang === 'en' ? 'Media devices API unavailable in this browser context.' : '当前浏览器环境不支持音视频设备枚举。',
+        });
+        return;
+      }
+      const list = await navigator.mediaDevices.enumerateDevices();
+      const mics = list.filter((d) => d.kind === 'audioinput').length;
+      const cams = list.filter((d) => d.kind === 'videoinput').length;
+      const speakers = list.filter((d) => d.kind === 'audiooutput').length;
+      const ok = mics > 0;
+      setDeviceCheck({
+        mics,
+        cams,
+        speakers,
+        ok,
+        note: ok
+          ? (lang === 'en' ? `Detected ${mics} mic(s), ${cams} camera(s), ${speakers} output(s).` : `检测到 ${mics} 个麦克风 · ${cams} 个摄像头 · ${speakers} 个音频输出`)
+          : (lang === 'en' ? 'No microphone detected or browser permission not yet granted.' : '未检测到麦克风，或尚未授予媒体权限'),
+      });
+    } catch {
+      setDeviceCheck({
+        mics: 0,
+        cams: 0,
+        speakers: 0,
+        ok: false,
+        note: lang === 'en' ? 'Failed to inspect media devices.' : '检测本地音视频设备失败。',
+      });
     }
   };
 
@@ -205,6 +244,14 @@ export const CallCenterPanel: React.FC<CallCenterPanelProps> = ({
           <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
+              onClick={() => void runDeviceCheck()}
+              className="min-h-[32px] min-w-[32px] rounded-lg border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center"
+              title={L('检测麦克风与摄像头设备', 'Check mic & camera devices', 'فحص الميكروفون والكاميرا')}
+            >
+              <Mic className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
               onClick={() => void runIceDiagnostic()}
               disabled={iceProbing}
               className="min-h-[32px] min-w-[32px] rounded-lg border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center disabled:opacity-40"
@@ -231,6 +278,12 @@ export const CallCenterPanel: React.FC<CallCenterPanelProps> = ({
             </button>
           </div>
         </div>
+
+        {deviceCheck && (
+          <div className={`rounded-lg px-2.5 py-2 text-[11px] border tabular-nums ${deviceCheck.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200'}`}>
+            <p className="font-medium">{deviceCheck.note}</p>
+          </div>
+        )}
 
         {iceProbeResult && (
           <div className={`rounded-lg px-2.5 py-2 text-[11px] border tabular-nums ${iceProbeResult.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200'}`}>

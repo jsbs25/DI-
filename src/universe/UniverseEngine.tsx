@@ -158,12 +158,14 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
     cameraRef.current = camera;
 
     let renderer: THREE.WebGLRenderer;
+    const isTouchOrCompact = (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches) || width < 1024;
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
       renderer.setSize(width, height);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setPixelRatio(isTouchOrCompact ? Math.min(window.devicePixelRatio || 1, 1.5) : Math.min(window.devicePixelRatio || 1, 2));
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.15;
+      renderer.domElement.style.touchAction = 'none';
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
     } catch {
@@ -178,7 +180,7 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
     };
 
     // Starfield
-    const starsCount = 3500;
+    const starsCount = isTouchOrCompact ? 1800 : 3500;
     const starGeometry = track(new THREE.BufferGeometry());
     const starPositions = new Float32Array(starsCount * 3);
     const starColors = new Float32Array(starsCount * 3);
@@ -385,17 +387,34 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
       }
     };
 
-    // Controls
+    // Controls (mouse drag + single-finger touch orbit + two-finger touch pinch-zoom)
     let isDragging = false;
+    let activePointerId: number | null = null;
     let dragMoved = false;
     let dragStartX = 0;
     let dragStartY = 0;
     let prevMouseX = 0;
     let prevMouseY = 0;
+    const activeTouches = new Map<number, { x: number; y: number }>();
+    let prevPinchDist: number | null = null;
+
+    const getPinchDistance = () => {
+      const pts = Array.from(activeTouches.values());
+      if (pts.length < 2) return null;
+      return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    };
 
     const onPointerDownDrag = (e: PointerEvent) => {
-      if (e.button !== 0) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activeTouches.size >= 2) {
+        isDragging = false;
+        activePointerId = null;
+        prevPinchDist = getPinchDistance();
+        return;
+      }
       isDragging = true;
+      activePointerId = e.pointerId;
       dragMoved = false;
       dragStartX = e.clientX;
       dragStartY = e.clientY;
@@ -404,10 +423,26 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
     };
 
     const onPointerMoveDrag = (e: PointerEvent) => {
-      if (!isDragging || !cameraRef.current) return;
+      if (activeTouches.has(e.pointerId)) {
+        activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+      if (activeTouches.size >= 2 && cameraRef.current) {
+        const dist = getPinchDistance();
+        if (dist !== null && prevPinchDist !== null && prevPinchDist > 0) {
+          const ratio = prevPinchDist / dist;
+          cameraRef.current.position.multiplyScalar(Math.min(1.12, Math.max(0.88, ratio)));
+          const len = cameraRef.current.position.length();
+          if (len < 12) cameraRef.current.position.setLength(12);
+          if (len > 520) cameraRef.current.position.setLength(520);
+          cameraTargetRef.current.isTransitioning = false;
+        }
+        prevPinchDist = dist;
+        return;
+      }
+      if (!isDragging || activePointerId !== e.pointerId || !cameraRef.current) return;
       const totalDx = e.clientX - dragStartX;
       const totalDy = e.clientY - dragStartY;
-      if (Math.abs(totalDx) + Math.abs(totalDy) > 4) dragMoved = true;
+      if (Math.abs(totalDx) + Math.abs(totalDy) > 6) dragMoved = true;
       const deltaX = e.clientX - prevMouseX;
       const deltaY = e.clientY - prevMouseY;
       prevMouseX = e.clientX;
@@ -429,11 +464,16 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
     };
 
     const onPointerUpDrag = (e: PointerEvent) => {
-      if (isDragging && !dragMoved) {
+      activeTouches.delete(e.pointerId);
+      if (activeTouches.size < 2) prevPinchDist = null;
+      if (isDragging && activePointerId === e.pointerId && !dragMoved) {
         handlePointerDown(e);
       }
-      isDragging = false;
-      dragMoved = false;
+      if (activePointerId === e.pointerId || activeTouches.size === 0) {
+        isDragging = false;
+        activePointerId = null;
+        dragMoved = false;
+      }
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -450,6 +490,7 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
     container.addEventListener('pointerdown', onPointerDownDrag);
     window.addEventListener('pointermove', onPointerMoveDrag);
     window.addEventListener('pointerup', onPointerUpDrag);
+    window.addEventListener('pointercancel', onPointerUpDrag);
     container.addEventListener('wheel', onWheel, { passive: false });
 
     // Animation loop
@@ -516,15 +557,33 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(w, h);
     };
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(handleResize) : null;
+    ro?.observe(container);
+    const onOrientation = () => setTimeout(handleResize, 120);
     window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', onOrientation);
+
+    const onContextLost = (ev: Event) => {
+      ev.preventDefault();
+      cancelAnimationFrame(animId);
+      setWebGlAvailable(false);
+    };
+    const onContextRestored = () => setWebGlAvailable(true);
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
 
     return () => {
       cancelAnimationFrame(animId);
+      ro?.disconnect();
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', onOrientation);
       container.removeEventListener('pointerdown', onPointerDownDrag);
       window.removeEventListener('pointermove', onPointerMoveDrag);
       window.removeEventListener('pointerup', onPointerUpDrag);
+      window.removeEventListener('pointercancel', onPointerUpDrag);
       container.removeEventListener('wheel', onWheel);
+      renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
+      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
 
       if (container && renderer.domElement && renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);

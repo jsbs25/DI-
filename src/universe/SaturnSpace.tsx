@@ -484,7 +484,7 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
 
   return (
     <div
-      className="min-h-[100dvh] text-[color:var(--color-one-text)]"
+      className="min-h-screen text-[color:var(--color-one-text)]"
       style={{
         background:
           'radial-gradient(1100px 600px at 20% -10%, rgba(215,182,118,0.08), transparent 55%), radial-gradient(900px 500px at 85% 10%, rgba(127,212,255,0.06), transparent 50%), linear-gradient(180deg, #030508 0%, #05070b 45%, #030508 100%)'

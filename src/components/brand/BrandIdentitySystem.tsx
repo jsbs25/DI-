@@ -192,7 +192,7 @@ export const BrandIdentitySystem: React.FC<BrandIdentitySystemProps> = ({ lang, 
       : '阶段四 · 独一 ONE 标志稳定呈现 (1300–1600ms)';
 
   return (
-    <div className="min-h-[100dvh] bg-[#0B0C0E] text-[#F7F5F0] pb-24">
+    <div className="min-h-screen bg-[#0B0C0E] text-[#F7F5F0] pb-24">
       {/* Museum / Institutional Editorial Header */}
       <div className="border-b border-white/10 bg-[#0B0C0E]/95">
         <div className="max-w-7xl mx-auto px-5 sm:px-8 pt-8 pb-6">
@@ -240,7 +240,7 @@ export const BrandIdentitySystem: React.FC<BrandIdentitySystemProps> = ({ lang, 
                   onClick={onBackToGlobe}
                   className="px-3 py-1.5 rounded-lg text-xs font-medium border border-white/15 text-[#A7ADB6] hover:text-white hover:border-white/30 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  {lang === 'zh' ? '返回 3D 地球' : 'Back to Earth'}
+                  {lang === 'zh' ? '返回首页' : 'Back to Home'}
                 </button>
               )}
             </div>

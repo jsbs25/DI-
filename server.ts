@@ -35,6 +35,7 @@ import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
 import { getMailProvider, mailStatus } from './server/mailProvider.ts';
 import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE164 } from './server/otp.ts';
 import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers, isUserViewingConversation } from './server/messengerWs.ts';
+import { attachAiLiveWs } from './server/aiLiveWs.ts';
 import { addCall, getCallById, listCallsForUser, ensureCallsArray } from './server/calls/index.ts';
 import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus, cleanupStaleCalls, cleanupStaleCallsDetailed, getCommunicationCapabilities } from './server/calls/service.ts';
 import { pushCallSignal, listCallSignalsForUser, clearCallSignals } from './server/calls/signals.ts';
@@ -1047,11 +1048,16 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const ATT_ID_RE = /^att_[a-zA-Z0-9_-]{6,80}$/;
 
-const ALLOWED_ATTACHMENT_TYPES = new Map<string, { kind: 'image' | 'file'; exts: string[] }>([
+const ALLOWED_ATTACHMENT_TYPES = new Map<string, { kind: 'image' | 'file' | 'audio'; exts: string[] }>([
   ['image/png', { kind: 'image', exts: ['.png'] }],
   ['image/jpeg', { kind: 'image', exts: ['.jpg', '.jpeg'] }],
   ['image/gif', { kind: 'image', exts: ['.gif'] }],
   ['image/webp', { kind: 'image', exts: ['.webp'] }],
+  ['audio/webm', { kind: 'audio', exts: ['.webm'] }],
+  ['audio/ogg', { kind: 'audio', exts: ['.ogg', '.oga'] }],
+  ['audio/mp4', { kind: 'audio', exts: ['.m4a', '.mp4'] }],
+  ['audio/mpeg', { kind: 'audio', exts: ['.mp3'] }],
+  ['audio/wav', { kind: 'audio', exts: ['.wav'] }],
   ['application/pdf', { kind: 'file', exts: ['.pdf'] }],
   ['text/plain', { kind: 'file', exts: ['.txt'] }],
   ['application/zip', { kind: 'file', exts: ['.zip'] }],
@@ -1076,17 +1082,23 @@ function sniffMime(buf: Buffer): string | null {
   if (buf.length >= 6 && buf.slice(0, 6).toString('ascii') === 'GIF87a') return 'image/gif';
   if (buf.length >= 6 && buf.slice(0, 6).toString('ascii') === 'GIF89a') return 'image/gif';
   if (buf.length >= 12 && buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  if (buf.length >= 12 && buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WAVE') return 'audio/wav';
+  if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'audio/webm';
+  if (buf.length >= 4 && buf.slice(0, 4).toString('ascii') === 'OggS') return 'audio/ogg';
+  if (buf.length >= 12 && buf.slice(4, 8).toString('ascii') === 'ftyp') return 'audio/mp4';
+  if (buf.length >= 3 && (buf.slice(0, 3).toString('ascii') === 'ID3' || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0))) return 'audio/mpeg';
   if (buf.length >= 5 && buf.slice(0, 5).toString('ascii') === '%PDF-') return 'application/pdf';
   if (buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04) return 'application/zip'; // zip/docx containers share signature
   return null;
 }
 
-function resolveAllowedAttachment(name: string, claimedMime: string, buf: Buffer): { ok: true; mimeType: string; kind: 'image' | 'file' } | { ok: false; error: string } {
+function resolveAllowedAttachment(name: string, claimedMime: string, buf: Buffer): { ok: true; mimeType: string; kind: 'image' | 'file' | 'audio' } | { ok: false; error: string } {
   const safeName = safeFileName(name);
   const ext = extOf(safeName);
   if (ext && BLOCKED_EXTS.has(ext)) return { ok: false, error: 'File type not allowed' };
   let mime = String(claimedMime || '').toLowerCase().split(';')[0].trim();
   if (mime === 'image/jpg') mime = 'image/jpeg';
+  if (mime === 'video/webm' && ext === '.webm') mime = 'audio/webm';
   const sniff = sniffMime(buf);
   if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && sniff === 'application/zip') {
     // docx is a zip container; allow only with correct extension
@@ -1264,7 +1276,7 @@ app.get('/api/messenger/files/:id', (req, res) => {
     if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: 'File not found' });
     const wantDownload = req.query.download === '1' || req.query.download === 'true';
     const mime = typeof meta.mimeType === 'string' ? meta.mimeType : 'application/octet-stream';
-    const inline = !wantDownload && (meta.type === 'image' || mime === 'application/pdf' || mime === 'text/plain');
+    const inline = !wantDownload && (meta.type === 'image' || meta.type === 'audio' || mime.startsWith('audio/') || mime === 'application/pdf' || mime === 'text/plain');
     res.setHeader('Content-Type', mime);
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=0, no-store');
@@ -2825,6 +2837,22 @@ app.post('/api/conversations/:id/messages/:messageId/delete', async (req, res) =
   }
 });
 
+app.post('/api/conversations/:id/messages/:messageId/react', async (req, res) => {
+  const user = requireSessionUser(req, res);
+  if (!user) return;
+  const { id, messageId } = req.params as any;
+  const emoji = typeof req.body?.emoji === 'string' ? req.body.emoji : '';
+  try {
+    let msg: any;
+    await store.mutate(async () => { msg = store.toggleMessageReaction(user.id, id, messageId, emoji); });
+    wsBroadcastConversationEvent(id, { type: 'message_reaction', conversationId: id, messageId: msg.id, reactions: msg.reactions || {}, userId: user.id, emoji });
+    res.json({ success: true, message: msg, reactions: msg.reactions || {} });
+  } catch (e:any) {
+    const m = e?.message || 'Failed';
+    res.status(m === 'Forbidden' ? 403 : m === 'Message not found' ? 404 : 400).json({ success: false, error: m });
+  }
+});
+
 app.post('/api/conversations/:id/clear', async (req, res) => {
   const user = requireSessionUser(req, res);
   if (!user) return;
@@ -4330,12 +4358,18 @@ async function startServer() {
   const httpServer = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
   attachMessengerWs(wss as any);
+  const aiLiveWss = new WebSocketServer({ noServer: true });
+  attachAiLiveWs(aiLiveWss as any);
 
   httpServer.on('upgrade', (request, socket, head) => {
     const reqPath = (request.url || '').split('?')[0];
     if (reqPath === '/ws') {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
+      });
+    } else if (reqPath === '/ws/ai-live') {
+      aiLiveWss.handleUpgrade(request, socket, head, (ws) => {
+        aiLiveWss.emit('connection', ws, request);
       });
     }
   });
