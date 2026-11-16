@@ -16,10 +16,12 @@ import {
   Radio
 } from 'lucide-react';
 import { Language } from '../types/index.ts';
+import type { SaturnAgentAction } from '../utils/oneAgentController.ts';
 
 interface SaturnSpaceProps {
   lang: Language;
   onBack: () => void;
+  quickAction?: SaturnAgentAction | null;
 }
 
 export interface SaturnVideo {
@@ -127,7 +129,7 @@ function loadWatchlist(): string[] {
 
 // ---------- 主组件 ----------
 
-export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
+export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack, quickAction }) => {
   const isZh = lang === 'zh';
 
   const [query, setQuery] = useState('');
@@ -143,6 +145,7 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
   const [searched, setSearched] = useState(false);
 
   const searchRef = useRef<HTMLInputElement>(null);
+  const handledQuickSeqRef = useRef<number>(0);
 
   // 书签持久化
   useEffect(() => {
@@ -354,6 +357,61 @@ export const SaturnSpace: React.FC<SaturnSpaceProps> = ({ lang, onBack }) => {
   useEffect(() => {
     loadDaily();
   }, [loadDaily]);
+
+  // Autonomous One. Agent Action: search documentaries and auto-open one immediately
+  useEffect(() => {
+    if (!quickAction || quickAction.seq === handledQuickSeqRef.current) return;
+    handledQuickSeqRef.current = quickAction.seq;
+
+    const autoSearchAndOpen = async () => {
+      const q = (quickAction.query || '宇宙 天文 纪录片 4K').trim();
+      const targetPlatform = quickAction.platform || 'all';
+      setQuery(q);
+      setPlatformFilter(targetPlatform);
+      setLoading(true);
+      setError('');
+      setSearched(true);
+      setActiveChannel('');
+
+      try {
+        let videos = await searchAllPlatforms(q, targetPlatform);
+        if (!videos.length) {
+          try {
+            const res = await fetchWithTimeout('/saturn_daily.json', 5000);
+            if (res.ok) {
+              const data = await res.json();
+              if (Array.isArray(data?.videos) && data.videos.length > 0) {
+                videos = data.videos.map((v: any) => ({ ...v, platform: v.platform || 'youtube' }));
+              }
+            }
+          } catch {}
+        }
+
+        if (videos.length > 0) {
+          setResults(videos);
+          const pickPoolSize = quickAction.autoPlayRandom ? Math.min(videos.length, 6) : 1;
+          const picked = videos[Math.floor(Math.random() * pickPoolSize)] || videos[0];
+          const autoplayEmbed = picked.embedUrl
+            ? picked.embedUrl.replace('autoplay=0', 'autoplay=1')
+            : picked.platform === 'bilibili'
+            ? `https://player.bilibili.com/player.html?bvid=${picked.videoId}&page=1&autoplay=1&danmaku=0`
+            : `https://www.youtube.com/embed/${picked.videoId}?autoplay=1&rel=0`;
+          setPlayingVideo({ ...picked, embedUrl: autoplayEmbed });
+          try {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          } catch {}
+        } else {
+          setError(isZh ? '暂未搜索到可播放的纪录片，请稍后再试。' : 'No documentary found.');
+        }
+      } catch {
+        setError(isZh ? '纪录片检索服务波动，请重试。' : 'Documentary search error.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void autoSearchAndOpen();
+  }, [quickAction, searchAllPlatforms, isZh]);
 
   // 运行搜索
   const runSearch = useCallback(

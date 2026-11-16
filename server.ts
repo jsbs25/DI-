@@ -3084,6 +3084,38 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 });
 
+app.post('/api/ai/agent-command', async (req, res) => {
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  const lang = req.body?.lang === 'en' ? 'en' : 'zh';
+  if (!text) return res.json({ success: true, action: { type: 'none' } });
+
+  const systemPrompt = `You are the web-control planner for ONE. Given user speech, return ONLY valid JSON (no markdown) deciding whether the user wants to control the website, or {"type":"none"} if it is normal conversation.
+Allowed actions:
+- {"type":"play_music","query":"optional song/mood","crawl":true,"reply":"short confirmation in ${lang}"}
+- {"type":"play_music","control":"next"|"prev"|"pause"|"resume","reply":"short confirmation in ${lang}"}
+- {"type":"watch_documentary","query":"search keywords","platform":"all","randomPick":true,"reply":"short confirmation in ${lang}"}
+- {"type":"navigate_tab","tab":"globe|feed|chat|venus|arabic-learning|saturn|video|library|browser|universe|aihub|knowledge|moon|mercury|crawler|network|community|creator|game|brand","reply":"short confirmation in ${lang}"}
+- {"type":"browser_search","query":"web search keywords","reply":"short confirmation in ${lang}"}
+- {"type":"set_theme","theme":"dark"|"light","reply":"short confirmation in ${lang}"}
+- {"type":"none"}`;
+
+  try {
+    const resolvedModelId = aiGateway.getChatModelId();
+    const result = await aiGateway.generateContent(resolvedModelId, text, systemPrompt);
+    const raw = (result.content || '').trim();
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (result.success && jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed && typeof parsed.type === 'string') {
+        return res.json({ success: true, action: parsed });
+      }
+    }
+  } catch {
+    // non-fatal
+  }
+  return res.json({ success: true, action: { type: 'none' } });
+});
+
 app.post('/api/ai/translate', async (req, res) => {
   const { text, targetLang = 'English' } = req.body;
   if (!text) return res.status(400).json({ success: false, error: 'Text required' });

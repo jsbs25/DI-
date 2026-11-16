@@ -37,6 +37,7 @@ import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
 import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
 import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
 import { PlayerProvider, usePlayerContext } from './music/PlayerContext.tsx';
+import type { SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
 
 function MusicRouteGuard({ currentTab }: { currentTab: string }) {
   const { stopPlayback } = usePlayerContext();
@@ -116,6 +117,9 @@ export default function App() {
   const [messengerQuickAction, setMessengerQuickAction] = useState<MessengerQuickAction | null>(null);
   const [browserOpenProxySeq, setBrowserOpenProxySeq] = useState(0);
   const [isMobileKeyboardOpen, setIsMobileKeyboardOpen] = useState(false);
+  const [venusQuickAction, setVenusQuickAction] = useState<VenusAgentAction | null>(null);
+  const [saturnQuickAction, setSaturnQuickAction] = useState<SaturnAgentAction | null>(null);
+  const [browserQuickSearch, setBrowserQuickSearch] = useState<{ seq: number; query: string } | null>(null);
 
   useEffect(() => { document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'; document.documentElement.lang = lang; }, [lang]);
 
@@ -312,8 +316,8 @@ export default function App() {
         )}
 
         {currentTab === 'universe' && <div className="h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] bg-[#101c33] text-slate-100"><UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
-        {currentTab === 'saturn' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
-        {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('globe')} /></div>}
+        {currentTab === 'saturn' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} quickAction={saturnQuickAction} /></div>}
+        {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('globe')} quickAction={venusQuickAction} /></div>}
         {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} /></div>}
         {currentTab === 'feed' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} lang={lang} /></div>}
         <GlobalMessenger
@@ -335,7 +339,7 @@ export default function App() {
         {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
         {currentTab === 'arabic-learning' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><ArabicLearningHub lang={lang} onOpenLibrary={() => setCurrentTab('library')} /></div>}
         {currentTab === 'knowledge' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
-        <div className={currentTab === 'browser' ? 'block h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className={`h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] ${isMobileKeyboardOpen ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(4.65rem+env(safe-area-inset-bottom))]'} md:pb-0 flex flex-col min-h-0 bg-[#121e36] text-slate-100`}><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
+        <div className={currentTab === 'browser' ? 'block h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className={`h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] ${isMobileKeyboardOpen ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(4.65rem+env(safe-area-inset-bottom))]'} md:pb-0 flex flex-col min-h-0 bg-[#121e36] text-slate-100`}><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} quickSearchRequest={browserQuickSearch} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
         {currentTab === 'network' && (
           <OneNetworkCenter
             lang={lang}
@@ -402,7 +406,45 @@ export default function App() {
       {currentUser && <AccountSecurityModal isOpen={isSecurityModalOpen} onClose={() => setIsSecurityModalOpen(false)} currentUser={currentUser} onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }} />}
       {currentUser && <OnboardingModal isOpen={isOnboardingModalOpen} user={currentUser} onComplete={handleOnboardingComplete} lang={lang} />}
 
-      <HolographicAICompanion lang={lang} showLauncher={!immersive} placement={currentTab === 'globe' ? 'center-bottom' : 'corner'} onFlyTo={(lat, lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} onExploreUniverse={() => setCurrentTab('universe')} onOpenAIHub={() => setCurrentTab('aihub')} onNavigateTab={tab => setCurrentTab(tab)} currentTab={currentTab} />
+      <HolographicAICompanion
+        lang={lang}
+        showLauncher={!immersive}
+        placement={currentTab === 'globe' ? 'center-bottom' : 'corner'}
+        onFlyTo={(lat, lng) => {
+          setFocusCoordinates({ lat, lng, timestamp: Date.now() });
+          setCurrentTab('globe');
+        }}
+        onExploreUniverse={() => setCurrentTab('universe')}
+        onOpenAIHub={() => setCurrentTab('aihub')}
+        onNavigateTab={(tab) => {
+          setCurrentTab(tab);
+          if (tab !== 'browser') setBrowserInitialQuery(null);
+        }}
+        onPlayMusicAction={(opts) => {
+          setVenusQuickAction({
+            seq: Date.now(),
+            kind: 'crawl_and_play',
+            query: opts.query,
+          });
+          setCurrentTab('venus');
+        }}
+        onWatchDocumentaryAction={(opts) => {
+          setSaturnQuickAction({
+            seq: Date.now(),
+            query: opts.query,
+            platform: opts.platform,
+            autoPlayRandom: opts.randomPick ?? true,
+          });
+          setCurrentTab('saturn');
+        }}
+        onBrowserSearchAction={(query) => {
+          setBrowserQuickSearch({ seq: Date.now(), query });
+          setCurrentTab('browser');
+        }}
+        onSetTheme={setTheme}
+        onSetLang={setLang}
+        currentTab={currentTab}
+      />
 
       {!isSpaceExperience && (
         <footer className="w-full border-t border-slate-200 dark:border-white/10 bg-white/80 dark:bg-[#101a2e]/80 py-5 px-4 text-xs text-slate-500 dark:text-slate-400 md:pl-24">

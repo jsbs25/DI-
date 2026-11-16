@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Language } from '../../types/index.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
+import { useOptionalPlayerContext } from '../../music/PlayerContext.tsx';
+import { resolveNaturalAgentAction, type OneAgentAction } from '../../utils/oneAgentController.ts';
 
 interface HolographicAICompanionProps {
   lang: Language;
@@ -9,6 +11,15 @@ interface HolographicAICompanionProps {
   onExploreUniverse?: () => void;
   onOpenAIHub?: () => void;
   onNavigateTab?: (tab: string) => void;
+  onPlayMusicAction?: (opts: { query?: string; crawl?: boolean }) => void;
+  onWatchDocumentaryAction?: (opts: {
+    query: string;
+    platform?: 'all' | 'bilibili' | 'youtube';
+    randomPick?: boolean;
+  }) => void;
+  onBrowserSearchAction?: (query: string) => void;
+  onSetTheme?: (theme: 'dark' | 'light') => void;
+  onSetLang?: (lang: Language) => void;
   currentTab?: string;
   showLauncher?: boolean;
   placement?: 'center-bottom' | 'corner';
@@ -63,12 +74,19 @@ function decodePcm24kBase64ToFloat(base64: string): Float32Array {
 
 export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   lang,
+  onFlyTo,
   onExploreUniverse,
   onNavigateTab,
+  onPlayMusicAction,
+  onWatchDocumentaryAction,
+  onBrowserSearchAction,
+  onSetTheme,
+  onSetLang,
   showLauncher = true,
   placement = 'corner',
 }) => {
   const isZh = lang === 'zh';
+  const player = useOptionalPlayerContext();
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const [voiceActive, setVoiceActive] = useState(false);
   const [modelId, setModelId] = useState('gemini-2.5-flash');
@@ -286,47 +304,74 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
   }, [showLauncher, placement]);
 
-  // Voice navigation intent router
-  const detectAndNavigateIntent = useCallback(
-    (text: string): string | null => {
-      const lower = text.toLowerCase();
-      let targetTab: string | null = null;
-      if (lower.includes('信息') || lower.includes('消息') || lower.includes('通话') || lower.includes('聊天') || lower.includes('message') || lower.includes('call') || lower.includes('chat')) {
-        targetTab = 'chat';
-      } else if (lower.includes('品牌') || lower.includes('文化') || lower.includes('规范') || lower.includes('brand')) {
-        targetTab = 'brand';
-      } else if (lower.includes('首页') || lower.includes('主页') || lower.includes('home')) {
-        targetTab = 'home';
-      } else if (lower.includes('宇宙') || lower.includes('星空') || lower.includes('universe')) {
-        targetTab = 'universe';
-      } else if (lower.includes('地球') || lower.includes('globe') || lower.includes('earth')) {
-        targetTab = 'globe';
-      } else if (lower.includes('影视') || lower.includes('电影') || lower.includes('cinema')) {
-        targetTab = 'video';
-      } else if (lower.includes('音乐') || lower.includes('歌曲') || lower.includes('music')) {
-        targetTab = 'venus';
-      } else if (lower.includes('图书馆') || lower.includes('看书') || lower.includes('library')) {
-        targetTab = 'library';
-      } else if (lower.includes('语言学习') || lower.includes('学英语') || lower.includes('学习') || lower.includes('language') || lower.includes('english')) {
-        targetTab = 'arabic-learning';
-      } else if (lower.includes('发现') || lower.includes('discover')) {
-        targetTab = 'feed';
-      } else if (lower.includes('智能') || lower.includes('ai')) {
-        targetTab = 'aihub';
-      } else if (lower.includes('浏览器') || lower.includes('browser')) {
-        targetTab = 'browser';
-      }
+  // Execute structured full-website action triggered by voice
+  const runAgentAction = useCallback(
+    async (text: string): Promise<OneAgentAction> => {
+      const action = await resolveNaturalAgentAction(text, isZh);
+      if (action.type === 'none') return action;
 
-      if (targetTab) {
+      if (action.type === 'play_music') {
+        if (action.control === 'next') {
+          player?.playNext();
+        } else if (action.control === 'prev') {
+          player?.playPrevious();
+        } else if (action.control === 'pause') {
+          player?.pause();
+        } else if (action.control === 'resume') {
+          player?.play();
+        } else if (onPlayMusicAction) {
+          onPlayMusicAction({ query: action.query, crawl: action.crawl ?? true });
+        } else if (onNavigateTab) {
+          onNavigateTab('venus');
+        }
+      } else if (action.type === 'watch_documentary') {
+        if (onWatchDocumentaryAction) {
+          onWatchDocumentaryAction({
+            query: action.query,
+            platform: action.platform,
+            randomPick: action.randomPick ?? true,
+          });
+        } else if (onNavigateTab) {
+          onNavigateTab('saturn');
+        }
+      } else if (action.type === 'browser_search') {
+        if (onBrowserSearchAction) {
+          onBrowserSearchAction(action.query);
+        } else if (onNavigateTab) {
+          onNavigateTab('browser');
+        }
+      } else if (action.type === 'fly_to') {
+        if (onFlyTo) {
+          onFlyTo(action.lat, action.lng);
+        } else if (onNavigateTab) {
+          onNavigateTab('globe');
+        }
+      } else if (action.type === 'set_theme') {
+        onSetTheme?.(action.theme);
+      } else if (action.type === 'set_language') {
+        onSetLang?.(action.lang);
+      } else if (action.type === 'navigate_tab') {
         if (onNavigateTab) {
-          onNavigateTab(targetTab);
-        } else if (targetTab === 'universe' && onExploreUniverse) {
+          onNavigateTab(action.tab);
+        } else if (action.tab === 'universe' && onExploreUniverse) {
           onExploreUniverse();
         }
       }
-      return targetTab;
+
+      return action;
     },
-    [onNavigateTab, onExploreUniverse]
+    [
+      isZh,
+      onBrowserSearchAction,
+      onExploreUniverse,
+      onFlyTo,
+      onNavigateTab,
+      onPlayMusicAction,
+      onSetLang,
+      onSetTheme,
+      onWatchDocumentaryAction,
+      player,
+    ]
   );
 
   const stopOutputAudio = useCallback(() => {
@@ -508,18 +553,26 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       historyRef.current = [...historyRef.current.slice(-5), { role: 'user', parts: [{ text: clean }] }];
       setPhase('thinking');
 
-      const navTab = detectAndNavigateIntent(clean);
-      if (navTab) {
-        const navReply = isZh ? '好的，已为您切换画面。' : 'Done, navigating now.';
-        historyRef.current = [...historyRef.current.slice(-5), { role: 'model', parts: [{ text: navReply }] }];
-        if (shouldSpeak) {
-          speakFallbackReply(navReply, () => {
+      const action = await runAgentAction(clean);
+      if (action.type !== 'none') {
+        const actionReply = action.reply;
+        historyRef.current = [...historyRef.current.slice(-5), { role: 'model', parts: [{ text: actionReply }] }];
+        const isMediaPlayback =
+          (action.type === 'play_music' && !action.control) ||
+          action.type === 'play_music' && action.control === 'resume' ||
+          action.type === 'watch_documentary';
+        if (shouldSpeak && !isMediaPlayback) {
+          speakFallbackReply(actionReply, () => {
             isSendingFallbackRef.current = false;
             resumeSpeechAfter?.();
           });
         } else {
+          if (isMediaPlayback) {
+            stopOutputAudio();
+          }
           isSendingFallbackRef.current = false;
-          setPhase('idle');
+          setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+          resumeSpeechAfter?.();
         }
         return;
       }
@@ -561,7 +614,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         resumeSpeechAfter?.();
       }
     },
-    [detectAndNavigateIntent, isZh, speakFallbackReply]
+    [isZh, runAgentAction, speakFallbackReply, stopOutputAudio]
   );
 
   // Continuous browser SpeechRecognition fallback when Gemini Live WS isn't available
@@ -773,8 +826,16 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
         if (msg.type === 'turnComplete') {
           if (pendingUserTranscriptRef.current.trim()) {
-            detectAndNavigateIntent(pendingUserTranscriptRef.current.trim());
+            const finalized = pendingUserTranscriptRef.current.trim();
             pendingUserTranscriptRef.current = '';
+            void runAgentAction(finalized).then((action) => {
+              if (
+                (action.type === 'play_music' && !action.control) ||
+                action.type === 'watch_documentary'
+              ) {
+                stopOutputAudio();
+              }
+            });
           }
           if (activeAudioSourcesRef.current.size === 0) {
             setPhase('listening');
@@ -799,8 +860,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       }
     };
   }, [
-    detectAndNavigateIntent,
     playPcm24kChunk,
+    runAgentAction,
     startContinuousSpeechFallback,
     stopOutputAudio,
     stopSessionResources,

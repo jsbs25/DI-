@@ -40,10 +40,12 @@ import {
   setMediaRegionMode,
   subscribeMediaScheduler,
 } from '../services/media/scheduler.ts';
+import type { VenusAgentAction } from '../utils/oneAgentController.ts';
 
 interface VenusMusicSpaceProps {
   lang: Language;
   onBack: () => void;
+  quickAction?: VenusAgentAction | null;
 }
 
 const GENRE_FILTERS = [
@@ -153,7 +155,7 @@ function handleCoverError(e: React.SyntheticEvent<HTMLImageElement>) {
   img.src = DEFAULT_COVER;
 }
 
-export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }) => {
+export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, quickAction }) => {
   const isZh = lang === 'zh';
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [loading, setLoading] = useState(true);
@@ -185,6 +187,8 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   const mountedRef = useRef(true);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadAbortRef = useRef<AbortController | null>(null);
+  const handledQuickSeqRef = useRef<number>(0);
+  const crawlOverrideRef = useRef<boolean>(false);
 
   const showNotice = (msg: string, ms = 3200) => {
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
@@ -385,6 +389,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
   };
 
   useEffect(() => {
+    if (crawlOverrideRef.current) return;
     const q = searchQuery.trim();
     if (selectedGenre === 'bilibili_live') {
       void searchBilibiliMusic(q || '轻音乐 纯音乐', false);
@@ -395,6 +400,105 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGenre, effectiveRegion]);
+
+  // Autonomous One. Agent Action: crawl external music + search + play immediately
+  useEffect(() => {
+    if (!quickAction || quickAction.seq === handledQuickSeqRef.current) return;
+    handledQuickSeqRef.current = quickAction.seq;
+    crawlOverrideRef.current = true;
+
+    const runAutoCrawlAndPlay = async () => {
+      const kw = (quickAction.query || '').trim();
+      setLoading(true);
+      setSearching(true);
+      if (kw) setSearchQuery(kw);
+      showNotice(
+        isZh
+          ? kw
+            ? `One. 正在自动爬取并检索「${kw}」…`
+            : 'One. 正在自动爬取歌曲并准备为您播放…'
+          : 'One. is crawling and selecting a track for you…',
+        4500
+      );
+
+      try {
+        const [crawlRes, catalogRes] = await Promise.allSettled([
+          fetch('/api/music/crawl', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword: kw || 'ambient space piano' }),
+          }).then((r) => r.json()),
+          fetch(
+            kw
+              ? `/api/media/search?mediaType=music&q=${encodeURIComponent(kw)}&region=${effectiveRegion}&limit=20`
+              : `/api/music/tracks?genre=all&region=${effectiveRegion}`
+          ).then((r) => r.json()),
+        ]);
+
+        const crawledRaw =
+          crawlRes.status === 'fulfilled' && Array.isArray(crawlRes.value?.newTracks)
+            ? crawlRes.value.newTracks
+            : [];
+        const catalogRaw =
+          catalogRes.status === 'fulfilled' && Array.isArray(catalogRes.value?.tracks)
+            ? catalogRes.value.tracks
+            : [];
+
+        const mergedRaw = [...crawledRaw, ...catalogRaw];
+        const seen = new Set<string>();
+        let combined: MusicTrack[] = mergedRaw
+          .map(normalizeServerTrack)
+          .filter((t) => {
+            if (!t?.id || seen.has(t.id)) return false;
+            seen.add(t.id);
+            return Boolean(t.audioUrl || t.embedUrl);
+          });
+
+        if (combined.length === 0) {
+          combined = OFFLINE_FALLBACK_TRACKS;
+        }
+
+        if (!mountedRef.current) return;
+        setTracks(combined);
+
+        const audioPreferred = combined.filter((t) => Boolean(t.audioUrl));
+        const pool = audioPreferred.length > 0 ? audioPreferred : combined;
+        const pickFromPool = kw
+          ? pool[0]
+          : pool[Math.floor(Math.random() * Math.min(pool.length, 6))];
+        const chosenIdx = Math.max(
+          0,
+          combined.findIndex((t) => t.id === pickFromPool.id)
+        );
+        const chosen = combined[chosenIdx] || combined[0];
+
+        setShowEmbedStage(true);
+        player.playTrack(chosen, combined, chosenIdx);
+        void player.resumeAudioContext();
+        showNotice(
+          isZh
+            ? `One. 已为您自动爬取并播放：${chosen.title} — ${chosen.artist}`
+            : `One. playing: ${chosen.title} — ${chosen.artist}`,
+          4500
+        );
+      } catch {
+        if (!mountedRef.current) return;
+        setTracks(OFFLINE_FALLBACK_TRACKS);
+        const fallback = OFFLINE_FALLBACK_TRACKS[0];
+        player.playTrack(fallback, OFFLINE_FALLBACK_TRACKS, 0);
+        void player.resumeAudioContext();
+      } finally {
+        if (mountedRef.current) {
+          setLoading(false);
+          setSearching(false);
+          crawlOverrideRef.current = false;
+        }
+      }
+    };
+
+    void runAutoCrawlAndPlay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quickAction]);
 
   // Smooth slim audio spectrum visualizer
   useEffect(() => {

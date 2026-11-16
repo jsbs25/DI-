@@ -147,6 +147,7 @@ interface BrowserFindStatus {
 interface WebBrowserProps {
   lang: Language;
   initialQuery?: string;
+  quickSearchRequest?: { seq: number; query: string } | null;
   openProxySeq?: number;
   onBackToUniverse?: () => void;
   onBackToGlobe?: () => void;
@@ -370,7 +371,7 @@ function getInitialBrowserUrl(): string {
   return fallback;
 }
 
-export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, openProxySeq, onBackToUniverse, onBackToGlobe }) => {
+export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quickSearchRequest, openProxySeq, onBackToUniverse, onBackToGlobe }) => {
   const [initialUrl] = useState(getInitialBrowserUrl);
   const initialPreset = PRESET_PAGES[initialUrl];
   const browserEngine = typeof window === 'undefined' ? undefined : window.earthOneBrowser;
@@ -1661,6 +1662,14 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, open
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialQuery]);
+
+  // One. AI 语音/自然语言指令直达浏览器搜索或网页打开
+  useEffect(() => {
+    const q = quickSearchRequest?.query?.trim();
+    if (!quickSearchRequest || !q) return;
+    void handleNavigate(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quickSearchRequest?.seq]);
 
   // 网页预览（Web 预览模式）：优先尝试同源 HTML 代理（可嵌入时体验更接近原页），
   // 不可用时回退到 /api/browser/proxy。两者都不是原生 Chromium 浏览器。
