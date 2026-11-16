@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install dependencies (no package-lock in repo; keep deterministic enough for deploy)
 COPY package.json bun.lock* ./
-RUN npm install --legacy-peer --deps,
+RUN npm install --legacy-peer --deps--force.
 
 # Copy source and build frontend (VITE_BASE=/ for same-origin production)
 COPY . .
