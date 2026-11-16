@@ -21,6 +21,7 @@ interface HolographicAICompanionProps {
   currentTab?: string;
   showLauncher?: boolean;
   placement?: 'center-bottom' | 'corner';
+  openRequestSeq?: number;
 }
 
 interface MessageItem {
@@ -79,6 +80,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   onNavigateTab,
   showLauncher = true,
   placement = 'corner',
+  openRequestSeq,
 }) => {
   const isZh = lang === 'zh';
   const [isOpen, setIsOpen] = useState(false);
@@ -967,6 +969,16 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     stopOutputAudio,
     stopSessionResources,
   ]);
+
+  // External trigger (e.g. nav "智能") opens direct chat immediately
+  useEffect(() => {
+    if (openRequestSeq && openRequestSeq > 0) {
+      setIsOpen(true);
+      setShowTextInput(true);
+      setStatusNotice(null);
+      setTimeout(() => inputRef.current?.focus(), 80);
+    }
+  }, [openRequestSeq]);
 
   // Triggered on single click of floating AI -> opens directly into instant chat (no extra page navigation!)
   const handleLauncherClick = () => {

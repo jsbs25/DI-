@@ -54,7 +54,7 @@ const NAV_ITEMS: NavItem[] = [
   { tab: 'aihub', icon: Sparkles, label: { zh: '人工智能中枢', en: 'AI HUB' } },
   { tab: 'creator', icon: PenTool, label: { zh: '创作者中心', en: 'CREATOR' } },
   { tab: 'crawler', icon: Radar, label: { zh: '采集网络中枢', en: 'CRAWLER HUB' } },
-  { tab: 'arabic-learning', icon: GraduationCap, label: { zh: '阿语沉浸学习', en: 'ARABIC LEARNING' } },
+  { tab: 'arabic-learning', icon: GraduationCap, label: { zh: '语言学习', en: 'LANGUAGE LEARNING' } },
   { tab: 'knowledge', icon: Network, label: { zh: '全域知识图谱', en: 'KNOWLEDGE' } },
   { tab: 'feed', icon: Compass, label: { zh: '全球社群动态', en: 'COMMUNITY FEED' } },
   { tab: 'chat', icon: MessageSquare, label: { zh: '全球即时通信', en: 'MESSENGER' } },

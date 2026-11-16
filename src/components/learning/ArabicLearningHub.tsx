@@ -346,6 +346,7 @@ const COPY: Record<Language, Copy> = {
 interface ArabicLearningHubProps {
   lang: Language;
   onOpenLibrary: () => void;
+  embedded?: boolean;
 }
 
 type MainTab = 'letters' | 'islamic_library';
@@ -360,7 +361,7 @@ function readSavedProgress(): ArabicStudyState {
   }
 }
 
-export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOpenLibrary }) => {
+export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOpenLibrary, embedded = false }) => {
   const t = COPY[lang] || COPY.en;
   const isRtl = lang === 'ar';
 
@@ -550,10 +551,10 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
   return (
     <section
       dir={isRtl ? 'rtl' : 'ltr'}
-      className="min-h-[calc(100vh-4rem)] w-full px-4 pb-16 pt-6 text-[color:var(--color-one-text)] sm:px-6 lg:px-10"
+      className={embedded ? 'w-full text-[color:var(--color-one-text)]' : 'min-h-[calc(100vh-4rem)] w-full px-4 pb-16 pt-6 text-[color:var(--color-one-text)] sm:px-6 lg:px-10'}
       style={{ background: 'transparent' }}
     >
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6">
+      <div className={`mx-auto flex w-full ${embedded ? '' : 'max-w-[1440px]'} flex-col gap-6`}>
         {/* Hero / Header */}
         <header className="one-surface-elevated relative overflow-hidden px-5 py-6 sm:px-7 sm:py-7">
           <div
