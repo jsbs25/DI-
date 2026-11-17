@@ -8,7 +8,6 @@ interface MercurySearchProps {
   onOpenBook: (bookId: string) => void;
   onOpenKnowledge: (nodeId: string) => void;
   onSelectTab: (tab: string) => void;
-  quickSearch?: { seq: number; query: string } | null;
 }
 
 interface SearchResults {
@@ -43,7 +42,7 @@ function loadHistory(): string[] {
   } catch { return []; }
 }
 
-export const MercurySearch: React.FC<MercurySearchProps> = ({ lang, onBack, onOpenBook, onOpenKnowledge, onSelectTab, quickSearch }) => {
+export const MercurySearch: React.FC<MercurySearchProps> = ({ lang, onBack, onOpenBook, onOpenKnowledge, onSelectTab }) => {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<Category>('all');
   const [results, setResults] = useState<SearchResults | null>(null);
@@ -57,13 +56,6 @@ export const MercurySearch: React.FC<MercurySearchProps> = ({ lang, onBack, onOp
     setHistory(loadHistory());
     inputRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    if (quickSearch?.query) {
-      setQuery(quickSearch.query);
-      void runSearch(quickSearch.query);
-    }
-  }, [quickSearch]);
 
   const runSearch = async (q: string) => {
     const trimmed = q.trim();
@@ -118,8 +110,8 @@ export const MercurySearch: React.FC<MercurySearchProps> = ({ lang, onBack, onOp
             <Sparkles className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
             <span>{isZh ? 'ONE SEARCH · 全局检索' : 'ONE SEARCH · Global Search'}</span>
           </div>
-          <h1 className="mt-2.5 text-xl font-semibold tracking-tight text-white sm:text-2xl">{isZh ? '全局搜索' : 'Global Search'}</h1>
-          <p className="mt-1.5 max-w-2xl text-xs leading-relaxed text-[var(--color-one-text-muted)] sm:text-sm">
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">{isZh ? '全局搜索' : 'Global Search'}</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--color-one-text-muted)]">
             {isZh ? '检索 ONE 中你有权限访问的真实内容：书籍、知识、用户、社区、动态、文章与视频。' : 'Search real ONE content you can access: books, knowledge, people, communities, posts, articles and videos.'}
           </p>
 

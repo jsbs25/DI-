@@ -22,16 +22,13 @@ export interface MusicTrack {
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const MUSIC_FILE = path.join(DATA_DIR, 'venus_music_catalog.json');
 
-const NON_MUSIC_BLOCKLIST = /(greatest_speeches|abdication|sleep\s*sounds|air_conditioner|shortwave|numbers\s*station|podcast|sermon|audiobook|lecture|news\s*report|white\s*noise|brown\s*noise|pink\s*noise|fan\s*noise|test\s*tone|sample\s*pack|asmr\s*noise)/i;
+const NON_MUSIC_BLOCKLIST = /(greatest_speeches|abdication|sleep\s*sounds|air_conditioner|shortwave|numbers\s*station|podcast|sermon|audiobook)/i;
 
 function isValidPlayableMusicTrack(t: any): boolean {
-  if (!t || !t.id) return false;
+  if (!t || !t.id || !t.audioUrl) return false;
   const audioUrl = String(t.audioUrl || '').trim();
-  const embedUrl = String(t.embedUrl || '').trim();
-  const hasAudio = (/^https?:\/\//i.test(audioUrl) || audioUrl.startsWith('/')) && !!audioUrl;
-  const hasRealEmbed = !!embedUrl && /player\.bilibili\.com|youtube(?:-nocookie)?\.com\/embed\//i.test(embedUrl);
-  if (!hasAudio && !hasRealEmbed) return false;
-  const hay = `${t.id} ${t.title || ''} ${t.album || ''} ${audioUrl} ${embedUrl}`;
+  if (!/^https?:\/\//i.test(audioUrl) && !audioUrl.startsWith('/')) return false;
+  const hay = `${t.id} ${t.title || ''} ${t.album || ''} ${audioUrl}`;
   if (NON_MUSIC_BLOCKLIST.test(hay)) return false;
   if (
     audioUrl.includes('cdn.freesound.org/previews/') ||
@@ -251,39 +248,21 @@ class MusicStore {
   ): Promise<{ success: boolean; crawledCount: number; savedCount: number; newTracks: MusicTrack[]; source: string; keyword: string; errors: string[]; message?: string }> {
     const timeNow = new Date().toISOString();
     const source = String(sourceDomain || '').trim().toLowerCase();
-    const kwRaw = String(keyword || '').trim();
-    const kw = kwRaw && !/^(undefined|null)$/i.test(kwRaw) ? kwRaw : 'instrumental ambient piano';
+    const kw = String(keyword || 'space ambient').trim();
     const errors: string[] = [];
     const newTracks: MusicTrack[] = [];
 
-    const addVerifiedTrack = async (t: any) => {
-      if (!t || !t.id) return;
-      const titleHay = `${t.title || ''} ${t.artist || ''} ${t.album || ''}`.toLowerCase();
-      if (NON_MUSIC_BLOCKLIST.test(titleHay)) return;
+    const addVerifiedTrack = async (t: MusicTrack) => {
+      if (!isValidPlayableMusicTrack(t)) return;
       const exists = this.tracks.some(existing => existing.id === t.id || (existing.sourceUrl && t.sourceUrl && existing.sourceUrl === t.sourceUrl));
       if (exists) return;
-      const audioUrl = String(t.audioUrl || '').trim();
-      const embedUrl = String(t.embedUrl || '').trim();
-      if (audioUrl) {
-        if (!isValidPlayableMusicTrack({ ...t, audioUrl })) return;
-        const probe = await probeDirectMediaUrl(audioUrl, 'audio', 4500);
-        if (!probe.ok) return;
-      } else if (embedUrl) {
-        // Accept only real official embed sources (YouTube/Bilibili etc.), never fake placeholders
-        const isRealEmbed = /player\.bilibili\.com|youtube(?:-nocookie)?\.com\/embed\//i.test(embedUrl);
-        if (!isRealEmbed) return;
-      } else {
-        return;
-      }
-      newTracks.push(t as MusicTrack);
+      const probe = await probeDirectMediaUrl(t.audioUrl, 'audio', 4500);
+      if (!probe.ok) return;
+      newTracks.push(t);
     };
 
     try {
-      const wantArchive = source.includes('archive.org') || source.includes('freemusicarchive') || source.includes('fma') || source === 'all' || source === '';
-      const wantBili = source.includes('bilibili') || source === 'all' || source === '';
-      const wantYt = source.includes('youtube') || source === 'all' || source === '';
-
-      if (wantArchive) {
+      if (source.includes('archive.org') || source.includes('freemusicarchive') || source.includes('fma')) {
         const q = source.includes('freemusicarchive') || source.includes('fma')
           ? `(${kw}) AND mediatype:(audio) AND collection:(freemusicarchive OR netlabels OR audio_music)`
           : `(${kw}) AND mediatype:(audio) AND collection:(audio_music OR netlabels OR freemusicarchive)`;
@@ -312,83 +291,20 @@ class MusicStore {
               durationSeconds: Number(audio?.length) || 0,
               audioUrl: fileUrl,
               coverUrl: `https://archive.org/services/img/${encodeURIComponent(identifier)}`,
-              source: 'Internet Archive',
+              source: 'ONE Music',
               sourceUrl: `https://archive.org/details/${encodeURIComponent(identifier)}`,
               license: String(d?.licenseurl || 'Creative Commons'),
               crawledAt: timeNow,
               description: '已通过可播放直链校验的开放音乐曲目。'
-            });
-            if (newTracks.length >= 8) break;
+            } as any);
+            if (newTracks.length >= 6) break;
           } catch (e: any) {
             errors.push(`metadata:${identifier}:${e?.message || 'failed'}`);
           }
         }
-        if (docs.length === 0) errors.push('archive.org 未返回匹配音频条目。');
-      }
-
-      if (wantBili) {
-        try {
-          const { searchBilibiliVideos } = await import('./bilibiliCrawler.ts');
-          const rows = await searchBilibiliVideos(`${kw} 音乐`, 8);
-          for (const b of rows || []) {
-            if (!b?.bvid) continue;
-            await addVerifiedTrack({
-              id: `bili_${b.bvid}`,
-              title: String(b.title || b.bvid).slice(0, 180),
-              artist: String(b.author || 'Bilibili'),
-              album: 'Bilibili 官方播放器',
-              genre: 'Bilibili',
-              durationSeconds: b.durationSeconds || 0,
-              audioUrl: '',
-              embedUrl: b.embedUrl || `https://player.bilibili.com/player.html?bvid=${b.bvid}&page=1&autoplay=0&danmaku=0`,
-              coverUrl: b.pic || '/assets/music/electronic-pulse.jpg',
-              source: 'Bilibili',
-              sourceUrl: b.sourceUrl || `https://www.bilibili.com/video/${b.bvid}`,
-              license: 'Bilibili official embed',
-              crawledAt: timeNow,
-              description: '来自 Bilibili 官方播放器的可播放音乐/视频内容。',
-              playable: 'embed' as any,
-            } as any);
-            if (newTracks.length >= 12) break;
-          }
-        } catch (e: any) {
-          errors.push(`bilibili:${e?.message || 'failed'}`);
-        }
-      }
-
-      if (wantYt) {
-        try {
-          const { searchYouTubeMusic } = await import('./youtubeMusicSearch.ts');
-          const rows = await searchYouTubeMusic(kw, 8);
-          for (const y of rows || []) {
-            const titleHay = `${y?.title || ''} ${y?.artist || ''}`.toLowerCase();
-            if (NON_MUSIC_BLOCKLIST.test(titleHay)) continue;
-            await addVerifiedTrack({
-              id: String(y.id || '').slice(0, 180),
-              title: String(y.title || 'YouTube Music').slice(0, 180),
-              artist: String(y.artist || 'YouTube'),
-              album: String(y.album || 'YouTube'),
-              genre: String(y.genre || 'YouTube'),
-              durationSeconds: Number(y.durationSeconds || 0),
-              audioUrl: String(y.audioUrl || ''),
-              embedUrl: String(y.embedUrl || ''),
-              coverUrl: String(y.coverUrl || '/assets/music/ambient-space.jpg'),
-              source: String(y.source || 'YouTube'),
-              sourceUrl: String(y.sourceUrl || ''),
-              license: String(y.license || 'YouTube terms'),
-              crawledAt: timeNow,
-              description: String(y.description || '来自 YouTube / 开放音频源的可播放内容。'),
-              playable: y.playable as any,
-            } as any);
-            if (newTracks.length >= 16) break;
-          }
-        } catch (e: any) {
-          errors.push(`youtube:${e?.message || 'failed'}`);
-        }
-      }
-
-      if (!wantArchive && !wantBili && !wantYt) {
-        errors.push(`当前来源 ${sourceDomain} 暂不支持抓取。`);
+        if (docs.length === 0) errors.push('未返回匹配音频条目。');
+      } else {
+        errors.push(`当前来源 ${sourceDomain} 暂不支持直链抓取。`);
       }
     } catch (err: any) {
       errors.push(err?.message || String(err));

@@ -1028,10 +1028,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
             <span className="text-slate-400">{t.tagline}</span>
           </div>
 
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-sans font-semibold text-white tracking-tight leading-[1.12]">
+          <h1 className="text-3xl sm:text-5xl md:text-6xl font-sans font-semibold text-white tracking-tight leading-[1.06]">
             {t.appName}
           </h1>
-          <p className="mt-2 text-xs sm:text-sm text-slate-300/85 leading-relaxed font-sans max-w-md">
+          <p className="mt-2.5 text-sm sm:text-base text-slate-300/80 leading-relaxed font-sans max-w-md">
             {t.motto}
           </p>
 

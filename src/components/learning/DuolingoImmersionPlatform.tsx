@@ -9,23 +9,21 @@ import {
   Gem,
   Heart,
   Layers,
-  Loader2,
-  MessageCircle,
+  MessageSquare,
   Mic,
   MicOff,
   RotateCcw,
   Send,
   Sparkles,
-  Trophy,
   Volume2,
   X,
 } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
 
-type CourseLangId = 'en' | 'ar' | 'es' | 'fr' | 'ja';
+type CourseLangId = 'en' | 'zh' | 'ko' | 'ar' | 'es' | 'fr' | 'ja';
+
 type ChallengeKind = 'tile-build' | 'listen-choice' | 'context-choice' | 'speak-repeat';
-type SubMode = 'path' | 'ai_coach' | 'phrasebook';
 
 interface ImmersionChallenge {
   id: string;
@@ -62,13 +60,9 @@ interface LanguageCourse {
   speechLang: string;
   dir?: 'rtl' | 'ltr';
   accentColor: string;
-  scenarios: Array<{
-    id: string;
-    titleZh: string;
-    titleEn: string;
-    starterPrompt: string;
-    starterTranslationZh: string;
-  }>;
+  tutorGreetingZh: string;
+  tutorGreetingEn: string;
+  scenarios: Array<{ labelZh: string; labelEn: string; prompt: string }>;
   units: CourseUnit[];
 }
 
@@ -81,28 +75,12 @@ const IMMERSION_COURSES: LanguageCourse[] = [
     code: 'EN',
     speechLang: 'en-US',
     accentColor: '#0284c7',
+    tutorGreetingZh: 'Hi! 我是你的英语沉浸导师。选一个场景，或直接用英文/中文和我对话练习。',
+    tutorGreetingEn: "Hi! I'm your English Immersion Coach. Pick a scenario or message me to practice.",
     scenarios: [
-      {
-        id: 'en_cafe',
-        titleZh: '伦敦咖啡馆点单',
-        titleEn: 'Ordering at a London Café',
-        starterPrompt: 'Good morning! What can I get started for you today?',
-        starterTranslationZh: '早上好！请问今天想喝点什么？',
-      },
-      {
-        id: 'en_airport',
-        titleZh: '国际机场值机与转机',
-        titleEn: 'Airport Check-In & Transit',
-        starterPrompt: 'Hello! Where are you flying to today? May I see your passport?',
-        starterTranslationZh: '您好！您今天飞往哪里？请出示一下您的护照。',
-      },
-      {
-        id: 'en_tech',
-        titleZh: '硅谷科技交流讨论',
-        titleEn: 'Tech Meetup Discussion',
-        starterPrompt: 'Great to meet you! What kind of AI project are you working on?',
-        starterTranslationZh: '很高兴认识你！你最近在做什么 AI 项目？',
-      },
+      { labelZh: '机场与出行', labelEn: 'Travel', prompt: "Let's roleplay checking in at an international airport in natural English." },
+      { labelZh: '咖啡馆点单', labelEn: 'Café', prompt: "Let's practice ordering specialty coffee and making polite small talk in English." },
+      { labelZh: '商务表达', labelEn: 'Work', prompt: 'Coach me on giving a clear 2-sentence project update in fluent English.' },
     ],
     units: [
       {
@@ -144,7 +122,7 @@ const IMMERSION_COURSES: LanguageCourse[] = [
           {
             id: 'en_1_3',
             kind: 'speak-repeat',
-            promptZh: '点击发音并跟读这句高频句型（支持语音评测）',
+            promptZh: '点击发音并跟读这句高频句型（支持实时语音评测）',
             promptEn: 'Listen and repeat aloud',
             targetText: 'I would love to learn more about your culture',
             translationZh: '我很想多了解一些你们的文化。',
@@ -211,7 +189,7 @@ const IMMERSION_COURSES: LanguageCourse[] = [
         order: 3,
         titleZh: 'Unit 3 · 深度观点与逻辑表达',
         titleEn: 'Unit 3 · Clear Thinking & Nuance',
-        topicZh: '讨论协作、技术与长期主义观点',
+        topicZh: '讨论协作、习惯养成与长远视角',
         topicEn: 'Expressing clear perspectives',
         xpReward: 40,
         challenges: [
@@ -242,6 +220,183 @@ const IMMERSION_COURSES: LanguageCourse[] = [
     ],
   },
   {
+    id: 'zh',
+    nativeName: '中文',
+    zhName: '中文',
+    enName: 'Mandarin Chinese',
+    code: 'ZH',
+    speechLang: 'zh-CN',
+    accentColor: '#059669',
+    tutorGreetingZh: '你好！我可以陪你练习汉语拼音、声调、日常地道表达与古今词汇。',
+    tutorGreetingEn: 'Nǐ hǎo! Let us practice Mandarin tones, sentence flow, and everyday expressions.',
+    scenarios: [
+      { labelZh: '点餐与茶饮', labelEn: 'Dining', prompt: '请用中文带我练习在茶馆点茶和礼貌交流的句子，并附上拼音。' },
+      { labelZh: '声调对比', labelEn: 'Tones', prompt: '帮我出 3 组容易混淆声调的中文词组，附上拼音和例句。' },
+      { labelZh: '城市问路', labelEn: 'Transit', prompt: '我们模拟一次在北京地铁站问路的实用中文对话，附拼音。' },
+    ],
+    units: [
+      {
+        id: 'zh_u1',
+        order: 1,
+        titleZh: 'Unit 1 · 声调礼仪与自然寒暄',
+        titleEn: 'Unit 1 · Tones & Warm Greetings',
+        topicZh: '“你好”“请多关照”与声调辨析',
+        topicEn: 'Polite greetings & tone awareness',
+        xpReward: 25,
+        challenges: [
+          {
+            id: 'zh_1_1',
+            kind: 'tile-build',
+            promptZh: '组合礼貌问候句：“请问您贵姓？”',
+            promptEn: 'Build: "May I ask your surname?" (Qǐng wèn nín guì xìng)',
+            targetText: '请问 您 贵姓',
+            romanization: 'Qǐng wèn nín guì xìng?',
+            translationZh: '请问您贵姓？',
+            translationEn: 'May I ask your surname politely?',
+            speechLang: 'zh-CN',
+            expectedTokens: ['请问', '您', '贵姓'],
+            distractorTokens: ['昨天', '高兴'],
+          },
+          {
+            id: 'zh_1_2',
+            kind: 'listen-choice',
+            promptZh: '听中文普通话发音，选出对应英文含义',
+            promptEn: 'Listen to Mandarin and match its English meaning',
+            targetText: '很高兴在这里认识你',
+            romanization: 'Hěn gāoxìng zài zhèlǐ rènshi nǐ',
+            translationZh: '很高兴在这里认识你。',
+            translationEn: 'Very glad to meet you here.',
+            speechLang: 'zh-CN',
+            choices: [
+              { id: 'a', text: 'Very glad to meet you here.', correct: true },
+              { id: 'b', text: 'Where is the nearest library?' },
+              { id: 'c', text: 'Would you like a cup of green tea?' },
+            ],
+          },
+          {
+            id: 'zh_1_3',
+            kind: 'speak-repeat',
+            promptZh: '听标准读音并跟读：“我想学习流利的中文对话”',
+            promptEn: 'Listen and repeat: "I want to learn fluent Chinese conversation"',
+            targetText: '我想学习流利的中文对话',
+            romanization: 'Wǒ xiǎng xuéxí liúlì de Zhōngwén duìhuà',
+            translationZh: '我想学习流利的中文对话。',
+            translationEn: 'I want to practice fluent Mandarin conversation.',
+            speechLang: 'zh-CN',
+          },
+        ],
+      },
+      {
+        id: 'zh_u2',
+        order: 2,
+        titleZh: 'Unit 2 · 生活点单与方向指引',
+        titleEn: 'Unit 2 · Ordering & Getting Around',
+        topicZh: '点单、付款礼仪与地铁乘车用语',
+        topicEn: 'Tea shop orders & city transit',
+        xpReward: 30,
+        challenges: [
+          {
+            id: 'zh_2_1',
+            kind: 'context-choice',
+            promptZh: '在茶馆想点“一杯少糖的温乌龙茶”，最自然地说：',
+            promptEn: 'Choose the natural way to order a warm oolong tea with less sugar',
+            targetText: '你好，请给我一杯温的乌龙茶，少糖。',
+            romanization: 'Nǐ hǎo, qǐng gěi wǒ yì bēi wēn de wūlóngchá, shǎo táng.',
+            translationZh: '你好，请给我一杯温的乌龙茶，少糖。',
+            translationEn: 'Hello, one warm oolong tea with less sugar, please.',
+            speechLang: 'zh-CN',
+            choices: [
+              { id: 'a', text: '你好，请给我一杯温的乌龙茶，少糖。', note: '礼貌且自然', correct: true },
+              { id: 'b', text: '请问这辆列车什么时候到茶馆？' },
+              { id: 'c', text: '我的电脑昨天没有喝茶。' },
+            ],
+          },
+          {
+            id: 'zh_2_2',
+            kind: 'tile-build',
+            promptZh: '拼出问路句子：“请问去图书馆怎么走？”',
+            promptEn: 'Build: "Excuse me, how do I get to the library?"',
+            targetText: '请问 去 图书馆 怎么走',
+            romanization: 'Qǐngwèn qù túshūguǎn zěnme zǒu?',
+            translationZh: '请问去图书馆怎么走？',
+            translationEn: 'Excuse me, how do I get to the library?',
+            speechLang: 'zh-CN',
+            expectedTokens: ['请问', '去', '图书馆', '怎么走'],
+            distractorTokens: ['多少', '颜色'],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'ko',
+    nativeName: '한국어',
+    zhName: '韩语',
+    enName: 'Korean',
+    code: 'KO',
+    speechLang: 'ko-KR',
+    accentColor: '#7c3aed',
+    tutorGreetingZh: '안녕하세요! 我可以带你从敬语问候、韩文字母拼读到首尔日常交流实战。',
+    tutorGreetingEn: "Annyeonghaseyo! Let's practice polite Korean, Hangul, and daily expressions.",
+    scenarios: [
+      { labelZh: '首尔咖啡店', labelEn: 'Café', prompt: "Let's roleplay ordering an iced americano politely in Korean with romanization." },
+      { labelZh: '敬语区分', labelEn: 'Polite forms', prompt: 'Explain polite -요 endings vs formal -습니다 endings with 3 easy examples.' },
+    ],
+    units: [
+      {
+        id: 'ko_u1',
+        order: 1,
+        titleZh: 'Unit 1 · 礼貌敬语与初次见面',
+        titleEn: 'Unit 1 · Polite Greetings',
+        topicZh: '안녕하세요、감사합니다 与自我介绍',
+        topicEn: 'Polite greetings & warm thanks',
+        xpReward: 25,
+        challenges: [
+          {
+            id: 'ko_1_1',
+            kind: 'context-choice',
+            promptZh: '在首尔与人初次见面时，最礼貌的“见到您很高兴”是：',
+            promptEn: 'Select "Nice to meet you" in polite Korean',
+            targetText: '만나서 반갑습니다',
+            romanization: 'Mannaseo bangapseumnida',
+            translationZh: '见到您很高兴。',
+            translationEn: 'Nice to meet you.',
+            speechLang: 'ko-KR',
+            choices: [
+              { id: 'a', text: '만나서 반갑습니다', note: 'Mannaseo bangapseumnida', correct: true },
+              { id: 'b', text: '여기가 어디예요?', note: 'Where is this place?' },
+              { id: 'c', text: '잠시만 기다려 주세요', note: 'Please wait a moment' },
+            ],
+          },
+          {
+            id: 'ko_1_2',
+            kind: 'tile-build',
+            promptZh: '按正确韩语语序拼出：“不好意思，请问地铁站在哪里？”',
+            promptEn: 'Build: "Excuse me, where is the subway station?"',
+            targetText: '실례지만 지하철역이 어디예요',
+            romanization: 'Sillyejiman jihacheoryeogi eodiyeyo?',
+            translationZh: '不好意思，请问地铁站在哪里？',
+            translationEn: 'Excuse me, where is the subway station?',
+            speechLang: 'ko-KR',
+            expectedTokens: ['실례지만', '지하철역이', '어디예요'],
+            distractorTokens: ['감사합니다', '커피'],
+          },
+          {
+            id: 'ko_1_3',
+            kind: 'speak-repeat',
+            promptZh: '跟读敬语致谢：“진심으로 감사합니다”',
+            promptEn: 'Listen and repeat aloud',
+            targetText: '진심으로 감사합니다',
+            romanization: 'Jinsimeuro gamsahamnida',
+            translationZh: '衷心感谢您。',
+            translationEn: 'Thank you sincerely.',
+            speechLang: 'ko-KR',
+          },
+        ],
+      },
+    ],
+  },
+  {
     id: 'ar',
     nativeName: 'العربية',
     zhName: '阿拉伯语',
@@ -250,21 +405,11 @@ const IMMERSION_COURSES: LanguageCourse[] = [
     speechLang: 'ar-SA',
     dir: 'rtl',
     accentColor: '#d97706',
+    tutorGreetingZh: 'السلام عليكم! 我是你的阿拉伯语导师，随时带读标准阿语、练习词根与日常对话。',
+    tutorGreetingEn: 'As-salāmu ʿalaykum! Practice Modern Standard Arabic vocabulary, roots, and dialogue with me.',
     scenarios: [
-      {
-        id: 'ar_greet',
-        titleZh: '开罗街头寒暄与问路',
-        titleEn: 'Greetings & Directions in Cairo',
-        starterPrompt: 'أَهْلًا وَسَهْلًا! كَيْفَ حَالُكَ الْيَوْمَ؟',
-        starterTranslationZh: '欢迎光临！你今天过得怎么样？',
-      },
-      {
-        id: 'ar_market',
-        titleZh: '香料市集选购与致谢',
-        titleEn: 'Souq Market & Courtesy',
-        starterPrompt: 'مَسَاءُ الْخَيْرِ! مَاذَا تُحِبُّ أَنْ تَشْرَبَ؟ شَايٌ أَمْ قَهْوَةٌ؟',
-        starterTranslationZh: '晚上好！您想喝点什么？茶还是咖啡？',
-      },
+      { labelZh: '经典问候礼仪', labelEn: 'Greetings', prompt: 'Teach me 3 authentic Arabic greetings and warm replies with transliteration.' },
+      { labelZh: '书城与图书馆', labelEn: 'Library', prompt: 'Help me practice asking for a grammar book in Arabic with English/Chinese notes.' },
     ],
     units: [
       {
@@ -369,15 +514,12 @@ const IMMERSION_COURSES: LanguageCourse[] = [
     enName: 'Spanish',
     code: 'ES',
     speechLang: 'es-ES',
-    accentColor: '#059669',
+    accentColor: '#0f766e',
+    tutorGreetingZh: '¡Hola! 我是你的西班牙语沉浸陪练，一起来练习流利清晰的日常表达吧！',
+    tutorGreetingEn: '¡Hola! Let us practice warm, expressive everyday Spanish together.',
     scenarios: [
-      {
-        id: 'es_cafe',
-        titleZh: '马德里广场咖啡点单',
-        titleEn: 'Ordering Coffee in Madrid',
-        starterPrompt: '¡Hola! Buenos días. ¿Qué desea tomar hoy?',
-        starterTranslationZh: '你好！早上好，今天想喝点什么？',
-      },
+      { labelZh: '马德里点餐', labelEn: 'Tapas & Coffee', prompt: 'Let us practice ordering coffee and breakfast politely in Spanish.' },
+      { labelZh: '日常寒暄', labelEn: 'Small Talk', prompt: 'Start a friendly Spanish conversation asking how my week is going.' },
     ],
     units: [
       {
@@ -392,7 +534,7 @@ const IMMERSION_COURSES: LanguageCourse[] = [
           {
             id: 'es_1_1',
             kind: 'tile-build',
-            promptZh: '组合句子：“早上好，请问来一杯咖啡。”',
+            promptZh: '组合句子：“早上好，请来一杯咖啡。”',
             promptEn: 'Build: "Buenos días, un café por favor"',
             targetText: 'Buenos días un café por favor',
             translationZh: '早上好，请来一杯咖啡。',
@@ -421,34 +563,20 @@ const IMMERSION_COURSES: LanguageCourse[] = [
       {
         id: 'es_u2',
         order: 2,
-        titleZh: 'Unit 2 · 巴塞罗那问路与交流',
-        titleEn: 'Unit 2 · Getting Around',
-        topicZh: '问路、买票与地道赞美',
-        topicEn: 'Navigation & social expressions',
+        titleZh: 'Unit 2 · 旅途问路与礼貌致谢',
+        titleEn: 'Unit 2 · Directions & Courtesy',
+        topicZh: '博物馆、火车站问路与时间表达',
+        topicEn: 'Asking directions politely',
         xpReward: 30,
         challenges: [
           {
             id: 'es_2_1',
-            kind: 'context-choice',
-            promptZh: '礼貌询问“请问地铁站在哪里？”应选择：',
-            promptEn: 'Choose "Excuse me, where is the metro station?"',
-            targetText: 'Disculpa, ¿dónde está la estación de metro?',
-            translationZh: '不好意思，请问地铁站在哪里？',
-            translationEn: 'Excuse me, where is the metro station?',
-            speechLang: 'es-ES',
-            choices: [
-              { id: 'a', text: 'Disculpa, ¿dónde está la estación de metro?', correct: true },
-              { id: 'b', text: 'La cuenta por favor, muchas gracias' },
-            ],
-          },
-          {
-            id: 'es_2_2',
             kind: 'speak-repeat',
-            promptZh: '跟读高频表达：“¿Hablas inglés o chino?”',
-            promptEn: 'Repeat aloud',
-            targetText: 'Hablas inglés o chino',
-            translationZh: '你会说英语还是中文？',
-            translationEn: 'Do you speak English or Chinese?',
+            promptZh: '跟读高频问路句：“Disculpe, ¿dónde está el museo?”',
+            promptEn: 'Repeat aloud: "Excuse me, where is the museum?"',
+            targetText: 'Disculpe, ¿dónde está el museo?',
+            translationZh: '打扰一下，请问博物馆在哪里？',
+            translationEn: 'Excuse me, where is the museum?',
             speechLang: 'es-ES',
           },
         ],
@@ -462,15 +590,12 @@ const IMMERSION_COURSES: LanguageCourse[] = [
     enName: 'French',
     code: 'FR',
     speechLang: 'fr-FR',
-    accentColor: '#6366f1',
+    accentColor: '#4f46e5',
+    tutorGreetingZh: 'Bonjour ! 我是你的法语连诵与口语教练，随时开始法式日常交流。',
+    tutorGreetingEn: 'Bonjour ! Practice smooth French liaison, café etiquette, and natural phrasing.',
     scenarios: [
-      {
-        id: 'fr_paris',
-        titleZh: '巴黎左岸书店与咖啡交流',
-        titleEn: 'Paris Left Bank Café & Bookshop',
-        starterPrompt: 'Bonjour ! Bienvenue à Paris. Comment puis-je vous aider ?',
-        starterTranslationZh: '你好！欢迎来到巴黎，有什么可以帮您？',
-      },
+      { labelZh: '巴黎咖啡馆', labelEn: 'Paris Café', prompt: 'Simulate ordering a croissant and café crème politely in French.' },
+      { labelZh: '连诵发音技巧', labelEn: 'Pronunciation', prompt: 'Give me 3 everyday French sentences highlighting natural liaison.' },
     ],
     units: [
       {
@@ -485,7 +610,7 @@ const IMMERSION_COURSES: LanguageCourse[] = [
           {
             id: 'fr_1_1',
             kind: 'tile-build',
-            promptZh: '拼出句子：“你好，今天过得怎么样？”',
+            promptZh: '拼出句子：“您好，您今天过得怎么样？”',
             promptEn: 'Build: "Bonjour, comment allez-vous aujourd’hui"',
             targetText: 'Bonjour comment allez-vous aujourd’hui',
             translationZh: '您好，您今天过得怎么样？',
@@ -510,27 +635,6 @@ const IMMERSION_COURSES: LanguageCourse[] = [
           },
         ],
       },
-      {
-        id: 'fr_u2',
-        order: 2,
-        titleZh: 'Unit 2 · 塞纳河漫步与文化对话',
-        titleEn: 'Unit 2 · Culture & City Walk',
-        topicZh: '点单结账、问路与表达喜爱',
-        topicEn: 'Ordering, directions & preferences',
-        xpReward: 30,
-        challenges: [
-          {
-            id: 'fr_2_1',
-            kind: 'speak-repeat',
-            promptZh: '朗读常用句：“Je voudrais un croissant et un café, s’il vous plaît”',
-            promptEn: 'Repeat politely',
-            targetText: 'Je voudrais un croissant et un café',
-            translationZh: '我想要一个可颂和一杯咖啡。',
-            translationEn: 'I would like a croissant and a coffee.',
-            speechLang: 'fr-FR',
-          },
-        ],
-      },
     ],
   },
   {
@@ -541,14 +645,11 @@ const IMMERSION_COURSES: LanguageCourse[] = [
     code: 'JA',
     speechLang: 'ja-JP',
     accentColor: '#e11d48',
+    tutorGreetingZh: 'こんにちは！我可以陪你练习敬语寒暄、五十音词组与东京日常会话。',
+    tutorGreetingEn: 'Konnichiwa! Practice polite Japanese, travel phrases, and natural cadence with me.',
     scenarios: [
-      {
-        id: 'ja_tokyo',
-        titleZh: '东京电车问路与餐厅点单',
-        titleEn: 'Tokyo Station & Dining',
-        starterPrompt: 'いらっしゃいませ！何名様でしょうか？',
-        starterTranslationZh: '欢迎光临！请问一共几位？',
-      },
+      { labelZh: '东京问路', labelEn: 'Directions', prompt: 'Practice asking how to reach Shinjuku station in polite Japanese with romaji.' },
+      { labelZh: '餐厅点餐', labelEn: 'Dining', prompt: 'Roleplay ordering ramen and saying thank you naturally in Japanese.' },
     ],
     units: [
       {
@@ -589,26 +690,15 @@ const IMMERSION_COURSES: LanguageCourse[] = [
             expectedTokens: ['すみません', '駅は', 'どこ', 'ですか'],
             distractorTokens: ['ありがとう', 'ここ'],
           },
-        ],
-      },
-      {
-        id: 'ja_u2',
-        order: 2,
-        titleZh: 'Unit 2 · 日本居酒屋与日常点餐',
-        titleEn: 'Unit 2 · Café & Dining',
-        topicZh: '点餐确认、推荐询问与礼貌结账',
-        topicEn: 'Ordering & polite requests',
-        xpReward: 30,
-        challenges: [
           {
-            id: 'ja_2_1',
+            id: 'ja_1_3',
             kind: 'speak-repeat',
-            promptZh: '跟读点餐经典句：“すみません、おすすめは何ですか”',
-            promptEn: 'Repeat aloud',
-            targetText: 'おすすめは何ですか',
-            romanization: 'Osusume wa nan desu ka',
-            translationZh: '请问有什么推荐吗？',
-            translationEn: 'What do you recommend?',
+            promptZh: '跟读实用感谢句：“ありがとうございます”',
+            promptEn: 'Repeat aloud: "Thank you very much"',
+            targetText: 'ありがとうございます',
+            romanization: 'Arigatou gozaimasu',
+            translationZh: '非常感谢。',
+            translationEn: 'Thank you very much.',
             speechLang: 'ja-JP',
           },
         ],
@@ -621,13 +711,18 @@ interface ProgressState {
   xp: number;
   streak: number;
   hearts: number;
-  dailyXp: number;
   activeCourse: CourseLangId;
   completedUnitIds: string[];
   lastStudyDate: string;
 }
 
-const PROGRESS_KEY = 'earth_one_duolingo_immersion_v2';
+interface TutorMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+const PROGRESS_KEY = 'earth_one_duolingo_immersion_v1';
 
 function todayStr(): string {
   const d = new Date();
@@ -635,30 +730,28 @@ function todayStr(): string {
 }
 
 function loadProgress(): ProgressState {
-  const today = todayStr();
   const fallback: ProgressState = {
     xp: 40,
     streak: 1,
     hearts: 5,
-    dailyXp: 0,
     activeCourse: 'en',
     completedUnitIds: [],
-    lastStudyDate: today,
+    lastStudyDate: todayStr(),
   };
   if (typeof window === 'undefined') return fallback;
   try {
-    const raw = localStorage.getItem(PROGRESS_KEY) || localStorage.getItem('earth_one_duolingo_immersion_v1');
+    const raw = localStorage.getItem(PROGRESS_KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
-    const sameDay = parsed?.lastStudyDate === today;
     return {
       xp: Number.isFinite(parsed?.xp) ? parsed.xp : 40,
       streak: Number.isFinite(parsed?.streak) ? Math.max(1, parsed.streak) : 1,
       hearts: Number.isFinite(parsed?.hearts) ? Math.max(1, Math.min(5, parsed.hearts)) : 5,
-      dailyXp: sameDay && Number.isFinite(parsed?.dailyXp) ? parsed.dailyXp : 0,
-      activeCourse: ['en', 'ar', 'es', 'fr', 'ja'].includes(parsed?.activeCourse) ? parsed.activeCourse : 'en',
+      activeCourse: ['en', 'zh', 'ko', 'ar', 'es', 'fr', 'ja'].includes(parsed?.activeCourse)
+        ? parsed.activeCourse
+        : 'en',
       completedUnitIds: Array.isArray(parsed?.completedUnitIds) ? parsed.completedUnitIds : [],
-      lastStudyDate: typeof parsed?.lastStudyDate === 'string' ? parsed.lastStudyDate : today,
+      lastStudyDate: typeof parsed?.lastStudyDate === 'string' ? parsed.lastStudyDate : todayStr(),
     };
   } catch {
     return fallback;
@@ -677,15 +770,45 @@ function shuffleWithSeed<T>(arr: T[], seedStr: string): T[] {
   return copy;
 }
 
+function playFeedbackTone(kind: 'correct' | 'wrong' | 'complete') {
+  if (typeof window === 'undefined') return;
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const freqs =
+      kind === 'complete'
+        ? [523.25, 659.25, 783.99, 1046.5]
+        : kind === 'correct'
+          ? [523.25, 659.25]
+          : [280, 210];
+    freqs.forEach((f, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = kind === 'wrong' ? 'triangle' : 'sine';
+      osc.frequency.setValueAtTime(f, now + idx * 0.08);
+      gain.gain.setValueAtTime(0.001, now + idx * 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.09, now + idx * 0.08 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.19);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + idx * 0.08);
+      osc.stop(now + idx * 0.08 + 0.21);
+    });
+    setTimeout(() => {
+      void ctx.close().catch(() => {});
+    }, 900);
+  } catch {}
+}
+
 export const DuolingoImmersionPlatform: React.FC<{
   lang: Language;
   onOpenEnglishEngine?: () => void;
 }> = ({ lang, onOpenEnglishEngine }) => {
   const isZh = lang === 'zh';
   const [progress, setProgress] = useState<ProgressState>(loadProgress);
-  const [subMode, setSubMode] = useState<SubMode>('path');
-
-  // Interactive lesson state
+  const [platformMode, setPlatformMode] = useState<'path' | 'coach'>('path');
   const [activeUnit, setActiveUnit] = useState<CourseUnit | null>(null);
   const [stepIdx, setStepIdx] = useState(0);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
@@ -698,14 +821,13 @@ export const DuolingoImmersionPlatform: React.FC<{
   const [spokenText, setSpokenText] = useState('');
   const speakRecRef = useRef<any>(null);
 
-  // In-app AI Immersion Coach state
-  const [selectedScenarioIdx, setSelectedScenarioIdx] = useState(0);
-  const [coachMessages, setCoachMessages] = useState<
-    Array<{ role: 'tutor' | 'user'; text: string; note?: string }>
-  >([]);
-  const [coachInput, setCoachInput] = useState('');
-  const [coachLoading, setCoachLoading] = useState(false);
-  const [coachListening, setCoachListening] = useState(false);
+  // Embedded DeepSeek Language Tutor state
+  const [tutorInput, setTutorInput] = useState('');
+  const [tutorLoading, setTutorLoading] = useState(false);
+  const [tutorMessagesByCourse, setTutorMessagesByCourse] = useState<Record<string, TutorMessage[]>>({});
+  const [tutorMicActive, setTutorMicActive] = useState(false);
+  const tutorRecRef = useRef<any>(null);
+  const tutorEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     try {
@@ -718,24 +840,30 @@ export const DuolingoImmersionPlatform: React.FC<{
     [progress.activeCourse]
   );
 
-  // Initialize / reset AI Coach greeting when active language or scenario changes
-  const activeScenario = course.scenarios[selectedScenarioIdx] || course.scenarios[0];
-  useEffect(() => {
-    if (!activeScenario) return;
-    setCoachMessages([
+  const tutorMessages = useMemo<TutorMessage[]>(() => {
+    const existing = tutorMessagesByCourse[course.id];
+    if (existing && existing.length > 0) return existing;
+    return [
       {
-        role: 'tutor',
-        text: activeScenario.starterPrompt,
-        note: isZh ? activeScenario.starterTranslationZh : activeScenario.titleEn,
+        id: `init_${course.id}`,
+        role: 'assistant',
+        content: isZh ? course.tutorGreetingZh : course.tutorGreetingEn,
       },
-    ]);
-  }, [activeScenario, isZh]);
+    ];
+  }, [course, isZh, tutorMessagesByCourse]);
+
+  useEffect(() => {
+    if (platformMode === 'coach') {
+      tutorEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [tutorMessages, platformMode]);
 
   const speakPhrase = (text: string, speechLang: string, slow = false) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
-      const utt = new SpeechSynthesisUtterance(text);
+      const cleaned = text.replace(/[*_`#>]/g, '').trim();
+      const utt = new SpeechSynthesisUtterance(cleaned.slice(0, 320));
       utt.lang = speechLang;
       utt.rate = slow ? 0.68 : 0.96;
       const prefix = speechLang.split('-')[0].toLowerCase();
@@ -748,17 +876,8 @@ export const DuolingoImmersionPlatform: React.FC<{
     } catch {}
   };
 
-  const addXp = (amount: number) => {
-    const today = todayStr();
-    setProgress((prev) => ({
-      ...prev,
-      xp: prev.xp + amount,
-      dailyXp: (prev.lastStudyDate === today ? prev.dailyXp : 0) + amount,
-      lastStudyDate: today,
-    }));
-  };
-
   const startUnit = (unit: CourseUnit) => {
+    setPlatformMode('path');
     setActiveUnit(unit);
     setStepIdx(0);
     setSelectedChoice(null);
@@ -799,22 +918,30 @@ export const DuolingoImmersionPlatform: React.FC<{
       if (!cleanSpoken) {
         isRight = true;
       } else {
-        const expectedWords = currentChallenge.targetText
-          .toLowerCase()
-          .replace(/[^\p{L}\p{N}\s]/gu, '')
-          .split(/\s+/)
-          .filter(Boolean);
-        const hits = expectedWords.filter((w) => cleanSpoken.includes(w));
-        isRight = hits.length >= Math.max(1, Math.floor(expectedWords.length * 0.45));
+        const expectedNorm = currentChallenge.targetText.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+        const spokenNorm = cleanSpoken.replace(/[^\p{L}\p{N}]/gu, '');
+        if (spokenNorm && expectedNorm && (expectedNorm.includes(spokenNorm.slice(0, 3)) || spokenNorm.includes(expectedNorm.slice(0, 3)))) {
+          isRight = true;
+        } else {
+          const expectedWords = currentChallenge.targetText
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}\s]/gu, '')
+            .split(/\s+/)
+            .filter(Boolean);
+          const hits = expectedWords.filter((w) => cleanSpoken.includes(w));
+          isRight = hits.length >= Math.max(1, Math.floor(expectedWords.length * 0.45));
+        }
       }
     }
 
     if (isRight) {
       setCheckState('correct');
+      playFeedbackTone('correct');
       speakPhrase(currentChallenge.targetText, currentChallenge.speechLang);
-      addXp(10);
+      setProgress((prev) => ({ ...prev, xp: prev.xp + 10 }));
     } else {
       setCheckState('wrong');
+      playFeedbackTone('wrong');
       setProgress((prev) => ({
         ...prev,
         hearts: Math.max(1, prev.hearts - 1),
@@ -833,6 +960,7 @@ export const DuolingoImmersionPlatform: React.FC<{
     const nextIdx = stepIdx + 1;
     if (nextIdx >= activeUnit.challenges.length) {
       setUnitDone(true);
+      playFeedbackTone('complete');
       const today = todayStr();
       setProgress((prev) => {
         const completed = prev.completedUnitIds.includes(activeUnit.id)
@@ -841,7 +969,6 @@ export const DuolingoImmersionPlatform: React.FC<{
         return {
           ...prev,
           xp: prev.xp + activeUnit.xpReward,
-          dailyXp: (prev.lastStudyDate === today ? prev.dailyXp : 0) + activeUnit.xpReward,
           hearts: 5,
           completedUnitIds: completed,
           lastStudyDate: today,
@@ -895,74 +1022,71 @@ export const DuolingoImmersionPlatform: React.FC<{
     }
   };
 
-  // In-app AI Immersion Coach turn (zero external jump)
-  const sendCoachTurn = async (overrideText?: string) => {
-    const text = (overrideText ?? coachInput).trim();
-    if (!text || coachLoading) return;
-    setCoachInput('');
-    const nextHistory = [...coachMessages, { role: 'user' as const, text }];
-    setCoachMessages(nextHistory);
-    setCoachLoading(true);
+  const sendTutorPrompt = async (overrideText?: string) => {
+    const clean = (overrideText ?? tutorInput).trim();
+    if (!clean || tutorLoading) return;
+    if (!overrideText) setTutorInput('');
+
+    const cid = course.id;
+    const userMsg: TutorMessage = { id: `u_${Date.now()}`, role: 'user', content: clean };
+    const aiMsgId = `a_${Date.now()}`;
+    const currentMsgs = tutorMessages;
+
+    setTutorMessagesByCourse((prev) => ({
+      ...prev,
+      [cid]: [...currentMsgs, userMsg, { id: aiMsgId, role: 'assistant', content: '' }],
+    }));
+    setTutorLoading(true);
+
+    const tutorPrompt = `Active course language: ${course.enName} (${course.nativeName}, code: ${course.code}). User UI language: ${isZh ? 'Chinese' : 'English'}. Help the user practice ${course.nativeName} naturally in 2-4 clear lines with pronunciation/romanization notes when helpful. User input: ${clean}`;
 
     try {
-      const scenarioLabel = activeScenario ? `${activeScenario.titleZh} (${activeScenario.titleEn})` : course.nativeName;
-      const prompt = [
-        `你现在是站内沉浸式语言学习导师，当前课程语言是【${course.zhName} / ${course.nativeName}】，场景：【${scenarioLabel}】。`,
-        `学生刚才说：“${text}”。`,
-        `请严格按如下格式回复，保持简短生动（最多2行）：`,
-        `第1行：用自然地道的【${course.nativeName}】接着场景继续对话一句（不要带括号翻译）。`,
-        `第2行：用${isZh ? '中文' : '英文'}给出这句的翻译和1句温和的地道表达点评（如果学生用中文问怎么说，直接教他地道的${course.nativeName}句子）。`,
-      ].join('\n');
-
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt,
-          mode: 'companion',
+          prompt: tutorPrompt,
+          modelId: 'deepseek-v3',
+          mode: 'tutor',
+          maxTokens: 320,
           stream: true,
-          history: nextHistory.slice(-6).map((m) => ({
-            role: m.role === 'user' ? 'user' : 'assistant',
-            content: m.text,
-          })),
+          history: currentMsgs.slice(-6).map((m) => ({ role: m.role, content: m.content })),
         }),
       });
-
-      let full = '';
+      let acc = '';
       await readAIStream(res, (delta) => {
-        full += delta;
+        acc += delta;
+        setTutorMessagesByCourse((prev) => ({
+          ...prev,
+          [cid]: (prev[cid] || []).map((m) => (m.id === aiMsgId ? { ...m, content: acc } : m)),
+        }));
       });
-      const lines = full
-        .replace(/<think>[\s\S]*?<\/think>/g, '')
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean);
-      const replyMain = lines[0] || activeScenario?.starterPrompt || 'Great! Keep practicing!';
-      const replyNote = lines.slice(1).join(' ');
-
-      setCoachMessages((prev) => [...prev, { role: 'tutor', text: replyMain, note: replyNote }]);
-      speakPhrase(replyMain, course.speechLang, false);
-      addXp(15);
-    } catch {
-      setCoachMessages((prev) => [
+      if (acc.trim()) {
+        setProgress((prev) => ({ ...prev, xp: prev.xp + 5 }));
+      }
+    } catch (err) {
+      const errText = err instanceof Error && /401|503|API Key|DEEPSEEK_API_KEY/i.test(err.message)
+        ? isZh
+          ? `DeepSeek 口语导师暂未配置服务端密钥（请前往 AI 工作台设置填入 DeepSeek Key）。你现在可以先点选「课程闯关」进行词块、听力与跟读训练。`
+          : `DeepSeek Coach needs an API key in AI Hub settings. Meanwhile, all interactive Skill Path lessons work offline!`
+        : isZh
+          ? '网络连接暂时波动，请重试或切换课程闯关继续学习。'
+          : 'Temporary connection issue — please retry or practice Skill Path lessons.';
+      setTutorMessagesByCourse((prev) => ({
         ...prev,
-        {
-          role: 'tutor',
-          text: activeScenario?.starterPrompt || 'Let us continue practicing!',
-          note: isZh ? '网络短暂波动，已继续保持练习模式。' : 'Brief connection blip — continuing local drill.',
-        },
-      ]);
+        [cid]: (prev[cid] || []).map((m) => (m.id === aiMsgId ? { ...m, content: errText } : m)),
+      }));
     } finally {
-      setCoachLoading(false);
+      setTutorLoading(false);
     }
   };
 
-  const toggleCoachVoiceMic = () => {
-    if (coachListening) {
+  const toggleTutorMic = () => {
+    if (tutorMicActive) {
       try {
-        speakRecRef.current?.stop?.();
+        tutorRecRef.current?.stop?.();
       } catch {}
-      setCoachListening(false);
+      setTutorMicActive(false);
       return;
     }
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -972,35 +1096,19 @@ export const DuolingoImmersionPlatform: React.FC<{
       rec.lang = course.speechLang;
       rec.continuous = false;
       rec.interimResults = false;
-      setCoachListening(true);
+      setTutorMicActive(true);
       rec.onresult = (e: any) => {
-        const transcript = e.results?.[0]?.[0]?.transcript?.trim();
-        if (transcript) {
-          void sendCoachTurn(transcript);
-        }
+        const transcript = e.results?.[0]?.[0]?.transcript || '';
+        if (transcript.trim()) setTutorInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
       };
-      rec.onerror = () => setCoachListening(false);
-      rec.onend = () => setCoachListening(false);
-      speakRecRef.current = rec;
+      rec.onerror = () => setTutorMicActive(false);
+      rec.onend = () => setTutorMicActive(false);
+      tutorRecRef.current = rec;
       rec.start();
     } catch {
-      setCoachListening(false);
+      setTutorMicActive(false);
     }
   };
-
-  // All phrases inside active course for the built-in Phrasebook tab
-  const coursePhrases = useMemo(() => {
-    return course.units.flatMap((u) =>
-      u.challenges.map((ch) => ({
-        id: ch.id,
-        unitTitle: isZh ? u.titleZh : u.titleEn,
-        targetText: ch.targetText,
-        romanization: ch.romanization,
-        translation: isZh ? ch.translationZh : ch.translationEn,
-        speechLang: ch.speechLang,
-      }))
-    );
-  }, [course, isZh]);
 
   // Interactive Lesson Stage View
   if (activeUnit) {
@@ -1054,9 +1162,8 @@ export const DuolingoImmersionPlatform: React.FC<{
             <h3 className="text-2xl font-semibold text-[color:var(--color-one-text)]">
               {isZh ? '本单元沉浸通关！' : 'Unit Complete!'}
             </h3>
-            <p className="mt-2 text-sm text-[color:var(--color-one-text-muted)]">
-              {isZh ? activeUnit.titleZh : activeUnit.titleEn} · +{activeUnit.xpReward} XP ·{' '}
-              {isZh ? '生命值已自动补满' : 'Hearts restored'}
+            <p className="mt-2 text-sm text-[color:var(--color-one-text-muted)] tabular-nums">
+              {isZh ? activeUnit.titleZh : activeUnit.titleEn} · +{activeUnit.xpReward} XP
             </p>
             <div className="mt-7 flex flex-wrap justify-center gap-3">
               <button type="button" onClick={() => startUnit(activeUnit)} className="one-btn one-btn-md one-btn-secondary">
@@ -1175,17 +1282,16 @@ export const DuolingoImmersionPlatform: React.FC<{
                         style={!picked ? { borderColor: 'var(--color-one-border)' } : undefined}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <span
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-semibold tabular-nums text-[color:var(--color-one-text-dim)]"
-                            style={{ borderColor: 'var(--color-one-border)' }}
-                          >
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-semibold tabular-nums text-[color:var(--color-one-text-dim)]" style={{ borderColor: 'var(--color-one-border)' }}>
                             {idx + 1}
                           </span>
                           <div className="min-w-0">
                             <div dir={course.dir || 'ltr'} className="text-sm font-medium text-[color:var(--color-one-text)]">
                               {c.text}
                             </div>
-                            {c.note && <div className="mt-0.5 text-xs text-[color:var(--color-one-text-dim)]">{c.note}</div>}
+                            {c.note && (
+                              <div className="mt-0.5 text-xs text-[color:var(--color-one-text-dim)]">{c.note}</div>
+                            )}
                           </div>
                         </div>
                         {picked && <Check className="h-4 w-4 shrink-0 text-[color:var(--color-one-accent)]" />}
@@ -1225,8 +1331,8 @@ export const DuolingoImmersionPlatform: React.FC<{
                             ? '正在收音，点击结束'
                             : 'Listening…'
                           : isZh
-                          ? '按住 / 点击开口跟读'
-                          : 'Speak Now'}
+                            ? '点击开口跟读'
+                            : 'Speak Now'}
                       </span>
                     </button>
                   </div>
@@ -1281,11 +1387,11 @@ export const DuolingoImmersionPlatform: React.FC<{
                     >
                       {checkState === 'correct'
                         ? isZh
-                          ? '回答正确！ +10 XP'
-                          : 'Great job! +10 XP'
+                          ? '回答正确 · +10 XP'
+                          : 'Correct · +10 XP'
                         : isZh
-                        ? '再试一次，对照标准例句看看'
-                        : 'Not quite — review the phrase'}
+                          ? '再试一次，对照标准例句看看'
+                          : 'Not quite — review the phrase'}
                     </div>
                     <div dir={course.dir || 'ltr'} className="mt-1 text-xs text-[color:var(--color-one-text-muted)]">
                       {currentChallenge.targetText} · {isZh ? currentChallenge.translationZh : currentChallenge.translationEn}
@@ -1304,12 +1410,12 @@ export const DuolingoImmersionPlatform: React.FC<{
                           ? '重新作答'
                           : 'Retry'
                         : stepIdx + 1 >= totalSteps
-                        ? isZh
-                          ? '完成单元'
-                          : 'Finish'
-                        : isZh
-                        ? '继续下一题'
-                        : 'Continue'}
+                          ? isZh
+                            ? '完成单元'
+                            : 'Finish'
+                          : isZh
+                            ? '继续下一题'
+                            : 'Continue'}
                     </span>
                     <ArrowRight className="h-4 w-4" />
                   </button>
@@ -1322,70 +1428,76 @@ export const DuolingoImmersionPlatform: React.FC<{
     );
   }
 
-  const dailyGoalPct = Math.min(100, Math.round((progress.dailyXp / 50) * 100));
-
   return (
     <div className="space-y-5">
-      {/* Embedded Native Duolingo Header Strip — ZERO External Redirects */}
+      {/* Platform Overview Strip: Deployed 100% natively in Learning Center (Zero external redirects) */}
       <div className="one-surface flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <div className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-500">
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>{isZh ? '站内原生部署 · 多邻国多语言沉浸系统' : 'Built-In Duolingo Multi-Language Immersion Engine'}</span>
+          <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-[color:var(--color-one-text-dim)]">
+            <span>{isZh ? '多邻国 · 多语言沉浸学习系统' : 'Multi-Language Immersion Studio'}</span>
+            <span aria-hidden="true">·</span>
+            <span>{isZh ? '站内直连实训' : 'Native In-App Learning'}</span>
           </div>
           <h2 className="mt-1 text-xl font-semibold tracking-tight text-[color:var(--color-one-text)]">
-            {isZh ? `当前修习：${course.zhName} (${course.nativeName})` : `Active Course: ${course.enName} (${course.nativeName})`}
+            {isZh
+              ? `当前语种：${course.zhName} (${course.nativeName})`
+              : `Active Course: ${course.enName} (${course.nativeName})`}
           </h2>
           <p className="mt-1 text-xs text-[color:var(--color-one-text-muted)]">
             {isZh
-              ? '全流程直接在站内运行：互动词块、原声慢速精听、跟读口语与 AI 情景对练，无需跳转外部网页。'
-              : 'Runs completely inside ONE: interactive lessons, native audio, speaking drills, and live AI roleplay.'}
+              ? '内置 7 大语种交互课程路径、慢速原声精听、口语语音评测与 DeepSeek 一对一沉浸口语导师。'
+              : 'Interactive multi-language skill trees, slow/normal native audio, speech checks & DeepSeek live tutor.'}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4">
-          {/* Daily XP Quest Progress */}
-          <div
-            className="flex items-center gap-2.5 rounded-xl border px-3 py-2"
-            style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
-          >
-            <Trophy className="h-4 w-4 text-amber-500" />
-            <div className="min-w-[96px]">
-              <div className="flex items-center justify-between text-[10px] text-[color:var(--color-one-text-dim)] tabular-nums">
-                <span>{isZh ? '今日目标' : 'Daily Quest'}</span>
-                <span>{Math.min(50, progress.dailyXp)}/50 XP</span>
-              </div>
-              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
-                <div
-                  className="h-full rounded-full bg-emerald-500 transition-all"
-                  style={{ width: `${dailyGoalPct}%` }}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3.5 text-sm font-semibold tabular-nums">
-            <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400" title="连胜">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-4 text-sm font-semibold tabular-nums">
+            <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400" title={isZh ? '连胜天数' : 'Streak'}>
               <Flame className="h-4 w-4" />
               {progress.streak}d
             </span>
-            <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400" title="经验值">
+            <span className="inline-flex items-center gap-1.5 text-sky-600 dark:text-sky-400" title={isZh ? '经验值' : 'XP'}>
               <Gem className="h-4 w-4" />
               {progress.xp} XP
             </span>
-            <button
-              type="button"
-              onClick={() => setProgress((p) => ({ ...p, hearts: 5 }))}
-              title={isZh ? '点击补充生命值至 5 颗心' : 'Tap to refill hearts'}
-              className="inline-flex items-center gap-1 text-rose-500 hover:opacity-80 cursor-pointer"
-            >
+            <span className="inline-flex items-center gap-1.5 text-rose-500" title={isZh ? '生命值' : 'Hearts'}>
               <Heart className="h-4 w-4 fill-current" />
               {progress.hearts}
+            </span>
+          </div>
+
+          <div className="inline-flex items-center rounded-xl bg-[color:var(--color-one-surface-soft)] p-1 border" style={{ borderColor: 'var(--color-one-border)' }}>
+            <button
+              type="button"
+              onClick={() => setPlatformMode('path')}
+              className={`min-h-[36px] rounded-lg px-3 text-xs font-semibold transition whitespace-nowrap ${
+                platformMode === 'path'
+                  ? 'bg-[color:var(--color-one-surface)] text-[color:var(--color-one-text)] shadow-2xs'
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)]'
+              }`}
+            >
+              {isZh ? '课程闯关' : 'Skill Path'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlatformMode('coach')}
+              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition whitespace-nowrap ${
+                platformMode === 'coach'
+                  ? 'bg-[color:var(--color-one-surface)] text-[color:var(--color-one-accent)] shadow-2xs'
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)]'
+              }`}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>{isZh ? 'DeepSeek 对话陪练' : 'AI Coach'}</span>
             </button>
           </div>
 
           {onOpenEnglishEngine && (
-            <button type="button" onClick={onOpenEnglishEngine} className="one-btn one-btn-sm one-btn-secondary">
+            <button
+              type="button"
+              onClick={onOpenEnglishEngine}
+              className="one-btn one-btn-sm one-btn-secondary whitespace-nowrap shrink-0"
+            >
               <Sparkles className="h-3.5 w-3.5 text-[color:var(--color-one-accent)]" />
               <span>{isZh ? '英语词典引擎' : 'English Engine'}</span>
             </button>
@@ -1393,74 +1505,42 @@ export const DuolingoImmersionPlatform: React.FC<{
         </div>
       </div>
 
-      {/* Multi-Language Switcher + Built-In Mode Tabs */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:pb-0">
-          {IMMERSION_COURSES.map((c) => {
-            const active = c.id === progress.activeCourse;
-            const completedInCourse = c.units.filter((u) => progress.completedUnitIds.includes(u.id)).length;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => {
-                  setProgress((prev) => ({ ...prev, activeCourse: c.id }));
-                  setSelectedScenarioIdx(0);
-                }}
-                className={`flex min-h-[44px] shrink-0 items-center gap-2.5 rounded-xl border px-3.5 py-2 text-left transition cursor-pointer ${
-                  active
-                    ? 'border-[color:var(--color-one-accent)] bg-[color:var(--color-one-accent-soft)]'
-                    : 'border-[color:var(--color-one-border)] bg-[color:var(--color-one-surface)] hover:bg-[color:var(--color-one-surface-soft)]'
-                }`}
+      {/* Multi-Language Switcher (7 languages directly inside Learning Center) */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:pb-0">
+        {IMMERSION_COURSES.map((c) => {
+          const active = c.id === progress.activeCourse;
+          const completedInCourse = c.units.filter((u) => progress.completedUnitIds.includes(u.id)).length;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setProgress((prev) => ({ ...prev, activeCourse: c.id }))}
+              className={`flex min-h-[44px] shrink-0 items-center gap-2.5 rounded-xl border px-3.5 py-2 text-left transition cursor-pointer ${
+                active
+                  ? 'border-[color:var(--color-one-accent)] bg-[color:var(--color-one-accent-soft)]'
+                  : 'border-[color:var(--color-one-border)] bg-[color:var(--color-one-surface)] hover:bg-[color:var(--color-one-surface-soft)]'
+              }`}
+            >
+              <span
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
+                style={{ background: c.accentColor }}
               >
-                <span
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold text-white"
-                  style={{ background: c.accentColor }}
-                >
-                  {c.code}
-                </span>
-                <div>
-                  <div className="text-sm font-semibold text-[color:var(--color-one-text)]">
-                    {isZh ? c.zhName : c.enName}
-                  </div>
-                  <div className="text-[11px] tabular-nums text-[color:var(--color-one-text-dim)]">
-                    {c.nativeName} · {completedInCourse}/{c.units.length}
-                  </div>
+                {c.code}
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-[color:var(--color-one-text)] whitespace-nowrap">
+                  {isZh ? c.zhName : c.enName}
                 </div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="inline-flex rounded-xl border p-1 self-start sm:self-auto" style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface)' }}>
-          {([
-            { id: 'path' as const, zh: '闯关路径', en: 'Course Path', icon: Layers },
-            { id: 'ai_coach' as const, zh: 'AI 对练', en: 'AI Roleplay', icon: MessageCircle },
-            { id: 'phrasebook' as const, zh: '句库精听', en: 'Phrasebook', icon: Volume2 },
-          ]).map((tab) => {
-            const Icon = tab.icon;
-            const active = subMode === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setSubMode(tab.id)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition cursor-pointer ${
-                  active
-                    ? 'bg-emerald-600 text-white'
-                    : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)]'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                <span>{isZh ? tab.zh : tab.en}</span>
-              </button>
-            );
-          })}
-        </div>
+                <div className="text-[11px] tabular-nums text-[color:var(--color-one-text-dim)] whitespace-nowrap">
+                  {c.nativeName} · {completedInCourse}/{c.units.length}
+                </div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Mode 1: Course Path Units */}
-      {subMode === 'path' && (
+      {platformMode === 'path' ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {course.units.map((unit) => {
             const done = progress.completedUnitIds.includes(unit.id);
@@ -1476,7 +1556,9 @@ export const DuolingoImmersionPlatform: React.FC<{
                       <Layers className="h-3.5 w-3.5" style={{ color: course.accentColor }} />
                       {isZh ? `第 ${unit.order} 单元` : `Unit ${unit.order}`}
                     </span>
-                    <span className="tabular-nums">{done ? (isZh ? '已掌握' : 'Mastered') : `+${unit.xpReward} XP`}</span>
+                    <span className="tabular-nums">
+                      {done ? (isZh ? '已掌握' : 'Mastered') : `+${unit.xpReward} XP`}
+                    </span>
                   </div>
 
                   <h3 className="mt-2.5 text-base font-semibold text-[color:var(--color-one-text)]">
@@ -1486,7 +1568,7 @@ export const DuolingoImmersionPlatform: React.FC<{
                     {isZh ? unit.topicZh : unit.topicEn}
                   </p>
 
-                  <div className="mt-3 text-[11px] tabular-nums text-[color:var(--color-one-text-dim)]">
+                  <div className="mt-3 text-[11px] tabular-nums text-[color:var(--color-one-text-dim)] truncate">
                     {unit.challenges.length} {isZh ? '个互动关卡' : 'challenges'} · {unit.challenges[0]?.targetText}
                   </div>
                 </div>
@@ -1502,170 +1584,107 @@ export const DuolingoImmersionPlatform: React.FC<{
                   style={!done ? { background: course.accentColor } : undefined}
                 >
                   <BookOpen className="h-4 w-4" />
-                  <span>{done ? (isZh ? '巩固重温' : 'Review Unit') : isZh ? '开始站内闯关' : 'Start Lesson'}</span>
+                  <span>{done ? (isZh ? '巩固重温' : 'Review Unit') : isZh ? '开始沉浸挑战' : 'Start Lesson'}</span>
                 </button>
               </article>
             );
           })}
         </div>
-      )}
-
-      {/* Mode 2: Built-In AI Immersion Scenario Roleplay */}
-      {subMode === 'ai_coach' && (
+      ) : (
+        /* Embedded DeepSeek Live Language Tutor */
         <div className="one-surface-elevated overflow-hidden">
-          <div
-            className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4"
-            style={{ borderColor: 'var(--color-one-border)' }}
-          >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4" style={{ borderColor: 'var(--color-one-border)' }}>
             <div>
               <h3 className="text-base font-semibold text-[color:var(--color-one-text)]">
-                {isZh ? `${course.zhName} · AI 情景沉浸对练 (+15 XP/轮)` : `${course.enName} AI Immersion Roleplay`}
+                {isZh ? `${course.zhName} DeepSeek 沉浸对话陪练` : `${course.enName} DeepSeek Live Coach`}
               </h3>
-              <p className="mt-0.5 text-xs text-[color:var(--color-one-text-muted)]">
-                {isZh ? '用语音或文字直接与站内 AI 导师全外语实战对话，自动朗读并即时纠音点评。' : 'Practice live scenario roleplay inside ONE with instant voice playback.'}
+              <p className="mt-0.5 text-xs text-[color:var(--color-one-text-dim)]">
+                {isZh ? '支持语音输入、母语声线朗读、句型纠错与场景实战（每次交互 +5 XP）' : 'Voice input, native speech playback, corrections & roleplay (+5 XP)'}
               </p>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {course.scenarios.map((sc, idx) => (
+              {course.scenarios.map((sc, i) => (
                 <button
-                  key={sc.id}
+                  key={i}
                   type="button"
-                  onClick={() => setSelectedScenarioIdx(idx)}
-                  className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
-                    idx === selectedScenarioIdx
-                      ? 'border-[color:var(--color-one-accent)] bg-[color:var(--color-one-accent-soft)] text-[color:var(--color-one-accent)]'
-                      : 'border-[color:var(--color-one-border)] text-[color:var(--color-one-text-muted)]'
-                  }`}
+                  onClick={() => void sendTutorPrompt(sc.prompt)}
+                  className="rounded-lg border px-3 py-1.5 text-xs font-medium text-[color:var(--color-one-text-muted)] transition hover:border-[color:var(--color-one-accent)] hover:text-[color:var(--color-one-text)] whitespace-nowrap"
+                  style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
                 >
-                  {isZh ? sc.titleZh : sc.titleEn}
+                  {isZh ? sc.labelZh : sc.labelEn}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="max-h-[340px] space-y-3 overflow-y-auto p-5">
-            {coachMessages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
-                    msg.role === 'user'
-                      ? 'bg-sky-600 text-white'
-                      : 'border border-[color:var(--color-one-border)] bg-[color:var(--color-one-surface-soft)] text-[color:var(--color-one-text)]'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <p dir={course.dir || 'ltr'} className="font-medium leading-relaxed">
-                      {msg.text}
-                    </p>
-                    {msg.role === 'tutor' && (
-                      <button
-                        type="button"
-                        onClick={() => speakPhrase(msg.text, course.speechLang)}
-                        className="shrink-0 rounded-full p-1 text-[color:var(--color-one-accent)] hover:bg-black/5 dark:hover:bg-white/10"
-                        title={isZh ? '朗读原声' : 'Speak'}
-                      >
-                        <Volume2 className="h-4 w-4" />
-                      </button>
+          <div className="max-h-[420px] space-y-4 overflow-y-auto p-5">
+            {tutorMessages.map((msg) => {
+              const isUser = msg.role === 'user';
+              return (
+                <div key={msg.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[86%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                      isUser
+                        ? 'bg-sky-600 text-white'
+                        : 'border bg-[color:var(--color-one-surface-soft)] text-[color:var(--color-one-text)]'
+                    }`}
+                    style={!isUser ? { borderColor: 'var(--color-one-border)' } : undefined}
+                  >
+                    <div dir={course.dir || 'ltr'} className="whitespace-pre-wrap break-words">
+                      {msg.content || (tutorLoading ? '…' : '')}
+                    </div>
+                    {!isUser && msg.content && (
+                      <div className="mt-2 flex items-center justify-end border-t pt-1.5" style={{ borderColor: 'var(--color-one-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => speakPhrase(msg.content, course.speechLang)}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-[color:var(--color-one-text-dim)] hover:text-[color:var(--color-one-accent)]"
+                        >
+                          <Volume2 className="h-3.5 w-3.5" />
+                          <span>{isZh ? '母语朗读' : 'Listen'}</span>
+                        </button>
+                      </div>
                     )}
                   </div>
-                  {msg.note && (
-                    <p className="mt-1.5 text-xs opacity-80 leading-relaxed">{msg.note}</p>
-                  )}
                 </div>
-              </div>
-            ))}
-            {coachLoading && (
-              <div className="flex items-center gap-2 text-xs text-[color:var(--color-one-text-dim)]">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>{isZh ? 'AI 导师正在组织地道回应…' : 'Tutor replying…'}</span>
-              </div>
-            )}
+              );
+            })}
+            <div ref={tutorEndRef} />
           </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void sendCoachTurn();
-            }}
-            className="flex items-center gap-2 border-t p-4"
-            style={{ borderColor: 'var(--color-one-border)' }}
-          >
-            <button
-              type="button"
-              onClick={toggleCoachVoiceMic}
-              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition ${
-                coachListening
-                  ? 'border-rose-400 bg-rose-500 text-white'
-                  : 'border-[color:var(--color-one-border)] bg-[color:var(--color-one-surface-soft)] text-[color:var(--color-one-text)]'
-              }`}
-              title={isZh ? '语音输入对练' : 'Voice input'}
-            >
-              {coachListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-            </button>
-            <input
-              value={coachInput}
-              onChange={(e) => setCoachInput(e.target.value)}
-              placeholder={
-                isZh
-                  ? `试着用${course.zhName}或中文询问导师，例如“我要一杯拿铁谢谢”…`
-                  : `Reply in ${course.enName} or ask how to say a phrase…`
-              }
-              className="h-10 flex-1 rounded-xl border bg-[color:var(--color-one-surface-soft)] px-3.5 text-sm text-[color:var(--color-one-text)] placeholder-[color:var(--color-one-text-dim)] focus:border-[color:var(--color-one-accent)] focus:outline-none"
-              style={{ borderColor: 'var(--color-one-border)' }}
-            />
-            <button
-              type="submit"
-              disabled={!coachInput.trim() || coachLoading}
-              className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-45"
-            >
-              <Send className="h-3.5 w-3.5" />
-              <span>{isZh ? '发送' : 'Send'}</span>
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Mode 3: Built-In Phrasebook & Audio Drill */}
-      {subMode === 'phrasebook' && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {coursePhrases.map((item) => (
-            <div
-              key={item.id}
-              className="one-surface flex items-center justify-between gap-3 p-4"
-            >
-              <div className="min-w-0">
-                <div className="text-[11px] text-[color:var(--color-one-text-dim)]">{item.unitTitle}</div>
-                <div dir={course.dir || 'ltr'} className="mt-1 text-base font-semibold text-[color:var(--color-one-text)]">
-                  {item.targetText}
-                </div>
-                {item.romanization && (
-                  <div className="text-[11px] text-[color:var(--color-one-text-dim)]">{item.romanization}</div>
-                )}
-                <div className="mt-1 text-xs text-[color:var(--color-one-text-muted)]">{item.translation}</div>
-              </div>
-
-              <div className="flex shrink-0 items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => speakPhrase(item.targetText, item.speechLang, false)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border text-[color:var(--color-one-accent)] hover:bg-[color:var(--color-one-surface-soft)]"
-                  style={{ borderColor: 'var(--color-one-border)' }}
-                  title="1.0x"
-                >
-                  <Volume2 className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => speakPhrase(item.targetText, item.speechLang, true)}
-                  className="inline-flex h-9 items-center justify-center rounded-xl border px-2 text-[11px] font-medium text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)]"
-                  style={{ borderColor: 'var(--color-one-border)' }}
-                  title="0.7x Slow"
-                >
-                  0.7x
-                </button>
-              </div>
+          <div className="border-t p-4" style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}>
+            <div className="flex items-center gap-2 rounded-xl border bg-[color:var(--color-one-surface)] p-1.5" style={{ borderColor: 'var(--color-one-border)' }}>
+              <button
+                type="button"
+                onClick={toggleTutorMic}
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition ${
+                  tutorMicActive ? 'bg-rose-500/15 text-rose-500' : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)]'
+                }`}
+                title={isZh ? `用 ${course.nativeName} 语音输入` : `Speak in ${course.nativeName}`}
+              >
+                {tutorMicActive ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              </button>
+              <input
+                type="text"
+                value={tutorInput}
+                onChange={(e) => setTutorInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void sendTutorPrompt();
+                }}
+                placeholder={isZh ? `输入${course.zhName}句子或用中文提问…` : `Type in ${course.enName} or ask anything…`}
+                className="min-w-0 flex-1 bg-transparent px-2 text-sm text-[color:var(--color-one-text)] placeholder:text-[color:var(--color-one-text-dim)] outline-none"
+              />
+              <button
+                type="button"
+                disabled={!tutorInput.trim() || tutorLoading}
+                onClick={() => void sendTutorPrompt()}
+                className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg bg-sky-600 px-4 text-xs font-semibold text-white transition hover:bg-sky-500 disabled:opacity-40 whitespace-nowrap"
+              >
+                <Send className="h-3.5 w-3.5" />
+                <span>{isZh ? '发送' : 'Send'}</span>
+              </button>
             </div>
-          ))}
+          </div>
         </div>
       )}
     </div>

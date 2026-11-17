@@ -2970,6 +2970,12 @@ app.post('/api/ai/ollama/roles', (req, res) => {
   res.json({ success: true, ...updated });
 });
 
+app.post('/api/ai/custom-config', (req, res) => {
+  const { apiKey, baseUrl, customModel } = req.body || {};
+  aiGateway.registerCustomProvider(String(apiKey || ''), baseUrl ? String(baseUrl) : undefined, customModel ? String(customModel) : undefined);
+  res.json({ success: true, models: aiGateway.getModels() });
+});
+
 app.get('/api/ai/stats', (req, res) => {
   const models = aiGateway.getModels();
   const totalCalls = models.reduce((acc, m) => acc + m.totalCalls, 0);
@@ -2978,7 +2984,7 @@ app.get('/api/ai/stats', (req, res) => {
 });
 
 app.post('/api/ai/chat', async (req, res) => {
-  const { prompt, messages, history, modelId, model, mode = 'general', apiKey, baseUrl, customModel, stream } = req.body;
+  const { prompt, messages, history, modelId, model, mode = 'general', apiKey, baseUrl, customModel, stream, maxTokens } = req.body;
 
   // If the user supplied a custom API key, register it as the custom provider
   // and route this request through it.
@@ -2995,13 +3001,28 @@ app.post('/api/ai/chat', async (req, res) => {
   const contextualPrompt = buildConversationPrompt(userPrompt, conversationHistory);
 
   const systemInstructions: Record<string, string> = {
-    general: 'You are a general-purpose assistant, not a branded persona. Answer the current question directly in the user’s language. For follow-ups, prioritize the latest relevant conversation turns and honor the user’s constraints. Do not introduce unrelated themes or claim abilities you do not have. Keep simple answers concise; expand only when the user asks. Be accurate and say when uncertain.',
-    translator: 'You are the Project Earth Polyglot Translator. Translate with native fidelity, preserving emotional nuance and cultural context.',
-    writer: 'You are the Project Earth Creator Assistant. Help author eloquent global essays, articles, poetry, and stories.',
-    tutor: 'You are the Project Earth International Language Coach. Help the user master natural conversation, idioms, and pronunciation.'
+    general: 'You are powered by DeepSeek inside ONE. Answer the user’s question directly, accurately, and naturally in the user’s language. Keep simple answers concise; expand only when asked.',
+    'voice-agent': `You are One., a fast real-time DeepSeek voice assistant controlling the ONE platform.
+Rules:
+1) Respond concisely in 1-2 short spoken-friendly sentences in the user's language (plain speech, no markdown bullets or code blocks unless asked).
+2) If the user clearly asks to control the website, start line 1 with [[ACTION:<JSON>]] then a newline and your brief confirmation. Allowed actions:
+- [[ACTION:{"type":"play_music","query":"optional keyword","crawl":true}]]
+- [[ACTION:{"type":"play_music","control":"next"|"prev"|"stop"|"resume"}]]
+- [[ACTION:{"type":"watch_documentary","query":"keywords","platform":"all","randomPick":true}]]
+- [[ACTION:{"type":"navigate_tab","tab":"globe|feed|chat|venus|arabic-learning|saturn|video|library|browser|universe|aihub|knowledge|moon|crawler|network|community|creator|game|brand"}]]
+- [[ACTION:{"type":"browser_search","query":"keywords"}]]
+- [[ACTION:{"type":"set_theme","theme":"dark"|"light"}]]
+3) Otherwise do NOT output [[ACTION:...]], just answer directly and immediately.`,
+    translator: 'You are the Polyglot Translator inside ONE. Translate with native fidelity, preserving nuance and cultural context.',
+    writer: 'You are the Creator Assistant inside ONE. Help author eloquent global essays, articles, poetry, and stories.',
+    tutor: 'You are the International Language Coach inside ONE. Help master natural conversation, grammar, idioms, and pronunciation concisely in the target language plus brief helpful guidance.'
   };
 
   const systemPrompt = systemInstructions[mode] || systemInstructions.general;
+  const resolvedMaxTokens = typeof maxTokens === 'number' && maxTokens > 0
+    ? Math.min(4096, Math.max(64, Math.floor(maxTokens)))
+    : (mode === 'voice-agent' ? 240 : undefined);
+
   const shouldStream = stream === true;
   if (shouldStream) {
     res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
@@ -3013,7 +3034,8 @@ app.post('/api/ai/chat', async (req, res) => {
         userPrompt,
         systemPrompt,
         token => res.write(`${JSON.stringify({ delta: token })}\n`),
-        conversationHistory
+        conversationHistory,
+        resolvedMaxTokens
       );
       if (result.success) {
         res.write(`${JSON.stringify({ done: true, tokens: result.tokens, model: resolvedModelId })}\n`);
@@ -3032,7 +3054,8 @@ app.post('/api/ai/chat', async (req, res) => {
     usesStructuredHistory ? userPrompt : contextualPrompt,
     systemPrompt,
     undefined,
-    conversationHistory
+    conversationHistory,
+    resolvedMaxTokens
   );
 
   if (result.success) {

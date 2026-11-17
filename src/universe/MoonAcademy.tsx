@@ -69,33 +69,33 @@ export const MoonAcademy: React.FC<MoonAcademyProps> = ({ lang, currentUser, onB
           'radial-gradient(1000px 520px at 75% -10%, rgba(127,212,255,0.07), transparent 55%), linear-gradient(180deg, #04060a 0%, #05070b 50%, #030508 100%)'
       }}
     >
-      <header className="relative overflow-hidden border-b px-4 pb-5 pt-6 sm:px-8 lg:px-12" style={{ borderColor: 'var(--color-one-border)' }}>
+      <header className="relative overflow-hidden border-b px-4 pb-8 pt-24 sm:px-8 lg:px-12" style={{ borderColor: 'var(--color-one-border)' }}>
         <div
           aria-hidden
-          className="pointer-events-none absolute -top-24 right-[10%] h-64 w-64 rounded-full opacity-15 blur-3xl"
+          className="pointer-events-none absolute -top-24 right-[10%] h-72 w-72 rounded-full opacity-20 blur-3xl"
           style={{ background: 'radial-gradient(circle, rgba(244,243,238,0.45), transparent 70%)' }}
         />
         <div className="relative mx-auto max-w-[1440px]">
-          <button type="button" onClick={onBack} className="one-btn one-btn-sm one-btn-ghost mb-3 -ml-2">
+          <button type="button" onClick={onBack} className="one-btn one-btn-sm one-btn-ghost mb-6 -ml-2">
             <ArrowLeft className="h-4 w-4" />
             {t.back}
           </button>
 
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-3xl">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
                 <span className="one-badge one-badge-accent inline-flex items-center gap-1.5">
                   <GraduationCap className="h-3.5 w-3.5" />
                   {t.eyebrow}
                 </span>
               </div>
-              <h1 className="text-xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-2xl">
+              <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-4xl lg:text-5xl">
                 {t.title}
               </h1>
-              <p className="mt-1 text-xs font-medium tracking-[0.14em] text-[color:var(--color-one-text-muted)] sm:text-sm">
+              <p className="mt-1 text-sm font-medium tracking-[0.18em] text-[color:var(--color-one-text-muted)] sm:text-base">
                 {t.tagline}
               </p>
-              <p className="mt-2 max-w-2xl text-xs leading-relaxed text-[color:var(--color-one-text-muted)] sm:text-sm">{t.desc}</p>
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-[color:var(--color-one-text-muted)]">{t.desc}</p>
             </div>
 
             <div

@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install dependencies (no package-lock in repo; keep deterministic enough for deploy)
 COPY package.json bun.lock* ./
-RUN npm install --legacy-peer --deps--force.
+RUN npm install --no-audit --no-fund
 
 # Copy source and build frontend (VITE_BASE=/ for same-origin production)
 COPY . .
@@ -20,7 +20,7 @@ ENV EARTH_ONE_SERVE_DIST=true
 
 # Runtime deps + tsx for TypeScript server entry
 COPY package.json bun.lock* ./
-RUN npm install --force
+RUN npm install --omit=dev --no-audit --no-fund && npm install tsx --no-audit --no-fund
 
 # App runtime files
 COPY --from=build /app/dist ./dist

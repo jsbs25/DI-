@@ -201,17 +201,17 @@ export const VideoCenter: React.FC<VideoCenterProps> = ({ videos: initialVideos,
   };
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-5 sm:px-6">
-      <div className="border-b border-[var(--color-one-border)] pb-4">
+    <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-8 sm:px-6">
+      <div className="border-b border-[var(--color-one-border)] pb-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="mb-1.5 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--color-one-text-muted)]">
-              <Film className="h-3 w-3 text-[var(--color-one-accent)]" />
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3 py-1 text-[11px] font-medium text-[var(--color-one-text-muted)]">
+              <Film className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
               <span>
                 {isZh ? 'ONE 影像 · 中国大陆 & 海外双通道合法分发' : 'ONE VIDEO · CN & Global Media Scheduler'}
               </span>
             </div>
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-white sm:text-2xl">{t.videoTab}</h1>
+            <h1 className="text-3xl font-semibold tracking-tight text-slate-900 dark:text-white">{t.videoTab}</h1>
           </div>
 
           {/* Region Scheduler Selector */}

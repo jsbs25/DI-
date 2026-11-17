@@ -6,13 +6,10 @@ import { getOllamaContextWindow, getOllamaTokenBudget, type AIConversationMessag
 // in server.ts, so the gateway (instantiated at import time) must load env itself.
 dotenv.config();
 
-import { ThinkingLevel } from '@google/genai';
-import { createGeminiClient, GEMINI_FAST_MODEL, GEMINI_TEXT_MODEL, hasGeminiApiKey } from './geminiClient.ts';
-
 export interface AIModelMeta {
   id: string;
   name: string;
-  provider: 'Gemini' | 'DeepSeek' | 'Custom';
+  provider: 'DeepSeek' | 'Custom';
   category: 'text' | 'multimodal' | 'code' | 'reasoning';
   status: 'active' | 'quota_exhausted' | 'unconfigured' | 'error';
   isDefault: boolean;
@@ -149,75 +146,55 @@ class AIGateway {
     }, 10000);
   }
 
+  private isUsableKey(key: string | undefined): boolean {
+    const k = (key || '').trim();
+    if (!k || k.length < 12) return false;
+    if (/^(x|test|demo|none|null|undefined|placeholder|changeme|MY_API_KEY)$/i.test(k)) return false;
+    return true;
+  }
+
   private maskKey(key: string | undefined): string {
-    if (!key || key.trim() === '') return '未配置服务端密钥';
-    if (key.length <= 8) return '********';
-    return `${key.slice(0, 4)}...${key.slice(-4)}`;
+    if (!this.isUsableKey(key)) return '未配置 (请设置 DEEPSEEK_API_KEY 或在 AI 工作台填入)';
+    const k = String(key).trim();
+    return `${k.slice(0, 4)}...${k.slice(-4)}`;
   }
 
   private initProviders() {
-    this.deepseekKey = (process.env.DEEPSEEK_API_KEY || '').trim();
-    this.customKey = (process.env.CUSTOM_API_KEY || '').trim();
-
-    const geminiReady = hasGeminiApiKey();
-    const deepseekReady = Boolean(this.deepseekKey);
+    const rawDs = (process.env.DEEPSEEK_API_KEY || '').trim();
+    this.deepseekKey = this.isUsableKey(rawDs) ? rawDs : '';
+    const rawCustom = (process.env.CUSTOM_API_KEY || '').trim();
+    this.customKey = this.isUsableKey(rawCustom) ? rawCustom : '';
 
     this.models = [
       {
-        id: GEMINI_FAST_MODEL,
-        name: 'Gemini 3.1 Flash Lite (极速响应 · 当前默认主引擎)',
-        provider: 'Gemini',
-        category: 'multimodal',
-        status: geminiReady ? 'active' : 'unconfigured',
-        isDefault: geminiReady,
+        id: 'deepseek-v3',
+        name: 'DeepSeek-V3 (极速对话 · 全站语音默认)',
+        provider: 'DeepSeek',
+        category: 'text',
+        status: 'active',
+        isDefault: true,
         totalCalls: 0,
         totalTokens: 0,
-        averageLatencyMs: 45,
-        apiKeyMasked: geminiReady ? '已连接 Gemini 密钥 (Secrets)' : '未配置 GEMINI_API_KEY',
-        isFree: true
-      },
-      {
-        id: GEMINI_TEXT_MODEL,
-        name: 'Gemini 4 Hydrogen (深度推理与全站分析)',
-        provider: 'Gemini',
-        category: 'multimodal',
-        status: geminiReady ? 'active' : 'unconfigured',
-        isDefault: false,
-        totalCalls: 0,
-        totalTokens: 0,
-        averageLatencyMs: 120,
-        apiKeyMasked: geminiReady ? '已连接 Gemini 密钥 (Secrets)' : '未配置 GEMINI_API_KEY',
-        isFree: true
+        averageLatencyMs: 140,
+        apiKeyMasked: this.deepseekKey ? this.maskKey(this.deepseekKey) : '未配置密钥',
+        isFree: !this.deepseekKey
       },
       {
         id: 'deepseek-r1-open',
-        name: 'DeepSeek-R1 (需服务端密钥或本地 Ollama)',
+        name: 'DeepSeek-R1 (深度推理 · 复杂分析)',
         provider: 'DeepSeek',
         category: 'reasoning',
-        status: deepseekReady ? 'active' : 'unconfigured',
+        status: 'active',
         isDefault: false,
         totalCalls: 0,
         totalTokens: 0,
-        averageLatencyMs: 240,
-        apiKeyMasked: deepseekReady ? this.maskKey(this.deepseekKey) : '未配置 DEEPSEEK_API_KEY（可填写自定义密钥或运行本地 Ollama）',
-        isFree: !deepseekReady
-      },
-      {
-        id: 'deepseek-v3',
-        name: 'DeepSeek-V3 (需服务端密钥)',
-        provider: 'DeepSeek',
-        category: 'text',
-        status: deepseekReady ? 'active' : 'unconfigured',
-        isDefault: !geminiReady && deepseekReady,
-        totalCalls: 0,
-        totalTokens: 0,
-        averageLatencyMs: 180,
-        apiKeyMasked: deepseekReady ? this.maskKey(this.deepseekKey) : '未配置 DEEPSEEK_API_KEY',
-        isFree: !deepseekReady
+        averageLatencyMs: 320,
+        apiKeyMasked: this.deepseekKey ? this.maskKey(this.deepseekKey) : '未配置密钥',
+        isFree: !this.deepseekKey
       },
       {
         id: 'custom',
-        name: '自定义 OpenAI / DeepSeek / 本地 Ollama 接口',
+        name: '自定义 DeepSeek / 本地 Ollama 接口',
         provider: 'Custom',
         category: 'text',
         status: 'active',
@@ -225,7 +202,7 @@ class AIGateway {
         totalCalls: 0,
         totalTokens: 0,
         averageLatencyMs: 0,
-        apiKeyMasked: '支持 api.deepseek.com 或 127.0.0.1:11434',
+        apiKeyMasked: '支持 api.deepseek.com 或 localhost:11434',
         isFree: true
       }
     ];
@@ -249,9 +226,22 @@ class AIGateway {
    * Register or update a user-supplied DeepSeek / OpenAI-compatible or Ollama provider.
    */
   public registerCustomProvider(apiKey: string, baseUrl?: string, model?: string): void {
-    this.customKey = (apiKey || '').trim();
-    this.customBaseUrl = (baseUrl || 'https://api.deepseek.com/v1').trim();
+    const cleanKey = (apiKey || '').trim();
+    const cleanUrl = (baseUrl || 'https://api.deepseek.com/v1').trim();
+    this.customKey = cleanKey;
+    this.customBaseUrl = cleanUrl;
     this.customModel = (model || 'deepseek-chat').trim();
+
+    if (this.isUsableKey(cleanKey) && cleanUrl.toLowerCase().includes('deepseek.com')) {
+      this.deepseekKey = cleanKey;
+      for (const m of this.models) {
+        if (m.id === 'deepseek-v3' || m.id === 'deepseek-r1-open') {
+          m.status = 'active';
+          m.apiKeyMasked = this.maskKey(cleanKey);
+          m.errorMessage = undefined;
+        }
+      }
+    }
 
     const entry = this.models.find(m => m.id === 'custom');
     if (entry) {
@@ -411,13 +401,11 @@ class AIGateway {
   }
 
   public getChatModelId(): string {
-    if (hasGeminiApiKey()) return GEMINI_FAST_MODEL;
-    return this.deepseekKey ? 'deepseek-v3' : 'deepseek-r1-open';
+    return 'deepseek-v3';
   }
 
   public getCrawlerModelId(): string {
-    if (hasGeminiApiKey()) return GEMINI_TEXT_MODEL;
-    return this.deepseekKey ? 'deepseek-v3' : 'deepseek-r1-open';
+    return 'deepseek-v3';
   }
 
   /**
@@ -456,7 +444,8 @@ ${page.content.slice(0, 4500)}
     prompt: string,
     systemInstruction?: string,
     onToken?: (token: string) => void,
-    history?: AIConversationMessage[]
+    history?: AIConversationMessage[],
+    maxTokens?: number
   ): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
     let targetModel = this.getModel(modelId);
     if (modelId.startsWith('ollama:') && !targetModel) {
@@ -473,97 +462,10 @@ ${page.content.slice(0, 4500)}
     targetModel = targetModel || this.models.find(m => m.isDefault) || this.models[0];
     const startTime = Date.now();
 
-    // 0. GEMINI CLOUD ENGINE (via @google/genai server-side client)
-    if (targetModel.id === GEMINI_TEXT_MODEL || targetModel.provider === 'Gemini') {
-      const gemini = createGeminiClient();
-      if (!gemini) {
-        return {
-          success: false,
-          content: '',
-          errorMessage: 'GEMINI_API_KEY is not configured in Settings > Secrets.'
-        };
-      }
-      try {
-        const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
-        for (const h of history || []) {
-          if (!h?.content) continue;
-          contents.push({
-            role: h.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: h.content }]
-          });
-        }
-        contents.push({ role: 'user', parts: [{ text: prompt }] });
-
-        const activeGeminiModel = targetModel.id === GEMINI_TEXT_MODEL ? GEMINI_TEXT_MODEL : GEMINI_FAST_MODEL;
-        const modelsToTry =
-          activeGeminiModel === GEMINI_FAST_MODEL
-            ? [GEMINI_FAST_MODEL, GEMINI_TEXT_MODEL]
-            : [GEMINI_TEXT_MODEL, GEMINI_FAST_MODEL];
-
-        let fullText = '';
-        let lastErr: any = null;
-        for (const candidateModel of modelsToTry) {
-          try {
-            const config: Record<string, any> = {};
-            if (systemInstruction) config.systemInstruction = systemInstruction;
-            if (candidateModel === GEMINI_TEXT_MODEL) {
-              config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
-            }
-            if (onToken) {
-              const streamResp = await gemini.models.generateContentStream({
-                model: candidateModel,
-                contents,
-                config: Object.keys(config).length ? config : undefined
-              });
-              for await (const chunk of streamResp) {
-                const delta = chunk.text || '';
-                if (delta) {
-                  fullText += delta;
-                  onToken(delta);
-                }
-              }
-            } else {
-              const resp = await gemini.models.generateContent({
-                model: candidateModel,
-                contents,
-                config: Object.keys(config).length ? config : undefined
-              });
-              fullText = resp.text || '';
-            }
-            lastErr = null;
-            break;
-          } catch (err: any) {
-            lastErr = err;
-            if (!/503|429|UNAVAILABLE|overloaded|high demand/i.test(String(err?.message || err))) {
-              throw err;
-            }
-          }
-        }
-        if (lastErr) throw lastErr;
-
-        const latency = Date.now() - startTime;
-        const tokens = Math.ceil((prompt.length + fullText.length) / 3.5);
-        targetModel.totalCalls += 1;
-        targetModel.totalTokens += tokens;
-        targetModel.averageLatencyMs = Math.round(
-          (targetModel.averageLatencyMs * (targetModel.totalCalls - 1) + latency) / targetModel.totalCalls
-        );
-        targetModel.lastUsedAt = new Date().toISOString();
-        targetModel.status = 'active';
-        targetModel.errorMessage = undefined;
-        return { success: true, content: fullText, tokens };
-      } catch (err: any) {
-        const message = String(err?.message || err);
-        targetModel.status = 'error';
-        targetModel.errorMessage = message;
-        return { success: false, content: '', errorMessage: message };
-      }
-    }
-
-    // 1. DEEPSEEK FALLBACK ENGINE
+    // 1. ALL CLOUD & BUILT-IN REQUESTS ROUTE STRICTLY TO DEEPSEEK (deepseek-v3 / deepseek-r1-open)
     if (targetModel.id === 'deepseek-r1-open' || targetModel.id === 'deepseek-v3') {
       try {
-        const result = await this.runDeepSeekEngine(targetModel.id, prompt, systemInstruction, onToken, history);
+        const result = await this.runDeepSeekEngine(targetModel.id, prompt, systemInstruction, onToken, history, maxTokens);
         const latency = Date.now() - startTime;
         const tokens = result.tokens || Math.ceil((prompt.length + result.content.length) / 3.5);
 
@@ -636,7 +538,7 @@ ${page.content.slice(0, 4500)}
     return {
       success: false,
       content: '',
-      errorMessage: '当前选中的 AI 引擎暂不可用，请切换到活跃引擎（Gemini）或检查配置后重试。'
+      errorMessage: '当前模型请求已重路由至 DeepSeek 引擎，但服务暂不可用，请稍后重试。'
     };
   }
 
@@ -650,7 +552,8 @@ ${page.content.slice(0, 4500)}
     prompt: string,
     systemInstruction?: string,
     onToken?: (token: string) => void,
-    history: AIConversationMessage[] = []
+    history: AIConversationMessage[] = [],
+    maxTokens?: number
   ): Promise<{ content: string; tokens?: number }> {
     const messages: ChatMessage[] = [];
     if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
@@ -661,25 +564,29 @@ ${page.content.slice(0, 4500)}
     }
     messages.push({ role: 'user', content: prompt });
 
-    // Primary path: Official DeepSeek API when DEEPSEEK_API_KEY is present
-    if (this.deepseekKey) {
+    // Primary path: Official DeepSeek API when valid DEEPSEEK_API_KEY is present
+    if (this.isUsableKey(this.deepseekKey)) {
       const dsModel = modelId === 'deepseek-r1-open' ? 'deepseek-reasoner' : 'deepseek-chat';
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30000);
+      const timer = setTimeout(() => controller.abort(), 22000);
       try {
         const useStream = Boolean(onToken);
+        const requestBody: Record<string, any> = {
+          model: dsModel,
+          messages,
+          temperature: dsModel === 'deepseek-reasoner' ? undefined : 0.65,
+          stream: useStream
+        };
+        if (typeof maxTokens === 'number' && maxTokens > 0) {
+          requestBody.max_tokens = maxTokens;
+        }
         const response = await fetch('https://api.deepseek.com/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${this.deepseekKey}`
           },
-          body: JSON.stringify({
-            model: dsModel,
-            messages,
-            temperature: dsModel === 'deepseek-reasoner' ? undefined : 0.7,
-            stream: useStream
-          }),
+          body: JSON.stringify(requestBody),
           signal: controller.signal
         });
 

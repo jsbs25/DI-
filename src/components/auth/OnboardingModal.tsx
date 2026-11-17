@@ -253,7 +253,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   maxLength={40}
                   value={username}
                   onChange={e => setUsername(e.target.value.replace(/[\r\n\t\u0000-\u001F\u007F]/g, ''))}
-                  placeholder="中文 / 한국어 / العربية / Any"
+                  placeholder="Username"
                   className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 focus:outline-none focus:border-cyan-500"
                 />
               </div>

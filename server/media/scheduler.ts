@@ -217,19 +217,11 @@ export async function dispatchUnifiedMusicSearch(options: {
       ? [...localEnriched, ...jamRes.rows, ...wmRes.rows, ...ytIaRes.rows, ...biliRes.rows]
       : [...localEnriched, ...ytIaRes.rows, ...wmRes.rows, ...jamRes.rows, ...biliRes.rows];
 
-  const isLikelyNonMusic = (item: any): boolean => {
-    const hay = `${item?.title || ''} ${item?.artist || ''} ${item?.album || ''} ${item?.description || ''} ${item?.genre || ''}`.toLowerCase();
-    return /speech|sermon|podcast|audiobook|lecture|news report|breaking news|white noise|brown noise|pink noise|fan noise|air conditioner|test tone|sample pack|asmr sleep sounds only|number station|greatest speeches|abdication/.test(hay);
-  };
-
   const isPlayableTrack = (item: any): boolean => {
     if (!item) return false;
     if (item.availabilityStatus === 'unavailable' || item.playbackType === 'external_redirect') return false;
-    if (isLikelyNonMusic(item)) return false;
-    const audioUrl = typeof item.audioUrl === 'string' ? item.audioUrl.trim() : '';
-    const hasAudio = audioUrl.length > 0 && /^https?:\/\//i.test(audioUrl);
+    const hasAudio = typeof item.audioUrl === 'string' && item.audioUrl.trim().length > 0;
     const hasEmbed = typeof item.embedUrl === 'string' && item.embedUrl.trim().length > 0 && item.playable !== 'none';
-    // Prefer direct playable audio for reliable listening; allow embeds only when marked clearly playable
     return hasAudio || hasEmbed;
   };
 
@@ -237,10 +229,9 @@ export async function dispatchUnifiedMusicSearch(options: {
   const sortedMerged = [...rawMerged]
     .filter(isPlayableTrack)
     .sort((a, b) => {
-      const aAudio = (a.audioUrl && /^https?:\/\//i.test(String(a.audioUrl))) ? 0 : 1;
-      const bAudio = (b.audioUrl && /^https?:\/\//i.test(String(b.audioUrl))) ? 0 : 1;
-      if (aAudio !== bAudio) return aAudio - bAudio;
-      return 0;
+      const aAudio = a.audioUrl ? 0 : 1;
+      const bAudio = b.audioUrl ? 0 : 1;
+      return aAudio - bAudio;
     });
 
   const seen = new Set<string>();

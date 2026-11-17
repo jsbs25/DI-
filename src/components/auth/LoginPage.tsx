@@ -215,9 +215,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
                     disabled={loading}
                     maxLength={40}
                     className="w-full h-11 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#0f1829] px-3.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:bg-white dark:focus:bg-[#131e33] disabled:opacity-50"
-                    placeholder={L('支持中文、韩文、阿拉伯文、英文或任意字符', 'Any language, script, letters, or symbols', 'أدخل أي نص: عربي، صيني، كوري، إنجليزي أو رموز')}
+                    placeholder={L('请输入用户名', 'Enter username', 'أدخل اسم المستخدم')}
                   />
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">{L('支持任意文字（中文、韩文、阿拉伯文、英文、数字、符号等），1-40 个字符', 'Supports any script (Chinese, Korean, Arabic, English, symbols), 1-40 chars', 'يدعم أي لغة أو نص (العربية، الصينية، الكورية، الإنجليزية، الرموز)، 1-40 حرفًا')}</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">{L('1-40 个字符', '1-40 characters', '1-40 حرفًا')}</span>
                 </label>
                 <label className="block space-y-1.5">
                   <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{L('邮箱', 'Email', 'البريد الإلكتروني')}</span>

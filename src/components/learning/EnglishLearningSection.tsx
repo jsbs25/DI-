@@ -758,7 +758,7 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
             ) : (
               <div>
                 <span className="one-badge one-badge-gold">{activeWord.level} · {activeWord.pos}</span>
-                <h3 className="mt-3 text-2xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-3xl">
+                <h3 className="mt-4 text-4xl font-semibold tracking-tight text-[color:var(--color-one-text)]">
                   {activeWord.word}
                 </h3>
                 <p className="mt-1.5 font-mono text-sm text-[#8ECFFF]">

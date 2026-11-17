@@ -214,11 +214,11 @@ export const SolarSystemDirectory: React.FC<SolarSystemDirectoryProps> = ({ onSe
               <Orbit className="h-3.5 w-3.5" />
               <span>ONE UNIVERSE · SPACE DIRECTORY</span>
             </div>
-            <h2 id="solar-system-heading" className="text-xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-2xl">
+            <h2 id="solar-system-heading" className="text-2xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-3xl lg:text-4xl">
               ONE UNIVERSE
             </h2>
-            <p className="mt-1 text-xs font-medium tracking-[0.12em] text-[color:var(--color-one-text-muted)]">One World. Infinite Possibilities.</p>
-            <p className="mt-2 max-w-2xl text-xs leading-6 text-[color:var(--color-one-text-muted)] sm:text-sm">
+            <p className="mt-1 text-sm font-medium tracking-[0.12em] text-[color:var(--color-one-text-muted)]">One World. Infinite Possibilities.</p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-[color:var(--color-one-text-muted)]">
               真实 3D 天体与空间入口。每个天体对应已开放或建设中的数字空间，信息与入口均以真实生态映射为准。
             </p>
           </div>
@@ -260,7 +260,7 @@ export const SolarSystemDirectory: React.FC<SolarSystemDirectoryProps> = ({ onSe
                 <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[color:var(--color-one-text-dim)]">{activeBody.name}</span>
                 <span className="one-badge one-badge-neutral font-mono normal-case tracking-normal">{activeBody.type.replace(/_/g, ' ')}</span>
               </div>
-              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-3xl">{activeBody.chineseName}</h3>
+              <h3 className="mt-2 text-3xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-4xl">{activeBody.chineseName}</h3>
               <p className="mt-2 text-sm leading-6 text-[color:var(--color-one-text-muted)]">{activeBody.humanityRole.description}</p>
             </div>
 

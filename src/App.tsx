@@ -9,6 +9,8 @@ import { GlobalFeed } from './components/social/GlobalFeed.tsx';
 import { GlobalMessenger, type MessengerQuickAction } from './components/chat/GlobalMessenger.tsx';
 import { AIHub } from './components/ai/AIHub.tsx';
 import { CreatorHub } from './components/creator/CreatorHub.tsx';
+import { VideoCenter } from './components/video/VideoCenter.tsx';
+import { GameCenter } from './components/games/GameCenter.tsx';
 import { CommunityList } from './components/community/CommunityList.tsx';
 import { UserProfileModal } from './components/profile/UserProfileModal.tsx';
 import { LuxuryAdBanner } from './components/commercial/LuxuryAdBanner.tsx';
@@ -32,13 +34,11 @@ import { MoonAcademy } from './universe/MoonAcademy.tsx';
 import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
+import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
+import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
 import { GlobalMiniPlayer } from './components/music/GlobalMiniPlayer.tsx';
-import { GameCenter } from './components/games/GameCenter.tsx';
-import { VideoCenter } from './components/video/VideoCenter.tsx';
-import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
-import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
-import type { GameId, OneAgentAction, SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
+import type { SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -109,8 +109,6 @@ export default function App() {
   const [venusQuickAction, setVenusQuickAction] = useState<VenusAgentAction | null>(null);
   const [saturnQuickAction, setSaturnQuickAction] = useState<SaturnAgentAction | null>(null);
   const [browserQuickSearch, setBrowserQuickSearch] = useState<{ seq: number; query: string } | null>(null);
-  const [mercuryQuickSearch, setMercuryQuickSearch] = useState<{ seq: number; query: string } | null>(null);
-  const [gameQuickLaunch, setGameQuickLaunch] = useState<{ seq: number; game: GameId } | null>(null);
 
   useEffect(() => { document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'; document.documentElement.lang = lang; }, [lang]);
 
@@ -138,9 +136,13 @@ export default function App() {
   }, []);
 
   const isViewportWorkspace = ['universe', 'chat', 'browser'].includes(currentTab);
-  const isSpaceExperience = isViewportWorkspace || ['globe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge', 'call'].includes(currentTab);
+  const isSpaceExperience = isViewportWorkspace || ['globe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge', 'network', 'settings', 'profile', 'call'].includes(currentTab);
   useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
 
+  useEffect(() => {
+    if (currentTab === 'settings') setIsSecurityModalOpen(true);
+    if (currentTab === 'profile' && currentUser) setProfileModalUser(currentUser);
+  }, [currentTab, currentUser]);
 
 
   const refreshConversations = async () => { try { const res = await fetch('/api/conversations'); const data = await res.json(); if (data.success) setConversations(data.conversations || []); } catch {} };
@@ -185,7 +187,7 @@ export default function App() {
   const handleUpdateProfile = async (userData: Partial<User>) => { try { const res = await fetch('/api/auth/update-profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(userData) }); const data = await res.json(); if (data.success && data.user) setCurrentUser(data.user); } catch {} };
   const handleAuthSuccess = (user: User, token: string, isNewRegistration: boolean) => { try { if (token) localStorage.setItem('earth_one_token', token); } catch {} setCurrentUser(user); void refreshConversations(); void refreshIntegrations(); try { const url = new URL(window.location.href); if (url.searchParams.get('module') === 'brand') { url.searchParams.delete('module'); window.history.replaceState({}, '', url.pathname + url.search); setCurrentTab('globe'); } } catch {} if (isNewRegistration || user.hasCompletedOnboarding === false) setIsOnboardingModalOpen(true); else { setWelcomeToast(`Welcome back, ${user.displayName}!`); setTimeout(() => setWelcomeToast(null), 4000); if (user.location?.isPublic) { setCurrentTab('globe'); setFocusCoordinates({ lat: user.location.lat, lng: user.location.lng, timestamp: Date.now() }); } } };
   const handleOnboardingComplete = async (updatedUser: User) => { setCurrentUser(updatedUser); setIsOnboardingModalOpen(false); const nodesRes = await fetch('/api/globe/nodes'); const nodesData = await nodesRes.json(); if (nodesData.success) setNodes(nodesData.nodes); setWelcomeToast(`Beacon active in ${updatedUser.location?.cityName || ''}`); setTimeout(() => setWelcomeToast(null), 5000); setCurrentTab('globe'); setFocusCoordinates({ lat: updatedUser.location.lat, lng: updatedUser.location.lng, timestamp: Date.now() }); };
-  const handleLogout = async () => { try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {} try { localStorage.removeItem('earth_one_token'); } catch {} setCurrentUser(null); setConversations([]); setIntegrations([]); setActiveConversationId('conv_global'); setWelcomeToast('Logged out.'); setTimeout(() => setWelcomeToast(null), 3000); };
+  const handleLogout = async () => { window.dispatchEvent(new Event('one-music-force-stop')); try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {} try { localStorage.removeItem('earth_one_token'); } catch {} setCurrentUser(null); setConversations([]); setIntegrations([]); setActiveConversationId('conv_global'); setWelcomeToast('Logged out.'); setTimeout(() => setWelcomeToast(null), 3000); };
   const handleSelectGlobeUser = (node: GlobeUserNode) => { const fullUser: User = { id: node.userId, username: node.userId, displayName: node.displayName, avatar: node.avatar, bio: node.latestThought || '', location: { countryCode: node.countryCode, countryName: node.countryName, cityName: node.cityName, lat: node.lat, lng: node.lng, isPublic: true }, interests: [], followersCount: 0, followingCount: 0, tipsReceived: 0, isOnline: node.isOnline, verified: true, joinedAt: '' } as any; setProfileModalUser(fullUser); };
   const handleOpenDirectChat = async (targetUser: User) => { const existing = conversations.find(c => c.type === 'direct' && c.participantIds?.includes(targetUser.id)); if (existing) { setActiveConversationId(existing.id); setDirectOpenSeq(s => s + 1); setCurrentTab('chat'); return; } try { const res = await fetch('/api/conversations/direct', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetUserId: targetUser.id }) }); const data = await res.json().catch(() => ({})); if (data.success) { if (Array.isArray(data.conversations)) setConversations(data.conversations); else await refreshConversations(); if (data.conversation?.id) setActiveConversationId(data.conversation.id); setDirectOpenSeq(s => s + 1); setCurrentTab('chat'); return; } } catch {} setDirectOpenSeq(s => s + 1); setCurrentTab('chat'); };
   const handleQuickCall = (kind: 'audio' | 'video', target: { targetUserId?: string; conversationId?: string }) => {
@@ -204,87 +206,25 @@ export default function App() {
   };
   const handleEnterPlanet = (planetId: string) => { const eco = getPlanetEcosystem(planetId); if (!eco || !eco.available) return; setCurrentTab(eco.tab); setBrowserInitialQuery(null); };
 
-  const handleExecuteSiteAction = (action: OneAgentAction) => {
-    switch (action.type) {
-      case 'navigate_tab': {
-        const nextTab = normalizeModule(action.tab);
-        setCurrentTab(nextTab);
-        if (nextTab !== 'browser') setBrowserInitialQuery(null);
-        break;
-      }
-      case 'fly_to':
-        setFocusCoordinates({ lat: action.lat, lng: action.lng, timestamp: Date.now() });
-        setCurrentTab('globe');
-        break;
-      case 'play_music':
-        setVenusQuickAction({
-          seq: Date.now(),
-          kind: 'crawl_and_play',
-          query: action.query,
-        });
-        setCurrentTab('venus');
-        break;
-      case 'watch_documentary':
-        setSaturnQuickAction({
-          seq: Date.now(),
-          query: action.query,
-          platform: action.platform,
-          autoPlayRandom: action.randomPick ?? true,
-        });
-        setCurrentTab('saturn');
-        break;
-      case 'browser_search':
-        setBrowserQuickSearch({ seq: Date.now(), query: action.query });
-        setCurrentTab('browser');
-        break;
-      case 'mercury_search':
-        setMercuryQuickSearch({ seq: Date.now(), query: action.query });
-        setCurrentTab('mercury');
-        break;
-      case 'open_game':
-        setGameQuickLaunch({ seq: Date.now(), game: action.game });
-        setCurrentTab('game');
-        break;
-      case 'messenger_action':
-        if (action.action === 'open_calls') {
-          handleOpenCallCenterFromHome();
-        } else if (action.action === 'start_audio_call') {
-          handleQuickCall('audio', { conversationId: activeConversationId });
-        } else if (action.action === 'start_video_call') {
-          handleQuickCall('video', { conversationId: activeConversationId });
-        } else {
-          setMessengerQuickAction({ seq: Date.now(), kind: 'open_chat', conversationId: activeConversationId });
-          setCurrentTab('chat');
-        }
-        break;
-      case 'create_post':
-        if (action.content.trim()) {
-          void handleCreatePost({ content: action.content.trim(), category: action.category || 'thought' });
-        }
-        setCurrentTab('feed');
-        break;
-      case 'set_theme':
-        setTheme(action.theme);
-        break;
-      case 'set_language':
-        setLang(action.lang);
-        break;
-      case 'set_immersive':
-        if (action.immersive) setCurrentTab('globe');
-        setImmersive(action.immersive);
-        break;
-      case 'open_command_palette':
-        setCommandOpen(true);
-        break;
-      case 'replay_intro':
-        setShowIntro(true);
-        break;
-      default:
-        break;
-    }
-  };
-
   if (!currentUser) {
+    if (currentTab === 'brand') {
+      return (
+        <>
+          <OfflineIndicator lang={lang} />
+          <BrandIdentitySystem
+            lang={lang}
+            onBackToGlobe={() => {
+              setCurrentTab('globe');
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('module');
+                window.history.replaceState({}, '', url.pathname + url.search);
+              } catch {}
+            }}
+          />
+        </>
+      );
+    }
     return (
       <>
         <OfflineIndicator lang={lang} />
@@ -367,7 +307,7 @@ export default function App() {
         {currentTab === 'universe' && <div className="h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] bg-[#101c33] text-slate-100"><UniverseEngine onSwitchToEarthWorld={() => setCurrentTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
         {currentTab === 'saturn' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><SaturnSpace lang={lang} onBack={() => setCurrentTab('universe')} quickAction={saturnQuickAction} /></div>}
         {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><VenusMusicSpace lang={lang} onBack={() => setCurrentTab('globe')} quickAction={venusQuickAction} /></div>}
-        {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} quickSearch={mercuryQuickSearch} /></div>}
+        {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MercurySearch lang={lang} onBack={() => setCurrentTab('universe')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); setCurrentTab('knowledge'); }} onSelectTab={setCurrentTab} /></div>}
         {currentTab === 'feed' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); setCurrentTab('globe'); }} lang={lang} /></div>}
         <GlobalMessenger
           conversations={conversations}
@@ -387,27 +327,70 @@ export default function App() {
         <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[#121e36] text-slate-100"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} /></div></div>
         {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
         {currentTab === 'arabic-learning' && (
-          <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]">
+          <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]">
             <ArabicLearningHub
               lang={lang}
               onOpenLibrary={() => setCurrentTab('library')}
-              onOpenUrlInBrowser={(url) => {
-                setBrowserQuickSearch({ seq: Date.now(), query: url });
-                setCurrentTab('browser');
-              }}
             />
           </div>
         )}
         {currentTab === 'knowledge' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => setCurrentTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); setCurrentTab('library'); }} /></div>}
         <div className={currentTab === 'browser' ? 'block h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className={`h-full w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] ${isMobileKeyboardOpen ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(4.65rem+env(safe-area-inset-bottom))]'} md:pb-0 flex flex-col min-h-0 bg-[#121e36] text-slate-100`}><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} quickSearchRequest={browserQuickSearch} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => setCurrentTab('universe')} onBackToGlobe={() => setCurrentTab('globe')} /></div></div>
+        {currentTab === 'network' && (
+          <OneNetworkCenter
+            lang={lang}
+            onOpenBrowserProxy={() => {
+              setBrowserOpenProxySeq((s) => s + 1);
+              setCurrentTab('browser');
+            }}
+            onOpenCalls={() => setCurrentTab('chat')}
+          />
+        )}
         {currentTab === 'crawler' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><CrawlerDashboard lang={lang} /></div>}
         {currentTab === 'creator' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
+        {currentTab === 'video' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><VideoCenter videos={videos} lang={lang} /></div>}
+        {currentTab === 'game' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><GameCenter currentUser={currentUser} lang={lang} /></div>}
         {currentTab === 'community' && <div className="pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
         {currentTab === 'academy' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonAcademy lang={lang} currentUser={currentUser} onBack={() => setCurrentTab('universe')} /></div>}
-        {currentTab === 'game' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><GameCenter currentUser={currentUser} lang={lang} quickLaunch={gameQuickLaunch} /></div>}
-        {currentTab === 'video' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><VideoCenter videos={videos} lang={lang} /></div>}
-        {currentTab === 'network' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><OneNetworkCenter lang={lang} onOpenBrowserProxy={() => { setBrowserOpenProxySeq(s => s + 1); setCurrentTab('browser'); }} onOpenCalls={handleOpenCallCenterFromHome} /></div>}
-        {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8"><BrandIdentitySystem lang={lang} onBackToGlobe={() => setCurrentTab('globe')} /></div>}
+        {currentTab === 'settings' && (
+          <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
+            <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
+              <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'设置与安全':'Settings & Security'}</h1>
+              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'ONE 当前未提供独立的全局设置页面。账户、安全、隐私与绑定等真实能力已在「账户与安全」中提供。':'ONE does not currently provide a standalone global settings page. Real account, security, privacy, and linking controls are available in Account & Security.'}</p>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setIsSecurityModalOpen(true)} className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">Account &amp; Security</button>
+                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.06] text-slate-800 dark:text-slate-100 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-white/[0.12]">{lang==='zh'?'个人资料':'Profile'}</button>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='zh'?'状态：独立设置模块未实现；已开放能力均为真实功能。':'Status: standalone settings module not implemented; exposed controls are real.'}</p>
+            </div>
+          </div>
+        )}
+        {currentTab === 'profile' && (
+          <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
+            <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
+              <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'个人主页':'Profile'}</h1>
+              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'你的个人资料与地球信标通过真实资料面板管理（非独立路由页）。':'Your profile and globe beacon are managed via the real profile panel (no standalone route page).'}</p>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">{lang==='zh'?'打开个人资料':'Open profile'}</button>
+                <button onClick={() => setIsOnboardingModalOpen(true)} className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.06] text-slate-800 dark:text-slate-100 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-white/[0.12]">{lang==='zh'?'编辑地球信标':'Edit beacon'}</button>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='zh'?'状态：独立 profile 页面未实现；以上入口为真实功能。':'Status: standalone profile page not implemented; entries above are real.'}</p>
+            </div>
+          </div>
+        )}
+        {currentTab === 'call' && (
+          <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
+            <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
+              <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'通话':'Calls'}</h1>
+              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'当前没有独立的通话模块页面。通话能力（如可用）集成在消息/会话体验中，并依赖真实设备权限与连接状态；本路由不提供伪造通话界面。':'There is no standalone call module page. Call capabilities, where available, are integrated into messaging/conversations and depend on real device permissions and connectivity; this route does not provide a fabricated call UI.'}</p>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setCurrentTab('chat')} className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">{lang==='zh'?'打开消息':'Open messages'}</button>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='zh'?'状态：独立 call 模块未实现；多端/设备通话需真实环境验证。':'Status: standalone call module not implemented; multi-device calling requires real-environment verification.'}</p>
+            </div>
+          </div>
+        )}
+        {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><BrandIdentitySystem lang={lang} onBackToGlobe={() => setCurrentTab('globe')} /></div>}
       </main>
 
       <AppDock currentTab={currentTab} lang={lang} hidden={(currentTab === 'globe' && immersive) || (isMobileKeyboardOpen && isViewportWorkspace)} onSelectTab={(tab) => { setCurrentTab(tab); if (tab !== 'browser') setBrowserInitialQuery(null); }} />
@@ -423,7 +406,6 @@ export default function App() {
         lang={lang}
         showLauncher={!immersive}
         placement={currentTab === 'globe' ? 'center-bottom' : 'corner'}
-        onExecuteAction={handleExecuteSiteAction}
         onFlyTo={(lat, lng) => {
           setFocusCoordinates({ lat, lng, timestamp: Date.now() });
           setCurrentTab('globe');
@@ -458,11 +440,6 @@ export default function App() {
         onSetTheme={setTheme}
         onSetLang={setLang}
         currentTab={currentTab}
-        siteContext={{
-          theme,
-          immersive,
-          userName: currentUser?.displayName,
-        }}
       />
 
       {!isSpaceExperience && (

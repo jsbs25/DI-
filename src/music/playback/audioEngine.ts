@@ -104,7 +104,6 @@ class GlobalAudioEngine {
     const el = this.element;
     if (!el) return false;
     try {
-      await this.resumeContext();
       await el.play();
       return true;
     } catch {
@@ -135,10 +134,7 @@ class GlobalAudioEngine {
     if (typeof window === 'undefined') return null;
     const el = this.element;
     if (!el) return null;
-    if (this.analyser) {
-      if (this.audioCtx?.state === 'suspended') void this.resumeContext();
-      return this.analyser;
-    }
+    if (this.analyser) return this.analyser;
     try {
       if (this.attachedTo && this.attachedTo !== el) {
         // cannot safely reattach a different media element to an existing source in most browsers
@@ -156,7 +152,6 @@ class GlobalAudioEngine {
       this.analyser = analyser;
       this.sourceNode = source;
       this.attachedTo = el;
-      if (ctx.state === 'suspended') void this.resumeContext();
       return analyser;
     } catch {
       return this.analyser;
