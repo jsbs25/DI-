@@ -150,12 +150,52 @@ export function extractInlineAgentDirective(rawText: string): {
   return { action: parsedAction, spokenText };
 }
 
-export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAction | null {
-  const raw = text.trim();
+function isConversationalFraming(
+  raw: string,
+  history?: Array<{ role: string; content: string }>
+): boolean {
+  const clean = raw
+    .trim()
+    .replace(/多林国/g, '多邻国')
+    .replace(/记录片/g, '纪录片');
+  if (!clean) return false;
+
+  // Negation / boundary statements ("别打开音乐", "不要去图书馆", "不是让你放歌", "不希望它像机器人")
+  if (/(?:别打开|不要打开|别去|不要去|不用打开|不用放|不是让你|不希望|不要总是|别用)/.test(clean)) {
+    return true;
+  }
+
+  // Design / brainstorming / hypothetical framing ("我想做一个AI，能陪我聊天也可以放音乐看书")
+  if (/(?:我想做一个|我要做一个|正在开发|正在设计|构想|讨论一下|比如|例如|如果|既能.+又能|不仅.+还能|我希望它(?:能够?)?|设计一个|打造一个|用来)/.test(clean)) {
+    return true;
+  }
+
+  // Informational questions asking *about* a module instead of launching it ("多邻国能学啥", "宇宙为什么黑")
+  if (/(?:能学啥|是什么|什么意思|为什么|有什么功能|怎么样|好用吗|原理|区别)/.test(clean) && !/^(打开|进入|切换|去|播放|放|听|看|读|找)/.test(clean)) {
+    return true;
+  }
+
+  // Follow-up markers tied to an existing discussion
+  if (Array.isArray(history) && history.length > 0 && /^(?:对[，,\s]*|嗯[，,\s]*|没错[，,\s]*|但是|不过|可是|其实|那如果)/.test(clean)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function parseInstantAgentAction(
+  text: string,
+  isZh: boolean,
+  history?: Array<{ role: string; content: string }>
+): OneAgentAction | null {
+  const raw = text
+    .trim()
+    .replace(/多林国/g, '多邻国')
+    .replace(/记录片/g, '纪录片');
   if (!raw) return null;
   const lower = raw.toLowerCase();
 
-  // 1. Highest priority: Music playback stop / pause / resume / skip
+  // 1. Highest priority: Music playback stop / pause / resume / skip (direct transport commands)
   if (
     /停止播放|停止放歌|停止音乐|别放了|别播了|别放歌|别唱了|关掉音乐|关闭音乐|关闭播放|关了音乐|把音乐关|把歌关|把音乐停|把歌停|停一下|停下|停了吧|停吧|不听了|不要听了|暂停播放|暂停音乐|stop playing|stop music|stop the music|turn off music|pause music|^停$|^stop$|^pause$/i.test(
       raw
@@ -181,6 +221,11 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
     return { type: 'play_music', control: 'prev', reply: isZh ? '好的，切回上一首歌。' : 'Going back to the previous track.' };
   }
 
+  // Conversational framing / brainstorming / informational questions must NOT hijack tabs
+  if (isConversationalFraming(raw, history)) {
+    return null;
+  }
+
   // 2. Crawl & Play Music (natural expressions)
   if (
     /听歌|听首歌|听点歌|想听歌|放歌|放首歌|放点歌|放音乐|听音乐|播放音乐|开音乐|来首歌|来点音乐|来一首|放一首|听一首|打开.*音乐|开启.*音乐|进入.*音乐|去.*音乐|听钢琴|放钢琴|听轻音乐|放轻音乐|听纯音乐|爬.*歌|play.*(song|music|track)|open.*music|listen to music/i.test(
@@ -203,10 +248,15 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
   }
 
   // 3. Auto-Search & Auto-Open Book in Digital Library (works seamlessly on mobile & desktop)
+  const mentionsSiteModule =
+    /(多邻国|多林国|语言学习|音乐|影视|视频|纪录片|记录片|影院|浏览器|宇宙|星空|天文台|知识图谱|工作台|智能中枢|爬虫|网络中心|社区|创作中心|游戏中心|品牌|首页|主页|消息|信息|发现|广场|duolingo|music|video|browser|universe|observatory|ai hub|crawler|community|creator|game|home|globe)/i.test(
+      raw
+    );
   if (
     /《[^》]{1,40}》/.test(raw) ||
     /(我想|我要|帮我|请|去|给我)?(看|读|找|搜|查|打开|翻开|听).{0,16}(这本|一本|那本|本|个)?书/.test(raw) ||
-    /(我想看|我要看|打开|找一本|找本|搜一本|读一本)\s*[\u4e00-\u9fffA-Za-z0-9]{2,20}(?=书|$)/.test(raw) ||
+    (!mentionsSiteModule &&
+      /(我想看|我要看|找一本|找本|搜一本|读一本|翻开)\s*[\u4e00-\u9fffA-Za-z0-9]{2,20}(?=书|$)/.test(raw)) ||
     /\b(read|open|find)\b.*\b(book|novel|ebook|audiobook)\b/i.test(raw)
   ) {
     const query = extractBookQuery(raw);

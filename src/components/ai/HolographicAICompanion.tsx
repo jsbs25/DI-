@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
+import { getAiProfileKey } from '../../utils/aiProfile.ts';
 import { useOptionalPlayerContext } from '../../music/PlayerContext.tsx';
 import {
   extractInlineAgentDirective,
@@ -316,6 +317,16 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const recStateRef = useRef<'stopped' | 'starting' | 'running'>('stopped');
   const recKeepaliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recRetryDelayRef = useRef(180);
+  const profileKeyRef = useRef<string>(getAiProfileKey());
+  const liveWsRef = useRef<WebSocket | null>(null);
+  const wsPendingTurnRef = useRef<{
+    turnId: string;
+    epoch: number;
+    resolve: (res: { rawReply: string; model?: string }) => void;
+    reject: (err: Error) => void;
+    onDelta: (delta: string) => void;
+    rawReply: string;
+  } | null>(null);
 
   const ttsQueueRef = useRef<QueuedSpeechItem[]>([]);
   const ttsStreamDoneRef = useRef(true);
@@ -329,6 +340,54 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const ttsAudioCtxRef = useRef<AudioContext | null>(null);
 
   modelIdRef.current = modelId;
+
+  const ensureLiveWs = useCallback(() => {
+    if (typeof window === 'undefined' || typeof WebSocket === 'undefined') return null;
+    const existing = liveWsRef.current;
+    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+      return existing;
+    }
+    try {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${window.location.host}/ws/ai-live?profileKey=${encodeURIComponent(profileKeyRef.current)}`);
+      liveWsRef.current = ws;
+      ws.onmessage = (ev) => {
+        let msg: any = null;
+        try { msg = JSON.parse(String(ev.data || '')); } catch { return; }
+        if (!msg || typeof msg.type !== 'string') return;
+        const pending = wsPendingTurnRef.current;
+        if (!pending || msg.turnId !== pending.turnId || pending.epoch !== turnEpochRef.current) return;
+
+        if (msg.type === 'turn:delta' && typeof msg.delta === 'string') {
+          pending.rawReply += msg.delta;
+          pending.onDelta(msg.delta);
+        } else if (msg.type === 'turn:done') {
+          const finalRaw = typeof msg.rawReply === 'string' && msg.rawReply ? msg.rawReply : (pending.rawReply || String(msg.reply || ''));
+          wsPendingTurnRef.current = null;
+          pending.resolve({ rawReply: finalRaw, model: msg.model });
+        } else if (msg.type === 'turn:cancelled') {
+          wsPendingTurnRef.current = null;
+          const abortErr = new Error('Turn aborted');
+          (abortErr as any).name = 'AbortError';
+          pending.reject(abortErr);
+        } else if (msg.type === 'turn:error') {
+          wsPendingTurnRef.current = null;
+          pending.reject(new Error(String(msg.error || 'WebSocket turn failed')));
+        }
+      };
+      ws.onclose = () => {
+        if (liveWsRef.current === ws) liveWsRef.current = null;
+        const pending = wsPendingTurnRef.current;
+        if (pending) {
+          wsPendingTurnRef.current = null;
+          pending.reject(new Error('WebSocket disconnected'));
+        }
+      };
+      return ws;
+    } catch {
+      return null;
+    }
+  }, []);
 
   // Ensure reusable HTMLAudioElement with subtle warmth EQ for sweet expressive neural MP3 playback
   const ensureTtsAudioUnlocked = useCallback(() => {
@@ -807,6 +866,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
    */
   const interruptCurrentTurn = useCallback(() => {
     turnEpochRef.current += 1;
+    if (liveWsRef.current && liveWsRef.current.readyState === WebSocket.OPEN && wsPendingTurnRef.current) {
+      try {
+        liveWsRef.current.send(JSON.stringify({ type: 'turn:cancel', turnId: wsPendingTurnRef.current.turnId }));
+      } catch {}
+      wsPendingTurnRef.current = null;
+    }
     if (activeFetchAbortRef.current) {
       try {
         activeFetchAbortRef.current.abort();
@@ -827,6 +892,21 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     turnEpochRef.current += 1;
     isSendingRef.current = false;
     setActiveEmotion(null);
+
+    if (wsPendingTurnRef.current) {
+      if (liveWsRef.current && liveWsRef.current.readyState === WebSocket.OPEN) {
+        try {
+          liveWsRef.current.send(JSON.stringify({ type: 'turn:cancel', turnId: wsPendingTurnRef.current.turnId }));
+        } catch {}
+      }
+      wsPendingTurnRef.current = null;
+    }
+    if (liveWsRef.current) {
+      try {
+        liveWsRef.current.close();
+      } catch {}
+      liveWsRef.current = null;
+    }
 
     if (activeFetchAbortRef.current) {
       try {
@@ -1148,9 +1228,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       }
 
       historyRef.current = [...historyRef.current.slice(-20), { role: 'user', content: clean }];
+      const priorHistory = historyRef.current.slice(0, -1);
 
-      // 1. Instant local command dispatch (<1ms, zero network wait)
-      const instantAction = parseInstantAgentAction(clean, isZh);
+      // 1. Instant local command dispatch (<1ms, zero network wait) with context-aware anti-hijack guard
+      const instantAction = parseInstantAgentAction(clean, isZh, priorHistory);
       if (instantAction && instantAction.type !== 'none') {
         const isMusicAction = instantAction.type === 'play_music';
         if (!isMusicAction) {
@@ -1215,7 +1296,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       }
 
       // 3. Instant natural conversation (<1ms, responds immediately to greetings & daily chat)
-      const banterRaw = matchPureSocialBanter(clean, isZh);
+      const banterRaw = priorHistory.length === 0 ? matchPureSocialBanter(clean, isZh) : null;
       if (banterRaw) {
         const banterParsed = extractEmotionTag(banterRaw);
         historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: banterParsed.text }];
@@ -1236,7 +1317,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      // 4. Live DeepSeek-V3 / Live Knowledge Engine streaming turn with AbortController barge-in
+      // 4. Live DeepSeek-V3 / WebSocket / Live Knowledge Engine streaming turn with AbortController barge-in
       setPhase('thinking');
       stopOutputAudio();
       ttsStreamDoneRef.current = false;
@@ -1256,27 +1337,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         : 'deepseek-v3';
 
       try {
-        const res = await fetch('/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            prompt: clean,
-            modelId: activeDeepSeekModel,
-            mode: 'voice-agent',
-            maxTokens: 160,
-            stream: true,
-            history: historyRef.current.slice(-20),
-          }),
-        });
-
         let rawReply = '';
         let actionResolved = false;
         let mediaActionTriggered = false;
         let spokenOffset = 0;
         let detectedEmotion: VoiceEmotion | null = null;
 
-        await readAIStream(res, (delta) => {
+        const handleStreamDelta = (delta: string) => {
           if (myEpoch !== turnEpochRef.current) return;
           rawReply += delta;
 
@@ -1303,7 +1370,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
           if (!shouldSpeak || mediaActionTriggered) return;
 
-          // Wait briefly if inline [[EMO:...]] tag is still closing
           const spokenTrim = parsed.spokenText.trimStart();
           if (spokenTrim.startsWith('[[EMO:') && !spokenTrim.includes(']]') && spokenTrim.length < 40) {
             return;
@@ -1312,7 +1378,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           const emoExtracted = extractEmotionTag(parsed.spokenText);
           if (emoExtracted.emotion) detectedEmotion = emoExtracted.emotion;
 
-          // Stream short natural clauses immediately on 4+ chars for ultra-low first-word voice latency
           const display = emoExtracted.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '');
           const unuttered = display.slice(spokenOffset);
           if (!unuttered) return;
@@ -1323,7 +1388,71 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             spokenOffset += segment.length;
             enqueueEmotionalText(segment, myEpoch, detectedEmotion);
           }
-        });
+        };
+
+        const ws = liveWsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          const turnId = `ws_${myEpoch}_${Date.now()}`;
+          await new Promise<{ rawReply: string }>((resolve, reject) => {
+            wsPendingTurnRef.current = {
+              turnId,
+              epoch: myEpoch,
+              resolve: (out) => resolve(out),
+              reject,
+              onDelta: handleStreamDelta,
+              rawReply: '',
+            };
+            ws.send(
+              JSON.stringify({
+                type: 'turn:input',
+                turnId,
+                text: clean,
+                modelId: activeDeepSeekModel,
+                mode: 'voice-agent',
+                maxTokens: 200,
+                profileKey: profileKeyRef.current,
+                history: priorHistory.slice(-16),
+              })
+            );
+          }).catch(async (wsErr) => {
+            if (wsErr?.name === 'AbortError' || myEpoch !== turnEpochRef.current) throw wsErr;
+            // Transparently fall back to HTTP NDJSON stream if WS dropped mid-turn
+            rawReply = '';
+            spokenOffset = 0;
+            actionResolved = false;
+            const res = await fetch('/api/ai/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              signal: controller.signal,
+              body: JSON.stringify({
+                prompt: clean,
+                modelId: activeDeepSeekModel,
+                mode: 'voice-agent',
+                maxTokens: 200,
+                stream: true,
+                profileKey: profileKeyRef.current,
+                history: priorHistory.slice(-16),
+              }),
+            });
+            await readAIStream(res, handleStreamDelta);
+          });
+        } else {
+          const res = await fetch('/api/ai/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              prompt: clean,
+              modelId: activeDeepSeekModel,
+              mode: 'voice-agent',
+              maxTokens: 200,
+              stream: true,
+              profileKey: profileKeyRef.current,
+              history: priorHistory.slice(-16),
+            }),
+          });
+          await readAIStream(res, handleStreamDelta);
+        }
 
         if (myEpoch !== turnEpochRef.current) return;
         activeFetchAbortRef.current = null;
@@ -1430,6 +1559,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     recRetryDelayRef.current = 180;
     setVoiceActive(true);
     setPhase('connecting');
+    ensureLiveWs();
 
     // Unlock BOTH HTMLAudioElement + Web Speech Synthesis synchronously when inside user gesture
     ensureTtsAudioUnlocked();
@@ -1520,15 +1650,22 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             normClean(interimClean).length >= 2 &&
             spokenNorm.includes(normClean(interimClean));
 
+          const interimAction = interimClean.length >= 2
+            ? parseInstantAgentAction(interimClean, liveZh, historyRef.current)
+            : null;
+          const isPureTransportInterim = Boolean(
+            interimAction && interimAction.type === 'play_music' && interimAction.control
+          );
           const instantInterimMatch = Boolean(
             interimClean.length >= 2 &&
-              (parseInstantAgentAction(interimClean, liveZh) ||
+              (isPureTransportInterim ||
                 solvePrecisionQuery(interimClean, liveZh) ||
-                matchPureSocialBanter(interimClean, liveZh))
+                (historyRef.current.length === 0 && matchPureSocialBanter(interimClean, liveZh)))
           );
 
           const looksLikeIntentWhileMusic =
             instantInterimMatch ||
+            Boolean(interimAction) ||
             /^(one|你好|在吗|停止|停下|暂停|下一首|换歌|今天|现在|帮我|我在)/i.test(interimClean) ||
             interimClean.length >= 4;
 
@@ -1567,13 +1704,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             ) {
               return;
             }
-            // Drop ultra-short low-confidence lyric fragments only if music is loud and no command matched
             if (
               musicNowPlaying &&
               curNorm.length <= 2 &&
               minFinalConf > 0 &&
               minFinalConf < 0.42 &&
-              !parseInstantAgentAction(finalClean, liveZh) &&
+              !parseInstantAgentAction(finalClean, liveZh, historyRef.current) &&
               !matchPureSocialBanter(finalClean, liveZh)
             ) {
               return;
@@ -1583,9 +1719,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             return;
           }
 
-          // Speculative ultra-fast commit on stable interim transcript (cuts 500-800ms Chrome final delay)
+          // Speculative fast commit: only 160ms on unambiguous transport stop/next; 480ms quiet pause for conversational thoughts
           if (interimClean.length >= 2 && !isEchoOfAi) {
-            const commitDelay = instantInterimMatch ? 160 : (!musicNowPlaying || interimClean.length >= 4) ? 380 : 0;
+            const commitDelay = isPureTransportInterim ? 160 : (!musicNowPlaying || interimClean.length >= 4) ? 480 : 0;
             if (commitDelay > 0) {
               interimActionTimer = setTimeout(() => {
                 if (!sessionActiveRef.current) return;
@@ -1617,7 +1753,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             }, 3000);
             return;
           }
-          // Recover smoothly from aborted, audio-capture, network, or no-speech without losing continuous listening
           if (sessionActiveRef.current) {
             const waitMs = e?.error === 'audio-capture' || e?.error === 'network' ? 360 : 180;
             scheduleLaunch(waitMs);
@@ -1638,7 +1773,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         recognitionRef.current = rec;
         rec.start();
       } catch {
-        // Never kill continuous session on transient start race; backoff & retry cleanly
         recStateRef.current = 'stopped';
         if (sessionActiveRef.current) {
           const delay = recRetryDelayRef.current;
@@ -1650,9 +1784,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
     launchRecognizer();
 
-    // 2s keepalive watchdog guarantees continuous active listening even across browser audio-focus hiccups
+    // 2s keepalive watchdog guarantees continuous active listening + WS heartbeat
     recKeepaliveTimerRef.current = setInterval(() => {
       if (!sessionActiveRef.current) return;
+      ensureLiveWs();
+      if (liveWsRef.current && liveWsRef.current.readyState === WebSocket.OPEN) {
+        try { liveWsRef.current.send(JSON.stringify({ type: 'ping' })); } catch {}
+      }
       if (recStateRef.current === 'stopped' && !restartTimerRef.current) {
         launchRecognizer();
       } else if (phaseRef.current === 'connecting' && recStateRef.current === 'running') {
@@ -1661,7 +1799,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         }
       }
     }, 2000);
-  }, [ensureTtsAudioUnlocked, interruptCurrentTurn, pauseMusicForVoice, stopSessionResources]);
+  }, [ensureLiveWs, ensureTtsAudioUnlocked, interruptCurrentTurn, pauseMusicForVoice, stopSessionResources]);
 
   // Auto-resume continuous listening on load if mic permission was already granted and user has not turned it off
   const autoStartTriedRef = useRef(false);

@@ -11,6 +11,9 @@ export interface OpenAICompatibleRequest {
   messages: OpenAICompatibleMessage[];
   temperature?: number;
   timeoutMs?: number;
+  maxTokens?: number;
+  signal?: AbortSignal;
+  onToken?: (token: string) => void;
 }
 
 export interface OpenAICompatibleResponse {
@@ -65,6 +68,11 @@ export class OpenAICompatibleProvider {
     if (!request.messages.length) throw new Error('至少需要一条对话消息。');
 
     const controller = new AbortController();
+    const onExternalAbort = () => controller.abort();
+    if (request.signal) {
+      if (request.signal.aborted) controller.abort();
+      else request.signal.addEventListener('abort', onExternalAbort, { once: true });
+    }
     const timeout = setTimeout(
       () => controller.abort(),
       Math.max(1_000, request.timeoutMs ?? this.defaultTimeoutMs)
@@ -73,22 +81,71 @@ export class OpenAICompatibleProvider {
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        Accept: 'application/json'
+        Accept: request.onToken ? 'text/event-stream, application/json' : 'application/json'
       };
       const apiKey = request.apiKey?.trim();
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
+      const useStream = Boolean(request.onToken);
+      const bodyPayload: Record<string, any> = {
+        model,
+        messages: request.messages.map(({ role, content }) => ({ role, content })),
+        temperature: request.temperature ?? 0.7,
+        stream: useStream
+      };
+      if (typeof request.maxTokens === 'number' && request.maxTokens > 0) {
+        bodyPayload.max_tokens = request.maxTokens;
+      }
+
       const response = await fetch(endpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          model,
-          messages: request.messages.map(({ role, content }) => ({ role, content })),
-          temperature: request.temperature ?? 0.7,
-          stream: false
-        }),
+        body: JSON.stringify(bodyPayload),
         signal: controller.signal
       });
+
+      if (!response.ok) {
+        const rawErr = await response.text().catch(() => '');
+        let data: any = null;
+        try { data = rawErr ? JSON.parse(rawErr) : null; } catch {}
+        const providerMessage = data?.error?.message || data?.error || rawErr;
+        throw new Error(`OpenAI 兼容接口 HTTP ${response.status}: ${String(providerMessage).slice(0, 500)}`);
+      }
+
+      if (useStream && response.body && response.headers.get('content-type')?.includes('text/event-stream')) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullText = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const payload = trimmed.slice(5).trim();
+            if (!payload || payload === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(payload);
+              const delta = parsed?.choices?.[0]?.delta?.content || '';
+              if (delta) {
+                fullText += delta;
+                request.onToken?.(delta);
+              }
+            } catch {}
+          }
+          if (done) break;
+        }
+        if (fullText.trim()) {
+          return {
+            content: fullText.trim(),
+            tokens: Math.ceil(fullText.length / 2.5),
+            model
+          };
+        }
+      }
 
       const rawBody = await response.text();
       let data: any = null;
@@ -98,14 +155,10 @@ export class OpenAICompatibleProvider {
         data = null;
       }
 
-      if (!response.ok) {
-        const providerMessage = data?.error?.message || data?.error || rawBody;
-        throw new Error(`OpenAI 兼容接口 HTTP ${response.status}: ${String(providerMessage).slice(0, 500)}`);
-      }
-
       const content = this.extractText(data);
       if (!content) throw new Error('OpenAI 兼容接口返回了空响应。');
 
+      request.onToken?.(content);
       return {
         content,
         tokens: Number.isFinite(data?.usage?.total_tokens) ? data.usage.total_tokens : undefined,
@@ -113,11 +166,13 @@ export class OpenAICompatibleProvider {
       };
     } catch (error: any) {
       if (error?.name === 'AbortError') {
+        if (request.signal?.aborted) throw error;
         throw new Error(`OpenAI 兼容接口请求超时（${Math.max(1_000, request.timeoutMs ?? this.defaultTimeoutMs)}ms）。`);
       }
       throw error;
     } finally {
       clearTimeout(timeout);
+      if (request.signal) request.signal.removeEventListener('abort', onExternalAbort);
     }
   }
 

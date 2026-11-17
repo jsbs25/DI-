@@ -453,7 +453,8 @@ ${page.content.slice(0, 4500)}
     systemInstruction?: string,
     onToken?: (token: string) => void,
     history?: AIConversationMessage[],
-    maxTokens?: number
+    maxTokens?: number,
+    options?: { temperature?: number; signal?: AbortSignal }
   ): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
     let targetModel = this.getModel(modelId);
     if (modelId.startsWith('ollama:') && !targetModel) {
@@ -473,7 +474,15 @@ ${page.content.slice(0, 4500)}
     // 1. ALL CLOUD & BUILT-IN REQUESTS ROUTE STRICTLY TO DEEPSEEK (deepseek-v3 / deepseek-r1-open)
     if (targetModel.id === 'deepseek-r1-open' || targetModel.id === 'deepseek-v3') {
       try {
-        const result = await this.runDeepSeekEngine(targetModel.id, prompt, systemInstruction, onToken, history, maxTokens);
+        const result = await this.runDeepSeekEngine(
+          targetModel.id,
+          prompt,
+          systemInstruction,
+          onToken,
+          history,
+          maxTokens,
+          options
+        );
         const latency = Date.now() - startTime;
         const tokens = result.tokens || Math.ceil((prompt.length + result.content.length) / 3.5);
 
@@ -489,8 +498,10 @@ ${page.content.slice(0, 4500)}
         return { success: true, content: result.content, tokens };
       } catch (err: any) {
         const message = String(err?.message || err);
-        targetModel.status = 'error';
-        targetModel.errorMessage = message;
+        if (err?.name !== 'AbortError') {
+          targetModel.status = 'error';
+          targetModel.errorMessage = message;
+        }
         return { success: false, content: '', errorMessage: message };
       }
     }
@@ -500,7 +511,14 @@ ${page.content.slice(0, 4500)}
       const modelName = targetModel.id.slice('ollama:'.length);
       if (modelName.toLowerCase().startsWith('qwen3') || modelName.toLowerCase().includes('deepseek')) {
         try {
-          const result = await this.runFastOllamaModel(modelName, prompt, systemInstruction, onToken, history);
+          const result = await this.runFastOllamaModel(
+            modelName,
+            prompt,
+            systemInstruction,
+            onToken,
+            history,
+            options
+          );
           const latency = Date.now() - startTime;
           const tokens = result.tokens || Math.ceil((prompt.length + result.content.length) / 3.5);
           targetModel.status = 'active';
@@ -524,9 +542,13 @@ ${page.content.slice(0, 4500)}
         baseUrl: LOCAL_OLLAMA_BASE_URL,
         model: modelName,
         prompt,
-        systemInstruction
+        systemInstruction,
+        history,
+        onToken,
+        maxTokens,
+        temperature: options?.temperature,
+        signal: options?.signal
       });
-      if (res.success && onToken && res.content) onToken(res.content);
       return res;
     }
 
@@ -537,9 +559,13 @@ ${page.content.slice(0, 4500)}
         apiKey: this.customKey || this.deepseekKey,
         model: this.customModel || 'deepseek-chat',
         prompt,
-        systemInstruction
+        systemInstruction,
+        history,
+        onToken,
+        maxTokens,
+        temperature: options?.temperature,
+        signal: options?.signal
       });
-      if (res.success && onToken && res.content) onToken(res.content);
       return res;
     }
 
@@ -561,7 +587,8 @@ ${page.content.slice(0, 4500)}
     systemInstruction?: string,
     onToken?: (token: string) => void,
     history: AIConversationMessage[] = [],
-    maxTokens?: number
+    maxTokens?: number,
+    options?: { temperature?: number; signal?: AbortSignal }
   ): Promise<{ content: string; tokens?: number }> {
     const messages: ChatMessage[] = [];
     if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
@@ -576,13 +603,18 @@ ${page.content.slice(0, 4500)}
     if (this.isUsableKey(this.deepseekKey)) {
       const dsModel = modelId === 'deepseek-r1-open' ? 'deepseek-reasoner' : 'deepseek-chat';
       const controller = new AbortController();
+      const onExternalAbort = () => controller.abort();
+      if (options?.signal) {
+        if (options.signal.aborted) controller.abort();
+        else options.signal.addEventListener('abort', onExternalAbort, { once: true });
+      }
       const timer = setTimeout(() => controller.abort(), 22000);
       try {
         const useStream = Boolean(onToken);
         const requestBody: Record<string, any> = {
           model: dsModel,
           messages,
-          temperature: dsModel === 'deepseek-reasoner' ? undefined : 0.65,
+          temperature: dsModel === 'deepseek-reasoner' ? undefined : (options?.temperature ?? 0.68),
           stream: useStream
         };
         if (typeof maxTokens === 'number' && maxTokens > 0) {
@@ -629,11 +661,9 @@ ${page.content.slice(0, 4500)}
             }
             if (done) break;
           }
-          clearTimeout(timer);
           if (fullText.trim()) return { content: fullText };
         } else {
           const data = await response.json();
-          clearTimeout(timer);
           const text = data?.choices?.[0]?.message?.content || '';
           const tokens = data?.usage?.total_tokens || Math.ceil((prompt.length + text.length) / 3.5);
           if (text) {
@@ -642,9 +672,11 @@ ${page.content.slice(0, 4500)}
           }
         }
       } catch (err) {
-        clearTimeout(timer);
         console.warn('[DeepSeek Official API error]:', err instanceof Error ? err.message : err);
         throw err instanceof Error ? err : new Error(String(err));
+      } finally {
+        clearTimeout(timer);
+        if (options?.signal) options.signal.removeEventListener('abort', onExternalAbort);
       }
     }
 
@@ -654,7 +686,7 @@ ${page.content.slice(0, 4500)}
       this.ollamaChatModel ||
       (this.localOllamaModels.length > 0 ? this.localOllamaModels[0] : null);
     if (localDeepSeek) {
-      const fallbackRes = await this.callOllamaNative(localDeepSeek, prompt, systemInstruction);
+      const fallbackRes = await this.callOllamaNative(localDeepSeek, prompt, systemInstruction, history, options?.signal);
       if (fallbackRes.success) {
         onToken?.(fallbackRes.content);
         return { content: fallbackRes.content, tokens: fallbackRes.tokens };
@@ -669,10 +701,16 @@ ${page.content.slice(0, 4500)}
     prompt: string,
     systemInstruction?: string,
     onToken?: (token: string) => void,
-    history: AIConversationMessage[] = []
+    history: AIConversationMessage[] = [],
+    options?: { temperature?: number; signal?: AbortSignal }
   ): Promise<{ content: string; tokens?: number }> {
     await this.localOllamaWarmup;
     const controller = new AbortController();
+    const onExternalAbort = () => controller.abort();
+    if (options?.signal) {
+      if (options.signal.aborted) controller.abort();
+      else options.signal.addEventListener('abort', onExternalAbort, { once: true });
+    }
     const timeout = setTimeout(() => controller.abort(), LOCAL_OLLAMA_TIMEOUT_MS);
 
     try {
@@ -690,7 +728,7 @@ ${page.content.slice(0, 4500)}
           think: false,
           keep_alive: -1,
           options: {
-            temperature: 0.2,
+            temperature: options?.temperature ?? 0.5,
             num_predict: getOllamaTokenBudget(prompt, history),
             num_ctx: getOllamaContextWindow(prompt, systemInstruction, history)
           }
@@ -778,15 +816,25 @@ ${page.content.slice(0, 4500)}
   public async callOllamaNative(
     modelName: string,
     prompt: string,
-    systemInstruction?: string
+    systemInstruction?: string,
+    history: AIConversationMessage[] = [],
+    signal?: AbortSignal
   ): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
     const messages: Array<{ role: string; content: string }> = [];
     if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
+    for (const turn of history) {
+      if (turn?.content) messages.push({ role: turn.role, content: turn.content });
+    }
     messages.push({ role: 'user', content: prompt });
 
     for (const host of OLLAMA_HOSTS) {
       try {
         const controller = new AbortController();
+        const onExternalAbort = () => controller.abort();
+        if (signal) {
+          if (signal.aborted) controller.abort();
+          else signal.addEventListener('abort', onExternalAbort, { once: true });
+        }
         const timer = setTimeout(() => controller.abort(), LOCAL_OLLAMA_TIMEOUT_MS);
         const res = await fetch(`${host}/api/chat`, {
           method: 'POST',
@@ -799,6 +847,7 @@ ${page.content.slice(0, 4500)}
           signal: controller.signal
         });
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onExternalAbort);
         if (res.ok) {
           const data = await res.json();
           const content = data?.message?.content || data?.response || '';
@@ -830,16 +879,27 @@ ${page.content.slice(0, 4500)}
     model: string;
     prompt: string;
     systemInstruction?: string;
+    history?: AIConversationMessage[];
+    onToken?: (token: string) => void;
+    maxTokens?: number;
+    temperature?: number;
+    signal?: AbortSignal;
   }): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
     const isLocalOllama = opts.baseUrl.includes('localhost:11434') || opts.baseUrl.includes('127.0.0.1:11434');
     if (isLocalOllama) {
       // 优先走本地 Ollama 原生端点，完全免外网
-      const nativeRes = await this.callOllamaNative(opts.model, opts.prompt, opts.systemInstruction);
-      if (nativeRes.success) return nativeRes;
+      const nativeRes = await this.callOllamaNative(opts.model, opts.prompt, opts.systemInstruction, opts.history, opts.signal);
+      if (nativeRes.success) {
+        opts.onToken?.(nativeRes.content);
+        return nativeRes;
+      }
     }
 
     const messages: ChatMessage[] = [];
     if (opts.systemInstruction) messages.push({ role: 'system', content: opts.systemInstruction });
+    for (const turn of opts.history || []) {
+      if (turn?.content) messages.push({ role: turn.role, content: turn.content });
+    }
     messages.push({ role: 'user', content: opts.prompt });
 
     try {
@@ -848,6 +908,10 @@ ${page.content.slice(0, 4500)}
         apiKey: opts.apiKey,
         model: opts.model,
         messages: messages as OpenAICompatibleMessage[],
+        temperature: opts.temperature,
+        maxTokens: opts.maxTokens,
+        signal: opts.signal,
+        onToken: opts.onToken,
         timeoutMs: isLocalOllama ? LOCAL_OLLAMA_TIMEOUT_MS : undefined
       });
       return {

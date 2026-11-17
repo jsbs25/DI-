@@ -46,6 +46,7 @@ import { resolveCoordinates } from '../src/utils/geoData.ts';
 import { normalizePrivacySettings, DEFAULT_PRIVACY_SETTINGS, canViewProfileByPolicy, canSearchByField } from './privacyPolicy.ts';
 import { SEED_BOOKS, SEED_CRAWLER_TASKS, SEED_CRAWLED_PAGES } from './seedKnowledge.ts';
 import { crawlWebsite } from './webFetcher.ts';
+import type { AIMemoryItem } from './aiMemory.ts';
 
 const DATA_DIR = path.resolve(process.env.EARTH_ONE_DATA_DIR || path.join(process.cwd(), 'server_data'));
 const DATA_FILE = path.resolve(process.env.EARTH_ONE_DATA_FILE || path.join(path.dirname(DATA_DIR), 'server_data.json'));
@@ -572,6 +573,7 @@ class DataStore {
   notificationPrefs: Record<string, any> = {};
   privacySettings: Record<string, any> = {};
   calls: any[] = [];
+  aiMemories: AIMemoryItem[] = [];
 
   // EARTH ONE native identity (permanent public ID). Sequence is monotonic and never reused.
   nextEarthSequence: number = 100001;
@@ -690,6 +692,7 @@ class DataStore {
       notificationPrefs: this.notificationPrefs,
       privacySettings: this.privacySettings,
       calls: (this as any).calls || [],
+      aiMemories: this.aiMemories || [],
       networkPeers: (this as any).networkPeers || [],
       nextEarthSequence: this.nextEarthSequence,
       earthIdMap: this.earthIdMap,
@@ -752,6 +755,7 @@ class DataStore {
       this.notificationPrefs = data.notificationPrefs && typeof data.notificationPrefs === 'object' ? data.notificationPrefs : {};
       this.privacySettings = data.privacySettings && typeof data.privacySettings === 'object' ? data.privacySettings : {};
       (this as any).calls = Array.isArray(data.calls) ? data.calls : [];
+      this.aiMemories = Array.isArray(data.aiMemories) ? data.aiMemories : [];
       (this as any).networkPeers = Array.isArray(data.networkPeers) ? data.networkPeers : [];
       this.nextEarthSequence = Number.isFinite(data.nextEarthSequence) ? Math.max(100001, Math.floor(data.nextEarthSequence)) : 100001;
       this.earthIdMap = data.earthIdMap && typeof data.earthIdMap === 'object' ? data.earthIdMap : {};
@@ -953,6 +957,7 @@ class DataStore {
     ];
     this.messages = [];
     this.gameRooms = [];
+    this.aiMemories = [];
   }
 
   // Get active globe nodes for users with public location

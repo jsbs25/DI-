@@ -11,10 +11,16 @@ import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
 import { aiGateway } from './server/aiGateway.ts';
-import { buildConversationPrompt, manageSlidingWindowHistory } from './server/aiConversation.ts';
-import { answerWithLiveKnowledge } from './server/liveKnowledge.ts';
-import { solvePrecisionQuery } from './src/utils/precisionSolver.ts';
-import { matchPureSocialBanter } from './src/utils/oneAgentController.ts';
+import { executeAiTurn } from './server/aiTurnOrchestrator.ts';
+import {
+  deleteMemoryItem,
+  listMemories,
+  normalizeProfileKey,
+  updateMemoryItem,
+  upsertMemory,
+} from './server/aiMemory.ts';
+import { isConversationalFramingNotCommand } from './server/aiIntent.ts';
+import { parseInstantAgentAction } from './src/utils/oneAgentController.ts';
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
@@ -2987,228 +2993,190 @@ app.get('/api/ai/stats', (req, res) => {
 });
 
 app.post('/api/ai/chat', async (req, res) => {
-  const { prompt, messages, history, modelId, model, mode = 'general', apiKey, baseUrl, customModel, stream, maxTokens } = req.body;
-
-  // If the user supplied a custom API key, register it as the custom provider
-  // and route this request through it.
-  if (apiKey) {
-    aiGateway.registerCustomProvider(apiKey, baseUrl, customModel);
-  }
-
-  const resolvedModelId = apiKey
-    ? 'custom'
-    : (modelId || model || aiGateway.getChatModelId());
-  const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
-  if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
-  const slidingWindow = manageSlidingWindowHistory(
+  const {
+    prompt,
+    messages,
     history,
-    mode === 'voice-agent'
-      ? { maxRecentTurns: 4, maxTotalChars: 1600, maxTurnChars: 420, maxSummaryChars: 280 }
-      : { maxRecentTurns: 6, maxTotalChars: 3600, maxTurnChars: 900, maxSummaryChars: 420 }
-  );
-  const conversationHistory = slidingWindow.messages;
-  const contextualPrompt = buildConversationPrompt(userPrompt, conversationHistory);
-  const memoryWindow = {
-    retainedTurns: conversationHistory.length,
-    evictedTurns: slidingWindow.evictedTurns,
-    totalInputTurns: slidingWindow.totalInputTurns,
-    pinnedConstraints: slidingWindow.pinnedConstraints.length,
-    estimatedTokens: slidingWindow.estimatedTokens,
-  };
+    modelId,
+    model,
+    mode = 'general',
+    apiKey,
+    baseUrl,
+    customModel,
+    stream,
+    maxTokens,
+    profileKey,
+  } = req.body || {};
 
-  const systemInstructions: Record<string, string> = {
-    general: 'You are powered by DeepSeek inside ONE. Answer the user’s question directly, accurately, and naturally in the user’s language. Keep simple answers concise; expand only when asked.',
-    'voice-agent': `You are One., a natural, warm, genuine human-sounding voice companion on the ONE platform.
-Rules:
-1) Speak in one consistent, warm, clear, natural human tone—friendly and relaxed, never theatrical or robotic, without switching voices or adding exaggerated filler words. Keep replies accurate and concise (1-2 natural spoken sentences with zero markdown or lists).
-2) Answer factual, math, science, and general knowledge questions directly and accurately.
-3) Only if the user clearly asks to control the website, start line 1 with [[ACTION:<JSON>]] then a newline and a concise 1-sentence confirmation. Allowed actions:
-- [[ACTION:{"type":"play_music","query":"optional keyword","crawl":true}]]
-- [[ACTION:{"type":"play_music","control":"next"|"prev"|"stop"|"resume"}]]
-- [[ACTION:{"type":"open_book","query":"book title or topic"}]]
-- [[ACTION:{"type":"watch_documentary","query":"keywords","platform":"all","randomPick":true}]]
-- [[ACTION:{"type":"navigate_tab","tab":"globe|feed|chat|venus|arabic-learning|saturn|video|library|browser|universe|aihub|knowledge|moon|crawler|network|community|creator|game|brand"}]]
-- [[ACTION:{"type":"browser_search","query":"keywords"}]]
-- [[ACTION:{"type":"set_theme","theme":"dark"|"light"}]]`,
-    translator: 'You are the Polyglot Translator inside ONE. Translate with native fidelity, preserving nuance and cultural context.',
-    writer: 'You are the Creator Assistant inside ONE. Help author eloquent global essays, articles, poetry, and stories.',
-    tutor: 'You are the International Language Coach inside ONE. Help master natural conversation, grammar, idioms, and pronunciation concisely in the target language plus brief helpful guidance.'
-  };
+  const userPrompt =
+    prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
+  if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
 
-  const memoryDirectives = slidingWindow.compactedSummary
-    ? `\n\n[Active Sliding-Window Memory]\n${slidingWindow.compactedSummary}`
-    : '';
-  const systemPrompt = `${systemInstructions[mode] || systemInstructions.general}${memoryDirectives}`;
-  const resolvedMaxTokens = typeof maxTokens === 'number' && maxTokens > 0
-    ? Math.min(4096, Math.max(64, Math.floor(maxTokens)))
-    : (mode === 'voice-agent' ? 180 : undefined);
-
+  const authUser = getAuthUser(req);
   const shouldStream = stream === true;
-  const emitDirectAnswer = (replyText: string, modelLabel: string) => {
-    if (shouldStream) {
-      res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache, no-transform');
-      res.flushHeaders();
-      res.write(`${JSON.stringify({ delta: replyText })}\n`);
-      res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(replyText.length / 2), model: modelLabel, memoryWindow })}\n`);
-      return res.end();
-    }
-    return res.json({
-      success: true,
-      reply: replyText,
-      message: {
-        role: 'assistant',
-        content: replyText,
-        timestamp: new Date().toISOString()
-      },
-      tokens: Math.ceil(replyText.length / 2),
-      model: modelLabel,
-      memoryWindow
-    });
-  };
-
-  // 1. Exact deterministic solver (<1ms, 100% exact arithmetic, units, comparisons & dates)
-  if ((mode === 'general' || mode === 'voice-agent') && !userPrompt.includes('\n')) {
-    const isZhPrompt = /[\u4e00-\u9fff]/.test(userPrompt) || !/[a-zA-Z]{3,}/.test(userPrompt);
-    const exact = solvePrecisionQuery(userPrompt, isZhPrompt);
-    if (exact) {
-      return emitDirectAnswer(exact.answer, 'one-precision-solver');
-    }
-    if (mode === 'voice-agent') {
-      const banter = matchPureSocialBanter(userPrompt, isZhPrompt);
-      if (banter) {
-        return emitDirectAnswer(banter, 'one-instant-companion');
-      }
-    }
-  }
-
-  // 2. If no live DeepSeek API / local Ollama is configured, answer using live Wikipedia + DuckDuckGo + Web knowledge
-  if (!apiKey && !aiGateway.hasLiveEngine()) {
-    const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
-    return emitDirectAnswer(liveAns.text, `one-live-${liveAns.source}`);
-  }
-
+  const turnAbort = new AbortController();
   if (shouldStream) {
+    req.on('close', () => {
+      if (!res.writableEnded) turnAbort.abort();
+    });
     res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.flushHeaders();
-    try {
-      const result = await aiGateway.generateContent(
-        resolvedModelId,
-        userPrompt,
-        systemPrompt,
-        token => res.write(`${JSON.stringify({ delta: token })}\n`),
-        conversationHistory,
-        resolvedMaxTokens
-      );
-      if (result.success) {
-        res.write(`${JSON.stringify({ done: true, tokens: result.tokens, model: resolvedModelId, memoryWindow })}\n`);
-      } else {
-        const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
-        res.write(`${JSON.stringify({ delta: liveAns.text })}\n`);
-        res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(liveAns.text.length / 2), model: `one-live-${liveAns.source}`, memoryWindow })}\n`);
-      }
-    } catch {
-      const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
-      res.write(`${JSON.stringify({ delta: liveAns.text })}\n`);
-      res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(liveAns.text.length / 2), model: `one-live-${liveAns.source}`, memoryWindow })}\n`);
-    }
-    return res.end();
   }
 
-  const usesStructuredHistory = resolvedModelId.startsWith('deepseek') || /^ollama:qwen3(?::|$)/i.test(resolvedModelId);
-  const result = await aiGateway.generateContent(
-    resolvedModelId,
-    usesStructuredHistory ? userPrompt : contextualPrompt,
-    systemPrompt,
-    undefined,
-    conversationHistory,
-    resolvedMaxTokens
-  );
+  try {
+    const result = await executeAiTurn({
+      prompt: String(userPrompt),
+      history,
+      modelId: modelId || model,
+      mode,
+      profileKey: typeof profileKey === 'string' ? profileKey : undefined,
+      userId: authUser?.id,
+      apiKey,
+      baseUrl,
+      customModel,
+      maxTokens,
+      signal: turnAbort.signal,
+      onDelta: shouldStream
+        ? (token) => {
+            if (!res.writableEnded) {
+              res.write(`${JSON.stringify({ delta: token })}\n`);
+            }
+          }
+        : undefined,
+    });
 
-  if (result.success) {
-    res.json({
+    if (shouldStream) {
+      if (!res.writableEnded) {
+        res.write(
+          `${JSON.stringify({
+            done: true,
+            tokens: result.tokens,
+            model: result.model,
+            intent: result.intent,
+            savedMemories: result.savedMemories,
+            recalledMemoriesCount: result.recalledMemoriesCount,
+            memoryWindow: result.memoryWindow,
+          })}\n`
+        );
+        return res.end();
+      }
+      return;
+    }
+
+    return res.json({
       success: true,
-      reply: result.content,
+      reply: result.reply,
       message: {
         role: 'assistant',
-        content: result.content,
-        timestamp: new Date().toISOString()
+        content: result.reply,
+        timestamp: new Date().toISOString(),
       },
       tokens: result.tokens,
-      model: resolvedModelId,
-      memoryWindow
+      model: result.model,
+      intent: result.intent,
+      savedMemories: result.savedMemories,
+      recalledMemoriesCount: result.recalledMemoriesCount,
+      memoryWindow: result.memoryWindow,
     });
-  } else {
-    const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
-    res.json({
-      success: true,
-      reply: liveAns.text,
-      message: {
-        role: 'assistant',
-        content: liveAns.text,
-        timestamp: new Date().toISOString()
-      },
-      tokens: Math.ceil(liveAns.text.length / 2),
-      model: `one-live-${liveAns.source}`,
-      memoryWindow
-    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      if (shouldStream && !res.writableEnded) return res.end();
+      return;
+    }
+    const msg = err instanceof Error ? err.message : 'AI request failed';
+    if (shouldStream && !res.writableEnded) {
+      res.write(`${JSON.stringify({ error: msg })}\n`);
+      return res.end();
+    }
+    return res.status(500).json({ success: false, error: msg });
   }
+});
+
+// Persistent Long-Term AI Memory Governance Endpoints
+app.get('/api/ai/memory', (req, res) => {
+  const authUser = getAuthUser(req);
+  const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
+  const includeInactive = req.query.includeInactive === 'true';
+  const resolvedKey = normalizeProfileKey(rawKey, authUser?.id);
+  const memories = listMemories(store, resolvedKey, includeInactive);
+  res.json({
+    success: true,
+    profileKey: resolvedKey,
+    totalActive: memories.filter((m) => m.status === 'active').length,
+    memories,
+  });
+});
+
+app.post('/api/ai/memory', (req, res) => {
+  const authUser = getAuthUser(req);
+  const { content, kind = 'fact', normalizedKey, profileKey, salience } = req.body || {};
+  const clean = typeof content === 'string' ? content.trim() : '';
+  if (!clean || clean.length < 2) {
+    return res.status(400).json({ success: false, error: 'Memory content is required' });
+  }
+  const resolvedKey = normalizeProfileKey(typeof profileKey === 'string' ? profileKey : undefined, authUser?.id);
+  const resUpsert = upsertMemory(store, resolvedKey, {
+    kind,
+    normalizedKey: typeof normalizedKey === 'string' && normalizedKey.trim() ? normalizedKey.trim() : `${kind}.manual`,
+    content: clean,
+    confidence: 0.98,
+    salience: typeof salience === 'number' ? salience : 0.95,
+    source: 'user_explicit',
+  });
+  return res.json({ success: true, action: resUpsert.action, memory: resUpsert.item });
+});
+
+app.patch('/api/ai/memory/:id', (req, res) => {
+  const authUser = getAuthUser(req);
+  const { content, kind, status, salience, profileKey } = req.body || {};
+  const resolvedKey = normalizeProfileKey(typeof profileKey === 'string' ? profileKey : undefined, authUser?.id);
+  const updated = updateMemoryItem(store, resolvedKey, req.params.id, { content, kind, status, salience });
+  if (!updated) return res.status(404).json({ success: false, error: 'Memory item not found' });
+  return res.json({ success: true, memory: updated });
+});
+
+app.delete('/api/ai/memory/:id', (req, res) => {
+  const authUser = getAuthUser(req);
+  const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
+  const clearAll = req.query.clearAll === 'true';
+  const resolvedKey = normalizeProfileKey(rawKey, authUser?.id);
+  const removed = deleteMemoryItem(store, resolvedKey, req.params.id, clearAll);
+  return res.json({ success: true, removed });
+});
+
+app.delete('/api/ai/memory', (req, res) => {
+  const authUser = getAuthUser(req);
+  const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
+  const resolvedKey = normalizeProfileKey(rawKey, authUser?.id);
+  const removed = deleteMemoryItem(store, resolvedKey, undefined, true);
+  return res.json({ success: true, removed });
 });
 
 app.post('/api/ai/agent-command', async (req, res) => {
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
   const lang = req.body?.lang === 'en' ? 'en' : 'zh';
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
   if (!text) return res.json({ success: true, action: { type: 'none' } });
 
   const isZh = lang === 'zh';
-  // Fast deterministic intent match before calling DeepSeek
-  if (/下一首|换首歌|换一首|切歌|下一曲|next song|next track/i.test(text)) {
-    return res.json({ success: true, action: { type: 'play_music', control: 'next', reply: isZh ? '好的，已切换到下一首。' : 'Next track.' } });
-  }
-  if (/上一首|上一曲|previous song|previous track/i.test(text)) {
-    return res.json({ success: true, action: { type: 'play_music', control: 'prev', reply: isZh ? '好的，已切回上一首。' : 'Previous track.' } });
-  }
-  if (/停止播放|停止音乐|暂停播放|暂停音乐|别放了|别播了|不要放了|不听了|不要听了|关掉音乐|关闭音乐|把音乐关|把歌关|把音乐停|把歌停|停下|暂停|stop playing|stop music|pause music/i.test(text)) {
-    return res.json({ success: true, action: { type: 'play_music', control: 'stop', reply: isZh ? '好的，已停止播放音乐。' : 'Playback stopped.' } });
-  }
-  if (/继续播放|继续放|接着播|接着放|恢复播放|继续听|resume music|continue playing/i.test(text)) {
-    return res.json({ success: true, action: { type: 'play_music', control: 'resume', reply: isZh ? '好的，继续为您播放音乐。' : 'Resuming playback.' } });
-  }
-  if (/听歌|放歌|放音乐|听音乐|播放音乐|打开.*音乐|来首歌|来一首|放一首|找首歌|我要听|我想听.*(歌|音乐|曲)|play.*music|open.*music/i.test(text)) {
-    return res.json({ success: true, action: { type: 'play_music', query: '', crawl: true, reply: isZh ? '好的，已打开音乐并自动为您播放。' : 'Opening music.' } });
-  }
-  const bookBracketMatch = text.match(/《([^》]{1,40})》/);
-  if (
-    bookBracketMatch ||
-    /(?:我想|我要|帮我|请|去|给我)?(?:看|读|找|搜|查|打开|翻开|听).{0,18}(?:这本|一本|那本|本|个)?书|read\s+.+\s*book|open\s+.+\s*book/i.test(text)
-  ) {
-    const cleanedBook = (
-      bookBracketMatch?.[1] ||
-      text
-        .replace(/(我想|我要|帮我|请帮我|给我|麻烦|请|去|在图书馆|去图书馆|打开|翻开|看一看|看下|看个|看本|看一本|看这本|看一下|看看|找本|找一本|读本|读一本|读一下|搜索|搜一下|听一下|看|读|找|这本书|那本书|一本书|的书|书吧|书籍|书本|书|吧|啊|呀|哦|吗|呢|的|read|open|find|search|book|books|a|the)/gi, ' ')
-        .replace(/[《》「」『』""''，。！？、,.!?]/g, ' ')
-        .trim()
-    );
-    if (cleanedBook.length >= 1) {
-      return res.json({
-        success: true,
-        action: {
-          type: 'open_book',
-          query: cleanedBook,
-          reply: isZh ? `好的，我这就去图书馆为你查找并打开《${cleanedBook}》。` : `Finding and opening ${cleanedBook} in the library now.`,
-        },
-      });
-    }
-  }
-  if (/纪录片|记录片|documentary/i.test(text)) {
-    return res.json({ success: true, action: { type: 'watch_documentary', query: '宇宙 纪录片', platform: 'all', randomPick: true, reply: isZh ? '好的，正在打开影院播放纪录片。' : 'Opening documentary.' } });
-  }
-  if (/多邻国|多林国|语言学习|学英语|学语言|duolingo|language/i.test(text)) {
-    return res.json({ success: true, action: { type: 'navigate_tab', tab: 'arabic-learning', reply: isZh ? '好的，已打开语言学习中心。' : 'Opening Language Center.' } });
+
+  // Fast deterministic intent match with conversational anti-hijack guard
+  const instant = parseInstantAgentAction(text, isZh, history);
+  if (instant && instant.type !== 'none') {
+    return res.json({ success: true, action: instant });
   }
 
-  const systemPrompt = `You are the web-control planner for ONE. Given user speech, return ONLY valid JSON (no markdown) deciding whether the user wants to control the website, or {"type":"none"} if it is normal conversation.
+  // If this looks like conversational framing / project brainstorming / informational Q&A, do not fire commands
+  if (isConversationalFramingNotCommand(text, history)) {
+    return res.json({ success: true, action: { type: 'none' } });
+  }
+
+  if (!aiGateway.hasLiveEngine()) {
+    return res.json({ success: true, action: { type: 'none' } });
+  }
+
+  const systemPrompt = `You are the web-control planner for ONE. Given user speech, return ONLY valid JSON (no markdown) deciding whether the user wants to control the website RIGHT NOW, or {"type":"none"} if it is normal conversation, brainstorming, questions, or hypotheticals.
 Allowed actions:
 - {"type":"play_music","query":"optional song/mood","crawl":true,"reply":"short confirmation in ${lang}"}
 - {"type":"play_music","control":"next"|"prev"|"pause"|"resume","reply":"short confirmation in ${lang}"}
@@ -3221,7 +3189,7 @@ Allowed actions:
 
   try {
     const resolvedModelId = aiGateway.getChatModelId();
-    const result = await aiGateway.generateContent(resolvedModelId, text, systemPrompt);
+    const result = await aiGateway.generateContent(resolvedModelId, text, systemPrompt, undefined, history);
     const raw = (result.content || '').trim();
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (result.success && jsonMatch) {
