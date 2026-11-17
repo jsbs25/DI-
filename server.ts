@@ -14,6 +14,7 @@ import { aiGateway } from './server/aiGateway.ts';
 import { buildConversationPrompt, normalizeConversationHistory } from './server/aiConversation.ts';
 import { answerWithLiveKnowledge } from './server/liveKnowledge.ts';
 import { solvePrecisionQuery } from './src/utils/precisionSolver.ts';
+import { matchPureSocialBanter } from './src/utils/oneAgentController.ts';
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
@@ -3056,6 +3057,12 @@ Rules:
     if (exact) {
       return emitDirectAnswer(exact.answer, 'one-precision-solver');
     }
+    if (mode === 'voice-agent') {
+      const banter = matchPureSocialBanter(userPrompt, isZhPrompt);
+      if (banter) {
+        return emitDirectAnswer(banter, 'one-instant-companion');
+      }
+    }
   }
 
   // 2. If no live DeepSeek API / local Ollama is configured, answer using live Wikipedia + DuckDuckGo + Web knowledge
@@ -3247,7 +3254,7 @@ app.get('/api/ai/tts', async (req, res) => {
   }
 
   const providers = [
-    `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(cleanText)}&tl=${langParam === 'en' ? 'en' : 'zh-CN'}&client=tw-ob`,
+    `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(cleanText)}&tl=${langParam === 'en' ? 'en' : 'zh-CN'}&client=tw-ob&ttsspeed=1`,
     `https://fanyi.baidu.com/gettts?lan=${langParam}&text=${encodeURIComponent(cleanText)}&spd=${spdNum}&source=web`,
   ];
 

@@ -328,25 +328,40 @@ export function matchPureSocialBanter(text: string, isZh: boolean): string | nul
   const raw = text.trim();
   const lower = raw.toLowerCase();
 
-  if (/^(你好|您好|哈喽|嗨|在吗|在不在|hi|hello|hey)[!！?？。~～]*$/i.test(raw)) {
+  if (/^(你好|您好|哈喽|嗨|在吗|在不在|喂|one|wan|hello|hi|hey)[!！?？。~～]*$/i.test(raw)) {
     return isZh
-      ? '你好，我在听。有什么想问的问题、想听的歌或想看的书，随时告诉我。'
-      : 'Hi, I am here. Ask me any question or tell me what you would like to listen to or read.';
+      ? '我在听，怎么啦？随时问我或者让我放首歌都行。'
+      : 'Hi, I am right here. What can I help you with?';
   }
-  if (/你在干嘛|干嘛呢|做什么呢|忙什么|在忙吗|what are you doing/i.test(raw)) {
+  if (/你在干嘛|干嘛呢|做什么呢|忙什么|在忙吗|在干什么|what are you doing/i.test(raw)) {
+    const zhReplies = [
+      '我在吃饭呢，顺便等着你找我聊天，你今天忙不忙？',
+      '刚吃完饭正休息呢，一直开着在等你开口，有啥想问的？',
+      '正在发呆顺便看时间呢，刚好你叫我，要听歌还是聊两句？',
+    ];
     return isZh
-      ? '我一直在线陪着你呢。随时都可以直接问我问题、计算数学，或者让我放首歌陪你。'
-      : 'Just right here waiting for you. Ask me any question, play music, or open a book anytime.';
+      ? zhReplies[Math.floor(Date.now() / 4000) % zhReplies.length]
+      : 'Just relaxing after a meal and right here listening for you. How is your day going?';
   }
-  if (/吃饭了吗|吃了吗|吃过饭|饿不饿|have you eaten/i.test(raw)) {
+  if (/吃饭了吗|吃了吗|吃过饭|饿不饿|吃什么|have you eaten/i.test(raw)) {
     return isZh
-      ? '我是人工智能，不用吃饭哦。你今天吃得怎么样，忙不忙？'
-      : 'As an AI I do not need meals, thank you! How is your day going?';
+      ? '刚吃过饭呢，味道还不错，你今天吃得怎么样？'
+      : 'Just had a good meal! How about you?';
+  }
+  if (/今天(过得)?怎么样|今天忙不忙|今天忙吗|今天开心吗|今天还好吗|今天累不累|今天吃什么|今天要干嘛|今天打算/i.test(raw)) {
+    return isZh
+      ? '今天挺轻松愉快的，我一直都在这儿陪着你，你今天安排得怎么样？'
+      : 'Today is going smoothly and I am right here with you. How are your plans going today?';
   }
   if (/^(早安|早上好|good morning)[!！。~～]*$/i.test(raw)) {
     return isZh
-      ? '早上好，祝你今天顺顺利利、心情愉快。有什么需要随时告诉我。'
+      ? '早上好，祝你今天顺顺利利、心情愉快。'
       : 'Good morning! Wishing you a great day ahead.';
+  }
+  if (/^(中午好|下午好|晚上好|good afternoon|good evening)[!！。~～]*$/i.test(raw)) {
+    return isZh
+      ? '你好呀，状态怎么样，需要我做点什么吗？'
+      : 'Hello! How is your day going so far?';
   }
   if (/^(晚安|要睡了|去睡觉|good night)[!！。~～]*$/i.test(raw)) {
     return isZh
@@ -355,8 +370,8 @@ export function matchPureSocialBanter(text: string, isZh: boolean): string | nul
   }
   if (/好累|累死了|心累|不开心|难过|伤心|委屈|压力好大|心情不好|烦死了|焦虑|孤单|tired|sad|stressed|lonely/i.test(raw)) {
     return isZh
-      ? '今天辛苦你了，先停下来休息一会儿、喝杯水。需要的话我可以帮你放一首轻音乐。'
-      : 'It sounds like a long day. Take a moment to rest, and let me know if you want some calm music.';
+      ? '辛苦了，先歇口气喝口水，要我放一首舒缓点的歌陪你吗？'
+      : 'Sounds like a long day. Take a breather—want me to put on some relaxing music?';
   }
   if (/^(开心|好开心|高兴|太好了|哈哈|happy|awesome)[!！。~～]*$/i.test(raw)) {
     return isZh
@@ -365,36 +380,36 @@ export function matchPureSocialBanter(text: string, isZh: boolean): string | nul
   }
   if (/好无聊|无聊|bored/i.test(raw) && raw.length < 10) {
     return isZh
-      ? '想找点事做的话，可以考我百科知识，或者让我放首歌、找本好书给你读。'
-      : 'We can explore trivia, put on a song, or open a book if you like.';
+      ? '无聊的话我可以给你放首歌、讲个冷知识，或者陪你聊聊天。'
+      : 'We can put on a song, chat, or explore a book if you like.';
   }
   if (/喜欢你|爱你|真可爱|真甜|声音好听|love you|cute/i.test(raw)) {
     return isZh
-      ? '谢谢你的认可，能清晰准确地帮到你就是我最开心的事。'
-      : 'Thank you! I am really glad I can be helpful.';
+      ? '谢谢夸奖呀，我会一直在你身边陪着你的。'
+      : 'Thank you! I am glad to keep you company.';
   }
   if (/夸夸我|安慰我|鼓励我/i.test(raw)) {
     return isZh
-      ? '你已经做得很好了，一步一步来，别给自己太大压力，我会一直在这里陪你。'
-      : 'You are doing great—take it one step at a time, I am right here with you.';
+      ? '你已经做得很好啦，放轻松一步步来，我一直在这里。'
+      : 'You are doing great—take it one step at a time, I am right here.';
   }
   if (/讲个笑话|逗我笑|joke/i.test(raw)) {
     return isZh
-      ? '为什么图书馆总是安静得让人安心？因为每一本书都在等一个愿意翻开它的人。'
+      ? '为什么图书馆总是特别安静？因为每一本书都在等一个愿意翻开它的人。'
       : 'Why do books make great friends? Because every one of them waits patiently to share a story.';
   }
   if (/^(你是谁|你叫什么|who are you|what is your name)[?？!！]*$/i.test(raw)) {
     return isZh
-      ? '我是 One.，你的语音智能伙伴，可以回答问题、精确计算、播放音乐和打开图书馆书籍。'
-      : 'I am One., your voice companion for answers, math, music, and books.';
+      ? '我是 One.，随时在线陪着你，问答、放歌、找书都可以直接开口。'
+      : 'I am One., your always-ready voice companion for answers, music, and books.';
   }
   if (/你能干什么|你能做什么|有什么功能|what can you do/i.test(raw)) {
     return isZh
-      ? '我可以准确解答百科与数学问题、控制音乐播放与切换，也能帮你搜索并打开图书馆的书籍。'
-      : 'I can answer questions accurately, calculate math, control music playback, and open library books.';
+      ? '我可以随时回答你问题、算数学、控制音乐播放切换，也能直接帮你找书打开看。'
+      : 'I can answer questions, do math, control music playback, and open books for you.';
   }
   if (/^(谢谢|感谢|谢谢你|thanks|thank you)[!！。~～]*$/i.test(lower)) {
-    return isZh ? '不客气，随时有需要都可以直接叫我。' : 'You are welcome, anytime.';
+    return isZh ? '不客气，随时喊我就行。' : 'You are welcome, anytime.';
   }
   return null;
 }

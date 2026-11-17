@@ -58,9 +58,9 @@ const NATURAL_HUMAN_PROFILE: Omit<EmotionAnalysisResult, 'emotion' | 'intensity'
   labelEn: 'Natural',
   auraHex: 0x8ecfff,
   basePitch: 1.0,
-  baseRate: 1.0,
-  baiduSpd: 5,
-  audioPlaybackRate: 1.0,
+  baseRate: 1.16,
+  baiduSpd: 6,
+  audioPlaybackRate: 1.16,
 };
 
 const EMOTION_PROFILES: Record<
@@ -78,7 +78,8 @@ const EMOTION_PROFILES: Record<
 
 /**
  * Unified Natural Human Voice Profile:
- * Uses one steady, pleasant, natural voice without abrupt speed, pitch, or mood shifts.
+ * Uses one steady, pleasant, natural voice with crisp ~1.16x conversational pacing
+ * and zero abrupt speed, pitch, or mood shifts.
  */
 export function analyzeDialogueEmotion(
   _userText: string,
@@ -93,7 +94,7 @@ export function analyzeDialogueEmotion(
 }
 
 /**
- * Splits a reply into natural full-sentence segments for smooth, unhurried,
+ * Splits a reply into natural full-sentence segments for smooth, crisp,
  * human-sounding speech delivery with uniform natural pitch and pacing.
  */
 export function buildExpressivePhrases(
@@ -146,10 +147,10 @@ export function buildExpressivePhrases(
   return finalSegments.map((seg) => ({
     text: seg,
     emotion: analysis.emotion,
-    pitch: 1.0,
-    rate: 1.0,
-    baiduSpd: 5,
-    audioPlaybackRate: 1.0,
-    pauseAfterMs: 75,
+    pitch: analysis.basePitch,
+    rate: analysis.baseRate,
+    baiduSpd: analysis.baiduSpd,
+    audioPlaybackRate: analysis.audioPlaybackRate,
+    pauseAfterMs: 20,
   }));
 }

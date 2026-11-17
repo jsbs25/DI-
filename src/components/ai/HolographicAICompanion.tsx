@@ -170,7 +170,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const [modelId, setModelId] = useState('deepseek-v3');
   const [activeEmotion, setActiveEmotion] = useState<EmotionAnalysisResult | null>(null);
   const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
-  const hasLiveEngineRef = useRef<boolean | null>(null);
 
   // Unified Music Player state hosted directly inside One. orb
   const [musicPopoverOpen, setMusicPopoverOpen] = useState(false);
@@ -181,6 +180,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const popoverStageAnchorRef = useRef<HTMLDivElement | null>(null);
   const pausedMusicForVoiceRef = useRef(false);
   const explicitStopMusicRef = useRef(false);
+  const speculativePauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playerRef = useRef(player);
+  playerRef.current = player;
+  const isZhRef = useRef(isZh);
+  isZhRef.current = isZh;
 
   // Cache sweet natural voice as soon as browser populates speechSynthesis voices
   useEffect(() => {
@@ -203,9 +207,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         .then((r) => r.json())
         .then((data) => {
           if (cancelled || !data?.success) return;
-          if (typeof data.hasLiveEngine === 'boolean') {
-            hasLiveEngineRef.current = data.hasLiveEngine;
-          }
           if (Array.isArray(data.models)) {
             const deepseekPreferred =
               data.models.find((m: { id: string }) => m.id === 'deepseek-v3') ||
@@ -312,6 +313,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const historyRef = useRef<HistoryTurn[]>([]);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recStateRef = useRef<'stopped' | 'starting' | 'running'>('stopped');
+  const recKeepaliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recRetryDelayRef = useRef(180);
 
   const ttsQueueRef = useRef<QueuedSpeechItem[]>([]);
   const ttsStreamDoneRef = useRef(true);
@@ -612,39 +616,62 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     (currentTrack?.raw as any)?.embedUrl ||
     currentTrack?.sources.find((s) => s.kind === 'embed' && s.embedUrl)?.embedUrl;
   const liveEmbedSrc = canRunAudioSession ? buildUnifiedEmbedUrl(rawEmbed, isMusicPlaying) : undefined;
+  const liveEmbedSrcRef = useRef(liveEmbedSrc);
+  liveEmbedSrcRef.current = liveEmbedSrc;
+  const isMusicPlayingRef = useRef(isMusicPlaying);
+  isMusicPlayingRef.current = isMusicPlaying;
 
   const sendYouTubeCmd = useCallback((func: 'playVideo' | 'pauseVideo') => {
     const win = embedIframeRef.current?.contentWindow;
-    if (!win || !liveEmbedSrc || !liveEmbedSrc.includes('youtube')) return;
+    const src = liveEmbedSrcRef.current;
+    if (!win || !src || !src.includes('youtube')) return;
     try {
       win.postMessage(JSON.stringify({ event: 'command', func, args: [] }), '*');
     } catch {}
-  }, [liveEmbedSrc]);
-
-  const pauseMusicForVoice = useCallback(() => {
-    if (!player) return;
-    if (player.state.isPlaying || pausedMusicForVoiceRef.current) {
-      if (player.state.isPlaying) {
-        pausedMusicForVoiceRef.current = true;
-        player.pause();
-      }
-      sendYouTubeCmd('pauseVideo');
-    }
-  }, [player, sendYouTubeCmd]);
+  }, []);
 
   const resumeMusicIfPausedForVoice = useCallback(() => {
-    if (!player || explicitStopMusicRef.current) {
+    if (speculativePauseTimerRef.current) {
+      clearTimeout(speculativePauseTimerRef.current);
+      speculativePauseTimerRef.current = null;
+    }
+    const p = playerRef.current;
+    if (!p || explicitStopMusicRef.current) {
       pausedMusicForVoiceRef.current = false;
       return;
     }
-    if (pausedMusicForVoiceRef.current && player.currentTrack && !player.userStopped) {
+    if (pausedMusicForVoiceRef.current && p.currentTrack && !p.userStopped) {
       pausedMusicForVoiceRef.current = false;
-      player.unlockAudio();
-      void player.resumeAudioContext();
-      player.play();
+      p.unlockAudio();
+      void p.resumeAudioContext();
+      p.play();
       sendYouTubeCmd('playVideo');
     }
-  }, [player, sendYouTubeCmd]);
+  }, [sendYouTubeCmd]);
+
+  const pauseMusicForVoice = useCallback((isSpeculative = false) => {
+    const p = playerRef.current;
+    if (!p) return;
+    if (speculativePauseTimerRef.current) {
+      clearTimeout(speculativePauseTimerRef.current);
+      speculativePauseTimerRef.current = null;
+    }
+    if (p.state.isPlaying || isMusicPlayingRef.current || pausedMusicForVoiceRef.current) {
+      if (p.state.isPlaying || isMusicPlayingRef.current) {
+        pausedMusicForVoiceRef.current = true;
+        p.pause();
+      }
+      sendYouTubeCmd('pauseVideo');
+      if (isSpeculative) {
+        speculativePauseTimerRef.current = setTimeout(() => {
+          speculativePauseTimerRef.current = null;
+          if (!isSendingRef.current && !isTtsSpeakingRef.current && pausedMusicForVoiceRef.current) {
+            resumeMusicIfPausedForVoice();
+          }
+        }, 1500);
+      }
+    }
+  }, [resumeMusicIfPausedForVoice, sendYouTubeCmd]);
 
   // Cycle aurora aura color subtly while playing music outside Music tab
   useEffect(() => {
@@ -776,6 +803,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
   const stopSessionResources = useCallback(() => {
     sessionActiveRef.current = false;
+    recStateRef.current = 'stopped';
     turnEpochRef.current += 1;
     isSendingRef.current = false;
     setActiveEmotion(null);
@@ -790,6 +818,14 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
     }
+    if (recKeepaliveTimerRef.current) {
+      clearInterval(recKeepaliveTimerRef.current);
+      recKeepaliveTimerRef.current = null;
+    }
+    if (speculativePauseTimerRef.current) {
+      clearTimeout(speculativePauseTimerRef.current);
+      speculativePauseTimerRef.current = null;
+    }
     if (errorResetTimerRef.current) {
       clearTimeout(errorResetTimerRef.current);
       errorResetTimerRef.current = null;
@@ -799,6 +835,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
     if (recognitionRef.current) {
       try {
+        recognitionRef.current.onstart = null;
         recognitionRef.current.onend = null;
         recognitionRef.current.onresult = null;
         recognitionRef.current.onerror = null;
@@ -893,6 +930,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           finish,
           Math.max(2200, Math.min(12000, phrase.text.length * 220))
         );
+        try {
+          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        } catch {}
         window.speechSynthesis.speak(utt);
       } catch {
         onDone();
@@ -972,7 +1012,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           audioEl.src = blobUrl;
           (audioEl as any).preservesPitch = true;
           (audioEl as any).webkitPreservesPitch = true;
-          audioEl.playbackRate = 1.0;
+          audioEl.playbackRate = nextItem.phrase.audioPlaybackRate || 1.16;
           audioEl.volume = 1;
 
           let settled = false;
@@ -1005,7 +1045,16 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           await audioEl.play();
           return;
         } catch {
-          // Graceful fallback to browser speech synthesis if audio playback was interrupted/blocked
+          if (ttsSafetyTimerRef.current) {
+            clearTimeout(ttsSafetyTimerRef.current);
+            ttsSafetyTimerRef.current = null;
+          }
+          audioEl.onended = null;
+          audioEl.onerror = null;
+          ttsBlobUrlsRef.current.delete(blobUrl);
+          try {
+            URL.revokeObjectURL(blobUrl);
+          } catch {}
         }
       }
 
@@ -1060,12 +1109,23 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       const clean = userText.trim();
       if (!clean) return;
 
+      // Clear any pending speculative music resume timer because a real voice turn has committed
+      if (speculativePauseTimerRef.current) {
+        clearTimeout(speculativePauseTimerRef.current);
+        speculativePauseTimerRef.current = null;
+      }
       // Supersede any active speaking or streaming turn immediately (true instant barge-in)
       const myEpoch = interruptCurrentTurn();
       explicitStopMusicRef.current = false;
       currentUserTurnRef.current = clean;
       isSendingRef.current = true;
       const shouldSpeak = sessionActiveRef.current;
+
+      if (/^(休眠|退出语音|关闭语音|别听我说话|go to sleep|stop listening)$/i.test(clean)) {
+        try { localStorage.setItem('one-voice-always-on:v1', '0'); } catch {}
+        stopSessionResources();
+        return;
+      }
 
       historyRef.current = [...historyRef.current.slice(-4), { role: 'user', content: clean }];
 
@@ -1134,28 +1194,26 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      // 3. Pure greetings / light banter when no LLM key is set (<1ms); real questions always go to Live Knowledge / DeepSeek
-      if (hasLiveEngineRef.current === false) {
-        const banterRaw = matchPureSocialBanter(clean, isZh);
-        if (banterRaw) {
-          const banterParsed = extractEmotionTag(banterRaw);
-          historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: banterParsed.text }];
-          if (shouldSpeak) {
-            speakDeepSeekReply(banterParsed.text, myEpoch, banterParsed.emotion, () => {
-              if (myEpoch === turnEpochRef.current) {
-                isSendingRef.current = false;
-                setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-                resumeMusicIfPausedForVoice();
-              }
-            });
-          } else {
-            stopOutputAudio();
-            isSendingRef.current = false;
-            setPhase('idle');
-            resumeMusicIfPausedForVoice();
-          }
-          return;
+      // 3. Instant natural conversation (<1ms, responds immediately to greetings & daily chat)
+      const banterRaw = matchPureSocialBanter(clean, isZh);
+      if (banterRaw) {
+        const banterParsed = extractEmotionTag(banterRaw);
+        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: banterParsed.text }];
+        if (shouldSpeak) {
+          speakDeepSeekReply(banterParsed.text, myEpoch, banterParsed.emotion, () => {
+            if (myEpoch === turnEpochRef.current) {
+              isSendingRef.current = false;
+              setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+              resumeMusicIfPausedForVoice();
+            }
+          });
+        } else {
+          stopOutputAudio();
+          isSendingRef.current = false;
+          setPhase('idle');
+          resumeMusicIfPausedForVoice();
         }
+        return;
       }
 
       // 4. Live DeepSeek-V3 / Live Knowledge Engine streaming turn with AbortController barge-in
@@ -1327,10 +1385,14 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       resumeMusicIfPausedForVoice,
       speakDeepSeekReply,
       stopOutputAudio,
+      stopSessionResources,
     ]
   );
 
-  // Instant Continuous Voice Session with Real-Time Barge-In
+  const runDeepSeekTurnRef = useRef(runDeepSeekTurn);
+  runDeepSeekTurnRef.current = runDeepSeekTurn;
+
+  // Instant Continuous Voice Session with Real-Time Barge-In & Self-Healing Watchdog
   const startDeepSeekVoiceSession = useCallback(() => {
     stopSessionResources();
 
@@ -1345,10 +1407,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     }
 
     sessionActiveRef.current = true;
+    recRetryDelayRef.current = 180;
     setVoiceActive(true);
     setPhase('connecting');
 
-    // Unlock BOTH HTMLAudioElement + Web Speech Synthesis synchronously on user gesture
+    // Unlock BOTH HTMLAudioElement + Web Speech Synthesis synchronously when inside user gesture
     ensureTtsAudioUnlocked();
     try {
       if ('speechSynthesis' in window) {
@@ -1364,15 +1427,42 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       /iPad|iPhone|iPod/i.test(ua) ||
       (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
+    const scheduleLaunch = (delayMs: number) => {
+      if (!sessionActiveRef.current) return;
+      if (restartTimerRef.current) {
+        clearTimeout(restartTimerRef.current);
+      }
+      restartTimerRef.current = setTimeout(() => {
+        restartTimerRef.current = null;
+        launchRecognizer();
+      }, delayMs);
+    };
+
     const launchRecognizer = () => {
       if (!sessionActiveRef.current) return;
+      if (recStateRef.current === 'starting' || recStateRef.current === 'running') return;
+
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.onstart = null;
+          recognitionRef.current.onend = null;
+          recognitionRef.current.onresult = null;
+          recognitionRef.current.onerror = null;
+          recognitionRef.current.abort?.();
+        } catch {}
+        recognitionRef.current = null;
+      }
+
       try {
+        recStateRef.current = 'starting';
         const rec = new SpeechRec();
-        rec.lang = isZh ? 'zh-CN' : 'en-US';
+        rec.lang = isZhRef.current ? 'zh-CN' : 'en-US';
         rec.continuous = !isAppleTouch;
         rec.interimResults = true;
 
         rec.onstart = () => {
+          recStateRef.current = 'running';
+          recRetryDelayRef.current = 180;
           if (sessionActiveRef.current && !isTtsSpeakingRef.current && !isSendingRef.current) {
             setPhase('listening');
           }
@@ -1384,10 +1474,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           if (!sessionActiveRef.current) return;
           let interim = '';
           let finalSegment = '';
+          let minFinalConf = 1;
           for (let i = e.resultIndex; i < e.results.length; i++) {
             const res = e.results[i];
+            const conf = Number(res[0]?.confidence ?? 0);
             if (res.isFinal) {
               finalSegment += res[0].transcript;
+              if (conf > 0 && conf < minFinalConf) minFinalConf = conf;
             } else {
               interim += res[0].transcript;
             }
@@ -1397,17 +1490,33 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           const spokenNorm = normClean(currentSpokenTextRef.current);
           const interimClean = interim.trim();
           const finalClean = finalSegment.trim();
+          const liveZh = isZhRef.current;
+          const musicNowPlaying = Boolean(playerRef.current?.state.isPlaying || isMusicPlayingRef.current);
 
-          // Real-time Barge-In: interrupt audio/TTS & in-flight DeepSeek immediately when user speaks
           const isEchoOfAi =
             isTtsSpeakingRef.current &&
-            interimClean.length < 10 &&
+            interimClean.length < 12 &&
             spokenNorm &&
             normClean(interimClean).length >= 2 &&
             spokenNorm.includes(normClean(interimClean));
 
+          const instantInterimMatch = Boolean(
+            interimClean.length >= 2 &&
+              (parseInstantAgentAction(interimClean, liveZh) ||
+                solvePrecisionQuery(interimClean, liveZh) ||
+                matchPureSocialBanter(interimClean, liveZh))
+          );
+
+          const looksLikeIntentWhileMusic =
+            instantInterimMatch ||
+            /^(one|你好|在吗|停止|停下|暂停|下一首|换歌|今天|现在|帮我|我在)/i.test(interimClean) ||
+            interimClean.length >= 4;
+
+          // Real-time Barge-In: only pause music eagerly on clear speech (never stray 2-char lyrics)
           if (interimClean.length >= 2 && !isEchoOfAi) {
-            pauseMusicForVoice();
+            if (!musicNowPlaying || looksLikeIntentWhileMusic) {
+              pauseMusicForVoice(true);
+            }
             if (isTtsSpeakingRef.current || isSendingRef.current) {
               interruptCurrentTurn();
             }
@@ -1420,35 +1529,65 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
           if (finalClean) {
             const now = Date.now();
+            const prevNorm = normClean(lastHandledFinalRef.current.text);
+            const curNorm = normClean(finalClean);
             if (
-              lastHandledFinalRef.current.text === finalClean &&
-              now - lastHandledFinalRef.current.at < 1500
+              curNorm &&
+              prevNorm &&
+              now - lastHandledFinalRef.current.at < 2600 &&
+              (curNorm === prevNorm || (prevNorm.length >= 2 && curNorm.startsWith(prevNorm)))
             ) {
               return;
             }
             if (
               isTtsSpeakingRef.current &&
               spokenNorm &&
-              normClean(finalClean).length >= 3 &&
-              spokenNorm.includes(normClean(finalClean))
+              curNorm.length >= 3 &&
+              spokenNorm.includes(curNorm)
+            ) {
+              return;
+            }
+            // Drop ultra-short low-confidence lyric fragments only if music is loud and no command matched
+            if (
+              musicNowPlaying &&
+              curNorm.length <= 2 &&
+              minFinalConf > 0 &&
+              minFinalConf < 0.42 &&
+              !parseInstantAgentAction(finalClean, liveZh) &&
+              !matchPureSocialBanter(finalClean, liveZh)
             ) {
               return;
             }
             lastHandledFinalRef.current = { text: finalClean, at: now };
-            void runDeepSeekTurn(finalClean);
+            void runDeepSeekTurnRef.current(finalClean);
             return;
           }
 
-          if (interimClean && parseInstantAgentAction(interimClean, isZh)) {
-            interimActionTimer = setTimeout(() => {
-              if (!sessionActiveRef.current) return;
-              lastHandledFinalRef.current = { text: interimClean, at: Date.now() };
-              void runDeepSeekTurn(interimClean);
-            }, 180);
+          // Speculative ultra-fast commit on stable interim transcript (cuts 500-800ms Chrome final delay)
+          if (interimClean.length >= 2 && !isEchoOfAi) {
+            const commitDelay = instantInterimMatch ? 160 : (!musicNowPlaying || interimClean.length >= 4) ? 380 : 0;
+            if (commitDelay > 0) {
+              interimActionTimer = setTimeout(() => {
+                if (!sessionActiveRef.current) return;
+                const prevNorm = normClean(lastHandledFinalRef.current.text);
+                const curNorm = normClean(interimClean);
+                if (
+                  curNorm &&
+                  prevNorm &&
+                  Date.now() - lastHandledFinalRef.current.at < 2600 &&
+                  curNorm === prevNorm
+                ) {
+                  return;
+                }
+                lastHandledFinalRef.current = { text: interimClean, at: Date.now() };
+                void runDeepSeekTurnRef.current(interimClean);
+              }, commitDelay);
+            }
           }
         };
 
         rec.onerror = (e: any) => {
+          recStateRef.current = 'stopped';
           if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
             sessionActiveRef.current = false;
             setVoiceActive(false);
@@ -1456,32 +1595,101 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             errorResetTimerRef.current = setTimeout(() => {
               if (!sessionActiveRef.current) setPhase('idle');
             }, 3000);
+            return;
+          }
+          // Recover smoothly from aborted, audio-capture, network, or no-speech without losing continuous listening
+          if (sessionActiveRef.current) {
+            const waitMs = e?.error === 'audio-capture' || e?.error === 'network' ? 360 : 180;
+            scheduleLaunch(waitMs);
           }
         };
 
         rec.onend = () => {
+          recStateRef.current = 'stopped';
+          if (interimActionTimer) {
+            clearTimeout(interimActionTimer);
+            interimActionTimer = null;
+          }
           if (sessionActiveRef.current) {
-            restartTimerRef.current = setTimeout(launchRecognizer, isAppleTouch ? 120 : 60);
+            scheduleLaunch(isAppleTouch ? 200 : 150);
           }
         };
 
         recognitionRef.current = rec;
         rec.start();
       } catch {
-        sessionActiveRef.current = false;
-        setVoiceActive(false);
-        setPhase('error');
+        // Never kill continuous session on transient start race; backoff & retry cleanly
+        recStateRef.current = 'stopped';
+        if (sessionActiveRef.current) {
+          const delay = recRetryDelayRef.current;
+          recRetryDelayRef.current = Math.min(1200, delay + 150);
+          scheduleLaunch(delay);
+        }
       }
     };
 
     launchRecognizer();
-  }, [ensureTtsAudioUnlocked, interruptCurrentTurn, isZh, pauseMusicForVoice, runDeepSeekTurn, stopSessionResources]);
+
+    // 2s keepalive watchdog guarantees continuous active listening even across browser audio-focus hiccups
+    recKeepaliveTimerRef.current = setInterval(() => {
+      if (!sessionActiveRef.current) return;
+      if (recStateRef.current === 'stopped' && !restartTimerRef.current) {
+        launchRecognizer();
+      } else if (phaseRef.current === 'connecting' && recStateRef.current === 'running') {
+        if (!isTtsSpeakingRef.current && !isSendingRef.current) {
+          setPhase('listening');
+        }
+      }
+    }, 2000);
+  }, [ensureTtsAudioUnlocked, interruptCurrentTurn, pauseMusicForVoice, stopSessionResources]);
+
+  // Auto-resume continuous listening on load if mic permission was already granted and user has not turned it off
+  const autoStartTriedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartTriedRef.current || typeof window === 'undefined') return;
+    autoStartTriedRef.current = true;
+    try {
+      if (localStorage.getItem('one-voice-always-on:v1') === '0') return;
+    } catch {}
+    const navPerms = (navigator as any)?.permissions;
+    if (navPerms?.query) {
+      navPerms
+        .query({ name: 'microphone' })
+        .then((status: PermissionStatus) => {
+          if (status.state === 'granted' && !sessionActiveRef.current) {
+            startDeepSeekVoiceSession();
+          }
+        })
+        .catch(() => {});
+    }
+  }, [startDeepSeekVoiceSession]);
+
+  // Unlock audio output cleanly on first user interaction whenever always-on listening is running
+  useEffect(() => {
+    const unlockOnce = () => {
+      if (sessionActiveRef.current) {
+        ensureTtsAudioUnlocked();
+      }
+    };
+    window.addEventListener('pointerdown', unlockOnce, { passive: true, capture: true });
+    window.addEventListener('keydown', unlockOnce, { passive: true, capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockOnce, true);
+      window.removeEventListener('keydown', unlockOnce, true);
+    };
+  }, [ensureTtsAudioUnlocked]);
 
   const handleLauncherClick = () => {
     if (suppressClickRef.current) return;
     if (voiceActive || sessionActiveRef.current) {
+      try {
+        localStorage.setItem('one-voice-always-on:v1', '0');
+      } catch {}
       stopSessionResources();
     } else {
+      try {
+        localStorage.setItem('one-voice-always-on:v1', '1');
+      } catch {}
       player?.unlockAudio();
       ensureTtsAudioUnlocked();
       startDeepSeekVoiceSession();

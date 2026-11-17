@@ -221,7 +221,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             el.src = url;
             (el as any).preservesPitch = true;
             (el as any).webkitPreservesPitch = true;
-            el.playbackRate = 1.0;
+            el.playbackRate = p.audioPlaybackRate;
             el.onended = () => {
               URL.revokeObjectURL(url);
               setTimeout(resolve, p.pauseAfterMs);

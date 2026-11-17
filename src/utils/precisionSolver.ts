@@ -412,7 +412,7 @@ export function solvePrecisionQuery(rawInput: string, isZh: boolean): PrecisionA
   if (!raw) return null;
 
   // 1. Live exact date & time questions
-  if (/几点(钟|了)?$|现在时间|what time is it/i.test(raw)) {
+  if (/几点(钟|了|半|分)?[?？啊吗呀呢]*$|现在(是)?什么时候|现在时间|what time is it/i.test(raw)) {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
@@ -422,7 +422,7 @@ export function solvePrecisionQuery(rawInput: string, isZh: boolean): PrecisionA
       kind: 'datetime',
     };
   }
-  if (/今天(是)?(几号|多少号|几月几号|星期几|礼拜几)|what (date|day) is today/i.test(raw)) {
+  if (/今天(是)?(几号|多少号|几月几号|几月几日|星期几|礼拜几|周几|哪一天|什么日子|什么日期|日期|几月)|今年是哪年|what (date|day) is today|today's date/i.test(raw)) {
     const now = new Date();
     const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
     return {
@@ -433,13 +433,36 @@ export function solvePrecisionQuery(rawInput: string, isZh: boolean): PrecisionA
       kind: 'datetime',
     };
   }
-  if (/明天(是)?(几号|星期几|礼拜几)/i.test(raw)) {
+  if (/明天(是)?(几号|多少号|几月几号|几月几日|星期几|礼拜几|周几|哪一天)/.test(raw)) {
     const tmr = new Date(Date.now() + 86_400_000);
     const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
     return {
       answer: isZh
         ? `明天是 ${tmr.getFullYear()} 年 ${tmr.getMonth() + 1} 月 ${tmr.getDate()} 日，${weekdays[tmr.getDay()]}。`
         : `Tomorrow is ${tmr.toDateString()}.`,
+      emotion: 'cheerful',
+      kind: 'datetime',
+    };
+  }
+  if (/昨天(是)?(几号|多少号|几月几号|几月几日|星期几|礼拜几|周几|哪一天)/.test(raw)) {
+    const yst = new Date(Date.now() - 86_400_000);
+    const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+    return {
+      answer: isZh
+        ? `昨天是 ${yst.getFullYear()} 年 ${yst.getMonth() + 1} 月 ${yst.getDate()} 日，${weekdays[yst.getDay()]}。`
+        : `Yesterday was ${yst.toDateString()}.`,
+      emotion: 'cheerful',
+      kind: 'datetime',
+    };
+  }
+  if (/今天(是)?不是周末|今天周末吗/.test(raw)) {
+    const day = new Date().getDay();
+    const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+    const isWeekend = day === 0 || day === 6;
+    return {
+      answer: isZh
+        ? `今天是${weekdays[day]}，${isWeekend ? '正好是周末，好好放松一下。' : '还不是周末，是工作日哦。'}`
+        : `Today is ${weekdays[day]}.`,
       emotion: 'cheerful',
       kind: 'datetime',
     };
