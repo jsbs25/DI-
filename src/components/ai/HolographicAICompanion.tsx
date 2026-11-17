@@ -1,5 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import {
+  Disc3,
+  ExternalLink,
+  Maximize2,
+  Pause,
+  Play,
+  SkipBack,
+  SkipForward,
+  Square,
+  X,
+} from 'lucide-react';
 import { Language } from '../../types/index.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
 import { useOptionalPlayerContext } from '../../music/PlayerContext.tsx';
@@ -57,6 +68,32 @@ type VoicePhase =
 interface QueuedSpeechItem {
   phrase: ProsodyPhrase;
   audioPromise: Promise<string | null> | null;
+}
+
+const DEFAULT_MUSIC_COVER = '/assets/music/ambient-space.jpg';
+
+function buildUnifiedEmbedUrl(rawUrl: string | undefined, isPlaying: boolean): string | undefined {
+  if (!rawUrl) return undefined;
+  try {
+    const u = new URL(rawUrl);
+    if (u.hostname.includes('youtube')) {
+      // Keep YouTube embed URL stable across pause/resume so postMessage preserves exact playback position
+      u.searchParams.set('autoplay', '1');
+      u.searchParams.set('enablejsapi', '1');
+      u.searchParams.set('playsinline', '1');
+      u.searchParams.set('rel', '0');
+      return u.toString();
+    }
+    if (u.hostname.includes('bilibili')) {
+      u.searchParams.set('autoplay', isPlaying ? '1' : '0');
+      u.searchParams.set('danmaku', '0');
+      u.searchParams.set('muted', '0');
+      return u.toString();
+    }
+    return rawUrl;
+  } catch {
+    return rawUrl;
+  }
 }
 
 function pickSweetVoice(isZh: boolean): SpeechSynthesisVoice | null {
@@ -122,6 +159,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   onBrowserSearchAction,
   onSetTheme,
   onSetLang,
+  currentTab = 'globe',
   showLauncher = true,
   placement = 'corner',
 }) => {
@@ -133,6 +171,16 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const [activeEmotion, setActiveEmotion] = useState<EmotionAnalysisResult | null>(null);
   const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const hasLiveEngineRef = useRef<boolean | null>(null);
+
+  // Unified Music Player state hosted directly inside One. orb
+  const [musicPopoverOpen, setMusicPopoverOpen] = useState(false);
+  const [showMiniVideo, setShowMiniVideo] = useState(false);
+  const [stageRect, setStageRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const [auroraIdx, setAuroraIdx] = useState(0);
+  const embedIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const popoverStageAnchorRef = useRef<HTMLDivElement | null>(null);
+  const pausedMusicForVoiceRef = useRef(false);
+  const explicitStopMusicRef = useRef(false);
 
   // Cache sweet natural voice as soon as browser populates speechSynthesis voices
   useEffect(() => {
@@ -285,8 +333,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       const el = new Audio();
       el.crossOrigin = 'anonymous';
       el.preload = 'auto';
-      (el as any).preservesPitch = false;
-      (el as any).webkitPreservesPitch = false;
+      (el as any).preservesPitch = true;
+      (el as any).webkitPreservesPitch = true;
       ttsAudioElRef.current = el;
 
       try {
@@ -295,17 +343,17 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           const ctx = new AudioCtx();
           ttsAudioCtxRef.current = ctx;
           const src = ctx.createMediaElementSource(el);
-          // Warmth chest boost + sweet vocal presence EQ
+          // Balanced natural vocal EQ
           const warmth = ctx.createBiquadFilter();
           warmth.type = 'lowshelf';
           warmth.frequency.value = 230;
-          warmth.gain.value = 2.4;
+          warmth.gain.value = 1.6;
 
           const presence = ctx.createBiquadFilter();
           presence.type = 'peaking';
           presence.frequency.value = 2900;
-          presence.Q.value = 1.2;
-          presence.gain.value = 2.2;
+          presence.Q.value = 1.1;
+          presence.gain.value = 1.4;
 
           src.connect(warmth);
           warmth.connect(presence);
@@ -459,14 +507,22 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
       if (action.type === 'play_music') {
         if (action.control === 'next') {
+          explicitStopMusicRef.current = false;
+          pausedMusicForVoiceRef.current = false;
           player?.activateMusicSession();
           player?.playNext();
         } else if (action.control === 'prev') {
+          explicitStopMusicRef.current = false;
+          pausedMusicForVoiceRef.current = false;
           player?.activateMusicSession();
           player?.playPrevious();
         } else if (action.control === 'stop' || action.control === 'pause') {
+          explicitStopMusicRef.current = true;
+          pausedMusicForVoiceRef.current = false;
           player?.stopAndHold();
         } else if (action.control === 'resume') {
+          explicitStopMusicRef.current = false;
+          pausedMusicForVoiceRef.current = false;
           if (player?.currentTrack) {
             player.activateMusicSession();
             player.unlockAudio();
@@ -479,9 +535,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             onNavigateTab('venus');
           }
         } else if (onPlayMusicAction) {
+          explicitStopMusicRef.current = false;
+          pausedMusicForVoiceRef.current = false;
           player?.activateMusicSession();
           onPlayMusicAction({ query: action.query, crawl: action.crawl ?? true });
         } else if (onNavigateTab) {
+          explicitStopMusicRef.current = false;
+          pausedMusicForVoiceRef.current = false;
           onNavigateTab('venus');
         }
       } else if (action.type === 'open_book') {
@@ -538,6 +598,113 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       player,
     ]
   );
+
+  const canRunAudioSession = Boolean(
+    player?.sessionActivated && !player?.userStopped && player?.currentTrack
+  );
+  const currentTrack = player?.currentTrack ?? null;
+  const isMusicPlaying = Boolean(player?.state.isPlaying);
+  const isOnVenus = currentTab === 'venus';
+  const showUnifiedMusicControls = canRunAudioSession && !isOnVenus;
+
+  const rawEmbed =
+    currentTrack?.playback.embedUrl ||
+    (currentTrack?.raw as any)?.embedUrl ||
+    currentTrack?.sources.find((s) => s.kind === 'embed' && s.embedUrl)?.embedUrl;
+  const liveEmbedSrc = canRunAudioSession ? buildUnifiedEmbedUrl(rawEmbed, isMusicPlaying) : undefined;
+
+  const sendYouTubeCmd = useCallback((func: 'playVideo' | 'pauseVideo') => {
+    const win = embedIframeRef.current?.contentWindow;
+    if (!win || !liveEmbedSrc || !liveEmbedSrc.includes('youtube')) return;
+    try {
+      win.postMessage(JSON.stringify({ event: 'command', func, args: [] }), '*');
+    } catch {}
+  }, [liveEmbedSrc]);
+
+  const pauseMusicForVoice = useCallback(() => {
+    if (!player) return;
+    if (player.state.isPlaying || pausedMusicForVoiceRef.current) {
+      if (player.state.isPlaying) {
+        pausedMusicForVoiceRef.current = true;
+        player.pause();
+      }
+      sendYouTubeCmd('pauseVideo');
+    }
+  }, [player, sendYouTubeCmd]);
+
+  const resumeMusicIfPausedForVoice = useCallback(() => {
+    if (!player || explicitStopMusicRef.current) {
+      pausedMusicForVoiceRef.current = false;
+      return;
+    }
+    if (pausedMusicForVoiceRef.current && player.currentTrack && !player.userStopped) {
+      pausedMusicForVoiceRef.current = false;
+      player.unlockAudio();
+      void player.resumeAudioContext();
+      player.play();
+      sendYouTubeCmd('playVideo');
+    }
+  }, [player, sendYouTubeCmd]);
+
+  // Cycle aurora aura color subtly while playing music outside Music tab
+  useEffect(() => {
+    if (!showUnifiedMusicControls || !isMusicPlaying) return;
+    const timer = setInterval(() => {
+      setAuroraIdx((i) => (i + 1) % 5);
+    }, 1800);
+    return () => clearInterval(timer);
+  }, [showUnifiedMusicControls, isMusicPlaying]);
+
+  useEffect(() => {
+    if (isOnVenus || !canRunAudioSession) {
+      setMusicPopoverOpen(false);
+    }
+  }, [isOnVenus, canRunAudioSession]);
+
+  // Keep YouTube embed synchronized with PlayerContext play/pause without reloading
+  useEffect(() => {
+    if (!liveEmbedSrc || !liveEmbedSrc.includes('youtube')) return;
+    sendYouTubeCmd(isMusicPlaying ? 'playVideo' : 'pauseVideo');
+  }, [isMusicPlaying, liveEmbedSrc, sendYouTubeCmd]);
+
+  // Dock persistent YouTube/Bilibili iframe into #venus-stage-slot or orb popover preview
+  useLayoutEffect(() => {
+    if (!canRunAudioSession || !liveEmbedSrc) {
+      setStageRect(null);
+      return;
+    }
+    const measure = () => {
+      const target = isOnVenus
+        ? document.getElementById('venus-stage-slot')
+        : musicPopoverOpen && showMiniVideo
+          ? popoverStageAnchorRef.current
+          : null;
+      if (!target) {
+        setStageRect(null);
+        return;
+      }
+      const r = target.getBoundingClientRect();
+      if (r.width > 20 && r.height > 20) {
+        setStageRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+      } else {
+        setStageRect(null);
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    const slot = document.getElementById('venus-stage-slot');
+    if (slot) ro.observe(slot);
+    if (popoverStageAnchorRef.current) ro.observe(popoverStageAnchorRef.current);
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    const rafTick = setInterval(measure, 250);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+      clearInterval(rafTick);
+    };
+  }, [canRunAudioSession, liveEmbedSrc, isOnVenus, musicPopoverOpen, showMiniVideo, currentTrack?.id]);
 
   const stopOutputAudio = useCallback(() => {
     ttsQueueRef.current = [];
@@ -643,7 +810,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
     setVoiceActive(false);
     setPhase('idle');
-  }, [stopOutputAudio]);
+    resumeMusicIfPausedForVoice();
+  }, [resumeMusicIfPausedForVoice, stopOutputAudio]);
 
   useEffect(() => {
     return () => {
@@ -782,11 +950,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      // Otherwise use server-cached neural MP3 audio, racing against a strict 750ms deadline so latency never stalls
+      // Use fast Google-backed neural MP3 audio (~165ms) with a generous 1750ms deadline before browser fallback
       const blobUrl = nextItem.audioPromise
         ? await Promise.race([
             nextItem.audioPromise,
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 750)),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1750)),
           ])
         : null;
       if (epoch !== turnEpochRef.current) {
@@ -802,9 +970,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           }
           audioEl.pause();
           audioEl.src = blobUrl;
-          (audioEl as any).preservesPitch = false;
-          (audioEl as any).webkitPreservesPitch = false;
-          audioEl.playbackRate = nextItem.phrase.audioPlaybackRate;
+          (audioEl as any).preservesPitch = true;
+          (audioEl as any).webkitPreservesPitch = true;
+          audioEl.playbackRate = 1.0;
           audioEl.volume = 1;
 
           let settled = false;
@@ -894,6 +1062,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
       // Supersede any active speaking or streaming turn immediately (true instant barge-in)
       const myEpoch = interruptCurrentTurn();
+      explicitStopMusicRef.current = false;
       currentUserTurnRef.current = clean;
       isSendingRef.current = true;
       const shouldSpeak = sessionActiveRef.current;
@@ -903,11 +1072,16 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       // 1. Instant local command dispatch (<1ms, zero network wait)
       const instantAction = parseInstantAgentAction(clean, isZh);
       if (instantAction && instantAction.type !== 'none') {
+        const isMusicAction = instantAction.type === 'play_music';
+        if (!isMusicAction) {
+          pauseMusicForVoice();
+        }
         const executed = executeParsedAction(instantAction, clean.toLowerCase());
         if (!executed) {
           if (myEpoch === turnEpochRef.current) {
             isSendingRef.current = false;
             setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+            if (!isMusicAction) resumeMusicIfPausedForVoice();
           }
           return;
         }
@@ -915,7 +1089,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: extractedReply.text }];
         const isMediaPlayback =
           (instantAction.type === 'play_music' && !instantAction.control) ||
-          (instantAction.type === 'play_music' && instantAction.control === 'resume') ||
+          (instantAction.type === 'play_music' && (instantAction.control === 'resume' || instantAction.control === 'next' || instantAction.control === 'prev')) ||
           instantAction.type === 'watch_documentary';
 
         if (shouldSpeak && !isMediaPlayback) {
@@ -923,6 +1097,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             if (myEpoch === turnEpochRef.current) {
               isSendingRef.current = false;
               setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+              if (!isMusicAction) resumeMusicIfPausedForVoice();
             }
           });
         } else {
@@ -935,6 +1110,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
+      // Pause active music while user converses with One., and resume automatically afterward
+      pauseMusicForVoice();
+
       // 2. Exact Precision Solver (<1ms, 100% mathematically/factually exact — zero hallucination)
       const precision = solvePrecisionQuery(clean, isZh);
       if (precision) {
@@ -944,17 +1122,19 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             if (myEpoch === turnEpochRef.current) {
               isSendingRef.current = false;
               setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+              resumeMusicIfPausedForVoice();
             }
           });
         } else {
           stopOutputAudio();
           isSendingRef.current = false;
           setPhase('idle');
+          resumeMusicIfPausedForVoice();
         }
         return;
       }
 
-      // 3. Pure greetings / emotional banter when no LLM key is set (<1ms); real questions always go to Live Knowledge / DeepSeek
+      // 3. Pure greetings / light banter when no LLM key is set (<1ms); real questions always go to Live Knowledge / DeepSeek
       if (hasLiveEngineRef.current === false) {
         const banterRaw = matchPureSocialBanter(clean, isZh);
         if (banterRaw) {
@@ -965,18 +1145,20 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               if (myEpoch === turnEpochRef.current) {
                 isSendingRef.current = false;
                 setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+                resumeMusicIfPausedForVoice();
               }
             });
           } else {
             stopOutputAudio();
             isSendingRef.current = false;
             setPhase('idle');
+            resumeMusicIfPausedForVoice();
           }
           return;
         }
       }
 
-      // 4. Live DeepSeek-V3 / Live Knowledge Engine streaming turn with Emotion Analysis & AbortController barge-in
+      // 4. Live DeepSeek-V3 / Live Knowledge Engine streaming turn with AbortController barge-in
       setPhase('thinking');
       stopOutputAudio();
       ttsStreamDoneRef.current = false;
@@ -984,6 +1166,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         if (myEpoch === turnEpochRef.current) {
           isSendingRef.current = false;
           setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+          resumeMusicIfPausedForVoice();
         }
       };
 
@@ -1051,7 +1234,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           const emoExtracted = extractEmotionTag(parsed.spokenText);
           if (emoExtracted.emotion) detectedEmotion = emoExtracted.emotion;
 
-          // Stream short expressive clauses immediately on 4+ chars for ultra-low first-word voice latency
+          // Stream short natural clauses immediately on 4+ chars for ultra-low first-word voice latency
           const display = emoExtracted.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '');
           const unuttered = display.slice(spokenOffset);
           if (!unuttered) return;
@@ -1093,6 +1276,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           stopOutputAudio();
           isSendingRef.current = false;
           setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+          if (!mediaActionTriggered) resumeMusicIfPausedForVoice();
           return;
         }
 
@@ -1104,6 +1288,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           ttsDoneCallbackRef.current = null;
           isSendingRef.current = false;
           setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+          resumeMusicIfPausedForVoice();
         }
       } catch (err: any) {
         if (err?.name === 'AbortError' || myEpoch !== turnEpochRef.current) {
@@ -1122,16 +1307,27 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             if (myEpoch === turnEpochRef.current) {
               isSendingRef.current = false;
               setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+              resumeMusicIfPausedForVoice();
             }
           });
         } else {
           stopOutputAudio();
           isSendingRef.current = false;
           setPhase('idle');
+          resumeMusicIfPausedForVoice();
         }
       }
     },
-    [enqueueEmotionalText, executeParsedAction, interruptCurrentTurn, isZh, speakDeepSeekReply, stopOutputAudio]
+    [
+      enqueueEmotionalText,
+      executeParsedAction,
+      interruptCurrentTurn,
+      isZh,
+      pauseMusicForVoice,
+      resumeMusicIfPausedForVoice,
+      speakDeepSeekReply,
+      stopOutputAudio,
+    ]
   );
 
   // Instant Continuous Voice Session with Real-Time Barge-In
@@ -1210,8 +1406,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             normClean(interimClean).length >= 2 &&
             spokenNorm.includes(normClean(interimClean));
 
-          if (interimClean.length >= 2 && !isEchoOfAi && (isTtsSpeakingRef.current || isSendingRef.current)) {
-            interruptCurrentTurn();
+          if (interimClean.length >= 2 && !isEchoOfAi) {
+            pauseMusicForVoice();
+            if (isTtsSpeakingRef.current || isSendingRef.current) {
+              interruptCurrentTurn();
+            }
           }
 
           if (interimActionTimer) {
@@ -1276,7 +1475,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
 
     launchRecognizer();
-  }, [ensureTtsAudioUnlocked, interruptCurrentTurn, isZh, runDeepSeekTurn, stopSessionResources]);
+  }, [ensureTtsAudioUnlocked, interruptCurrentTurn, isZh, pauseMusicForVoice, runDeepSeekTurn, stopSessionResources]);
 
   const handleLauncherClick = () => {
     if (suppressClickRef.current) return;
@@ -1350,20 +1549,18 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   };
 
   const activePillLabel = (() => {
-    if (!voiceActive && phase !== 'error') return 'One.';
+    if (!voiceActive && phase !== 'error') {
+      return showUnifiedMusicControls && currentTrack?.title ? currentTrack.title : 'One.';
+    }
     switch (phase) {
       case 'connecting':
         return isZh ? 'One. · 连接中' : 'One. · Connecting';
       case 'listening':
         return isZh ? 'One. · 聆听中' : 'One. · Listening';
       case 'thinking':
-        return isZh ? 'One. · 感知语境' : 'One. · Sensing';
+        return isZh ? 'One. · 思考中' : 'One. · Thinking';
       case 'speaking':
-        return activeEmotion
-          ? `One. · ${isZh ? activeEmotion.labelZh : activeEmotion.labelEn}`
-          : isZh
-            ? 'One. · 甜美对话'
-            : 'One. · Speaking';
+        return isZh ? 'One. · 对话中' : 'One. · Speaking';
       case 'error':
         return isZh ? 'One. · 需麦克风' : 'One. · Mic Needed';
       default:
@@ -1371,64 +1568,382 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     }
   })();
 
+  const glowColors = [
+    'shadow-[0_0_24px_rgba(56,189,248,0.48)]',
+    'shadow-[0_0_24px_rgba(192,132,252,0.48)]',
+    'shadow-[0_0_24px_rgba(244,114,182,0.48)]',
+    'shadow-[0_0_24px_rgba(251,191,36,0.48)]',
+    'shadow-[0_0_24px_rgba(52,211,153,0.48)]',
+  ];
+
   const activeBorderClass =
     phase === 'listening'
       ? 'border-emerald-400/75 shadow-[0_0_24px_rgba(52,211,153,0.32)]'
       : phase === 'speaking'
-      ? 'border-pink-300/80 shadow-[0_0_28px_rgba(244,114,182,0.42)]'
+      ? 'border-sky-300/80 shadow-[0_0_26px_rgba(142,207,255,0.42)]'
       : phase === 'connecting' || phase === 'thinking'
       ? 'border-[#69B8FF]/80 shadow-[0_0_24px_rgba(105,184,255,0.32)]'
       : phase === 'error'
       ? 'border-rose-400/75 shadow-[0_0_20px_rgba(248,113,113,0.28)]'
+      : showUnifiedMusicControls && isMusicPlaying
+      ? `border-white/25 ${glowColors[auroraIdx]}`
       : 'border-white/18 shadow-[0_14px_38px_rgba(0,0,0,0.68)] hover:border-[#8ECFFF]/60';
 
-  if (!showLauncher) return null;
+  if (!showLauncher && !canRunAudioSession) return null;
 
-  return placement === 'center-bottom' ? (
-    <div
-      id="globe-ai-launcher"
-      className="fixed bottom-[calc(5.1rem+env(safe-area-inset-bottom))] md:bottom-7 left-1/2 -translate-x-1/2 z-40 select-none"
-    >
-      <button
-        type="button"
-        onClick={handleLauncherClick}
-        aria-label="One."
-        aria-pressed={voiceActive}
-        className={`group inline-flex min-h-[44px] h-11 items-center gap-2.5 rounded-full border bg-[#070B16]/82 backdrop-blur-2xl pl-2 pr-4 transition-all hover:scale-[1.03] active:scale-95 cursor-pointer ${activeBorderClass}`}
-      >
-        <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] border border-white/12">
-          <canvas ref={orbCanvasRef} className="pointer-events-none h-7 w-7 rounded-full" />
-        </span>
-        <span className="text-xs font-semibold tracking-[0.14em] text-[#F7F5F0] whitespace-nowrap">
-          {activePillLabel}
-        </span>
-      </button>
-    </div>
-  ) : (
-    <div
-      id="globe-ai-launcher"
-      style={{ left: `${launcherPos.x}px`, top: `${launcherPos.y}px` }}
-      className="fixed z-40 select-none"
-    >
-      <button
-        type="button"
-        onPointerDown={handleOrbPointerDown}
-        onPointerMove={handleOrbPointerMove}
-        onPointerUp={finishOrbDrag}
-        onPointerCancel={finishOrbDrag}
-        onClick={handleLauncherClick}
-        style={{ touchAction: 'none' }}
-        aria-label="One."
-        aria-pressed={voiceActive}
-        title={activePillLabel}
-        className={`group relative flex h-12 w-12 items-center justify-center rounded-full border bg-[#070B16]/82 backdrop-blur-2xl transition-transform ${activeBorderClass} ${
-          isDragging
-            ? 'scale-110 cursor-grabbing ring-2 ring-[#8ECFFF]/60'
-            : 'cursor-pointer hover:scale-105 active:scale-95'
-        }`}
-      >
-        <canvas ref={orbCanvasRef} className="pointer-events-none h-10 w-10 rounded-full" />
-      </button>
-    </div>
+  const trackTitle = currentTrack?.title || (isZh ? '正在播放' : 'Now Playing');
+  const trackArtist = currentTrack?.artist || 'ONE Music';
+  const trackCover = currentTrack?.coverUrl || DEFAULT_MUSIC_COVER;
+  const trackSource = currentTrack?.source || currentTrack?.playback.provider || 'YouTube / Bilibili';
+
+  const displayCornerLeft =
+    showUnifiedMusicControls && typeof window !== 'undefined'
+      ? Math.min(launcherPos.x, Math.max(10, window.innerWidth - 220))
+      : launcherPos.x;
+
+  const renderMusicPopover = () =>
+    showUnifiedMusicControls && musicPopoverOpen ? (
+      <div className="mb-3 w-[min(88vw,288px)] rounded-2xl border border-slate-200/90 bg-white/95 p-3.5 shadow-xl backdrop-blur-2xl dark:border-white/15 dark:bg-[#162238]/95">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{trackTitle}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
+              <span className="truncate">{trackArtist}</span>
+              <span aria-hidden="true">·</span>
+              <span className="shrink-0">{trackSource}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMusicPopoverOpen(false)}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
+            title={isZh ? '收起' : 'Close'}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {liveEmbedSrc && showMiniVideo && (
+          <div
+            ref={popoverStageAnchorRef}
+            className="mt-2.5 aspect-video w-full overflow-hidden rounded-xl bg-slate-950"
+          />
+        )}
+
+        <div className="mt-3 flex items-center justify-between gap-1.5">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                explicitStopMusicRef.current = false;
+                pausedMusicForVoiceRef.current = false;
+                player?.playPrevious();
+              }}
+              className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+              title={isZh ? '上一首' : 'Previous'}
+            >
+              <SkipBack className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                explicitStopMusicRef.current = false;
+                pausedMusicForVoiceRef.current = false;
+                player?.unlockAudio();
+                void player?.resumeAudioContext();
+                player?.togglePlay();
+              }}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900"
+              title={isMusicPlaying ? (isZh ? '暂停' : 'Pause') : (isZh ? '播放' : 'Play')}
+            >
+              {isMusicPlaying ? <Pause className="h-4 w-4 fill-current" /> : <Play className="ml-0.5 h-4 w-4 fill-current" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                explicitStopMusicRef.current = false;
+                pausedMusicForVoiceRef.current = false;
+                player?.playNext();
+              }}
+              className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+              title={isZh ? '下一首' : 'Next'}
+            >
+              <SkipForward className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1">
+            {liveEmbedSrc && (
+              <button
+                type="button"
+                onClick={() => setShowMiniVideo((v) => !v)}
+                className={`flex min-h-[38px] min-w-[38px] items-center justify-center rounded-xl transition ${
+                  showMiniVideo
+                    ? 'bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-300'
+                    : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/10'
+                }`}
+                title={isZh ? '切换画面' : 'Toggle video'}
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setMusicPopoverOpen(false);
+                onNavigateTab?.('venus');
+              }}
+              className="flex min-h-[38px] items-center gap-1 rounded-xl px-2.5 text-xs font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-500/15 whitespace-nowrap"
+            >
+              <span>{isZh ? '打开音乐' : 'Open'}</span>
+              <ExternalLink className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                explicitStopMusicRef.current = true;
+                pausedMusicForVoiceRef.current = false;
+                setMusicPopoverOpen(false);
+                player?.stopAndHold();
+              }}
+              className="flex min-h-[38px] min-w-[38px] items-center justify-center rounded-xl text-rose-500 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/15"
+              title={isZh ? '停止播放' : 'Stop'}
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null;
+
+  return (
+    <>
+      {/* Single persistent YouTube / Bilibili player iframe hosted inside One. across all pages */}
+      {canRunAudioSession && liveEmbedSrc && (
+        <div
+          style={
+            stageRect
+              ? {
+                  position: 'fixed',
+                  top: `${stageRect.top}px`,
+                  left: `${stageRect.left}px`,
+                  width: `${stageRect.width}px`,
+                  height: `${stageRect.height}px`,
+                  zIndex: isOnVenus ? 20 : 52,
+                }
+              : {
+                  position: 'fixed',
+                  bottom: '8px',
+                  left: '8px',
+                  width: '2px',
+                  height: '2px',
+                  opacity: 0.01,
+                  pointerEvents: 'none',
+                  zIndex: 0,
+                }
+          }
+          className={stageRect ? 'overflow-hidden rounded-2xl bg-slate-950' : 'overflow-hidden'}
+        >
+          <iframe
+            ref={embedIframeRef}
+            key={currentTrack?.id || liveEmbedSrc}
+            title={trackTitle}
+            src={liveEmbedSrc}
+            className="h-full w-full border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
+        </div>
+      )}
+
+      {showLauncher && (
+        placement === 'center-bottom' ? (
+          <div
+            id="globe-ai-launcher"
+            className="fixed bottom-[calc(5.1rem+env(safe-area-inset-bottom))] md:bottom-7 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center select-none"
+          >
+            {renderMusicPopover()}
+            <div
+              className={`inline-flex min-h-[46px] items-center gap-1.5 rounded-full border bg-[#070B16]/86 backdrop-blur-2xl p-1 transition-all duration-500 ${activeBorderClass}`}
+            >
+              <button
+                type="button"
+                onClick={handleLauncherClick}
+                aria-label="One."
+                aria-pressed={voiceActive}
+                className="group relative inline-flex h-9 items-center gap-2 rounded-full pl-1.5 pr-3 transition-transform hover:scale-[1.02] active:scale-95 cursor-pointer"
+              >
+                <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] border border-white/12">
+                  {showUnifiedMusicControls && (
+                    <span
+                      className={`one-wrist-aurora absolute -inset-[2px] rounded-full opacity-90 pointer-events-none ${
+                        isMusicPlaying ? '' : '[animation-play-state:paused] opacity-40'
+                      }`}
+                    />
+                  )}
+                  <canvas ref={orbCanvasRef} className="relative z-10 pointer-events-none h-7 w-7 rounded-full bg-[#070B16]" />
+                </span>
+                <span className="max-w-[138px] truncate text-xs font-semibold tracking-[0.08em] text-[#F7F5F0]">
+                  {activePillLabel}
+                </span>
+              </button>
+
+              {showUnifiedMusicControls && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      explicitStopMusicRef.current = false;
+                      pausedMusicForVoiceRef.current = false;
+                      player?.unlockAudio();
+                      void player?.resumeAudioContext();
+                      player?.togglePlay();
+                    }}
+                    title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
+                    aria-label={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
+                  >
+                    {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      explicitStopMusicRef.current = false;
+                      pausedMusicForVoiceRef.current = false;
+                      player?.playNext();
+                    }}
+                    title={isZh ? '换下一首' : 'Next song'}
+                    aria-label={isZh ? '换下一首' : 'Next song'}
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
+                  >
+                    <SkipForward className="h-3.5 w-3.5 fill-current" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMusicPopoverOpen((o) => !o)}
+                    title={isZh ? '音乐详情' : 'Music details'}
+                    aria-label={isZh ? '音乐详情' : 'Music details'}
+                    className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
+                  >
+                    {trackCover ? (
+                      <img
+                        src={trackCover}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          if (!e.currentTarget.dataset.fallback) {
+                            e.currentTarget.dataset.fallback = '1';
+                            e.currentTarget.src = DEFAULT_MUSIC_COVER;
+                          }
+                        }}
+                        className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
+                      />
+                    ) : (
+                      <Disc3 className={`h-4 w-4 text-sky-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div
+            id="globe-ai-launcher"
+            style={{ left: `${displayCornerLeft}px`, top: `${launcherPos.y}px` }}
+            className="fixed z-40 flex flex-col items-start select-none"
+          >
+            {renderMusicPopover()}
+            <div
+              className={`inline-flex items-center gap-1 rounded-full border bg-[#070B16]/86 backdrop-blur-2xl p-1 transition-all duration-500 ${activeBorderClass}`}
+            >
+              <button
+                type="button"
+                onPointerDown={handleOrbPointerDown}
+                onPointerMove={handleOrbPointerMove}
+                onPointerUp={finishOrbDrag}
+                onPointerCancel={finishOrbDrag}
+                onClick={handleLauncherClick}
+                style={{ touchAction: 'none' }}
+                aria-label="One."
+                aria-pressed={voiceActive}
+                title={activePillLabel}
+                className={`group relative flex h-10 w-10 items-center justify-center rounded-full transition-transform ${
+                  isDragging
+                    ? 'scale-110 cursor-grabbing ring-2 ring-[#8ECFFF]/60'
+                    : 'cursor-pointer hover:scale-105 active:scale-95'
+                }`}
+              >
+                {showUnifiedMusicControls && (
+                  <span
+                    className={`one-wrist-aurora absolute inset-0 rounded-full opacity-95 pointer-events-none ${
+                      isMusicPlaying ? '' : '[animation-play-state:paused] opacity-40'
+                    }`}
+                  />
+                )}
+                <canvas ref={orbCanvasRef} className="relative z-10 pointer-events-none h-9 w-9 rounded-full bg-[#070B16]" />
+              </button>
+
+              {showUnifiedMusicControls && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      explicitStopMusicRef.current = false;
+                      pausedMusicForVoiceRef.current = false;
+                      player?.unlockAudio();
+                      void player?.resumeAudioContext();
+                      player?.togglePlay();
+                    }}
+                    title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
+                    aria-label={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
+                  >
+                    {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      explicitStopMusicRef.current = false;
+                      pausedMusicForVoiceRef.current = false;
+                      player?.playNext();
+                    }}
+                    title={isZh ? '换下一首' : 'Next song'}
+                    aria-label={isZh ? '换下一首' : 'Next song'}
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
+                  >
+                    <SkipForward className="h-3.5 w-3.5 fill-current" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMusicPopoverOpen((o) => !o)}
+                    title={trackTitle}
+                    aria-label={isZh ? '音乐详情' : 'Music details'}
+                    className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
+                  >
+                    {trackCover ? (
+                      <img
+                        src={trackCover}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          if (!e.currentTarget.dataset.fallback) {
+                            e.currentTarget.dataset.fallback = '1';
+                            e.currentTarget.src = DEFAULT_MUSIC_COVER;
+                          }
+                        }}
+                        className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
+                      />
+                    ) : (
+                      <Disc3 className={`h-4 w-4 text-sky-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      )}
+    </>
   );
 };

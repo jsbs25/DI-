@@ -34,14 +34,6 @@ function iaIdentifier(book: EmbeddableBookRef): string | null {
   return m?.[1] || null;
 }
 
-function gutenbergId(book: EmbeddableBookRef): string | null {
-  const sourceUrl = safeHttps(book.sourceUrl) || safeHttps(book.externalReadUrl);
-  const fromUrl = sourceUrl?.match(/gutenberg\.org\/ebooks\/(\d+)/)?.[1];
-  if (fromUrl) return fromUrl;
-  const ext = (book.externalId || book.identifier || '').replace(/^gutenberg_/, '');
-  return /^\d+$/.test(ext) ? ext : null;
-}
-
 export function getBookEmbedUrl(book: EmbeddableBookRef): { url: string; label: string } | null {
   const source = String(book.source || '').toLowerCase();
   const sourceUrl = safeHttps(book.sourceUrl) || safeHttps(book.externalReadUrl);
@@ -79,27 +71,9 @@ export function getBookEmbedUrl(book: EmbeddableBookRef): { url: string; label: 
     if (iaId) return { url: `https://archive.org/embed/${encodeURIComponent(iaId)}`, label: 'Internet Archive 公开阅读' };
   }
 
-  const olMatch = sourceUrl?.match(/openlibrary\.org\/(works|books)\/([A-Za-z0-9]+)/);
-  if (source === 'openlibrary' || olMatch) {
-    if (olMatch) return { url: `https://openlibrary.org/${olMatch[1]}/${olMatch[2]}`, label: 'Open Library 官方页面/借阅' };
-    if (sourceUrl?.includes('openlibrary.org')) return { url: sourceUrl, label: 'Open Library 官方页面/借阅' };
-  }
-
-  const gutId = gutenbergId(book);
-  if (source === 'gutenberg' || source === 'project gutenberg' || gutId) {
-    if (gutId) return { url: `https://www.gutenberg.org/ebooks/${gutId}.html.images`, label: 'Project Gutenberg 在线阅读' };
-  }
-
-  if ((source === 'wikisource' || /zh\.wikisource\.org/.test(sourceUrl || '')) && book.pageTitle) {
-    return { url: `https://zh.wikisource.org/wiki/${encodeURIComponent(book.pageTitle)}`, label: 'Wikisource 在线阅读' };
-  }
-  if ((source === 'ar_wikisource' || /ar\.wikisource\.org/.test(sourceUrl || '')) && book.pageTitle) {
-    return { url: `https://ar.wikisource.org/wiki/${encodeURIComponent(book.pageTitle)}`, label: 'Arabic Wikisource 在线阅读' };
-  }
-  if (sourceUrl && /wikisource\.org\/wiki\//.test(sourceUrl)) {
-    return { url: sourceUrl, label: 'Wikisource 在线阅读' };
-  }
-
+  // Open Library, Project Gutenberg, and Wikisource send X-Frame-Options / frame-ancestors
+  // headers blocking <iframe> embeds; those sources are read directly in the built-in chapter
+  // reader via full-text ingest or via external source link instead of blank frames.
   if (sourceUrl && /google\.[^/]+\/books/.test(sourceUrl)) {
     const gbId = book.identifier || sourceUrl.match(/[?&]id=([^&]+)/)?.[1];
     if (gbId) {

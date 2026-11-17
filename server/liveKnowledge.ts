@@ -130,7 +130,7 @@ export async function answerWithLiveKnowledge(
   const precision = solvePrecisionQuery(clean, isZh);
   if (precision) {
     return {
-      text: isVoice ? `[[EMO:${precision.emotion}]] ${precision.answer}` : precision.answer,
+      text: precision.answer,
       source: 'precision',
     };
   }
@@ -152,10 +152,9 @@ export async function answerWithLiveKnowledge(
 
     const bestFact = (isZh ? zhWiki : enWiki) || ddg || zhWiki || enWiki;
     if (bestFact) {
-      const formatted = isVoice ? `[[EMO:curious]] ${bestFact}` : bestFact;
-      knowledgeCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, text: formatted });
+      knowledgeCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, text: bestFact });
       return {
-        text: formatted,
+        text: bestFact,
         source: ddg && bestFact === ddg ? 'duckduckgo' : 'wikipedia',
       };
     }
@@ -163,19 +162,18 @@ export async function answerWithLiveKnowledge(
     // 3. Web search snippet fallback
     const webFact = await queryWebSnippetFallback(topic, isZh ? 'zh' : 'en', isVoice);
     if (webFact) {
-      const formatted = isVoice ? `[[EMO:cheerful]] ${webFact}` : webFact;
-      knowledgeCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, text: formatted });
-      return { text: formatted, source: 'web' };
+      knowledgeCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, text: webFact });
+      return { text: webFact, source: 'web' };
     }
   }
 
   // 4. Sincere transparent fallback if offline/unrecognized
   const transparent = isZh
     ? isVoice
-      ? '[[EMO:curious]] 这个问题涉及到更自由的推理创作呢，我刚刚检索了实时百科没有找到完全匹配的词条；你可以换个精确一点的关键词再问我，或在工作台接入 DeepSeek 密钥开启无限问答！'
+      ? '这个问题我现在没查到直接的百科词条，你可以换个关键词问我，或者在 AI 工作台配置 DeepSeek 密钥来解锁完整对话。'
       : '未能从实时百科检索到该问题的直接词条。您可以换用更明确的关键词，或在 DeepSeek 工作台填入 API 密钥以开启完整深度推理。'
     : isVoice
-      ? '[[EMO:curious]] I searched live knowledge for that and could not find an exact entry—try phrasing it with a specific topic or configure a DeepSeek key in the AI Hub for open reasoning!'
+      ? 'I could not find a direct entry for that just now. Try a more specific keyword, or add a DeepSeek key in the AI Hub for open reasoning.'
       : 'No direct live encyclopedic entry matched that query. Try a more specific topic or add a DeepSeek key in the AI Hub for full open reasoning.';
 
   return { text: transparent, source: 'conversational' };

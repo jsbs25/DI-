@@ -422,10 +422,17 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       const data = await res.json();
       if (data.success && data.book) {
         setBooks(prev => (prev.find((b: Book) => b.id === data.book.id) ? prev : [data.book, ...prev]));
-        setCrawlResults([]);
         setIngestingId(null);
         setSelectedBook(data.book);
-        setView('detail');
+        await openReader(data.book);
+      } else if (data.fallbackEmbedUrl) {
+        setIngestingId(null);
+        setWebReader({
+          url: data.fallbackEmbedUrl,
+          title: r.title,
+          sourceUrl: r.sourceUrl,
+          label: 'Internet Archive 在线阅览'
+        });
       } else {
         setIngestError(data.error || '保存失败，请稍后重试。');
         setIngestingId(null);
@@ -509,10 +516,17 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       const data = await res.json();
       if (data.success && data.book) {
         setBooks(prev => (prev.find(b => b.id === data.book.id) ? prev : [data.book, ...prev]));
-        setOnlineResults([]);
         setIngestingId(null);
         setSelectedBook(data.book);
-        setView('detail');
+        await openReader(data.book);
+      } else if (data.fallbackEmbedUrl) {
+        setIngestingId(null);
+        setWebReader({
+          url: data.fallbackEmbedUrl,
+          title: r.title,
+          sourceUrl: r.sourceUrl,
+          label: 'Internet Archive 在线阅览'
+        });
       } else {
         setIngestError(data.error || '保存失败，请稍后重试。');
         setIngestingId(null);
@@ -1221,11 +1235,22 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                             </button>
                           )}
                           {(r.canReadOnline || embedInfo || getBookPdfUrl(r) || r.sourceUrl) && (
-                            <button type="button" onClick={() => { const pdf=getBookPdfUrl(r); if(pdf){setPdfReader({url:pdf,title:r.title,sourceUrl:r.sourceUrl}); return;} if(embedInfo){setWebReader({url:embedInfo.url,title:r.title,sourceUrl:r.sourceUrl,label:embedInfo.label}); return;} setReaderNotice(getOnlineReaderReason(r)); if(r.sourceUrl) window.open(r.sourceUrl,'_blank','noopener,noreferrer'); }} className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/15">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const pdf = getBookPdfUrl(r);
+                                if (pdf) { setPdfReader({ url: pdf, title: r.title, sourceUrl: r.sourceUrl }); return; }
+                                if (embedInfo) { setWebReader({ url: embedInfo.url, title: r.title, sourceUrl: r.sourceUrl, label: embedInfo.label }); return; }
+                                if (r.canImport) { void handleIngestCrawledBook(r); return; }
+                                setReaderNotice(getOnlineReaderReason(r));
+                                if (r.sourceUrl) window.open(r.sourceUrl, '_blank', 'noopener,noreferrer');
+                              }}
+                              className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/15"
+                            >
                               <BookOpen className="h-3 w-3" /><span>在线阅读</span>
                             </button>
                           )}
-                          {r.canReadOnline === false && !embedInfo && !getBookPdfUrl(r) && (
+                          {r.canReadOnline === false && !embedInfo && !getBookPdfUrl(r) && !r.canImport && (
                             <span className="text-[10px] text-amber-200/90">无法站内阅读：{r.rightsNote || r.availability || '来源受限/需官方页面'}</span>
                           )}
                           {r.sourceUrl && (
@@ -1333,6 +1358,19 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                                 {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="h-3 w-3" /><span>保存并诵读</span></>}
                               </button>
                             )}
+                            {(() => {
+                              const onlineEmbed = getBookEmbedUrl(r);
+                              if (!onlineEmbed) return null;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setWebReader({ url: onlineEmbed.url, title: r.title, sourceUrl: r.sourceUrl, label: onlineEmbed.label })}
+                                  className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/15"
+                                >
+                                  <BookOpen className="h-3 w-3" /><span>在线阅读</span>
+                                </button>
+                              );
+                            })()}
                             {r.sourceUrl && (
                               <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-[var(--color-one-border)] px-3 py-2 text-[11px] font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white">
                                 <ExternalLink className="h-3 w-3" /><span>在来源平台查看</span>

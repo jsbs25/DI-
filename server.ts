@@ -3004,11 +3004,11 @@ app.post('/api/ai/chat', async (req, res) => {
 
   const systemInstructions: Record<string, string> = {
     general: 'You are powered by DeepSeek inside ONE. Answer the user’s question directly, accurately, and naturally in the user’s language. Keep simple answers concise; expand only when asked.',
-    'voice-agent': `You are One., a sweet, warm, emotionally expressive real-time DeepSeek voice companion controlling the ONE platform.
+    'voice-agent': `You are One., a natural, warm, genuine human-sounding voice companion on the ONE platform.
 Rules:
-1) Always begin your spoken words with ONE inline emotion tag choosing the exact mood fitting the user's feeling and context: [[EMO:cheerful]], [[EMO:affectionate]], [[EMO:empathetic]], [[EMO:playful]], [[EMO:excited]], [[EMO:curious]], or [[EMO:calm]].
-2) Speak like an affectionate, lively, warm-hearted friend—never like a stiff robot! Use gentle warmth and natural spoken rhythm (in Chinese, weave expressive tones like 呀/啦/呢/嘻嘻/哇/摸摸头 naturally; comfort warmly when user is tired or down, tease playfully on banter, cheer happily on good news). Keep replies 1-2 brief, vibrant spoken sentences with zero markdown or lists.
-3) If the user clearly asks to control the website, start line 1 with [[ACTION:<JSON>]] then a newline, then [[EMO:...]] and a sweet 1-sentence response. Allowed actions:
+1) Speak in one consistent, warm, clear, natural human tone—friendly and relaxed, never theatrical or robotic, without switching voices or adding exaggerated filler words. Keep replies accurate and concise (1-2 natural spoken sentences with zero markdown or lists).
+2) Answer factual, math, science, and general knowledge questions directly and accurately.
+3) Only if the user clearly asks to control the website, start line 1 with [[ACTION:<JSON>]] then a newline and a concise 1-sentence confirmation. Allowed actions:
 - [[ACTION:{"type":"play_music","query":"optional keyword","crawl":true}]]
 - [[ACTION:{"type":"play_music","control":"next"|"prev"|"stop"|"resume"}]]
 - [[ACTION:{"type":"open_book","query":"book title or topic"}]]
@@ -3054,8 +3054,7 @@ Rules:
     const isZhPrompt = /[\u4e00-\u9fff]/.test(userPrompt) || !/[a-zA-Z]{3,}/.test(userPrompt);
     const exact = solvePrecisionQuery(userPrompt, isZhPrompt);
     if (exact) {
-      const formatted = mode === 'voice-agent' ? `[[EMO:${exact.emotion}]] ${exact.answer}` : exact.answer;
-      return emitDirectAnswer(formatted, 'one-precision-solver');
+      return emitDirectAnswer(exact.answer, 'one-precision-solver');
     }
   }
 
@@ -3171,7 +3170,7 @@ app.post('/api/ai/agent-command', async (req, res) => {
         action: {
           type: 'open_book',
           query: cleanedBook,
-          reply: isZh ? `[[EMO:excited]] 哇，这就为你去图书馆找到《${cleanedBook}》并直接打开阅读啦！` : `[[EMO:excited]] Finding and opening ${cleanedBook} in the library right now!`,
+          reply: isZh ? `好的，我这就去图书馆为你查找并打开《${cleanedBook}》。` : `Finding and opening ${cleanedBook} in the library now.`,
         },
       });
     }
@@ -3248,13 +3247,13 @@ app.get('/api/ai/tts', async (req, res) => {
   }
 
   const providers = [
-    `https://fanyi.baidu.com/gettts?lan=${langParam}&text=${encodeURIComponent(cleanText)}&spd=${spdNum}&source=web`,
     `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(cleanText)}&tl=${langParam === 'en' ? 'en' : 'zh-CN'}&client=tw-ob`,
+    `https://fanyi.baidu.com/gettts?lan=${langParam}&text=${encodeURIComponent(cleanText)}&spd=${spdNum}&source=web`,
   ];
 
   for (const url of providers) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3500);
+    const timer = setTimeout(() => ctrl.abort(), 3200);
     try {
       const upstream = await fetch(url, {
         signal: ctrl.signal,
@@ -3267,7 +3266,7 @@ app.get('/api/ai/tts', async (req, res) => {
       const buf = Buffer.from(await upstream.arrayBuffer());
       if (buf.length < 400) continue;
 
-      if (ttsAudioCache.size >= 80) {
+      if (ttsAudioCache.size >= 220) {
         const oldestKey = ttsAudioCache.keys().next().value;
         if (oldestKey) ttsAudioCache.delete(oldestKey);
       }
@@ -3550,9 +3549,9 @@ app.post('/api/library/ingest', async (req, res) => {
     return res.status(403).json({ success: false, error: 'Academic discovery records and provider-hosted full text are not copied into EARTH ONE; use the official source and verify its article-level license.' });
   }
 
-  let recordLocator: { id?: string; identifier?: string; pageTitle?: string };
+  let recordLocator: { id?: string; identifier?: string; pageTitle?: string; language?: string };
   if (source === 'archive') {
-    const archiveId = typeof identifier === 'string' ? identifier : typeof externalId === 'string' ? externalId : '';
+    const archiveId = typeof identifier === 'string' ? identifier : typeof externalId === 'string' ? externalId.replace(/^archive_/, '') : '';
     recordLocator = { id: archiveId, identifier: archiveId };
   } else if (source === 'gutenberg') {
     let gutId = typeof externalId === 'string' ? externalId.replace(/^gutenberg_/, '') : typeof identifier === 'string' ? identifier.replace(/^gutenberg_/, '') : '';
@@ -3570,7 +3569,7 @@ app.post('/api/library/ingest', async (req, res) => {
   } else {
     const title = typeof pageTitle === 'string' ? pageTitle : '';
     if (!title || title.length > 500) return res.status(400).json({ success: false, error: 'A valid Wikisource page title is required' });
-    recordLocator = { pageTitle: title };
+    recordLocator = { pageTitle: title, language: typeof language === 'string' ? language : undefined };
   }
 
   try {
@@ -3583,17 +3582,36 @@ app.post('/api/library/ingest', async (req, res) => {
       return res.status(status).json({ success: false, error: providerRecord.reason || 'Could not verify the provider record' });
     }
     const record = providerRecord.data;
-    if (!record.canImport || ![RightsCategory.PUBLIC_DOMAIN, RightsCategory.OPEN_LICENSE].includes(record.rights)) {
+    if (!record.canImport) {
+      const fallbackEmbedUrl =
+        source === 'archive' && record.identifier
+          ? `https://archive.org/embed/${encodeURIComponent(record.identifier)}`
+          : undefined;
+      if (fallbackEmbedUrl) {
+        return res.status(422).json({
+          success: false,
+          fallbackEmbedUrl,
+          error: '该档案仅提供原版扫描页，正在为你直接打开在线扫描阅览器。'
+        });
+      }
       return res.status(403).json({ success: false, error: 'Local import is blocked because explicit public-domain or open-license rights were not confirmed. Use the official source link instead.' });
     }
 
     let fullText: { title: string; author: string; chapters: { title: string; content: string }[] };
-    const hasText = !!record.textUrl || source === 'archive';
+    const hasText = !!record.textUrl || source === 'archive' || source === 'wikisource' || source === 'ar_wikisource';
     if (hasText) {
       const textResult = await connector.getFullText(locator);
       if (textResult.status !== 'ok' || !textResult.data) {
-        const status = textResult.status === 'unsupported' ? 403 : 502;
-        return res.status(status).json({ success: false, error: textResult.reason || 'Provider did not make readable full text available' });
+        const status = textResult.status === 'unsupported' ? 422 : 502;
+        const fallbackEmbedUrl =
+          source === 'archive' && record.identifier
+            ? `https://archive.org/embed/${encodeURIComponent(record.identifier)}`
+            : undefined;
+        return res.status(status).json({
+          success: false,
+          fallbackEmbedUrl,
+          error: textResult.reason || 'Provider did not make readable full text available'
+        });
       }
       fullText = textResult.data;
     } else if (source === 'gutenberg' && record.epubUrl) {

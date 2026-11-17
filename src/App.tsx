@@ -37,7 +37,6 @@ import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
 import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
 import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
-import { GlobalMiniPlayer } from './components/music/GlobalMiniPlayer.tsx';
 import type { LibraryAgentAction, SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
 
 export default function App() {
@@ -459,7 +458,6 @@ export default function App() {
           </div>
         </footer>
       )}
-      <GlobalMiniPlayer lang={lang} currentTab={currentTab} onOpenMusic={() => setCurrentTab('venus')} />
       <OfflineIndicator lang={lang} />
     </div>
     </PlayerProvider>

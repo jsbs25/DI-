@@ -248,7 +248,7 @@ function toCrawled(r: BookSearchResult): CrawledBook {
       : r.source === 'archive' && r.identifier
         ? `https://archive.org/details/${encodeURIComponent(r.identifier)}`
         : r.source === 'wikisource' && r.pageTitle
-          ? `https://zh.wikisource.org/wiki/${encodeURIComponent(r.pageTitle)}`
+          ? `https://${r.language?.startsWith('en') ? 'en' : 'zh'}.wikisource.org/wiki/${encodeURIComponent(r.pageTitle)}`
           : r.source === 'ar_wikisource' && r.pageTitle
             ? `https://ar.wikisource.org/wiki/${encodeURIComponent(r.pageTitle)}`
             : '';
@@ -305,45 +305,49 @@ export async function crawlOpenBooks(
     { source: 'arabic_wikisource', count: arws?.length || 0, ok: arws !== null },
   ];
 
-  // Prioritize exact-relevance open text/embed books & YouTube/Bilibili full readings
-  const all: CrawledBook[] = [
-    ...(googleBooks || []),
-    ...(ol || []),
-    ...(gutenberg || []).map(toCrawled),
-    ...(ws || []).map(toCrawled),
-    ...(iaTexts || []),
-    ...(ytBooks || []),
-    ...(biliBooks || []),
-    ...(arws || []).map(toCrawled),
+  const qLower = q.toLowerCase();
+  const verdictNoiseRe = /判决书|裁定书|民事一审|民事二审|合同纠纷|仲裁|股份有限公司|有限责任公司/;
+  const score = (item: CrawledBook) => {
+    const t = (item.title || '').toLowerCase();
+    let s = 0;
+    if (t === qLower || t === `《${qLower}》`) s += 6;
+    else if (t.startsWith(qLower)) s += 4;
+    else if (t.includes(qLower)) s += 2;
+    if (verdictNoiseRe.test(item.title || '')) s -= 12;
+    if (item.canImport) s += 2;
+    if (item.embedUrl) s += 1;
+    if (item.canReadOnline) s += 1;
+    return s;
+  };
+
+  // Sort within each source bucket first, then round-robin interleave across buckets
+  // so readable full-text sources (Wikisource / Gutenberg) always appear alongside Archive/YouTube/Bilibili.
+  const buckets: CrawledBook[][] = [
+    (ws || []).map(toCrawled).sort((a, b) => score(b) - score(a)),
+    (gutenberg || []).map(toCrawled).sort((a, b) => score(b) - score(a)),
+    (iaTexts || []).slice().sort((a, b) => score(b) - score(a)),
+    (ytBooks || []).slice().sort((a, b) => score(b) - score(a)),
+    (biliBooks || []).slice().sort((a, b) => score(b) - score(a)),
+    (ol || []).slice().sort((a, b) => score(b) - score(a)),
+    (googleBooks || []).slice().sort((a, b) => score(b) - score(a)),
+    (arws || []).map(toCrawled).sort((a, b) => score(b) - score(a)),
   ];
 
+  const interleaved: CrawledBook[] = [];
+  const maxBucketLen = buckets.reduce((m, b) => Math.max(m, b.length), 0);
+  for (let i = 0; i < maxBucketLen; i++) {
+    for (const bucket of buckets) {
+      if (i < bucket.length) interleaved.push(bucket[i]);
+    }
+  }
+
   const seen = new Set<string>();
-  const deduped = all.filter((b) => {
+  const deduped = interleaved.filter((b) => {
     const titleStr = typeof b.title === 'string' ? b.title : String(b.title || '');
-    const authorStr =
-      typeof b.author === 'string' ? b.author : Array.isArray(b.author) ? (b.author as any).join(', ') : String(b.author || '');
-    const key = `${titleStr.toLowerCase().replace(/\s+/g, ' ').trim()}::${authorStr.toLowerCase().trim()}`.slice(0, 120);
+    const key = `${b.source}::${titleStr.toLowerCase().replace(/\s+/g, ' ').trim()}`.slice(0, 120);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  });
-
-  const qLower = q.toLowerCase();
-  const verdictNoiseRe = /判决书|裁定书|民事一审|民事二审|合同纠纷|仲裁|股份有限公司|有限责任公司/;
-  deduped.sort((a, b) => {
-    const score = (item: CrawledBook) => {
-      const t = (item.title || '').toLowerCase();
-      let s = 0;
-      if (t === qLower || t === `《${qLower}》`) s += 6;
-      else if (t.startsWith(qLower)) s += 4;
-      else if (t.includes(qLower)) s += 2;
-      if (verdictNoiseRe.test(item.title || '')) s -= 12;
-      if (item.canImport) s += 2;
-      if (item.embedUrl) s += 2;
-      if (item.canReadOnline) s += 1;
-      return s;
-    };
-    return score(b) - score(a);
   });
 
   return { results: deduped.slice(0, limit * 2), sources };

@@ -219,9 +219,9 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           const url = URL.createObjectURL(blob);
           await new Promise<void>((resolve, reject) => {
             el.src = url;
-            (el as any).preservesPitch = false;
-            (el as any).webkitPreservesPitch = false;
-            el.playbackRate = p.audioPlaybackRate;
+            (el as any).preservesPitch = true;
+            (el as any).webkitPreservesPitch = true;
+            el.playbackRate = 1.0;
             el.onended = () => {
               URL.revokeObjectURL(url);
               setTimeout(resolve, p.pauseAfterMs);
