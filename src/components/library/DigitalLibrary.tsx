@@ -33,12 +33,15 @@ import { PdfDocumentViewer } from '../browser/PdfDocumentViewer.tsx';
 import { getBookEmbedUrl, getBookPdfUrl, isRtlLanguage } from './bookEmbedUrl.ts';
 import { AdminLibrary } from './AdminLibrary.tsx';
 import { filterLibrarySearchResults, getLibrarySearchFilterOptions, LIBRARY_RIGHTS_FILTER_LABELS } from './searchFilters.ts';
+import type { LibraryAgentAction } from '../../utils/oneAgentController.ts';
 
 interface DigitalLibraryProps {
   lang: Language;
   currentUser?: { id: string } | null;
   /** When set, opens the detail view for a specific book (cross-module navigation). */
   focusBookId?: string | null;
+  /** Driven by One. voice AI: searches & immediately opens the matched book reader cleanly on mobile and desktop. */
+  quickAction?: LibraryAgentAction | null;
 }
 
 interface OnlineLibraryResult {
@@ -113,7 +116,7 @@ const SHELF_TABS: { id: BookshelfStatus | 'all'; label: string }[] = [
   { id: 'favorite', label: '收藏' }
 ];
 
-export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUser, focusBookId }) => {
+export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUser, focusBookId, quickAction }) => {
   // ---- View routing ----
   const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf' | 'admin'>('home');
   const [activeCategory, setActiveCategory] = useState<string>('all');
@@ -223,6 +226,131 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       .catch(() => {});
     return () => { cancelled = true; };
   }, [focusBookId]);
+
+  const handledLibrarySeqRef = useRef<number>(0);
+  useEffect(() => {
+    if (!quickAction || !quickAction.query?.trim() || quickAction.seq === handledLibrarySeqRef.current) return;
+    handledLibrarySeqRef.current = quickAction.seq;
+    const q = quickAction.query.trim();
+    let cancelled = false;
+
+    setView('home');
+    setSearchQuery(q);
+    setIngestError(null);
+    setReaderNotice(null);
+    setIsCrawling(true);
+    setCrawlResults([]);
+    setCrawlSources([]);
+
+    void (async () => {
+      try {
+        const [localRes, crawlRes] = await Promise.all([
+          fetch(`/api/library/books?search=${encodeURIComponent(q)}`).then(r => r.json()).catch(() => null),
+          fetch(`/api/library/crawl?q=${encodeURIComponent(q)}&limit=16`).then(r => r.json()).catch(() => null),
+        ]);
+        if (cancelled) return;
+
+        const localList: Book[] = Array.isArray(localRes?.books) ? localRes.books : [];
+        const crawledList: any[] = Array.isArray(crawlRes?.results) ? crawlRes.results : [];
+        if (crawlRes?.success) {
+          setCrawlResults(crawledList);
+          setCrawlSources(Array.isArray(crawlRes.sources) ? crawlRes.sources : []);
+        }
+
+        if (quickAction.autoOpen !== false) {
+          const qLower = q.toLowerCase();
+          const localHit = localList.find(b =>
+            (b.title || '').toLowerCase().includes(qLower) || qLower.includes((b.title || '').toLowerCase())
+          ) || localList[0];
+
+          if (localHit) {
+            const fullLocal = (await loadFullBook(localHit.id)) || localHit;
+            const hasReadableLocal = Boolean(
+              fullLocal.epubUrl ||
+              getBookPdfUrl(fullLocal as any) ||
+              (fullLocal.chapters && fullLocal.chapters.some(ch => ch.content && ch.content.trim().length > 0)) ||
+              getBookEmbedUrl(fullLocal as any)
+            );
+            if (hasReadableLocal) {
+              setSelectedBook(fullLocal);
+              await openReader(fullLocal);
+              return;
+            }
+          }
+
+          // Prefer genuine literary full-text editions (skip legal verdict noise)
+          const legalNoiseRe = /判决书|裁定书|民事一审|民事二审|合同纠纷|有限责任公司|股份有限公司/;
+          const importCandidate = crawledList.find(
+            (r) =>
+              r?.canImport &&
+              ['wikisource', 'gutenberg', 'ar_wikisource'].includes(String(r.source || '').toLowerCase()) &&
+              !legalNoiseRe.test(String(r.title || ''))
+          );
+          if (importCandidate) {
+            try {
+              setIngestingId(importCandidate.id);
+              const ingestResp = await fetch('/api/library/ingest', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  textUrl: importCandidate.textUrl,
+                  externalId: importCandidate.id,
+                  pageTitle: importCandidate.pageTitle,
+                  identifier: importCandidate.identifier,
+                  epubUrl: importCandidate.epubUrl,
+                  source: importCandidate.source,
+                  title: importCandidate.title,
+                  author: importCandidate.author,
+                  coverImage: importCandidate.coverImage,
+                  description: importCandidate.description,
+                  language: importCandidate.language,
+                  sourceUrl: importCandidate.sourceUrl,
+                }),
+              }).then(r => r.json());
+              if (!cancelled && ingestResp?.success && ingestResp.book) {
+                setBooks(prev => (prev.find(b => b.id === ingestResp.book.id) ? prev : [ingestResp.book, ...prev]));
+                setSelectedBook(ingestResp.book);
+                setIngestingId(null);
+                await openReader(ingestResp.book);
+                return;
+              }
+            } catch {} finally {
+              if (!cancelled) setIngestingId(null);
+            }
+          }
+
+          // Otherwise auto-open embeddable Archive / Google Books / YouTube Audiobook / Bilibili Book Reading cleanly in-app
+          const playableCandidate =
+            crawledList.find(r => getBookPdfUrl(r)) ||
+            crawledList.find(r => Boolean(getBookEmbedUrl(r))) ||
+            crawledList[0];
+
+          if (playableCandidate) {
+            const pdf = getBookPdfUrl(playableCandidate);
+            if (pdf) {
+              setPdfReader({ url: pdf, title: playableCandidate.title, sourceUrl: playableCandidate.sourceUrl });
+              return;
+            }
+            const embed = getBookEmbedUrl(playableCandidate);
+            if (embed) {
+              setWebReader({
+                url: embed.url,
+                title: playableCandidate.title,
+                sourceUrl: playableCandidate.sourceUrl,
+                label: embed.label,
+              });
+              return;
+            }
+            setCrawlReader(playableCandidate);
+          }
+        }
+      } finally {
+        if (!cancelled) setIsCrawling(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [quickAction]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1047,18 +1175,30 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             )}
           </section>
 
-          {/* Saturn-style open book crawl results */}
+          {/* Saturn-style multi-engine open book & audiobook crawler results */}
           {(crawlResults.length > 0 || isCrawling) && (
             <section aria-labelledby="library-crawl-results-title" aria-busy={isCrawling} className="rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-5 shadow-[var(--shadow-one-sm)]">
-              <h3 id="library-crawl-results-title" className="mb-1 text-sm font-semibold text-white">开放图书爬取 / 多源检索结果</h3>
-              <p className="mb-3 text-[11px] leading-relaxed text-[var(--color-one-text-muted)]">并行检索 Gutenberg、Open Library、Internet Archive、Wikisource 等公开/开放来源；仅展示元数据与官方链接，不抓取受版权保护内容。</p>
+              <h3 id="library-crawl-results-title" className="mb-1 text-sm font-semibold text-white">全网图书 / 有声精读爬虫结果</h3>
+              <p className="mb-3 text-[11px] leading-relaxed text-[var(--color-one-text-muted)]">已并行接入 Google Books、YouTube 有声精读、Bilibili 读书、Gutenberg、Open Library、Internet Archive、Wikisource，支持直接站内翻开阅读与有声聆听。</p>
               {crawlSources.length > 0 && (
                 <div className="mb-3 flex flex-wrap gap-1.5">
-                  {crawlSources.map((src: any) => (
-                    <span key={src.source} className={`rounded-md border px-2 py-1 text-[10px] ${src.ok ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : 'border-[var(--color-one-border)] text-[var(--color-one-text-dim)]'}`}>
-                      {src.source}: {src.ok ? `可用 ${src.count}` : '失败/超时'}
-                    </span>
-                  ))}
+                  {crawlSources.map((src: any) => {
+                    const srcNameMap: Record<string, string> = {
+                      youtube: 'YouTube 有声/精读',
+                      googlebooks: 'Google Books',
+                      bilibili: 'Bilibili 读书',
+                      openlibrary: 'Open Library',
+                      archive: 'Internet Archive',
+                      wikisource: 'Wikisource',
+                      gutenberg: 'Gutenberg',
+                      arabic_wikisource: 'Arabic Wikisource',
+                    };
+                    return (
+                      <span key={src.source} className={`rounded-md border px-2 py-1 text-[10px] ${src.ok && src.count > 0 ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : 'border-[var(--color-one-border)] text-[var(--color-one-text-dim)]'}`}>
+                        {srcNameMap[src.source] || src.source}: {src.ok ? `已采集 ${src.count}` : '待连接/超时'}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
               {isCrawling ? (
@@ -1168,7 +1308,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   {visibleOnlineResults.map(r => {
                     const canImport = r.canImport === true;
                     const sourceName = r.sourceName || ({
-                      openlibrary: 'Open Library', gutenberg: 'Project Gutenberg', googlebooks: 'Google Books', europeana: 'Europeana', archive: 'Internet Archive', wikisource: 'Wikisource', ar_wikisource: '阿拉伯语维基文库', openalex: 'OpenAlex', crossref: 'Crossref', arxiv: 'arXiv', europepmc: 'Europe PMC', pmc: 'PubMed Central', pubmed: 'PubMed', shamela: 'Shamela'
+                      youtube: 'YouTube 有声精读', bilibili: 'Bilibili 精读', openlibrary: 'Open Library', gutenberg: 'Project Gutenberg', googlebooks: 'Google Books', europeana: 'Europeana', archive: 'Internet Archive', wikisource: 'Wikisource', ar_wikisource: '阿拉伯语维基文库', openalex: 'OpenAlex', crossref: 'Crossref', arxiv: 'arXiv', europepmc: 'Europe PMC', pmc: 'PubMed Central', pubmed: 'PubMed', shamela: 'Shamela'
                     } as Record<string, string>)[r.source] || r.source;
                     const resourceType = typeof r.metadata?.resourceType === 'string' ? r.metadata.resourceType : undefined;
                     const identifierLabel = r.doi ? `DOI ${r.doi}` : r.isbn?.length ? `ISBN ${r.isbn[0]}` : r.identifier ? `ID ${r.identifier}` : undefined;
@@ -1780,12 +1920,16 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 <iframe
                   src={embed.url}
                   title={crawlReader.title}
-                  className="min-h-0 flex-1 border-0 bg-white"
+                  className="min-h-0 flex-1 border-0 bg-black sm:bg-white"
                   referrerPolicy="strict-origin-when-cross-origin"
-                  sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                  {...(/youtube\.com|bilibili\.com|archive\.org/i.test(embed.url)
+                    ? {}
+                    : { sandbox: 'allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-presentation' })}
                 />
                 <p className="flex items-start gap-1.5 border-t border-slate-800 px-4 py-2 text-[10px] leading-relaxed text-slate-500">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 通过官方/公开阅读页面嵌入显示；内容版权、可用性与是否允许嵌入由来源站点控制。若空白或受限，请点击“官方来源”打开。网页嵌入阅读暂不支持精确进度保存与站内批注。
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 通过官方/公开阅读页面或有声精读播放器嵌入显示；若加载空白，请点击“官方来源”打开。
                 </p>
               </>
             ) : (
@@ -1813,9 +1957,19 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               <button type="button" onClick={() => setWebReader(null)} aria-label="关闭阅读器" className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>
             </div>
           </div>
-          <iframe src={webReader.url} title={webReader.title} className="min-h-0 flex-1 border-0 bg-white" referrerPolicy="strict-origin-when-cross-origin" sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads" />
+          <iframe
+            src={webReader.url}
+            title={webReader.title}
+            className="min-h-0 flex-1 border-0 bg-black sm:bg-white"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+            {...(/youtube\.com|bilibili\.com|archive\.org/i.test(webReader.url)
+              ? {}
+              : { sandbox: 'allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-presentation' })}
+          />
           <p className="flex items-start gap-1.5 border-t border-slate-800 px-4 py-2 text-[10px] leading-relaxed text-slate-500">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 网页/官方阅读页按来源站点权限嵌入显示；若被站点禁止嵌入或需登录/付费/借阅，将无法在站内加载，请使用“官方来源”打开。嵌入网页阅读不支持跨站精确进度、书签与批注保存。
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 网页/官方阅读页或有声精读按来源站点权限嵌入显示；若加载受限请点击“官方来源”打开。
           </p>
         </div>
       )}

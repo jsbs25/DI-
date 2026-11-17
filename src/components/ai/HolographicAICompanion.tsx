@@ -25,6 +25,7 @@ interface HolographicAICompanionProps {
   onOpenAIHub?: () => void;
   onNavigateTab?: (tab: string) => void;
   onPlayMusicAction?: (opts: { query?: string; crawl?: boolean }) => void;
+  onOpenBookAction?: (opts: { query: string }) => void;
   onWatchDocumentaryAction?: (opts: {
     query: string;
     platform?: 'all' | 'bilibili' | 'youtube';
@@ -114,6 +115,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   onExploreUniverse,
   onNavigateTab,
   onPlayMusicAction,
+  onOpenBookAction,
   onWatchDocumentaryAction,
   onBrowserSearchAction,
   onSetTheme,
@@ -128,6 +130,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const [modelId, setModelId] = useState('deepseek-v3');
   const [activeEmotion, setActiveEmotion] = useState<EmotionAnalysisResult | null>(null);
   const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const hasLiveEngineRef = useRef<boolean | null>(null);
 
   // Cache sweet natural voice as soon as browser populates speechSynthesis voices
   useEffect(() => {
@@ -142,22 +145,32 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
   }, [isZh]);
 
-  // Resolve default DeepSeek chat model from backend (prefer fast DeepSeek-V3 for low-latency voice)
+  // Resolve default DeepSeek chat model and live engine availability from backend
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/ai/models')
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled || !data?.success || !Array.isArray(data.models)) return;
-        const deepseekPreferred =
-          data.models.find((m: { id: string }) => m.id === 'deepseek-v3') ||
-          data.models.find((m: { id: string; isDefault?: boolean }) => m.isDefault && m.id.startsWith('deepseek')) ||
-          data.models.find((m: { id: string }) => m.id.startsWith('deepseek'));
-        if (deepseekPreferred?.id) setModelId(deepseekPreferred.id);
-      })
-      .catch(() => {});
+    const syncModels = () => {
+      fetch('/api/ai/models')
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled || !data?.success) return;
+          if (typeof data.hasLiveEngine === 'boolean') {
+            hasLiveEngineRef.current = data.hasLiveEngine;
+          }
+          if (Array.isArray(data.models)) {
+            const deepseekPreferred =
+              data.models.find((m: { id: string }) => m.id === 'deepseek-v3') ||
+              data.models.find((m: { id: string; isDefault?: boolean }) => m.isDefault && m.id.startsWith('deepseek')) ||
+              data.models.find((m: { id: string }) => m.id.startsWith('deepseek'));
+            if (deepseekPreferred?.id) setModelId(deepseekPreferred.id);
+          }
+        })
+        .catch(() => {});
+    };
+    syncModels();
+    window.addEventListener('one-ai-config-updated', syncModels);
     return () => {
       cancelled = true;
+      window.removeEventListener('one-ai-config-updated', syncModels);
     };
   }, []);
 
@@ -469,6 +482,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         } else if (onNavigateTab) {
           onNavigateTab('venus');
         }
+      } else if (action.type === 'open_book') {
+        if (onOpenBookAction) {
+          onOpenBookAction({ query: action.query });
+        } else if (onNavigateTab) {
+          onNavigateTab('library');
+        }
       } else if (action.type === 'watch_documentary') {
         if (onWatchDocumentaryAction) {
           onWatchDocumentaryAction({
@@ -509,6 +528,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       onExploreUniverse,
       onFlyTo,
       onNavigateTab,
+      onOpenBookAction,
       onPlayMusicAction,
       onSetLang,
       onSetTheme,
@@ -760,8 +780,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      // Otherwise use our server-cached natural neural female MP3 audio with expressive pitch & cadence contour
-      const blobUrl = nextItem.audioPromise ? await nextItem.audioPromise : null;
+      // Otherwise use server-cached neural MP3 audio, racing against a strict 750ms deadline so latency never stalls
+      const blobUrl = nextItem.audioPromise
+        ? await Promise.race([
+            nextItem.audioPromise,
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 750)),
+          ])
+        : null;
       if (epoch !== turnEpochRef.current) {
         ttsDrainingRef.current = false;
         return;
@@ -908,7 +933,27 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      // 2. Single-trip fast DeepSeek-V3 streaming chat with live Emotion Analysis & AbortController barge-in
+      // 2. If no live LLM key / local Ollama is configured, speak warm emotional reply immediately (<2ms, zero HTTP wait)
+      if (hasLiveEngineRef.current === false) {
+        const fallbackRaw = resolveConversationalFallback(clean, isZh);
+        const fallbackParsed = extractEmotionTag(fallbackRaw);
+        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: fallbackParsed.text }];
+        if (shouldSpeak) {
+          speakDeepSeekReply(fallbackParsed.text, myEpoch, fallbackParsed.emotion, () => {
+            if (myEpoch === turnEpochRef.current) {
+              isSendingRef.current = false;
+              setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+            }
+          });
+        } else {
+          stopOutputAudio();
+          isSendingRef.current = false;
+          setPhase('idle');
+        }
+        return;
+      }
+
+      // 3. Single-trip fast DeepSeek-V3 streaming chat with live Emotion Analysis & AbortController barge-in
       setPhase('thinking');
       stopOutputAudio();
       ttsStreamDoneRef.current = false;
@@ -935,7 +980,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             prompt: clean,
             modelId: activeDeepSeekModel,
             mode: 'voice-agent',
-            maxTokens: 180,
+            maxTokens: 160,
             stream: true,
             history: historyRef.current.slice(-4),
           }),
@@ -983,12 +1028,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           const emoExtracted = extractEmotionTag(parsed.spokenText);
           if (emoExtracted.emotion) detectedEmotion = emoExtracted.emotion;
 
-          // Stream short expressive sentences rapidly for ultra-low voice latency
+          // Stream short expressive clauses immediately on 4+ chars for ultra-low first-word voice latency
           const display = emoExtracted.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '');
           const unuttered = display.slice(spokenOffset);
           if (!unuttered) return;
 
-          const breakMatch = unuttered.match(/^([\s\S]*?[。！？!?;；\n]|[\s\S]{10,}?[，,、])/);
+          const breakMatch = unuttered.match(/^([\s\S]*?[。！？!?;；\n]|[\s\S]{4,}?[，,、])/);
           if (breakMatch) {
             const segment = breakMatch[1];
             spokenOffset += segment.length;
@@ -1177,7 +1222,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               if (!sessionActiveRef.current) return;
               lastHandledFinalRef.current = { text: interimClean, at: Date.now() };
               void runDeepSeekTurn(interimClean);
-            }, 340);
+            }, 180);
           }
         };
 

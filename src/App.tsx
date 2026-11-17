@@ -38,7 +38,7 @@ import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx'
 import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
 import { GlobalMiniPlayer } from './components/music/GlobalMiniPlayer.tsx';
-import type { SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
+import type { LibraryAgentAction, SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -108,6 +108,7 @@ export default function App() {
   const [isMobileKeyboardOpen, setIsMobileKeyboardOpen] = useState(false);
   const [venusQuickAction, setVenusQuickAction] = useState<VenusAgentAction | null>(null);
   const [saturnQuickAction, setSaturnQuickAction] = useState<SaturnAgentAction | null>(null);
+  const [libraryQuickAction, setLibraryQuickAction] = useState<LibraryAgentAction | null>(null);
   const [browserQuickSearch, setBrowserQuickSearch] = useState<{ seq: number; query: string } | null>(null);
 
   useEffect(() => { document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr'; document.documentElement.lang = lang; }, [lang]);
@@ -324,7 +325,7 @@ export default function App() {
           quickAction={messengerQuickAction}
         />
         {currentTab === 'aihub' && <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8"><AIHub lang={lang} /></div>}
-        <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[#121e36] text-slate-100"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} /></div></div>
+        <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[#121e36] text-slate-100"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} quickAction={libraryQuickAction} /></div></div>
         {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonSpaceObservatory lang={lang} onBack={() => setCurrentTab('universe')} /></div>}
         {currentTab === 'arabic-learning' && (
           <div className="w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]">
@@ -423,6 +424,14 @@ export default function App() {
             query: opts.query,
           });
           setCurrentTab('venus');
+        }}
+        onOpenBookAction={(opts) => {
+          setLibraryQuickAction({
+            seq: Date.now(),
+            query: opts.query,
+            autoOpen: true,
+          });
+          setCurrentTab('library');
         }}
         onWatchDocumentaryAction={(opts) => {
           setSaturnQuickAction({

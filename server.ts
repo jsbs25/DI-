@@ -2957,7 +2957,7 @@ app.get('/api/games/rooms', (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/ai/models', async (_req, res) => {
   await aiGateway.detectLocalOllama();
-  res.json({ success: true, models: aiGateway.getModels() });
+  res.json({ success: true, hasLiveEngine: aiGateway.hasLiveEngine(), models: aiGateway.getModels() });
 });
 
 app.get('/api/ai/ollama/roles', (req, res) => {
@@ -2973,7 +2973,7 @@ app.post('/api/ai/ollama/roles', (req, res) => {
 app.post('/api/ai/custom-config', (req, res) => {
   const { apiKey, baseUrl, customModel } = req.body || {};
   aiGateway.registerCustomProvider(String(apiKey || ''), baseUrl ? String(baseUrl) : undefined, customModel ? String(customModel) : undefined);
-  res.json({ success: true, models: aiGateway.getModels() });
+  res.json({ success: true, hasLiveEngine: aiGateway.hasLiveEngine(), models: aiGateway.getModels() });
 });
 
 app.get('/api/ai/stats', (req, res) => {
@@ -3009,6 +3009,7 @@ Rules:
 3) If the user clearly asks to control the website, start line 1 with [[ACTION:<JSON>]] then a newline, then [[EMO:...]] and a sweet 1-sentence response. Allowed actions:
 - [[ACTION:{"type":"play_music","query":"optional keyword","crawl":true}]]
 - [[ACTION:{"type":"play_music","control":"next"|"prev"|"stop"|"resume"}]]
+- [[ACTION:{"type":"open_book","query":"book title or topic"}]]
 - [[ACTION:{"type":"watch_documentary","query":"keywords","platform":"all","randomPick":true}]]
 - [[ACTION:{"type":"navigate_tab","tab":"globe|feed|chat|venus|arabic-learning|saturn|video|library|browser|universe|aihub|knowledge|moon|crawler|network|community|creator|game|brand"}]]
 - [[ACTION:{"type":"browser_search","query":"keywords"}]]
@@ -3100,6 +3101,29 @@ app.post('/api/ai/agent-command', async (req, res) => {
   if (/听歌|放歌|放音乐|听音乐|播放音乐|打开.*音乐|来首歌|来一首|放一首|找首歌|我要听|我想听.*(歌|音乐|曲)|play.*music|open.*music/i.test(text)) {
     return res.json({ success: true, action: { type: 'play_music', query: '', crawl: true, reply: isZh ? '好的，已打开音乐并自动为您播放。' : 'Opening music.' } });
   }
+  const bookBracketMatch = text.match(/《([^》]{1,40})》/);
+  if (
+    bookBracketMatch ||
+    /(?:我想|我要|帮我|请|去|给我)?(?:看|读|找|搜|查|打开|翻开|听).{0,18}(?:这本|一本|那本|本|个)?书|read\s+.+\s*book|open\s+.+\s*book/i.test(text)
+  ) {
+    const cleanedBook = (
+      bookBracketMatch?.[1] ||
+      text
+        .replace(/(我想|我要|帮我|请帮我|给我|麻烦|请|去|在图书馆|去图书馆|打开|翻开|看一看|看下|看个|看本|看一本|看这本|看一下|看看|找本|找一本|读本|读一本|读一下|搜索|搜一下|听一下|看|读|找|这本书|那本书|一本书|的书|书吧|书籍|书本|书|吧|啊|呀|哦|吗|呢|的|read|open|find|search|book|books|a|the)/gi, ' ')
+        .replace(/[《》「」『』""''，。！？、,.!?]/g, ' ')
+        .trim()
+    );
+    if (cleanedBook.length >= 1) {
+      return res.json({
+        success: true,
+        action: {
+          type: 'open_book',
+          query: cleanedBook,
+          reply: isZh ? `[[EMO:excited]] 哇，这就为你去图书馆找到《${cleanedBook}》并直接打开阅读啦！` : `[[EMO:excited]] Finding and opening ${cleanedBook} in the library right now!`,
+        },
+      });
+    }
+  }
   if (/纪录片|记录片|documentary/i.test(text)) {
     return res.json({ success: true, action: { type: 'watch_documentary', query: '宇宙 纪录片', platform: 'all', randomPick: true, reply: isZh ? '好的，正在打开影院播放纪录片。' : 'Opening documentary.' } });
   }
@@ -3111,6 +3135,7 @@ app.post('/api/ai/agent-command', async (req, res) => {
 Allowed actions:
 - {"type":"play_music","query":"optional song/mood","crawl":true,"reply":"short confirmation in ${lang}"}
 - {"type":"play_music","control":"next"|"prev"|"pause"|"resume","reply":"short confirmation in ${lang}"}
+- {"type":"open_book","query":"book title or topic","reply":"short confirmation in ${lang}"}
 - {"type":"watch_documentary","query":"search keywords","platform":"all","randomPick":true,"reply":"short confirmation in ${lang}"}
 - {"type":"navigate_tab","tab":"globe|feed|chat|venus|arabic-learning|saturn|video|library|browser|universe|aihub|knowledge|moon|mercury|crawler|network|community|creator|game|brand","reply":"short confirmation in ${lang}"}
 - {"type":"browser_search","query":"web search keywords","reply":"short confirmation in ${lang}"}

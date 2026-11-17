@@ -208,6 +208,14 @@ class AIGateway {
     ];
   }
 
+  public hasLiveEngine(): boolean {
+    return (
+      this.isUsableKey(this.deepseekKey) ||
+      this.isUsableKey(this.customKey) ||
+      this.localOllamaModels.length > 0
+    );
+  }
+
   public getModels(): AIModelMeta[] {
     return this.models;
   }

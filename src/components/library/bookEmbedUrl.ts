@@ -45,9 +45,33 @@ function gutenbergId(book: EmbeddableBookRef): string | null {
 export function getBookEmbedUrl(book: EmbeddableBookRef): { url: string; label: string } | null {
   const source = String(book.source || '').toLowerCase();
   const sourceUrl = safeHttps(book.sourceUrl) || safeHttps(book.externalReadUrl);
+  const directEmbed = safeHttps(book.embedUrl);
 
-  if (safeHttps(book.embedUrl)) {
-    return { url: safeHttps(book.embedUrl)!, label: '官方嵌入阅读' };
+  if (directEmbed) {
+    if (source === 'youtube' || /youtube\.com|youtu\.be/i.test(directEmbed)) {
+      return { url: directEmbed, label: 'YouTube 有声全本精读' };
+    }
+    if (source === 'bilibili' || /bilibili\.com/i.test(directEmbed)) {
+      return { url: directEmbed, label: 'Bilibili 读书精讲' };
+    }
+    if (source === 'googlebooks' || /books\.google\./i.test(directEmbed)) {
+      return { url: directEmbed, label: 'Google Books 官方在线预览' };
+    }
+    return { url: directEmbed, label: '官方嵌入阅读' };
+  }
+
+  if (source === 'youtube' || (sourceUrl && /(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/.test(sourceUrl))) {
+    const vid = book.identifier || sourceUrl?.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/)?.[1];
+    if (vid) {
+      return { url: `https://www.youtube.com/embed/${vid}?autoplay=1&enablejsapi=1&rel=0&playsinline=1`, label: 'YouTube 有声全本精读' };
+    }
+  }
+
+  if (source === 'bilibili' || (sourceUrl && /bilibili\.com\/video\/(BV[A-Za-z0-9]+)/i.test(sourceUrl))) {
+    const bvid = book.identifier || sourceUrl?.match(/bilibili\.com\/video\/(BV[A-Za-z0-9]+)/i)?.[1];
+    if (bvid) {
+      return { url: `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&high_quality=1&danmaku=0&autoplay=1`, label: 'Bilibili 读书精讲' };
+    }
   }
 
   const iaId = iaIdentifier(book);
@@ -77,6 +101,10 @@ export function getBookEmbedUrl(book: EmbeddableBookRef): { url: string; label: 
   }
 
   if (sourceUrl && /google\.[^/]+\/books/.test(sourceUrl)) {
+    const gbId = book.identifier || sourceUrl.match(/[?&]id=([^&]+)/)?.[1];
+    if (gbId) {
+      return { url: `https://books.google.com/books?id=${encodeURIComponent(gbId)}&printsec=frontcover&output=embed`, label: 'Google Books 官方在线预览' };
+    }
     return { url: sourceUrl, label: 'Google Books（按来源权限预览）' };
   }
   return null;

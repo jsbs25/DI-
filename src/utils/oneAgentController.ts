@@ -11,12 +11,23 @@ export interface SaturnAgentAction {
   autoPlayRandom?: boolean;
 }
 
+export interface LibraryAgentAction {
+  seq: number;
+  query: string;
+  autoOpen?: boolean;
+}
+
 export type OneAgentAction =
   | {
       type: 'play_music';
       query?: string;
       crawl?: boolean;
       control?: 'next' | 'prev' | 'pause' | 'stop' | 'resume';
+      reply: string;
+    }
+  | {
+      type: 'open_book';
+      query: string;
       reply: string;
     }
   | {
@@ -97,6 +108,26 @@ function extractDocumentaryQuery(raw: string): string {
   return RANDOM_DOCUMENTARY_TOPICS[idx];
 }
 
+function extractBookQuery(raw: string): string {
+  const bracketed = raw.match(/《([^》]{1,40})》/)?.[1];
+  if (bracketed && bracketed.trim()) return bracketed.trim();
+
+  const enMatch = raw.match(/(?:read|open|find|search|book)\s+(?:the\s+book\s+|a\s+book\s+(?:about|on)\s+)?(.+)/i)?.[1];
+  const candidate = (enMatch || raw)
+    .replace(
+      /(我想|我要|帮我|请帮我|给我|麻烦|请|去|去图书馆|在图书馆|打开那个|打开|翻开|看一看|看下|看个|看本|看一本|看这本|看那本|看一下|看看|找本|找一本|找个|找点|读本|读一本|读一下|搜本|搜一本|搜索|搜一下|听一下|看|读|找|关于|这本书|那本书|一本书|的书|书吧|书籍|书本|书|吧|啊|呀|哦|吗|呢|了|的|read|open|find|search|book|books|about|the|a)/gi,
+      ' '
+    )
+    .replace(/[《》「」『』""''，。！？、,.!?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (candidate.length >= 1 && !/^(一下|点|些|什么)$/i.test(candidate)) {
+    return candidate;
+  }
+  return '';
+}
+
 export function extractInlineAgentDirective(rawText: string): {
   action: OneAgentAction | null;
   spokenText: string;
@@ -169,7 +200,31 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
     };
   }
 
-  // 3. Search & Auto-Open Documentary / Cinema Video
+  // 3. Auto-Search & Auto-Open Book in Digital Library (works seamlessly on mobile & desktop)
+  if (
+    /《[^》]{1,40}》/.test(raw) ||
+    /(我想|我要|帮我|请|去|给我)?(看|读|找|搜|查|打开|翻开|听).{0,16}(这本|一本|那本|本|个)?书/.test(raw) ||
+    /(我想看|我要看|打开|找一本|找本|搜一本|读一本)\s*[\u4e00-\u9fffA-Za-z0-9]{2,20}(?=书|$)/.test(raw) ||
+    /\b(read|open|find)\b.*\b(book|novel|ebook|audiobook)\b/i.test(raw)
+  ) {
+    const query = extractBookQuery(raw);
+    if (query) {
+      return {
+        type: 'open_book',
+        query,
+        reply: isZh
+          ? `[[EMO:excited]] 哇，这就为你去图书馆搜《${query}》，马上自动给你翻开读起来！`
+          : `[[EMO:excited]] Yay! Opening ${query} for you right now!`,
+      };
+    }
+    return {
+      type: 'navigate_tab',
+      tab: 'library',
+      reply: isZh ? '[[EMO:cheerful]] 好哒，世界数字图书馆打开啦，你想看哪本书随时告诉我！' : '[[EMO:cheerful]] Digital Library is open! Which book would you like?',
+    };
+  }
+
+  // 4. Search & Auto-Open Documentary / Cinema Video
   if (/纪录片|记录片|看电影|看视频|看大片|看片|影院|星环影院|documentary|watch.*(movie|video|film|doc)/i.test(raw)) {
     const query = extractDocumentaryQuery(raw);
     const platform = /b站|bilibili/i.test(raw) ? 'bilibili' : /youtube/i.test(raw) ? 'youtube' : 'all';
@@ -179,8 +234,8 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
       platform,
       randomPick: true,
       reply: isZh
-        ? `好呀，马上打开影院给你找「${query}」，一起看吧！`
-        : `Opening cinema and queuing ${query} for you!`,
+        ? `[[EMO:excited]] 好呀，马上打开影院给你找「${query}」，一起看吧！`
+        : `[[EMO:excited]] Opening cinema and queuing ${query} for you!`,
     };
   }
 

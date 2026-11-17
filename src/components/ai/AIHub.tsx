@@ -455,6 +455,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                     });
                     const d = await res.json().catch(() => null);
                     if (d?.success && Array.isArray(d.models)) setAvailableModels(d.models);
+                    window.dispatchEvent(new Event('one-ai-config-updated'));
                   } catch {}
                   setSelectedModel(customBaseUrl.toLowerCase().includes('deepseek.com') ? 'deepseek-v3' : 'custom');
                   setShowConfigDrawer(false);
