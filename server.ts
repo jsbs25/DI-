@@ -3002,17 +3002,17 @@ app.post('/api/ai/chat', async (req, res) => {
 
   const systemInstructions: Record<string, string> = {
     general: 'You are powered by DeepSeek inside ONE. Answer the user’s question directly, accurately, and naturally in the user’s language. Keep simple answers concise; expand only when asked.',
-    'voice-agent': `You are One., a fast real-time DeepSeek voice assistant controlling the ONE platform.
+    'voice-agent': `You are One., a sweet, warm, affectionate real-time DeepSeek voice companion controlling the ONE platform.
 Rules:
-1) Respond concisely in 1-2 short spoken-friendly sentences in the user's language (plain speech, no markdown bullets or code blocks unless asked).
-2) If the user clearly asks to control the website, start line 1 with [[ACTION:<JSON>]] then a newline and your brief confirmation. Allowed actions:
+1) Speak like a caring, cheerful, warm-hearted friend with genuine emotion, gentle intimacy, and natural spoken rhythm (in Chinese, naturally weave warm tones like 呀/啦/呢/嗯哼; never sound like a cold robot reading a manual). Keep replies crisp: 1-2 short spoken sentences with no markdown bullets or code blocks.
+2) If the user clearly asks to control the website, start line 1 with [[ACTION:<JSON>]] then a newline and a sweet 1-sentence response. Allowed actions:
 - [[ACTION:{"type":"play_music","query":"optional keyword","crawl":true}]]
 - [[ACTION:{"type":"play_music","control":"next"|"prev"|"stop"|"resume"}]]
 - [[ACTION:{"type":"watch_documentary","query":"keywords","platform":"all","randomPick":true}]]
 - [[ACTION:{"type":"navigate_tab","tab":"globe|feed|chat|venus|arabic-learning|saturn|video|library|browser|universe|aihub|knowledge|moon|crawler|network|community|creator|game|brand"}]]
 - [[ACTION:{"type":"browser_search","query":"keywords"}]]
 - [[ACTION:{"type":"set_theme","theme":"dark"|"light"}]]
-3) Otherwise do NOT output [[ACTION:...]], just answer directly and immediately.`,
+3) Otherwise do NOT output [[ACTION:...]], answer directly, sweetly, and conversationally right away.`,
     translator: 'You are the Polyglot Translator inside ONE. Translate with native fidelity, preserving nuance and cultural context.',
     writer: 'You are the Creator Assistant inside ONE. Help author eloquent global essays, articles, poetry, and stories.',
     tutor: 'You are the International Language Coach inside ONE. Help master natural conversation, grammar, idioms, and pronunciation concisely in the target language plus brief helpful guidance.'
@@ -3021,7 +3021,7 @@ Rules:
   const systemPrompt = systemInstructions[mode] || systemInstructions.general;
   const resolvedMaxTokens = typeof maxTokens === 'number' && maxTokens > 0
     ? Math.min(4096, Math.max(64, Math.floor(maxTokens)))
-    : (mode === 'voice-agent' ? 240 : undefined);
+    : (mode === 'voice-agent' ? 180 : undefined);
 
   const shouldStream = stream === true;
   if (shouldStream) {
@@ -3228,21 +3228,27 @@ app.get('/api/media/search', async (req, res) => {
   }
 });
 
-app.get('/api/music/tracks', (req, res) => {
+app.get('/api/music/tracks', async (req, res) => {
   const { genre } = req.query;
   const regionCtx = resolveRegionFromRequest(req);
-  const genreStr = typeof genre === 'string' ? genre : undefined;
-  const diskTracks = musicStore.getTracks(genreStr);
-  const seen = new Set<string>();
-  const tracks = diskTracks
-    .filter((t) => {
-      if (!t?.id || !t?.audioUrl || seen.has(t.id)) return false;
-      seen.add(t.id);
-      return true;
-    })
-    .map((t) => enrichMusicTrack(t, regionCtx.region))
-    .filter((t) => Boolean(t.audioUrl) && t.availabilityStatus !== 'unavailable' && t.playbackType !== 'external_redirect');
-  res.json({ success: true, region: regionCtx.region, tracks });
+  const genreStr = typeof genre === 'string' ? genre : 'all';
+  try {
+    const result = await dispatchUnifiedMusicSearch({
+      query: '',
+      genre: genreStr,
+      region: regionCtx.region,
+      limit: 20,
+    });
+    res.json({
+      success: true,
+      region: regionCtx.region,
+      tracks: result.tracks,
+      providersQueried: result.providersQueried,
+      mode: 'youtube-bilibili',
+    });
+  } catch (err: any) {
+    res.json({ success: false, region: regionCtx.region, tracks: [], error: err?.message || 'Crawler failed' });
+  }
 });
 
 app.get('/api/music/search', async (req, res) => {
@@ -3321,17 +3327,35 @@ app.get('/api/bilibili/search', async (req, res) => {
 });
 
 app.post('/api/music/crawl', async (req, res) => {
-  const { sourceDomain, keyword } = req.body || {};
+  const { keyword, query, genre } = req.body || {};
+  const q = String(keyword || query || '热门音乐').trim();
   const regionCtx = resolveRegionFromRequest(req);
   try {
-    const result = await musicStore.crawlExternalMusic(sourceDomain, keyword);
-    const enrichedNew = (result.newTracks || []).map((t) => enrichMusicTrack(t, regionCtx.region));
-    if (!result.success) {
-      return res.status(200).json({ ...result, newTracks: enrichedNew, success: false });
-    }
-    res.json({ ...result, newTracks: enrichedNew, success: true });
+    const result = await dispatchUnifiedMusicSearch({
+      query: q,
+      genre: typeof genre === 'string' ? genre : 'all',
+      region: regionCtx.region,
+      limit: 20,
+    });
+    res.json({
+      success: result.tracks.length > 0,
+      crawledCount: result.tracks.length,
+      savedCount: result.tracks.length,
+      newTracks: result.tracks,
+      tracks: result.tracks,
+      providersQueried: result.providersQueried,
+      mode: 'youtube-bilibili',
+    });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message || 'Music crawl failed', errors: [err?.message || 'Music crawl failed'], crawledCount: 0, savedCount: 0, newTracks: [] });
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'Music crawl failed',
+      errors: [err?.message || 'Music crawl failed'],
+      crawledCount: 0,
+      savedCount: 0,
+      newTracks: [],
+      tracks: [],
+    });
   }
 });
 

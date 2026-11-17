@@ -43,6 +43,49 @@ type VoicePhase =
   | 'speaking'
   | 'error';
 
+function pickSweetVoice(isZh: boolean): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices() || [];
+  if (!voices.length) return null;
+
+  const preferredPatterns = isZh
+    ? [
+        /xiaoxiao/i,
+        /xiaoyi/i,
+        /ting-?ting/i,
+        /meijia/i,
+        /sinji/i,
+        /google\s*普通话/i,
+        /huihui/i,
+        /yaoyao/i,
+        /natural.*zh|zh.*natural/i,
+        /neural.*zh|zh.*neural/i,
+        /female|女/i,
+      ]
+    : [
+        /jenny/i,
+        /aria/i,
+        /ava/i,
+        /samantha/i,
+        /victoria/i,
+        /karen/i,
+        /google us english/i,
+        /natural.*en|en.*natural/i,
+        /neural.*en|en.*neural/i,
+        /female/i,
+      ];
+
+  const langPrefix = isZh ? 'zh' : 'en';
+  const langVoices = voices.filter((v) => (v.lang || '').toLowerCase().startsWith(langPrefix));
+  const pool = langVoices.length > 0 ? langVoices : voices;
+
+  for (const pat of preferredPatterns) {
+    const match = pool.find((v) => pat.test(v.name) || pat.test(v.voiceURI));
+    if (match) return match;
+  }
+  return pool[0] || null;
+}
+
 export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   lang,
   onFlyTo,
@@ -61,6 +104,20 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const [voiceActive, setVoiceActive] = useState(false);
   const [modelId, setModelId] = useState('deepseek-v3');
+  const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+
+  // Cache sweet natural female voice as soon as browser populates speechSynthesis voices
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const refreshVoice = () => {
+      preferredVoiceRef.current = pickSweetVoice(isZh);
+    };
+    refreshVoice();
+    window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoice);
+    return () => {
+      window.speechSynthesis.removeEventListener?.('voiceschanged', refreshVoice);
+    };
+  }, [isZh]);
 
   // Resolve default DeepSeek chat model from backend (prefer fast DeepSeek-V3 for low-latency voice)
   useEffect(() => {
@@ -150,14 +207,18 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
   }, [clampLauncherPos]);
 
-  // Real-time DeepSeek voice session & streaming TTS queue refs
+  // Real-time DeepSeek voice session with turn-epoch instant barge-in & sweet TTS queue
   const phaseRef = useRef<VoicePhase>('idle');
   phaseRef.current = phase;
   const sessionActiveRef = useRef(false);
   const recognitionRef = useRef<any>(null);
+  const turnEpochRef = useRef(0);
+  const activeFetchAbortRef = useRef<AbortController | null>(null);
   const isSendingRef = useRef(false);
   const isTtsSpeakingRef = useRef(false);
+  const currentSpokenTextRef = useRef('');
   const lastExecutedActionRef = useRef<{ key: string; at: number }>({ key: '', at: 0 });
+  const lastHandledFinalRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const modelIdRef = useRef(modelId);
   const historyRef = useRef<HistoryTurn[]>([]);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -171,7 +232,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
   modelIdRef.current = modelId;
 
-  // Render 3D wireframe orb driven smoothly by voice phase (no WebAudio mic lock on mobile/iPad Safari)
+  // Render 3D wireframe orb driven smoothly by voice phase
   useEffect(() => {
     if (!showLauncher) return;
     const canvas = orbCanvasRef.current;
@@ -205,7 +266,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     scene.add(coreMesh);
 
     const nucGeo = new THREE.SphereGeometry(0.35, 16, 16);
-    const nucMat = new THREE.MeshBasicMaterial({ color: 0xcab07b });
+    const nucMat = new THREE.MeshBasicMaterial({ color: 0xf4a2c4 });
     const nucMesh = new THREE.Mesh(nucGeo, nucMat);
     scene.add(nucMesh);
 
@@ -225,8 +286,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         colorTarget.setHex(0x4ade80);
         energy = 0.25 + 0.18 * Math.sin(t * 4.2);
       } else if (currentPhase === 'speaking' || isTtsSpeakingRef.current) {
-        colorTarget.setHex(0xe5c17d);
-        energy = 0.48 + 0.26 * Math.sin(t * 9.5);
+        colorTarget.setHex(0xf9a8d4);
+        energy = 0.52 + 0.28 * Math.sin(t * 9.5);
       } else if (currentPhase === 'connecting' || currentPhase === 'thinking') {
         colorTarget.setHex(0x69b8ff);
         energy = 0.34 + 0.14 * Math.cos(t * 6.5);
@@ -276,34 +337,35 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       const key = dedupeKey || JSON.stringify(action);
       if (
         lastExecutedActionRef.current.key === key &&
-        now - lastExecutedActionRef.current.at < 2600
+        now - lastExecutedActionRef.current.at < 2200
       ) {
         return false;
       }
       lastExecutedActionRef.current = { key, at: now };
 
-      if (action.type === 'play_music' && !action.control) {
-        player?.unlockAudio();
-      }
-
       if (action.type === 'play_music') {
         if (action.control === 'next') {
+          player?.activateMusicSession();
           player?.playNext();
         } else if (action.control === 'prev') {
+          player?.activateMusicSession();
           player?.playPrevious();
         } else if (action.control === 'stop' || action.control === 'pause') {
           player?.stopAndHold();
         } else if (action.control === 'resume') {
           if (player?.currentTrack) {
+            player.activateMusicSession();
             player.unlockAudio();
             void player.resumeAudioContext();
             player.play();
           } else if (onPlayMusicAction) {
+            player?.activateMusicSession();
             onPlayMusicAction({ crawl: true });
           } else if (onNavigateTab) {
             onNavigateTab('venus');
           }
         } else if (onPlayMusicAction) {
+          player?.activateMusicSession();
           onPlayMusicAction({ query: action.query, crawl: action.crawl ?? true });
         } else if (onNavigateTab) {
           onNavigateTab('venus');
@@ -361,6 +423,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     ttsStreamDoneRef.current = true;
     ttsDrainingRef.current = false;
     ttsDoneCallbackRef.current = null;
+    currentSpokenTextRef.current = '';
     if (ttsSafetyTimerRef.current) {
       clearTimeout(ttsSafetyTimerRef.current);
       ttsSafetyTimerRef.current = null;
@@ -373,10 +436,37 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     isTtsSpeakingRef.current = false;
   }, []);
 
+  /**
+   * Instant Barge-In: cancels in-flight DeepSeek HTTP request and speech synthesis
+   * within milliseconds so the user can interrupt mid-sentence with a new question.
+   */
+  const interruptCurrentTurn = useCallback(() => {
+    turnEpochRef.current += 1;
+    if (activeFetchAbortRef.current) {
+      try {
+        activeFetchAbortRef.current.abort();
+      } catch {}
+      activeFetchAbortRef.current = null;
+    }
+    isSendingRef.current = false;
+    stopOutputAudio();
+    if (sessionActiveRef.current) {
+      setPhase('listening');
+    }
+    return turnEpochRef.current;
+  }, [stopOutputAudio]);
+
   const stopSessionResources = useCallback(() => {
     sessionActiveRef.current = false;
+    turnEpochRef.current += 1;
     isSendingRef.current = false;
 
+    if (activeFetchAbortRef.current) {
+      try {
+        activeFetchAbortRef.current.abort();
+      } catch {}
+      activeFetchAbortRef.current = null;
+    }
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
@@ -419,69 +509,88 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       .replace(/\s+/g, ' ')
       .trim();
 
-  const pumpTtsQueue = useCallback(() => {
-    if (ttsDrainingRef.current) return;
-    const nextChunk = ttsQueueRef.current.shift();
-    if (!nextChunk) {
-      if (ttsStreamDoneRef.current) {
+  const pumpTtsQueue = useCallback(
+    (epoch: number) => {
+      if (epoch !== turnEpochRef.current || ttsDrainingRef.current) return;
+      const nextChunk = ttsQueueRef.current.shift();
+      if (!nextChunk) {
+        if (ttsStreamDoneRef.current) {
+          isTtsSpeakingRef.current = false;
+          currentSpokenTextRef.current = '';
+          if (sessionActiveRef.current) setPhase('listening');
+          const cb = ttsDoneCallbackRef.current;
+          ttsDoneCallbackRef.current = null;
+          cb?.();
+        }
+        return;
+      }
+
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
         isTtsSpeakingRef.current = false;
-        if (sessionActiveRef.current) setPhase('listening');
         const cb = ttsDoneCallbackRef.current;
         ttsDoneCallbackRef.current = null;
         cb?.();
+        return;
       }
-      return;
-    }
 
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      isTtsSpeakingRef.current = false;
-      const cb = ttsDoneCallbackRef.current;
-      ttsDoneCallbackRef.current = null;
-      cb?.();
-      return;
-    }
+      ttsDrainingRef.current = true;
+      isTtsSpeakingRef.current = true;
+      currentSpokenTextRef.current = nextChunk;
+      setPhase('speaking');
 
-    ttsDrainingRef.current = true;
-    isTtsSpeakingRef.current = true;
-    setPhase('speaking');
-
-    try {
-      const utt = new SpeechSynthesisUtterance(nextChunk.slice(0, 260));
-      utt.lang = isZh ? 'zh-CN' : 'en-US';
-      utt.rate = 1.12;
-      let finished = false;
-      const finalize = () => {
-        if (finished) return;
-        finished = true;
-        if (ttsSafetyTimerRef.current) {
-          clearTimeout(ttsSafetyTimerRef.current);
-          ttsSafetyTimerRef.current = null;
+      try {
+        const utt = new SpeechSynthesisUtterance(nextChunk.slice(0, 260));
+        const sweetVoice = preferredVoiceRef.current || pickSweetVoice(isZh);
+        if (sweetVoice) {
+          utt.voice = sweetVoice;
+          utt.lang = sweetVoice.lang || (isZh ? 'zh-CN' : 'en-US');
+        } else {
+          utt.lang = isZh ? 'zh-CN' : 'en-US';
         }
+        // Sweet, gentle, lively companion prosody
+        utt.pitch = 1.15;
+        utt.rate = 1.04;
+        utt.volume = 1;
+
+        let finished = false;
+        const finalize = () => {
+          if (finished) return;
+          finished = true;
+          if (ttsSafetyTimerRef.current) {
+            clearTimeout(ttsSafetyTimerRef.current);
+            ttsSafetyTimerRef.current = null;
+          }
+          ttsDrainingRef.current = false;
+          if (epoch === turnEpochRef.current) {
+            pumpTtsQueue(epoch);
+          }
+        };
+        utt.onend = finalize;
+        utt.onerror = finalize;
+        ttsSafetyTimerRef.current = setTimeout(finalize, Math.max(2400, Math.min(12000, nextChunk.length * 200)));
+        window.speechSynthesis.speak(utt);
+      } catch {
         ttsDrainingRef.current = false;
-        pumpTtsQueue();
-      };
-      utt.onend = finalize;
-      utt.onerror = finalize;
-      ttsSafetyTimerRef.current = setTimeout(finalize, Math.max(2600, Math.min(14000, nextChunk.length * 190)));
-      window.speechSynthesis.speak(utt);
-    } catch {
-      ttsDrainingRef.current = false;
-      pumpTtsQueue();
-    }
-  }, [isZh]);
+        if (epoch === turnEpochRef.current) pumpTtsQueue(epoch);
+      }
+    },
+    [isZh]
+  );
 
   const enqueueSpeechChunk = useCallback(
-    (segment: string) => {
+    (segment: string, epoch: number) => {
+      if (epoch !== turnEpochRef.current) return;
       const cleaned = cleanSpeechSegment(segment);
       if (!cleaned) return;
       ttsQueueRef.current.push(cleaned);
-      pumpTtsQueue();
+      pumpTtsQueue(epoch);
     },
     [pumpTtsQueue]
   );
 
   const speakDeepSeekReply = useCallback(
-    (text: string, onDone?: () => void) => {
+    (text: string, epoch: number, onDone?: () => void) => {
+      if (epoch !== turnEpochRef.current) return;
       stopOutputAudio();
       const cleaned = cleanSpeechSegment(text);
       if (!cleaned) {
@@ -490,15 +599,18 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       }
       ttsStreamDoneRef.current = true;
       ttsDoneCallbackRef.current = onDone || null;
-      enqueueSpeechChunk(cleaned.slice(0, 420));
+      enqueueSpeechChunk(cleaned.slice(0, 420), epoch);
     },
     [enqueueSpeechChunk, stopOutputAudio]
   );
 
   const runDeepSeekTurn = useCallback(
-    async (userText: string, resumeSpeechAfter?: () => void) => {
+    async (userText: string) => {
       const clean = userText.trim();
-      if (!clean || isSendingRef.current) return;
+      if (!clean) return;
+
+      // Supersede any active speaking or streaming turn immediately (true instant barge-in)
+      const myEpoch = interruptCurrentTurn();
       isSendingRef.current = true;
       const shouldSpeak = sessionActiveRef.current;
 
@@ -509,9 +621,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       if (instantAction && instantAction.type !== 'none') {
         const executed = executeParsedAction(instantAction, clean.toLowerCase());
         if (!executed) {
-          isSendingRef.current = false;
-          setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-          resumeSpeechAfter?.();
+          if (myEpoch === turnEpochRef.current) {
+            isSendingRef.current = false;
+            setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+          }
           return;
         }
         const actionReply = instantAction.reply;
@@ -522,27 +635,35 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           instantAction.type === 'watch_documentary';
 
         if (shouldSpeak && !isMediaPlayback) {
-          speakDeepSeekReply(actionReply, () => {
-            isSendingRef.current = false;
-            resumeSpeechAfter?.();
+          speakDeepSeekReply(actionReply, myEpoch, () => {
+            if (myEpoch === turnEpochRef.current) {
+              isSendingRef.current = false;
+              setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+            }
           });
         } else {
           if (isMediaPlayback) stopOutputAudio();
-          isSendingRef.current = false;
-          setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-          resumeSpeechAfter?.();
+          if (myEpoch === turnEpochRef.current) {
+            isSendingRef.current = false;
+            setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+          }
         }
         return;
       }
 
-      // 2. Single-trip fast DeepSeek-V3 streaming chat (handles both natural commands & free QA)
+      // 2. Single-trip fast DeepSeek-V3 streaming chat with AbortController barge-in support
       setPhase('thinking');
       stopOutputAudio();
       ttsStreamDoneRef.current = false;
       ttsDoneCallbackRef.current = () => {
-        isSendingRef.current = false;
-        resumeSpeechAfter?.();
+        if (myEpoch === turnEpochRef.current) {
+          isSendingRef.current = false;
+          setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+        }
       };
+
+      const controller = new AbortController();
+      activeFetchAbortRef.current = controller;
 
       const activeDeepSeekModel = modelIdRef.current.startsWith('deepseek')
         ? modelIdRef.current
@@ -552,11 +673,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         const res = await fetch('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             prompt: clean,
             modelId: activeDeepSeekModel,
             mode: 'voice-agent',
-            maxTokens: 240,
+            maxTokens: 180,
             stream: true,
             history: historyRef.current.slice(-4),
           }),
@@ -568,9 +690,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         let spokenOffset = 0;
 
         await readAIStream(res, (delta) => {
+          if (myEpoch !== turnEpochRef.current) return;
           rawReply += delta;
 
-          // Wait briefly if output looks like an inline [[ACTION:{...}]] directive
           const trimmedStart = rawReply.trimStart();
           const waitingForDirective =
             !actionResolved && trimmedStart.startsWith('[') && !trimmedStart.includes(']]') && trimmedStart.length < 180;
@@ -594,18 +716,21 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
           if (!shouldSpeak || mediaActionTriggered) return;
 
-          // Stream sentences into speechSynthesis immediately without waiting for stream end
+          // Stream short clauses rapidly (>= 8 chars on punctuation) for ultra-low speech latency
           const display = parsed.spokenText.replace(/<think>[\s\S]*?(<\/think>|$)/g, '');
           const unuttered = display.slice(spokenOffset);
           if (!unuttered) return;
 
-          const breakMatch = unuttered.match(/^([\s\S]*?[。！？!?;；\n]|[\s\S]{24,}?[，,])/);
+          const breakMatch = unuttered.match(/^([\s\S]*?[。！？!?;；\n]|[\s\S]{8,}?[，,、])/);
           if (breakMatch) {
             const segment = breakMatch[1];
             spokenOffset += segment.length;
-            enqueueSpeechChunk(segment);
+            enqueueSpeechChunk(segment, myEpoch);
           }
         });
+
+        if (myEpoch !== turnEpochRef.current) return;
+        activeFetchAbortRef.current = null;
 
         const finalParsed = extractInlineAgentDirective(rawReply);
         if (!actionResolved && finalParsed.action && finalParsed.action.type !== 'none') {
@@ -628,21 +753,23 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           stopOutputAudio();
           isSendingRef.current = false;
           setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-          if (mediaActionTriggered) resumeSpeechAfter?.();
           return;
         }
 
         ttsStreamDoneRef.current = true;
         const remainder = cleanedReply ? cleanedReply.slice(spokenOffset) : finalText;
         if (cleanSpeechSegment(remainder)) {
-          enqueueSpeechChunk(remainder);
+          enqueueSpeechChunk(remainder, myEpoch);
         } else if (!ttsDrainingRef.current && ttsQueueRef.current.length === 0) {
           ttsDoneCallbackRef.current = null;
           isSendingRef.current = false;
           setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-          resumeSpeechAfter?.();
         }
-      } catch (err) {
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || myEpoch !== turnEpochRef.current) {
+          return;
+        }
+        activeFetchAbortRef.current = null;
         const fallbackText = resolveConversationalFallback(
           clean,
           isZh,
@@ -650,22 +777,23 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         );
         historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: fallbackText }];
         if (shouldSpeak) {
-          speakDeepSeekReply(fallbackText, () => {
-            isSendingRef.current = false;
-            resumeSpeechAfter?.();
+          speakDeepSeekReply(fallbackText, myEpoch, () => {
+            if (myEpoch === turnEpochRef.current) {
+              isSendingRef.current = false;
+              setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+            }
           });
         } else {
           stopOutputAudio();
           isSendingRef.current = false;
           setPhase('idle');
-          resumeSpeechAfter?.();
         }
       }
     },
-    [enqueueSpeechChunk, executeParsedAction, isZh, speakDeepSeekReply, stopOutputAudio]
+    [enqueueSpeechChunk, executeParsedAction, interruptCurrentTurn, isZh, speakDeepSeekReply, stopOutputAudio]
   );
 
-  // Instant DeepSeek Voice Session (works reliably on iPhone/iPad Safari, Android Chrome, and Desktop)
+  // Instant Continuous Voice Session with Real-Time Barge-In
   const startDeepSeekVoiceSession = useCallback(() => {
     stopSessionResources();
 
@@ -683,7 +811,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     setVoiceActive(true);
     setPhase('connecting');
 
-    // Unlock SpeechSynthesis inside the click gesture for iOS/iPadOS/Android browsers
+    // Unlock SpeechSynthesis inside user gesture for iOS/iPadOS/Android browsers
     try {
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
@@ -699,9 +827,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
     const launchRecognizer = () => {
-      if (!sessionActiveRef.current || isTtsSpeakingRef.current || isSendingRef.current) {
-        return;
-      }
+      if (!sessionActiveRef.current) return;
       try {
         const rec = new SpeechRec();
         rec.lang = isZh ? 'zh-CN' : 'en-US';
@@ -709,7 +835,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         rec.interimResults = true;
 
         rec.onstart = () => {
-          if (sessionActiveRef.current) setPhase('listening');
+          if (sessionActiveRef.current && !isTtsSpeakingRef.current && !isSendingRef.current) {
+            setPhase('listening');
+          }
         };
 
         let interimActionTimer: ReturnType<typeof setTimeout> | null = null;
@@ -726,37 +854,59 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               interim += res[0].transcript;
             }
           }
-          if (interim && isTtsSpeakingRef.current) {
-            stopOutputAudio();
+
+          const normClean = (s: string) => s.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+          const spokenNorm = normClean(currentSpokenTextRef.current);
+          const interimClean = interim.trim();
+          const finalClean = finalSegment.trim();
+
+          // Real-time Barge-In: interrupt TTS / in-flight request immediately if user speaks something new
+          const isEchoOfAi =
+            isTtsSpeakingRef.current &&
+            interimClean.length < 10 &&
+            spokenNorm &&
+            normClean(interimClean).length >= 2 &&
+            spokenNorm.includes(normClean(interimClean));
+
+          if (interimClean.length >= 2 && !isEchoOfAi && (isTtsSpeakingRef.current || isSendingRef.current)) {
+            interruptCurrentTurn();
           }
+
           if (interimActionTimer) {
             clearTimeout(interimActionTimer);
             interimActionTimer = null;
           }
-          if (finalSegment.trim()) {
-            try {
-              rec.stop();
-            } catch {}
-            void runDeepSeekTurn(finalSegment.trim(), () => {
-              if (sessionActiveRef.current) {
-                restartTimerRef.current = setTimeout(launchRecognizer, 120);
-              }
-            });
+
+          if (finalClean) {
+            const now = Date.now();
+            // Prevent duplicate trigger if interim quick-command already fired on identical phrase
+            if (
+              lastHandledFinalRef.current.text === finalClean &&
+              now - lastHandledFinalRef.current.at < 1500
+            ) {
+              return;
+            }
+            // Ignore exact self-echo if mic hears our own speaker output with zero new words
+            if (
+              isTtsSpeakingRef.current &&
+              spokenNorm &&
+              normClean(finalClean).length >= 3 &&
+              spokenNorm.includes(normClean(finalClean))
+            ) {
+              return;
+            }
+            lastHandledFinalRef.current = { text: finalClean, at: now };
+            // Keep recognizer alive continuously without calling rec.stop() so next barge-in has 0ms lag!
+            void runDeepSeekTurn(finalClean);
             return;
           }
-          const trimmedInterim = interim.trim();
-          if (trimmedInterim && parseInstantAgentAction(trimmedInterim, isZh)) {
+
+          if (interimClean && parseInstantAgentAction(interimClean, isZh)) {
             interimActionTimer = setTimeout(() => {
-              if (!sessionActiveRef.current || isSendingRef.current) return;
-              try {
-                rec.stop();
-              } catch {}
-              void runDeepSeekTurn(trimmedInterim, () => {
-                if (sessionActiveRef.current) {
-                  restartTimerRef.current = setTimeout(launchRecognizer, 120);
-                }
-              });
-            }, 520);
+              if (!sessionActiveRef.current) return;
+              lastHandledFinalRef.current = { text: interimClean, at: Date.now() };
+              void runDeepSeekTurn(interimClean);
+            }, 340);
           }
         };
 
@@ -772,8 +922,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         };
 
         rec.onend = () => {
-          if (sessionActiveRef.current && !isTtsSpeakingRef.current && !isSendingRef.current) {
-            restartTimerRef.current = setTimeout(launchRecognizer, isAppleTouch ? 240 : 140);
+          // Always keep microphone hot while voice session is active (even during AI speech!)
+          if (sessionActiveRef.current) {
+            restartTimerRef.current = setTimeout(launchRecognizer, isAppleTouch ? 120 : 60);
           }
         };
 
@@ -787,9 +938,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
 
     launchRecognizer();
-  }, [isZh, runDeepSeekTurn, stopOutputAudio, stopSessionResources]);
+  }, [interruptCurrentTurn, isZh, runDeepSeekTurn, stopSessionResources]);
 
-  // Single click directly toggles in-place DeepSeek voice conversation (zero modal/input popup!)
   const handleLauncherClick = () => {
     if (suppressClickRef.current) return;
     if (voiceActive || sessionActiveRef.current) {
@@ -868,7 +1018,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       case 'listening':
         return isZh ? 'One. · 聆听中' : 'One. · Listening';
       case 'thinking':
-        return isZh ? 'One. · DeepSeek' : 'One. · DeepSeek';
+        return isZh ? 'One. · 思考中' : 'One. · Thinking';
       case 'speaking':
         return isZh ? 'One. · 对话中' : 'One. · Speaking';
       case 'error':
@@ -882,7 +1032,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     phase === 'listening'
       ? 'border-emerald-400/75 shadow-[0_0_24px_rgba(52,211,153,0.32)]'
       : phase === 'speaking'
-      ? 'border-[#E5C17D]/80 shadow-[0_0_24px_rgba(229,193,125,0.34)]'
+      ? 'border-pink-300/80 shadow-[0_0_26px_rgba(244,114,182,0.36)]'
       : phase === 'connecting' || phase === 'thinking'
       ? 'border-[#69B8FF]/80 shadow-[0_0_24px_rgba(105,184,255,0.32)]'
       : phase === 'error'

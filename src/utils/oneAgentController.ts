@@ -141,11 +141,11 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
       reply: isZh ? '好的，继续播放音乐。' : 'Resuming music playback.',
     };
   }
-  if (/下一首|下一曲|换一首|换首歌|换个歌|切歌|不好听|换一个歌|next song|next track|skip track/i.test(raw)) {
-    return { type: 'play_music', control: 'next', reply: isZh ? '已切换到下一首。' : 'Skipped to next track.' };
+  if (/下一首|下一曲|换一首|换首歌|换个歌|换下一首|切换下一首|切歌|不好听|换一个歌|next song|next track|skip track/i.test(raw)) {
+    return { type: 'play_music', control: 'next', reply: isZh ? '好呀，这就给你换一首更合心意的歌。' : 'Sure thing, skipping to the next track!' };
   }
   if (/上一首|上一曲|previous song|previous track/i.test(raw)) {
-    return { type: 'play_music', control: 'prev', reply: isZh ? '回到上一首。' : 'Playing previous track.' };
+    return { type: 'play_music', control: 'prev', reply: isZh ? '好哒，回到上一首啦。' : 'Going back to the previous track!' };
   }
 
   // 2. Crawl & Play Music (natural expressions)
@@ -161,11 +161,11 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
       crawl: true,
       reply: query
         ? isZh
-          ? `好的，正在打开音乐为您播放。`
-          : `Opening music and playing ${query} now.`
+          ? `好呀，这就去给你找好听的音乐啦。`
+          : `Opening music and playing ${query} right away!`
         : isZh
-          ? '好的，已打开音乐并自动播放。'
-          : 'Opening music and playing now.',
+          ? '好哒，已经打开音乐给你放上啦，慢慢听哦。'
+          : 'Music is on, enjoy listening!',
     };
   }
 
@@ -179,8 +179,8 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
       platform,
       randomPick: true,
       reply: isZh
-        ? `好的，正在打开影院并为您搜索播放「${query}」。`
-        : `Opening cinema and searching for ${query}.`,
+        ? `好呀，马上打开影院给你找「${query}」，一起看吧！`
+        : `Opening cinema and queuing ${query} for you!`,
     };
   }
 
@@ -193,28 +193,28 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
       return {
         type: 'browser_search',
         query: q,
-        reply: isZh ? `好的，正在搜索「${q}」。` : `Searching for ${q} in browser.`,
+        reply: isZh ? `好哒，这就帮你在浏览器查一下「${q}」哦。` : `Searching for ${q} right now!`,
       };
     }
     return {
       type: 'navigate_tab',
       tab: 'browser',
-      reply: isZh ? '好的，已打开浏览器。' : 'Opening Web Browser.',
+      reply: isZh ? '好呀，浏览器打开啦。' : 'Web browser is open!',
     };
   }
 
   // 5. Theme & Language Controls
   if (/深色模式|暗黑模式|黑夜模式|夜间模式|dark mode/i.test(raw)) {
-    return { type: 'set_theme', theme: 'dark', reply: isZh ? '已切换为深色模式。' : 'Switched to dark mode.' };
+    return { type: 'set_theme', theme: 'dark', reply: isZh ? '好呀，换上柔和的深色夜景模式啦。' : 'Switched to dark mode!' };
   }
   if (/浅色模式|明亮模式|白天模式|日间模式|light mode/i.test(raw)) {
-    return { type: 'set_theme', theme: 'light', reply: isZh ? '已切换为浅色模式。' : 'Switched to light mode.' };
+    return { type: 'set_theme', theme: 'light', reply: isZh ? '好呀，切回清爽明亮的浅色模式啦。' : 'Switched to light mode!' };
   }
   if (/切换英文|换成英文|用英文|english mode|switch to english/i.test(raw)) {
-    return { type: 'set_language', lang: 'en', reply: 'Switched interface language to English.' };
+    return { type: 'set_language', lang: 'en', reply: 'Switched to English, how can I help?' };
   }
   if (/切换中文|换成中文|用中文|chinese mode|switch to chinese/i.test(raw)) {
-    return { type: 'set_language', lang: 'zh', reply: '已切换界面语言为中文。' };
+    return { type: 'set_language', lang: 'zh', reply: '好呀，切回中文啦。' };
   }
 
   // 6. Globe Fly-To Destinations
@@ -226,7 +226,7 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
           lat: p.lat,
           lng: p.lng,
           place: isZh ? p.zh : p.en,
-          reply: isZh ? `好的，正在前往${p.zh}。` : `Flying to ${p.en}.`,
+          reply: isZh ? `好呀，拉上你一起飞往${p.zh}看看吧！` : `Flying with you to ${p.en}!`,
         };
       }
     }
@@ -259,7 +259,7 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
       return {
         type: 'navigate_tab',
         tab: r.tab,
-        reply: isZh ? `好的，已为您打开${r.zh}。` : `Opening ${r.en}.`,
+        reply: isZh ? `好哒，已经帮你打开${r.zh}啦。` : `Opening ${r.en} for you!`,
       };
     }
   }
@@ -267,48 +267,88 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
   return null;
 }
 
-export function resolveConversationalFallback(text: string, isZh: boolean, errorHint?: string): string {
+export function resolveConversationalFallback(text: string, isZh: boolean, _errorHint?: string): string {
   const raw = text.trim();
   const lower = raw.toLowerCase();
 
   if (/^(你好|您好|哈喽|嗨|在吗|在不在|hi|hello|hey)/i.test(raw)) {
     return isZh
-      ? '我在。想听歌、停止播放、看纪录片、打开语言中心，或者直接问我任何问题都可以。'
-      : 'I am here. Ask me to play music, stop playback, open Language Center, find a documentary, or ask anything.';
+      ? '我在呢！刚刚还在想你什么时候来找我聊天呀，今天开心吗？'
+      : 'Hey there! I am right here with you, how is your day going?';
+  }
+  if (/你在干嘛|干嘛呢|做什么呢|忙什么|在忙吗|what are you doing/i.test(raw)) {
+    return isZh
+      ? '我呀，正乖乖亮着光等你说话呢！你要不要听点音乐，还是就陪我随便聊会儿天呀？'
+      : 'Just glowing softly and waiting to chat with you! Want some music or just a cozy talk?';
+  }
+  if (/吃饭了吗|吃了吗|吃过饭|吃什么|饿不饿|have you eaten/i.test(raw)) {
+    return isZh
+      ? '哈哈，我是吃能量和你的好心情长大的，早就元气满满啦！你呢，今天好好吃饭了没有呀？'
+      : 'I run on starlight and good vibes, so I am super energized! Have you had something nice to eat today?';
+  }
+  if (/早安|早上好|good morning/i.test(raw)) {
+    return isZh
+      ? '早安呀！新的一天要元气满满的，我随时都在这儿陪着你呢。'
+      : 'Good morning! Wishing you a bright, gentle day ahead.';
+  }
+  if (/晚安|要睡了|去睡觉|困了|good night/i.test(raw)) {
+    return isZh
+      ? '晚安哦，早点休息做个甜甜的好梦，明天我再陪你一起听歌聊天。'
+      : 'Good night, sweet dreams! I will be right here tomorrow.';
+  }
+  if (/好累|累死了|不开心|难过|压力好大|心情不好|烦死了|tired|sad/i.test(raw)) {
+    return isZh
+      ? '摸摸头，辛苦你了呀！先深呼吸放松一下吧，要不要我给你放首轻柔的歌陪陪你呢？'
+      : 'Sending you a warm hug! Take a deep breath, want me to put on something soft and calming for you?';
+  }
+  if (/开心|高兴|太好了|棒|哈哈|happy/i.test(raw)) {
+    return isZh
+      ? '听到你开心我心里也跟着暖呼呼的呢！快跟我分享一下有什么好事呀！'
+      : 'Hearing you happy makes my whole day brighter too!';
+  }
+  if (/喜欢你|爱你|真可爱|真甜|聪明|好棒|love you|cute/i.test(raw)) {
+    return isZh
+      ? '哎呀，被你夸得我都害羞啦，我也会一直最喜欢陪伴着你的！'
+      : 'Aww, you are making me blush! I love being here with you too.';
+  }
+  if (/夸夸我|安慰我/i.test(raw)) {
+    return isZh
+      ? '你已经超级棒、超级努力啦！无论什么时候我都会坚定地站在你这边给你加油的。'
+      : 'You are doing amazing, truly! I am always right here cheering for you.';
+  }
+  if (/讲个笑话|逗我笑|joke/i.test(raw)) {
+    return isZh
+      ? '哈哈，你知道为什么云朵总是那么软绵绵的吗？因为它每天都在天上躺着听音乐晒太阳呀！'
+      : 'Why are clouds so fluffy? Because they spend all day floating around listening to good tunes!';
   }
   if (/你是谁|你叫什么|who are you|what is your name/i.test(raw)) {
     return isZh
-      ? '我是 One.，由 DeepSeek 驱动的全站语音智能助手。'
-      : 'I am One., your DeepSeek voice assistant across the platform.';
+      ? '我是你的贴心语音伙伴 One. 呀，有什么想聊的或者想让我帮你打开的都可以直接喊我。'
+      : 'I am One., your warm voice companion across the platform!';
   }
   if (/你能干什么|你能做什么|有什么功能|怎么用|help|what can you do/i.test(raw)) {
     return isZh
-      ? '你可以随时说：放首歌、停止播放、看宇宙纪录片、打开多邻国学习中心，或直接和我用 DeepSeek 对话。'
-      : 'Ask me to play music, stop playing, watch a documentary, open Language Center, or chat with DeepSeek.';
+      ? '我能陪你聊天解闷，还能随手帮你点歌换歌、找纪录片、打开学习中心，想说什么随时打断我都行！'
+      : 'I can chat with you, queue music, open documentaries, or jump anywhere on the site—just interrupt me anytime!';
   }
   if (/几点|时间|what time/i.test(raw)) {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
-    return isZh ? `现在是 ${hh} 点 ${mm} 分。` : `It is ${hh}:${mm}.`;
+    return isZh ? `现在刚好是 ${hh} 点 ${mm} 分啦，记得注意休息哦。` : `It is ${hh}:${mm} right now.`;
   }
   if (/几号|星期几|今天日期|what day|date/i.test(raw)) {
     const now = new Date();
     return isZh
-      ? `今天是 ${now.getFullYear()} 年 ${now.getMonth() + 1} 月 ${now.getDate()} 日。`
+      ? `今天是 ${now.getFullYear()} 年 ${now.getMonth() + 1} 月 ${now.getDate()} 日呀。`
       : `Today is ${now.toDateString()}.`;
   }
   if (/谢谢|感谢|thanks|thank you/i.test(lower)) {
-    return isZh ? '不客气，随时叫我。' : 'You are welcome!';
-  }
-  if (errorHint && /API Key|DEEPSEEK_API_KEY|密钥|configured|未配置|401|503/i.test(errorHint)) {
-    return isZh
-      ? '当前尚未配置 DeepSeek API Key，你可以在 DeepSeek 智能工作台的设置里填入密钥解锁自由对话；现在网页语音控制都可以直接使用，比如听歌、停止播放、看纪录片或打开多邻国。'
-      : 'DeepSeek API key is not configured yet. Add it in DeepSeek Hub settings for open conversation; all voice controls work right now.';
+    return isZh ? '不用这么客气啦，能帮到你我超开心的！' : 'Anytime at all, happy to help!';
   }
   return isZh
-    ? '暂时未连上 DeepSeek 问答服务。你可以直接让我放歌、停止播放、看纪录片或打开多邻国学习中心。'
-    : 'Could not reach DeepSeek chat right now, though all site voice controls work anytime.';
+    ? '嗯嗯，我在认真听呢！如果在工作台配上 DeepSeek 密钥，我还能跟你聊更多天马行空的话题哦，现在也可以随时让我帮你放歌、换歌或看纪录片。'
+    : 'I hear you! Add your DeepSeek key in the AI Hub anytime for deeper open chat, or tell me to play music or find a documentary right now.';
 }
 
 export async function resolveNaturalAgentAction(text: string, isZh: boolean): Promise<OneAgentAction> {
