@@ -9,6 +9,14 @@ import {
   resolveConversationalFallback,
   type OneAgentAction,
 } from '../../utils/oneAgentController.ts';
+import {
+  analyzeDialogueEmotion,
+  buildExpressivePhrases,
+  extractEmotionTag,
+  type EmotionAnalysisResult,
+  type ProsodyPhrase,
+  type VoiceEmotion,
+} from '../../utils/emotionEngine.ts';
 
 interface HolographicAICompanionProps {
   lang: Language;
@@ -43,6 +51,11 @@ type VoicePhase =
   | 'speaking'
   | 'error';
 
+interface QueuedSpeechItem {
+  phrase: ProsodyPhrase;
+  audioPromise: Promise<string | null> | null;
+}
+
 function pickSweetVoice(isZh: boolean): SpeechSynthesisVoice | null {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
   const voices = window.speechSynthesis.getVoices() || [];
@@ -52,26 +65,28 @@ function pickSweetVoice(isZh: boolean): SpeechSynthesisVoice | null {
     ? [
         /xiaoxiao/i,
         /xiaoyi/i,
+        /ting-?ting.*enhanced/i,
+        /meijia.*enhanced/i,
         /ting-?ting/i,
         /meijia/i,
         /sinji/i,
+        /natural.*zh|zh.*natural/i,
+        /neural.*zh|zh.*neural/i,
         /google\s*普通话/i,
         /huihui/i,
         /yaoyao/i,
-        /natural.*zh|zh.*natural/i,
-        /neural.*zh|zh.*neural/i,
         /female|女/i,
       ]
     : [
-        /jenny/i,
-        /aria/i,
-        /ava/i,
-        /samantha/i,
+        /jenny.*natural|jenny/i,
+        /aria.*natural|aria/i,
+        /ava.*natural|ava/i,
+        /samantha.*enhanced|samantha/i,
+        /natural.*en|en.*natural/i,
+        /neural.*en|en.*neural/i,
         /victoria/i,
         /karen/i,
         /google us english/i,
-        /natural.*en|en.*natural/i,
-        /neural.*en|en.*neural/i,
         /female/i,
       ];
 
@@ -84,6 +99,13 @@ function pickSweetVoice(isZh: boolean): SpeechSynthesisVoice | null {
     if (match) return match;
   }
   return pool[0] || null;
+}
+
+function isAuthenticNeuralVoice(voice: SpeechSynthesisVoice | null): boolean {
+  if (!voice) return false;
+  return /xiaoxiao|xiaoyi|natural|neural|enhanced|premium|jenny|aria/i.test(
+    `${voice.name} ${voice.voiceURI}`
+  );
 }
 
 export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
@@ -104,9 +126,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const [voiceActive, setVoiceActive] = useState(false);
   const [modelId, setModelId] = useState('deepseek-v3');
+  const [activeEmotion, setActiveEmotion] = useState<EmotionAnalysisResult | null>(null);
   const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
-  // Cache sweet natural female voice as soon as browser populates speechSynthesis voices
+  // Cache sweet natural voice as soon as browser populates speechSynthesis voices
   useEffect(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     const refreshVoice = () => {
@@ -138,7 +161,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
   }, []);
 
-  // Launcher Orb 3D canvas & responsive drag bounds (respects mobile bottom dock & tablet left dock)
+  // Launcher Orb 3D canvas & responsive drag bounds
   const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const ORB_SIZE = 48;
   const clampLauncherPos = useCallback((x: number, y: number) => {
@@ -207,9 +230,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
   }, [clampLauncherPos]);
 
-  // Real-time DeepSeek voice session with turn-epoch instant barge-in & sweet TTS queue
+  // Real-time DeepSeek voice session + Emotion Engine + Hybrid Neural TTS Audio
   const phaseRef = useRef<VoicePhase>('idle');
   phaseRef.current = phase;
+  const activeEmotionRef = useRef<EmotionAnalysisResult | null>(null);
+  activeEmotionRef.current = activeEmotion;
   const sessionActiveRef = useRef(false);
   const recognitionRef = useRef<any>(null);
   const turnEpochRef = useRef(0);
@@ -217,6 +242,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const isSendingRef = useRef(false);
   const isTtsSpeakingRef = useRef(false);
   const currentSpokenTextRef = useRef('');
+  const currentUserTurnRef = useRef('');
   const lastExecutedActionRef = useRef<{ key: string; at: number }>({ key: '', at: 0 });
   const lastHandledFinalRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
   const modelIdRef = useRef(modelId);
@@ -224,15 +250,80 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const ttsQueueRef = useRef<string[]>([]);
+  const ttsQueueRef = useRef<QueuedSpeechItem[]>([]);
   const ttsStreamDoneRef = useRef(true);
   const ttsDrainingRef = useRef(false);
   const ttsDoneCallbackRef = useRef<(() => void) | null>(null);
   const ttsSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ttsPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ttsFetchControllersRef = useRef<Set<AbortController>>(new Set());
+  const ttsBlobUrlsRef = useRef<Set<string>>(new Set());
+  const ttsAudioElRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAudioCtxRef = useRef<AudioContext | null>(null);
 
   modelIdRef.current = modelId;
 
-  // Render 3D wireframe orb driven smoothly by voice phase
+  // Ensure reusable HTMLAudioElement with subtle warmth EQ for sweet expressive neural MP3 playback
+  const ensureTtsAudioUnlocked = useCallback(() => {
+    if (typeof window === 'undefined') return null;
+    if (!ttsAudioElRef.current) {
+      const el = new Audio();
+      el.crossOrigin = 'anonymous';
+      el.preload = 'auto';
+      (el as any).preservesPitch = false;
+      (el as any).webkitPreservesPitch = false;
+      ttsAudioElRef.current = el;
+
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          ttsAudioCtxRef.current = ctx;
+          const src = ctx.createMediaElementSource(el);
+          // Warmth chest boost + sweet vocal presence EQ
+          const warmth = ctx.createBiquadFilter();
+          warmth.type = 'lowshelf';
+          warmth.frequency.value = 230;
+          warmth.gain.value = 2.4;
+
+          const presence = ctx.createBiquadFilter();
+          presence.type = 'peaking';
+          presence.frequency.value = 2900;
+          presence.Q.value = 1.2;
+          presence.gain.value = 2.2;
+
+          src.connect(warmth);
+          warmth.connect(presence);
+          presence.connect(ctx.destination);
+        }
+      } catch {
+        // Basic <audio> playback works seamlessly even if Web Audio graph is restricted
+      }
+    }
+
+    if (ttsAudioCtxRef.current?.state === 'suspended') {
+      void ttsAudioCtxRef.current.resume().catch(() => {});
+    }
+    // Unlock audio element synchronously inside user tap using silent tiny data-URI WAV
+    try {
+      const el = ttsAudioElRef.current;
+      if (el && el.paused && !el.src) {
+        el.src =
+          'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+        el.volume = 0.01;
+        void el.play().then(() => {
+          el.pause();
+          el.volume = 1;
+          el.removeAttribute('src');
+        }).catch(() => {
+          el.volume = 1;
+        });
+      }
+    } catch {}
+    return ttsAudioElRef.current;
+  }, []);
+
+  // Render 3D wireframe orb reflecting live voice phase AND active emotional color aura
   useEffect(() => {
     if (!showLauncher) return;
     const canvas = orbCanvasRef.current;
@@ -271,6 +362,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     scene.add(nucMesh);
 
     const colorTarget = new THREE.Color(0x8ecfff);
+    const nucColorTarget = new THREE.Color(0xf4a2c4);
     let rafId = 0;
     let t = 0;
     let active = true;
@@ -280,24 +372,31 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       rafId = requestAnimationFrame(animate);
 
       const currentPhase = phaseRef.current;
+      const emo = activeEmotionRef.current;
       let energy = 0.08;
 
       if (currentPhase === 'listening') {
         colorTarget.setHex(0x4ade80);
+        nucColorTarget.setHex(0x38bdf8);
         energy = 0.25 + 0.18 * Math.sin(t * 4.2);
       } else if (currentPhase === 'speaking' || isTtsSpeakingRef.current) {
-        colorTarget.setHex(0xf9a8d4);
+        colorTarget.setHex(emo?.auraHex ?? 0xf9a8d4);
+        nucColorTarget.setHex(emo?.auraHex ?? 0xf472b6);
         energy = 0.52 + 0.28 * Math.sin(t * 9.5);
       } else if (currentPhase === 'connecting' || currentPhase === 'thinking') {
         colorTarget.setHex(0x69b8ff);
+        nucColorTarget.setHex(0xfbbf24);
         energy = 0.34 + 0.14 * Math.cos(t * 6.5);
       } else if (currentPhase === 'error') {
         colorTarget.setHex(0xf87171);
+        nucColorTarget.setHex(0xf87171);
         energy = 0.12;
       } else {
         colorTarget.setHex(0x8ecfff);
+        nucColorTarget.setHex(0xf4a2c4);
       }
       coreMat.color.lerp(colorTarget, 0.14);
+      nucMat.color.lerp(nucColorTarget, 0.14);
 
       const speedBoost = sessionActiveRef.current ? 1.15 + energy * 1.4 : 1;
       t += 0.025 * speedBoost;
@@ -424,10 +523,40 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     ttsDrainingRef.current = false;
     ttsDoneCallbackRef.current = null;
     currentSpokenTextRef.current = '';
+
     if (ttsSafetyTimerRef.current) {
       clearTimeout(ttsSafetyTimerRef.current);
       ttsSafetyTimerRef.current = null;
     }
+    if (ttsPauseTimerRef.current) {
+      clearTimeout(ttsPauseTimerRef.current);
+      ttsPauseTimerRef.current = null;
+    }
+
+    for (const ctrl of ttsFetchControllersRef.current) {
+      try {
+        ctrl.abort();
+      } catch {}
+    }
+    ttsFetchControllersRef.current.clear();
+
+    const audioEl = ttsAudioElRef.current;
+    if (audioEl) {
+      try {
+        audioEl.onended = null;
+        audioEl.onerror = null;
+        audioEl.pause();
+        audioEl.currentTime = 0;
+      } catch {}
+    }
+
+    for (const url of ttsBlobUrlsRef.current) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    }
+    ttsBlobUrlsRef.current.clear();
+
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel();
@@ -437,8 +566,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   }, []);
 
   /**
-   * Instant Barge-In: cancels in-flight DeepSeek HTTP request and speech synthesis
-   * within milliseconds so the user can interrupt mid-sentence with a new question.
+   * Instant Barge-In: cancels in-flight DeepSeek HTTP request, TTS MP3 prefetch,
+   * HTMLAudio playback, and speech synthesis within milliseconds.
    */
   const interruptCurrentTurn = useCallback(() => {
     turnEpochRef.current += 1;
@@ -460,6 +589,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     sessionActiveRef.current = false;
     turnEpochRef.current += 1;
     isSendingRef.current = false;
+    setActiveEmotion(null);
 
     if (activeFetchAbortRef.current) {
       try {
@@ -502,18 +632,90 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const cleanSpeechSegment = (raw: string) =>
     raw
       .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .replace(/\[\[EMO:[^\]]+\]\]/gi, '')
       .replace(/\[\[ACTION:[\s\S]*?\]\]/g, '')
       .replace(/```[\s\S]*?```/g, '')
       .replace(/https?:\/\/\S+/g, '')
-      .replace(/[*_#`>~]/g, '')
+      .replace(/[*_#`>]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
 
+  // Prefetch /api/ai/tts MP3 audio blob for natural expressive female voice
+  const prefetchNeuralAudioUrl = useCallback(
+    async (phrase: ProsodyPhrase): Promise<string | null> => {
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 2400);
+      ttsFetchControllersRef.current.add(ctrl);
+      try {
+        const res = await fetch(
+          `/api/ai/tts?text=${encodeURIComponent(phrase.text)}&lang=${isZh ? 'zh' : 'en'}&spd=${phrase.baiduSpd}&emotion=${phrase.emotion}`,
+          { signal: ctrl.signal }
+        );
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        if (blob.size < 400) return null;
+        const objUrl = URL.createObjectURL(blob);
+        ttsBlobUrlsRef.current.add(objUrl);
+        return objUrl;
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timeout);
+        ttsFetchControllersRef.current.delete(ctrl);
+      }
+    },
+    [isZh]
+  );
+
+  // Fallback expressive browser SpeechSynthesis using phrase-level pitch & rate contour
+  const speakPhraseViaBrowserSpeech = useCallback(
+    (phrase: ProsodyPhrase, onDone: () => void) => {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+        onDone();
+        return;
+      }
+      try {
+        const utt = new SpeechSynthesisUtterance(phrase.text.slice(0, 260));
+        const sweetVoice = preferredVoiceRef.current || pickSweetVoice(isZh);
+        if (sweetVoice) {
+          utt.voice = sweetVoice;
+          utt.lang = sweetVoice.lang || (isZh ? 'zh-CN' : 'en-US');
+        } else {
+          utt.lang = isZh ? 'zh-CN' : 'en-US';
+        }
+        utt.pitch = phrase.pitch;
+        utt.rate = phrase.rate;
+        utt.volume = 1;
+
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          if (ttsSafetyTimerRef.current) {
+            clearTimeout(ttsSafetyTimerRef.current);
+            ttsSafetyTimerRef.current = null;
+          }
+          onDone();
+        };
+        utt.onend = finish;
+        utt.onerror = finish;
+        ttsSafetyTimerRef.current = setTimeout(
+          finish,
+          Math.max(2200, Math.min(12000, phrase.text.length * 220))
+        );
+        window.speechSynthesis.speak(utt);
+      } catch {
+        onDone();
+      }
+    },
+    [isZh]
+  );
+
   const pumpTtsQueue = useCallback(
-    (epoch: number) => {
+    async (epoch: number) => {
       if (epoch !== turnEpochRef.current || ttsDrainingRef.current) return;
-      const nextChunk = ttsQueueRef.current.shift();
-      if (!nextChunk) {
+      const nextItem = ttsQueueRef.current.shift();
+      if (!nextItem) {
         if (ttsStreamDoneRef.current) {
           isTtsSpeakingRef.current = false;
           currentSpokenTextRef.current = '';
@@ -525,83 +727,137 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-        isTtsSpeakingRef.current = false;
-        const cb = ttsDoneCallbackRef.current;
-        ttsDoneCallbackRef.current = null;
-        cb?.();
+      ttsDrainingRef.current = true;
+      isTtsSpeakingRef.current = true;
+      currentSpokenTextRef.current = nextItem.phrase.text;
+      setPhase('speaking');
+
+      const advanceNext = (pauseMs: number) => {
+        if (epoch !== turnEpochRef.current) {
+          ttsDrainingRef.current = false;
+          return;
+        }
+        ttsPauseTimerRef.current = setTimeout(() => {
+          ttsDrainingRef.current = false;
+          if (epoch === turnEpochRef.current) {
+            void pumpTtsQueue(epoch);
+          }
+        }, pauseMs);
+      };
+
+      const finishPhrase = () => {
+        if (ttsSafetyTimerRef.current) {
+          clearTimeout(ttsSafetyTimerRef.current);
+          ttsSafetyTimerRef.current = null;
+        }
+        advanceNext(nextItem.phrase.pauseAfterMs);
+      };
+
+      // If browser already has a genuine neural voice (Edge Xiaoxiao/Jenny or Apple Enhanced), speak natively with expressive prosody
+      const nativeVoice = preferredVoiceRef.current || pickSweetVoice(isZh);
+      if (isAuthenticNeuralVoice(nativeVoice)) {
+        speakPhraseViaBrowserSpeech(nextItem.phrase, finishPhrase);
         return;
       }
 
-      ttsDrainingRef.current = true;
-      isTtsSpeakingRef.current = true;
-      currentSpokenTextRef.current = nextChunk;
-      setPhase('speaking');
-
-      try {
-        const utt = new SpeechSynthesisUtterance(nextChunk.slice(0, 260));
-        const sweetVoice = preferredVoiceRef.current || pickSweetVoice(isZh);
-        if (sweetVoice) {
-          utt.voice = sweetVoice;
-          utt.lang = sweetVoice.lang || (isZh ? 'zh-CN' : 'en-US');
-        } else {
-          utt.lang = isZh ? 'zh-CN' : 'en-US';
-        }
-        // Sweet, gentle, lively companion prosody
-        utt.pitch = 1.15;
-        utt.rate = 1.04;
-        utt.volume = 1;
-
-        let finished = false;
-        const finalize = () => {
-          if (finished) return;
-          finished = true;
-          if (ttsSafetyTimerRef.current) {
-            clearTimeout(ttsSafetyTimerRef.current);
-            ttsSafetyTimerRef.current = null;
-          }
-          ttsDrainingRef.current = false;
-          if (epoch === turnEpochRef.current) {
-            pumpTtsQueue(epoch);
-          }
-        };
-        utt.onend = finalize;
-        utt.onerror = finalize;
-        ttsSafetyTimerRef.current = setTimeout(finalize, Math.max(2400, Math.min(12000, nextChunk.length * 200)));
-        window.speechSynthesis.speak(utt);
-      } catch {
+      // Otherwise use our server-cached natural neural female MP3 audio with expressive pitch & cadence contour
+      const blobUrl = nextItem.audioPromise ? await nextItem.audioPromise : null;
+      if (epoch !== turnEpochRef.current) {
         ttsDrainingRef.current = false;
-        if (epoch === turnEpochRef.current) pumpTtsQueue(epoch);
+        return;
       }
+
+      const audioEl = blobUrl ? ensureTtsAudioUnlocked() : null;
+      if (blobUrl && audioEl) {
+        try {
+          if (ttsAudioCtxRef.current?.state === 'suspended') {
+            await ttsAudioCtxRef.current.resume().catch(() => {});
+          }
+          audioEl.pause();
+          audioEl.src = blobUrl;
+          (audioEl as any).preservesPitch = false;
+          (audioEl as any).webkitPreservesPitch = false;
+          audioEl.playbackRate = nextItem.phrase.audioPlaybackRate;
+          audioEl.volume = 1;
+
+          let settled = false;
+          const onClipEnd = () => {
+            if (settled) return;
+            settled = true;
+            audioEl.onended = null;
+            audioEl.onerror = null;
+            ttsBlobUrlsRef.current.delete(blobUrl);
+            try {
+              URL.revokeObjectURL(blobUrl);
+            } catch {}
+            finishPhrase();
+          };
+          const onClipError = () => {
+            if (settled) return;
+            settled = true;
+            audioEl.onended = null;
+            audioEl.onerror = null;
+            speakPhraseViaBrowserSpeech(nextItem.phrase, finishPhrase);
+          };
+
+          audioEl.onended = onClipEnd;
+          audioEl.onerror = onClipError;
+          ttsSafetyTimerRef.current = setTimeout(
+            onClipEnd,
+            Math.max(2600, Math.min(14000, nextItem.phrase.text.length * 260))
+          );
+
+          await audioEl.play();
+          return;
+        } catch {
+          // Graceful fallback to browser speech synthesis if audio playback was interrupted/blocked
+        }
+      }
+
+      speakPhraseViaBrowserSpeech(nextItem.phrase, finishPhrase);
     },
-    [isZh]
+    [ensureTtsAudioUnlocked, isZh, speakPhraseViaBrowserSpeech]
   );
 
-  const enqueueSpeechChunk = useCallback(
-    (segment: string, epoch: number) => {
+  const enqueueEmotionalText = useCallback(
+    (rawText: string, epoch: number, explicitEmotion?: VoiceEmotion | null) => {
       if (epoch !== turnEpochRef.current) return;
-      const cleaned = cleanSpeechSegment(segment);
+      const cleaned = cleanSpeechSegment(rawText);
       if (!cleaned) return;
-      ttsQueueRef.current.push(cleaned);
-      pumpTtsQueue(epoch);
+
+      const analysis = analyzeDialogueEmotion(
+        currentUserTurnRef.current,
+        cleaned,
+        explicitEmotion
+      );
+      setActiveEmotion(analysis);
+
+      const nativeNeural = isAuthenticNeuralVoice(preferredVoiceRef.current || pickSweetVoice(isZh));
+      const phrases = buildExpressivePhrases(cleaned, analysis, nativeNeural ? 'speech' : 'audio');
+      for (const phrase of phrases) {
+        const audioPromise = nativeNeural ? null : prefetchNeuralAudioUrl(phrase);
+        ttsQueueRef.current.push({ phrase, audioPromise });
+      }
+      void pumpTtsQueue(epoch);
     },
-    [pumpTtsQueue]
+    [isZh, prefetchNeuralAudioUrl, pumpTtsQueue]
   );
 
   const speakDeepSeekReply = useCallback(
-    (text: string, epoch: number, onDone?: () => void) => {
+    (text: string, epoch: number, explicitEmotion?: VoiceEmotion | null, onDone?: () => void) => {
       if (epoch !== turnEpochRef.current) return;
       stopOutputAudio();
-      const cleaned = cleanSpeechSegment(text);
+      const extracted = extractEmotionTag(text);
+      const cleaned = cleanSpeechSegment(extracted.text);
       if (!cleaned) {
         onDone?.();
         return;
       }
       ttsStreamDoneRef.current = true;
       ttsDoneCallbackRef.current = onDone || null;
-      enqueueSpeechChunk(cleaned.slice(0, 420), epoch);
+      enqueueEmotionalText(cleaned.slice(0, 420), epoch, explicitEmotion || extracted.emotion);
     },
-    [enqueueSpeechChunk, stopOutputAudio]
+    [enqueueEmotionalText, stopOutputAudio]
   );
 
   const runDeepSeekTurn = useCallback(
@@ -611,6 +867,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
       // Supersede any active speaking or streaming turn immediately (true instant barge-in)
       const myEpoch = interruptCurrentTurn();
+      currentUserTurnRef.current = clean;
       isSendingRef.current = true;
       const shouldSpeak = sessionActiveRef.current;
 
@@ -627,15 +884,15 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           }
           return;
         }
-        const actionReply = instantAction.reply;
-        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: actionReply }];
+        const extractedReply = extractEmotionTag(instantAction.reply);
+        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: extractedReply.text }];
         const isMediaPlayback =
           (instantAction.type === 'play_music' && !instantAction.control) ||
           (instantAction.type === 'play_music' && instantAction.control === 'resume') ||
           instantAction.type === 'watch_documentary';
 
         if (shouldSpeak && !isMediaPlayback) {
-          speakDeepSeekReply(actionReply, myEpoch, () => {
+          speakDeepSeekReply(extractedReply.text, myEpoch, extractedReply.emotion, () => {
             if (myEpoch === turnEpochRef.current) {
               isSendingRef.current = false;
               setPhase(sessionActiveRef.current ? 'listening' : 'idle');
@@ -651,7 +908,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      // 2. Single-trip fast DeepSeek-V3 streaming chat with AbortController barge-in support
+      // 2. Single-trip fast DeepSeek-V3 streaming chat with live Emotion Analysis & AbortController barge-in
       setPhase('thinking');
       stopOutputAudio();
       ttsStreamDoneRef.current = false;
@@ -688,15 +945,16 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         let actionResolved = false;
         let mediaActionTriggered = false;
         let spokenOffset = 0;
+        let detectedEmotion: VoiceEmotion | null = null;
 
         await readAIStream(res, (delta) => {
           if (myEpoch !== turnEpochRef.current) return;
           rawReply += delta;
 
           const trimmedStart = rawReply.trimStart();
-          const waitingForDirective =
-            !actionResolved && trimmedStart.startsWith('[') && !trimmedStart.includes(']]') && trimmedStart.length < 180;
-          if (waitingForDirective) return;
+          const waitingForBracket =
+            trimmedStart.startsWith('[') && !trimmedStart.includes(']]') && trimmedStart.length < 180;
+          if (!actionResolved && waitingForBracket) return;
 
           const parsed = extractInlineAgentDirective(rawReply);
           if (!actionResolved) {
@@ -716,16 +974,25 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
           if (!shouldSpeak || mediaActionTriggered) return;
 
-          // Stream short clauses rapidly (>= 8 chars on punctuation) for ultra-low speech latency
-          const display = parsed.spokenText.replace(/<think>[\s\S]*?(<\/think>|$)/g, '');
+          // Wait briefly if inline [[EMO:...]] tag is still closing
+          const spokenTrim = parsed.spokenText.trimStart();
+          if (spokenTrim.startsWith('[[EMO:') && !spokenTrim.includes(']]') && spokenTrim.length < 40) {
+            return;
+          }
+
+          const emoExtracted = extractEmotionTag(parsed.spokenText);
+          if (emoExtracted.emotion) detectedEmotion = emoExtracted.emotion;
+
+          // Stream short expressive sentences rapidly for ultra-low voice latency
+          const display = emoExtracted.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '');
           const unuttered = display.slice(spokenOffset);
           if (!unuttered) return;
 
-          const breakMatch = unuttered.match(/^([\s\S]*?[。！？!?;；\n]|[\s\S]{8,}?[，,、])/);
+          const breakMatch = unuttered.match(/^([\s\S]*?[。！？!?;；\n]|[\s\S]{10,}?[，,、])/);
           if (breakMatch) {
             const segment = breakMatch[1];
             spokenOffset += segment.length;
-            enqueueSpeechChunk(segment, myEpoch);
+            enqueueEmotionalText(segment, myEpoch, detectedEmotion);
           }
         });
 
@@ -745,8 +1012,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           }
         }
 
-        const cleanedReply = finalParsed.spokenText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-        const finalText = cleanedReply || resolveConversationalFallback(clean, isZh);
+        const emoFinal = extractEmotionTag(finalParsed.spokenText.replace(/<think>[\s\S]*?<\/think>/g, '').trim());
+        const resolvedEmotion = emoFinal.emotion || detectedEmotion;
+        const cleanedReply = emoFinal.text.trim();
+        const fallbackParsed = extractEmotionTag(resolveConversationalFallback(clean, isZh));
+        const finalText = cleanedReply || fallbackParsed.text;
+        const finalEmotion = resolvedEmotion || fallbackParsed.emotion;
+
         historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: finalText }];
 
         if (!shouldSpeak || mediaActionTriggered) {
@@ -759,7 +1031,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         ttsStreamDoneRef.current = true;
         const remainder = cleanedReply ? cleanedReply.slice(spokenOffset) : finalText;
         if (cleanSpeechSegment(remainder)) {
-          enqueueSpeechChunk(remainder, myEpoch);
+          enqueueEmotionalText(remainder, myEpoch, finalEmotion);
         } else if (!ttsDrainingRef.current && ttsQueueRef.current.length === 0) {
           ttsDoneCallbackRef.current = null;
           isSendingRef.current = false;
@@ -770,14 +1042,15 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           return;
         }
         activeFetchAbortRef.current = null;
-        const fallbackText = resolveConversationalFallback(
+        const fallbackRaw = resolveConversationalFallback(
           clean,
           isZh,
           err instanceof Error ? err.message : undefined
         );
-        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: fallbackText }];
+        const fallbackParsed = extractEmotionTag(fallbackRaw);
+        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: fallbackParsed.text }];
         if (shouldSpeak) {
-          speakDeepSeekReply(fallbackText, myEpoch, () => {
+          speakDeepSeekReply(fallbackParsed.text, myEpoch, fallbackParsed.emotion, () => {
             if (myEpoch === turnEpochRef.current) {
               isSendingRef.current = false;
               setPhase(sessionActiveRef.current ? 'listening' : 'idle');
@@ -790,7 +1063,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         }
       }
     },
-    [enqueueSpeechChunk, executeParsedAction, interruptCurrentTurn, isZh, speakDeepSeekReply, stopOutputAudio]
+    [enqueueEmotionalText, executeParsedAction, interruptCurrentTurn, isZh, speakDeepSeekReply, stopOutputAudio]
   );
 
   // Instant Continuous Voice Session with Real-Time Barge-In
@@ -811,7 +1084,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     setVoiceActive(true);
     setPhase('connecting');
 
-    // Unlock SpeechSynthesis inside user gesture for iOS/iPadOS/Android browsers
+    // Unlock BOTH HTMLAudioElement + Web Speech Synthesis synchronously on user gesture
+    ensureTtsAudioUnlocked();
     try {
       if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
@@ -860,7 +1134,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           const interimClean = interim.trim();
           const finalClean = finalSegment.trim();
 
-          // Real-time Barge-In: interrupt TTS / in-flight request immediately if user speaks something new
+          // Real-time Barge-In: interrupt audio/TTS & in-flight DeepSeek immediately when user speaks
           const isEchoOfAi =
             isTtsSpeakingRef.current &&
             interimClean.length < 10 &&
@@ -879,14 +1153,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
           if (finalClean) {
             const now = Date.now();
-            // Prevent duplicate trigger if interim quick-command already fired on identical phrase
             if (
               lastHandledFinalRef.current.text === finalClean &&
               now - lastHandledFinalRef.current.at < 1500
             ) {
               return;
             }
-            // Ignore exact self-echo if mic hears our own speaker output with zero new words
             if (
               isTtsSpeakingRef.current &&
               spokenNorm &&
@@ -896,7 +1168,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               return;
             }
             lastHandledFinalRef.current = { text: finalClean, at: now };
-            // Keep recognizer alive continuously without calling rec.stop() so next barge-in has 0ms lag!
             void runDeepSeekTurn(finalClean);
             return;
           }
@@ -922,7 +1193,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         };
 
         rec.onend = () => {
-          // Always keep microphone hot while voice session is active (even during AI speech!)
           if (sessionActiveRef.current) {
             restartTimerRef.current = setTimeout(launchRecognizer, isAppleTouch ? 120 : 60);
           }
@@ -938,7 +1208,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
 
     launchRecognizer();
-  }, [interruptCurrentTurn, isZh, runDeepSeekTurn, stopSessionResources]);
+  }, [ensureTtsAudioUnlocked, interruptCurrentTurn, isZh, runDeepSeekTurn, stopSessionResources]);
 
   const handleLauncherClick = () => {
     if (suppressClickRef.current) return;
@@ -946,6 +1216,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       stopSessionResources();
     } else {
       player?.unlockAudio();
+      ensureTtsAudioUnlocked();
       startDeepSeekVoiceSession();
     }
   };
@@ -1018,9 +1289,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       case 'listening':
         return isZh ? 'One. · 聆听中' : 'One. · Listening';
       case 'thinking':
-        return isZh ? 'One. · 思考中' : 'One. · Thinking';
+        return isZh ? 'One. · 感知语境' : 'One. · Sensing';
       case 'speaking':
-        return isZh ? 'One. · 对话中' : 'One. · Speaking';
+        return activeEmotion
+          ? `One. · ${isZh ? activeEmotion.labelZh : activeEmotion.labelEn}`
+          : isZh
+            ? 'One. · 甜美对话'
+            : 'One. · Speaking';
       case 'error':
         return isZh ? 'One. · 需麦克风' : 'One. · Mic Needed';
       default:
@@ -1032,7 +1307,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     phase === 'listening'
       ? 'border-emerald-400/75 shadow-[0_0_24px_rgba(52,211,153,0.32)]'
       : phase === 'speaking'
-      ? 'border-pink-300/80 shadow-[0_0_26px_rgba(244,114,182,0.36)]'
+      ? 'border-pink-300/80 shadow-[0_0_28px_rgba(244,114,182,0.42)]'
       : phase === 'connecting' || phase === 'thinking'
       ? 'border-[#69B8FF]/80 shadow-[0_0_24px_rgba(105,184,255,0.32)]'
       : phase === 'error'

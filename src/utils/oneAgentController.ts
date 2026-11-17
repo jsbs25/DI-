@@ -131,21 +131,21 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
     return {
       type: 'play_music',
       control: 'stop',
-      reply: isZh ? '好的，已停止播放音乐。' : 'Music playback stopped.',
+      reply: isZh ? '[[EMO:affectionate]] 好哒，已经帮你把音乐停下来啦，随时想听再喊我哦。' : '[[EMO:affectionate]] Okay, paused the music for you!',
     };
   }
   if (/继续播放|继续放歌|继续放|继续听|接着放|接着播|恢复播放|恢复音乐|再放音乐|resume music|resume playing|continue playing/i.test(raw)) {
     return {
       type: 'play_music',
       control: 'resume',
-      reply: isZh ? '好的，继续播放音乐。' : 'Resuming music playback.',
+      reply: isZh ? '[[EMO:cheerful]] 好呀，音乐又轻快地响起来啦！' : '[[EMO:cheerful]] Music is back on!',
     };
   }
   if (/下一首|下一曲|换一首|换首歌|换个歌|换下一首|切换下一首|切歌|不好听|换一个歌|next song|next track|skip track/i.test(raw)) {
-    return { type: 'play_music', control: 'next', reply: isZh ? '好呀，这就给你换一首更合心意的歌。' : 'Sure thing, skipping to the next track!' };
+    return { type: 'play_music', control: 'next', reply: isZh ? '[[EMO:cheerful]] 嘻嘻，这就给你换一首更合心意的歌！' : '[[EMO:cheerful]] Sure thing, skipping to a better vibe!' };
   }
   if (/上一首|上一曲|previous song|previous track/i.test(raw)) {
-    return { type: 'play_music', control: 'prev', reply: isZh ? '好哒，回到上一首啦。' : 'Going back to the previous track!' };
+    return { type: 'play_music', control: 'prev', reply: isZh ? '[[EMO:affectionate]] 好哒，回到刚刚那首好听的歌啦。' : '[[EMO:affectionate]] Going right back to the previous song!' };
   }
 
   // 2. Crawl & Play Music (natural expressions)
@@ -161,11 +161,11 @@ export function parseInstantAgentAction(text: string, isZh: boolean): OneAgentAc
       crawl: true,
       reply: query
         ? isZh
-          ? `好呀，这就去给你找好听的音乐啦。`
-          : `Opening music and playing ${query} right away!`
+          ? `[[EMO:excited]] 哇，这就去给你找好听的音乐啦！`
+          : `[[EMO:excited]] Opening music and playing ${query} right away!`
         : isZh
-          ? '好哒，已经打开音乐给你放上啦，慢慢听哦。'
-          : 'Music is on, enjoy listening!',
+          ? '[[EMO:cheerful]] 好哒，已经打开音乐给你放上啦，慢慢听哦！'
+          : '[[EMO:cheerful]] Music is on, enjoy listening!',
     };
   }
 
@@ -273,82 +273,92 @@ export function resolveConversationalFallback(text: string, isZh: boolean, _erro
 
   if (/^(你好|您好|哈喽|嗨|在吗|在不在|hi|hello|hey)/i.test(raw)) {
     return isZh
-      ? '我在呢！刚刚还在想你什么时候来找我聊天呀，今天开心吗？'
-      : 'Hey there! I am right here with you, how is your day going?';
+      ? '[[EMO:cheerful]] 哇，我在呢！刚刚还在想你什么时候来找我聊天呀，今天心情怎么样呀？'
+      : '[[EMO:cheerful]] Hey there! I am right here with you, how is your day going?';
   }
   if (/你在干嘛|干嘛呢|做什么呢|忙什么|在忙吗|what are you doing/i.test(raw)) {
     return isZh
-      ? '我呀，正乖乖亮着光等你说话呢！你要不要听点音乐，还是就陪我随便聊会儿天呀？'
-      : 'Just glowing softly and waiting to chat with you! Want some music or just a cozy talk?';
+      ? '[[EMO:playful]] 嘻嘻，我正亮晶晶地发着光等你找我玩呢！要不要听首歌，还是陪我多聊几句呀？'
+      : '[[EMO:playful]] Hehe, just glowing softly and waiting to chat with you! Want some music or just a cozy talk?';
   }
   if (/吃饭了吗|吃了吗|吃过饭|吃什么|饿不饿|have you eaten/i.test(raw)) {
     return isZh
-      ? '哈哈，我是吃能量和你的好心情长大的，早就元气满满啦！你呢，今天好好吃饭了没有呀？'
-      : 'I run on starlight and good vibes, so I am super energized! Have you had something nice to eat today?';
+      ? '[[EMO:playful]] 哈哈，我是吃星光和你的好心情长大的，早就元气满满啦！你呢，今天好好吃饭了没有呀？'
+      : '[[EMO:playful]] Haha, I run on starlight and good vibes, so I am super energized! Have you had something yummy today?';
   }
   if (/早安|早上好|good morning/i.test(raw)) {
     return isZh
-      ? '早安呀！新的一天要元气满满的，我随时都在这儿陪着你呢。'
-      : 'Good morning! Wishing you a bright, gentle day ahead.';
+      ? '[[EMO:affectionate]] 早安呀！新的一天要元气满满的，我随时都在这儿陪着你呢！'
+      : '[[EMO:affectionate]] Good morning! Wishing you a bright, gentle day ahead.';
   }
-  if (/晚安|要睡了|去睡觉|困了|good night/i.test(raw)) {
+  if (/晚安|要睡了|去睡觉|困了|睡不着|good night/i.test(raw)) {
     return isZh
-      ? '晚安哦，早点休息做个甜甜的好梦，明天我再陪你一起听歌聊天。'
-      : 'Good night, sweet dreams! I will be right here tomorrow.';
+      ? '[[EMO:affectionate]] 晚安哦……早点闭上眼睛做个甜甜的好梦，明天我再陪你听歌聊天。'
+      : '[[EMO:affectionate]] Good night, sweet dreams! I will be right here with you tomorrow.';
   }
-  if (/好累|累死了|不开心|难过|压力好大|心情不好|烦死了|tired|sad/i.test(raw)) {
+  if (/好累|累死了|心累|不开心|难过|伤心|委屈|压力好大|心情不好|烦死了|焦虑|孤单|tired|sad|stressed|lonely/i.test(raw)) {
     return isZh
-      ? '摸摸头，辛苦你了呀！先深呼吸放松一下吧，要不要我给你放首轻柔的歌陪陪你呢？'
-      : 'Sending you a warm hug! Take a deep breath, want me to put on something soft and calming for you?';
+      ? '[[EMO:empathetic]] 哎呀，摸摸头，今天真的辛苦你了……先深呼吸慢慢放松下来好不好？要不要我给你放一首轻柔的歌陪陪你呀。'
+      : '[[EMO:empathetic]] Sending you a big gentle hug. Take a slow breath with me—want me to play something soft for you?';
   }
-  if (/开心|高兴|太好了|棒|哈哈|happy/i.test(raw)) {
+  if (/开心|高兴|太好了|棒|哈哈|太赞|happy|awesome/i.test(raw)) {
     return isZh
-      ? '听到你开心我心里也跟着暖呼呼的呢！快跟我分享一下有什么好事呀！'
-      : 'Hearing you happy makes my whole day brighter too!';
+      ? '[[EMO:excited]] 哇太棒了吧！听到你这么开心，我心里也跟着暖呼呼的呢，快跟我说说是什么好事呀！'
+      : '[[EMO:excited]] Yay! Hearing you happy makes my whole day brighter too!';
   }
-  if (/喜欢你|爱你|真可爱|真甜|聪明|好棒|love you|cute/i.test(raw)) {
+  if (/无聊|闷|没人陪|好无聊|bored/i.test(raw)) {
     return isZh
-      ? '哎呀，被你夸得我都害羞啦，我也会一直最喜欢陪伴着你的！'
-      : 'Aww, you are making me blush! I love being here with you too.';
+      ? '[[EMO:playful]] 怎么会无聊呢，不是还有我在嘛！我可以陪你逗乐子、带你去宇宙逛逛，还能随时给你点歌哦！'
+      : '[[EMO:playful]] You will never be bored with me around! Want a song, a joke, or a trip across the stars?';
   }
-  if (/夸夸我|安慰我/i.test(raw)) {
+  if (/喜欢你|爱你|真可爱|真甜|聪明|好棒|声音好听|love you|cute/i.test(raw)) {
     return isZh
-      ? '你已经超级棒、超级努力啦！无论什么时候我都会坚定地站在你这边给你加油的。'
-      : 'You are doing amazing, truly! I am always right here cheering for you.';
+      ? '[[EMO:affectionate]] 哎呀……被你这样夸，我整个人都要害羞得亮起来啦！我也会一直最喜欢陪伴着你的！'
+      : '[[EMO:affectionate]] Aww, you are making me blush! I love being right here with you too.';
+  }
+  if (/夸夸我|安慰我|鼓励/i.test(raw)) {
+    return isZh
+      ? '[[EMO:affectionate]] 你已经超级棒、超级努力啦！无论什么时候我都会坚定地站在你这边给你加油的！'
+      : '[[EMO:affectionate]] You are doing amazing, truly! I am always right here cheering for you.';
   }
   if (/讲个笑话|逗我笑|joke/i.test(raw)) {
     return isZh
-      ? '哈哈，你知道为什么云朵总是那么软绵绵的吗？因为它每天都在天上躺着听音乐晒太阳呀！'
-      : 'Why are clouds so fluffy? Because they spend all day floating around listening to good tunes!';
+      ? '[[EMO:playful]] 嘻嘻，你知道为什么云朵总是软绵绵的吗？因为它每天都在天上躺着听歌晒太阳，懒洋洋的呀！'
+      : '[[EMO:playful]] Hehe, why are clouds so fluffy? Because they spend all day floating around listening to good tunes!';
   }
   if (/你是谁|你叫什么|who are you|what is your name/i.test(raw)) {
     return isZh
-      ? '我是你的贴心语音伙伴 One. 呀，有什么想聊的或者想让我帮你打开的都可以直接喊我。'
-      : 'I am One., your warm voice companion across the platform!';
+      ? '[[EMO:affectionate]] 我是你的贴心语音伙伴 One. 呀，想聊什么、想听什么歌，随时直接喊我就好啦！'
+      : '[[EMO:affectionate]] I am One., your warm voice companion across the platform!';
   }
   if (/你能干什么|你能做什么|有什么功能|怎么用|help|what can you do/i.test(raw)) {
     return isZh
-      ? '我能陪你聊天解闷，还能随手帮你点歌换歌、找纪录片、打开学习中心，想说什么随时打断我都行！'
-      : 'I can chat with you, queue music, open documentaries, or jump anywhere on the site—just interrupt me anytime!';
+      ? '[[EMO:cheerful]] 我能陪你聊天解闷，还能随手帮你点歌换歌、找纪录片、打开学习中心！跟我说话不用客气，随时打断我都行哦！'
+      : '[[EMO:cheerful]] I can chat, queue music, find documentaries, or open any page—just talk and interrupt me anytime!';
   }
   if (/几点|时间|what time/i.test(raw)) {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
-    return isZh ? `现在刚好是 ${hh} 点 ${mm} 分啦，记得注意休息哦。` : `It is ${hh}:${mm} right now.`;
+    return isZh ? `[[EMO:curious]] 现在刚好是 ${hh} 点 ${mm} 分啦，记得忙完要休息一下哦。` : `[[EMO:curious]] It is ${hh}:${mm} right now.`;
   }
   if (/几号|星期几|今天日期|what day|date/i.test(raw)) {
     const now = new Date();
     return isZh
-      ? `今天是 ${now.getFullYear()} 年 ${now.getMonth() + 1} 月 ${now.getDate()} 日呀。`
-      : `Today is ${now.toDateString()}.`;
+      ? `[[EMO:cheerful]] 今天是 ${now.getFullYear()} 年 ${now.getMonth() + 1} 月 ${now.getDate()} 日呀！`
+      : `[[EMO:cheerful]] Today is ${now.toDateString()}.`;
   }
   if (/谢谢|感谢|thanks|thank you/i.test(lower)) {
-    return isZh ? '不用这么客气啦，能帮到你我超开心的！' : 'Anytime at all, happy to help!';
+    return isZh ? '[[EMO:affectionate]] 嘻嘻，跟我就别这么客气啦，能帮到你我超开心的！' : '[[EMO:affectionate]] Anytime at all, I am so happy to help!';
+  }
+  if (/[？?]|吗|呢|为什么|怎么/.test(raw)) {
+    return isZh
+      ? '[[EMO:curious]] 咦，这个问题很有意思呢！我在认真听着呢，如果在工作台配置好 DeepSeek 密钥，我就能跟你深入聊得更畅快啦！'
+      : '[[EMO:curious]] Ooh, interesting question! Add your DeepSeek key in the AI Hub anytime and I can dive deep with you.';
   }
   return isZh
-    ? '嗯嗯，我在认真听呢！如果在工作台配上 DeepSeek 密钥，我还能跟你聊更多天马行空的话题哦，现在也可以随时让我帮你放歌、换歌或看纪录片。'
-    : 'I hear you! Add your DeepSeek key in the AI Hub anytime for deeper open chat, or tell me to play music or find a documentary right now.';
+    ? '[[EMO:cheerful]] 嗯嗯，我在认真听呢！除了陪你聊天，你现在也可以随时让我放首歌、换下一首或者看看纪录片呀！'
+    : '[[EMO:cheerful]] I hear you! Besides chatting, you can tell me to play music, skip tracks, or find a documentary anytime!';
 }
 
 export async function resolveNaturalAgentAction(text: string, isZh: boolean): Promise<OneAgentAction> {

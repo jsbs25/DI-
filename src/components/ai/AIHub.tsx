@@ -3,6 +3,7 @@ import { Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
 import { loadAIConversationHistory, saveAIConversationHistory } from '../../utils/aiSessionHistory.ts';
+import { analyzeDialogueEmotion, buildExpressivePhrases } from '../../utils/emotionEngine.ts';
 import {
   Bot,
   Check,
@@ -161,16 +162,82 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     }
   };
 
+  const hubTtsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const hubTtsAbortRef = useRef<AbortController | null>(null);
+
   const speakText = (text: string) => {
-    if (!('speechSynthesis' in window)) return;
+    hubTtsAbortRef.current?.abort();
+    hubTtsAbortRef.current = new AbortController();
+    const signal = hubTtsAbortRef.current.signal;
+
     try {
-      window.speechSynthesis.cancel();
-      const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-      const utterance = new SpeechSynthesisUtterance(clean);
-      utterance.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
-      utterance.rate = 1.02;
-      window.speechSynthesis.speak(utterance);
+      hubTtsAudioRef.current?.pause();
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     } catch {}
+
+    const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    if (!clean) return;
+
+    const analysis = analyzeDialogueEmotion('', clean);
+    const phrases = buildExpressivePhrases(clean.slice(0, 320), analysis, 'audio');
+    if (phrases.length === 0) return;
+
+    const playBrowserFallback = () => {
+      if (!('speechSynthesis' in window) || signal.aborted) return;
+      const speechPhrases = buildExpressivePhrases(clean.slice(0, 320), analysis, 'speech');
+      let idx = 0;
+      const nextUtt = () => {
+        if (signal.aborted || idx >= speechPhrases.length) return;
+        const p = speechPhrases[idx++];
+        const utt = new SpeechSynthesisUtterance(p.text);
+        utt.lang = isZh ? 'zh-CN' : 'en-US';
+        utt.pitch = p.pitch;
+        utt.rate = p.rate;
+        utt.onend = () => setTimeout(nextUtt, p.pauseAfterMs);
+        window.speechSynthesis.speak(utt);
+      };
+      nextUtt();
+    };
+
+    void (async () => {
+      if (!hubTtsAudioRef.current) {
+        hubTtsAudioRef.current = new Audio();
+      }
+      const el = hubTtsAudioRef.current;
+      for (const p of phrases) {
+        if (signal.aborted) return;
+        try {
+          const r = await fetch(
+            `/api/ai/tts?text=${encodeURIComponent(p.text)}&lang=${isZh ? 'zh' : 'en'}&spd=${p.baiduSpd}&emotion=${p.emotion}`,
+            { signal }
+          );
+          if (!r.ok) {
+            playBrowserFallback();
+            return;
+          }
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          await new Promise<void>((resolve, reject) => {
+            el.src = url;
+            (el as any).preservesPitch = false;
+            (el as any).webkitPreservesPitch = false;
+            el.playbackRate = p.audioPlaybackRate;
+            el.onended = () => {
+              URL.revokeObjectURL(url);
+              setTimeout(resolve, p.pauseAfterMs);
+            };
+            el.onerror = () => {
+              URL.revokeObjectURL(url);
+              reject(new Error('audio err'));
+            };
+            el.play().catch(reject);
+          });
+        } catch {
+          if (!signal.aborted) playBrowserFallback();
+          return;
+        }
+      }
+    })();
   };
 
   const handleCopy = (id: string, text: string) => {

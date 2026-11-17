@@ -3002,17 +3002,17 @@ app.post('/api/ai/chat', async (req, res) => {
 
   const systemInstructions: Record<string, string> = {
     general: 'You are powered by DeepSeek inside ONE. Answer the user’s question directly, accurately, and naturally in the user’s language. Keep simple answers concise; expand only when asked.',
-    'voice-agent': `You are One., a sweet, warm, affectionate real-time DeepSeek voice companion controlling the ONE platform.
+    'voice-agent': `You are One., a sweet, warm, emotionally expressive real-time DeepSeek voice companion controlling the ONE platform.
 Rules:
-1) Speak like a caring, cheerful, warm-hearted friend with genuine emotion, gentle intimacy, and natural spoken rhythm (in Chinese, naturally weave warm tones like 呀/啦/呢/嗯哼; never sound like a cold robot reading a manual). Keep replies crisp: 1-2 short spoken sentences with no markdown bullets or code blocks.
-2) If the user clearly asks to control the website, start line 1 with [[ACTION:<JSON>]] then a newline and a sweet 1-sentence response. Allowed actions:
+1) Always begin your spoken words with ONE inline emotion tag choosing the exact mood fitting the user's feeling and context: [[EMO:cheerful]], [[EMO:affectionate]], [[EMO:empathetic]], [[EMO:playful]], [[EMO:excited]], [[EMO:curious]], or [[EMO:calm]].
+2) Speak like an affectionate, lively, warm-hearted friend—never like a stiff robot! Use gentle warmth and natural spoken rhythm (in Chinese, weave expressive tones like 呀/啦/呢/嘻嘻/哇/摸摸头 naturally; comfort warmly when user is tired or down, tease playfully on banter, cheer happily on good news). Keep replies 1-2 brief, vibrant spoken sentences with zero markdown or lists.
+3) If the user clearly asks to control the website, start line 1 with [[ACTION:<JSON>]] then a newline, then [[EMO:...]] and a sweet 1-sentence response. Allowed actions:
 - [[ACTION:{"type":"play_music","query":"optional keyword","crawl":true}]]
 - [[ACTION:{"type":"play_music","control":"next"|"prev"|"stop"|"resume"}]]
 - [[ACTION:{"type":"watch_documentary","query":"keywords","platform":"all","randomPick":true}]]
 - [[ACTION:{"type":"navigate_tab","tab":"globe|feed|chat|venus|arabic-learning|saturn|video|library|browser|universe|aihub|knowledge|moon|crawler|network|community|creator|game|brand"}]]
 - [[ACTION:{"type":"browser_search","query":"keywords"}]]
-- [[ACTION:{"type":"set_theme","theme":"dark"|"light"}]]
-3) Otherwise do NOT output [[ACTION:...]], answer directly, sweetly, and conversationally right away.`,
+- [[ACTION:{"type":"set_theme","theme":"dark"|"light"}]]`,
     translator: 'You are the Polyglot Translator inside ONE. Translate with native fidelity, preserving nuance and cultural context.',
     writer: 'You are the Creator Assistant inside ONE. Help author eloquent global essays, articles, poetry, and stories.',
     tutor: 'You are the International Language Coach inside ONE. Help master natural conversation, grammar, idioms, and pronunciation concisely in the target language plus brief helpful guidance.'
@@ -3146,6 +3146,65 @@ app.post('/api/ai/translate', async (req, res) => {
   } else {
     res.json({ success: false, error: result.errorMessage || 'Translation failed' });
   }
+});
+
+const ttsAudioCache = new Map<string, Buffer>();
+app.get('/api/ai/tts', async (req, res) => {
+  const rawText = typeof req.query.text === 'string' ? req.query.text.trim() : '';
+  const langParam = req.query.lang === 'en' ? 'en' : 'zh';
+  const spdNum = Math.max(3, Math.min(6, Number(req.query.spd) || 5));
+  if (!rawText) return res.status(400).json({ success: false, error: 'text required' });
+
+  const cleanText = rawText
+    .replace(/\[\[EMO:[^\]]+\]\]/gi, '')
+    .replace(/\[\[ACTION:[\s\S]*?\]\]/g, '')
+    .trim()
+    .slice(0, 220);
+  if (!cleanText) return res.status(400).json({ success: false, error: 'empty text' });
+
+  const cacheKey = `${langParam}:${spdNum}:${cleanText}`;
+  const cached = ttsAudioCache.get(cacheKey);
+  if (cached) {
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(cached);
+  }
+
+  const providers = [
+    `https://fanyi.baidu.com/gettts?lan=${langParam}&text=${encodeURIComponent(cleanText)}&spd=${spdNum}&source=web`,
+    `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(cleanText)}&tl=${langParam === 'en' ? 'en' : 'zh-CN'}&client=tw-ob`,
+  ];
+
+  for (const url of providers) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3500);
+    try {
+      const upstream = await fetch(url, {
+        signal: ctrl.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+          Referer: url.includes('baidu') ? 'https://fanyi.baidu.com/' : 'https://translate.google.com/',
+        },
+      });
+      if (!upstream.ok) continue;
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      if (buf.length < 400) continue;
+
+      if (ttsAudioCache.size >= 80) {
+        const oldestKey = ttsAudioCache.keys().next().value;
+        if (oldestKey) ttsAudioCache.delete(oldestKey);
+      }
+      ttsAudioCache.set(cacheKey, buf);
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.send(buf);
+    } catch {
+      // try fallback provider
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return res.status(502).json({ success: false, error: 'TTS upstream unavailable' });
 });
 
 // -------------------------------------------------------------
