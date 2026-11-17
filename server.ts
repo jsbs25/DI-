@@ -11,7 +11,7 @@ import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
 import { aiGateway } from './server/aiGateway.ts';
-import { buildConversationPrompt, normalizeConversationHistory } from './server/aiConversation.ts';
+import { buildConversationPrompt, manageSlidingWindowHistory } from './server/aiConversation.ts';
 import { answerWithLiveKnowledge } from './server/liveKnowledge.ts';
 import { solvePrecisionQuery } from './src/utils/precisionSolver.ts';
 import { matchPureSocialBanter } from './src/utils/oneAgentController.ts';
@@ -3000,8 +3000,21 @@ app.post('/api/ai/chat', async (req, res) => {
     : (modelId || model || aiGateway.getChatModelId());
   const userPrompt = prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
   if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
-  const conversationHistory = normalizeConversationHistory(history);
+  const slidingWindow = manageSlidingWindowHistory(
+    history,
+    mode === 'voice-agent'
+      ? { maxRecentTurns: 4, maxTotalChars: 1600, maxTurnChars: 420, maxSummaryChars: 280 }
+      : { maxRecentTurns: 6, maxTotalChars: 3600, maxTurnChars: 900, maxSummaryChars: 420 }
+  );
+  const conversationHistory = slidingWindow.messages;
   const contextualPrompt = buildConversationPrompt(userPrompt, conversationHistory);
+  const memoryWindow = {
+    retainedTurns: conversationHistory.length,
+    evictedTurns: slidingWindow.evictedTurns,
+    totalInputTurns: slidingWindow.totalInputTurns,
+    pinnedConstraints: slidingWindow.pinnedConstraints.length,
+    estimatedTokens: slidingWindow.estimatedTokens,
+  };
 
   const systemInstructions: Record<string, string> = {
     general: 'You are powered by DeepSeek inside ONE. Answer the user’s question directly, accurately, and naturally in the user’s language. Keep simple answers concise; expand only when asked.',
@@ -3022,7 +3035,10 @@ Rules:
     tutor: 'You are the International Language Coach inside ONE. Help master natural conversation, grammar, idioms, and pronunciation concisely in the target language plus brief helpful guidance.'
   };
 
-  const systemPrompt = systemInstructions[mode] || systemInstructions.general;
+  const memoryDirectives = slidingWindow.compactedSummary
+    ? `\n\n[Active Sliding-Window Memory]\n${slidingWindow.compactedSummary}`
+    : '';
+  const systemPrompt = `${systemInstructions[mode] || systemInstructions.general}${memoryDirectives}`;
   const resolvedMaxTokens = typeof maxTokens === 'number' && maxTokens > 0
     ? Math.min(4096, Math.max(64, Math.floor(maxTokens)))
     : (mode === 'voice-agent' ? 180 : undefined);
@@ -3034,7 +3050,7 @@ Rules:
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.flushHeaders();
       res.write(`${JSON.stringify({ delta: replyText })}\n`);
-      res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(replyText.length / 2), model: modelLabel })}\n`);
+      res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(replyText.length / 2), model: modelLabel, memoryWindow })}\n`);
       return res.end();
     }
     return res.json({
@@ -3046,7 +3062,8 @@ Rules:
         timestamp: new Date().toISOString()
       },
       tokens: Math.ceil(replyText.length / 2),
-      model: modelLabel
+      model: modelLabel,
+      memoryWindow
     });
   };
 
@@ -3085,16 +3102,16 @@ Rules:
         resolvedMaxTokens
       );
       if (result.success) {
-        res.write(`${JSON.stringify({ done: true, tokens: result.tokens, model: resolvedModelId })}\n`);
+        res.write(`${JSON.stringify({ done: true, tokens: result.tokens, model: resolvedModelId, memoryWindow })}\n`);
       } else {
         const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
         res.write(`${JSON.stringify({ delta: liveAns.text })}\n`);
-        res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(liveAns.text.length / 2), model: `one-live-${liveAns.source}` })}\n`);
+        res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(liveAns.text.length / 2), model: `one-live-${liveAns.source}`, memoryWindow })}\n`);
       }
     } catch {
       const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
       res.write(`${JSON.stringify({ delta: liveAns.text })}\n`);
-      res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(liveAns.text.length / 2), model: `one-live-${liveAns.source}` })}\n`);
+      res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(liveAns.text.length / 2), model: `one-live-${liveAns.source}`, memoryWindow })}\n`);
     }
     return res.end();
   }
@@ -3119,7 +3136,8 @@ Rules:
         timestamp: new Date().toISOString()
       },
       tokens: result.tokens,
-      model: resolvedModelId
+      model: resolvedModelId,
+      memoryWindow
     });
   } else {
     const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
@@ -3132,7 +3150,8 @@ Rules:
         timestamp: new Date().toISOString()
       },
       tokens: Math.ceil(liveAns.text.length / 2),
-      model: `one-live-${liveAns.source}`
+      model: `one-live-${liveAns.source}`,
+      memoryWindow
     });
   }
 });

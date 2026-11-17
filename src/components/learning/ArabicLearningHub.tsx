@@ -555,154 +555,90 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
       className="min-h-[calc(100vh-4rem)] w-full px-4 pb-16 pt-6 text-[color:var(--color-one-text)] sm:px-6 lg:px-10"
       style={{ background: 'transparent' }}
     >
-      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6">
-        {/* Hero / Header */}
-        <header className="one-surface-elevated relative overflow-hidden px-5 py-6 sm:px-7 sm:py-7">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full opacity-30 blur-3xl"
-            style={{ background: 'radial-gradient(circle, rgba(215,182,118,0.35), transparent 70%)' }}
-          />
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -left-20 bottom-0 h-48 w-48 rounded-full opacity-20 blur-3xl"
-            style={{ background: 'radial-gradient(circle, rgba(127,212,255,0.35), transparent 70%)' }}
-          />
+      <div className="mx-auto flex w-full max-w-[1360px] flex-col gap-5">
+        {/* Clean Architectural Header — no heavy white box */}
+        <header className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-end sm:justify-between" style={{ borderColor: 'var(--color-one-border)' }}>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-xl">
+              {t.title}
+            </h1>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-[color:var(--color-one-text-muted)]">
+              {t.subtitle}
+            </p>
+          </div>
 
-          <div className="relative flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div className="flex max-w-3xl items-start gap-4">
-              <div
-                className="mt-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border"
-                style={{
-                  borderColor: 'rgba(215,182,118,0.28)',
-                  background: 'rgba(215,182,118,0.1)',
-                  color: 'var(--color-one-gold)'
-                }}
-              >
-                <Library className="h-6 w-6" />
-              </div>
-              <div>
-                <div className="mb-1 flex items-center gap-2 text-xs font-medium text-[color:var(--color-one-gold)]">
-                  <span>{lang === 'zh' ? '多邻国 · 多语言沉浸学习平台' : 'MULTI-LANGUAGE IMMERSION'}</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="text-[color:var(--color-one-text-dim)]">EN / 中文 / 한국어 / AR / ES / FR / JA</span>
-                </div>
-                <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-3xl">
-                  {t.title}
-                </h1>
-                <p className="mt-1.5 max-w-2xl text-sm leading-6 text-[color:var(--color-one-text-muted)]">
-                  {t.subtitle}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className="one-btn one-btn-md one-btn-secondary" onClick={onOpenLibrary}>
-                <BookOpen className="h-4 w-4" style={{ color: 'var(--color-one-gold)' }} />
-                <span>{t.openLibrary}</span>
-              </button>
-            </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button type="button" className="one-btn one-btn-sm one-btn-secondary whitespace-nowrap" onClick={onOpenLibrary}>
+              <BookOpen className="h-3.5 w-3.5" style={{ color: 'var(--color-one-gold)' }} />
+              <span>{t.openLibrary}</span>
+            </button>
           </div>
         </header>
 
-        {/* Primary tabs */}
-        <div className="one-surface-subtle flex flex-col gap-3 p-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:pb-0">
-            <button
-              type="button"
-              onClick={() => setMainTab('duolingo_platform')}
-              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                mainTab === 'duolingo_platform'
-                  ? ''
-                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
-              }`}
-              style={
-                mainTab === 'duolingo_platform'
-                  ? {
-                      background: 'rgba(16, 185, 129, 0.14)',
-                      border: '1px solid rgba(16, 185, 129, 0.34)',
-                      color: 'var(--color-one-success)'
-                    }
-                  : { border: '1px solid transparent' }
-              }
-            >
-              <GraduationCap className="h-4 w-4" />
-              <span>{lang === 'zh' ? '多邻国沉浸平台' : 'Duolingo Immersion'}</span>
-            </button>
+        {/* Clean Borderless Inline Navigation Strip */}
+        <nav
+          aria-label="Language learning modules"
+          className="flex items-center gap-1 overflow-x-auto border-b pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ borderColor: 'var(--color-one-border)' }}
+        >
+          <button
+            type="button"
+            onClick={() => setMainTab('duolingo_platform')}
+            className={`inline-flex min-h-[38px] items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              mainTab === 'duolingo_platform'
+                ? 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300'
+                : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[color:var(--color-one-surface-soft)]'
+            }`}
+          >
+            <GraduationCap className="h-4 w-4" />
+            <span>{lang === 'zh' ? '多邻国沉浸平台' : 'Duolingo Immersion'}</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setMainTab('english_engine')}
-              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                mainTab === 'english_engine'
-                  ? 'text-[color:var(--color-one-text)]'
-                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
-              }`}
-              style={
-                mainTab === 'english_engine'
-                  ? {
-                      background: 'rgba(127,212,255,0.14)',
-                      border: '1px solid rgba(127,212,255,0.32)',
-                      color: 'var(--color-one-accent)'
-                    }
-                  : { border: '1px solid transparent' }
-              }
-            >
-              <Sparkles className="h-4 w-4" />
-              <span>{lang === 'zh' ? '实时英语引擎' : 'English Engine'}</span>
-            </button>
+          <button
+            type="button"
+            onClick={() => setMainTab('english_engine')}
+            className={`inline-flex min-h-[38px] items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              mainTab === 'english_engine'
+                ? 'bg-[color:var(--color-one-accent-soft)] text-[color:var(--color-one-accent)]'
+                : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[color:var(--color-one-surface-soft)]'
+            }`}
+          >
+            <Sparkles className="h-4 w-4" />
+            <span>{lang === 'zh' ? '实时英语引擎' : 'English Engine'}</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setMainTab('letters');
-                setView('home');
-              }}
-              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                mainTab === 'letters'
-                  ? ''
-                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
-              }`}
-              style={
-                mainTab === 'letters'
-                  ? {
-                      background: 'rgba(127,212,255,0.14)',
-                      border: '1px solid rgba(127,212,255,0.28)',
-                      color: 'var(--color-one-accent)'
-                    }
-                  : { border: '1px solid transparent' }
-              }
-            >
-              <BookOpen className="h-4 w-4" />
-              <span>{lang === 'zh' ? '阿语字母与复习' : `${t.alphabet} · ${t.practice}`}</span>
-            </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMainTab('letters');
+              setView('home');
+            }}
+            className={`inline-flex min-h-[38px] items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              mainTab === 'letters'
+                ? 'bg-[color:var(--color-one-accent-soft)] text-[color:var(--color-one-accent)]'
+                : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[color:var(--color-one-surface-soft)]'
+            }`}
+          >
+            <BookOpen className="h-4 w-4" />
+            <span>{lang === 'zh' ? '阿语字母与复习' : `${t.alphabet} · ${t.practice}`}</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setMainTab('islamic_library')}
-              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                mainTab === 'islamic_library'
-                  ? 'text-[color:var(--color-one-text)]'
-                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
-              }`}
-              style={
-                mainTab === 'islamic_library'
-                  ? {
-                      background: 'rgba(215,182,118,0.14)',
-                      border: '1px solid rgba(215,182,118,0.28)',
-                      color: 'var(--color-one-gold)'
-                    }
-                  : { border: '1px solid transparent' }
-              }
-            >
-              <BookMarked className="h-4 w-4" />
-              <span>{lang === 'zh' ? '伊斯兰数字图书馆' : t.library}</span>
-              <span className="text-[11px] font-mono tabular-nums opacity-75">
-                ({libraryBooks.length})
-              </span>
-            </button>
-          </div>
-        </div>
+          <button
+            type="button"
+            onClick={() => setMainTab('islamic_library')}
+            className={`inline-flex min-h-[38px] items-center gap-2 rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              mainTab === 'islamic_library'
+                ? 'bg-[color:var(--color-one-gold-soft)] text-[color:var(--color-one-gold)]'
+                : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[color:var(--color-one-surface-soft)]'
+            }`}
+          >
+            <BookMarked className="h-4 w-4" />
+            <span>{lang === 'zh' ? '伊斯兰数字图书馆' : t.library}</span>
+            <span className="text-[11px] font-mono tabular-nums opacity-75">
+              {libraryBooks.length}
+            </span>
+          </button>
+        </nav>
 
         {/* TAB 0: DUOLINGO MULTI-LANGUAGE IMMERSION PLATFORM */}
         {mainTab === 'duolingo_platform' && (
@@ -716,52 +652,62 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
         {mainTab === 'english_engine' && <EnglishLearningSection lang={lang} />}
 
         {/* ============================================================= */}
-        {/* TAB 1: ISLAMIC DIGITAL LIBRARIES & MANUSCRIPT CRAWLER          */}
+        {/* TAB 2: ISLAMIC DIGITAL LIBRARIES & MANUSCRIPT CRAWLER          */}
         {/* ============================================================= */}
         {mainTab === 'islamic_library' && (
           <div className="space-y-5">
-            <div className="one-surface p-5 sm:p-6">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="relative flex-1">
-                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-[color:var(--color-one-text-dim)]">
-                    <Search className="h-4 w-4" />
-                  </div>
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="在各大伊斯兰图书馆中检索 (如: لسان العرب, 语法, Ajrumiyyah, Tafsir, Ibn Manzur)..."
-                    className="w-full rounded-xl border bg-[color:var(--color-one-surface-soft)] py-2.5 pl-10 pr-10 text-sm text-[color:var(--color-one-text)] placeholder-[color:var(--color-one-text-dim)] transition focus:border-[rgba(215,182,118,0.45)] focus:outline-none focus:ring-1 focus:ring-[rgba(215,182,118,0.35)]"
-                    style={{ borderColor: 'var(--color-one-border)' }}
-                  />
-                  {searchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setSearchQuery('')}
-                      className="absolute inset-y-0 right-0 flex items-center pr-3 text-[color:var(--color-one-text-dim)] hover:text-[color:var(--color-one-text)]"
-                      aria-label="Clear search"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
+            {/* Unboxed Search & Filter Bar */}
+            <div className="space-y-3.5 border-b pb-4" style={{ borderColor: 'var(--color-one-border)' }}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-[color:var(--color-one-text)]">
+                    {lang === 'zh' ? '伊斯兰经典古籍数字馆' : t.library}
+                  </h2>
+                  <p className="mt-0.5 text-xs text-[color:var(--color-one-text-dim)]">
+                    {lang === 'zh'
+                      ? '直连 Shamela · Waqfeya · Noor · Internet Archive 原典书目与在线阅读'
+                      : t.libraryHint}
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleTriggerCrawler}
+                  disabled={isCrawling}
+                  className="one-btn one-btn-sm one-btn-primary shrink-0 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isCrawling ? 'animate-spin' : ''}`} />
+                  <span>{isCrawling ? '正在同步馆藏…' : '全库同步爬取新典籍'}</span>
+                </button>
+              </div>
+
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-[color:var(--color-one-text-dim)]">
+                  <Search className="h-4 w-4" />
+                </div>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="检索阿语书名、作者或主题 (如: لسان العرب, 语法, Ajrumiyyah, Tafsir, Ibn Manzur)..."
+                  className="h-10 w-full rounded-xl border bg-[color:var(--color-one-surface)] pl-10 pr-10 text-sm text-[color:var(--color-one-text)] placeholder-[color:var(--color-one-text-dim)] transition focus:border-[color:var(--color-one-gold)] focus:outline-none"
+                  style={{ borderColor: 'var(--color-one-border)' }}
+                />
+                {searchQuery && (
                   <button
                     type="button"
-                    onClick={handleTriggerCrawler}
-                    disabled={isCrawling}
-                    className="one-btn one-btn-md one-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-[color:var(--color-one-text-dim)] hover:text-[color:var(--color-one-text)]"
+                    aria-label="Clear search"
                   >
-                    <RefreshCw className={`h-4 w-4 ${isCrawling ? 'animate-spin' : ''}`} />
-                    <span>{isCrawling ? '正在爬取各大图书馆...' : '启动爬虫抓取新文献'}</span>
+                    <X className="h-4 w-4" />
                   </button>
-                </div>
+                )}
               </div>
 
               {crawlFeedback && (
                 <div
-                  className="mt-4 flex items-start gap-2 rounded-xl border px-3.5 py-3 text-sm"
+                  className="flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-xs"
                   style={{
                     borderColor: 'rgba(215,182,118,0.28)',
                     background: 'rgba(215,182,118,0.08)',
@@ -769,261 +715,208 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                   }}
                   role="status"
                 >
-                  <Sparkles className="mt-0.5 h-4 w-4 shrink-0" style={{ color: 'var(--color-one-gold)' }} />
+                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-one-gold)' }} />
                   <span className="text-[color:var(--color-one-text-muted)]">{crawlFeedback}</span>
                 </div>
               )}
 
-              <div className="mt-5 flex flex-col gap-4 border-t pt-4" style={{ borderColor: 'var(--color-one-border)' }}>
-                <div className="flex flex-col gap-2">
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-[color:var(--color-one-text-dim)]">
-                    <Filter className="h-3.5 w-3.5" /> 分类
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      { id: 'all', label: '全部典籍' },
-                      { id: 'grammar', label: '语法与词法 (النحو والصرف)' },
-                      { id: 'lexicon', label: '权威辞书 (المعاجم)' },
-                      { id: 'quran_tafsir', label: '经注学 (التفسير)' },
-                      { id: 'hadith', label: '圣训与传记 (الحديث)' },
-                      { id: 'literature', label: '文学与修辞 (الأدب والبلاغة)' },
-                      { id: 'learning', label: '综合教材 (تعليم العربية)' }
-                    ].map((c) => {
-                      const active = selectedCategory === c.id;
-                      return (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => setSelectedCategory(c.id as any)}
-                          className="rounded-lg px-3 py-1.5 text-xs font-medium transition-all"
-                          style={
-                            active
-                              ? {
-                                  color: 'var(--color-one-gold)',
-                                  background: 'rgba(215,182,118,0.14)',
-                                  border: '1px solid rgba(215,182,118,0.28)'
-                                }
-                              : {
-                                  color: 'var(--color-one-text-muted)',
-                                  background: 'var(--color-one-surface-soft)',
-                                  border: '1px solid var(--color-one-border)'
-                                }
-                          }
-                        >
-                          {c.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+              <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <Filter className="mr-1 h-3.5 w-3.5 shrink-0 text-[color:var(--color-one-text-dim)]" />
+                  {[
+                    { id: 'all', label: '全部典籍' },
+                    { id: 'grammar', label: '语法词法' },
+                    { id: 'lexicon', label: '权威辞书' },
+                    { id: 'quran_tafsir', label: '经注学' },
+                    { id: 'hadith', label: '圣训传记' },
+                    { id: 'literature', label: '文学修辞' },
+                    { id: 'learning', label: '综合教材' }
+                  ].map((c) => {
+                    const active = selectedCategory === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setSelectedCategory(c.id as any)}
+                        className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-[color:var(--color-one-gold-soft)] text-[color:var(--color-one-gold)]'
+                            : 'text-[color:var(--color-one-text-muted)] hover:bg-[color:var(--color-one-surface-soft)] hover:text-[color:var(--color-one-text)]'
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                <div className="flex flex-col gap-2">
-                  <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-[color:var(--color-one-text-dim)]">
-                    馆藏源
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      { id: 'all', label: '全部来源' },
-                      { id: 'shamela', label: 'المكتبة الشاملة' },
-                      { id: 'waqfeya', label: 'المكتبة الوقفية' },
-                      { id: 'noor', label: 'مكتبة نور' },
-                      { id: 'internet_archive', label: 'Internet Archive' },
-                      { id: 'wikisource', label: 'Wikisource' }
-                    ].map((s) => {
-                      const active = selectedSource === s.id;
-                      return (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onClick={() => setSelectedSource(s.id as any)}
-                          className="rounded-lg px-2.5 py-1.5 text-[11px] font-mono transition-all"
-                          style={
-                            active
-                              ? {
-                                  color: 'var(--color-one-accent)',
-                                  background: 'rgba(127,212,255,0.12)',
-                                  border: '1px solid rgba(127,212,255,0.26)'
-                                }
-                              : {
-                                  color: 'var(--color-one-text-dim)',
-                                  background: 'var(--color-one-surface-soft)',
-                                  border: '1px solid var(--color-one-border)'
-                                }
-                          }
-                        >
-                          {s.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="flex items-center gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {[
+                    { id: 'all', label: '全部馆源' },
+                    { id: 'shamela', label: '沙米拉' },
+                    { id: 'waqfeya', label: '瓦克菲亚' },
+                    { id: 'noor', label: '努尔' },
+                    { id: 'internet_archive', label: 'Archive' },
+                    { id: 'wikisource', label: 'Wikisource' }
+                  ].map((s) => {
+                    const active = selectedSource === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setSelectedSource(s.id as any)}
+                        className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-[color:var(--color-one-accent-soft)] font-medium text-[color:var(--color-one-accent)]'
+                            : 'text-[color:var(--color-one-text-dim)] hover:text-[color:var(--color-one-text)]'
+                        }`}
+                      >
+                        {s.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
             {filteredBooks.length === 0 ? (
-              <div className="one-surface flex flex-col items-center justify-center px-6 py-14 text-center">
+              <div className="flex flex-col items-center justify-center rounded-2xl border px-6 py-14 text-center" style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface)' }}>
                 <div
-                  className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border"
+                  className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl border"
                   style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
                 >
-                  <Library className="h-7 w-7 text-[color:var(--color-one-text-dim)]" />
+                  <Library className="h-6 w-6 text-[color:var(--color-one-text-dim)]" />
                 </div>
-                <h3 className="text-base font-semibold text-[color:var(--color-one-text)]">未找到符合条件的古籍文献</h3>
-                <p className="mt-2 max-w-md text-sm leading-6 text-[color:var(--color-one-text-muted)]">
-                  尝试切换分类或来源，或点击“启动爬虫抓取新文献”向网络档案与数字图书馆发起检索。
+                <h3 className="text-sm font-semibold text-[color:var(--color-one-text)]">未找到符合条件的古籍文献</h3>
+                <p className="mt-1.5 max-w-md text-xs leading-5 text-[color:var(--color-one-text-muted)]">
+                  可切换上方分类/馆源筛选，或发起跨馆抓取更多经典文献。
                 </p>
-                <button type="button" onClick={handleTriggerCrawler} className="one-btn one-btn-md one-btn-secondary mt-5">
-                  <RefreshCw className={`h-4 w-4 ${isCrawling ? 'animate-spin' : ''}`} />
-                  启动全局网络爬虫检索
+                <button type="button" onClick={handleTriggerCrawler} className="one-btn one-btn-sm one-btn-secondary mt-4">
+                  <RefreshCw className={`h-3.5 w-3.5 ${isCrawling ? 'animate-spin' : ''}`} />
+                  <span>跨馆同步检索</span>
                 </button>
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {filteredBooks.map((book) => {
-                  const sourceTone: Record<string, { color: string; bg: string; border: string }> = {
-                    shamela: { color: 'var(--color-one-gold)', bg: 'rgba(215,182,118,0.12)', border: 'rgba(215,182,118,0.26)' },
-                    waqfeya: { color: 'var(--color-one-accent)', bg: 'rgba(127,212,255,0.12)', border: 'rgba(127,212,255,0.26)' },
-                    noor: { color: 'var(--color-one-success)', bg: 'rgba(76,195,138,0.12)', border: 'rgba(76,195,138,0.26)' },
-                    internet_archive: { color: 'var(--color-one-text)', bg: 'rgba(244,243,238,0.08)', border: 'rgba(244,243,238,0.18)' },
-                    wikisource: { color: 'var(--color-one-text-muted)', bg: 'rgba(244,243,238,0.06)', border: 'var(--color-one-border)' }
-                  };
-                  const tone = sourceTone[book.librarySource] || sourceTone.wikisource;
+                {filteredBooks.map((book) => (
+                  <article
+                    key={book.id}
+                    className="one-surface group flex flex-col justify-between p-4 transition-all hover:-translate-y-0.5"
+                  >
+                    <div>
+                      <div className="mb-2.5 flex items-center justify-between gap-2 text-[11px] text-[color:var(--color-one-text-dim)]">
+                        <span className="font-medium text-[color:var(--color-one-gold)]">
+                          {book.librarySourceNameZh || book.librarySourceNameAr}
+                        </span>
+                        <span className="truncate">
+                          {book.categoryLabelZh}{book.year ? ` · ${book.year}` : ''}{book.volumes ? ` · ${book.volumes} 卷` : ''}
+                        </span>
+                      </div>
 
-                  return (
-                    <article
-                      key={book.id}
-                      className="one-surface group flex flex-col justify-between p-5 transition-all hover:-translate-y-0.5"
-                      style={{ borderColor: 'var(--color-one-border)' }}
-                    >
-                      <div>
-                        <div className="mb-3 flex items-center justify-between gap-2">
-                          <span
-                            className="rounded-md px-2.5 py-1 text-[10px] font-mono"
-                            style={{ color: tone.color, background: tone.bg, border: `1px solid ${tone.border}` }}
-                          >
-                            {book.librarySourceNameAr}
-                          </span>
-                          <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--color-one-text-dim)]">
-                            <span>{book.categoryLabelZh}</span>
-                            {book.year && <span>· {book.year}</span>}
-                          </div>
-                        </div>
-
-                        <div className="flex items-start gap-4">
-                          {book.coverImage ? (
+                      <div className="flex items-start gap-3.5">
+                        <div
+                          className="relative flex h-20 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border"
+                          style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
+                        >
+                          <BookOpen className="h-5 w-5 text-[color:var(--color-one-text-dim)]" />
+                          {book.coverImage && (
                             <img
                               src={book.coverImage}
                               alt={book.title}
-                              className="h-24 w-16 shrink-0 rounded-lg border object-cover"
-                              style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
+                              referrerPolicy="no-referrer"
+                              className="absolute inset-0 h-full w-full object-cover"
                               loading="lazy"
                               onError={(e) => {
-                                (e.target as HTMLElement).style.display = 'none';
+                                e.currentTarget.style.display = 'none';
                               }}
                             />
-                          ) : (
-                            <div
-                              className="flex h-24 w-16 shrink-0 items-center justify-center rounded-lg border"
-                              style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
-                            >
-                              <BookOpen className="h-6 w-6 text-[color:var(--color-one-text-dim)]" />
-                            </div>
                           )}
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <h3
-                                dir="rtl"
-                                lang="ar"
-                                className="truncate font-serif text-lg font-semibold leading-snug text-[color:var(--color-one-text)]"
-                                title={book.title}
-                              >
-                                {book.title}
-                              </h3>
-                              <button
-                                type="button"
-                                onClick={() => speak(book.title)}
-                                className="rounded-md p-1.5 text-[color:var(--color-one-text-dim)] transition hover:bg-[rgba(244,243,238,0.06)] hover:text-[color:var(--color-one-accent)]"
-                                title="朗读阿语书名"
-                              >
-                                <Volume2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-
-                            {book.titleZh && (
-                              <p className="mt-0.5 line-clamp-1 text-xs font-medium text-[color:var(--color-one-text-muted)]">
-                                {book.titleZh}
-                              </p>
-                            )}
-                            <p dir="rtl" lang="ar" className="mt-1 truncate text-xs" style={{ color: 'var(--color-one-gold)' }}>
-                              {book.author}
-                            </p>
-                            {book.authorZh && (
-                              <p className="truncate text-[11px] text-[color:var(--color-one-text-dim)]">作者: {book.authorZh}</p>
-                            )}
-                          </div>
                         </div>
 
-                        <p className="mt-3.5 line-clamp-2 text-xs leading-relaxed text-[color:var(--color-one-text-muted)]">
-                          {book.description}
-                        </p>
-
-                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                          {book.volumes && (
-                            <span className="one-badge one-badge-neutral font-mono normal-case tracking-normal">{book.volumes} 卷本</span>
-                          )}
-                          {book.tags.slice(0, 3).map((tag, idx) => (
-                            <span
-                              key={idx}
-                              className="rounded-md px-1.5 py-0.5 text-[10px]"
-                              style={{ color: 'var(--color-one-text-dim)', background: 'var(--color-one-surface-soft)' }}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-1.5">
+                            <h3
+                              dir="rtl"
+                              lang="ar"
+                              className="truncate font-serif text-base font-semibold leading-snug text-[color:var(--color-one-text)]"
+                              title={book.title}
                             >
-                              #{tag}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="mt-5 flex items-center justify-between gap-2 border-t pt-3.5" style={{ borderColor: 'var(--color-one-border)' }}>
-                        <div className="flex items-center gap-2">
-                          {book.embedUrl ? (
+                              {book.title}
+                            </h3>
                             <button
                               type="button"
-                              onClick={() => setReadingBook(book)}
-                              className="one-btn one-btn-sm one-btn-secondary"
+                              onClick={() => speak(book.title)}
+                              className="shrink-0 rounded-md p-1 text-[color:var(--color-one-text-dim)] transition hover:bg-[color:var(--color-one-surface-soft)] hover:text-[color:var(--color-one-accent)]"
+                              title="朗读阿语书名"
                             >
-                              <Eye className="h-3.5 w-3.5" />
-                              <span>在线阅读</span>
+                              <Volume2 className="h-3.5 w-3.5" />
                             </button>
-                          ) : null}
-                          {book.pdfUrl ? (
-                            <a
-                              href={book.pdfUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="one-btn one-btn-sm one-btn-ghost"
-                              title="下载高清原典 PDF"
-                            >
-                              <Download className="h-3.5 w-3.5" style={{ color: 'var(--color-one-gold)' }} />
-                              <span>PDF</span>
-                            </a>
-                          ) : null}
-                        </div>
+                          </div>
 
-                        <a
-                          href={book.sourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-xs text-[color:var(--color-one-text-dim)] transition hover:text-[color:var(--color-one-accent)]"
-                          title="访问图书馆原始馆藏页"
-                        >
-                          <span className="font-mono text-[11px]">原站馆藏</span>
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
+                          {book.titleZh && (
+                            <p className="mt-0.5 line-clamp-1 text-xs font-medium text-[color:var(--color-one-text)]">
+                              {book.titleZh}
+                            </p>
+                          )}
+                          <p dir="rtl" lang="ar" className="mt-0.5 truncate text-xs text-[color:var(--color-one-gold)]">
+                            {book.author}
+                          </p>
+                          {book.authorZh && (
+                            <p className="truncate text-[11px] text-[color:var(--color-one-text-dim)]">{book.authorZh}</p>
+                          )}
+                        </div>
                       </div>
-                    </article>
-                  );
-                })}
+
+                      <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-[color:var(--color-one-text-muted)]">
+                        {book.description}
+                      </p>
+
+                      {book.tags.length > 0 && (
+                        <div className="mt-2 truncate text-[11px] text-[color:var(--color-one-text-dim)]">
+                          {book.tags.slice(0, 3).map(t => `#${t}`).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between gap-2 border-t pt-3" style={{ borderColor: 'var(--color-one-border)' }}>
+                      <div className="flex items-center gap-2">
+                        {book.embedUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => setReadingBook(book)}
+                            className="one-btn one-btn-sm one-btn-secondary whitespace-nowrap"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            <span>在线阅读</span>
+                          </button>
+                        ) : null}
+                        {book.pdfUrl ? (
+                          <a
+                            href={book.pdfUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="one-btn one-btn-sm one-btn-ghost whitespace-nowrap"
+                            title="下载高清原典 PDF"
+                          >
+                            <Download className="h-3.5 w-3.5" style={{ color: 'var(--color-one-gold)' }} />
+                            <span>PDF</span>
+                          </a>
+                        ) : null}
+                      </div>
+
+                      <a
+                        href={book.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-[color:var(--color-one-text-dim)] transition hover:text-[color:var(--color-one-accent)] whitespace-nowrap"
+                        title="访问图书馆原始馆藏页"
+                      >
+                        <span>原站馆藏</span>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  </article>
+                ))}
               </div>
             )}
           </div>

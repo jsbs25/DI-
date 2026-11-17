@@ -105,11 +105,14 @@ async function queryDuckDuckGoInstant(topic: string, isVoice: boolean): Promise<
 async function queryWebSnippetFallback(query: string, lang: 'zh' | 'en', isVoice: boolean): Promise<string | null> {
   try {
     const hits = await Promise.race([
-      searchWeb(query, 3, 'auto', lang),
+      searchWeb(query, 4, 'auto', lang),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 2200)),
     ]);
     if (!Array.isArray(hits) || hits.length === 0) return null;
-    const usable = hits.find((h) => h.snippet && h.snippet.trim().length > 18);
+    const usable = hits.find((h) => {
+      const s = (h.snippet || '').trim();
+      return s.length > 18 && !/Nearby places|Gas stations|Map details|Hotels Restaurants/i.test(s);
+    });
     if (!usable) return null;
     return summarizeExtract(usable.snippet, isVoice ? 2 : 3, isVoice ? 165 : 320);
   } catch {

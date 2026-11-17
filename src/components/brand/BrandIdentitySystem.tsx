@@ -276,10 +276,10 @@ export const BrandIdentitySystem: React.FC<BrandIdentitySystemProps> = ({ lang, 
                 <div className="text-xs tracking-widest uppercase text-[#C4A876]">
                   Phase 01 · 品牌定位与核心哲学
                 </div>
-                <h2 className="text-2xl sm:text-3xl font-semibold text-white tracking-tight">
+                <h2 className="text-xl sm:text-2xl font-semibold text-white tracking-tight">
                   从一个清醒原点出发，连接世界与无限可能
                 </h2>
-                <p className="text-sm sm:text-base text-[#A7ADB6] leading-relaxed max-w-2xl">
+                <p className="text-xs sm:text-sm text-[#A7ADB6] leading-relaxed max-w-2xl">
                   「独一 ONE」不是单一的社交、AI 或信息门户，而是一个面向全球用户、可承载不断演化服务形态的数字生态系统。Logo 必须独立于任何具体功能之外，建立自有视觉母语——东方未来主义（Eastern Futurism）。
                 </p>
               </div>
@@ -335,12 +335,12 @@ export const BrandIdentitySystem: React.FC<BrandIdentitySystemProps> = ({ lang, 
 
         {/* PHASE 2: THREE ORIGINAL LOGO CONCEPTS */}
         {chapter === 'concepts' && (
-          <section className="space-y-10">
+          <section className="space-y-7">
             {/* Control Strip */}
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
               <div>
-                <h2 className="text-xl sm:text-2xl font-semibold text-white">三套差异化原创 Logo 方案深度对比</h2>
-                <p className="text-xs sm:text-sm text-[#A7ADB6] mt-1">
+                <h2 className="text-lg sm:text-xl font-semibold text-white">三套差异化原创 Logo 方案深度对比</h2>
+                <p className="text-xs text-[#A7ADB6] mt-1">
                   三套方案分别遵循中心起源（ONE ORIGIN）、八向回环（ONE INFINITY）、负空间视界（ONE HORIZON）构建，非简单换色。
                 </p>
               </div>
@@ -348,7 +348,7 @@ export const BrandIdentitySystem: React.FC<BrandIdentitySystemProps> = ({ lang, 
                 <button
                   type="button"
                   onClick={() => setShowGrid(g => !g)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
                     showGrid
                       ? 'bg-[#247864]/25 border-[#2E8B74] text-[#F7F5F0]'
                       : 'bg-white/[0.03] border-white/10 text-[#A7ADB6] hover:text-white'
@@ -361,7 +361,7 @@ export const BrandIdentitySystem: React.FC<BrandIdentitySystemProps> = ({ lang, 
             </div>
 
             {/* 3-Concept Comparison Cards */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
               {BRAND_CONCEPTS.slice(0, 3).map(c => {
                 const isSelected = selectedConcept === c.id;
                 return (
@@ -375,14 +375,14 @@ export const BrandIdentitySystem: React.FC<BrandIdentitySystemProps> = ({ lang, 
                   >
                     {/* Preview Canvas */}
                     <div
-                      className="h-56 flex items-center justify-center relative border-b border-white/10"
+                      className="h-44 flex items-center justify-center relative border-b border-white/10"
                       style={{ backgroundColor: surfacePalette.bg }}
                     >
                       <BrandMark
                         concept={c.id}
                         mode={surfaceMode}
                         lockup="symbol"
-                        size={132}
+                        size={108}
                         showGrid={showGrid}
                       />
                       <div
@@ -445,13 +445,13 @@ export const BrandIdentitySystem: React.FC<BrandIdentitySystemProps> = ({ lang, 
             </div>
 
             {/* Deep Inspection Panel for Selected Concept */}
-            <div className="rounded-xl border border-white/10 bg-[#14161A] p-6 sm:p-8 space-y-8">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-5">
+            <div className="rounded-xl border border-white/10 bg-[#14161A] p-5 sm:p-6 space-y-6">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-4">
                 <div>
                   <div className="text-xs font-mono text-[#C4A876]">
                     方案详述 · {activeMeta.code} · {activeMeta.name}
                   </div>
-                  <h3 className="text-xl sm:text-2xl font-semibold text-white mt-1">
+                  <h3 className="text-base sm:text-lg font-semibold text-white mt-1">
                     {activeMeta.zhName} — 四种组合形式与几何构造逻辑
                   </h3>
                 </div>

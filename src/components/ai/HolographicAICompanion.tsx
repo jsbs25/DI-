@@ -621,11 +621,14 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
   const isMusicPlayingRef = useRef(isMusicPlaying);
   isMusicPlayingRef.current = isMusicPlaying;
 
-  const sendYouTubeCmd = useCallback((func: 'playVideo' | 'pauseVideo') => {
+  const sendYouTubeCmd = useCallback((func: 'playVideo' | 'pauseVideo' | 'unMute') => {
     const win = embedIframeRef.current?.contentWindow;
     const src = liveEmbedSrcRef.current;
     if (!win || !src || !src.includes('youtube')) return;
     try {
+      if (func === 'playVideo') {
+        win.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
+      }
       win.postMessage(JSON.stringify({ event: 'command', func, args: [] }), '*');
     } catch {}
   }, []);
@@ -693,6 +696,23 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     if (!liveEmbedSrc || !liveEmbedSrc.includes('youtube')) return;
     sendYouTubeCmd(isMusicPlaying ? 'playVideo' : 'pauseVideo');
   }, [isMusicPlaying, liveEmbedSrc, sendYouTubeCmd]);
+
+  // Direct synchronous play/pause triggers from VenusMusicSpace real-playback toggle switch
+  useEffect(() => {
+    const onTriggerPlay = () => {
+      explicitStopMusicRef.current = false;
+      sendYouTubeCmd('playVideo');
+    };
+    const onTriggerPause = () => {
+      sendYouTubeCmd('pauseVideo');
+    };
+    window.addEventListener('one-music-trigger-play', onTriggerPlay);
+    window.addEventListener('one-music-trigger-pause', onTriggerPause);
+    return () => {
+      window.removeEventListener('one-music-trigger-play', onTriggerPlay);
+      window.removeEventListener('one-music-trigger-pause', onTriggerPause);
+    };
+  }, [sendYouTubeCmd]);
 
   // Dock persistent YouTube/Bilibili iframe into #venus-stage-slot or orb popover preview
   useLayoutEffect(() => {
@@ -1127,7 +1147,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      historyRef.current = [...historyRef.current.slice(-4), { role: 'user', content: clean }];
+      historyRef.current = [...historyRef.current.slice(-20), { role: 'user', content: clean }];
 
       // 1. Instant local command dispatch (<1ms, zero network wait)
       const instantAction = parseInstantAgentAction(clean, isZh);
@@ -1146,7 +1166,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           return;
         }
         const extractedReply = extractEmotionTag(instantAction.reply);
-        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: extractedReply.text }];
+        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: extractedReply.text }];
         const isMediaPlayback =
           (instantAction.type === 'play_music' && !instantAction.control) ||
           (instantAction.type === 'play_music' && (instantAction.control === 'resume' || instantAction.control === 'next' || instantAction.control === 'prev')) ||
@@ -1176,7 +1196,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       // 2. Exact Precision Solver (<1ms, 100% mathematically/factually exact — zero hallucination)
       const precision = solvePrecisionQuery(clean, isZh);
       if (precision) {
-        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: precision.answer }];
+        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: precision.answer }];
         if (shouldSpeak) {
           speakDeepSeekReply(precision.answer, myEpoch, precision.emotion, () => {
             if (myEpoch === turnEpochRef.current) {
@@ -1198,7 +1218,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       const banterRaw = matchPureSocialBanter(clean, isZh);
       if (banterRaw) {
         const banterParsed = extractEmotionTag(banterRaw);
-        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: banterParsed.text }];
+        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: banterParsed.text }];
         if (shouldSpeak) {
           speakDeepSeekReply(banterParsed.text, myEpoch, banterParsed.emotion, () => {
             if (myEpoch === turnEpochRef.current) {
@@ -1246,7 +1266,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             mode: 'voice-agent',
             maxTokens: 160,
             stream: true,
-            history: historyRef.current.slice(-4),
+            history: historyRef.current.slice(-20),
           }),
         });
 
@@ -1328,7 +1348,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         const finalText = cleanedReply || fallbackParsed.text;
         const finalEmotion = resolvedEmotion || fallbackParsed.emotion;
 
-        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: finalText }];
+        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: finalText }];
 
         if (!shouldSpeak || mediaActionTriggered) {
           stopOutputAudio();
@@ -1359,7 +1379,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           err instanceof Error ? err.message : undefined
         );
         const fallbackParsed = extractEmotionTag(fallbackRaw);
-        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: fallbackParsed.text }];
+        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: fallbackParsed.text }];
         if (shouldSpeak) {
           speakDeepSeekReply(fallbackParsed.text, myEpoch, fallbackParsed.emotion, () => {
             if (myEpoch === turnEpochRef.current) {

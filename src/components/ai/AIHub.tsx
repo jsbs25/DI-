@@ -60,6 +60,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
+  const isComposingRef = useRef(false);
 
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = loadAIConversationHistory('earth-one-ai-hub:v1', (value): value is Message =>
@@ -264,7 +265,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         prompt: textToSend,
         modelId: selectedModel,
         mode: 'general',
-        history: messages.slice(-8).map(message => ({ role: message.role, content: message.content })),
+        history: messages.slice(-24).map(message => ({ role: message.role, content: message.content })),
         ...(shouldStream ? { stream: true } : {})
       };
       if (selectedModel === 'custom' || customApiKey.trim()) {
@@ -542,8 +543,10 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                   rows={1}
                   value={promptInput}
                   onChange={e => setPromptInput(e.target.value)}
+                  onCompositionStart={() => { isComposingRef.current = true; }}
+                  onCompositionEnd={() => { isComposingRef.current = false; }}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       void handleSend();
                     }
