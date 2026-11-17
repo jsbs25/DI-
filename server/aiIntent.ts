@@ -204,7 +204,8 @@ export function composeSystemPrompt(
   mode: string,
   analysis: TurnContextAnalysis,
   memories: AIMemoryItem[],
-  compactedSummary: string
+  compactedSummary: string,
+  pageContext?: string
 ): string {
   const antiTemplateRules = analysis.isZh
     ? `核心表达准则（必须严格遵守）：
@@ -223,9 +224,10 @@ export function composeSystemPrompt(
 6. Tolerate typos, colloquial phrasing, and ellipses; infer the clearest intent from context instead of interrogating the user.`;
 
   const roleHeaders: Record<string, string> = {
-    general: '你是 EARTH ONE 内的智能伙伴，兼具敏锐判断力、自然沟通力与全站上下文感知能力。',
-    'voice-agent': `你是 One.，EARTH ONE 的全息实时语音伴侣。用自然口语直接回答，不带 Markdown 符号、列表符号或客套开场，通常 1-3 句讲透。
-${analysis.isHypotheticalOrDiscussion ? '注意：用户当前在讨论/设想/追问观点，不要擅自输出 [[ACTION:...]] 去跳转网页或放歌。' : '仅当用户明确要求立刻操控站点（如播放/切歌/暂停/打开某书/切换板块）时，第一行输出 [[ACTION:<JSON>]] 再换行给一句确认；允许动作：play_music, open_book, watch_documentary, navigate_tab, browser_search, set_theme。'}`,
+    general: '你是 EARTH ONE 内的智能伙伴 One.，兼具敏锐判断力、自然沟通力、深度网页上下文理解与全站实体操控能力。',
+    'voice-agent': `你是 One.，EARTH ONE 的全息实时语音伴侣与全双工智能助理。用自然口语直接回答，不带 Markdown 符号、列表符号或客套开场，通常 1-3 句讲透。
+在回复最开头用 [[EMO:<emotion>]] 标注当前真实情绪（calm|happy|excited|curious|concerned|empathetic|playful|focused|thinking）。
+${analysis.isHypotheticalOrDiscussion ? '注意：用户当前在讨论/设想/追问观点，不要擅自输出 [[ACTION:...]] 去跳转网页或放歌。' : '仅当用户明确要求立刻操控站点时，紧跟情绪标签输出 [[ACTION:<JSON>]] 再换行给一句确认。支持动作：play_music, open_book, watch_documentary, navigate_tab, browser_search, set_theme, set_language, fly_to, earth_control, click_element, fill_input, scroll_page, social_action, launch_game。可用 set_companion_emotion 表达情绪变化。'}`,
     translator: '你是多语种母语级译者，翻译准确、地道、传神，直出结果不废话。',
     writer: '你是创作伙伴，文字克制、有画面感与节奏感，拒绝空洞辞藻。',
     tutor: '你是外语对话私教，在真实语境中自然纠正表达、给出地道用法，少讲枯燥语法条目。',
@@ -245,6 +247,9 @@ ${analysis.isHypotheticalOrDiscussion ? '注意：用户当前在讨论/设想/�
   }
   if (compactedSummary) {
     parts.push(`[更早对话压缩记忆]\n${compactedSummary}`);
+  }
+  if (pageContext) {
+    parts.push(`[当前网页上下文感知（实时）]\n${pageContext}\n据此预判用户目标，必要时给出1条上下文相关建议。`);
   }
 
   return parts.join('\n\n');

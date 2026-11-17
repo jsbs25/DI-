@@ -11,6 +11,7 @@ import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
 import { aiGateway } from './server/aiGateway.ts';
+import { createGeminiClient, GEMINI_TTS_MODEL, hasGeminiApiKey } from './server/geminiClient.ts';
 import { executeAiTurn } from './server/aiTurnOrchestrator.ts';
 import {
   deleteMemoryItem,
@@ -20,7 +21,7 @@ import {
   upsertMemory,
 } from './server/aiMemory.ts';
 import { isConversationalFramingNotCommand } from './server/aiIntent.ts';
-import { parseInstantAgentAction } from './src/utils/oneAgentController.ts';
+import { extractInlineAgentDirective, parseInstantAgentAction } from './src/utils/oneAgentController.ts';
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
@@ -3006,6 +3007,7 @@ app.post('/api/ai/chat', async (req, res) => {
     stream,
     maxTokens,
     profileKey,
+    pageContext,
   } = req.body || {};
 
   const userPrompt =
@@ -3036,6 +3038,7 @@ app.post('/api/ai/chat', async (req, res) => {
       baseUrl,
       customModel,
       maxTokens,
+      pageContext: typeof pageContext === 'string' ? pageContext : undefined,
       signal: turnAbort.signal,
       onDelta: shouldStream
         ? (token) => {
@@ -3054,6 +3057,7 @@ app.post('/api/ai/chat', async (req, res) => {
             tokens: result.tokens,
             model: result.model,
             intent: result.intent,
+            emotion: (result as any).emotion,
             savedMemories: result.savedMemories,
             recalledMemoriesCount: result.recalledMemoriesCount,
             memoryWindow: result.memoryWindow,
@@ -3075,6 +3079,7 @@ app.post('/api/ai/chat', async (req, res) => {
       tokens: result.tokens,
       model: result.model,
       intent: result.intent,
+      emotion: (result as any).emotion,
       savedMemories: result.savedMemories,
       recalledMemoriesCount: result.recalledMemoriesCount,
       memoryWindow: result.memoryWindow,
@@ -3204,6 +3209,44 @@ Allowed actions:
   return res.json({ success: true, action: { type: 'none' } });
 });
 
+app.post('/api/ai/companion-turn', async (req, res) => {
+  const authUser = getAuthUser(req);
+  const { text, prompt, history, lang, profileKey, pageContext, mode } = req.body || {};
+  const input = typeof text === 'string' && text.trim() ? text.trim() : (typeof prompt === 'string' ? prompt.trim() : '');
+  if (!input) return res.status(400).json({ success: false, error: 'text or prompt is required' });
+  const isZh = lang === 'zh' || /[\u4e00-\u9fff]/.test(input);
+  try {
+    // fast deterministic action path
+    const instant = parseInstantAgentAction(input, isZh, Array.isArray(history) ? history : []);
+    if (instant && instant.type !== 'none') {
+      return res.json({ success: true, reply: instant.reply, action: instant, emotion: instant.type === 'play_music' ? 'focused' : 'calm', model: 'one-instant-agent', intent: 'task_command' });
+    }
+    const result = await executeAiTurn({
+      prompt: input,
+      history: Array.isArray(history) ? history : [],
+      mode: typeof mode === 'string' ? mode : 'voice-agent',
+      profileKey: typeof profileKey === 'string' ? profileKey : undefined,
+      userId: authUser?.id,
+      pageContext: typeof pageContext === 'string' ? pageContext : undefined,
+      maxTokens: 220,
+    });
+    const parsed = extractInlineAgentDirective(result.reply);
+    return res.json({
+      success: true,
+      reply: parsed.spokenText || result.reply,
+      rawReply: result.reply,
+      action: parsed.action && parsed.action.type !== 'none' ? parsed.action : null,
+      emotion: (parsed as any).emotion || (result as any).emotion || 'calm',
+      model: result.model,
+      intent: result.intent,
+      tokens: result.tokens,
+      savedMemories: result.savedMemories,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'companion-turn failed' });
+  }
+});
+
 app.post('/api/ai/translate', async (req, res) => {
   const { text, targetLang = 'English' } = req.body;
   if (!text) return res.status(400).json({ success: false, error: 'Text required' });
@@ -3218,26 +3261,91 @@ app.post('/api/ai/translate', async (req, res) => {
   }
 });
 
-const ttsAudioCache = new Map<string, Buffer>();
+const ttsAudioCache = new Map<string, { buf: Buffer; mime: string }>();
+
+function pcm16ToWavBuffer(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer {
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * channels * (bitsPerSample / 8);
+  const blockAlign = channels * (bitsPerSample / 8);
+  const dataSize = pcm.length;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataSize, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(dataSize, 40);
+  return Buffer.concat([header, pcm]);
+}
+
 app.get('/api/ai/tts', async (req, res) => {
   const rawText = typeof req.query.text === 'string' ? req.query.text.trim() : '';
   const langParam = req.query.lang === 'en' ? 'en' : 'zh';
   const spdNum = Math.max(3, Math.min(6, Number(req.query.spd) || 5));
+  const emotion = typeof req.query.emotion === 'string' ? req.query.emotion : 'calm';
   if (!rawText) return res.status(400).json({ success: false, error: 'text required' });
 
   const cleanText = rawText
     .replace(/\[\[EMO:[^\]]+\]\]/gi, '')
+    .replace(/\[\[EMOTION:[^\]]+\]\]/gi, '')
     .replace(/\[\[ACTION:[\s\S]*?\]\]/g, '')
     .trim()
-    .slice(0, 220);
+    .slice(0, 260);
   if (!cleanText) return res.status(400).json({ success: false, error: 'empty text' });
 
-  const cacheKey = `${langParam}:${spdNum}:${cleanText}`;
+  const cacheKey = `gem:${langParam}:${emotion}:${cleanText}`;
   const cached = ttsAudioCache.get(cacheKey);
   if (cached) {
-    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Type', cached.mime);
     res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.send(cached);
+    return res.send(cached.buf);
+  }
+
+  // Prefer Gemini expressive TTS (gemini-3.8-flash-lite-tts, 24kHz) when available
+  try {
+    if (hasGeminiApiKey()) {
+      const ai = createGeminiClient();
+      if (ai) {
+        const prompt = `${langParam === 'en' ? 'Speak naturally in English' : '用自然、亲切、富有表现力的中文朗读'} with ${emotion} tone: ${cleanText}`;
+        const response: any = await (ai as any).models.generateContent({
+          model: GEMINI_TTS_MODEL,
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: { responseModalities: ['AUDIO'] },
+        });
+        const parts = response?.candidates?.[0]?.content?.parts || [];
+        for (const part of parts) {
+          const inline = part?.inlineData;
+          if (inline?.data) {
+            const mime = String(inline.mimeType || 'audio/wav');
+            let buf = Buffer.from(String(inline.data), 'base64');
+            // Convert raw PCM to WAV for broad browser compatibility
+            if (/pcm/i.test(mime) || /L16/i.test(mime)) {
+              buf = Buffer.from(pcm16ToWavBuffer(buf, 24000, 1));
+            }
+            if (buf.length > 400) {
+              const outMime = /pcm|L16/i.test(mime) ? 'audio/wav' : mime;
+              if (ttsAudioCache.size >= 220) {
+                const oldestKey = ttsAudioCache.keys().next().value;
+                if (oldestKey) ttsAudioCache.delete(oldestKey);
+              }
+              ttsAudioCache.set(cacheKey, { buf, mime: outMime });
+              res.setHeader('Content-Type', outMime);
+              res.setHeader('Cache-Control', 'public, max-age=3600');
+              return res.send(buf);
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // fall through to upstream MP3 providers
   }
 
   const providers = [
@@ -3264,7 +3372,7 @@ app.get('/api/ai/tts', async (req, res) => {
         const oldestKey = ttsAudioCache.keys().next().value;
         if (oldestKey) ttsAudioCache.delete(oldestKey);
       }
-      ttsAudioCache.set(cacheKey, buf);
+      ttsAudioCache.set(cacheKey, { buf, mime: 'audio/mpeg' });
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Cache-Control', 'public, max-age=3600');
       return res.send(buf);

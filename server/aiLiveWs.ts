@@ -61,10 +61,13 @@ export function attachAiLiveWs(wss: WebSocketServer) {
     };
 
     const memories = listMemories(store, sessionProfileKey, false);
+    const geminiKey = Boolean((process.env.GEMINI_API_KEY || '').trim());
     safeSend(clientWs, {
       type: 'session:ready',
-      engine: 'deepseek',
-      hasLiveEngine: aiGateway.hasLiveEngine(),
+      engine: geminiKey ? 'gemini-live-bridge' : 'deepseek',
+      liveModel: geminiKey ? 'gemini-3.8-live' : undefined,
+      liveConfig: geminiKey ? { startSensitivity: 'START_SENSITIVITY_HIGH', activityHandling: 'START_OF_ACTIVITY_INTERRUPTS' } : undefined,
+      hasLiveEngine: aiGateway.hasLiveEngine() || geminiKey,
       profileKey: sessionProfileKey,
       memoryCount: memories.length,
     });
@@ -118,6 +121,7 @@ export function attachAiLiveWs(wss: WebSocketServer) {
         const mode = typeof msg.mode === 'string' ? msg.mode : 'voice-agent';
         const modelId = typeof msg.modelId === 'string' ? msg.modelId : undefined;
         const maxTokens = typeof msg.maxTokens === 'number' ? msg.maxTokens : undefined;
+        const pageContext = typeof msg.pageContext === 'string' ? msg.pageContext : undefined;
         if (typeof msg.profileKey === 'string') {
           sessionProfileKey = normalizeProfileKey(msg.profileKey, userId);
         }
@@ -166,6 +170,7 @@ export function attachAiLiveWs(wss: WebSocketServer) {
               profileKey: sessionProfileKey,
               userId,
               maxTokens,
+              pageContext,
               signal: controller.signal,
               onDelta: (delta) => {
                 if (controller.signal.aborted || activeTurnId !== turnId) return;
@@ -176,8 +181,12 @@ export function attachAiLiveWs(wss: WebSocketServer) {
             if (controller.signal.aborted || activeTurnId !== turnId) return;
 
             const parsedDirective = extractInlineAgentDirective(result.reply);
+            const directiveEmotion = (parsedDirective as any).emotion || (result as any).emotion || null;
             if (parsedDirective.action && parsedDirective.action.type !== 'none') {
-              safeSend(clientWs, { type: 'turn:action', turnId, action: parsedDirective.action });
+              safeSend(clientWs, { type: 'turn:action', turnId, action: parsedDirective.action, emotion: directiveEmotion });
+            }
+            if (directiveEmotion) {
+              safeSend(clientWs, { type: 'turn:emotion', turnId, emotion: directiveEmotion });
             }
             if (result.savedMemories.length > 0) {
               safeSend(clientWs, {
@@ -195,6 +204,7 @@ export function attachAiLiveWs(wss: WebSocketServer) {
               model: result.model,
               tokens: result.tokens,
               intent: result.intent,
+              emotion: directiveEmotion,
               savedMemories: result.savedMemories,
               memoryWindow: result.memoryWindow,
             });

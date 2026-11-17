@@ -24,14 +24,11 @@ export type OneAgentAction =
       type: 'play_music';
       query?: string;
       crawl?: boolean;
-      control?: 'next' | 'prev' | 'pause' | 'stop' | 'resume';
+      control?: 'next' | 'prev' | 'pause' | 'stop' | 'resume' | 'volume_up' | 'volume_down';
+      volume?: number;
       reply: string;
     }
-  | {
-      type: 'open_book';
-      query: string;
-      reply: string;
-    }
+  | { type: 'open_book'; query: string; reply: string }
   | {
       type: 'watch_documentary';
       query: string;
@@ -42,8 +39,15 @@ export type OneAgentAction =
   | { type: 'navigate_tab'; tab: string; reply: string }
   | { type: 'browser_search'; query: string; reply: string }
   | { type: 'fly_to'; lat: number; lng: number; place: string; reply: string }
+  | { type: 'earth_control'; action: 'spin' | 'stop_spin' | 'focus'; lat?: number; lng?: number; place?: string; reply: string }
   | { type: 'set_theme'; theme: 'dark' | 'light'; reply: string }
-  | { type: 'set_language'; lang: 'zh' | 'en'; reply: string }
+  | { type: 'set_language'; lang: 'zh' | 'en' | 'ar'; reply: string }
+  | { type: 'click_element'; selector?: string; label?: string; reply: string }
+  | { type: 'fill_input'; selector?: string; label?: string; value: string; reply: string }
+  | { type: 'scroll_page'; direction: 'up' | 'down' | 'top' | 'bottom'; amount?: number; reply: string }
+  | { type: 'social_action'; action: 'open_chat' | 'open_feed' | 'start_call'; target?: string; reply: string }
+  | { type: 'launch_game'; query?: string; reply: string }
+  | { type: 'set_companion_emotion'; emotion: 'calm' | 'happy' | 'excited' | 'curious' | 'concerned' | 'empathetic' | 'playful' | 'focused' | 'thinking'; reply: string }
   | { type: 'none' };
 
 const RANDOM_DOCUMENTARY_TOPICS = [
@@ -133,21 +137,32 @@ function extractBookQuery(raw: string): string {
 export function extractInlineAgentDirective(rawText: string): {
   action: OneAgentAction | null;
   spokenText: string;
+  emotion: string | null;
 } {
   const text = rawText.trim();
-  const match = text.match(/^\[\[ACTION:(\{[\s\S]*?\})\]\]\s*/);
+  let working = text;
+  let emotion: string | null = null;
+  const emoMatch = working.match(/^\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]\s*/i);
+  if (emoMatch) {
+    emotion = emoMatch[1].toLowerCase();
+    working = working.slice(emoMatch[0].length);
+  }
+  const match = working.match(/^\[\[ACTION:(\{[\s\S]*?\})\]\]\s*/);
   if (!match) {
-    return { action: null, spokenText: text };
+    return { action: null, spokenText: working, emotion };
   }
   let parsedAction: OneAgentAction | null = null;
   try {
     const obj = JSON.parse(match[1]);
     if (obj && typeof obj.type === 'string' && obj.type !== 'none') {
       parsedAction = { reply: '', ...obj } as OneAgentAction;
+      if (parsedAction.type === 'set_companion_emotion' && typeof (parsedAction as any).emotion === 'string') {
+        emotion = (parsedAction as any).emotion;
+      }
     }
   } catch {}
-  const spokenText = text.slice(match[0].length).trim();
-  return { action: parsedAction, spokenText };
+  const spokenText = working.slice(match[0].length).trim();
+  return { action: parsedAction, spokenText, emotion };
 }
 
 function isConversationalFraming(

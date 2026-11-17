@@ -14,6 +14,7 @@ import {
 import { Language } from '../../types/index.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
 import { getAiProfileKey } from '../../utils/aiProfile.ts';
+import { capturePageContext, formatPageContextForPrompt } from '../../utils/pageContextEngine.ts';
 import { useOptionalPlayerContext } from '../../music/PlayerContext.tsx';
 import {
   extractInlineAgentDirective,
@@ -361,8 +362,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         if (msg.type === 'turn:delta' && typeof msg.delta === 'string') {
           pending.rawReply += msg.delta;
           pending.onDelta(msg.delta);
+        } else if (msg.type === 'turn:emotion' && typeof msg.emotion === 'string') {
+          try { setActiveEmotion(analyzeDialogueEmotion(currentUserTurnRef.current, '', msg.emotion as any)); } catch {}
         } else if (msg.type === 'turn:done') {
           const finalRaw = typeof msg.rawReply === 'string' && msg.rawReply ? msg.rawReply : (pending.rawReply || String(msg.reply || ''));
+          if (typeof msg.emotion === 'string') {
+            try { setActiveEmotion(analyzeDialogueEmotion(currentUserTurnRef.current, '', msg.emotion as any)); } catch {}
+          }
           wsPendingTurnRef.current = null;
           pending.resolve({ rawReply: finalRaw, model: msg.model });
         } else if (msg.type === 'turn:cancelled') {
@@ -638,13 +644,54 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       } else if (action.type === 'set_theme') {
         onSetTheme?.(action.theme);
       } else if (action.type === 'set_language') {
-        onSetLang?.(action.lang);
+        onSetLang?.(action.lang as any);
       } else if (action.type === 'navigate_tab') {
-        if (onNavigateTab) {
-          onNavigateTab(action.tab);
-        } else if (action.tab === 'universe' && onExploreUniverse) {
-          onExploreUniverse();
+        if (onNavigateTab) onNavigateTab(action.tab);
+        else if (action.tab === 'universe' && onExploreUniverse) onExploreUniverse();
+      } else if (action.type === 'earth_control') {
+        if (action.action === 'focus' && typeof action.lat === 'number' && typeof action.lng === 'number') {
+          if (onFlyTo) onFlyTo(action.lat, action.lng);
+          else if (onNavigateTab) onNavigateTab('globe');
+        } else {
+          try { window.dispatchEvent(new CustomEvent('one-earth-control', { detail: action })); } catch {}
         }
+      } else if (action.type === 'click_element') {
+        try {
+          const el = action.selector ? document.querySelector(action.selector) : null;
+          if (el instanceof HTMLElement) el.click();
+          else if (action.label) {
+            const candidates = Array.from(document.querySelectorAll('button,[role="button"],a')) as HTMLElement[];
+            const target = candidates.find(c => (c.innerText||'').includes(action.label!));
+            target?.click();
+          }
+        } catch {}
+      } else if (action.type === 'fill_input') {
+        try {
+          const el = action.selector ? document.querySelector(action.selector) : null;
+          const input = (el as HTMLInputElement | HTMLTextAreaElement | null) ||
+            (action.label ? (Array.from(document.querySelectorAll('input,textarea')).find(i => ((i as HTMLElement).getAttribute('placeholder')||'').includes(action.label!)) as any) : null);
+          if (input) {
+            input.focus();
+            input.value = action.value;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        } catch {}
+      } else if (action.type === 'scroll_page') {
+        try {
+          if (action.direction === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
+          else if (action.direction === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+          else window.scrollBy({ top: action.direction === 'up' ? -(action.amount || 480) : (action.amount || 480), behavior: 'smooth' });
+        } catch {}
+      } else if (action.type === 'social_action') {
+        if (action.action === 'open_chat' || action.action === 'start_call') onNavigateTab?.('chat');
+        else if (action.action === 'open_feed') onNavigateTab?.('feed');
+      } else if (action.type === 'launch_game') {
+        onNavigateTab?.('game');
+      } else if (action.type === 'set_companion_emotion') {
+        try {
+          // emotion handled by TTS/orb pipeline via extracted tag
+        } catch {}
       }
       return true;
     },
@@ -1279,7 +1326,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       if (precision) {
         historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: precision.answer }];
         if (shouldSpeak) {
-          speakDeepSeekReply(precision.answer, myEpoch, precision.emotion, () => {
+          speakDeepSeekReply(precision.answer, myEpoch, (precision as any).emotion as any, () => {
             if (myEpoch === turnEpochRef.current) {
               isSendingRef.current = false;
               setPhase(sessionActiveRef.current ? 'listening' : 'idle');
@@ -1353,10 +1400,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
           if (!actionResolved && waitingForBracket) return;
 
           const parsed = extractInlineAgentDirective(rawReply);
+          if (parsed.emotion) detectedEmotion = parsed.emotion as any;
           if (!actionResolved) {
             actionResolved = true;
             if (parsed.action && parsed.action.type !== 'none') {
-              executeParsedAction(parsed.action);
+              executeParsedAction(parsed.action, parsed.spokenText || rawReply.slice(0,80));
               if (
                 (parsed.action.type === 'play_music' && !parsed.action.control) ||
                 (parsed.action.type === 'play_music' && parsed.action.control === 'resume') ||
@@ -1412,6 +1460,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                 maxTokens: 200,
                 profileKey: profileKeyRef.current,
                 history: priorHistory.slice(-16),
+                pageContext: formatPageContextForPrompt(capturePageContext({ currentTab, lang: (lang === 'ar' ? 'zh' : lang) as any, isLoggedIn: Boolean((window as any).__oneIsLoggedIn), music: player?.currentTrack ? { isPlaying: Boolean(player?.state?.isPlaying), title: player.currentTrack.title, artist: player.currentTrack.artist, source: (player.currentTrack as any).source } : { isPlaying: false } })),
               })
             );
           }).catch(async (wsErr) => {
@@ -1432,6 +1481,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
                 stream: true,
                 profileKey: profileKeyRef.current,
                 history: priorHistory.slice(-16),
+                pageContext: formatPageContextForPrompt(capturePageContext({ currentTab, lang: (lang === 'ar' ? 'zh' : lang) as any, isLoggedIn: Boolean((window as any).__oneIsLoggedIn), music: player?.currentTrack ? { isPlaying: Boolean(player?.state?.isPlaying), title: player.currentTrack.title, artist: player.currentTrack.artist, source: (player.currentTrack as any).source } : { isPlaying: false } })),
               }),
             });
             await readAIStream(res, handleStreamDelta);
@@ -1449,6 +1499,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               stream: true,
               profileKey: profileKeyRef.current,
               history: priorHistory.slice(-16),
+              pageContext: formatPageContextForPrompt(capturePageContext({ currentTab, lang: (lang === 'ar' ? 'zh' : lang) as any, isLoggedIn: Boolean((window as any).__oneIsLoggedIn), music: player?.currentTrack ? { isPlaying: Boolean(player?.state?.isPlaying), title: player.currentTrack.title, artist: player.currentTrack.artist, source: (player.currentTrack as any).source } : { isPlaying: false } })),
             }),
           });
           await readAIStream(res, handleStreamDelta);
@@ -1458,8 +1509,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         activeFetchAbortRef.current = null;
 
         const finalParsed = extractInlineAgentDirective(rawReply);
+        if (finalParsed.emotion) detectedEmotion = finalParsed.emotion as any;
         if (!actionResolved && finalParsed.action && finalParsed.action.type !== 'none') {
-          executeParsedAction(finalParsed.action);
+          executeParsedAction(finalParsed.action, finalParsed.spokenText || rawReply.slice(0,80));
           if (
             (finalParsed.action.type === 'play_music' && !finalParsed.action.control) ||
             (finalParsed.action.type === 'play_music' && finalParsed.action.control === 'resume') ||

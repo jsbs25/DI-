@@ -27,6 +27,7 @@ export interface ExecuteAiTurnParams {
   baseUrl?: string;
   customModel?: string;
   maxTokens?: number;
+  pageContext?: string;
   signal?: AbortSignal;
   onDelta?: (delta: string) => void;
 }
@@ -36,6 +37,7 @@ export interface ExecuteAiTurnResult {
   model: string;
   tokens: number;
   intent: string;
+  emotion?: string;
   savedMemories: AIMemoryItem[];
   recalledMemoriesCount: number;
   memoryWindow: {
@@ -91,6 +93,7 @@ export async function executeAiTurn(params: ExecuteAiTurnParams): Promise<Execut
         model: 'one-precision-solver',
         tokens: Math.ceil(exact.answer.length / 2),
         intent: analysis.intent,
+        emotion: (exact as any).emotion || 'focused',
         savedMemories,
         recalledMemoriesCount: recalledMemories.length,
         memoryWindow,
@@ -106,6 +109,7 @@ export async function executeAiTurn(params: ExecuteAiTurnParams): Promise<Execut
           model: 'one-instant-companion',
           tokens: Math.ceil(banter.length / 2),
           intent: analysis.intent,
+          emotion: (banter.match(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]/i)||[])[1] || 'happy',
           savedMemories,
           recalledMemoriesCount: recalledMemories.length,
           memoryWindow,
@@ -114,7 +118,7 @@ export async function executeAiTurn(params: ExecuteAiTurnParams): Promise<Execut
     }
   }
 
-  const systemPrompt = composeSystemPrompt(mode, analysis, recalledMemories, slidingWindow.compactedSummary);
+  const systemPrompt = composeSystemPrompt(mode, analysis, recalledMemories, slidingWindow.compactedSummary, params.pageContext);
   const contextualPrompt = buildConversationPrompt(userPrompt, conversationHistory);
   const resolvedMaxTokens =
     typeof params.maxTokens === 'number' && params.maxTokens > 0
@@ -146,11 +150,13 @@ export async function executeAiTurn(params: ExecuteAiTurnParams): Promise<Execut
         throw abortErr;
       }
       if (result.success && result.content.trim()) {
+        const emo = (result.content.match(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]/i)||[])[1];
         return {
           reply: result.content,
           model: resolvedModelId,
           tokens: result.tokens || Math.ceil(result.content.length / 2.5),
           intent: analysis.intent,
+          emotion: emo || undefined,
           savedMemories,
           recalledMemoriesCount: recalledMemories.length,
           memoryWindow,
@@ -206,11 +212,13 @@ export async function executeAiTurn(params: ExecuteAiTurnParams): Promise<Execut
     }
   }
 
+  const liveEmo = (liveAns.text.match(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]/i)||[])[1];
   return {
     reply: liveAns.text,
     model: `one-live-${liveAns.source}`,
     tokens: Math.ceil(liveAns.text.length / 2),
     intent: analysis.intent,
+    emotion: liveEmo || undefined,
     savedMemories,
     recalledMemoriesCount: recalledMemories.length,
     memoryWindow,
