@@ -39,29 +39,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
     setInfoMsg(null);
   };
 
-  const normalizeUsername = (v: string) => v.toLowerCase().replace(/[^a-z0-9_]/g, '');
+  const sanitizeUsernameInput = (v: string) => v.replace(/[\r\n\t\u0000-\u001F\u007F]/g, '');
 
   const parseJsonSafe = async (res: Response) => {
     try { return await res.json(); } catch { return {}; }
-  };
-
-  const handleGuestPreview = async () => {
-    if (loading) return;
-    setErrorMsg(null);
-    setLoading(true);
-    try {
-      const res = await fetch('/api/auth/guest-preview', { method: 'POST' });
-      const data = await parseJsonSafe(res);
-      if (res.ok && data?.success && data?.user) {
-        onAuthSuccess(data.user, data.token || '', false);
-      } else {
-        setErrorMsg(data?.error || L('预览入口暂不可用，请注册或登录。', 'Preview entry unavailable, please sign in or register.'));
-      }
-    } catch {
-      setErrorMsg(L('网络错误，请重试。', 'Network error, please try again.'));
-    } finally {
-      setLoading(false);
-    }
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -98,10 +79,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
       return;
     }
 
-    const cleanUsername = normalizeUsername(username.trim());
+    const cleanUsername = sanitizeUsernameInput(username).trim();
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanUsername) { setErrorMsg(L('请输入用户名。', 'Please enter a username.', 'يرجى إدخال اسم مستخدم.')); return; }
-    if (cleanUsername.length < 3) { setErrorMsg(L('用户名至少 3 个字符（字母、数字或下划线）。', 'Username must be at least 3 characters (letters, numbers, underscore).', 'يجب أن يكون اسم المستخدم 3 أحرف على الأقل.')); return; }
+    if (Array.from(cleanUsername).length > 40) { setErrorMsg(L('用户名最多 40 个字符。', 'Username cannot exceed 40 characters.', 'يجب ألا يتجاوز اسم المستخدم 40 حرفًا.')); return; }
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) { setErrorMsg(L('请输入有效的邮箱地址。', 'Please enter a valid email address.', 'يرجى إدخال بريد إلكتروني صالح.')); return; }
     if (registerPassword.length < 6) { setErrorMsg(L('密码至少需要 6 个字符。', 'Password must be at least 6 characters.', 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.')); return; }
     if (registerPassword !== confirmPassword) { setErrorMsg(L('两次输入的密码不一致。', 'Passwords do not match.', 'كلمتا المرور غير متطابقتين.')); return; }
@@ -230,12 +211,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
                   <input
                     autoComplete="username"
                     value={username}
-                    onChange={(e) => setUsername(normalizeUsername(e.target.value))}
+                    onChange={(e) => setUsername(sanitizeUsernameInput(e.target.value))}
                     disabled={loading}
+                    maxLength={40}
                     className="w-full h-11 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#0f1829] px-3.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:bg-white dark:focus:bg-[#131e33] disabled:opacity-50"
-                    placeholder={L('字母、数字、下划线', 'letters, numbers, underscore', 'حروف وأرقام وشرطة سفلية')}
+                    placeholder={L('支持中文、韩文、阿拉伯文、英文或任意字符', 'Any language, script, letters, or symbols', 'أدخل أي نص: عربي، صيني، كوري، إنجليزي أو رموز')}
                   />
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">{L('至少 3 个字符，仅支持 a-z、0-9、_', 'At least 3 characters: a-z, 0-9, _', '3 أحرف على الأقل: a-z، 0-9، _')}</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">{L('支持任意文字（中文、韩文、阿拉伯文、英文、数字、符号等），1-40 个字符', 'Supports any script (Chinese, Korean, Arabic, English, symbols), 1-40 chars', 'يدعم أي لغة أو نص (العربية، الصينية، الكورية، الإنجليزية، الرموز)، 1-40 حرفًا')}</span>
                 </label>
                 <label className="block space-y-1.5">
                   <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{L('邮箱', 'Email', 'البريد الإلكتروني')}</span>
@@ -296,15 +278,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
               {loading ? L('处理中…', 'Please wait…', 'يرجى الانتظار…') : (mode === 'login' ? L('登录', 'Sign in', 'تسجيل الدخول') : L('创建账号', 'Create account', 'إنشاء حساب'))}
             </button>
           </form>
-
-          <button
-            type="button"
-            disabled={loading}
-            onClick={handleGuestPreview}
-            className="w-full h-10 mt-3 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.04] text-slate-700 dark:text-slate-200 text-xs font-medium hover:bg-slate-100 dark:hover:bg-white/[0.08] transition disabled:opacity-50 cursor-pointer"
-          >
-            {L('一键体验完整 EARTH ONE 数字世界（访客预览）', 'Enter EARTH ONE Instant Preview', 'دخول فوري لمعاينة EARTH ONE')}
-          </button>
 
           <div className="mt-5 text-sm text-slate-500 dark:text-slate-400">
             {mode === 'login' ? (

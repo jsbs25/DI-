@@ -548,7 +548,7 @@ class DataStore {
   gameRooms: GameRoom[] = [];
   ads: Advertisement[] = [];
   countries: GlobeCountryStat[] = [];
-  currentUser!: User;
+  currentUser: User | undefined = undefined;
   accounts: Map<string, AuthAccount> = new Map(); // keyed by email, username, and userId
   sessions: Map<string, string> = new Map(); // token -> userId
 
@@ -711,7 +711,7 @@ class DataStore {
       if (!fs.existsSync(DATA_FILE)) return false;
       const raw = fs.readFileSync(DATA_FILE, 'utf-8');
       const data = JSON.parse(raw);
-      if (!data || !Array.isArray(data.users) || data.users.length === 0) return false;
+      if (!data || !Array.isArray(data.users)) return false;
 
       this.users = data.users;
       this.posts = data.posts || [];
@@ -755,15 +755,7 @@ class DataStore {
       (this as any).networkPeers = Array.isArray(data.networkPeers) ? data.networkPeers : [];
       this.nextEarthSequence = Number.isFinite(data.nextEarthSequence) ? Math.max(100001, Math.floor(data.nextEarthSequence)) : 100001;
       this.earthIdMap = data.earthIdMap && typeof data.earthIdMap === 'object' ? data.earthIdMap : {};
-      this.currentUser = data.currentUser || this.users[0];
-
-      // Persist the now-stripped (metadata-only) main store once after migrating
-      // legacy inline content, so server_data.json stops carrying full text.
-      if (migrated) this.saveToDisk();
-
-      // In-memory identity normalization for runtime safety (defaults only).
-      // Does NOT persist historical earthId assignment to real data here.
-      try { this.ensureAccountIdentityDefaults({ persist: false, assignMissingEarthIds: false }); } catch (e) { console.warn('Identity defaults normalization failed:', e); }
+      this.currentUser = data.currentUser || this.users[0] || undefined;
 
       this.accounts.clear();
       if (data.accounts) {
@@ -779,6 +771,16 @@ class DataStore {
         });
       }
 
+      const purged = this.purgeVirtualAndTestAccounts();
+
+      // Persist the now-stripped (metadata-only) main store once after migrating
+      // legacy inline content or purging virtual/test accounts.
+      if (migrated || purged) this.saveToDisk();
+
+      // In-memory identity normalization for runtime safety (defaults only).
+      // Does NOT persist historical earthId assignment to real data here.
+      try { this.ensureAccountIdentityDefaults({ persist: false, assignMissingEarthIds: false }); } catch (e) { console.warn('Identity defaults normalization failed:', e); }
+
       return true;
     } catch (err) {
       console.warn('Failed to load store from disk, falling back to seed:', err);
@@ -786,8 +788,134 @@ class DataStore {
     }
   }
 
+  private isVirtualOrTestAccount(u: any): boolean {
+    if (!u || typeof u !== 'object') return false;
+    const id = String(u.id || '').trim();
+    const username = String(u.username || '').trim().toLowerCase();
+    const email = String(u.email || '').trim().toLowerCase();
+    const staticSeedIds = new Set([
+      'current_user', 'user_cn_1', 'user_us_1', 'user_jo_1',
+      'user_sa_1', 'user_fr_1', 'user_es_1', 'user_ru_1',
+    ]);
+    const staticSeedHandles = new Set([
+      'cosmic_explorer', 'li_wei', 'sarah_sky', 'tariq_amman',
+      'noura_riyadh', 'julien_paris', 'elena_bcn', 'dmitry_spb',
+      'alice_445489', 'bob_445489',
+    ]);
+    if (staticSeedIds.has(id) || staticSeedHandles.has(username)) return true;
+    if (/^(e2e_|media_qa_|orb_|globe_e2e|globe_mob|globe_verify)/i.test(username)) return true;
+    if (/@(earthone\.world|earthone\.test|test\.local|example\.com)$/i.test(email)) return true;
+    if (/^globe_(e2e|mob|verify).*@earthone\.local$/i.test(email)) return true;
+    return false;
+  }
+
+  private purgeVirtualAndTestAccounts(): boolean {
+    const removedIds = new Set<string>();
+    const keptUsers: User[] = [];
+    for (const u of this.users) {
+      if (this.isVirtualOrTestAccount(u)) {
+        if (u?.id) removedIds.add(u.id);
+      } else {
+        keptUsers.push(u);
+      }
+    }
+    const keptIds = new Set(keptUsers.map(u => u.id));
+    let changed = keptUsers.length !== this.users.length;
+    this.users = keptUsers;
+
+    for (const [k, acc] of Array.from(this.accounts.entries())) {
+      if (!acc || removedIds.has(acc.userId) || !keptIds.has(acc.userId)) {
+        this.accounts.delete(k);
+        changed = true;
+      }
+    }
+    for (const [tok, uid] of Array.from(this.sessions.entries())) {
+      if (removedIds.has(uid) || !keptIds.has(uid)) {
+        this.sessions.delete(tok);
+        changed = true;
+      }
+    }
+    // Re-ensure username/lowercase keys exist for remaining real accounts
+    for (const u of this.users) {
+      const acc = this.accounts.get(u.id);
+      if (acc) {
+        const uname = String(u.username || '').trim();
+        if (uname) {
+          this.accounts.set(uname, acc);
+          this.accounts.set(uname.toLowerCase(), acc);
+        }
+        if (u.email) this.accounts.set(String(u.email).trim().toLowerCase(), acc);
+      }
+    }
+
+    const removedConvIds = new Set<string>();
+    const nextConvs: Conversation[] = [];
+    for (const c of this.conversations) {
+      if (c.type === 'direct') {
+        const pids = Array.isArray(c.participantIds) ? c.participantIds : [];
+        if (pids.some(pid => removedIds.has(pid) || !keptIds.has(pid))) {
+          removedConvIds.add(c.id);
+          changed = true;
+          continue;
+        }
+      } else if (Array.isArray(c.participantIds)) {
+        const filteredPids = c.participantIds.filter(pid => !removedIds.has(pid) && keptIds.has(pid));
+        if (filteredPids.length !== c.participantIds.length) {
+          c.participantIds = filteredPids;
+          changed = true;
+        }
+      }
+      nextConvs.push(c);
+    }
+    this.conversations = nextConvs;
+
+    const nextMessages = this.messages.filter(m => !removedConvIds.has(m.conversationId) && !removedIds.has(m.senderId));
+    if (nextMessages.length !== this.messages.length) {
+      this.messages = nextMessages;
+      changed = true;
+    }
+
+    const nextFriends = this.friendRequests.filter(fr => keptIds.has(fr.fromUserId) && keptIds.has(fr.toUserId));
+    if (nextFriends.length !== this.friendRequests.length) {
+      this.friendRequests = nextFriends;
+      changed = true;
+    }
+
+    for (const uid of Object.keys(this.blockedBy || {})) {
+      if (!keptIds.has(uid)) {
+        delete this.blockedBy[uid];
+        changed = true;
+      } else {
+        const filtered = (this.blockedBy[uid] || []).filter(bid => keptIds.has(bid));
+        if (filtered.length !== (this.blockedBy[uid] || []).length) {
+          this.blockedBy[uid] = filtered;
+          changed = true;
+        }
+      }
+    }
+
+    for (const uid of Object.keys(this.earthIdMap || {})) {
+      if (!keptIds.has(uid)) {
+        delete this.earthIdMap[uid];
+        changed = true;
+      }
+    }
+
+    const nextNotifications = this.notifications.filter(n => !n?.userId || keptIds.has(n.userId));
+    if (nextNotifications.length !== this.notifications.length) {
+      this.notifications = nextNotifications;
+      changed = true;
+    }
+
+    if (!this.currentUser || !keptIds.has(this.currentUser.id)) {
+      this.currentUser = this.users[0] || undefined;
+      changed = true;
+    }
+    return changed;
+  }
+
   initSeedData(): void {
-    this.users = [...SEED_USERS];
+    this.users = [];
     this.posts = [...SEED_POSTS];
     this.articles = [...SEED_ARTICLES];
     this.videos = [...SEED_VIDEOS];
@@ -809,183 +937,22 @@ class DataStore {
     this.blockedBy = {};
     this.securityAudit = [];
     this.loginFailures = {};
+    this.accounts.clear();
+    this.sessions.clear();
+    this.currentUser = undefined;
 
-    // Seed authentication accounts with default password 'password123'
-    const defaultSalt = 'earth_one_salt_2026';
-    const defaultHash = crypto.createHash('sha256').update('password123' + defaultSalt).digest('hex');
-
-    this.users.forEach(u => {
-      const email = `${u.username}@earthone.world`;
-      u.email = email;
-      u.hasCompletedOnboarding = true;
-      const acc: AuthAccount = {
-        userId: u.id,
-        email,
-        passwordHash: defaultHash,
-        salt: defaultSalt
-      };
-      this.accounts.set(u.id, acc);
-      this.accounts.set(email.toLowerCase(), acc);
-      this.accounts.set(u.username.toLowerCase(), acc);
-    });
-
-    // Default logged in user (can switch or edit)
-    this.currentUser = {
-      id: 'current_user',
-      username: 'cosmic_explorer',
-      displayName: 'Global Citizen (世界公民)',
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-      banner: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80',
-      bio: 'One Earth, One Humanity. Passionate about cross-cultural bridges, languages, and future technology.',
-      location: {
-        countryCode: 'CN',
-        countryName: 'China',
-        cityName: 'Shanghai',
-        lat: 31.2304,
-        lng: 121.4737,
-        isPublic: true
-      },
-      interests: ['Global Peace', 'Languages', 'AI', 'Astronomy', 'Chess'],
-      followersCount: 156,
-      followingCount: 42,
-      tipsReceived: 60,
-      isOnline: true,
-      verified: true,
-      joinedAt: '2026-11-01'
-    };
-
-    // Add current user to users list
-    this.users.unshift(this.currentUser);
-
-    // Initial public chat rooms & conversations
     this.conversations = [
       {
         id: 'conv_global',
         type: 'global_channel',
         name: 'Earth One Global Lounge (全球交流大厅)',
-        participantIds: this.users.map(u => u.id),
-        lastMessage: 'Welcome to Earth One! Connect with citizens worldwide.',
+        participantIds: [],
+        lastMessage: 'Welcome to Earth One! Connect with real citizens worldwide.',
         lastMessageTime: 'Just now'
-      },
-      {
-        id: 'conv_direct_tariq',
-        type: 'direct',
-        name: 'Tariq Al-Hashemi',
-        countryCode: 'JO',
-        participantIds: ['current_user', 'user_jo_1'],
-        otherUser: this.users.find(u => u.id === 'user_jo_1'),
-        lastMessage: 'Ahlan wa sahlan! Welcome from Amman.',
-        lastMessageTime: '10m ago',
-        isOnline: true
-      },
-      {
-        id: 'conv_direct_sarah',
-        type: 'direct',
-        name: 'Sarah Jenkins',
-        countryCode: 'US',
-        participantIds: ['current_user', 'user_us_1'],
-        otherUser: this.users.find(u => u.id === 'user_us_1'),
-        lastMessage: 'Did you see the latest James Webb spectra analysis?',
-        lastMessageTime: '1h ago',
-        isOnline: true
-      },
-      {
-        id: 'conv_direct_dmitry',
-        type: 'direct',
-        name: 'Dmitry Volkov',
-        countryCode: 'RU',
-        participantIds: ['current_user', 'user_ru_1'],
-        otherUser: this.users.find(u => u.id === 'user_ru_1'),
-        lastMessage: 'Whenever you are ready for a chess game, invite me!',
-        lastMessageTime: '2h ago',
-        isOnline: true
       }
     ];
-
-    this.messages = [
-      {
-        id: 'msg_1',
-        conversationId: 'conv_global',
-        senderId: 'user_cn_1',
-        senderName: 'Li Wei (李伟)',
-        senderAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        senderCountry: 'CN',
-        content: '大家好！欢迎来到 EARTH ONE。从北京向全世界问好！',
-        originalLanguage: 'zh',
-        translatedContent: 'Hello everyone! Welcome to EARTH ONE. Greetings to the whole world from Beijing!',
-        translatedTo: 'en',
-        createdAt: '2026-11-03T08:00:00Z'
-      },
-      {
-        id: 'msg_2',
-        conversationId: 'conv_global',
-        senderId: 'user_jo_1',
-        senderName: 'Tariq Al-Hashemi (طارق)',
-        senderAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-        senderCountry: 'JO',
-        content: 'أهلاً وسهلاً بالجميع من الأردن! يوم جميل يجمعنا معاً.',
-        originalLanguage: 'ar',
-        translatedContent: 'Welcome everyone from Jordan! A beautiful day bringing us all together.',
-        translatedTo: 'en',
-        createdAt: '2026-11-03T08:05:00Z'
-      },
-      {
-        id: 'msg_3',
-        conversationId: 'conv_global',
-        senderId: 'user_us_1',
-        senderName: 'Sarah Jenkins',
-        senderAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-        senderCountry: 'US',
-        content: 'Spinning the 3D globe and seeing light nodes pulse in real time is mesmerizing! Greetings from San Francisco!',
-        originalLanguage: 'en',
-        translatedContent: '旋转3D地球并看到光节点实时脉动真是太迷人了！旧金山向大家问好！',
-        translatedTo: 'zh',
-        createdAt: '2026-11-03T08:12:00Z'
-      },
-      {
-        id: 'msg_4',
-        conversationId: 'conv_direct_tariq',
-        senderId: 'user_jo_1',
-        senderName: 'Tariq Al-Hashemi',
-        senderAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-        senderCountry: 'JO',
-        content: 'Ahlan wa sahlan! Welcome to Earth One, my friend. Let me know if you want to explore the history of Amman and Petra.',
-        originalLanguage: 'en',
-        createdAt: '2026-11-03T08:30:00Z'
-      }
-    ];
-
-    // Initial games
-    this.gameRooms = [
-      {
-        id: 'game_1',
-        gameSlug: 'chess',
-        title: 'Friendly Grandmaster Blitz',
-        host: {
-          id: 'user_ru_1',
-          displayName: 'Dmitry Volkov',
-          countryCode: 'RU',
-          avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80'
-        },
-        status: 'waiting',
-        currentTurn: 'white',
-        boardState: {}
-      },
-      {
-        id: 'game_2',
-        gameSlug: 'gomoku',
-        title: 'Eastern Five-in-a-Row Arena',
-        host: {
-          id: 'user_cn_1',
-          displayName: 'Li Wei',
-          countryCode: 'CN',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
-        },
-        status: 'waiting',
-        currentTurn: 'black',
-        boardState: {}
-      }
-    ];
+    this.messages = [];
+    this.gameRooms = [];
   }
 
   // Get active globe nodes for users with public location
@@ -1010,6 +977,7 @@ class DataStore {
   // Add a post
   addPost(data: Partial<Post>, authorUser?: User): Post {
     const author = authorUser || this.currentUser;
+    if (!author) throw new Error('Authentication required.');
     const newPost: Post = {
       id: `post_${Date.now()}`,
       userId: author.id,
@@ -1058,6 +1026,7 @@ class DataStore {
     const post = this.posts.find(p => p.id === postId);
     if (!post) return null;
     const author = authorUser || this.currentUser;
+    if (!author) throw new Error('Authentication required.');
     const newComment = {
       id: `c_${Date.now()}`,
       postId,
@@ -1090,6 +1059,7 @@ class DataStore {
     extra?: { attachments?: ChatMessage['attachments']; replyToId?: string; status?: ChatMessage['status']; clientMsgId?: string }
   ): ChatMessage {
     const author = authorUser || this.currentUser;
+    if (!author) throw new Error('Authentication required.');
     const now = new Date().toISOString();
 
     // Idempotency: same sender+conversation+clientMsgId must not create duplicates
@@ -1133,15 +1103,21 @@ class DataStore {
   static DEFAULT_AVATAR = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80';
 
   validateUsername(raw: string): { ok: true; username: string } | { ok: false; error: string } {
-    const username = String(raw || '').trim().toLowerCase();
-    if (!/^[a-z0-9_]{3,30}$/.test(username)) return { ok: false, error: 'Username must be 3-30 characters: letters, numbers, underscore.' };
+    const username = String(raw || '')
+      .replace(/[\r\n\t\u0000-\u001F\u007F]/g, '')
+      .trim();
+    const chars = Array.from(username);
+    if (chars.length < 1 || chars.length > 40) {
+      return { ok: false, error: 'Username must be 1-40 characters (any language, script, letters, numbers, or symbols).' };
+    }
     return { ok: true, username };
   }
 
   isUsernameTaken(username: string, excludeUserId?: string): boolean {
-    const u = username.toLowerCase();
-    if (this.users.some(x => x.id !== excludeUserId && String(x.username || '').toLowerCase() === u)) return true;
-    const acc = this.accounts.get(u);
+    const u = String(username || '').trim().toLowerCase();
+    if (!u) return false;
+    if (this.users.some(x => x.id !== excludeUserId && String(x.username || '').trim().toLowerCase() === u)) return true;
+    const acc = this.accounts.get(u) || this.accounts.get(String(username || '').trim());
     if (acc && acc.userId !== excludeUserId) return true;
     return false;
   }
@@ -1166,7 +1142,8 @@ class DataStore {
 
   // Update current or target user profile (safe fields only). Never trust client for id/permissions.
   updateProfile(data: any, userId?: string): User {
-    const targetId = userId || this.currentUser.id;
+    const targetId = userId || this.currentUser?.id;
+    if (!targetId) throw new Error('User not found.');
     const target = this.users.find(u => u.id === targetId);
     if (!target) throw new Error('User not found.');
 
@@ -1184,19 +1161,23 @@ class DataStore {
         if (bio.length > 300) throw new Error('Bio is too long (max 300).');
         target.bio = bio;
       }
-      // username (unique, server-validated)
+      // username (unique, server-validated — universal Unicode support)
       if (Object.prototype.hasOwnProperty.call(data, 'username') && data.username !== undefined && data.username !== null) {
         const v = this.validateUsername(String(data.username));
         if (!v.ok) throw new Error(v.error);
-        if (v.username !== String(target.username || '').toLowerCase()) {
+        const oldRaw = String(target.username || '').trim();
+        const oldLower = oldRaw.toLowerCase();
+        const nextLower = v.username.toLowerCase();
+        if (nextLower !== oldLower) {
           if (this.isUsernameTaken(v.username, target.id)) throw new Error('Username is already taken.');
-          const oldUsername = String(target.username || '').toLowerCase();
-          const acc = this.accounts.get(target.id) || (oldUsername ? this.accounts.get(oldUsername) : undefined);
+        }
+        if (v.username !== oldRaw) {
+          const acc = this.accounts.get(target.id) || (oldLower ? this.accounts.get(oldLower) : undefined) || (oldRaw ? this.accounts.get(oldRaw) : undefined);
           if (acc) {
-            // remove old username key if it pointed to same account
-            if (oldUsername && this.accounts.get(oldUsername)?.userId === target.id) this.accounts.delete(oldUsername);
+            if (oldRaw && this.accounts.get(oldRaw)?.userId === target.id) this.accounts.delete(oldRaw);
+            if (oldLower && this.accounts.get(oldLower)?.userId === target.id) this.accounts.delete(oldLower);
             this.accounts.set(v.username, acc);
-            // keep by userId and email/phone keys intact
+            this.accounts.set(nextLower, acc);
             this.accounts.set(target.id, acc);
           }
           target.username = v.username;
@@ -1222,7 +1203,7 @@ class DataStore {
     }
 
     this.propagateUserProfile(target.id);
-    if (this.currentUser.id === target.id) this.currentUser = target;
+    if (this.currentUser?.id === target.id) this.currentUser = target;
     this.saveToDisk();
     return target;
   }
@@ -1379,7 +1360,8 @@ class DataStore {
     }
     // keep currentUser in sync
     if (this.currentUser?.id) {
-      const cu = this.users.find(u => u.id === this.currentUser.id);
+      const cuId = this.currentUser.id;
+      const cu = this.users.find(u => u.id === cuId);
       if (cu) this.currentUser = { ...this.currentUser, earthId: (cu as any).earthId, accountStatus: this.getAccountStatus(cu) } as any;
     }
     if (changed && persist) this.saveToDisk();
@@ -1576,15 +1558,21 @@ class DataStore {
   // Register new citizen
   registerUser(email: string, password: string, displayName?: string, username?: string): { user: User; token: string } {
     const cleanEmail = email.trim().toLowerCase();
-    if (this.accounts.has(cleanEmail)) {
+    if (this.accounts.has(cleanEmail) || this.users.some(u => String(u.email || '').trim().toLowerCase() === cleanEmail)) {
       throw new Error('An account with this email already exists.');
     }
 
-    const cleanUsername = (username || cleanEmail.split('@')[0] || `citizen_${Date.now()}`)
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, '');
+    const candidateRaw = (username !== undefined && username !== null && String(username).trim() !== '')
+      ? String(username)
+      : (cleanEmail.split('@')[0] || `citizen_${Date.now()}`);
+    const v = this.validateUsername(candidateRaw);
+    if (!v.ok) {
+      throw new Error(v.error);
+    }
+    const cleanUsername = v.username;
+    const usernameKey = cleanUsername.toLowerCase();
 
-    if (this.accounts.has(cleanUsername)) {
+    if (this.isUsernameTaken(cleanUsername)) {
       throw new Error('This username is already taken. Please choose another.');
     }
 
@@ -1600,10 +1588,10 @@ class DataStore {
       accountStatus: 'active',
       email: cleanEmail,
       username: cleanUsername,
-      displayName: displayName || cleanUsername,
+      displayName: (displayName || '').trim() || cleanUsername,
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
       banner: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80',
-      bio: 'New citizen exploring Earth One.',
+      bio: 'Citizen exploring Earth One.',
       location: {
         countryCode: 'CN',
         countryName: 'China',
@@ -1619,7 +1607,7 @@ class DataStore {
       isOnline: true,
       verified: false,
       joinedAt: new Date().toISOString(),
-      hasCompletedOnboarding: false // Triggers onboarding flow!
+      hasCompletedOnboarding: false
     } as any;
 
     const acc: AuthAccount = {
@@ -1634,6 +1622,7 @@ class DataStore {
     this.accounts.set(userId, acc);
     this.accounts.set(cleanEmail, acc);
     this.accounts.set(cleanUsername, acc);
+    this.accounts.set(usernameKey, acc);
     this.sessions.set(token, userId);
     if ((newUser as any).earthId) this.earthIdMap[userId] = (newUser as any).earthId;
 
@@ -1644,8 +1633,16 @@ class DataStore {
 
   // Login citizen
   loginUser(identifier: string, password: string): { user: User; token: string } {
-    const cleanId = identifier.trim().toLowerCase();
-    const acc = this.accounts.get(cleanId);
+    const rawId = String(identifier || '').trim();
+    const cleanId = rawId.toLowerCase();
+    let acc = this.accounts.get(rawId) || this.accounts.get(cleanId);
+    if (!acc && rawId) {
+      const matched = this.users.find(u =>
+        String(u.username || '').trim().toLowerCase() === cleanId ||
+        String(u.email || '').trim().toLowerCase() === cleanId
+      );
+      if (matched) acc = this.accounts.get(matched.id);
+    }
     if (!acc) {
       throw new Error('Invalid email/username or password.');
     }
@@ -1659,7 +1656,7 @@ class DataStore {
       acc.passwordHash = this.hashPassword(password, acc.salt);
     }
 
-    const user = this.users.find(u => u.id === acc.userId);
+    const user = this.users.find(u => u.id === acc!.userId);
     if (!user) {
       throw new Error('User profile record not found.');
     }
@@ -1706,17 +1703,22 @@ class DataStore {
       throw new Error('User not found.');
     }
 
-    if (data.username && data.username !== user.username) {
-      const cleanUser = data.username.toLowerCase().replace(/[^a-z0-9_]/g, '');
-      const existing = this.accounts.get(cleanUser);
-      if (existing && existing.userId !== user.id) {
+    if (data.username && data.username.trim() !== user.username) {
+      const v = this.validateUsername(data.username);
+      if (!v.ok) throw new Error(v.error);
+      if (this.isUsernameTaken(v.username, user.id)) {
         throw new Error('Username is already taken.');
       }
-      user.username = cleanUser;
+      const oldRaw = String(user.username || '').trim();
+      const oldLower = oldRaw.toLowerCase();
       const acc = this.accounts.get(user.id);
       if (acc) {
-        this.accounts.set(cleanUser, acc);
+        if (oldRaw && this.accounts.get(oldRaw)?.userId === user.id) this.accounts.delete(oldRaw);
+        if (oldLower && this.accounts.get(oldLower)?.userId === user.id) this.accounts.delete(oldLower);
+        this.accounts.set(v.username, acc);
+        this.accounts.set(v.username.toLowerCase(), acc);
       }
+      user.username = v.username;
     }
 
     if (data.displayName) user.displayName = data.displayName.trim();
@@ -1742,7 +1744,7 @@ class DataStore {
 
     user.hasCompletedOnboarding = true;
 
-    if (this.currentUser.id === user.id) {
+    if (this.currentUser?.id === user.id) {
       this.currentUser = user;
     }
 
@@ -1885,9 +1887,9 @@ class DataStore {
         throw new Error('UNBOUND_EXTERNAL_IDENTITY');
       }
       // Explicit creation path only (not used for direct public OAuth login callbacks).
-      const base = (displayName || email?.split('@')[0] || `${provider}_user`).toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 18) || provider;
+      const base = (displayName || email?.split('@')[0] || `${provider}_user`).replace(/[\r\n\t\u0000-\u001F\u007F]/g, '').trim().slice(0, 24) || provider;
       let username = base; let n = 1;
-      while (this.accounts.has(username) || this.users.some(u => u.username === username)) { username = `${base}_${n++}`; }
+      while (this.isUsernameTaken(username)) { username = `${base}_${n++}`; }
       const userId = `user_${provider}_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
       const earthId = this.allocateEarthId();
       const created: User = {
@@ -1907,10 +1909,11 @@ class DataStore {
       } as any;
       this.users.unshift(created);
       const salt = crypto.randomBytes(16).toString('hex');
-      const acc: AuthAccount = { userId, email: (email || `${username}@earthone.local`).toLowerCase(), passwordHash: this.hashPassword(crypto.randomBytes(24).toString('hex'), salt), salt };
+      const acc: AuthAccount = { userId, email: (email || `${userId}@earthone.local`).toLowerCase(), passwordHash: this.hashPassword(crypto.randomBytes(24).toString('hex'), salt), salt };
       this.accounts.set(userId, acc);
       this.accounts.set(acc.email, acc);
       this.accounts.set(username, acc);
+      this.accounts.set(username.toLowerCase(), acc);
       this.earthIdMap[userId] = earthId;
       user = created;
     }
