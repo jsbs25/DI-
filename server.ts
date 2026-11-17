@@ -12,6 +12,8 @@ import { toPublicUser } from './server/privacy.ts';
 import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
 import { aiGateway } from './server/aiGateway.ts';
 import { buildConversationPrompt, normalizeConversationHistory } from './server/aiConversation.ts';
+import { answerWithLiveKnowledge } from './server/liveKnowledge.ts';
+import { solvePrecisionQuery } from './src/utils/precisionSolver.ts';
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
@@ -3025,6 +3027,44 @@ Rules:
     : (mode === 'voice-agent' ? 180 : undefined);
 
   const shouldStream = stream === true;
+  const emitDirectAnswer = (replyText: string, modelLabel: string) => {
+    if (shouldStream) {
+      res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.flushHeaders();
+      res.write(`${JSON.stringify({ delta: replyText })}\n`);
+      res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(replyText.length / 2), model: modelLabel })}\n`);
+      return res.end();
+    }
+    return res.json({
+      success: true,
+      reply: replyText,
+      message: {
+        role: 'assistant',
+        content: replyText,
+        timestamp: new Date().toISOString()
+      },
+      tokens: Math.ceil(replyText.length / 2),
+      model: modelLabel
+    });
+  };
+
+  // 1. Exact deterministic solver (<1ms, 100% exact arithmetic, units, comparisons & dates)
+  if ((mode === 'general' || mode === 'voice-agent') && !userPrompt.includes('\n')) {
+    const isZhPrompt = /[\u4e00-\u9fff]/.test(userPrompt) || !/[a-zA-Z]{3,}/.test(userPrompt);
+    const exact = solvePrecisionQuery(userPrompt, isZhPrompt);
+    if (exact) {
+      const formatted = mode === 'voice-agent' ? `[[EMO:${exact.emotion}]] ${exact.answer}` : exact.answer;
+      return emitDirectAnswer(formatted, 'one-precision-solver');
+    }
+  }
+
+  // 2. If no live DeepSeek API / local Ollama is configured, answer using live Wikipedia + DuckDuckGo + Web knowledge
+  if (!apiKey && !aiGateway.hasLiveEngine()) {
+    const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
+    return emitDirectAnswer(liveAns.text, `one-live-${liveAns.source}`);
+  }
+
   if (shouldStream) {
     res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -3041,10 +3081,14 @@ Rules:
       if (result.success) {
         res.write(`${JSON.stringify({ done: true, tokens: result.tokens, model: resolvedModelId })}\n`);
       } else {
-        res.write(`${JSON.stringify({ error: result.errorMessage || 'DeepSeek 服务当前不可用，请稍后重试。' })}\n`);
+        const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
+        res.write(`${JSON.stringify({ delta: liveAns.text })}\n`);
+        res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(liveAns.text.length / 2), model: `one-live-${liveAns.source}` })}\n`);
       }
-    } catch (error) {
-      res.write(`${JSON.stringify({ error: error instanceof Error ? error.message : 'DeepSeek 服务当前不可用，请稍后重试。' })}\n`);
+    } catch {
+      const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
+      res.write(`${JSON.stringify({ delta: liveAns.text })}\n`);
+      res.write(`${JSON.stringify({ done: true, tokens: Math.ceil(liveAns.text.length / 2), model: `one-live-${liveAns.source}` })}\n`);
     }
     return res.end();
   }
@@ -3072,9 +3116,17 @@ Rules:
       model: resolvedModelId
     });
   } else {
-    res.status(result.errorMessage?.includes('429') ? 429 : 503).json({
-      success: false,
-      error: result.errorMessage || 'AI 服务当前不可用，请检查服务端模型配置或稍后重试。'
+    const liveAns = await answerWithLiveKnowledge(userPrompt, mode);
+    res.json({
+      success: true,
+      reply: liveAns.text,
+      message: {
+        role: 'assistant',
+        content: liveAns.text,
+        timestamp: new Date().toISOString()
+      },
+      tokens: Math.ceil(liveAns.text.length / 2),
+      model: `one-live-${liveAns.source}`
     });
   }
 });

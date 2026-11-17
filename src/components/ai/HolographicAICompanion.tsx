@@ -5,10 +5,12 @@ import { readAIStream } from '../../utils/aiStream.ts';
 import { useOptionalPlayerContext } from '../../music/PlayerContext.tsx';
 import {
   extractInlineAgentDirective,
+  matchPureSocialBanter,
   parseInstantAgentAction,
   resolveConversationalFallback,
   type OneAgentAction,
 } from '../../utils/oneAgentController.ts';
+import { solvePrecisionQuery } from '../../utils/precisionSolver.ts';
 import {
   analyzeDialogueEmotion,
   buildExpressivePhrases,
@@ -933,13 +935,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      // 2. If no live LLM key / local Ollama is configured, speak warm emotional reply immediately (<2ms, zero HTTP wait)
-      if (hasLiveEngineRef.current === false) {
-        const fallbackRaw = resolveConversationalFallback(clean, isZh);
-        const fallbackParsed = extractEmotionTag(fallbackRaw);
-        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: fallbackParsed.text }];
+      // 2. Exact Precision Solver (<1ms, 100% mathematically/factually exact — zero hallucination)
+      const precision = solvePrecisionQuery(clean, isZh);
+      if (precision) {
+        historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: precision.answer }];
         if (shouldSpeak) {
-          speakDeepSeekReply(fallbackParsed.text, myEpoch, fallbackParsed.emotion, () => {
+          speakDeepSeekReply(precision.answer, myEpoch, precision.emotion, () => {
             if (myEpoch === turnEpochRef.current) {
               isSendingRef.current = false;
               setPhase(sessionActiveRef.current ? 'listening' : 'idle');
@@ -953,7 +954,29 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         return;
       }
 
-      // 3. Single-trip fast DeepSeek-V3 streaming chat with live Emotion Analysis & AbortController barge-in
+      // 3. Pure greetings / emotional banter when no LLM key is set (<1ms); real questions always go to Live Knowledge / DeepSeek
+      if (hasLiveEngineRef.current === false) {
+        const banterRaw = matchPureSocialBanter(clean, isZh);
+        if (banterRaw) {
+          const banterParsed = extractEmotionTag(banterRaw);
+          historyRef.current = [...historyRef.current.slice(-4), { role: 'assistant', content: banterParsed.text }];
+          if (shouldSpeak) {
+            speakDeepSeekReply(banterParsed.text, myEpoch, banterParsed.emotion, () => {
+              if (myEpoch === turnEpochRef.current) {
+                isSendingRef.current = false;
+                setPhase(sessionActiveRef.current ? 'listening' : 'idle');
+              }
+            });
+          } else {
+            stopOutputAudio();
+            isSendingRef.current = false;
+            setPhase('idle');
+          }
+          return;
+        }
+      }
+
+      // 4. Live DeepSeek-V3 / Live Knowledge Engine streaming turn with Emotion Analysis & AbortController barge-in
       setPhase('thinking');
       stopOutputAudio();
       ttsStreamDoneRef.current = false;
