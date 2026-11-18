@@ -2,18 +2,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { ChevronDown, ChevronUp, Compass, RotateCcw, SunMedium, Wind } from 'lucide-react';
+import { ChevronDown, ChevronUp, Compass, RotateCcw, SlidersHorizontal, SunMedium, Wind } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
 import {
   detectWebGLSupport,
   isSoftwareRenderer,
   prefersReducedMotion,
 } from '../spatial/webglCapabilities.ts';
-import { createParadiseTextures, detectParadiseQuality } from './paradiseQuality.ts';
+import {
+  createParadiseTextures,
+  detectParadiseQuality,
+  type UserQualityChoice,
+} from './paradiseQuality.ts';
 import {
   createParadiseSkyDome,
   formatClockTime,
@@ -29,6 +29,7 @@ import { createParadiseArchitecture } from './paradiseArchitecture.ts';
 import { createParadiseFlora } from './paradiseFlora.ts';
 import { createParadiseFauna } from './paradiseFauna.ts';
 import { createParadiseWeatherFX } from './paradiseWeatherFX.ts';
+import { createParadisePostPipeline, type ParadisePostPipeline } from './paradisePost.ts';
 
 type CameraPresetId = 'overlook' | 'bridge' | 'blossoms' | 'pavilion';
 
@@ -41,11 +42,30 @@ interface CameraPreset {
 }
 
 const CAMERA_PRESETS: CameraPreset[] = [
-  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [-4.5, 8.2, 23.5], target: [2.5, 1.4, -2.5] },
-  { id: 'bridge', zh: '溪桥', en: 'Bridge', pos: [-2.2, 4.2, 5.8], target: [-6.4, 1.1, -8.4] },
-  { id: 'blossoms', zh: '花海', en: 'Blossoms', pos: [7.2, 2.8, 16.5], target: [-3.5, 1.3, 6.2] },
-  { id: 'pavilion', zh: '亭台', en: 'Pavilion', pos: [3.2, 4.4, 5.2], target: [12.4, 2.2, -7.8] },
+  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [-4.5, 8.2, 23.5], target: [2.5, 1.8, -2.5] },
+  { id: 'bridge', zh: '溪桥', en: 'Bridge', pos: [-2.2, 4.2, 5.8], target: [-6.4, 1.3, -8.4] },
+  { id: 'blossoms', zh: '银杏樱林', en: 'Ginkgo & Sakura', pos: [-11.2, 3.8, 15.2], target: [3.2, 2.2, 1.2] },
+  { id: 'pavilion', zh: '亭台', en: 'Pavilion', pos: [3.2, 4.2, 5.2], target: [12.8, 2.6, -7.8] },
 ];
+
+const QUALITY_OPTIONS: Array<{ id: UserQualityChoice; zh: string; en: string }> = [
+  { id: 'auto', zh: '自动', en: 'Auto' },
+  { id: 'high', zh: '高', en: 'High' },
+  { id: 'medium', zh: '中', en: 'Med' },
+  { id: 'low', zh: '低', en: 'Low' },
+];
+
+const QUALITY_STORAGE_KEY = 'earthone_paradise_quality_v1';
+
+function readStoredQuality(): UserQualityChoice {
+  try {
+    const v = localStorage.getItem(QUALITY_STORAGE_KEY);
+    if (v === 'auto' || v === 'high' || v === 'medium' || v === 'low') return v;
+  } catch {
+    // ignore storage access issues
+  }
+  return 'auto';
+}
 
 interface ParadiseWorld3DProps {
   lang: Language;
@@ -71,9 +91,28 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const [timeOfDay, setTimeOfDay] = useState(0.44);
   const [activeWeather, setActiveWeather] = useState<WeatherKind>('clear');
   const [cameraPreset, setCameraPreset] = useState<CameraPresetId>('overlook');
+  const [userQuality, setUserQuality] = useState<UserQualityChoice>(() => readStoredQuality());
 
-  // Mutable engine command refs shared with WebGL animation loop (zero canvas tear-down on UI changes)
+  // Mutable engine command refs shared with WebGL animation loop
   const envRef = useRef<ParadiseEnvironmentEngine | null>(null);
+  const persistedRef = useRef<{
+    timeOfDay: number;
+    autoCycle: boolean;
+    weather: WeatherKind;
+    autoWeather: boolean;
+    hasCam: boolean;
+    camPos: THREE.Vector3;
+    camTarget: THREE.Vector3;
+  }>({
+    timeOfDay: 0.44,
+    autoCycle: true,
+    weather: 'clear',
+    autoWeather: true,
+    hasCam: false,
+    camPos: new THREE.Vector3(-4.5, 8.2, 23.5),
+    camTarget: new THREE.Vector3(2.5, 1.4, -2.5),
+  });
+
   const cameraMoveRef = useRef<{
     active: boolean;
     targetPos: THREE.Vector3;
@@ -110,9 +149,12 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
     const gl = renderer.getContext();
     const isSoftwareGl = isSoftwareRenderer(gl);
-    const quality = detectParadiseQuality(isSoftwareGl, reducedMotion, width, height);
+    const quality = detectParadiseQuality(isSoftwareGl, reducedMotion, width, height, userQuality);
 
-    renderer.setPixelRatio(quality.pixelRatio);
+    let activePixelRatio = quality.pixelRatio;
+    let dynDofEnabled = quality.enableDOF;
+
+    renderer.setPixelRatio(activePixelRatio);
     renderer.setSize(width, height, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -132,9 +174,13 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
     const aspect = width / height;
     const camera = new THREE.PerspectiveCamera(aspect < 0.78 ? 50 : 42, aspect, 0.2, 260);
-    // Adjust initial overlook distance slightly on narrow portrait phones/foldables
     const portraitZScale = aspect < 0.78 ? 1.18 : 1.0;
-    camera.position.set(-4.5 * portraitZScale, 8.2, 23.5 * portraitZScale);
+
+    if (persistedRef.current.hasCam) {
+      camera.position.copy(persistedRef.current.camPos);
+    } else {
+      camera.position.set(-4.5 * portraitZScale, 8.2, 23.5 * portraitZScale);
+    }
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = !isSoftwareGl;
@@ -146,7 +192,11 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     controls.maxDistance = 42.0;
     controls.minPolarAngle = Math.PI * 0.14;
     controls.maxPolarAngle = Math.PI * 0.465;
-    controls.target.set(2.5, 1.4, -2.5);
+    if (persistedRef.current.hasCam) {
+      controls.target.copy(persistedRef.current.camTarget);
+    } else {
+      controls.target.set(2.5, 1.4, -2.5);
+    }
     controls.update();
 
     const onControlStart = () => {
@@ -154,7 +204,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     };
     controls.addEventListener('start', onControlStart);
 
-    // Environment reflection map for realistic water sheen, bronze & wet dew highlights
+    // Environment reflection map for water sheen, bronze & wet dew highlights
     const pmremGen = new THREE.PMREMGenerator(renderer);
     const roomEnv = new RoomEnvironment();
     const envRT = pmremGen.fromScene(roomEnv, 0.05);
@@ -164,14 +214,19 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     pmremGen.dispose();
 
     const textures = createParadiseTextures(renderer.capabilities.getMaxAnisotropy());
-    const envEngine = new ParadiseEnvironmentEngine(0.44, 'clear');
+    const envEngine = new ParadiseEnvironmentEngine(
+      persistedRef.current.timeOfDay,
+      persistedRef.current.weather
+    );
+    envEngine.autoCycle = persistedRef.current.autoCycle;
+    envEngine.autoWeather = persistedRef.current.autoWeather;
     envRef.current = envEngine;
 
-    // 1. Sky Dome + Sun + Moon + Stars + Clouds + Rainbow + Lightning
+    // 1. Sky Dome + Sun + Moon + Stars + Milky Way + Multi-layer Beer-Powder Clouds
     const skyDome = createParadiseSkyDome();
     scene.add(skyDome.mesh);
 
-    // 2. Calibrated 3D Atmospheric Lighting (1 shadow caster + Hemisphere sky/ground + Pavilion lantern)
+    // 2. Calibrated 3D Atmospheric Lighting
     const hemiLight = new THREE.HemisphereLight(0xbce0f7, 0x34462c, 0.75);
     scene.add(hemiLight);
 
@@ -197,7 +252,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     lightningLight.position.set(8, 34, -36);
     scene.add(lightningLight);
 
-    // 3. Real Spatial World Modules
+    // 3. Spatial World Modules
     const terrain = createParadiseTerrain(quality, textures);
     scene.add(terrain.group);
 
@@ -210,31 +265,29 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     const fauna = createParadiseFauna(quality, textures, flora.flowerSpots);
     scene.add(fauna.group);
 
-    const weatherFX = createParadiseWeatherFX(quality, textures);
+    const weatherFX = createParadiseWeatherFX(quality, textures, flora.treeCanopies);
     scene.add(weatherFX.group);
 
-    // Optional restrained optical Bloom on capable desktop/tablet GPUs (skipped on phone & software GL)
-    let composer: EffectComposer | null = null;
-    let composerRT: THREE.WebGLRenderTarget | null = null;
-    let bloomPass: UnrealBloomPass | null = null;
-
-    if (quality.enableBloom) {
-      composerRT = new THREE.WebGLRenderTarget(
-        Math.max(1, Math.floor(width * quality.pixelRatio)),
-        Math.max(1, Math.floor(height * quality.pixelRatio)),
-        { type: THREE.HalfFloatType }
+    // 4. Volumetric God-Rays + Depth-Aware DOF + Subtle Bloom Post-Processing
+    let postPipeline: ParadisePostPipeline | null = null;
+    if (quality.enableBloom || quality.enableGodRays || quality.enableDOF) {
+      postPipeline = createParadisePostPipeline(
+        renderer,
+        scene,
+        camera,
+        width,
+        height,
+        activePixelRatio,
+        {
+          enableBloom: quality.enableBloom,
+          enableGodRays: quality.enableGodRays,
+          enableDOF: dynDofEnabled,
+        }
       );
-      composer = new EffectComposer(renderer, composerRT);
-      composer.setPixelRatio(quality.pixelRatio);
-      composer.setSize(width, height);
-      composer.addPass(new RenderPass(scene, camera));
-      bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.16, 0.34, 0.9);
-      composer.addPass(bloomPass);
-      composer.addPass(new OutputPass());
       renderer.compile(scene, camera);
     }
 
-    // 4. Interactive Mouse / Touch Raycasting (Throttled for smooth FPS)
+    // 5. Interactive Mouse / Touch Raycasting
     const raycaster = new THREE.Raycaster();
     const pointerNdc = new THREE.Vector2();
     const pointerWorld = new THREE.Vector3(0, -20, 0);
@@ -331,12 +384,9 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       camera.aspect = nextAspect;
       camera.fov = nextAspect < 0.78 ? 50 : 42;
       camera.updateProjectionMatrix();
+      renderer.setPixelRatio(activePixelRatio);
       renderer.setSize(w, h, false);
-      if (composer) {
-        composer.setPixelRatio(quality.pixelRatio);
-        composer.setSize(w, h);
-        bloomPass?.setSize(w, h);
-      }
+      postPipeline?.setSize(w, h, activePixelRatio);
     };
 
     const ro = new ResizeObserver(handleResize);
@@ -349,7 +399,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
 
-    // Software-GL GPU fence pacing (prevents CPU-starvation on headless/VDI SwiftShader)
+    // Software-GL GPU fence pacing
     function afterDraw(cb: () => void) {
       const gl2 = renderer?.getContext() as WebGL2RenderingContext | undefined;
       if (!gl2 || typeof gl2.fenceSync !== 'function') {
@@ -374,6 +424,17 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     const clock = new THREE.Clock();
     let hudSyncAccum = 0;
 
+    // Adaptive FPS governor state (for smooth MacBook Air M2 performance in 'auto' mode)
+    let smoothedDt = 0.016;
+    let slowAccum = 0;
+    let fastAccum = 0;
+    let governorStage: 0 | 1 | 2 = 0;
+
+    const camForward = new THREE.Vector3();
+    const tmpKeyWorld = new THREE.Vector3();
+    const sunScreenPos = new THREE.Vector2(0.6, 0.75);
+    const godRayColor = new THREE.Color(0xffdfa8);
+
     const tick = () => {
       if (disposed || !renderer) return;
       if (hidden) {
@@ -384,6 +445,42 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       const rawDt = clock.getDelta();
       const dt = Math.min(rawDt > 0 ? rawDt : 0.016, 0.08);
       const elapsed = clock.getElapsedTime();
+
+      // Dynamic FPS governor when user selected 'auto' on GPU
+      if (userQuality === 'auto' && !isSoftwareGl && elapsed > 3.0 && rawDt < 0.14) {
+        smoothedDt += (rawDt - smoothedDt) * 0.08;
+        if (smoothedDt > 0.029) {
+          slowAccum += dt;
+          fastAccum = 0;
+          if (slowAccum > 2.5) {
+            slowAccum = 0;
+            if (governorStage === 0 && dynDofEnabled) {
+              governorStage = 1;
+              dynDofEnabled = false;
+              postPipeline?.setOptions({ enableDOF: false });
+            } else if (governorStage <= 1 && activePixelRatio > 1.05) {
+              governorStage = 2;
+              activePixelRatio = Math.max(1.0, quality.pixelRatio * 0.8);
+              handleResize();
+            }
+          }
+        } else if (smoothedDt < 0.0175) {
+          fastAccum += dt;
+          slowAccum = 0;
+          if (fastAccum > 6.5 && governorStage > 0) {
+            fastAccum = 0;
+            if (governorStage === 2) {
+              governorStage = 1;
+              activePixelRatio = quality.pixelRatio;
+              handleResize();
+            } else if (governorStage === 1 && quality.enableDOF) {
+              governorStage = 0;
+              dynDofEnabled = true;
+              postPipeline?.setOptions({ enableDOF: true });
+            }
+          }
+        }
+      }
 
       // Advance continuous Day-Night & Weather simulation
       envEngine.update(reducedMotion ? dt * 0.25 : dt);
@@ -418,18 +515,18 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       sunLight.color.copy(st.sunLightColor);
 
       const sunBaseInt = THREE.MathUtils.smoothstep(st.sunElevation, -0.02, 0.35) * 2.15 * st.sunAttenuation;
-      const moonBaseInt = THREE.MathUtils.smoothstep(st.moonDir.y, 0.0, 0.4) * 0.55 * (1 - st.cloudDarkness * 0.55);
+      const moonBaseInt = THREE.MathUtils.smoothstep(st.moonDir.y, 0.0, 0.4) * 0.58 * (1 - st.cloudDarkness * 0.55);
       sunLight.intensity = useMoon ? moonBaseInt : Math.max(0.25, sunBaseInt);
 
       hemiLight.color.copy(st.hemiSkyColor);
       hemiLight.groundColor.copy(st.hemiGroundColor);
       hemiLight.intensity = THREE.MathUtils.lerp(0.38, 0.85, st.dayFactor) * THREE.MathUtils.lerp(1, 0.72, st.cloudDarkness);
 
-      // Storm lightning scene illumination
+      // Storm lightning illumination
       lightningLight.intensity = st.lightningFlash * 3.4;
       lightningLight.position.set(st.lightningAzimuth * 30, 32, -36);
 
-      // Warm lakeside pavilion lantern glow
+      // Warm lakeside pavilion lantern glow & rain material wetness
       architecture.lanternLight.intensity = st.lanternGlow * 2.2;
       architecture.lanternGlassMat.emissiveIntensity = 0.12 + st.lanternGlow * 1.85;
       for (const mat of architecture.wettableMaterials) {
@@ -437,20 +534,27 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         mat.roughness = THREE.MathUtils.lerp(baseR, Math.max(0.14, baseR * 0.36), st.wetness);
       }
 
-      // Sync Terrain, Water, Waterfall
+      // Sync Terrain, Water.js Planar Reflection & Waterfall
       terrain.terrainUniforms.uWetness.value = st.wetness;
-      terrain.waterUniforms.uTime.value = elapsed;
-      terrain.waterUniforms.uSunDir.value.copy(st.sunDir);
-      terrain.waterUniforms.uMoonDir.value.copy(st.moonDir);
-      (terrain.waterUniforms.uSkyHorizon.value as THREE.Color).copy(st.horizonColor);
-      (terrain.waterUniforms.uSkyZenith.value as THREE.Color).copy(st.zenithColor);
-      (terrain.waterUniforms.uSunColor.value as THREE.Color).copy(st.sunLightColor);
-      (terrain.waterUniforms.uFogColor.value as THREE.Color).copy(st.fogColor);
-      terrain.waterUniforms.uFogDensity.value = st.fogDensity;
-      terrain.waterUniforms.uDayFactor.value = st.dayFactor;
-      terrain.waterUniforms.uNightFactor.value = st.nightFactor;
-      terrain.waterUniforms.uWindStrength.value = st.windStrength;
-      terrain.waterUniforms.uRainIntensity.value = st.rainIntensity;
+      terrain.terrainUniforms.uTime.value = elapsed;
+
+      const wu = terrain.waterUniforms;
+      if (wu.time) wu.time.value = elapsed * (0.65 + st.windStrength * 0.45);
+      if (wu.sunDirection) (wu.sunDirection.value as THREE.Vector3).copy(useMoon ? st.moonDir : st.sunDir);
+      if (wu.sunColor) (wu.sunColor.value as THREE.Color).copy(useMoon ? st.hemiSkyColor : st.sunLightColor);
+      if (wu.waterColor) {
+        (wu.waterColor.value as THREE.Color).setRGB(
+          THREE.MathUtils.lerp(0.02, 0.04, st.dayFactor),
+          THREE.MathUtils.lerp(0.05, 0.19, st.dayFactor),
+          THREE.MathUtils.lerp(0.09, 0.21, st.dayFactor)
+        );
+      }
+      if (wu.distortionScale) wu.distortionScale.value = 1.65 + st.windStrength * 1.45;
+      if (wu.uDayFactor) wu.uDayFactor.value = st.dayFactor;
+      if (wu.uNightFactor) wu.uNightFactor.value = st.nightFactor;
+      if (wu.uMoonDir) (wu.uMoonDir.value as THREE.Vector3).copy(st.moonDir);
+      if (wu.uWindStrength) wu.uWindStrength.value = st.windStrength;
+      if (wu.uRainIntensity) wu.uRainIntensity.value = st.rainIntensity;
 
       terrain.waterfallUniforms.uTime.value = elapsed;
       terrain.waterfallUniforms.uDayFactor.value = st.dayFactor;
@@ -470,6 +574,9 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       );
       flora.uniforms.uWetness.value = st.wetness;
 
+      // Camera forward vector for curiosity butterflies & volumetric god-rays
+      camera.getWorldDirection(camForward);
+
       // Flora, Fauna, Weather FX
       flora.update(elapsed, reducedMotion ? st.windStrength * 0.25 : st.windStrength, st.dewAmount, st.nightFactor);
       fauna.update(
@@ -481,7 +588,9 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         st.rainIntensity,
         st.windStrength,
         pointerWorldDamped,
-        pointerActive
+        pointerActive,
+        camera.position,
+        camForward
       );
       weatherFX.update(
         elapsed,
@@ -494,7 +603,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         st.fogColor
       );
 
-      // Smooth damped camera preset transitions (cancels cleanly on arrival or user drag)
+      // Smooth damped camera preset transitions
       if (cameraMoveRef.current.active) {
         const k = 1 - Math.exp(-3.2 * dt);
         camera.position.lerp(cameraMoveRef.current.targetPos, k);
@@ -507,14 +616,51 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         }
       }
 
-      // Clamp camera gracefully above ground surface
       const camFloor = Math.max(0.8, terrainHeightAt(camera.position.x, camera.position.z) + 0.9);
       if (camera.position.y < camFloor) camera.position.y = camFloor;
 
       controls.update();
 
-      if (composer) {
-        composer.render();
+      // Persist state continuously in case quality tier is switched seamlessly
+      persistedRef.current.hasCam = true;
+      persistedRef.current.camPos.copy(camera.position);
+      persistedRef.current.camTarget.copy(controls.target);
+      persistedRef.current.timeOfDay = st.timeOfDay;
+      persistedRef.current.weather = envEngine.targetWeather;
+      persistedRef.current.autoCycle = envEngine.autoCycle;
+      persistedRef.current.autoWeather = envEngine.autoWeather;
+
+      if (postPipeline) {
+        // Project active sun/moon disc onto UV plane for crepuscular light shafts
+        tmpKeyWorld.copy(activeKeyDir).multiplyScalar(140).add(camera.position).project(camera);
+        sunScreenPos.set(tmpKeyWorld.x * 0.5 + 0.5, tmpKeyWorld.y * 0.5 + 0.5);
+
+        const facingKey = THREE.MathUtils.smoothstep(activeKeyDir.dot(camForward), -0.15, 0.35);
+        const keyElevationVis = useMoon
+          ? THREE.MathUtils.smoothstep(st.moonDir.y, 0.02, 0.25) * 0.14
+          : THREE.MathUtils.smoothstep(st.sunElevation, -0.04, 0.22) *
+            (0.24 + st.twilightFactor * 0.16) *
+            st.sunAttenuation;
+        const rayIntensity = facingKey * keyElevationVis * (1 - st.cloudDarkness * 0.65);
+
+        if (useMoon) {
+          godRayColor.setRGB(0.62, 0.76, 0.98);
+        } else {
+          godRayColor.copy(st.sunLightColor).lerp(new THREE.Color(0xfff0d0), 0.35);
+        }
+
+        postPipeline.setOptions({
+          enableBloom: quality.enableBloom,
+          enableGodRays: quality.enableGodRays,
+          enableDOF: dynDofEnabled,
+          sunScreenPos,
+          godRayIntensity: rayIntensity,
+          godRayColor,
+          focusDistance: camera.position.distanceTo(controls.target),
+          cameraNear: camera.near,
+          cameraFar: camera.far,
+        });
+        postPipeline.render();
       } else {
         renderer.render(scene, camera);
       }
@@ -556,9 +702,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         if (domEl.parentNode === container) container.removeChild(domEl);
       }
 
-      bloomPass?.dispose();
-      composer?.dispose();
-      composerRT?.dispose();
+      postPipeline?.dispose();
       skyDome.dispose();
       terrain.dispose();
       architecture.dispose();
@@ -570,7 +714,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       renderer?.dispose();
       envRef.current = null;
     };
-  }, [webglReady]);
+  }, [webglReady, userQuality]);
 
   const applyTimePreset = (preset: TimePreset) => {
     const engine = envRef.current;
@@ -612,6 +756,15 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     cameraMoveRef.current.active = true;
   };
 
+  const selectQuality = (q: UserQualityChoice) => {
+    setUserQuality(q);
+    try {
+      localStorage.setItem(QUALITY_STORAGE_KEY, q);
+    } catch {
+      // ignore
+    }
+  };
+
   const currentPhaseLabel = getTimePhaseLabel(timeOfDay, isZh);
   const currentClockLabel = formatClockTime(timeOfDay);
   const activeWeatherMeta = WEATHER_OPTIONS.find((w) => w.id === activeWeather) || WEATHER_OPTIONS[0];
@@ -643,7 +796,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         className="pointer-events-none fixed right-3 top-[calc(3.9rem+env(safe-area-inset-top))] md:top-auto md:right-auto md:bottom-[max(1.5rem,env(safe-area-inset-bottom))] md:left-[6.25rem] z-20 flex flex-col items-end md:items-start gap-2 max-w-[calc(100vw-1.5rem)] md:max-w-[440px]"
       >
         {controlsOpen && (
-          <div className="pointer-events-auto w-[min(92vw,420px)] rounded-2xl border border-white/15 bg-[#0c1420]/88 p-3.5 shadow-2xl text-xs text-slate-100">
+          <div className="pointer-events-auto w-[min(92vw,420px)] rounded-2xl border border-white/15 bg-[#0c1420]/90 p-3.5 shadow-2xl text-xs text-slate-100">
             {/* Day-Night Controls */}
             <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10">
               <div className="flex items-center gap-1.5 font-medium text-slate-100">
@@ -742,30 +895,53 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             </div>
 
             {/* Camera Viewpoints */}
-            <div className="mt-3 flex items-center justify-between gap-1.5 pt-2.5 border-t border-white/10">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {CAMERA_PRESETS.map((cp) => (
-                  <button
-                    key={cp.id}
-                    type="button"
-                    onClick={() => moveCameraToPreset(cp)}
-                    className={`min-h-[32px] inline-flex items-center gap-1 rounded-lg px-2.5 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                      cameraPreset === cp.id
-                        ? 'bg-emerald-300/22 text-emerald-100'
-                        : 'bg-white/8 text-slate-300 hover:bg-white/15'
-                    }`}
-                  >
-                    <Compass className="h-3 w-3" />
-                    <span>{isZh ? cp.zh : cp.en}</span>
-                  </button>
-                ))}
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-white/10">
+              {CAMERA_PRESETS.map((cp) => (
+                <button
+                  key={cp.id}
+                  type="button"
+                  onClick={() => moveCameraToPreset(cp)}
+                  className={`min-h-[32px] inline-flex items-center gap-1 rounded-lg px-2.5 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                    cameraPreset === cp.id
+                      ? 'bg-emerald-300/22 text-emerald-100'
+                      : 'bg-white/8 text-slate-300 hover:bg-white/15'
+                  }`}
+                >
+                  <Compass className="h-3 w-3" />
+                  <span>{isZh ? cp.zh : cp.en}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Render Quality Tier Selector (High / Medium / Low / Auto) */}
+            <div className="mt-3 flex items-center justify-between gap-2 pt-2.5 border-t border-white/10">
+              <div className="flex items-center gap-1.5 font-medium text-slate-100">
+                <SlidersHorizontal className="h-3.5 w-3.5 text-emerald-300" />
+                <span>{isZh ? '画质等级' : 'Quality'}</span>
+              </div>
+              <div className="inline-flex rounded-lg bg-white/8 p-0.5 gap-0.5">
+                {QUALITY_OPTIONS.map((opt) => {
+                  const active = userQuality === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => selectQuality(opt.id)}
+                      className={`min-h-[26px] rounded-md px-2 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                        active ? 'bg-white text-slate-900' : 'text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      {isZh ? opt.zh : opt.en}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
         )}
 
         {/* Always-accessible single-row control strip */}
-        <div className="pointer-events-auto inline-flex items-center rounded-xl border border-white/15 bg-[#0c1420]/84 divide-x divide-white/12 shadow-lg overflow-hidden">
+        <div className="pointer-events-auto inline-flex items-center rounded-xl border border-white/15 bg-[#0c1420]/86 divide-x divide-white/12 shadow-lg overflow-hidden">
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
