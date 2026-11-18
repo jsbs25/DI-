@@ -9,7 +9,7 @@ import type {
   User,
   VideoItem,
 } from '../../types/index.ts';
-import { DeepOceanWorld3D } from '../ocean/DeepOceanWorld3D.tsx';
+import { ProductCulture3D } from '../brand/ProductCulture3D.tsx';
 
 type Props = {
   lang: Language;
@@ -38,9 +38,10 @@ export const OneHome: React.FC<Props> = ({
   onImmersiveChange,
 }) => {
   return (
-    <main className="relative h-[100dvh] w-full overflow-hidden bg-[#021222]">
-      <DeepOceanWorld3D
+    <main className="relative h-[100dvh] w-full overflow-hidden bg-[#020307]">
+      <ProductCulture3D
         lang={lang}
+        shiftRightOnDesktop={false}
         immersive={immersive}
         onImmersiveChange={onImmersiveChange}
       />
