@@ -11,17 +11,26 @@ import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
 import { aiGateway } from './server/aiGateway.ts';
-import { createGeminiClient, GEMINI_TTS_MODEL, hasGeminiApiKey } from './server/geminiClient.ts';
 import { executeAiTurn } from './server/aiTurnOrchestrator.ts';
+import { Modality, ThinkingLevel } from '@google/genai';
+import { getGeminiClient } from './server/geminiClient.ts';
 import {
+  AI_COMPANION_TOOLS,
+  buildCompanionSystemInstruction,
+  type LivePageContextSummary,
+} from './server/aiLiveTools.ts';
+import {
+  commitMemoriesFromTurn,
   deleteMemoryItem,
   listMemories,
   normalizeProfileKey,
+  retrieveRelevantMemories,
   updateMemoryItem,
   upsertMemory,
 } from './server/aiMemory.ts';
-import { isConversationalFramingNotCommand } from './server/aiIntent.ts';
-import { extractInlineAgentDirective, parseInstantAgentAction } from './src/utils/oneAgentController.ts';
+import { analyzeTurnContext, isConversationalFramingNotCommand } from './server/aiIntent.ts';
+import { solvePrecisionQuery } from './src/utils/precisionSolver.ts';
+import { parseInstantAgentAction } from './src/utils/oneAgentController.ts';
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
@@ -3007,7 +3016,6 @@ app.post('/api/ai/chat', async (req, res) => {
     stream,
     maxTokens,
     profileKey,
-    pageContext,
   } = req.body || {};
 
   const userPrompt =
@@ -3038,7 +3046,6 @@ app.post('/api/ai/chat', async (req, res) => {
       baseUrl,
       customModel,
       maxTokens,
-      pageContext: typeof pageContext === 'string' ? pageContext : undefined,
       signal: turnAbort.signal,
       onDelta: shouldStream
         ? (token) => {
@@ -3057,7 +3064,6 @@ app.post('/api/ai/chat', async (req, res) => {
             tokens: result.tokens,
             model: result.model,
             intent: result.intent,
-            emotion: (result as any).emotion,
             savedMemories: result.savedMemories,
             recalledMemoriesCount: result.recalledMemoriesCount,
             memoryWindow: result.memoryWindow,
@@ -3079,7 +3085,6 @@ app.post('/api/ai/chat', async (req, res) => {
       tokens: result.tokens,
       model: result.model,
       intent: result.intent,
-      emotion: (result as any).emotion,
       savedMemories: result.savedMemories,
       recalledMemoriesCount: result.recalledMemoriesCount,
       memoryWindow: result.memoryWindow,
@@ -3209,44 +3214,6 @@ Allowed actions:
   return res.json({ success: true, action: { type: 'none' } });
 });
 
-app.post('/api/ai/companion-turn', async (req, res) => {
-  const authUser = getAuthUser(req);
-  const { text, prompt, history, lang, profileKey, pageContext, mode } = req.body || {};
-  const input = typeof text === 'string' && text.trim() ? text.trim() : (typeof prompt === 'string' ? prompt.trim() : '');
-  if (!input) return res.status(400).json({ success: false, error: 'text or prompt is required' });
-  const isZh = lang === 'zh' || /[\u4e00-\u9fff]/.test(input);
-  try {
-    // fast deterministic action path
-    const instant = parseInstantAgentAction(input, isZh, Array.isArray(history) ? history : []);
-    if (instant && instant.type !== 'none') {
-      return res.json({ success: true, reply: instant.reply, action: instant, emotion: instant.type === 'play_music' ? 'focused' : 'calm', model: 'one-instant-agent', intent: 'task_command' });
-    }
-    const result = await executeAiTurn({
-      prompt: input,
-      history: Array.isArray(history) ? history : [],
-      mode: typeof mode === 'string' ? mode : 'voice-agent',
-      profileKey: typeof profileKey === 'string' ? profileKey : undefined,
-      userId: authUser?.id,
-      pageContext: typeof pageContext === 'string' ? pageContext : undefined,
-      maxTokens: 220,
-    });
-    const parsed = extractInlineAgentDirective(result.reply);
-    return res.json({
-      success: true,
-      reply: parsed.spokenText || result.reply,
-      rawReply: result.reply,
-      action: parsed.action && parsed.action.type !== 'none' ? parsed.action : null,
-      emotion: (parsed as any).emotion || (result as any).emotion || 'calm',
-      model: result.model,
-      intent: result.intent,
-      tokens: result.tokens,
-      savedMemories: result.savedMemories,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || 'companion-turn failed' });
-  }
-});
-
 app.post('/api/ai/translate', async (req, res) => {
   const { text, targetLang = 'English' } = req.body;
   if (!text) return res.status(400).json({ success: false, error: 'Text required' });
@@ -3261,13 +3228,11 @@ app.post('/api/ai/translate', async (req, res) => {
   }
 });
 
-const ttsAudioCache = new Map<string, { buf: Buffer; mime: string }>();
-
-function pcm16ToWavBuffer(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer {
-  const bitsPerSample = 16;
-  const byteRate = sampleRate * channels * (bitsPerSample / 8);
-  const blockAlign = channels * (bitsPerSample / 8);
-  const dataSize = pcm.length;
+function wrapPcm24kAsWav(pcmBuffer: Buffer, sampleRate = 24000, channels = 1): Buffer {
+  const bytesPerSample = 2;
+  const blockAlign = channels * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = pcmBuffer.length;
   const header = Buffer.alloc(44);
   header.write('RIFF', 0);
   header.writeUInt32LE(36 + dataSize, 4);
@@ -3279,73 +3244,340 @@ function pcm16ToWavBuffer(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer
   header.writeUInt32LE(sampleRate, 24);
   header.writeUInt32LE(byteRate, 28);
   header.writeUInt16LE(blockAlign, 32);
-  header.writeUInt16LE(bitsPerSample, 34);
+  header.writeUInt16LE(16, 34);
   header.write('data', 36);
   header.writeUInt32LE(dataSize, 40);
-  return Buffer.concat([header, pcm]);
+  return Buffer.concat([header, pcmBuffer]);
 }
 
+app.post('/api/ai/companion-turn', async (req, res) => {
+  const {
+    prompt,
+    lang = 'zh',
+    pageContext,
+    history,
+    profileKey: rawProfileKey,
+  } = req.body || {};
+
+  const cleanPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+  if (!cleanPrompt) {
+    return res.status(400).json({ success: false, error: 'Prompt is required' });
+  }
+
+  const authUser = getAuthUser(req);
+  const profileKey = normalizeProfileKey(typeof rawProfileKey === 'string' ? rawProfileKey : undefined, authUser?.id);
+  const histArray = Array.isArray(history)
+    ? history
+        .slice(-10)
+        .filter((h: any) => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string')
+        .map((h: any) => ({ role: h.role as 'user' | 'assistant', content: String(h.content) }))
+    : [];
+
+  const savedMemories = commitMemoriesFromTurn(store, profileKey, cleanPrompt, histArray);
+  const recalledMemories = retrieveRelevantMemories(store, profileKey, cleanPrompt, histArray, 560);
+  const analysis = analyzeTurnContext(cleanPrompt, histArray, recalledMemories);
+  const isZh = lang === 'zh' || analysis.isZh;
+
+  // 1. Exact deterministic precision solver fast-path (<1ms)
+  if (!cleanPrompt.includes('\n')) {
+    const exact = solvePrecisionQuery(analysis.normalizedPrompt, isZh);
+    if (exact) {
+      return res.json({
+        success: true,
+        model: 'one-precision-solver',
+        reply: exact.answer,
+        emotion: 'focused',
+        emotionIntensity: 0.72,
+        emotionReason: isZh ? '精确计算' : 'Exact calculation',
+        toolCalls: [],
+        savedMemories,
+      });
+    }
+  }
+
+  const ai = getGeminiClient();
+  if (!ai) {
+    // Graceful multi-engine fallback if Gemini key is absent
+    try {
+      const fallback = await executeAiTurn({
+        prompt: cleanPrompt,
+        history: histArray,
+        mode: 'voice-agent',
+        profileKey,
+        userId: authUser?.id,
+      });
+      return res.json({
+        success: true,
+        model: fallback.model,
+        reply: fallback.reply,
+        emotion:
+          analysis.sentiment === 'tired' || analysis.sentiment === 'frustrated'
+            ? 'empathetic'
+            : analysis.sentiment === 'excited'
+              ? 'excited'
+              : analysis.sentiment === 'playful'
+                ? 'playful'
+                : 'calm',
+        emotionIntensity: 0.72,
+        emotionReason: '',
+        toolCalls: [],
+        savedMemories,
+      });
+    } catch {
+      return res.status(503).json({ success: false, error: 'AI engine unavailable' });
+    }
+  }
+
+  try {
+    const contents = [
+      ...histArray.map((h) => ({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.content }],
+      })),
+      { role: 'user', parts: [{ text: cleanPrompt }] },
+    ];
+
+    const callModel = (modelName: string) =>
+      Promise.race([
+        ai.models.generateContent({
+          model: modelName,
+          contents,
+          config: {
+            systemInstruction: buildCompanionSystemInstruction(
+              lang,
+              (pageContext || null) as LivePageContextSummary | null,
+              recalledMemories
+            ),
+            thinkingConfig: modelName.includes('hydrogen') ? { thinkingLevel: ThinkingLevel.LOW } : undefined,
+            tools: [{ functionDeclarations: AI_COMPANION_TOOLS }],
+            temperature: analysis.temperatureHint ?? 0.7,
+            maxOutputTokens: 512,
+          },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`${modelName} timeout`)), 7500)
+        ),
+      ]);
+
+    let activeModel = 'gemini-4-hydrogen';
+    let response;
+    try {
+      response = await callModel('gemini-4-hydrogen');
+    } catch {
+      try {
+        activeModel = 'gemini-2.5-flash';
+        response = await callModel('gemini-2.5-flash');
+      } catch (e2: any) {
+        console.warn('[companion-turn] Gemini fallback triggered:', e2?.message || e2);
+        throw e2;
+      }
+    }
+
+    const rawCalls = response.functionCalls || [];
+    let emotion = 'calm';
+    let emotionIntensity = 0.7;
+    let emotionReason = '';
+    const clientToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const serverResolvedFacts: string[] = [];
+
+    for (const c of rawCalls) {
+      const name = c.name || '';
+      const args = (c.args || {}) as Record<string, unknown>;
+      if (name === 'set_companion_emotion') {
+        if (typeof args.emotion === 'string') emotion = args.emotion;
+        if (typeof args.intensity === 'number') emotionIntensity = args.intensity;
+        if (typeof args.reason === 'string') emotionReason = args.reason;
+      } else if (name === 'recall_or_save_memory') {
+        const act = String(args.action || 'recall');
+        const queryOrContent = String(args.queryOrContent || '').trim();
+        if (act === 'save' && queryOrContent) {
+          upsertMemory(store, profileKey, {
+            kind: 'fact',
+            normalizedKey: `fact.companion_${Date.now().toString(36)}`,
+            content: queryOrContent,
+            confidence: 0.96,
+            salience: 0.94,
+            source: 'user_explicit',
+          });
+        }
+      } else if (name === 'lookup_live_knowledge') {
+        const q = String(args.query || '').trim();
+        const exact = q ? solvePrecisionQuery(q, isZh) : null;
+        if (exact) serverResolvedFacts.push(exact.answer);
+      } else if (name) {
+        if (analysis.isHypotheticalOrDiscussion && (name === 'navigate_to_space' || name === 'control_music_player' || name === 'watch_cinema_video' || name === 'open_book_action')) {
+          continue;
+        }
+        clientToolCalls.push({ name, args });
+      }
+    }
+
+    const replyText = (response.text || '').trim() || serverResolvedFacts[0] || '';
+    return res.json({
+      success: true,
+      model: activeModel,
+      reply: replyText,
+      emotion,
+      emotionIntensity,
+      emotionReason,
+      toolCalls: clientToolCalls,
+      savedMemories,
+    });
+  } catch {
+    try {
+      const fallbackTools: Array<{ name: string; args: Record<string, unknown> }> = [];
+      let fallbackReply = '';
+
+      if (!analysis.isHypotheticalOrDiscussion) {
+        const clean = analysis.normalizedPrompt;
+        const wantsDark = /(?:深色|暗黑|夜间|暗色|dark\s*mode|night\s*mode)/i.test(clean);
+        const wantsLight = /(?:浅色|亮色|白天|日间|light\s*mode|day\s*mode)/i.test(clean);
+        if (wantsDark) fallbackTools.push({ name: 'control_appearance', args: { theme: 'dark' } });
+        else if (wantsLight) fallbackTools.push({ name: 'control_appearance', args: { theme: 'light' } });
+
+        const instant = parseInstantAgentAction(cleanPrompt, isZh, histArray);
+        if (instant && instant.type !== 'none') {
+          if (instant.type === 'set_theme' && !fallbackTools.some((t) => t.name === 'control_appearance')) {
+            fallbackTools.push({ name: 'control_appearance', args: { theme: instant.theme } });
+          } else if (instant.type === 'navigate_tab') {
+            fallbackTools.push({ name: 'navigate_to_space', args: { space: instant.tab } });
+          } else if (instant.type === 'play_music') {
+            fallbackTools.push({
+              name: 'control_music_player',
+              args: instant.control ? { action: instant.control } : { action: 'play_query', query: instant.query },
+            });
+          } else if (instant.type === 'watch_documentary') {
+            fallbackTools.push({ name: 'watch_cinema_video', args: { query: instant.query } });
+          } else if (instant.type === 'open_book') {
+            fallbackTools.push({ name: 'open_book_action', args: { query: instant.query, action: 'read' } });
+          } else if (instant.type === 'browser_search') {
+            fallbackTools.push({ name: 'browser_and_search', args: { mode: 'search', query: instant.query } });
+          }
+          if (instant.reply) fallbackReply = instant.reply;
+        }
+      }
+
+      if (fallbackTools.length > 1 && analysis.sentiment === 'tired') {
+        fallbackReply = isZh
+          ? '辛苦了，先别硬撑。我已经帮你切好深色护眼模式并放上舒缓音乐，靠着休息一会儿吧。'
+          : 'You sound tired—take a breather. I switched to dark mode and put on soothing music for you.';
+      } else if (fallbackTools.length === 0 || !fallbackReply) {
+        const fallback = await executeAiTurn({
+          prompt: cleanPrompt,
+          history: histArray,
+          mode: 'voice-agent',
+          profileKey,
+          userId: authUser?.id,
+        });
+        fallbackReply = fallback.reply;
+      }
+
+      const fallbackEmotion =
+        analysis.sentiment === 'tired' || analysis.sentiment === 'frustrated'
+          ? 'empathetic'
+          : analysis.sentiment === 'excited'
+            ? 'excited'
+            : analysis.sentiment === 'playful'
+              ? 'playful'
+              : 'calm';
+
+      return res.json({
+        success: true,
+        model: 'one-companion-fallback',
+        reply: fallbackReply,
+        emotion: fallbackEmotion,
+        emotionIntensity: fallbackEmotion === 'empathetic' ? 0.85 : 0.72,
+        emotionReason: fallbackEmotion === 'empathetic' ? (isZh ? '温柔共情与照料' : 'Warm care & empathy') : (isZh ? '稳定响应' : 'Attentive response'),
+        toolCalls: fallbackTools,
+        savedMemories,
+      });
+    } catch (innerErr: any) {
+      return res.status(500).json({
+        success: false,
+        error: innerErr?.message || 'Companion turn failed',
+      });
+    }
+  }
+});
+
+app.post('/api/ai/tts', async (req, res) => {
+  const { text, emotion = 'calm', voiceName = 'Zephyr' } = req.body || {};
+  const cleanText = typeof text === 'string' ? text.trim().slice(0, 600) : '';
+  if (!cleanText) {
+    return res.status(400).json({ success: false, error: 'text is required' });
+  }
+
+  const ai = getGeminiClient();
+  if (!ai) {
+    return res.status(503).json({ success: false, error: 'GEMINI_API_KEY not configured' });
+  }
+
+  const styleHints: Record<string, string> = {
+    excited: 'Speak warmly with bright excitement and energetic enthusiasm:',
+    happy: 'Speak cheerfully with a warm smile in your voice:',
+    curious: 'Speak with bright curiosity and an engaging inquisitive tone:',
+    concerned: 'Speak gently with sincere care and attentive concern:',
+    empathetic: 'Speak softly, tenderly, and empathetically:',
+    playful: 'Speak playfully with light-hearted sparkle:',
+    focused: 'Speak crisply, clearly, and confidently:',
+    thinking: 'Speak thoughtfully and calmly:',
+    calm: 'Speak naturally, warmly, and clearly:',
+  };
+
+  const allowedVoices = new Set(['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir']);
+  const safeVoice = allowedVoices.has(String(voiceName)) ? String(voiceName) : 'Zephyr';
+  const promptPrefix = styleHints[String(emotion)] || styleHints.calm;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash-lite-tts',
+      contents: `${promptPrefix} ${cleanText}`,
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: safeVoice },
+          },
+        },
+      },
+    });
+
+    const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!data) {
+      return res.status(502).json({ success: false, error: 'Empty audio output' });
+    }
+    const pcmBuffer = Buffer.from(data, 'base64');
+    const wavBuffer = wrapPcm24kAsWav(pcmBuffer, 24000, 1);
+    return res.json({
+      success: true,
+      mimeType: 'audio/wav',
+      audioBase64: wavBuffer.toString('base64'),
+    });
+  } catch (err: any) {
+    return res.status(502).json({ success: false, error: err?.message || 'TTS generation failed' });
+  }
+});
+
+const ttsAudioCache = new Map<string, Buffer>();
 app.get('/api/ai/tts', async (req, res) => {
   const rawText = typeof req.query.text === 'string' ? req.query.text.trim() : '';
   const langParam = req.query.lang === 'en' ? 'en' : 'zh';
   const spdNum = Math.max(3, Math.min(6, Number(req.query.spd) || 5));
-  const emotion = typeof req.query.emotion === 'string' ? req.query.emotion : 'calm';
   if (!rawText) return res.status(400).json({ success: false, error: 'text required' });
 
   const cleanText = rawText
     .replace(/\[\[EMO:[^\]]+\]\]/gi, '')
-    .replace(/\[\[EMOTION:[^\]]+\]\]/gi, '')
     .replace(/\[\[ACTION:[\s\S]*?\]\]/g, '')
     .trim()
-    .slice(0, 260);
+    .slice(0, 220);
   if (!cleanText) return res.status(400).json({ success: false, error: 'empty text' });
 
-  const cacheKey = `gem:${langParam}:${emotion}:${cleanText}`;
+  const cacheKey = `${langParam}:${spdNum}:${cleanText}`;
   const cached = ttsAudioCache.get(cacheKey);
   if (cached) {
-    res.setHeader('Content-Type', cached.mime);
+    res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.send(cached.buf);
-  }
-
-  // Prefer Gemini expressive TTS (gemini-3.8-flash-lite-tts, 24kHz) when available
-  try {
-    if (hasGeminiApiKey()) {
-      const ai = createGeminiClient();
-      if (ai) {
-        const prompt = `${langParam === 'en' ? 'Speak naturally in English' : '用自然、亲切、富有表现力的中文朗读'} with ${emotion} tone: ${cleanText}`;
-        const response: any = await (ai as any).models.generateContent({
-          model: GEMINI_TTS_MODEL,
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          config: { responseModalities: ['AUDIO'] },
-        });
-        const parts = response?.candidates?.[0]?.content?.parts || [];
-        for (const part of parts) {
-          const inline = part?.inlineData;
-          if (inline?.data) {
-            const mime = String(inline.mimeType || 'audio/wav');
-            let buf = Buffer.from(String(inline.data), 'base64');
-            // Convert raw PCM to WAV for broad browser compatibility
-            if (/pcm/i.test(mime) || /L16/i.test(mime)) {
-              buf = Buffer.from(pcm16ToWavBuffer(buf, 24000, 1));
-            }
-            if (buf.length > 400) {
-              const outMime = /pcm|L16/i.test(mime) ? 'audio/wav' : mime;
-              if (ttsAudioCache.size >= 220) {
-                const oldestKey = ttsAudioCache.keys().next().value;
-                if (oldestKey) ttsAudioCache.delete(oldestKey);
-              }
-              ttsAudioCache.set(cacheKey, { buf, mime: outMime });
-              res.setHeader('Content-Type', outMime);
-              res.setHeader('Cache-Control', 'public, max-age=3600');
-              return res.send(buf);
-            }
-          }
-        }
-      }
-    }
-  } catch {
-    // fall through to upstream MP3 providers
+    return res.send(cached);
   }
 
   const providers = [
@@ -3372,7 +3604,7 @@ app.get('/api/ai/tts', async (req, res) => {
         const oldestKey = ttsAudioCache.keys().next().value;
         if (oldestKey) ttsAudioCache.delete(oldestKey);
       }
-      ttsAudioCache.set(cacheKey, { buf, mime: 'audio/mpeg' });
+      ttsAudioCache.set(cacheKey, buf);
       res.setHeader('Content-Type', 'audio/mpeg');
       res.setHeader('Cache-Control', 'public, max-age=3600');
       return res.send(buf);

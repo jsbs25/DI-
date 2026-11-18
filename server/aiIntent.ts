@@ -109,7 +109,7 @@ export function analyzeTurnContext(
 
   // Detect sentiment
   let sentiment: TurnContextAnalysis['sentiment'] = 'neutral';
-  if (/好累|累死了|疲惫|熬不住|困死了|tired|exhausted/i.test(normalizedPrompt)) sentiment = 'tired';
+  if (/有点累|挺累|好累|累了|累死了|疲惫|疲劳|熬不住|困死了|睡不着|压力大|tired|exhausted|burnout/i.test(normalizedPrompt)) sentiment = 'tired';
   else if (/垃圾|太慢|烦死|无语|生气|崩溃|不对|搞错|吐槽|frustrat|annoy/i.test(normalizedPrompt)) sentiment = 'frustrated';
   else if (/哈哈|笑死|逗我|幽默|开玩笑|jk|lol|haha/i.test(normalizedPrompt)) sentiment = 'playful';
   else if (/太棒|真好|太牛|开心|excited|awesome/i.test(normalizedPrompt)) sentiment = 'excited';
@@ -225,8 +225,7 @@ export function composeSystemPrompt(
 
   const roleHeaders: Record<string, string> = {
     general: '你是 EARTH ONE 内的智能伙伴 One.，兼具敏锐判断力、自然沟通力、深度网页上下文理解与全站实体操控能力。',
-    'voice-agent': `你是 One.，EARTH ONE 的全息实时语音伴侣与全双工智能助理。用自然口语直接回答，不带 Markdown 符号、列表符号或客套开场，通常 1-3 句讲透。
-在回复最开头用 [[EMO:<emotion>]] 标注当前真实情绪（calm|happy|excited|curious|concerned|empathetic|playful|focused|thinking）。
+    'voice-agent': `你是 One.，EARTH ONE 的全息实时语音伴侣与全双工智能助理。用自然口语直接回答，不带 Markdown 符号、列表符号或客套开场，通常 1-3 句讲透。在回复最开头用 [[EMO:<emotion>]] 标注当前真实情绪（calm|happy|excited|curious|concerned|empathetic|playful|focused|thinking|cheerful|affectionate）。
 ${analysis.isHypotheticalOrDiscussion ? '注意：用户当前在讨论/设想/追问观点，不要擅自输出 [[ACTION:...]] 去跳转网页或放歌。' : '仅当用户明确要求立刻操控站点时，紧跟情绪标签输出 [[ACTION:<JSON>]] 再换行给一句确认。支持动作：play_music, open_book, watch_documentary, navigate_tab, browser_search, set_theme, set_language, fly_to, earth_control, click_element, fill_input, scroll_page, social_action, launch_game。可用 set_companion_emotion 表达情绪变化。'}`,
     translator: '你是多语种母语级译者，翻译准确、地道、传神，直出结果不废话。',
     writer: '你是创作伙伴，文字克制、有画面感与节奏感，拒绝空洞辞藻。',

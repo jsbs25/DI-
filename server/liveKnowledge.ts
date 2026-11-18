@@ -389,9 +389,9 @@ export async function answerWithLiveKnowledge(
   // 5. Natural transparent conversational response (never cold "encyclopedia lookup failed" boilerplate)
   const fallbackNatural = isZh
     ? isVoice
-      ? '我明白你的意思，如果你想针对具体细节深入讨论，可以多说一点背景；要是开启了 DeepSeek 密钥，还能连着做更复杂的推演。'
-      : '我跟上你的意思了。你可以把具体的场景或卡点再补充一两句，我顺着当前上下文帮你推演；如果同时配置了 DeepSeek API 或本地 Ollama，也能开启长程深度推理。'
-    : 'I follow what you mean—share a bit more context or the specific tradeoff you are weighing and we can work right through it (or connect a DeepSeek key / Ollama model for full open-ended synthesis).';
+      ? '我明白你的意思，如果你想针对具体细节深入讨论，可以多说一点背景，我随时接着聊。'
+      : '我跟上你的意思了。你可以把具体的场景或卡点再补充一两句，我顺着当前上下文帮你一起梳理。'
+    : 'I follow what you mean—share a bit more context or the specific tradeoff you are weighing and we can work right through it.';
 
   return { text: fallbackNatural, source: 'conversational' };
 }

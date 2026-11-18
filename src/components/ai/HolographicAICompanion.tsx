@@ -1,40 +1,92 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import {
+  AlertCircle,
+  Brain,
   Disc3,
   ExternalLink,
+  Flame,
+  Heart,
+  HelpCircle,
   Maximize2,
+  Mic,
+  MicOff,
+  Minimize2,
   Pause,
   Play,
+  Send,
   SkipBack,
   SkipForward,
+  SlidersHorizontal,
+  Sparkles,
   Square,
+  Volume2,
+  VolumeX,
+  Wind,
   X,
+  Zap,
 } from 'lucide-react';
-import { Language } from '../../types/index.ts';
-import { readAIStream } from '../../utils/aiStream.ts';
-import { getAiProfileKey } from '../../utils/aiProfile.ts';
-import { capturePageContext, formatPageContextForPrompt } from '../../utils/pageContextEngine.ts';
+import type { Language } from '../../types/index.ts';
 import { useOptionalPlayerContext } from '../../music/PlayerContext.tsx';
+import { getAiProfileKey } from '../../utils/aiProfile.ts';
+import { AudioLiveClient } from './audioLiveClient.ts';
 import {
-  extractInlineAgentDirective,
-  matchPureSocialBanter,
+  collectLivePageContext,
+  type LivePageContextSummary,
+} from '../../utils/pageContextEngine.ts';
+import {
+  executeGeminiToolCall,
   parseInstantAgentAction,
   resolveConversationalFallback,
-  type OneAgentAction,
+  type WebsiteControlHandlers,
 } from '../../utils/oneAgentController.ts';
-import { solvePrecisionQuery } from '../../utils/precisionSolver.ts';
 import {
   analyzeDialogueEmotion,
-  buildExpressivePhrases,
-  extractEmotionTag,
-  type EmotionAnalysisResult,
-  type ProsodyPhrase,
   type VoiceEmotion,
 } from '../../utils/emotionEngine.ts';
+import {
+  readVoiceListeningMode,
+  subscribeVoiceListeningMode,
+  writeVoiceListeningMode,
+  type VoiceListeningMode,
+} from '../../utils/voiceModeSettings.ts';
 
-interface HolographicAICompanionProps {
+export type CompanionEmotion =
+  | 'calm'
+  | 'happy'
+  | 'excited'
+  | 'curious'
+  | 'concerned'
+  | 'empathetic'
+  | 'playful'
+  | 'focused'
+  | 'thinking';
+
+type VoicePhase =
+  | 'idle'
+  | 'connecting'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'error';
+
+interface TranscriptEntry {
+  id: string;
+  role: 'user' | 'assistant' | 'action';
+  text: string;
+  emotion?: CompanionEmotion;
+  interrupted?: boolean;
+}
+
+export interface HolographicAICompanionProps {
   lang: Language;
+  theme?: 'light' | 'dark';
+  isAuthenticated?: boolean;
+  userName?: string;
+  userCity?: string;
+  currentTab?: string;
+  showLauncher?: boolean;
+  placement?: 'center-bottom' | 'corner';
   onFlyTo?: (lat: number, lng: number) => void;
   onExploreUniverse?: () => void;
   onOpenAIHub?: () => void;
@@ -47,39 +99,146 @@ interface HolographicAICompanionProps {
     randomPick?: boolean;
   }) => void;
   onBrowserSearchAction?: (query: string) => void;
+  onGlobalSearchAction?: (query: string) => void;
   onSetTheme?: (theme: 'dark' | 'light') => void;
   onSetLang?: (lang: Language) => void;
-  currentTab?: string;
-  showLauncher?: boolean;
-  placement?: 'center-bottom' | 'corner';
+  onSetImmersive?: (v: boolean) => void;
+  onOpenCommandPalette?: () => void;
+  onReplayIntro?: () => void;
+  onCreatePost?: (postData: { content: string; category: string }) => Promise<void> | void;
+  onCreateArticle?: (articleData: { title: string; content: string; category: string }) => Promise<void> | void;
+  onFilterCountry?: (countryCode: string | null) => void;
+  onToggleJoinCommunity?: (commId: string) => void;
+  onOpenBook?: (bookId: string) => void;
+  onOpenKnowledge?: (nodeId: string) => void;
+  onOpenProfile?: () => void;
+  onOpenAuth?: () => void;
+  onOpenSecurity?: () => void;
+  onToggleLocationPrivacy?: () => void;
+  onOpenMessages?: (conversationId?: string) => void;
+  onOpenCalls?: () => void;
+  onQuickCall?: (kind: 'audio' | 'video', target: { targetUserId?: string; conversationId?: string }) => void;
 }
 
-interface HistoryTurn {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-type VoicePhase =
-  | 'idle'
-  | 'connecting'
-  | 'listening'
-  | 'thinking'
-  | 'speaking'
-  | 'error';
-
-interface QueuedSpeechItem {
-  phrase: ProsodyPhrase;
-  audioPromise: Promise<string | null> | null;
-}
-
+const VOICE_PREF_KEY = 'earth-one-ai-voice-pref:v2';
+const POS_KEY = 'earth-one-ai-launcher-pos:v1';
 const DEFAULT_MUSIC_COVER = '/assets/music/ambient-space.jpg';
+
+const VOICE_OPTIONS = [
+  { id: 'Zephyr', labelZh: 'Zephyr · 清澈灵动', labelEn: 'Zephyr · Bright' },
+  { id: 'Kore', labelZh: 'Kore · 温暖柔和', labelEn: 'Kore · Warm' },
+  { id: 'Puck', labelZh: 'Puck · 活力好奇', labelEn: 'Puck · Playful' },
+  { id: 'Charon', labelZh: 'Charon · 沉稳深邃', labelEn: 'Charon · Deep' },
+  { id: 'Fenrir', labelZh: 'Fenrir · 果断锐利', labelEn: 'Fenrir · Crisp' },
+] as const;
+
+const EMOTION_META: Record<
+  CompanionEmotion,
+  { zh: string; en: string; hex: number; cssAccent: string; ringClass: string }
+> = {
+  calm: {
+    zh: '平静聆听',
+    en: 'Serene',
+    hex: 0x8ecfff,
+    cssAccent: '#8ECFFF',
+    ringClass: 'border-sky-400/50 shadow-[0_0_24px_rgba(142,207,255,0.28)]',
+  },
+  happy: {
+    zh: '愉悦开心',
+    en: 'Happy',
+    hex: 0xf5c451,
+    cssAccent: '#F5C451',
+    ringClass: 'border-amber-400/70 shadow-[0_0_26px_rgba(245,196,81,0.34)]',
+  },
+  excited: {
+    zh: '兴奋雀跃',
+    en: 'Excited',
+    hex: 0xfb923c,
+    cssAccent: '#FB923C',
+    ringClass: 'border-orange-400/75 shadow-[0_0_28px_rgba(251,146,60,0.38)]',
+  },
+  curious: {
+    zh: '充满好奇',
+    en: 'Curious',
+    hex: 0x34d399,
+    cssAccent: '#34D399',
+    ringClass: 'border-emerald-400/70 shadow-[0_0_26px_rgba(52,211,153,0.34)]',
+  },
+  concerned: {
+    zh: '关切在意',
+    en: 'Concerned',
+    hex: 0xf87171,
+    cssAccent: '#F87171',
+    ringClass: 'border-rose-400/75 shadow-[0_0_26px_rgba(248,113,113,0.34)]',
+  },
+  empathetic: {
+    zh: '温柔共情',
+    en: 'Empathetic',
+    hex: 0xf472b6,
+    cssAccent: '#F472B6',
+    ringClass: 'border-pink-400/70 shadow-[0_0_26px_rgba(244,114,182,0.34)]',
+  },
+  playful: {
+    zh: '俏皮轻快',
+    en: 'Playful',
+    hex: 0x2dd4bf,
+    cssAccent: '#2DD4BF',
+    ringClass: 'border-teal-400/70 shadow-[0_0_26px_rgba(45,212,191,0.34)]',
+  },
+  focused: {
+    zh: '专注执行',
+    en: 'Focused',
+    hex: 0x60a5fa,
+    cssAccent: '#60A5FA',
+    ringClass: 'border-blue-400/75 shadow-[0_0_26px_rgba(96,165,250,0.34)]',
+  },
+  thinking: {
+    zh: '深度思考',
+    en: 'Thinking',
+    hex: 0xa78bfa,
+    cssAccent: '#A78BFA',
+    ringClass: 'border-violet-400/70 shadow-[0_0_26px_rgba(167,139,250,0.34)]',
+  },
+};
+
+function mapVoiceEmotionToCompanion(v: VoiceEmotion): CompanionEmotion {
+  if (v === 'cheerful' || v === 'affectionate') return 'happy';
+  if (v === 'excited') return 'excited';
+  if (v === 'curious') return 'curious';
+  if (v === 'empathetic') return 'empathetic';
+  if (v === 'playful') return 'playful';
+  return 'calm';
+}
+
+function EmotionIcon({ emotion }: { emotion: CompanionEmotion }) {
+  const cls = 'h-3.5 w-3.5 shrink-0';
+  switch (emotion) {
+    case 'excited':
+      return <Flame className={`${cls} text-orange-400`} />;
+    case 'happy':
+      return <Sparkles className={`${cls} text-amber-400`} />;
+    case 'curious':
+      return <HelpCircle className={`${cls} text-emerald-400`} />;
+    case 'concerned':
+      return <AlertCircle className={`${cls} text-rose-400`} />;
+    case 'empathetic':
+      return <Heart className={`${cls} text-pink-400`} />;
+    case 'playful':
+      return <Zap className={`${cls} text-teal-400`} />;
+    case 'focused':
+      return <Brain className={`${cls} text-blue-400`} />;
+    case 'thinking':
+      return <Brain className={`${cls} text-violet-400`} />;
+    default:
+      return <Wind className={`${cls} text-sky-400`} />;
+  }
+}
 
 function buildUnifiedEmbedUrl(rawUrl: string | undefined, isPlaying: boolean): string | undefined {
   if (!rawUrl) return undefined;
   try {
     const u = new URL(rawUrl);
     if (u.hostname.includes('youtube')) {
-      // Keep YouTube embed URL stable across pause/resume so postMessage preserves exact playback position
       u.searchParams.set('autoplay', '1');
       u.searchParams.set('enablejsapi', '1');
       u.searchParams.set('playsinline', '1');
@@ -98,642 +257,120 @@ function buildUnifiedEmbedUrl(rawUrl: string | undefined, isPlaying: boolean): s
   }
 }
 
-function pickSweetVoice(isZh: boolean): SpeechSynthesisVoice | null {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
-  const voices = window.speechSynthesis.getVoices() || [];
-  if (!voices.length) return null;
+export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (props) => {
+  const {
+    lang,
+    theme = 'light',
+    isAuthenticated = true,
+    userName,
+    userCity,
+    currentTab = 'globe',
+    showLauncher = true,
+    placement = 'corner',
+  } = props;
 
-  const preferredPatterns = isZh
-    ? [
-        /xiaoxiao/i,
-        /xiaoyi/i,
-        /ting-?ting.*enhanced/i,
-        /meijia.*enhanced/i,
-        /ting-?ting/i,
-        /meijia/i,
-        /sinji/i,
-        /natural.*zh|zh.*natural/i,
-        /neural.*zh|zh.*neural/i,
-        /google\s*普通话/i,
-        /huihui/i,
-        /yaoyao/i,
-        /female|女/i,
-      ]
-    : [
-        /jenny.*natural|jenny/i,
-        /aria.*natural|aria/i,
-        /ava.*natural|ava/i,
-        /samantha.*enhanced|samantha/i,
-        /natural.*en|en.*natural/i,
-        /neural.*en|en.*neural/i,
-        /victoria/i,
-        /karen/i,
-        /google us english/i,
-        /female/i,
-      ];
-
-  const langPrefix = isZh ? 'zh' : 'en';
-  const langVoices = voices.filter((v) => (v.lang || '').toLowerCase().startsWith(langPrefix));
-  const pool = langVoices.length > 0 ? langVoices : voices;
-
-  for (const pat of preferredPatterns) {
-    const match = pool.find((v) => pat.test(v.name) || pat.test(v.voiceURI));
-    if (match) return match;
-  }
-  return pool[0] || null;
-}
-
-function isAuthenticNeuralVoice(voice: SpeechSynthesisVoice | null): boolean {
-  if (!voice) return false;
-  return /xiaoxiao|xiaoyi|natural|neural|enhanced|premium|jenny|aria/i.test(
-    `${voice.name} ${voice.voiceURI}`
-  );
-}
-
-export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
-  lang,
-  onFlyTo,
-  onExploreUniverse,
-  onNavigateTab,
-  onPlayMusicAction,
-  onOpenBookAction,
-  onWatchDocumentaryAction,
-  onBrowserSearchAction,
-  onSetTheme,
-  onSetLang,
-  currentTab = 'globe',
-  showLauncher = true,
-  placement = 'corner',
-}) => {
   const isZh = lang === 'zh';
   const player = useOptionalPlayerContext();
+
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const [voiceActive, setVoiceActive] = useState(false);
-  const [modelId, setModelId] = useState('deepseek-v3');
-  const [activeEmotion, setActiveEmotion] = useState<EmotionAnalysisResult | null>(null);
-  const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const [hudOpen, setHudOpen] = useState(false);
+  const [showVoiceMenu, setShowVoiceMenu] = useState(false);
+  const [mutedOutput, setMutedOutput] = useState(false);
+  const [liveModeEngine, setLiveModeEngine] = useState<'gemini-live' | 'companion-api'>('gemini-live');
+  const [listeningMode, setListeningMode] = useState<VoiceListeningMode>(() => readVoiceListeningMode());
 
-  // Unified Music Player state hosted directly inside One. orb
+  const [emotion, setEmotion] = useState<CompanionEmotion>('calm');
+  const [emotionIntensity, setEmotionIntensity] = useState(0.65);
+  const [emotionReason, setEmotionReason] = useState('');
+
+  const [voiceName, setVoiceName] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(VOICE_PREF_KEY);
+      if (saved && VOICE_OPTIONS.some((v) => v.id === saved)) return saved;
+    } catch {}
+    return 'Zephyr';
+  });
+
+  const [textInput, setTextInput] = useState('');
+  const [isSendingText, setIsSendingText] = useState(false);
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [energySnapshot, setEnergySnapshot] = useState<{ input: number; output: number }>({
+    input: 0,
+    output: 0,
+  });
+
+  // Unified Music Player embed & popover state hosted inside One. orb
   const [musicPopoverOpen, setMusicPopoverOpen] = useState(false);
   const [showMiniVideo, setShowMiniVideo] = useState(false);
   const [stageRect, setStageRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const [auroraIdx, setAuroraIdx] = useState(0);
   const embedIframeRef = useRef<HTMLIFrameElement | null>(null);
   const popoverStageAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  const phaseRef = useRef<VoicePhase>('idle');
+  phaseRef.current = phase;
+  const emotionRef = useRef<CompanionEmotion>('calm');
+  emotionRef.current = emotion;
+  const emotionIntensityRef = useRef<number>(0.65);
+  emotionIntensityRef.current = emotionIntensity;
+  const voiceActiveRef = useRef(false);
+  voiceActiveRef.current = voiceActive;
+  const mutedOutputRef = useRef(false);
+  mutedOutputRef.current = mutedOutput;
+  const listeningModeRef = useRef<VoiceListeningMode>(listeningMode);
+  listeningModeRef.current = listeningMode;
+  const profileKeyRef = useRef<string>(getAiProfileKey());
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioClientRef = useRef<AudioLiveClient | null>(null);
+  const fallbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const speechRecRef = useRef<any>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hudOrbCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const voiceNameRef = useRef(voiceName);
+  voiceNameRef.current = voiceName;
+  const currentOutputTurnIdRef = useRef<string | null>(null);
+  const currentInputTurnIdRef = useRef<string | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Music player synchronization refs
+  const playerRef = useRef(player);
+  playerRef.current = player;
+  const isMusicPlayingRef = useRef(false);
   const pausedMusicForVoiceRef = useRef(false);
   const explicitStopMusicRef = useRef(false);
   const speculativePauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const playerRef = useRef(player);
-  playerRef.current = player;
-  const isZhRef = useRef(isZh);
-  isZhRef.current = isZh;
 
-  // Cache sweet natural voice as soon as browser populates speechSynthesis voices
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    const refreshVoice = () => {
-      preferredVoiceRef.current = pickSweetVoice(isZh);
-    };
-    refreshVoice();
-    window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoice);
-    return () => {
-      window.speechSynthesis.removeEventListener?.('voiceschanged', refreshVoice);
-    };
-  }, [isZh]);
-
-  // Resolve default DeepSeek chat model and live engine availability from backend
-  useEffect(() => {
-    let cancelled = false;
-    const syncModels = () => {
-      fetch('/api/ai/models')
-        .then((r) => r.json())
-        .then((data) => {
-          if (cancelled || !data?.success) return;
-          if (Array.isArray(data.models)) {
-            const deepseekPreferred =
-              data.models.find((m: { id: string }) => m.id === 'deepseek-v3') ||
-              data.models.find((m: { id: string; isDefault?: boolean }) => m.isDefault && m.id.startsWith('deepseek')) ||
-              data.models.find((m: { id: string }) => m.id.startsWith('deepseek'));
-            if (deepseekPreferred?.id) setModelId(deepseekPreferred.id);
-          }
-        })
-        .catch(() => {});
-    };
-    syncModels();
-    window.addEventListener('one-ai-config-updated', syncModels);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('one-ai-config-updated', syncModels);
-    };
-  }, []);
-
-  // Launcher Orb 3D canvas & responsive drag bounds
-  const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ORB_SIZE = 48;
-  const clampLauncherPos = useCallback((x: number, y: number) => {
-    if (typeof window === 'undefined') return { x: 16, y: 120 };
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const minX = vw >= 768 ? 82 : 10;
-    const maxX = Math.max(minX, vw - ORB_SIZE - 10);
-    const minY = 66;
-    const maxY = Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 86 : 18));
-    return {
-      x: Math.min(Math.max(x, minX), maxX),
-      y: Math.min(Math.max(y, minY), maxY),
-    };
-  }, []);
-
-  const [launcherPos, setLauncherPos] = useState<{ x: number; y: number }>(() => {
-    if (typeof window === 'undefined') return { x: 16, y: 120 };
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const minX = vw >= 768 ? 82 : 10;
-    const maxX = Math.max(minX, vw - ORB_SIZE - 10);
-    const minY = 66;
-    const maxY = Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 86 : 18));
-    const defaultPos = {
-      x: Math.max(minX, vw - ORB_SIZE - (vw < 768 ? 14 : 22)),
-      y: Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 90 : 22)),
-    };
-    try {
-      const saved = localStorage.getItem('earth-one-ai-launcher-pos:v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
-          return {
-            x: Math.min(Math.max(parsed.x, minX), maxX),
-            y: Math.min(Math.max(parsed.y, minY), maxY),
-          };
-        }
-      }
-    } catch {}
-    return defaultPos;
-  });
-
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStateRef = useRef<{
-    active: boolean;
-    pointerId: number | null;
-    startX: number;
-    startY: number;
-    origX: number;
-    origY: number;
-    moved: boolean;
-  }>({ active: false, pointerId: null, startX: 0, startY: 0, origX: 0, origY: 0, moved: false });
-  const suppressClickRef = useRef(false);
-
-  useEffect(() => {
-    const onResize = () => setLauncherPos((p) => clampLauncherPos(p.x, p.y));
-    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
-    window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', onResize);
-    vv?.addEventListener('resize', onResize);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('orientationchange', onResize);
-      vv?.removeEventListener('resize', onResize);
-    };
-  }, [clampLauncherPos]);
-
-  // Real-time DeepSeek voice session + Emotion Engine + Hybrid Neural TTS Audio
-  const phaseRef = useRef<VoicePhase>('idle');
-  phaseRef.current = phase;
-  const activeEmotionRef = useRef<EmotionAnalysisResult | null>(null);
-  activeEmotionRef.current = activeEmotion;
-  const sessionActiveRef = useRef(false);
-  const recognitionRef = useRef<any>(null);
-  const turnEpochRef = useRef(0);
-  const activeFetchAbortRef = useRef<AbortController | null>(null);
-  const isSendingRef = useRef(false);
-  const isTtsSpeakingRef = useRef(false);
-  const currentSpokenTextRef = useRef('');
-  const currentUserTurnRef = useRef('');
-  const lastExecutedActionRef = useRef<{ key: string; at: number }>({ key: '', at: 0 });
-  const lastHandledFinalRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
-  const modelIdRef = useRef(modelId);
-  const historyRef = useRef<HistoryTurn[]>([]);
-  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const errorResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recStateRef = useRef<'stopped' | 'starting' | 'running'>('stopped');
-  const recKeepaliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const recRetryDelayRef = useRef(180);
-  const profileKeyRef = useRef<string>(getAiProfileKey());
-  const liveWsRef = useRef<WebSocket | null>(null);
-  const wsPendingTurnRef = useRef<{
-    turnId: string;
-    epoch: number;
-    resolve: (res: { rawReply: string; model?: string }) => void;
-    reject: (err: Error) => void;
-    onDelta: (delta: string) => void;
-    rawReply: string;
-  } | null>(null);
-
-  const ttsQueueRef = useRef<QueuedSpeechItem[]>([]);
-  const ttsStreamDoneRef = useRef(true);
-  const ttsDrainingRef = useRef(false);
-  const ttsDoneCallbackRef = useRef<(() => void) | null>(null);
-  const ttsSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ttsPauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ttsFetchControllersRef = useRef<Set<AbortController>>(new Set());
-  const ttsBlobUrlsRef = useRef<Set<string>>(new Set());
-  const ttsAudioElRef = useRef<HTMLAudioElement | null>(null);
-  const ttsAudioCtxRef = useRef<AudioContext | null>(null);
-
-  modelIdRef.current = modelId;
-
-  const ensureLiveWs = useCallback(() => {
-    if (typeof window === 'undefined' || typeof WebSocket === 'undefined') return null;
-    const existing = liveWsRef.current;
-    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
-      return existing;
-    }
-    try {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${proto}//${window.location.host}/ws/ai-live?profileKey=${encodeURIComponent(profileKeyRef.current)}`);
-      liveWsRef.current = ws;
-      ws.onmessage = (ev) => {
-        let msg: any = null;
-        try { msg = JSON.parse(String(ev.data || '')); } catch { return; }
-        if (!msg || typeof msg.type !== 'string') return;
-        const pending = wsPendingTurnRef.current;
-        if (!pending || msg.turnId !== pending.turnId || pending.epoch !== turnEpochRef.current) return;
-
-        if (msg.type === 'turn:delta' && typeof msg.delta === 'string') {
-          pending.rawReply += msg.delta;
-          pending.onDelta(msg.delta);
-        } else if (msg.type === 'turn:emotion' && typeof msg.emotion === 'string') {
-          try { setActiveEmotion(analyzeDialogueEmotion(currentUserTurnRef.current, '', msg.emotion as any)); } catch {}
-        } else if (msg.type === 'turn:done') {
-          const finalRaw = typeof msg.rawReply === 'string' && msg.rawReply ? msg.rawReply : (pending.rawReply || String(msg.reply || ''));
-          if (typeof msg.emotion === 'string') {
-            try { setActiveEmotion(analyzeDialogueEmotion(currentUserTurnRef.current, '', msg.emotion as any)); } catch {}
-          }
-          wsPendingTurnRef.current = null;
-          pending.resolve({ rawReply: finalRaw, model: msg.model });
-        } else if (msg.type === 'turn:cancelled') {
-          wsPendingTurnRef.current = null;
-          const abortErr = new Error('Turn aborted');
-          (abortErr as any).name = 'AbortError';
-          pending.reject(abortErr);
-        } else if (msg.type === 'turn:error') {
-          wsPendingTurnRef.current = null;
-          pending.reject(new Error(String(msg.error || 'WebSocket turn failed')));
-        }
-      };
-      ws.onclose = () => {
-        if (liveWsRef.current === ws) liveWsRef.current = null;
-        const pending = wsPendingTurnRef.current;
-        if (pending) {
-          wsPendingTurnRef.current = null;
-          pending.reject(new Error('WebSocket disconnected'));
-        }
-      };
-      return ws;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  // Ensure reusable HTMLAudioElement with subtle warmth EQ for sweet expressive neural MP3 playback
-  const ensureTtsAudioUnlocked = useCallback(() => {
-    if (typeof window === 'undefined') return null;
-    if (!ttsAudioElRef.current) {
-      const el = new Audio();
-      el.crossOrigin = 'anonymous';
-      el.preload = 'auto';
-      (el as any).preservesPitch = true;
-      (el as any).webkitPreservesPitch = true;
-      ttsAudioElRef.current = el;
-
-      try {
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const ctx = new AudioCtx();
-          ttsAudioCtxRef.current = ctx;
-          const src = ctx.createMediaElementSource(el);
-          // Balanced natural vocal EQ
-          const warmth = ctx.createBiquadFilter();
-          warmth.type = 'lowshelf';
-          warmth.frequency.value = 230;
-          warmth.gain.value = 1.6;
-
-          const presence = ctx.createBiquadFilter();
-          presence.type = 'peaking';
-          presence.frequency.value = 2900;
-          presence.Q.value = 1.1;
-          presence.gain.value = 1.4;
-
-          src.connect(warmth);
-          warmth.connect(presence);
-          presence.connect(ctx.destination);
-        }
-      } catch {
-        // Basic <audio> playback works seamlessly even if Web Audio graph is restricted
-      }
-    }
-
-    if (ttsAudioCtxRef.current?.state === 'suspended') {
-      void ttsAudioCtxRef.current.resume().catch(() => {});
-    }
-    // Unlock audio element synchronously inside user tap using silent tiny data-URI WAV
-    try {
-      const el = ttsAudioElRef.current;
-      if (el && el.paused && !el.src) {
-        el.src =
-          'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-        el.volume = 0.01;
-        void el.play().then(() => {
-          el.pause();
-          el.volume = 1;
-          el.removeAttribute('src');
-        }).catch(() => {
-          el.volume = 1;
-        });
-      }
-    } catch {}
-    return ttsAudioElRef.current;
-  }, []);
-
-  // Render 3D wireframe orb reflecting live voice phase AND active emotional color aura
-  useEffect(() => {
-    if (!showLauncher) return;
-    const canvas = orbCanvasRef.current;
-    if (!canvas) return;
-
-    const size = placement === 'center-bottom' ? 38 : 46;
-    canvas.width = size;
-    canvas.height = size;
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 100);
-    camera.position.z = 2.35;
-
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-    } catch {
-      return;
-    }
-    renderer.setSize(size, size);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-
-    const coreGeo = new THREE.IcosahedronGeometry(0.76, 2);
-    const coreMat = new THREE.MeshBasicMaterial({
-      color: 0x8ecfff,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.92,
-    });
-    const coreMesh = new THREE.Mesh(coreGeo, coreMat);
-    scene.add(coreMesh);
-
-    const nucGeo = new THREE.SphereGeometry(0.35, 16, 16);
-    const nucMat = new THREE.MeshBasicMaterial({ color: 0xf4a2c4 });
-    const nucMesh = new THREE.Mesh(nucGeo, nucMat);
-    scene.add(nucMesh);
-
-    const colorTarget = new THREE.Color(0x8ecfff);
-    const nucColorTarget = new THREE.Color(0xf4a2c4);
-    let rafId = 0;
-    let t = 0;
-    let active = true;
-
-    const animate = () => {
-      if (!active || document.hidden) return;
-      rafId = requestAnimationFrame(animate);
-
-      const currentPhase = phaseRef.current;
-      const emo = activeEmotionRef.current;
-      let energy = 0.08;
-
-      if (currentPhase === 'listening') {
-        colorTarget.setHex(0x4ade80);
-        nucColorTarget.setHex(0x38bdf8);
-        energy = 0.25 + 0.18 * Math.sin(t * 4.2);
-      } else if (currentPhase === 'speaking' || isTtsSpeakingRef.current) {
-        colorTarget.setHex(emo?.auraHex ?? 0xf9a8d4);
-        nucColorTarget.setHex(emo?.auraHex ?? 0xf472b6);
-        energy = 0.52 + 0.28 * Math.sin(t * 9.5);
-      } else if (currentPhase === 'connecting' || currentPhase === 'thinking') {
-        colorTarget.setHex(0x69b8ff);
-        nucColorTarget.setHex(0xfbbf24);
-        energy = 0.34 + 0.14 * Math.cos(t * 6.5);
-      } else if (currentPhase === 'error') {
-        colorTarget.setHex(0xf87171);
-        nucColorTarget.setHex(0xf87171);
-        energy = 0.12;
-      } else {
-        colorTarget.setHex(0x8ecfff);
-        nucColorTarget.setHex(0xf4a2c4);
-      }
-      coreMat.color.lerp(colorTarget, 0.14);
-      nucMat.color.lerp(nucColorTarget, 0.14);
-
-      const speedBoost = sessionActiveRef.current ? 1.15 + energy * 1.4 : 1;
-      t += 0.025 * speedBoost;
-      coreMesh.rotation.y += 0.018 * speedBoost;
-      coreMesh.rotation.x += 0.008 * speedBoost;
-      const s = 1 + Math.sin(t * 2.6) * 0.07 + energy * 0.22;
-      nucMesh.scale.set(s, s, s);
-      renderer.render(scene, camera);
-    };
-
-    const onVis = () => {
-      if (!document.hidden && active) {
-        cancelAnimationFrame(rafId);
-        animate();
-      }
-    };
-    document.addEventListener('visibilitychange', onVis);
-    animate();
-
-    return () => {
-      active = false;
-      document.removeEventListener('visibilitychange', onVis);
-      cancelAnimationFrame(rafId);
-      coreGeo.dispose();
-      coreMat.dispose();
-      nucGeo.dispose();
-      nucMat.dispose();
-      renderer.dispose();
-    };
-  }, [showLauncher, placement]);
-
-  // Execute parsed website action cleanly
-  const executeParsedAction = useCallback(
-    (action: OneAgentAction, dedupeKey = ''): boolean => {
-      if (action.type === 'none') return false;
-      const now = Date.now();
-      const key = dedupeKey || JSON.stringify(action);
-      if (
-        lastExecutedActionRef.current.key === key &&
-        now - lastExecutedActionRef.current.at < 2200
-      ) {
-        return false;
-      }
-      lastExecutedActionRef.current = { key, at: now };
-
-      if (action.type === 'play_music') {
-        if (action.control === 'next') {
-          explicitStopMusicRef.current = false;
-          pausedMusicForVoiceRef.current = false;
-          player?.activateMusicSession();
-          player?.playNext();
-        } else if (action.control === 'prev') {
-          explicitStopMusicRef.current = false;
-          pausedMusicForVoiceRef.current = false;
-          player?.activateMusicSession();
-          player?.playPrevious();
-        } else if (action.control === 'stop' || action.control === 'pause') {
-          explicitStopMusicRef.current = true;
-          pausedMusicForVoiceRef.current = false;
-          player?.stopAndHold();
-        } else if (action.control === 'resume') {
-          explicitStopMusicRef.current = false;
-          pausedMusicForVoiceRef.current = false;
-          if (player?.currentTrack) {
-            player.activateMusicSession();
-            player.unlockAudio();
-            void player.resumeAudioContext();
-            player.play();
-          } else if (onPlayMusicAction) {
-            player?.activateMusicSession();
-            onPlayMusicAction({ crawl: true });
-          } else if (onNavigateTab) {
-            onNavigateTab('venus');
-          }
-        } else if (onPlayMusicAction) {
-          explicitStopMusicRef.current = false;
-          pausedMusicForVoiceRef.current = false;
-          player?.activateMusicSession();
-          onPlayMusicAction({ query: action.query, crawl: action.crawl ?? true });
-        } else if (onNavigateTab) {
-          explicitStopMusicRef.current = false;
-          pausedMusicForVoiceRef.current = false;
-          onNavigateTab('venus');
-        }
-      } else if (action.type === 'open_book') {
-        if (onOpenBookAction) {
-          onOpenBookAction({ query: action.query });
-        } else if (onNavigateTab) {
-          onNavigateTab('library');
-        }
-      } else if (action.type === 'watch_documentary') {
-        if (onWatchDocumentaryAction) {
-          onWatchDocumentaryAction({
-            query: action.query,
-            platform: action.platform,
-            randomPick: action.randomPick ?? true,
-          });
-        } else if (onNavigateTab) {
-          onNavigateTab('saturn');
-        }
-      } else if (action.type === 'browser_search') {
-        if (onBrowserSearchAction) {
-          onBrowserSearchAction(action.query);
-        } else if (onNavigateTab) {
-          onNavigateTab('browser');
-        }
-      } else if (action.type === 'fly_to') {
-        if (onFlyTo) {
-          onFlyTo(action.lat, action.lng);
-        } else if (onNavigateTab) {
-          onNavigateTab('globe');
-        }
-      } else if (action.type === 'set_theme') {
-        onSetTheme?.(action.theme);
-      } else if (action.type === 'set_language') {
-        onSetLang?.(action.lang as any);
-      } else if (action.type === 'navigate_tab') {
-        if (onNavigateTab) onNavigateTab(action.tab);
-        else if (action.tab === 'universe' && onExploreUniverse) onExploreUniverse();
-      } else if (action.type === 'earth_control') {
-        if (action.action === 'focus' && typeof action.lat === 'number' && typeof action.lng === 'number') {
-          if (onFlyTo) onFlyTo(action.lat, action.lng);
-          else if (onNavigateTab) onNavigateTab('globe');
-        } else {
-          try { window.dispatchEvent(new CustomEvent('one-earth-control', { detail: action })); } catch {}
-        }
-      } else if (action.type === 'click_element') {
-        try {
-          const el = action.selector ? document.querySelector(action.selector) : null;
-          if (el instanceof HTMLElement) el.click();
-          else if (action.label) {
-            const candidates = Array.from(document.querySelectorAll('button,[role="button"],a')) as HTMLElement[];
-            const target = candidates.find(c => (c.innerText||'').includes(action.label!));
-            target?.click();
-          }
-        } catch {}
-      } else if (action.type === 'fill_input') {
-        try {
-          const el = action.selector ? document.querySelector(action.selector) : null;
-          const input = (el as HTMLInputElement | HTMLTextAreaElement | null) ||
-            (action.label ? (Array.from(document.querySelectorAll('input,textarea')).find(i => ((i as HTMLElement).getAttribute('placeholder')||'').includes(action.label!)) as any) : null);
-          if (input) {
-            input.focus();
-            input.value = action.value;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-          }
-        } catch {}
-      } else if (action.type === 'scroll_page') {
-        try {
-          if (action.direction === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
-          else if (action.direction === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-          else window.scrollBy({ top: action.direction === 'up' ? -(action.amount || 480) : (action.amount || 480), behavior: 'smooth' });
-        } catch {}
-      } else if (action.type === 'social_action') {
-        if (action.action === 'open_chat' || action.action === 'start_call') onNavigateTab?.('chat');
-        else if (action.action === 'open_feed') onNavigateTab?.('feed');
-      } else if (action.type === 'launch_game') {
-        onNavigateTab?.('game');
-      } else if (action.type === 'set_companion_emotion') {
-        try {
-          // emotion handled by TTS/orb pipeline via extracted tag
-        } catch {}
-      }
-      return true;
-    },
-    [
-      onBrowserSearchAction,
-      onExploreUniverse,
-      onFlyTo,
-      onNavigateTab,
-      onOpenBookAction,
-      onPlayMusicAction,
-      onSetLang,
-      onSetTheme,
-      onWatchDocumentaryAction,
-      player,
-    ]
-  );
-
-  const canRunAudioSession = Boolean(
-    player?.sessionActivated && !player?.userStopped && player?.currentTrack
-  );
   const currentTrack = player?.currentTrack ?? null;
   const isMusicPlaying = Boolean(player?.state.isPlaying);
+  isMusicPlayingRef.current = isMusicPlaying;
   const isOnVenus = currentTab === 'venus';
-  const showUnifiedMusicControls = canRunAudioSession && !isOnVenus;
-
+  const canRunAudioSession = Boolean(
+    isAuthenticated && player?.sessionActivated && !player?.userStopped && currentTrack
+  );
   const rawEmbed =
     currentTrack?.playback.embedUrl ||
     (currentTrack?.raw as any)?.embedUrl ||
     currentTrack?.sources.find((s) => s.kind === 'embed' && s.embedUrl)?.embedUrl;
   const liveEmbedSrc = canRunAudioSession ? buildUnifiedEmbedUrl(rawEmbed, isMusicPlaying) : undefined;
-  const liveEmbedSrcRef = useRef(liveEmbedSrc);
-  liveEmbedSrcRef.current = liveEmbedSrc;
-  const isMusicPlayingRef = useRef(isMusicPlaying);
-  isMusicPlayingRef.current = isMusicPlaying;
+  const showUnifiedMusicControls = canRunAudioSession && !isOnVenus;
 
-  const sendYouTubeCmd = useCallback((func: 'playVideo' | 'pauseVideo' | 'unMute') => {
-    const win = embedIframeRef.current?.contentWindow;
-    const src = liveEmbedSrcRef.current;
-    if (!win || !src || !src.includes('youtube')) return;
+  useEffect(() => {
+    return subscribeVoiceListeningMode((mode) => {
+      setListeningMode(mode);
+      listeningModeRef.current = mode;
+    });
+  }, []);
+
+  const sendYouTubeCmd = useCallback((func: 'playVideo' | 'pauseVideo' | 'stopVideo') => {
     try {
-      if (func === 'playVideo') {
-        win.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
+      const win = embedIframeRef.current?.contentWindow;
+      if (!win) return;
+      if (func === 'stopVideo') {
+        win.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
       }
       win.postMessage(JSON.stringify({ event: 'command', func, args: [] }), '*');
     } catch {}
@@ -758,31 +395,34 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     }
   }, [sendYouTubeCmd]);
 
-  const pauseMusicForVoice = useCallback((isSpeculative = false) => {
-    const p = playerRef.current;
-    if (!p) return;
-    if (speculativePauseTimerRef.current) {
-      clearTimeout(speculativePauseTimerRef.current);
-      speculativePauseTimerRef.current = null;
-    }
-    if (p.state.isPlaying || isMusicPlayingRef.current || pausedMusicForVoiceRef.current) {
-      if (p.state.isPlaying || isMusicPlayingRef.current) {
-        pausedMusicForVoiceRef.current = true;
-        p.pause();
+  const pauseMusicForVoice = useCallback(
+    (isSpeculative = false) => {
+      const p = playerRef.current;
+      if (!p) return;
+      if (speculativePauseTimerRef.current) {
+        clearTimeout(speculativePauseTimerRef.current);
+        speculativePauseTimerRef.current = null;
       }
-      sendYouTubeCmd('pauseVideo');
-      if (isSpeculative) {
-        speculativePauseTimerRef.current = setTimeout(() => {
-          speculativePauseTimerRef.current = null;
-          if (!isSendingRef.current && !isTtsSpeakingRef.current && pausedMusicForVoiceRef.current) {
-            resumeMusicIfPausedForVoice();
-          }
-        }, 1500);
+      if (p.state.isPlaying || isMusicPlayingRef.current || pausedMusicForVoiceRef.current) {
+        if (p.state.isPlaying || isMusicPlayingRef.current) {
+          pausedMusicForVoiceRef.current = true;
+          p.pause();
+        }
+        sendYouTubeCmd('pauseVideo');
+        if (isSpeculative) {
+          speculativePauseTimerRef.current = setTimeout(() => {
+            speculativePauseTimerRef.current = null;
+            if (phaseRef.current !== 'speaking' && phaseRef.current !== 'thinking' && pausedMusicForVoiceRef.current) {
+              resumeMusicIfPausedForVoice();
+            }
+          }, 1800);
+        }
       }
-    }
-  }, [resumeMusicIfPausedForVoice, sendYouTubeCmd]);
+    },
+    [resumeMusicIfPausedForVoice, sendYouTubeCmd]
+  );
 
-  // Cycle aurora aura color subtly while playing music outside Music tab
+  // Cycle aurora aura color while music is playing outside Venus tab
   useEffect(() => {
     if (!showUnifiedMusicControls || !isMusicPlaying) return;
     const timer = setInterval(() => {
@@ -797,13 +437,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     }
   }, [isOnVenus, canRunAudioSession]);
 
-  // Keep YouTube embed synchronized with PlayerContext play/pause without reloading
   useEffect(() => {
     if (!liveEmbedSrc || !liveEmbedSrc.includes('youtube')) return;
     sendYouTubeCmd(isMusicPlaying ? 'playVideo' : 'pauseVideo');
   }, [isMusicPlaying, liveEmbedSrc, sendYouTubeCmd]);
 
-  // Direct synchronous play/pause triggers from VenusMusicSpace real-playback toggle switch
   useEffect(() => {
     const onTriggerPlay = () => {
       explicitStopMusicRef.current = false;
@@ -859,1050 +497,1010 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     };
   }, [canRunAudioSession, liveEmbedSrc, isOnVenus, musicPopoverOpen, showMiniVideo, currentTrack?.id]);
 
-  const stopOutputAudio = useCallback(() => {
-    ttsQueueRef.current = [];
-    ttsStreamDoneRef.current = true;
-    ttsDrainingRef.current = false;
-    ttsDoneCallbackRef.current = null;
-    currentSpokenTextRef.current = '';
+  // Build live page context snapshot on demand
+  const getPageContext = useCallback((): LivePageContextSummary => {
+    return collectLivePageContext({
+      currentTab,
+      theme,
+      lang,
+      isAuthenticated,
+      userName,
+      userCity,
+      music: player
+        ? {
+            isPlaying: player.state.isPlaying,
+            title: player.currentTrack?.title,
+            artist: player.currentTrack?.artist,
+            volume: Math.round((player.state.volume ?? 0.8) * 100),
+            muted: player.state.muted,
+          }
+        : undefined,
+    });
+  }, [currentTab, theme, lang, isAuthenticated, userName, userCity, player]);
 
-    if (ttsSafetyTimerRef.current) {
-      clearTimeout(ttsSafetyTimerRef.current);
-      ttsSafetyTimerRef.current = null;
-    }
-    if (ttsPauseTimerRef.current) {
-      clearTimeout(ttsPauseTimerRef.current);
-      ttsPauseTimerRef.current = null;
-    }
+  const proactiveSuggestions = useMemo(() => {
+    return collectLivePageContext({
+      currentTab,
+      theme,
+      lang,
+      isAuthenticated,
+      userName,
+      userCity,
+      music: player
+        ? {
+            isPlaying: player.state.isPlaying,
+            title: player.currentTrack?.title,
+            artist: player.currentTrack?.artist,
+            volume: Math.round((player.state.volume ?? 0.8) * 100),
+            muted: player.state.muted,
+          }
+        : undefined,
+    }).proactiveSuggestions;
+  }, [currentTab, theme, lang, isAuthenticated, userName, userCity, player, hudOpen]);
 
-    for (const ctrl of ttsFetchControllersRef.current) {
+  const controlHandlersRef = useRef<WebsiteControlHandlers>({
+    lang,
+    theme,
+    player,
+    getPageContext,
+  });
+  controlHandlersRef.current = {
+    lang,
+    theme,
+    player,
+    getPageContext,
+    onNavigateTab: props.onNavigateTab,
+    onFlyTo: props.onFlyTo,
+    onExploreUniverse: props.onExploreUniverse,
+    onOpenAIHub: props.onOpenAIHub,
+    onPlayMusicAction: props.onPlayMusicAction,
+    onOpenBookAction: props.onOpenBookAction,
+    onWatchDocumentaryAction: props.onWatchDocumentaryAction,
+    onBrowserSearchAction: props.onBrowserSearchAction,
+    onGlobalSearchAction: props.onGlobalSearchAction,
+    onSetTheme: props.onSetTheme,
+    onSetLang: props.onSetLang,
+    onSetImmersive: props.onSetImmersive,
+    onOpenCommandPalette: props.onOpenCommandPalette,
+    onReplayIntro: props.onReplayIntro,
+    onCreatePost: props.onCreatePost,
+    onCreateArticle: props.onCreateArticle,
+    onFilterCountry: props.onFilterCountry,
+    onToggleJoinCommunity: props.onToggleJoinCommunity,
+    onOpenBook: props.onOpenBook,
+    onOpenKnowledge: props.onOpenKnowledge,
+    onOpenProfile: props.onOpenProfile,
+    onOpenAuth: props.onOpenAuth,
+    onOpenSecurity: props.onOpenSecurity,
+    onToggleLocationPrivacy: props.onToggleLocationPrivacy,
+    onOpenMessages: props.onOpenMessages,
+    onOpenCalls: props.onOpenCalls,
+    onQuickCall: props.onQuickCall,
+  };
+
+  useEffect(() => {
+    if (hudOpen) {
+      transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [transcript, hudOpen]);
+
+  const appendEntry = useCallback(
+    (role: TranscriptEntry['role'], text: string, extra?: Partial<TranscriptEntry>) => {
+      const clean = text.trim();
+      if (!clean) return '';
+      const id = `${role}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      setTranscript((prev) => [...prev.slice(-24), { id, role, text: clean, ...extra }]);
+      return id;
+    },
+    []
+  );
+
+  // Stop all AI audio output immediately (< 5ms)
+  const stopAllOutputImmediately = useCallback((markInterrupted = true) => {
+    audioClientRef.current?.flushOutput();
+    if (fallbackAudioRef.current) {
       try {
-        ctrl.abort();
+        fallbackAudioRef.current.pause();
+        fallbackAudioRef.current.src = '';
       } catch {}
+      fallbackAudioRef.current = null;
     }
-    ttsFetchControllersRef.current.clear();
-
-    const audioEl = ttsAudioElRef.current;
-    if (audioEl) {
-      try {
-        audioEl.onended = null;
-        audioEl.onerror = null;
-        audioEl.pause();
-        audioEl.currentTime = 0;
-      } catch {}
-    }
-
-    for (const url of ttsBlobUrlsRef.current) {
-      try {
-        URL.revokeObjectURL(url);
-      } catch {}
-    }
-    ttsBlobUrlsRef.current.clear();
-
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel();
       } catch {}
     }
-    isTtsSpeakingRef.current = false;
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort();
+      } catch {}
+      abortControllerRef.current = null;
+    }
+
+    if (markInterrupted && currentOutputTurnIdRef.current) {
+      const targetId = currentOutputTurnIdRef.current;
+      setTranscript((prev) =>
+        prev.map((item) => (item.id === targetId ? { ...item, interrupted: true } : item))
+      );
+    }
+    currentOutputTurnIdRef.current = null;
+
+    if (voiceActiveRef.current) {
+      setPhase('listening');
+    } else if (phaseRef.current === 'speaking' || phaseRef.current === 'thinking') {
+      setPhase('idle');
+    }
   }, []);
 
-  /**
-   * Instant Barge-In: cancels in-flight DeepSeek HTTP request, TTS MP3 prefetch,
-   * HTMLAudio playback, and speech synthesis within milliseconds.
-   */
-  const interruptCurrentTurn = useCallback(() => {
-    turnEpochRef.current += 1;
-    if (liveWsRef.current && liveWsRef.current.readyState === WebSocket.OPEN && wsPendingTurnRef.current) {
+  const handleManualInterrupt = useCallback(() => {
+    stopAllOutputImmediately(true);
+    setEmotion('curious');
+    setEmotionReason(isZh ? '随时听你说' : 'All ears');
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
-        liveWsRef.current.send(JSON.stringify({ type: 'turn:cancel', turnId: wsPendingTurnRef.current.turnId }));
+        wsRef.current.send(JSON.stringify({ type: 'interrupt' }));
       } catch {}
-      wsPendingTurnRef.current = null;
     }
-    if (activeFetchAbortRef.current) {
+  }, [isZh, stopAllOutputImmediately]);
+
+  // Keep live Gemini session synced whenever user navigates or changes theme/music
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const timer = setTimeout(() => {
       try {
-        activeFetchAbortRef.current.abort();
+        ws.send(
+          JSON.stringify({
+            type: 'context',
+            pageContext: getPageContext(),
+          })
+        );
       } catch {}
-      activeFetchAbortRef.current = null;
-    }
-    isSendingRef.current = false;
-    stopOutputAudio();
-    if (sessionActiveRef.current) {
-      setPhase('listening');
-    }
-    return turnEpochRef.current;
-  }, [stopOutputAudio]);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [currentTab, theme, lang, isAuthenticated, player?.state.isPlaying, player?.currentTrack?.id, getPageContext]);
 
-  const stopSessionResources = useCallback(() => {
-    sessionActiveRef.current = false;
-    recStateRef.current = 'stopped';
-    turnEpochRef.current += 1;
-    isSendingRef.current = false;
-    setActiveEmotion(null);
-
-    if (wsPendingTurnRef.current) {
-      if (liveWsRef.current && liveWsRef.current.readyState === WebSocket.OPEN) {
-        try {
-          liveWsRef.current.send(JSON.stringify({ type: 'turn:cancel', turnId: wsPendingTurnRef.current.turnId }));
-        } catch {}
-      }
-      wsPendingTurnRef.current = null;
-    }
-    if (liveWsRef.current) {
-      try {
-        liveWsRef.current.close();
-      } catch {}
-      liveWsRef.current = null;
-    }
-
-    if (activeFetchAbortRef.current) {
-      try {
-        activeFetchAbortRef.current.abort();
-      } catch {}
-      activeFetchAbortRef.current = null;
-    }
-    if (restartTimerRef.current) {
-      clearTimeout(restartTimerRef.current);
-      restartTimerRef.current = null;
-    }
-    if (recKeepaliveTimerRef.current) {
-      clearInterval(recKeepaliveTimerRef.current);
-      recKeepaliveTimerRef.current = null;
-    }
-    if (speculativePauseTimerRef.current) {
-      clearTimeout(speculativePauseTimerRef.current);
-      speculativePauseTimerRef.current = null;
-    }
-    if (errorResetTimerRef.current) {
-      clearTimeout(errorResetTimerRef.current);
-      errorResetTimerRef.current = null;
-    }
-
-    stopOutputAudio();
-
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.onstart = null;
-        recognitionRef.current.onend = null;
-        recognitionRef.current.onresult = null;
-        recognitionRef.current.onerror = null;
-        recognitionRef.current.abort?.();
-        recognitionRef.current.stop?.();
-      } catch {}
-      recognitionRef.current = null;
-    }
-
+  const stopVoiceSession = useCallback(() => {
+    voiceActiveRef.current = false;
     setVoiceActive(false);
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    stopAllOutputImmediately(false);
+
+    if (speechRecRef.current) {
+      try {
+        speechRecRef.current.onend = null;
+        speechRecRef.current.onresult = null;
+        speechRecRef.current.abort?.();
+        speechRecRef.current.stop?.();
+      } catch {}
+      speechRecRef.current = null;
+    }
+    if (audioClientRef.current) {
+      audioClientRef.current.dispose();
+      audioClientRef.current = null;
+    }
+    if (wsRef.current) {
+      try {
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.close();
+      } catch {}
+      wsRef.current = null;
+    }
+    setEnergySnapshot({ input: 0, output: 0 });
     setPhase('idle');
     resumeMusicIfPausedForVoice();
-  }, [resumeMusicIfPausedForVoice, stopOutputAudio]);
+  }, [resumeMusicIfPausedForVoice, stopAllOutputImmediately]);
 
   useEffect(() => {
     return () => {
-      stopSessionResources();
+      stopVoiceSession();
     };
-  }, [stopSessionResources]);
+  }, [stopVoiceSession]);
 
-  const cleanSpeechSegment = (raw: string) =>
-    raw
-      .replace(/<think>[\s\S]*?<\/think>/g, '')
-      .replace(/\[\[EMO:[^\]]+\]\]/gi, '')
-      .replace(/\[\[ACTION:[\s\S]*?\]\]/g, '')
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/https?:\/\/\S+/g, '')
-      .replace(/[*_#`>]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-  // Prefetch /api/ai/tts MP3 audio blob for natural expressive female voice
-  const prefetchNeuralAudioUrl = useCallback(
-    async (phrase: ProsodyPhrase): Promise<string | null> => {
-      const ctrl = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 2400);
-      ttsFetchControllersRef.current.add(ctrl);
-      try {
-        const res = await fetch(
-          `/api/ai/tts?text=${encodeURIComponent(phrase.text)}&lang=${isZh ? 'zh' : 'en'}&spd=${phrase.baiduSpd}&emotion=${phrase.emotion}`,
-          { signal: ctrl.signal }
-        );
-        if (!res.ok) return null;
-        const blob = await res.blob();
-        if (blob.size < 400) return null;
-        const objUrl = URL.createObjectURL(blob);
-        ttsBlobUrlsRef.current.add(objUrl);
-        return objUrl;
-      } catch {
-        return null;
-      } finally {
-        clearTimeout(timeout);
-        ttsFetchControllersRef.current.delete(ctrl);
-      }
-    },
-    [isZh]
-  );
-
-  // Fallback expressive browser SpeechSynthesis using phrase-level pitch & rate contour
-  const speakPhraseViaBrowserSpeech = useCallback(
-    (phrase: ProsodyPhrase, onDone: () => void) => {
-      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-        onDone();
+  // Speak via Gemini TTS (/api/ai/tts) or SpeechSynthesis fallback
+  const speakFallbackReply = useCallback(
+    async (text: string, replyEmotion: CompanionEmotion) => {
+      if (mutedOutputRef.current) {
+        resumeMusicIfPausedForVoice();
         return;
       }
-      try {
-        const utt = new SpeechSynthesisUtterance(phrase.text.slice(0, 260));
-        const sweetVoice = preferredVoiceRef.current || pickSweetVoice(isZh);
-        if (sweetVoice) {
-          utt.voice = sweetVoice;
-          utt.lang = sweetVoice.lang || (isZh ? 'zh-CN' : 'en-US');
-        } else {
-          utt.lang = isZh ? 'zh-CN' : 'en-US';
-        }
-        utt.pitch = phrase.pitch;
-        utt.rate = phrase.rate;
-        utt.volume = 1;
-
-        let finished = false;
-        const finish = () => {
-          if (finished) return;
-          finished = true;
-          if (ttsSafetyTimerRef.current) {
-            clearTimeout(ttsSafetyTimerRef.current);
-            ttsSafetyTimerRef.current = null;
-          }
-          onDone();
-        };
-        utt.onend = finish;
-        utt.onerror = finish;
-        ttsSafetyTimerRef.current = setTimeout(
-          finish,
-          Math.max(2200, Math.min(12000, phrase.text.length * 220))
-        );
-        try {
-          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-        } catch {}
-        window.speechSynthesis.speak(utt);
-      } catch {
-        onDone();
-      }
-    },
-    [isZh]
-  );
-
-  const pumpTtsQueue = useCallback(
-    async (epoch: number) => {
-      if (epoch !== turnEpochRef.current || ttsDrainingRef.current) return;
-      const nextItem = ttsQueueRef.current.shift();
-      if (!nextItem) {
-        if (ttsStreamDoneRef.current) {
-          isTtsSpeakingRef.current = false;
-          currentSpokenTextRef.current = '';
-          if (sessionActiveRef.current) setPhase('listening');
-          const cb = ttsDoneCallbackRef.current;
-          ttsDoneCallbackRef.current = null;
-          cb?.();
-        }
+      const clean = text.replace(/[*_#`>]/g, '').trim();
+      if (!clean) {
+        resumeMusicIfPausedForVoice();
         return;
       }
 
-      ttsDrainingRef.current = true;
-      isTtsSpeakingRef.current = true;
-      currentSpokenTextRef.current = nextItem.phrase.text;
+      pauseMusicForVoice(false);
       setPhase('speaking');
-
-      const advanceNext = (pauseMs: number) => {
-        if (epoch !== turnEpochRef.current) {
-          ttsDrainingRef.current = false;
-          return;
-        }
-        ttsPauseTimerRef.current = setTimeout(() => {
-          ttsDrainingRef.current = false;
-          if (epoch === turnEpochRef.current) {
-            void pumpTtsQueue(epoch);
+      try {
+        const res = await fetch('/api/ai/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: clean,
+            emotion: replyEmotion,
+            voiceName: voiceNameRef.current,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.success && data.audioBase64) {
+            const audio = new Audio(`data:audio/wav;base64,${data.audioBase64}`);
+            fallbackAudioRef.current = audio;
+            const finishPlayback = () => {
+              fallbackAudioRef.current = null;
+              setPhase(voiceActiveRef.current ? 'listening' : 'idle');
+              resumeMusicIfPausedForVoice();
+            };
+            audio.onended = finishPlayback;
+            audio.onerror = finishPlayback;
+            await audio.play();
+            return;
           }
-        }, pauseMs);
-      };
-
-      const finishPhrase = () => {
-        if (ttsSafetyTimerRef.current) {
-          clearTimeout(ttsSafetyTimerRef.current);
-          ttsSafetyTimerRef.current = null;
         }
-        advanceNext(nextItem.phrase.pauseAfterMs);
-      };
-
-      // If browser already has a genuine neural voice (Edge Xiaoxiao/Jenny or Apple Enhanced), speak natively with expressive prosody
-      const nativeVoice = preferredVoiceRef.current || pickSweetVoice(isZh);
-      if (isAuthenticNeuralVoice(nativeVoice)) {
-        speakPhraseViaBrowserSpeech(nextItem.phrase, finishPhrase);
-        return;
+      } catch {
+        // fallback to Web Speech API
       }
 
-      // Use fast Google-backed neural MP3 audio (~165ms) with a generous 1750ms deadline before browser fallback
-      const blobUrl = nextItem.audioPromise
-        ? await Promise.race([
-            nextItem.audioPromise,
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1750)),
-          ])
-        : null;
-      if (epoch !== turnEpochRef.current) {
-        ttsDrainingRef.current = false;
-        return;
-      }
-
-      const audioEl = blobUrl ? ensureTtsAudioUnlocked() : null;
-      if (blobUrl && audioEl) {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         try {
-          if (ttsAudioCtxRef.current?.state === 'suspended') {
-            await ttsAudioCtxRef.current.resume().catch(() => {});
-          }
-          audioEl.pause();
-          audioEl.src = blobUrl;
-          (audioEl as any).preservesPitch = true;
-          (audioEl as any).webkitPreservesPitch = true;
-          audioEl.playbackRate = nextItem.phrase.audioPlaybackRate || 1.16;
-          audioEl.volume = 1;
-
-          let settled = false;
-          const onClipEnd = () => {
-            if (settled) return;
-            settled = true;
-            audioEl.onended = null;
-            audioEl.onerror = null;
-            ttsBlobUrlsRef.current.delete(blobUrl);
-            try {
-              URL.revokeObjectURL(blobUrl);
-            } catch {}
-            finishPhrase();
+          window.speechSynthesis.cancel();
+          const utt = new SpeechSynthesisUtterance(clean.slice(0, 420));
+          utt.lang = isZh ? 'zh-CN' : 'en-US';
+          utt.rate = replyEmotion === 'excited' ? 1.12 : replyEmotion === 'concerned' ? 0.96 : 1.04;
+          utt.pitch = replyEmotion === 'excited' || replyEmotion === 'playful' ? 1.1 : 1.02;
+          const finishUtt = () => {
+            setPhase(voiceActiveRef.current ? 'listening' : 'idle');
+            resumeMusicIfPausedForVoice();
           };
-          const onClipError = () => {
-            if (settled) return;
-            settled = true;
-            audioEl.onended = null;
-            audioEl.onerror = null;
-            speakPhraseViaBrowserSpeech(nextItem.phrase, finishPhrase);
-          };
-
-          audioEl.onended = onClipEnd;
-          audioEl.onerror = onClipError;
-          ttsSafetyTimerRef.current = setTimeout(
-            onClipEnd,
-            Math.max(2600, Math.min(14000, nextItem.phrase.text.length * 260))
-          );
-
-          await audioEl.play();
+          utt.onend = finishUtt;
+          utt.onerror = finishUtt;
+          window.speechSynthesis.speak(utt);
           return;
-        } catch {
-          if (ttsSafetyTimerRef.current) {
-            clearTimeout(ttsSafetyTimerRef.current);
-            ttsSafetyTimerRef.current = null;
-          }
-          audioEl.onended = null;
-          audioEl.onerror = null;
-          ttsBlobUrlsRef.current.delete(blobUrl);
-          try {
-            URL.revokeObjectURL(blobUrl);
-          } catch {}
-        }
+        } catch {}
       }
-
-      speakPhraseViaBrowserSpeech(nextItem.phrase, finishPhrase);
+      setPhase(voiceActiveRef.current ? 'listening' : 'idle');
+      resumeMusicIfPausedForVoice();
     },
-    [ensureTtsAudioUnlocked, isZh, speakPhraseViaBrowserSpeech]
+    [isZh, pauseMusicForVoice, resumeMusicIfPausedForVoice]
   );
 
-  const enqueueEmotionalText = useCallback(
-    (rawText: string, epoch: number, explicitEmotion?: VoiceEmotion | null) => {
-      if (epoch !== turnEpochRef.current) return;
-      const cleaned = cleanSpeechSegment(rawText);
-      if (!cleaned) return;
-
-      const analysis = analyzeDialogueEmotion(
-        currentUserTurnRef.current,
-        cleaned,
-        explicitEmotion
-      );
-      setActiveEmotion(analysis);
-
-      const nativeNeural = isAuthenticNeuralVoice(preferredVoiceRef.current || pickSweetVoice(isZh));
-      const phrases = buildExpressivePhrases(cleaned, analysis, nativeNeural ? 'speech' : 'audio');
-      for (const phrase of phrases) {
-        const audioPromise = nativeNeural ? null : prefetchNeuralAudioUrl(phrase);
-        ttsQueueRef.current.push({ phrase, audioPromise });
-      }
-      void pumpTtsQueue(epoch);
-    },
-    [isZh, prefetchNeuralAudioUrl, pumpTtsQueue]
-  );
-
-  const speakDeepSeekReply = useCallback(
-    (text: string, epoch: number, explicitEmotion?: VoiceEmotion | null, onDone?: () => void) => {
-      if (epoch !== turnEpochRef.current) return;
-      stopOutputAudio();
-      const extracted = extractEmotionTag(text);
-      const cleaned = cleanSpeechSegment(extracted.text);
-      if (!cleaned) {
-        onDone?.();
-        return;
-      }
-      ttsStreamDoneRef.current = true;
-      ttsDoneCallbackRef.current = onDone || null;
-      enqueueEmotionalText(cleaned.slice(0, 420), epoch, explicitEmotion || extracted.emotion);
-    },
-    [enqueueEmotionalText, stopOutputAudio]
-  );
-
-  const runDeepSeekTurn = useCallback(
-    async (userText: string) => {
-      const clean = userText.trim();
+  // Fallback text/action turn via /api/ai/companion-turn
+  const runCompanionTurnApi = useCallback(
+    async (userPrompt: string, speakOut: boolean) => {
+      const clean = userPrompt.trim();
       if (!clean) return;
 
-      // Clear any pending speculative music resume timer because a real voice turn has committed
-      if (speculativePauseTimerRef.current) {
-        clearTimeout(speculativePauseTimerRef.current);
-        speculativePauseTimerRef.current = null;
-      }
-      // Supersede any active speaking or streaming turn immediately (true instant barge-in)
-      const myEpoch = interruptCurrentTurn();
-      explicitStopMusicRef.current = false;
-      currentUserTurnRef.current = clean;
-      isSendingRef.current = true;
-      const shouldSpeak = sessionActiveRef.current;
-
-      if (/^(休眠|退出语音|关闭语音|别听我说话|go to sleep|stop listening)$/i.test(clean)) {
-        try { localStorage.setItem('one-voice-always-on:v1', '0'); } catch {}
-        stopSessionResources();
-        return;
-      }
-
-      historyRef.current = [...historyRef.current.slice(-20), { role: 'user', content: clean }];
-      const priorHistory = historyRef.current.slice(0, -1);
-
-      // 1. Instant local command dispatch (<1ms, zero network wait) with context-aware anti-hijack guard
-      const instantAction = parseInstantAgentAction(clean, isZh, priorHistory);
-      if (instantAction && instantAction.type !== 'none') {
-        const isMusicAction = instantAction.type === 'play_music';
-        if (!isMusicAction) {
-          pauseMusicForVoice();
-        }
-        const executed = executeParsedAction(instantAction, clean.toLowerCase());
-        if (!executed) {
-          if (myEpoch === turnEpochRef.current) {
-            isSendingRef.current = false;
-            setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-            if (!isMusicAction) resumeMusicIfPausedForVoice();
-          }
-          return;
-        }
-        const extractedReply = extractEmotionTag(instantAction.reply);
-        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: extractedReply.text }];
-        const isMediaPlayback =
-          (instantAction.type === 'play_music' && !instantAction.control) ||
-          (instantAction.type === 'play_music' && (instantAction.control === 'resume' || instantAction.control === 'next' || instantAction.control === 'prev')) ||
-          instantAction.type === 'watch_documentary';
-
-        if (shouldSpeak && !isMediaPlayback) {
-          speakDeepSeekReply(extractedReply.text, myEpoch, extractedReply.emotion, () => {
-            if (myEpoch === turnEpochRef.current) {
-              isSendingRef.current = false;
-              setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-              if (!isMusicAction) resumeMusicIfPausedForVoice();
-            }
-          });
-        } else {
-          if (isMediaPlayback) stopOutputAudio();
-          if (myEpoch === turnEpochRef.current) {
-            isSendingRef.current = false;
-            setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-          }
-        }
-        return;
-      }
-
-      // Pause active music while user converses with One., and resume automatically afterward
-      pauseMusicForVoice();
-
-      // 2. Exact Precision Solver (<1ms, 100% mathematically/factually exact — zero hallucination)
-      const precision = solvePrecisionQuery(clean, isZh);
-      if (precision) {
-        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: precision.answer }];
-        if (shouldSpeak) {
-          speakDeepSeekReply(precision.answer, myEpoch, (precision as any).emotion as any, () => {
-            if (myEpoch === turnEpochRef.current) {
-              isSendingRef.current = false;
-              setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-              resumeMusicIfPausedForVoice();
-            }
-          });
-        } else {
-          stopOutputAudio();
-          isSendingRef.current = false;
-          setPhase('idle');
-          resumeMusicIfPausedForVoice();
-        }
-        return;
-      }
-
-      // 3. Instant natural conversation (<1ms, responds immediately to greetings & daily chat)
-      const banterRaw = priorHistory.length === 0 ? matchPureSocialBanter(clean, isZh) : null;
-      if (banterRaw) {
-        const banterParsed = extractEmotionTag(banterRaw);
-        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: banterParsed.text }];
-        if (shouldSpeak) {
-          speakDeepSeekReply(banterParsed.text, myEpoch, banterParsed.emotion, () => {
-            if (myEpoch === turnEpochRef.current) {
-              isSendingRef.current = false;
-              setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-              resumeMusicIfPausedForVoice();
-            }
-          });
-        } else {
-          stopOutputAudio();
-          isSendingRef.current = false;
-          setPhase('idle');
-          resumeMusicIfPausedForVoice();
-        }
-        return;
-      }
-
-      // 4. Live DeepSeek-V3 / WebSocket / Live Knowledge Engine streaming turn with AbortController barge-in
+      stopAllOutputImmediately(true);
+      setIsSendingText(true);
       setPhase('thinking');
-      stopOutputAudio();
-      ttsStreamDoneRef.current = false;
-      ttsDoneCallbackRef.current = () => {
-        if (myEpoch === turnEpochRef.current) {
-          isSendingRef.current = false;
-          setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-          resumeMusicIfPausedForVoice();
+      appendEntry('user', clean);
+
+      const recentHistory = transcript
+        .filter((t) => t.role === 'user' || t.role === 'assistant')
+        .slice(-8)
+        .map((t) => ({ role: t.role as 'user' | 'assistant', content: t.text }));
+
+      // Instant deterministic fast-path for crisp single commands (compound/emotional prompts go to Gemini)
+      const isCompoundOrEmotional =
+        clean.length > 18 ||
+        /(?:有点|好累|疲惫|难过|开心|记住|顺便|并|并且|而且|然后|同时|顺手|\band\b|\bthen\b|\balso\b)/i.test(clean);
+      const instant = isCompoundOrEmotional ? null : parseInstantAgentAction(clean, isZh, recentHistory);
+      if (instant && instant.type !== 'none') {
+        if (instant.type === 'play_music') {
+          if (instant.control === 'stop' || instant.control === 'pause') {
+            explicitStopMusicRef.current = true;
+            pausedMusicForVoiceRef.current = false;
+          } else {
+            explicitStopMusicRef.current = false;
+          }
+          await executeGeminiToolCall(
+            'control_music_player',
+            instant.control
+              ? { action: instant.control === 'prev' ? 'previous' : instant.control }
+              : { action: 'play_query', query: instant.query },
+            controlHandlersRef.current
+          );
+          setEmotion(instant.control === 'stop' ? 'calm' : 'happy');
+        } else if (instant.type === 'watch_documentary') {
+          await executeGeminiToolCall(
+            'watch_cinema_video',
+            { query: instant.query, platform: instant.platform, autoPlay: true },
+            controlHandlersRef.current
+          );
+          setEmotion('excited');
+        } else if (instant.type === 'open_book') {
+          await executeGeminiToolCall('open_book_action', { query: instant.query }, controlHandlersRef.current);
+          setEmotion('curious');
+        } else if (instant.type === 'navigate_tab') {
+          await executeGeminiToolCall('navigate_to_space', { space: instant.tab }, controlHandlersRef.current);
+          setEmotion('focused');
+        } else if (instant.type === 'browser_search') {
+          await executeGeminiToolCall(
+            'browser_and_search',
+            { mode: 'browser_url_or_search', query: instant.query },
+            controlHandlersRef.current
+          );
+          setEmotion('curious');
+        } else if (instant.type === 'fly_to') {
+          await executeGeminiToolCall(
+            'control_earth_globe',
+            { action: 'fly_to', lat: instant.lat, lng: instant.lng, placeName: instant.place },
+            controlHandlersRef.current
+          );
+          setEmotion('excited');
+        } else if (instant.type === 'set_theme') {
+          await executeGeminiToolCall('control_appearance', { theme: instant.theme }, controlHandlersRef.current);
+          setEmotion('happy');
+        } else if (instant.type === 'set_language') {
+          await executeGeminiToolCall('control_appearance', { language: instant.lang }, controlHandlersRef.current);
+          setEmotion('happy');
         }
-      };
+        appendEntry('assistant', instant.reply, { emotion: emotionRef.current });
+        setIsSendingText(false);
+        if (speakOut) {
+          void speakFallbackReply(instant.reply, emotionRef.current);
+        } else {
+          setPhase(voiceActiveRef.current ? 'listening' : 'idle');
+        }
+        return;
+      }
 
-      const controller = new AbortController();
-      activeFetchAbortRef.current = controller;
-
-      const activeDeepSeekModel = modelIdRef.current.startsWith('deepseek')
-        ? modelIdRef.current
-        : 'deepseek-v3';
+      const ac = new AbortController();
+      abortControllerRef.current = ac;
 
       try {
-        let rawReply = '';
-        let actionResolved = false;
-        let mediaActionTriggered = false;
-        let spokenOffset = 0;
-        let detectedEmotion: VoiceEmotion | null = null;
+        const res = await fetch('/api/ai/companion-turn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: ac.signal,
+          body: JSON.stringify({
+            prompt: clean,
+            lang,
+            profileKey: profileKeyRef.current,
+            pageContext: getPageContext(),
+            history: recentHistory,
+          }),
+        });
 
-        const handleStreamDelta = (delta: string) => {
-          if (myEpoch !== turnEpochRef.current) return;
-          rawReply += delta;
+        const data = await res.json().catch(() => ({}));
+        if (ac.signal.aborted) return;
 
-          const trimmedStart = rawReply.trimStart();
-          const waitingForBracket =
-            trimmedStart.startsWith('[') && !trimmedStart.includes(']]') && trimmedStart.length < 180;
-          if (!actionResolved && waitingForBracket) return;
+        if (res.ok && data?.success) {
+          let nextEmotion = (EMOTION_META[data.emotion as CompanionEmotion]
+            ? data.emotion
+            : 'calm') as CompanionEmotion;
 
-          const parsed = extractInlineAgentDirective(rawReply);
-          if (parsed.emotion) detectedEmotion = parsed.emotion as any;
-          if (!actionResolved) {
-            actionResolved = true;
-            if (parsed.action && parsed.action.type !== 'none') {
-              executeParsedAction(parsed.action, parsed.spokenText || rawReply.slice(0,80));
-              if (
-                (parsed.action.type === 'play_music' && !parsed.action.control) ||
-                (parsed.action.type === 'play_music' && parsed.action.control === 'resume') ||
-                parsed.action.type === 'watch_documentary'
-              ) {
-                mediaActionTriggered = true;
-                stopOutputAudio();
+          const actionSummaries: string[] = [];
+          if (Array.isArray(data.toolCalls)) {
+            for (const tc of data.toolCalls) {
+              if (tc.name === 'control_music_player') {
+                const act = String(tc.args?.action || '');
+                if (act === 'stop' || act === 'pause') {
+                  explicitStopMusicRef.current = true;
+                  pausedMusicForVoiceRef.current = false;
+                } else {
+                  explicitStopMusicRef.current = false;
+                }
+              }
+              const fb = await executeGeminiToolCall(tc.name, tc.args || {}, controlHandlersRef.current);
+              if (fb.summary) {
+                actionSummaries.push(fb.summary);
+                appendEntry('action', fb.summary);
               }
             }
           }
 
-          if (!shouldSpeak || mediaActionTriggered) return;
+          const finalReply =
+            (typeof data.reply === 'string' && data.reply.trim()) ||
+            (actionSummaries.length > 0
+              ? isZh
+                ? `好的，已经为你搞定：${actionSummaries.join('、')}。`
+                : `All set! ${actionSummaries.join(', ')}.`
+              : resolveConversationalFallback(clean, isZh));
 
-          const spokenTrim = parsed.spokenText.trimStart();
-          if (spokenTrim.startsWith('[[EMO:') && !spokenTrim.includes(']]') && spokenTrim.length < 40) {
-            return;
+          // Also enrich emotion with local dialogue analysis if model stayed neutral
+          if (nextEmotion === 'calm') {
+            const analyzed = analyzeDialogueEmotion(clean, finalReply);
+            nextEmotion = mapVoiceEmotionToCompanion(analyzed.emotion);
+            setEmotionIntensity(analyzed.intensity);
+          } else {
+            setEmotionIntensity(typeof data.emotionIntensity === 'number' ? data.emotionIntensity : 0.78);
           }
 
-          const emoExtracted = extractEmotionTag(parsed.spokenText);
-          if (emoExtracted.emotion) detectedEmotion = emoExtracted.emotion;
+          setEmotion(nextEmotion);
+          setEmotionReason(typeof data.emotionReason === 'string' ? data.emotionReason : '');
 
-          const display = emoExtracted.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '');
-          const unuttered = display.slice(spokenOffset);
-          if (!unuttered) return;
-
-          const breakMatch = unuttered.match(/^([\s\S]*?[。！？!?;；\n]|[\s\S]{4,}?[，,、])/);
-          if (breakMatch) {
-            const segment = breakMatch[1];
-            spokenOffset += segment.length;
-            enqueueEmotionalText(segment, myEpoch, detectedEmotion);
+          currentOutputTurnIdRef.current = appendEntry('assistant', finalReply, { emotion: nextEmotion });
+          if (speakOut) {
+            void speakFallbackReply(finalReply, nextEmotion);
+          } else {
+            setPhase(voiceActiveRef.current ? 'listening' : 'idle');
           }
-        };
-
-        const ws = liveWsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          const turnId = `ws_${myEpoch}_${Date.now()}`;
-          await new Promise<{ rawReply: string }>((resolve, reject) => {
-            wsPendingTurnRef.current = {
-              turnId,
-              epoch: myEpoch,
-              resolve: (out) => resolve(out),
-              reject,
-              onDelta: handleStreamDelta,
-              rawReply: '',
-            };
-            ws.send(
-              JSON.stringify({
-                type: 'turn:input',
-                turnId,
-                text: clean,
-                modelId: activeDeepSeekModel,
-                mode: 'voice-agent',
-                maxTokens: 200,
-                profileKey: profileKeyRef.current,
-                history: priorHistory.slice(-16),
-                pageContext: formatPageContextForPrompt(capturePageContext({ currentTab, lang: (lang === 'ar' ? 'zh' : lang) as any, isLoggedIn: Boolean((window as any).__oneIsLoggedIn), music: player?.currentTrack ? { isPlaying: Boolean(player?.state?.isPlaying), title: player.currentTrack.title, artist: player.currentTrack.artist, source: (player.currentTrack as any).source } : { isPlaying: false } })),
-              })
-            );
-          }).catch(async (wsErr) => {
-            if (wsErr?.name === 'AbortError' || myEpoch !== turnEpochRef.current) throw wsErr;
-            // Transparently fall back to HTTP NDJSON stream if WS dropped mid-turn
-            rawReply = '';
-            spokenOffset = 0;
-            actionResolved = false;
-            const res = await fetch('/api/ai/chat', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              signal: controller.signal,
-              body: JSON.stringify({
-                prompt: clean,
-                modelId: activeDeepSeekModel,
-                mode: 'voice-agent',
-                maxTokens: 200,
-                stream: true,
-                profileKey: profileKeyRef.current,
-                history: priorHistory.slice(-16),
-                pageContext: formatPageContextForPrompt(capturePageContext({ currentTab, lang: (lang === 'ar' ? 'zh' : lang) as any, isLoggedIn: Boolean((window as any).__oneIsLoggedIn), music: player?.currentTrack ? { isPlaying: Boolean(player?.state?.isPlaying), title: player.currentTrack.title, artist: player.currentTrack.artist, source: (player.currentTrack as any).source } : { isPlaying: false } })),
-              }),
-            });
-            await readAIStream(res, handleStreamDelta);
-          });
         } else {
-          const res = await fetch('/api/ai/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal,
-            body: JSON.stringify({
-              prompt: clean,
-              modelId: activeDeepSeekModel,
-              mode: 'voice-agent',
-              maxTokens: 200,
-              stream: true,
-              profileKey: profileKeyRef.current,
-              history: priorHistory.slice(-16),
-              pageContext: formatPageContextForPrompt(capturePageContext({ currentTab, lang: (lang === 'ar' ? 'zh' : lang) as any, isLoggedIn: Boolean((window as any).__oneIsLoggedIn), music: player?.currentTrack ? { isPlaying: Boolean(player?.state?.isPlaying), title: player.currentTrack.title, artist: player.currentTrack.artist, source: (player.currentTrack as any).source } : { isPlaying: false } })),
-            }),
-          });
-          await readAIStream(res, handleStreamDelta);
-        }
-
-        if (myEpoch !== turnEpochRef.current) return;
-        activeFetchAbortRef.current = null;
-
-        const finalParsed = extractInlineAgentDirective(rawReply);
-        if (finalParsed.emotion) detectedEmotion = finalParsed.emotion as any;
-        if (!actionResolved && finalParsed.action && finalParsed.action.type !== 'none') {
-          executeParsedAction(finalParsed.action, finalParsed.spokenText || rawReply.slice(0,80));
-          if (
-            (finalParsed.action.type === 'play_music' && !finalParsed.action.control) ||
-            (finalParsed.action.type === 'play_music' && finalParsed.action.control === 'resume') ||
-            finalParsed.action.type === 'watch_documentary'
-          ) {
-            mediaActionTriggered = true;
-            stopOutputAudio();
-          }
-        }
-
-        const emoFinal = extractEmotionTag(finalParsed.spokenText.replace(/<think>[\s\S]*?<\/think>/g, '').trim());
-        const resolvedEmotion = emoFinal.emotion || detectedEmotion;
-        const cleanedReply = emoFinal.text.trim();
-        const fallbackParsed = extractEmotionTag(resolveConversationalFallback(clean, isZh));
-        const finalText = cleanedReply || fallbackParsed.text;
-        const finalEmotion = resolvedEmotion || fallbackParsed.emotion;
-
-        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: finalText }];
-
-        if (!shouldSpeak || mediaActionTriggered) {
-          stopOutputAudio();
-          isSendingRef.current = false;
-          setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-          if (!mediaActionTriggered) resumeMusicIfPausedForVoice();
-          return;
-        }
-
-        ttsStreamDoneRef.current = true;
-        const remainder = cleanedReply ? cleanedReply.slice(spokenOffset) : finalText;
-        if (cleanSpeechSegment(remainder)) {
-          enqueueEmotionalText(remainder, myEpoch, finalEmotion);
-        } else if (!ttsDrainingRef.current && ttsQueueRef.current.length === 0) {
-          ttsDoneCallbackRef.current = null;
-          isSendingRef.current = false;
-          setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-          resumeMusicIfPausedForVoice();
+          const fallback = resolveConversationalFallback(clean, isZh);
+          setEmotion('concerned');
+          setEmotionReason(isZh ? '网络波动' : 'Connection hiccup');
+          appendEntry('assistant', fallback, { emotion: 'concerned' });
+          setPhase(voiceActiveRef.current ? 'listening' : 'idle');
         }
       } catch (err: any) {
-        if (err?.name === 'AbortError' || myEpoch !== turnEpochRef.current) {
-          return;
+        if (err?.name !== 'AbortError') {
+          const fallback = resolveConversationalFallback(clean, isZh);
+          setEmotion('concerned');
+          appendEntry('assistant', fallback, { emotion: 'concerned' });
+          setPhase(voiceActiveRef.current ? 'listening' : 'idle');
         }
-        activeFetchAbortRef.current = null;
-        const fallbackRaw = resolveConversationalFallback(
-          clean,
-          isZh,
-          err instanceof Error ? err.message : undefined
-        );
-        const fallbackParsed = extractEmotionTag(fallbackRaw);
-        historyRef.current = [...historyRef.current.slice(-20), { role: 'assistant', content: fallbackParsed.text }];
-        if (shouldSpeak) {
-          speakDeepSeekReply(fallbackParsed.text, myEpoch, fallbackParsed.emotion, () => {
-            if (myEpoch === turnEpochRef.current) {
-              isSendingRef.current = false;
-              setPhase(sessionActiveRef.current ? 'listening' : 'idle');
-              resumeMusicIfPausedForVoice();
-            }
-          });
-        } else {
-          stopOutputAudio();
-          isSendingRef.current = false;
-          setPhase('idle');
-          resumeMusicIfPausedForVoice();
-        }
+      } finally {
+        setIsSendingText(false);
       }
     },
-    [
-      enqueueEmotionalText,
-      executeParsedAction,
-      interruptCurrentTurn,
-      isZh,
-      pauseMusicForVoice,
-      resumeMusicIfPausedForVoice,
-      speakDeepSeekReply,
-      stopOutputAudio,
-      stopSessionResources,
-    ]
+    [appendEntry, getPageContext, isZh, lang, speakFallbackReply, stopAllOutputImmediately, transcript]
   );
 
-  const runDeepSeekTurnRef = useRef(runDeepSeekTurn);
-  runDeepSeekTurnRef.current = runDeepSeekTurn;
-
-  // Instant Continuous Voice Session with Real-Time Barge-In & Self-Healing Watchdog
-  const startDeepSeekVoiceSession = useCallback(() => {
-    stopSessionResources();
-
+  // Fallback Web SpeechRecognition loop when Gemini Live WS is unavailable
+  const startSpeechRecognitionFallback = useCallback(() => {
+    setLiveModeEngine('companion-api');
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) {
-      setVoiceActive(false);
       setPhase('error');
-      errorResetTimerRef.current = setTimeout(() => {
-        if (!sessionActiveRef.current) setPhase('idle');
-      }, 2800);
+      setEmotion('concerned');
+      setEmotionReason(isZh ? '浏览器不支持语音识别，可打字对话' : 'Speech recognition unavailable; use text input');
       return;
     }
 
-    sessionActiveRef.current = true;
-    recRetryDelayRef.current = 180;
-    setVoiceActive(true);
-    setPhase('connecting');
-    ensureLiveWs();
-
-    // Unlock BOTH HTMLAudioElement + Web Speech Synthesis synchronously when inside user gesture
-    ensureTtsAudioUnlocked();
-    try {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const primer = new SpeechSynthesisUtterance('');
-        primer.volume = 0;
-        window.speechSynthesis.speak(primer);
-      }
-    } catch {}
-
-    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-    const isAppleTouch =
-      /iPad|iPhone|iPod/i.test(ua) ||
-      (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-    const scheduleLaunch = (delayMs: number) => {
-      if (!sessionActiveRef.current) return;
-      if (restartTimerRef.current) {
-        clearTimeout(restartTimerRef.current);
-      }
-      restartTimerRef.current = setTimeout(() => {
-        restartTimerRef.current = null;
-        launchRecognizer();
-      }, delayMs);
-    };
-
-    const launchRecognizer = () => {
-      if (!sessionActiveRef.current) return;
-      if (recStateRef.current === 'starting' || recStateRef.current === 'running') return;
-
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.onstart = null;
-          recognitionRef.current.onend = null;
-          recognitionRef.current.onresult = null;
-          recognitionRef.current.onerror = null;
-          recognitionRef.current.abort?.();
-        } catch {}
-        recognitionRef.current = null;
-      }
-
+    const launch = () => {
+      if (!voiceActiveRef.current) return;
       try {
-        recStateRef.current = 'starting';
         const rec = new SpeechRec();
-        rec.lang = isZhRef.current ? 'zh-CN' : 'en-US';
-        rec.continuous = !isAppleTouch;
+        rec.lang = isZh ? 'zh-CN' : 'en-US';
+        rec.continuous = true;
         rec.interimResults = true;
-
         rec.onstart = () => {
-          recStateRef.current = 'running';
-          recRetryDelayRef.current = 180;
-          if (sessionActiveRef.current && !isTtsSpeakingRef.current && !isSendingRef.current) {
-            setPhase('listening');
-          }
+          if (voiceActiveRef.current) setPhase('listening');
         };
-
-        let interimActionTimer: ReturnType<typeof setTimeout> | null = null;
-
         rec.onresult = (e: any) => {
-          if (!sessionActiveRef.current) return;
-          let interim = '';
-          let finalSegment = '';
-          let minFinalConf = 1;
+          let finalText = '';
+          let interimText = '';
           for (let i = e.resultIndex; i < e.results.length; i++) {
-            const res = e.results[i];
-            const conf = Number(res[0]?.confidence ?? 0);
-            if (res.isFinal) {
-              finalSegment += res[0].transcript;
-              if (conf > 0 && conf < minFinalConf) minFinalConf = conf;
-            } else {
-              interim += res[0].transcript;
-            }
+            if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+            else interimText += e.results[i][0].transcript;
           }
-
-          const normClean = (s: string) => s.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
-          const spokenNorm = normClean(currentSpokenTextRef.current);
-          const interimClean = interim.trim();
-          const finalClean = finalSegment.trim();
-          const liveZh = isZhRef.current;
-          const musicNowPlaying = Boolean(playerRef.current?.state.isPlaying || isMusicPlayingRef.current);
-
-          const isEchoOfAi =
-            isTtsSpeakingRef.current &&
-            interimClean.length < 12 &&
-            spokenNorm &&
-            normClean(interimClean).length >= 2 &&
-            spokenNorm.includes(normClean(interimClean));
-
-          const interimAction = interimClean.length >= 2
-            ? parseInstantAgentAction(interimClean, liveZh, historyRef.current)
-            : null;
-          const isPureTransportInterim = Boolean(
-            interimAction && interimAction.type === 'play_music' && interimAction.control
-          );
-          const instantInterimMatch = Boolean(
-            interimClean.length >= 2 &&
-              (isPureTransportInterim ||
-                solvePrecisionQuery(interimClean, liveZh) ||
-                (historyRef.current.length === 0 && matchPureSocialBanter(interimClean, liveZh)))
-          );
-
-          const looksLikeIntentWhileMusic =
-            instantInterimMatch ||
-            Boolean(interimAction) ||
-            /^(one|你好|在吗|停止|停下|暂停|下一首|换歌|今天|现在|帮我|我在)/i.test(interimClean) ||
-            interimClean.length >= 4;
-
-          // Real-time Barge-In: only pause music eagerly on clear speech (never stray 2-char lyrics)
-          if (interimClean.length >= 2 && !isEchoOfAi) {
-            if (!musicNowPlaying || looksLikeIntentWhileMusic) {
-              pauseMusicForVoice(true);
-            }
-            if (isTtsSpeakingRef.current || isSendingRef.current) {
-              interruptCurrentTurn();
-            }
+          // Instant interruption on first detected speech
+          if ((interimText.trim() || finalText.trim()) && phaseRef.current === 'speaking') {
+            stopAllOutputImmediately(true);
+            setEmotion('curious');
+            setEmotionReason(isZh ? '我在听，你说' : 'Interrupted — listening');
           }
-
-          if (interimActionTimer) {
-            clearTimeout(interimActionTimer);
-            interimActionTimer = null;
-          }
-
-          if (finalClean) {
-            const now = Date.now();
-            const prevNorm = normClean(lastHandledFinalRef.current.text);
-            const curNorm = normClean(finalClean);
-            if (
-              curNorm &&
-              prevNorm &&
-              now - lastHandledFinalRef.current.at < 2600 &&
-              (curNorm === prevNorm || (prevNorm.length >= 2 && curNorm.startsWith(prevNorm)))
-            ) {
-              return;
-            }
-            if (
-              isTtsSpeakingRef.current &&
-              spokenNorm &&
-              curNorm.length >= 3 &&
-              spokenNorm.includes(curNorm)
-            ) {
-              return;
-            }
-            if (
-              musicNowPlaying &&
-              curNorm.length <= 2 &&
-              minFinalConf > 0 &&
-              minFinalConf < 0.42 &&
-              !parseInstantAgentAction(finalClean, liveZh, historyRef.current) &&
-              !matchPureSocialBanter(finalClean, liveZh)
-            ) {
-              return;
-            }
-            lastHandledFinalRef.current = { text: finalClean, at: now };
-            void runDeepSeekTurnRef.current(finalClean);
-            return;
-          }
-
-          // Speculative fast commit: only 160ms on unambiguous transport stop/next; 480ms quiet pause for conversational thoughts
-          if (interimClean.length >= 2 && !isEchoOfAi) {
-            const commitDelay = isPureTransportInterim ? 160 : (!musicNowPlaying || interimClean.length >= 4) ? 480 : 0;
-            if (commitDelay > 0) {
-              interimActionTimer = setTimeout(() => {
-                if (!sessionActiveRef.current) return;
-                const prevNorm = normClean(lastHandledFinalRef.current.text);
-                const curNorm = normClean(interimClean);
-                if (
-                  curNorm &&
-                  prevNorm &&
-                  Date.now() - lastHandledFinalRef.current.at < 2600 &&
-                  curNorm === prevNorm
-                ) {
-                  return;
-                }
-                lastHandledFinalRef.current = { text: interimClean, at: Date.now() };
-                void runDeepSeekTurnRef.current(interimClean);
-              }, commitDelay);
-            }
+          if (finalText.trim()) {
+            void runCompanionTurnApi(finalText.trim(), true);
           }
         };
-
-        rec.onerror = (e: any) => {
-          recStateRef.current = 'stopped';
-          if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
-            sessionActiveRef.current = false;
-            setVoiceActive(false);
-            setPhase('error');
-            errorResetTimerRef.current = setTimeout(() => {
-              if (!sessionActiveRef.current) setPhase('idle');
-            }, 3000);
-            return;
-          }
-          if (sessionActiveRef.current) {
-            const waitMs = e?.error === 'audio-capture' || e?.error === 'network' ? 360 : 180;
-            scheduleLaunch(waitMs);
-          }
-        };
-
         rec.onend = () => {
-          recStateRef.current = 'stopped';
-          if (interimActionTimer) {
-            clearTimeout(interimActionTimer);
-            interimActionTimer = null;
-          }
-          if (sessionActiveRef.current) {
-            scheduleLaunch(isAppleTouch ? 200 : 150);
+          if (voiceActiveRef.current) {
+            setTimeout(launch, 300);
           }
         };
-
-        recognitionRef.current = rec;
+        speechRecRef.current = rec;
         rec.start();
       } catch {
-        recStateRef.current = 'stopped';
-        if (sessionActiveRef.current) {
-          const delay = recRetryDelayRef.current;
-          recRetryDelayRef.current = Math.min(1200, delay + 150);
-          scheduleLaunch(delay);
-        }
+        setPhase('error');
       }
     };
+    launch();
+  }, [isZh, runCompanionTurnApi, stopAllOutputImmediately]);
 
-    launchRecognizer();
+  // Start Gemini Live real-time full-duplex bidirectional voice session
+  const startLiveVoiceSession = useCallback(async () => {
+    stopVoiceSession();
+    voiceActiveRef.current = true;
+    setVoiceActive(true);
+    setHudOpen(true);
+    setPhase('connecting');
+    setEmotion('curious');
+    setEmotionReason(isZh ? '正在建立实时全双工语音' : 'Connecting live duplex voice');
 
-    // 2s keepalive watchdog guarantees continuous active listening + WS heartbeat
-    recKeepaliveTimerRef.current = setInterval(() => {
-      if (!sessionActiveRef.current) return;
-      ensureLiveWs();
-      if (liveWsRef.current && liveWsRef.current.readyState === WebSocket.OPEN) {
-        try { liveWsRef.current.send(JSON.stringify({ type: 'ping' })); } catch {}
-      }
-      if (recStateRef.current === 'stopped' && !restartTimerRef.current) {
-        launchRecognizer();
-      } else if (phaseRef.current === 'connecting' && recStateRef.current === 'running') {
-        if (!isTtsSpeakingRef.current && !isSendingRef.current) {
-          setPhase('listening');
-        }
-      }
-    }, 2000);
-  }, [ensureLiveWs, ensureTtsAudioUnlocked, interruptCurrentTurn, pauseMusicForVoice, stopSessionResources]);
+    const audioClient = new AudioLiveClient();
+    audioClientRef.current = audioClient;
 
-  // Auto-resume continuous listening on load if mic permission was already granted and user has not turned it off
-  const autoStartTriedRef = useRef(false);
-  useEffect(() => {
-    if (autoStartTriedRef.current || typeof window === 'undefined') return;
-    autoStartTriedRef.current = true;
-    try {
-      if (localStorage.getItem('one-voice-always-on:v1') === '0') return;
-    } catch {}
-    const navPerms = (navigator as any)?.permissions;
-    if (navPerms?.query) {
-      navPerms
-        .query({ name: 'microphone' })
-        .then((status: PermissionStatus) => {
-          if (status.state === 'granted' && !sessionActiveRef.current) {
-            startDeepSeekVoiceSession();
-          }
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${proto}//${window.location.host}/ws/ai-live?profileKey=${encodeURIComponent(profileKeyRef.current)}`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    let liveFailed = false;
+
+    ws.onopen = async () => {
+      if (!voiceActiveRef.current) return;
+      ws.send(
+        JSON.stringify({
+          type: 'init',
+          lang,
+          voiceName: voiceNameRef.current,
+          profileKey: profileKeyRef.current,
+          pageContext: getPageContext(),
         })
-        .catch(() => {});
-    }
-  }, [startDeepSeekVoiceSession]);
-
-  // Unlock audio output cleanly on first user interaction whenever always-on listening is running
-  useEffect(() => {
-    const unlockOnce = () => {
-      if (sessionActiveRef.current) {
-        ensureTtsAudioUnlocked();
+      );
+      try {
+        await audioClient.startMic({
+          onMicPcmBase64: (b64) => {
+            if (ws.readyState === WebSocket.OPEN && !liveFailed) {
+              ws.send(JSON.stringify({ type: 'audio', data: b64 }));
+            }
+          },
+          onLocalBargeIn: () => {
+            // Instant <5ms local barge-in before server round-trip
+            stopAllOutputImmediately(true);
+            pauseMusicForVoice(true);
+            setEmotion('curious');
+            setEmotionReason(isZh ? '我在听，你说' : 'All ears — listening');
+          },
+        });
+      } catch {
+        setPhase('error');
+        setEmotion('concerned');
+        setEmotionReason(isZh ? '需要麦克风权限' : 'Microphone permission needed');
+        appendEntry(
+          'action',
+          isZh
+            ? '未获取到麦克风权限，你仍可以在下方直接输入文字控制整个网站。'
+            : 'Microphone unavailable — type below anytime to talk and control everything.'
+        );
+        voiceActiveRef.current = false;
+        setVoiceActive(false);
       }
     };
-    window.addEventListener('pointerdown', unlockOnce, { passive: true, capture: true });
-    window.addEventListener('keydown', unlockOnce, { passive: true, capture: true });
-    return () => {
-      window.removeEventListener('pointerdown', unlockOnce, true);
-      window.removeEventListener('keydown', unlockOnce, true);
+
+    ws.onmessage = async (event) => {
+      let msg: any;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      if (msg.type === 'ready') {
+        setLiveModeEngine('gemini-live');
+        if (voiceActiveRef.current) {
+          setPhase('listening');
+          setEmotion('happy');
+          setEmotionReason(isZh ? '全双工在线 · 随时召唤/打断' : 'Duplex Ready · Always listening');
+        }
+        return;
+      }
+
+      if (msg.type === 'live_unavailable') {
+        liveFailed = true;
+        audioClient.stopMic();
+        try {
+          ws.close();
+        } catch {}
+        wsRef.current = null;
+        startSpeechRecognitionFallback();
+        return;
+      }
+
+      if (msg.type === 'audio' && typeof msg.data === 'string') {
+        pauseMusicForVoice(false);
+        if (!mutedOutputRef.current) {
+          audioClient.setAssistantOutputting(true);
+          audioClient.enqueuePcm24k(msg.data);
+        }
+        if (phaseRef.current !== 'speaking') {
+          setPhase('speaking');
+        }
+        return;
+      }
+
+      if (msg.type === 'interrupted') {
+        stopAllOutputImmediately(true);
+        setEmotion('curious');
+        setEmotionReason(isZh ? '收到你的打断，请讲' : 'Interrupted — listening');
+        return;
+      }
+
+      if (msg.type === 'input_transcript' && typeof msg.text === 'string') {
+        const piece = msg.text;
+        if (!piece.trim()) return;
+        currentOutputTurnIdRef.current = null;
+        setTranscript((prev) => {
+          const existingId = currentInputTurnIdRef.current;
+          if (existingId && prev.some((item) => item.id === existingId)) {
+            return prev.map((item) =>
+              item.id === existingId ? { ...item, text: item.text + piece } : item
+            );
+          }
+          const newId = `user_${Date.now()}`;
+          currentInputTurnIdRef.current = newId;
+          return [...prev.slice(-24), { id: newId, role: 'user', text: piece }];
+        });
+        return;
+      }
+
+      if (msg.type === 'output_transcript' && typeof msg.text === 'string') {
+        const piece = msg.text;
+        if (!piece.trim()) return;
+        currentInputTurnIdRef.current = null;
+        setTranscript((prev) => {
+          const existingId = currentOutputTurnIdRef.current;
+          if (existingId && prev.some((item) => item.id === existingId)) {
+            return prev.map((item) =>
+              item.id === existingId
+                ? { ...item, text: item.text + piece, emotion: emotionRef.current }
+                : item
+            );
+          }
+          const newId = `assistant_${Date.now()}`;
+          currentOutputTurnIdRef.current = newId;
+          return [
+            ...prev.slice(-24),
+            { id: newId, role: 'assistant', text: piece, emotion: emotionRef.current },
+          ];
+        });
+        return;
+      }
+
+      if (msg.type === 'emotion' && typeof msg.emotion === 'string') {
+        const nextEmotion = (EMOTION_META[msg.emotion as CompanionEmotion]
+          ? msg.emotion
+          : 'calm') as CompanionEmotion;
+        setEmotion(nextEmotion);
+        if (typeof msg.intensity === 'number') setEmotionIntensity(msg.intensity);
+        if (typeof msg.reason === 'string') setEmotionReason(msg.reason);
+        return;
+      }
+
+      if (msg.type === 'tool_call' && Array.isArray(msg.calls)) {
+        setPhase('thinking');
+        const responses: Array<{ id?: string; name: string; response: Record<string, unknown> }> = [];
+        for (const call of msg.calls) {
+          if (call.name === 'control_music_player') {
+            const act = String(call.args?.action || '');
+            if (act === 'stop' || act === 'pause') {
+              explicitStopMusicRef.current = true;
+              pausedMusicForVoiceRef.current = false;
+            } else {
+              explicitStopMusicRef.current = false;
+            }
+          }
+          const fb = await executeGeminiToolCall(call.name, call.args || {}, controlHandlersRef.current);
+          if (fb.summary) {
+            appendEntry('action', fb.summary);
+          }
+          responses.push({
+            id: call.id,
+            name: call.name,
+            response: fb.response,
+          });
+        }
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'tool_response', responses }));
+        }
+        return;
+      }
+
+      if (msg.type === 'turn_complete') {
+        currentInputTurnIdRef.current = null;
+        currentOutputTurnIdRef.current = null;
+        audioClient.setAssistantOutputting(false);
+        const finishTurn = () => {
+          if (voiceActiveRef.current) {
+            setPhase('listening');
+          }
+          resumeMusicIfPausedForVoice();
+        };
+        if (!audioClient.isPlayingOutput()) {
+          finishTurn();
+        } else {
+          const checkDone = setInterval(() => {
+            if (!voiceActiveRef.current) {
+              clearInterval(checkDone);
+              return;
+            }
+            if (!audioClient.isPlayingOutput()) {
+              clearInterval(checkDone);
+              finishTurn();
+            }
+          }, 120);
+        }
+        return;
+      }
+
+      if (msg.type === 'live_error') {
+        setEmotion('concerned');
+        setEmotionReason(isZh ? '语音通道波动，随时重连' : 'Voice channel hiccup');
+      }
     };
-  }, [ensureTtsAudioUnlocked]);
+
+    ws.onerror = () => {
+      if (!liveFailed && voiceActiveRef.current) {
+        liveFailed = true;
+        startSpeechRecognitionFallback();
+      }
+    };
+
+    ws.onclose = () => {
+      // Keep always-on voice active by auto-reconnecting seamlessly if session wasn't explicitly stopped
+      if (voiceActiveRef.current && !liveFailed) {
+        if (listeningModeRef.current === 'always-listening') {
+          setPhase('connecting');
+          reconnectTimerRef.current = setTimeout(() => {
+            if (voiceActiveRef.current) {
+              void startLiveVoiceSession();
+            }
+          }, 1200);
+        } else {
+          setPhase('idle');
+          setVoiceActive(false);
+        }
+      }
+    };
+  }, [
+    appendEntry,
+    getPageContext,
+    isZh,
+    lang,
+    pauseMusicForVoice,
+    resumeMusicIfPausedForVoice,
+    startSpeechRecognitionFallback,
+    stopAllOutputImmediately,
+    stopVoiceSession,
+  ]);
+
+  // Sample real-time input/output audio energy for HUD waveform bars
+  useEffect(() => {
+    if (!voiceActive && !hudOpen) return;
+    const id = setInterval(() => {
+      const e = audioClientRef.current?.getEnergies() || { input: 0, output: 0 };
+      setEnergySnapshot(e);
+    }, 65);
+    return () => clearInterval(id);
+  }, [voiceActive, hudOpen]);
+
+  // Send text prompt (works in Live WS mode OR Companion HTTP mode; interrupts audio immediately!)
+  const handleSendText = useCallback(
+    async (overrideText?: string) => {
+      const raw = (overrideText ?? textInput).trim();
+      if (!raw) return;
+      if (!overrideText) setTextInput('');
+
+      // Interrupt any active speech immediately when user submits a command
+      stopAllOutputImmediately(true);
+
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN && liveModeEngine === 'gemini-live') {
+        appendEntry('user', raw);
+        setPhase('thinking');
+        ws.send(JSON.stringify({ type: 'text', text: raw }));
+        return;
+      }
+
+      await runCompanionTurnApi(raw, voiceActiveRef.current);
+    },
+    [appendEntry, liveModeEngine, runCompanionTurnApi, stopAllOutputImmediately, textInput]
+  );
+
+  // Draggable launcher orb positioning
+  const ORB_SIZE = 48;
+  const clampLauncherPos = useCallback((x: number, y: number) => {
+    if (typeof window === 'undefined') return { x: 16, y: 120 };
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const minX = vw >= 768 ? 82 : 10;
+    const maxX = Math.max(minX, vw - ORB_SIZE - 10);
+    const minY = 66;
+    const maxY = Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 86 : 18));
+    return {
+      x: Math.min(Math.max(x, minX), maxX),
+      y: Math.min(Math.max(y, minY), maxY),
+    };
+  }, []);
+
+  const [launcherPos, setLauncherPos] = useState<{ x: number; y: number }>(() => {
+    if (typeof window === 'undefined') return { x: 16, y: 120 };
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const minX = vw >= 768 ? 82 : 10;
+    const maxX = Math.max(minX, vw - ORB_SIZE - 10);
+    const minY = 66;
+    const maxY = Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 86 : 18));
+    const defaultPos = {
+      x: Math.max(minX, vw - ORB_SIZE - (vw < 768 ? 14 : 22)),
+      y: Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 90 : 22)),
+    };
+    try {
+      const saved = localStorage.getItem(POS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
+          return {
+            x: Math.min(Math.max(parsed.x, minX), maxX),
+            y: Math.min(Math.max(parsed.y, minY), maxY),
+          };
+        }
+      }
+    } catch {}
+    return defaultPos;
+  });
+
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStateRef = useRef({
+    active: false,
+    pointerId: null as number | null,
+    startX: 0,
+    startY: 0,
+    origX: 0,
+    origY: 0,
+    moved: false,
+  });
+  const suppressClickRef = useRef(false);
+
+  useEffect(() => {
+    const onResize = () => setLauncherPos((p) => clampLauncherPos(p.x, p.y));
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    vv?.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+      vv?.removeEventListener('resize', onResize);
+    };
+  }, [clampLauncherPos]);
+
+  // Living 3D Emotion-Reactive WebGL Orb renderer
+  useEffect(() => {
+    if (!showLauncher) return;
+    const mountOrb = (canvas: HTMLCanvasElement | null, size: number) => {
+      if (!canvas) return () => {};
+      canvas.width = size;
+      canvas.height = size;
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+      camera.position.z = 2.45;
+
+      let renderer: THREE.WebGLRenderer;
+      try {
+        renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+      } catch {
+        return () => {};
+      }
+      renderer.setSize(size, size);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+      const coreGeo = new THREE.IcosahedronGeometry(0.72, 2);
+      const coreMat = new THREE.MeshBasicMaterial({
+        color: 0x8ecfff,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.9,
+      });
+      const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+      scene.add(coreMesh);
+
+      const nucGeo = new THREE.SphereGeometry(0.34, 20, 20);
+      const nucMat = new THREE.MeshBasicMaterial({
+        color: 0xe5c17d,
+        transparent: true,
+        opacity: 0.92,
+      });
+      const nucMesh = new THREE.Mesh(nucGeo, nucMat);
+      scene.add(nucMesh);
+
+      const ringGeo = new THREE.TorusGeometry(0.95, 0.018, 8, 48);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0x8ecfff,
+        transparent: true,
+        opacity: 0.45,
+      });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.rotation.x = Math.PI * 0.36;
+      scene.add(ringMesh);
+
+      const colorTarget = new THREE.Color(0x8ecfff);
+      const nucColorTarget = new THREE.Color(0xe5c17d);
+      let rafId = 0;
+      let t = 0;
+      let alive = true;
+
+      const animate = () => {
+        if (!alive || document.hidden) return;
+        rafId = requestAnimationFrame(animate);
+
+        const curPhase = phaseRef.current;
+        const curEmotion = emotionRef.current;
+        const emoMeta = EMOTION_META[curEmotion] || EMOTION_META.calm;
+        const energies = audioClientRef.current?.getEnergies() || { input: 0, output: 0 };
+
+        colorTarget.setHex(emoMeta.hex);
+        if (curPhase === 'listening') {
+          nucColorTarget.setHex(0x34d399);
+        } else if (curPhase === 'speaking') {
+          nucColorTarget.setHex(0xf5c451);
+        } else if (curPhase === 'error') {
+          colorTarget.setHex(0xf87171);
+          nucColorTarget.setHex(0xfca5a5);
+        } else {
+          nucColorTarget.setHex(emoMeta.hex);
+        }
+
+        coreMat.color.lerp(colorTarget, 0.14);
+        ringMat.color.lerp(colorTarget, 0.14);
+        nucMat.color.lerp(nucColorTarget, 0.14);
+
+        const audioEnergy = Math.max(energies.input, energies.output);
+        const emotionBoost =
+          curEmotion === 'excited'
+            ? 1.5
+            : curEmotion === 'playful'
+              ? 1.35
+              : curEmotion === 'thinking'
+                ? 1.25
+                : curEmotion === 'concerned'
+                  ? 0.85
+                  : 1.0;
+
+        const speed = (voiceActiveRef.current ? 1.35 : 0.9) * emotionBoost + audioEnergy * 2.2;
+        t += 0.024 * speed;
+
+        coreMesh.rotation.y += 0.015 * speed;
+        coreMesh.rotation.x += 0.007 * speed;
+        ringMesh.rotation.z += 0.018 * speed;
+        ringMesh.rotation.y = Math.sin(t * 0.6) * 0.45;
+
+        const nucScale = 1 + Math.sin(t * 2.4) * 0.08 + audioEnergy * 0.42;
+        nucMesh.scale.set(nucScale, nucScale, nucScale);
+
+        const shellScale = 1 + audioEnergy * 0.16 * emotionIntensityRef.current;
+        coreMesh.scale.set(shellScale, shellScale, shellScale);
+
+        renderer.render(scene, camera);
+      };
+
+      const onVis = () => {
+        if (!document.hidden && alive) {
+          cancelAnimationFrame(rafId);
+          animate();
+        }
+      };
+      document.addEventListener('visibilitychange', onVis);
+      animate();
+
+      return () => {
+        alive = false;
+        document.removeEventListener('visibilitychange', onVis);
+        cancelAnimationFrame(rafId);
+        coreGeo.dispose();
+        coreMat.dispose();
+        nucGeo.dispose();
+        nucMat.dispose();
+        ringGeo.dispose();
+        ringMat.dispose();
+        renderer.dispose();
+      };
+    };
+
+    const cleanMain = mountOrb(orbCanvasRef.current, placement === 'center-bottom' ? 38 : 44);
+    const cleanHud = mountOrb(hudOrbCanvasRef.current, 36);
+    return () => {
+      cleanMain();
+      cleanHud();
+    };
+  }, [showLauncher, placement, hudOpen]);
 
   const handleLauncherClick = () => {
     if (suppressClickRef.current) return;
-    if (voiceActive || sessionActiveRef.current) {
-      try {
-        localStorage.setItem('one-voice-always-on:v1', '0');
-      } catch {}
-      stopSessionResources();
+    player?.unlockAudio();
+    if (!voiceActive) {
+      setHudOpen(true);
+      void startLiveVoiceSession();
     } else {
-      try {
-        localStorage.setItem('one-voice-always-on:v1', '1');
-      } catch {}
-      player?.unlockAudio();
-      ensureTtsAudioUnlocked();
-      startDeepSeekVoiceSession();
+      stopVoiceSession();
     }
   };
 
@@ -1958,7 +1556,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
       );
       setLauncherPos(finalPos);
       try {
-        localStorage.setItem('earth-one-ai-launcher-pos:v1', JSON.stringify(finalPos));
+        localStorage.setItem(POS_KEY, JSON.stringify(finalPos));
       } catch {}
       setTimeout(() => {
         suppressClickRef.current = false;
@@ -1966,26 +1564,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     }
   };
 
-  const activePillLabel = (() => {
-    if (!voiceActive && phase !== 'error') {
-      return showUnifiedMusicControls && currentTrack?.title ? currentTrack.title : 'One.';
-    }
-    switch (phase) {
-      case 'connecting':
-        return isZh ? 'One. · 连接中' : 'One. · Connecting';
-      case 'listening':
-        return isZh ? 'One. · 聆听中' : 'One. · Listening';
-      case 'thinking':
-        return isZh ? 'One. · 思考中' : 'One. · Thinking';
-      case 'speaking':
-        return isZh ? 'One. · 对话中' : 'One. · Speaking';
-      case 'error':
-        return isZh ? 'One. · 需麦克风' : 'One. · Mic Needed';
-      default:
-        return 'One.';
-    }
-  })();
+  if (!showLauncher && !canRunAudioSession) return null;
 
+  const emotionInfo = EMOTION_META[emotion] || EMOTION_META.calm;
   const glowColors = [
     'shadow-[0_0_24px_rgba(56,189,248,0.48)]',
     'shadow-[0_0_24px_rgba(192,132,252,0.48)]',
@@ -1993,30 +1574,44 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
     'shadow-[0_0_24px_rgba(251,191,36,0.48)]',
     'shadow-[0_0_24px_rgba(52,211,153,0.48)]',
   ];
-
-  const activeBorderClass =
-    phase === 'listening'
-      ? 'border-emerald-400/75 shadow-[0_0_24px_rgba(52,211,153,0.32)]'
-      : phase === 'speaking'
-      ? 'border-sky-300/80 shadow-[0_0_26px_rgba(142,207,255,0.42)]'
-      : phase === 'connecting' || phase === 'thinking'
-      ? 'border-[#69B8FF]/80 shadow-[0_0_24px_rgba(105,184,255,0.32)]'
-      : phase === 'error'
-      ? 'border-rose-400/75 shadow-[0_0_20px_rgba(248,113,113,0.28)]'
-      : showUnifiedMusicControls && isMusicPlaying
+  const activeBorderClass = voiceActive
+    ? emotionInfo.ringClass
+    : showUnifiedMusicControls && isMusicPlaying
       ? `border-white/25 ${glowColors[auroraIdx]}`
       : 'border-white/18 shadow-[0_14px_38px_rgba(0,0,0,0.68)] hover:border-[#8ECFFF]/60';
 
-  if (!showLauncher && !canRunAudioSession) return null;
+  const phaseLabel = (() => {
+    switch (phase) {
+      case 'connecting':
+        return isZh ? '正在连接' : 'Connecting';
+      case 'listening':
+        return isZh ? '全双工聆听中' : 'Duplex Listening';
+      case 'thinking':
+        return isZh ? '思考执行中' : 'Thinking';
+      case 'speaking':
+        return isZh ? '说话中 · 随时开口打断' : 'Speaking · Speak to interrupt';
+      case 'error':
+        return isZh ? '需麦克风权限' : 'Mic Needed';
+      default:
+        return isZh ? emotionInfo.zh : emotionInfo.en;
+    }
+  })();
 
+  const activePillLabel = (() => {
+    if (!voiceActive && phase !== 'error') {
+      return showUnifiedMusicControls && currentTrack?.title ? currentTrack.title : 'One.';
+    }
+    return `One. · ${phaseLabel}`;
+  })();
+
+  const activeLevel = Math.max(energySnapshot.input, energySnapshot.output);
   const trackTitle = currentTrack?.title || (isZh ? '正在播放' : 'Now Playing');
   const trackArtist = currentTrack?.artist || 'ONE Music';
   const trackCover = currentTrack?.coverUrl || DEFAULT_MUSIC_COVER;
   const trackSource = currentTrack?.source || currentTrack?.playback.provider || 'YouTube / Bilibili';
-
   const displayCornerLeft =
     showUnifiedMusicControls && typeof window !== 'undefined'
-      ? Math.min(launcherPos.x, Math.max(10, window.innerWidth - 220))
+      ? Math.min(launcherPos.x, Math.max(10, window.innerWidth - 260))
       : launcherPos.x;
 
   const renderMusicPopover = () =>
@@ -2025,17 +1620,15 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">{trackTitle}</div>
-            <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
-              <span className="truncate">{trackArtist}</span>
-              <span aria-hidden="true">·</span>
-              <span className="shrink-0">{trackSource}</span>
+            <div className="truncate text-xs text-slate-500 dark:text-slate-400">
+              {trackArtist} · {trackSource}
             </div>
           </div>
           <button
             type="button"
             onClick={() => setMusicPopoverOpen(false)}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
-            title={isZh ? '收起' : 'Close'}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-white"
+            aria-label={isZh ? '关闭音乐卡片' : 'Close music card'}
           >
             <X className="h-4 w-4" />
           </button>
@@ -2089,7 +1682,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               <SkipForward className="h-4 w-4" />
             </button>
           </div>
-
           <div className="flex items-center gap-1">
             {liveEmbedSrc && (
               <button
@@ -2109,7 +1701,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
               type="button"
               onClick={() => {
                 setMusicPopoverOpen(false);
-                onNavigateTab?.('venus');
+                props.onNavigateTab?.('venus');
               }}
               className="flex min-h-[38px] items-center gap-1 rounded-xl px-2.5 text-xs font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-500/15 whitespace-nowrap"
             >
@@ -2136,7 +1728,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
 
   return (
     <>
-      {/* Single persistent YouTube / Bilibili player iframe hosted inside One. across all pages */}
+      {/* Persistent YouTube / Bilibili embed hosted cleanly across pages */}
       {canRunAudioSession && liveEmbedSrc && (
         <div
           style={
@@ -2175,6 +1767,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
         </div>
       )}
 
+      {/* Floating Launcher Orb + Embedded Music Pill */}
       {showLauncher && (
         placement === 'center-bottom' ? (
           <div
@@ -2182,87 +1775,95 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             className="fixed bottom-[calc(5.1rem+env(safe-area-inset-bottom))] md:bottom-7 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center select-none"
           >
             {renderMusicPopover()}
-            <div
-              className={`inline-flex min-h-[46px] items-center gap-1.5 rounded-full border bg-[#070B16]/86 backdrop-blur-2xl p-1 transition-all duration-500 ${activeBorderClass}`}
-            >
+            <div className="flex items-center gap-1.5">
+              <div
+                className={`inline-flex min-h-[46px] items-center gap-1.5 rounded-full border bg-[#070B16]/88 backdrop-blur-2xl p-1 transition-all duration-500 ${activeBorderClass}`}
+              >
+                <button
+                  type="button"
+                  onClick={handleLauncherClick}
+                  aria-label="One."
+                  aria-pressed={voiceActive}
+                  title={activePillLabel}
+                  className="group relative inline-flex h-9 items-center gap-2 rounded-full pl-1 pr-3 transition-transform cursor-pointer hover:scale-[1.02] active:scale-95"
+                >
+                  <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] border border-white/12">
+                    {showUnifiedMusicControls && (
+                      <span
+                        className={`one-wrist-aurora absolute -inset-[2px] rounded-full opacity-90 pointer-events-none ${
+                          isMusicPlaying ? '' : '[animation-play-state:paused] opacity-40'
+                        }`}
+                      />
+                    )}
+                    <canvas ref={orbCanvasRef} className="relative z-10 pointer-events-none h-7 w-7 rounded-full" />
+                  </span>
+                  <span className="max-w-[155px] truncate text-xs font-semibold tracking-[0.08em] text-[#F7F5F0]">
+                    {activePillLabel}
+                  </span>
+                </button>
+                {showUnifiedMusicControls && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        explicitStopMusicRef.current = false;
+                        pausedMusicForVoiceRef.current = false;
+                        player?.unlockAudio();
+                        void player?.resumeAudioContext();
+                        player?.togglePlay();
+                      }}
+                      title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
+                    >
+                      {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        explicitStopMusicRef.current = false;
+                        pausedMusicForVoiceRef.current = false;
+                        player?.playNext();
+                      }}
+                      title={isZh ? '换下一首' : 'Next song'}
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
+                    >
+                      <SkipForward className="h-3.5 w-3.5 fill-current" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMusicPopoverOpen((o) => !o)}
+                      title={isZh ? '音乐详情' : 'Music details'}
+                      className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
+                    >
+                      {trackCover ? (
+                        <img
+                          src={trackCover}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            if (!e.currentTarget.dataset.fallback) {
+                              e.currentTarget.dataset.fallback = '1';
+                              e.currentTarget.src = DEFAULT_MUSIC_COVER;
+                            }
+                          }}
+                          className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
+                        />
+                      ) : (
+                        <Disc3 className={`h-4 w-4 text-sky-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
+                      )}
+                    </button>
+                  </>
+                )}
+              </div>
               <button
                 type="button"
-                onClick={handleLauncherClick}
-                aria-label="One."
-                aria-pressed={voiceActive}
-                className="group relative inline-flex h-9 items-center gap-2 rounded-full pl-1.5 pr-3 transition-transform hover:scale-[1.02] active:scale-95 cursor-pointer"
+                onClick={() => setHudOpen((v) => !v)}
+                title={hudOpen ? (isZh ? '收起面板' : 'Collapse') : (isZh ? '展开 One. 智能面板' : 'Open One. HUD')}
+                aria-label={hudOpen ? 'Collapse AI HUD' : 'Expand AI HUD'}
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-white/18 bg-[#070B16]/88 text-[#F7F5F0] backdrop-blur-2xl transition-all hover:border-[#8ECFFF]/60 hover:scale-105 active:scale-95 cursor-pointer shadow-[0_14px_38px_rgba(0,0,0,0.55)]"
               >
-                <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] border border-white/12">
-                  {showUnifiedMusicControls && (
-                    <span
-                      className={`one-wrist-aurora absolute -inset-[2px] rounded-full opacity-90 pointer-events-none ${
-                        isMusicPlaying ? '' : '[animation-play-state:paused] opacity-40'
-                      }`}
-                    />
-                  )}
-                  <canvas ref={orbCanvasRef} className="relative z-10 pointer-events-none h-7 w-7 rounded-full bg-[#070B16]" />
-                </span>
-                <span className="max-w-[138px] truncate text-xs font-semibold tracking-[0.08em] text-[#F7F5F0]">
-                  {activePillLabel}
-                </span>
+                {hudOpen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               </button>
-
-              {showUnifiedMusicControls && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      explicitStopMusicRef.current = false;
-                      pausedMusicForVoiceRef.current = false;
-                      player?.unlockAudio();
-                      void player?.resumeAudioContext();
-                      player?.togglePlay();
-                    }}
-                    title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
-                    aria-label={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
-                  >
-                    {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      explicitStopMusicRef.current = false;
-                      pausedMusicForVoiceRef.current = false;
-                      player?.playNext();
-                    }}
-                    title={isZh ? '换下一首' : 'Next song'}
-                    aria-label={isZh ? '换下一首' : 'Next song'}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
-                  >
-                    <SkipForward className="h-3.5 w-3.5 fill-current" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMusicPopoverOpen((o) => !o)}
-                    title={isZh ? '音乐详情' : 'Music details'}
-                    aria-label={isZh ? '音乐详情' : 'Music details'}
-                    className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
-                  >
-                    {trackCover ? (
-                      <img
-                        src={trackCover}
-                        alt=""
-                        referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          if (!e.currentTarget.dataset.fallback) {
-                            e.currentTarget.dataset.fallback = '1';
-                            e.currentTarget.src = DEFAULT_MUSIC_COVER;
-                          }
-                        }}
-                        className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
-                      />
-                    ) : (
-                      <Disc3 className={`h-4 w-4 text-sky-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
-                    )}
-                  </button>
-                </>
-              )}
             </div>
           </div>
         ) : (
@@ -2272,95 +1873,397 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = ({
             className="fixed z-40 flex flex-col items-start select-none"
           >
             {renderMusicPopover()}
-            <div
-              className={`inline-flex items-center gap-1 rounded-full border bg-[#070B16]/86 backdrop-blur-2xl p-1 transition-all duration-500 ${activeBorderClass}`}
-            >
-              <button
-                type="button"
-                onPointerDown={handleOrbPointerDown}
-                onPointerMove={handleOrbPointerMove}
-                onPointerUp={finishOrbDrag}
-                onPointerCancel={finishOrbDrag}
-                onClick={handleLauncherClick}
-                style={{ touchAction: 'none' }}
-                aria-label="One."
-                aria-pressed={voiceActive}
-                title={activePillLabel}
-                className={`group relative flex h-10 w-10 items-center justify-center rounded-full transition-transform ${
-                  isDragging
-                    ? 'scale-110 cursor-grabbing ring-2 ring-[#8ECFFF]/60'
-                    : 'cursor-pointer hover:scale-105 active:scale-95'
-                }`}
+            <div className="flex items-center gap-1.5">
+              <div
+                className={`inline-flex items-center gap-1 rounded-full border bg-[#070B16]/88 backdrop-blur-2xl p-1 transition-all duration-500 ${activeBorderClass}`}
               >
+                <button
+                  type="button"
+                  onPointerDown={handleOrbPointerDown}
+                  onPointerMove={handleOrbPointerMove}
+                  onPointerUp={finishOrbDrag}
+                  onPointerCancel={finishOrbDrag}
+                  onClick={handleLauncherClick}
+                  style={{ touchAction: 'none' }}
+                  aria-label="One."
+                  aria-pressed={voiceActive}
+                  title={activePillLabel}
+                  className={`group relative flex h-10 w-10 items-center justify-center rounded-full transition-transform ${
+                    isDragging
+                      ? 'scale-110 cursor-grabbing ring-2 ring-[#8ECFFF]/60'
+                      : 'cursor-pointer hover:scale-105 active:scale-95'
+                  }`}
+                >
+                  {showUnifiedMusicControls && (
+                    <span
+                      className={`one-wrist-aurora absolute inset-0 rounded-full opacity-95 pointer-events-none ${
+                        isMusicPlaying ? '' : '[animation-play-state:paused] opacity-40'
+                      }`}
+                    />
+                  )}
+                  <canvas ref={orbCanvasRef} className="relative z-10 pointer-events-none h-9 w-9 rounded-full" />
+                </button>
                 {showUnifiedMusicControls && (
-                  <span
-                    className={`one-wrist-aurora absolute inset-0 rounded-full opacity-95 pointer-events-none ${
-                      isMusicPlaying ? '' : '[animation-play-state:paused] opacity-40'
-                    }`}
-                  />
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        explicitStopMusicRef.current = false;
+                        pausedMusicForVoiceRef.current = false;
+                        player?.unlockAudio();
+                        void player?.resumeAudioContext();
+                        player?.togglePlay();
+                      }}
+                      title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
+                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
+                    >
+                      {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        explicitStopMusicRef.current = false;
+                        pausedMusicForVoiceRef.current = false;
+                        player?.playNext();
+                      }}
+                      title={isZh ? '换下一首' : 'Next song'}
+                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
+                    >
+                      <SkipForward className="h-3.5 w-3.5 fill-current" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMusicPopoverOpen((o) => !o)}
+                      title={trackTitle}
+                      className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
+                    >
+                      {trackCover ? (
+                        <img
+                          src={trackCover}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            if (!e.currentTarget.dataset.fallback) {
+                              e.currentTarget.dataset.fallback = '1';
+                              e.currentTarget.src = DEFAULT_MUSIC_COVER;
+                            }
+                          }}
+                          className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
+                        />
+                      ) : (
+                        <Disc3 className={`h-4 w-4 text-sky-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
+                      )}
+                    </button>
+                  </>
                 )}
-                <canvas ref={orbCanvasRef} className="relative z-10 pointer-events-none h-9 w-9 rounded-full bg-[#070B16]" />
-              </button>
-
-              {showUnifiedMusicControls && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      explicitStopMusicRef.current = false;
-                      pausedMusicForVoiceRef.current = false;
-                      player?.unlockAudio();
-                      void player?.resumeAudioContext();
-                      player?.togglePlay();
-                    }}
-                    title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
-                    aria-label={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
-                  >
-                    {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      explicitStopMusicRef.current = false;
-                      pausedMusicForVoiceRef.current = false;
-                      player?.playNext();
-                    }}
-                    title={isZh ? '换下一首' : 'Next song'}
-                    aria-label={isZh ? '换下一首' : 'Next song'}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
-                  >
-                    <SkipForward className="h-3.5 w-3.5 fill-current" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMusicPopoverOpen((o) => !o)}
-                    title={trackTitle}
-                    aria-label={isZh ? '音乐详情' : 'Music details'}
-                    className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
-                  >
-                    {trackCover ? (
-                      <img
-                        src={trackCover}
-                        alt=""
-                        referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          if (!e.currentTarget.dataset.fallback) {
-                            e.currentTarget.dataset.fallback = '1';
-                            e.currentTarget.src = DEFAULT_MUSIC_COVER;
-                          }
-                        }}
-                        className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
-                      />
-                    ) : (
-                      <Disc3 className={`h-4 w-4 text-sky-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
-                    )}
-                  </button>
-                </>
+              </div>
+              {!hudOpen && (
+                <button
+                  type="button"
+                  onClick={() => setHudOpen(true)}
+                  title={isZh ? '展开 One. 面板' : 'Open One. HUD'}
+                  aria-label="Open One. Companion HUD"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-[#070B16]/85 text-slate-300 hover:text-white hover:border-[#8ECFFF]/50 backdrop-blur-xl shadow-lg transition-all cursor-pointer"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </button>
               )}
             </div>
           </div>
         )
+      )}
+
+      {/* Expandable Floating Companion HUD */}
+      {showLauncher && hudOpen && (
+        <section
+          id="one-ai-hud"
+          aria-label="One. Living AI Companion"
+          className={`fixed z-[65] flex flex-col overflow-hidden rounded-2xl border bg-[#0B101D]/95 text-slate-100 shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur-2xl transition-all duration-200 ${
+            placement === 'center-bottom'
+              ? 'bottom-[calc(8.75rem+env(safe-area-inset-bottom))] md:bottom-[5.25rem] left-1/2 -translate-x-1/2'
+              : 'bottom-[calc(5.2rem+env(safe-area-inset-bottom))] md:bottom-20 right-3 md:right-6'
+          } w-[calc(100vw-1.5rem)] max-w-[400px] max-h-[68dvh] ${emotionInfo.ringClass}`}
+        >
+          {/* Header with Living Orb + Emotion Status + Controls */}
+          <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3.5 py-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative h-9 w-9 shrink-0 rounded-full border border-white/12 bg-white/[0.04] flex items-center justify-center">
+                <canvas ref={hudOrbCanvasRef} className="h-9 w-9 rounded-full pointer-events-none" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-white">
+                  <span>One.</span>
+                  <span className="text-slate-500">·</span>
+                  <span className="inline-flex items-center gap-1 font-medium text-slate-200 truncate">
+                    <EmotionIcon emotion={emotion} />
+                    <span>{isZh ? emotionInfo.zh : emotionInfo.en}</span>
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 truncate">
+                  {emotionReason ? `${emotionReason} · ${phaseLabel}` : phaseLabel}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setMutedOutput((v) => !v)}
+                title={mutedOutput ? (isZh ? '取消静音' : 'Unmute AI') : (isZh ? '静音 AI 语音' : 'Mute AI')}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+              >
+                {mutedOutput ? <VolumeX className="h-4 w-4 text-rose-400" /> : <Volume2 className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowVoiceMenu((v) => !v)}
+                title={isZh ? '声线与双工模式设置' : 'Voice & Duplex Settings'}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setHudOpen(false)}
+                title={isZh ? '收起面板' : 'Minimize'}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Voice Timbre + Duplex Mode Drawer */}
+          {showVoiceMenu && (
+            <div className="border-b border-white/10 bg-white/[0.03] px-3.5 py-2.5 space-y-2.5">
+              <div>
+                <div className="text-[11px] font-medium text-slate-400 mb-1.5">
+                  {isZh ? '通话与召唤模式' : 'Summon & Listening Mode'}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      writeVoiceListeningMode('always-listening');
+                      setListeningMode('always-listening');
+                    }}
+                    className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors cursor-pointer ${
+                      listeningMode === 'always-listening'
+                        ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-200'
+                        : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.06]'
+                    }`}
+                  >
+                    {isZh ? '全双工 · 随时打断/召唤' : 'Always-On Duplex'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      writeVoiceListeningMode('click-to-speak');
+                      setListeningMode('click-to-speak');
+                    }}
+                    className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors cursor-pointer ${
+                      listeningMode === 'click-to-speak'
+                        ? 'border-sky-400/60 bg-sky-500/15 text-sky-200'
+                        : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.06]'
+                    }`}
+                  >
+                    {isZh ? '手动开关对话' : 'Manual Mic Toggle'}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] font-medium text-slate-400 mb-1.5">
+                  {isZh ? '选择 One. 声线（实时切换生效）' : 'Voice Persona'}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {VOICE_OPTIONS.map((v) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => {
+                        setVoiceName(v.id);
+                        voiceNameRef.current = v.id;
+                        try {
+                          localStorage.setItem(VOICE_PREF_KEY, v.id);
+                        } catch {}
+                        setShowVoiceMenu(false);
+                        if (voiceActive) {
+                          void startLiveVoiceSession();
+                        }
+                      }}
+                      className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap truncate ${
+                        voiceName === v.id
+                          ? 'border-[#E5C17D]/60 bg-[#E5C17D]/15 text-[#F7E5BA]'
+                          : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.06]'
+                      }`}
+                    >
+                      {isZh ? v.labelZh : v.labelEn}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Live Audio Energy Bar + Instant Interrupt Control */}
+          {(voiceActive || phase === 'speaking') && (
+            <div className="flex items-center justify-between gap-2 border-b border-white/10 bg-white/[0.02] px-3.5 py-2">
+              <div className="flex items-center gap-1 h-5 flex-1">
+                {[0.45, 0.75, 1.0, 0.8, 0.6, 0.9, 0.5, 0.7, 0.4].map((w, idx) => {
+                  const scale = Math.max(0.22, Math.min(1, 0.22 + activeLevel * w * 1.15));
+                  return (
+                    <span
+                      key={idx}
+                      style={{
+                        transform: `scaleY(${scale})`,
+                        backgroundColor: emotionInfo.cssAccent,
+                      }}
+                      className="h-4 w-1 rounded-full transition-transform duration-75 origin-center"
+                    />
+                  );
+                })}
+                <span className="ml-2 text-[11px] text-slate-300 truncate">
+                  {phase === 'speaking'
+                    ? isZh
+                      ? '直接开口即可打断并切换'
+                      : 'Speak anytime to interrupt'
+                    : isZh
+                      ? '全双工实时听写 · 随时召唤'
+                      : 'Live duplex listening'}
+                </span>
+              </div>
+              {phase === 'speaking' && (
+                <button
+                  type="button"
+                  onClick={handleManualInterrupt}
+                  className="inline-flex items-center gap-1 rounded-lg border border-rose-400/50 bg-rose-500/20 px-2.5 py-1 text-[11px] font-semibold text-rose-200 hover:bg-rose-500/30 transition-colors cursor-pointer shrink-0"
+                >
+                  <Square className="h-2.5 w-2.5 fill-current" />
+                  <span>{isZh ? '打断' : 'Interrupt'}</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Conversation & Executed Actions Stream */}
+          <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5 min-h-[140px] max-h-[260px]">
+            {transcript.length === 0 ? (
+              <div className="space-y-1.5 py-2 text-xs text-slate-300 leading-relaxed">
+                <p className="font-medium text-white">
+                  {isZh
+                    ? '你好，我是 One. — 你的全能情绪伙伴。'
+                    : 'Hi, I am One. — your emotionally aware site companion.'}
+                </p>
+                <p className="text-slate-400">
+                  {isZh
+                    ? '点击下方麦克风即可像真人一样自然对话：我说话时你随时开口就会立刻停下听你讲；还能记住你的喜好，并直接操控音乐、影院、图书馆、游戏、主题切换和页面上的所有元素。'
+                    : 'Tap the mic for natural face-to-face voice chat: speak anytime to interrupt me mid-sentence, and ask me to control music, cinema, books, games, theme, or any control on screen.'}
+                </p>
+              </div>
+            ) : (
+              transcript.map((item) => {
+                if (item.role === 'action') {
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-1.5 text-[11px] text-[#E5C17D] px-1"
+                    >
+                      <Zap className="h-3 w-3 shrink-0" />
+                      <span>{item.text}</span>
+                    </div>
+                  );
+                }
+                const isUser = item.role === 'user';
+                return (
+                  <div
+                    key={item.id}
+                    className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[88%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
+                        isUser
+                          ? 'bg-sky-500/20 border border-sky-400/30 text-sky-50'
+                          : 'bg-white/[0.06] border border-white/10 text-slate-100'
+                      }`}
+                    >
+                      <span>{item.text}</span>
+                      {item.interrupted && (
+                        <span className="ml-1.5 text-[10px] text-rose-300">
+                          {isZh ? '· 已打断' : '· Interrupted'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            <div ref={transcriptEndRef} />
+          </div>
+
+          {/* Proactive Context-Aware Intent Suggestions */}
+          {proactiveSuggestions.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto border-t border-white/10 px-3 py-2 [scrollbar-width:none]">
+              {proactiveSuggestions.map((s) => (
+                <button
+                  key={s.label}
+                  type="button"
+                  onClick={() => void handleSendText(s.prompt)}
+                  className="shrink-0 rounded-lg border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-white/[0.1] hover:border-[#8ECFFF]/45 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Input & Voice Toggle Footer */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleSendText();
+            }}
+            className="flex items-center gap-2 border-t border-white/10 bg-white/[0.03] px-3 py-2.5"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                player?.unlockAudio();
+                if (voiceActive) stopVoiceSession();
+                else void startLiveVoiceSession();
+              }}
+              title={voiceActive ? (isZh ? '关闭实时语音' : 'Stop Voice') : (isZh ? '开启全双工实时语音' : 'Start Live Duplex Voice')}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-colors cursor-pointer ${
+                voiceActive
+                  ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                  : 'border-white/12 bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+              }`}
+            >
+              {voiceActive ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+            </button>
+
+            <input
+              type="text"
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              placeholder={
+                isZh
+                  ? '直接说或输入任何指令 / 问题…'
+                  : 'Speak or type any command or question…'
+              }
+              className="min-w-0 flex-1 h-9 rounded-xl border border-white/12 bg-white/[0.05] px-3 text-xs text-white placeholder:text-slate-400 outline-none focus:border-[#8ECFFF]/60"
+            />
+
+            <button
+              type="submit"
+              disabled={!textInput.trim() || isSendingText}
+              aria-label={isZh ? '发送' : 'Send'}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            >
+              <Send className="h-3.5 w-3.5" />
+            </button>
+          </form>
+        </section>
       )}
     </>
   );

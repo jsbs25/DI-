@@ -2,12 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
-import { getAiProfileKey } from '../../utils/aiProfile.ts';
 import { loadAIConversationHistory, saveAIConversationHistory } from '../../utils/aiSessionHistory.ts';
-import { analyzeDialogueEmotion, buildExpressivePhrases } from '../../utils/emotionEngine.ts';
 import {
   Bot,
-  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -15,17 +12,13 @@ import {
   Cpu,
   Mic,
   MicOff,
-  Pencil,
-  Plus,
   RotateCcw,
   Send,
   Settings2,
   Sparkles,
-  Trash2,
   User as UserIcon,
   Volume2,
   VolumeX,
-  X,
 } from 'lucide-react';
 
 interface AIHubProps {
@@ -45,7 +38,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const t = translations[lang];
   const isZh = lang === 'zh';
 
-  const [selectedModel, setSelectedModel] = useState<string>('deepseek-v3');
+  const [selectedModel, setSelectedModel] = useState<string>('deepseek-r1-open');
   const [availableModels, setAvailableModels] = useState<
     Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string; isFree?: boolean }>
   >([]);
@@ -57,29 +50,15 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const [showConfigDrawer, setShowConfigDrawer] = useState(false);
-  const [showMemoryDrawer, setShowMemoryDrawer] = useState(false);
-  const [memories, setMemories] = useState<Array<{
-    id: string;
-    kind: string;
-    content: string;
-    source: string;
-    updatedAt: string;
-  }>>([]);
-  const [newMemoryText, setNewMemoryText] = useState('');
-  const [newMemoryKind, setNewMemoryKind] = useState<'fact' | 'preference' | 'project' | 'identity'>('preference');
-  const [editingMemId, setEditingMemId] = useState<string | null>(null);
-  const [editingMemText, setEditingMemText] = useState('');
   const [customApiKey, setCustomApiKey] = useState('');
   const [customBaseUrl, setCustomBaseUrl] = useState('https://api.deepseek.com/v1');
   const [customModel, setCustomModel] = useState('deepseek-chat');
-  const profileKeyRef = useRef<string>(getAiProfileKey());
 
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
-  const isComposingRef = useRef(false);
 
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = loadAIConversationHistory('earth-one-ai-hub:v1', (value): value is Message =>
@@ -93,27 +72,13 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     return [{
       id: 'msg_welcome',
       role: 'assistant',
-      model: 'ONE Intelligence',
+      model: 'DeepSeek',
       timestamp: isZh ? '刚刚' : 'Now',
       content: isZh
-        ? '你好，我是 ONE。支持连续多轮上下文、长期记忆和实时推理——直接聊你的想法或项目就行。'
-        : 'Hi, I am ONE. We can pick up context naturally across turns and keep durable project notes. What are you working on?'
+        ? '欢迎来到 DeepSeek 智能工作台。\n\n全站已全面切换至 DeepSeek 深度推理与高速对话引擎（DeepSeek-R1 / DeepSeek-V3），支持多轮对话、代码分析、写作与翻译。\n\n请直接输入你的问题。'
+        : 'Welcome to DeepSeek Intelligence Hub.\n\nAll AI features are powered by DeepSeek (DeepSeek-R1 / DeepSeek-V3) for conversation, reasoning, coding, and writing.\n\nAsk anything to begin.'
     }];
   });
-
-  const refreshMemories = async () => {
-    try {
-      const res = await fetch(`/api/ai/memory?profileKey=${encodeURIComponent(profileKeyRef.current)}`);
-      const d = await res.json().catch(() => null);
-      if (d?.success && Array.isArray(d.memories)) {
-        setMemories(d.memories);
-      }
-    } catch {}
-  };
-
-  useEffect(() => {
-    void refreshMemories();
-  }, []);
 
   useEffect(() => {
     saveAIConversationHistory('earth-one-ai-hub:v1', messages);
@@ -126,7 +91,6 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         if (d.success && Array.isArray(d.models)) {
           setAvailableModels(d.models);
           const activeDefault =
-            d.models.find((m: any) => m.id === 'deepseek-v3') ||
             d.models.find((m: any) => m.isDefault && m.id.startsWith('deepseek')) ||
             d.models.find((m: any) => m.id.startsWith('deepseek')) ||
             d.models[0];
@@ -196,82 +160,16 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     }
   };
 
-  const hubTtsAudioRef = useRef<HTMLAudioElement | null>(null);
-  const hubTtsAbortRef = useRef<AbortController | null>(null);
-
   const speakText = (text: string) => {
-    hubTtsAbortRef.current?.abort();
-    hubTtsAbortRef.current = new AbortController();
-    const signal = hubTtsAbortRef.current.signal;
-
+    if (!('speechSynthesis' in window)) return;
     try {
-      hubTtsAudioRef.current?.pause();
-      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      window.speechSynthesis.cancel();
+      const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
+      utterance.rate = 1.02;
+      window.speechSynthesis.speak(utterance);
     } catch {}
-
-    const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-    if (!clean) return;
-
-    const analysis = analyzeDialogueEmotion('', clean);
-    const phrases = buildExpressivePhrases(clean.slice(0, 320), analysis, 'audio');
-    if (phrases.length === 0) return;
-
-    const playBrowserFallback = () => {
-      if (!('speechSynthesis' in window) || signal.aborted) return;
-      const speechPhrases = buildExpressivePhrases(clean.slice(0, 320), analysis, 'speech');
-      let idx = 0;
-      const nextUtt = () => {
-        if (signal.aborted || idx >= speechPhrases.length) return;
-        const p = speechPhrases[idx++];
-        const utt = new SpeechSynthesisUtterance(p.text);
-        utt.lang = isZh ? 'zh-CN' : 'en-US';
-        utt.pitch = p.pitch;
-        utt.rate = p.rate;
-        utt.onend = () => setTimeout(nextUtt, p.pauseAfterMs);
-        window.speechSynthesis.speak(utt);
-      };
-      nextUtt();
-    };
-
-    void (async () => {
-      if (!hubTtsAudioRef.current) {
-        hubTtsAudioRef.current = new Audio();
-      }
-      const el = hubTtsAudioRef.current;
-      for (const p of phrases) {
-        if (signal.aborted) return;
-        try {
-          const r = await fetch(
-            `/api/ai/tts?text=${encodeURIComponent(p.text)}&lang=${isZh ? 'zh' : 'en'}&spd=${p.baiduSpd}&emotion=${p.emotion}`,
-            { signal }
-          );
-          if (!r.ok) {
-            playBrowserFallback();
-            return;
-          }
-          const blob = await r.blob();
-          const url = URL.createObjectURL(blob);
-          await new Promise<void>((resolve, reject) => {
-            el.src = url;
-            (el as any).preservesPitch = true;
-            (el as any).webkitPreservesPitch = true;
-            el.playbackRate = p.audioPlaybackRate;
-            el.onended = () => {
-              URL.revokeObjectURL(url);
-              setTimeout(resolve, p.pauseAfterMs);
-            };
-            el.onerror = () => {
-              URL.revokeObjectURL(url);
-              reject(new Error('audio err'));
-            };
-            el.play().catch(reject);
-          });
-        } catch {
-          if (!signal.aborted) playBrowserFallback();
-          return;
-        }
-      }
-    })();
   };
 
   const handleCopy = (id: string, text: string) => {
@@ -298,8 +196,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         prompt: textToSend,
         modelId: selectedModel,
         mode: 'general',
-        profileKey: profileKeyRef.current,
-        history: messages.slice(-24).map(message => ({ role: message.role, content: message.content })),
+        history: messages.slice(-8).map(message => ({ role: message.role, content: message.content })),
         ...(shouldStream ? { stream: true } : {})
       };
       if (selectedModel === 'custom' || customApiKey.trim()) {
@@ -323,7 +220,6 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         });
         setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, model: streamResult.model || selectedModel, tokens: streamResult.tokens } : message));
         if (voiceOutput) speakText(replyContent);
-        void refreshMemories();
         return;
       }
       const data = await res.json();
@@ -331,23 +227,13 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
       const aiMsg: Message = { id: `ai_${Date.now()}`, role: 'assistant', content: replyContent, model: data.model || selectedModel, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), tokens: data.tokens };
       setMessages(prev => [...prev, aiMsg]);
       if (voiceOutput) speakText(replyContent);
-      void refreshMemories();
     } catch (error) {
       try {
         const rawModel = selectedModel.startsWith('ollama:') ? selectedModel.slice(7) : (customModel || 'deepseek-r1');
-        const memSnippet = memories.slice(0, 5).map(m => `- ${m.content}`).join('\n');
-        const ollamaMessages = [
-          {
-            role: 'system',
-            content: `${isZh ? '你是一个自然、聪明、直奔主题的对话伙伴。不要用“首先、其次、最后”或客服套话，直接结合上下文回答。' : 'Speak naturally and concisely without robotic boilerplate.'}${memSnippet ? `\n[记住的用户信息]\n${memSnippet}` : ''}`,
-          },
-          ...messages.slice(-12).map(m => ({ role: m.role, content: m.content })),
-          { role: 'user', content: textToSend }
-        ];
         const localRes = await fetch('http://127.0.0.1:11434/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: rawModel, messages: ollamaMessages, stream: false })
+          body: JSON.stringify({ model: rawModel, messages: [{ role: 'user', content: textToSend }], stream: false })
         });
         if (localRes.ok) {
           const lData = await localRes.json();
@@ -419,15 +305,18 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/15 bg-sky-50 dark:bg-sky-500/15 text-[var(--color-one-accent)]"><Sparkles className="h-5 w-5" /></span>
               <div className="min-w-0">
                 <h1 className="text-xl font-semibold tracking-[-0.03em] text-slate-900 dark:text-white sm:text-2xl">DeepSeek Intelligence</h1>
-                <p className="text-sm text-[var(--color-one-text-muted)]">{isZh ? '全站已统一接入 DeepSeek-V3 极速流式对话与 DeepSeek-R1 深度推理引擎。' : 'Unified DeepSeek-V3 fast streaming and DeepSeek-R1 reasoning.'}</p>
+                <p className="text-sm text-[var(--color-one-text-muted)]">{isZh ? '全站 AI 已统一接入 DeepSeek 深度推理与高速对话引擎。' : 'All platform intelligence is unified on DeepSeek reasoning and chat engines.'}</p>
               </div>
             </div>
-            <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-[var(--color-one-text-dim)] tabular-nums">
-              <span className="font-medium text-[var(--color-one-accent)]">DeepSeek Engine</span>
-              <span aria-hidden="true">·</span>
-              <span>{ollamaConnected ? (isZh ? '本地 DeepSeek Ollama 已连接' : 'Local Ollama Connected') : (isZh ? '极速流式输出' : 'Fast Streaming')}</span>
-              <span aria-hidden="true">·</span>
-              <span>{isZh ? `${messages.length} 条记录` : `${messages.length} messages`}</span>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className="one-badge one-badge-accent">
+                <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-[var(--color-one-accent)]" />
+                DeepSeek Active
+              </span>
+              {ollamaConnected && (
+                <span className="one-badge one-badge-neutral">{isZh ? '本地 DeepSeek Ollama 已连接' : 'Local DeepSeek Ollama'}</span>
+              )}
+              <span className="one-badge one-badge-neutral">{isZh ? `消息 ${messages.length}` : `${messages.length} messages`}</span>
             </div>
           </div>
 
@@ -440,11 +329,11 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                 aria-label={isZh ? '选择 DeepSeek 模型' : 'Select DeepSeek model'}
               >
                 {availableModels.length === 0 ? (
-                  <option value="deepseek-v3">DeepSeek-V3</option>
+                  <option value="deepseek-r1-open">DeepSeek-R1</option>
                 ) : (
                   availableModels.map(m => (
                     <option key={m.id} value={m.id}>
-                      {m.name}
+                      {m.isFree ? '• ' : ''}{m.name}
                     </option>
                   ))
                 )}
@@ -455,19 +344,6 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             <button type="button" onClick={() => setVoiceOutput(!voiceOutput)} className={`one-btn min-h-[44px] min-w-[44px] px-3 ${voiceOutput ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? '语音朗读' : 'Voice output'}>
               {voiceOutput ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                const next = !showMemoryDrawer;
-                setShowMemoryDrawer(next);
-                if (next) void refreshMemories();
-              }}
-              className={`one-btn min-h-[44px] px-3 gap-1.5 ${showMemoryDrawer ? 'one-btn-primary' : 'one-btn-secondary'}`}
-              title={isZh ? '长期记忆管理' : 'Long-term memory'}
-            >
-              <Brain className="h-4 w-4" />
-              <span className="hidden sm:inline text-xs tabular-nums">{memories.length}</span>
-            </button>
             <button type="button" onClick={() => setShowConfigDrawer(!showConfigDrawer)} className={`one-btn min-h-[44px] min-w-[44px] px-3 ${showConfigDrawer ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? 'DeepSeek 接口设置' : 'DeepSeek settings'}>
               <Settings2 className="h-4 w-4" />
             </button>
@@ -476,153 +352,6 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             </button>
           </div>
         </header>
-
-        {showMemoryDrawer && (
-          <div className="one-surface-subtle mb-4 p-4 sm:p-5">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-white">
-                <Brain className="h-4 w-4 text-[var(--color-one-accent)]" />
-                <span>{isZh ? '跨会话长期记忆（自动提取 + 手动纠偏）' : 'Long-Term Memory (Auto + Editable)'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                {memories.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!window.confirm(isZh ? '确定清空当前长期记忆吗？' : 'Clear all stored memories?')) return;
-                      await fetch(`/api/ai/memory?profileKey=${encodeURIComponent(profileKeyRef.current)}`, { method: 'DELETE' });
-                      setMemories([]);
-                    }}
-                    className="text-xs text-rose-500 hover:text-rose-600"
-                  >
-                    {isZh ? '清空记忆' : 'Clear all'}
-                  </button>
-                )}
-                <button type="button" onClick={() => setShowMemoryDrawer(false)} className="text-xs text-[var(--color-one-text-muted)] hover:text-slate-900 dark:hover:text-white">
-                  {isZh ? '收起' : 'Close'}
-                </button>
-              </div>
-            </div>
-
-            <div className="mb-3 flex flex-wrap gap-2">
-              <select
-                value={newMemoryKind}
-                onChange={e => setNewMemoryKind(e.target.value as any)}
-                className="h-10 rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-2.5 text-xs text-slate-900 dark:text-white outline-none"
-              >
-                <option value="preference">{isZh ? '沟通偏好' : 'Preference'}</option>
-                <option value="project">{isZh ? '核心项目' : 'Project'}</option>
-                <option value="identity">{isZh ? '个人身份' : 'Identity'}</option>
-                <option value="fact">{isZh ? '重要事实' : 'Fact'}</option>
-              </select>
-              <input
-                type="text"
-                value={newMemoryText}
-                onChange={e => setNewMemoryText(e.target.value)}
-                placeholder={isZh ? '添加希望 AI 长期记住的规则、项目或偏好…' : 'Pin a rule, project, or preference…'}
-                className="h-10 min-w-[200px] flex-1 rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-xs text-slate-900 dark:text-white outline-none focus:border-sky-500"
-              />
-              <button
-                type="button"
-                onClick={async () => {
-                  const clean = newMemoryText.trim();
-                  if (!clean) return;
-                  await fetch('/api/ai/memory', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: clean, kind: newMemoryKind, profileKey: profileKeyRef.current }),
-                  });
-                  setNewMemoryText('');
-                  void refreshMemories();
-                }}
-                className="one-btn one-btn-primary h-10 px-3 text-xs gap-1"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>{isZh ? '记住' : 'Save'}</span>
-              </button>
-            </div>
-
-            {memories.length === 0 ? (
-              <p className="text-xs text-[var(--color-one-text-dim)]">
-                {isZh ? '暂无长期记忆。在聊天中提到你的名字、项目、喜好或直接说“记住…”，系统会自动识别并存入这里。' : 'No persistent memories yet. Share your name, project, or preferences in chat or add one above.'}
-              </p>
-            ) : (
-              <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
-                {memories.map(mem => (
-                  <div key={mem.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.03] px-3 py-2 text-xs">
-                    <div className="min-w-0 flex-1 flex items-center gap-2">
-                      <span className="shrink-0 rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-600 dark:text-sky-300">
-                        {mem.kind}
-                      </span>
-                      {editingMemId === mem.id ? (
-                        <input
-                          type="text"
-                          value={editingMemText}
-                          onChange={e => setEditingMemText(e.target.value)}
-                          className="h-7 flex-1 rounded-lg border border-sky-400 bg-white dark:bg-black/30 px-2 text-xs text-slate-900 dark:text-white outline-none"
-                        />
-                      ) : (
-                        <span className="truncate text-slate-800 dark:text-slate-200">{mem.content}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {editingMemId === mem.id ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (editingMemText.trim()) {
-                                await fetch(`/api/ai/memory/${mem.id}`, {
-                                  method: 'PATCH',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ content: editingMemText.trim(), profileKey: profileKeyRef.current }),
-                                });
-                                void refreshMemories();
-                              }
-                              setEditingMemId(null);
-                            }}
-                            className="p-1 text-emerald-500 hover:text-emerald-600"
-                            title={isZh ? '保存' : 'Save'}
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                          </button>
-                          <button type="button" onClick={() => setEditingMemId(null)} className="p-1 text-slate-400 hover:text-slate-600">
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingMemId(mem.id);
-                              setEditingMemText(mem.content);
-                            }}
-                            className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white"
-                            title={isZh ? '修改纠偏' : 'Edit'}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              await fetch(`/api/ai/memory/${mem.id}?profileKey=${encodeURIComponent(profileKeyRef.current)}`, { method: 'DELETE' });
-                              void refreshMemories();
-                            }}
-                            className="p-1 text-slate-400 hover:text-rose-500"
-                            title={isZh ? '删除' : 'Delete'}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
         {showConfigDrawer && (
           <div className="one-surface-subtle mb-4 p-4 sm:p-5">
@@ -646,30 +375,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-one-text-muted)]">
               <span>{isZh ? '支持 DeepSeek 官方密钥（api.deepseek.com）或本地 DeepSeek Ollama（127.0.0.1:11434）。' : 'Supports official DeepSeek API or local DeepSeek Ollama.'}</span>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const res = await fetch('/api/ai/custom-config', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        apiKey: customApiKey.trim(),
-                        baseUrl: customBaseUrl.trim(),
-                        customModel: customModel.trim(),
-                      }),
-                    });
-                    const d = await res.json().catch(() => null);
-                    if (d?.success && Array.isArray(d.models)) setAvailableModels(d.models);
-                    window.dispatchEvent(new Event('one-ai-config-updated'));
-                  } catch {}
-                  setSelectedModel(customBaseUrl.toLowerCase().includes('deepseek.com') ? 'deepseek-v3' : 'custom');
-                  setShowConfigDrawer(false);
-                }}
-                className="one-btn one-btn-primary one-btn-md whitespace-nowrap shrink-0"
-              >
-                {isZh ? '应用并启用 DeepSeek 配置' : 'Apply DeepSeek config'}
-              </button>
+              <button type="button" onClick={() => { setSelectedModel('custom'); setShowConfigDrawer(false); }} className="one-btn one-btn-primary one-btn-md">{isZh ? '应用 DeepSeek 自定义配置' : 'Apply DeepSeek config'}</button>
             </div>
           </div>
         )}
@@ -748,10 +454,8 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                   rows={1}
                   value={promptInput}
                   onChange={e => setPromptInput(e.target.value)}
-                  onCompositionStart={() => { isComposingRef.current = true; }}
-                  onCompositionEnd={() => { isComposingRef.current = false; }}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey && !isComposingRef.current && !e.nativeEvent.isComposing) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       void handleSend();
                     }

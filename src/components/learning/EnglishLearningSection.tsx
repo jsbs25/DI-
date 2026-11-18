@@ -361,9 +361,9 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
 
   return (
     <div className="space-y-5">
-      {/* Clean Borderless Engine Sub-navigation + Accent Toggle */}
-      <div className="flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: 'var(--color-one-border)' }}>
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:pb-0">
+      {/* Top Engine Sub-navigation + Accent Toggle */}
+      <div className="one-surface flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-1.5">
           {[
             { id: 'engine', label: isZh ? '实时英语引擎 (词典 / 句法 / 跟读)' : 'Live English Engine' },
             { id: 'practice', label: isZh ? '核心词汇间隔记忆' : 'Vocabulary SRS' },
@@ -376,11 +376,20 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
                 key={item.id}
                 type="button"
                 onClick={() => setSubMode(item.id as any)}
-                className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                className="rounded-xl px-3.5 py-2 text-xs font-medium transition-all cursor-pointer"
+                style={
                   active
-                    ? 'bg-[color:var(--color-one-accent-soft)] text-[color:var(--color-one-accent)]'
-                    : 'text-[color:var(--color-one-text-muted)] hover:bg-[color:var(--color-one-surface-soft)] hover:text-[color:var(--color-one-text)]'
-                }`}
+                    ? {
+                        color: 'var(--color-one-accent)',
+                        background: 'rgba(127,212,255,0.14)',
+                        border: '1px solid rgba(127,212,255,0.32)',
+                      }
+                    : {
+                        color: 'var(--color-one-text-muted)',
+                        background: 'transparent',
+                        border: '1px solid transparent',
+                      }
+                }
               >
                 {item.label}
               </button>
@@ -388,11 +397,11 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
           })}
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+        <div className="flex items-center gap-2 self-end sm:self-auto">
           <span className="text-[11px] text-[color:var(--color-one-text-dim)]">
             {isZh ? '发音引擎' : 'Accent'}
           </span>
-          <div className="inline-flex rounded-lg border p-0.5" style={{ borderColor: 'var(--color-one-border)' }}>
+          <div className="inline-flex rounded-xl border p-0.5" style={{ borderColor: 'var(--color-one-border)' }}>
             {([
               ['en-US', 'US 美式'],
               ['en-GB', 'UK 英式'],
@@ -401,9 +410,9 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
                 key={code}
                 type="button"
                 onClick={() => setAccent(code)}
-                className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
                   accent === code
-                    ? 'bg-[color:var(--color-one-accent-soft)] text-[color:var(--color-one-accent)]'
+                    ? 'bg-[#8ECFFF]/20 text-[#8ECFFF]'
                     : 'text-[color:var(--color-one-text-dim)] hover:text-[color:var(--color-one-text)]'
                 }`}
               >

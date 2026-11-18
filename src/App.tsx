@@ -243,6 +243,28 @@ export default function App() {
             } catch {}
           }}
         />
+        <HolographicAICompanion
+          lang={lang}
+          theme={theme}
+          isAuthenticated={false}
+          currentTab={currentTab}
+          placement="corner"
+          onSetTheme={setTheme}
+          onSetLang={setLang}
+          onNavigateTab={(tab) => {
+            if (tab === 'brand') {
+              setCurrentTab('brand');
+              try {
+                const url = new URL(window.location.href);
+                url.searchParams.set('module', 'brand');
+                window.history.replaceState({}, '', url.pathname + url.search);
+              } catch {}
+            } else {
+              setIsAuthModalOpen(true);
+            }
+          }}
+          onOpenAuth={() => setIsAuthModalOpen(true)}
+        />
       </>
     );
   }
@@ -404,6 +426,10 @@ export default function App() {
 
       <HolographicAICompanion
         lang={lang}
+        theme={theme}
+        isAuthenticated={true}
+        userName={currentUser.displayName || currentUser.username}
+        userCity={currentUser.location?.cityName}
         showLauncher={!immersive}
         placement={currentTab === 'globe' ? 'center-bottom' : 'corner'}
         onFlyTo={(lat, lng) => {
@@ -445,8 +471,34 @@ export default function App() {
           setBrowserQuickSearch({ seq: Date.now(), query });
           setCurrentTab('browser');
         }}
+        onGlobalSearchAction={(query) => {
+          setSearchQuery(query);
+          setCurrentTab('mercury');
+        }}
         onSetTheme={setTheme}
         onSetLang={setLang}
+        onSetImmersive={setImmersive}
+        onOpenCommandPalette={() => setCommandOpen(true)}
+        onReplayIntro={() => setShowIntro(true)}
+        onCreatePost={handleCreatePost}
+        onCreateArticle={handleCreateArticle}
+        onFilterCountry={setActiveCountry}
+        onToggleJoinCommunity={handleToggleJoinCommunity}
+        onOpenBook={(bookId) => {
+          setLibraryFocusBookId(bookId);
+          setCurrentTab('library');
+        }}
+        onOpenKnowledge={(nodeId) => {
+          setKnowledgeFocusNodeId(nodeId);
+          setCurrentTab('knowledge');
+        }}
+        onOpenProfile={() => currentUser && setProfileModalUser(currentUser)}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onOpenSecurity={() => setIsSecurityModalOpen(true)}
+        onToggleLocationPrivacy={handleToggleLocationPrivacy}
+        onOpenMessages={(cid) => handleOpenConversationFromHome(cid || 'conv_global')}
+        onOpenCalls={handleOpenCallCenterFromHome}
+        onQuickCall={handleQuickCall}
         currentTab={currentTab}
       />
 

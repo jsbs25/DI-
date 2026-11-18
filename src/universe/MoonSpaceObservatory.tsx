@@ -16,6 +16,7 @@ import {
   Info
 } from 'lucide-react';
 import { Language } from '../types/index.ts';
+import { InteractiveMoonViewport } from './InteractiveMoonViewport.tsx';
 
 export interface AstroImage {
   id: string;
@@ -390,7 +391,10 @@ export const MoonSpaceObservatory: React.FC<MoonSpaceObservatoryProps> = ({ lang
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto w-full max-w-[1440px] space-y-5 px-4 pb-16 sm:px-6 lg:px-10">
+      <main className="relative z-10 mx-auto w-full max-w-[1440px] space-y-6 px-4 pb-16 sm:px-6 lg:px-10">
+        {/* Interactive 3D NASA LRO Moon Lab */}
+        <InteractiveMoonViewport lang={lang} />
+
         {/* Channels */}
         <div className="flex flex-wrap items-center gap-2">
           {PRESET_CHANNELS.map((ch) => {

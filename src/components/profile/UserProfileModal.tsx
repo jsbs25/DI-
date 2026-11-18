@@ -35,7 +35,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   lang
 }) => {
   const t = translations[lang];
-  const isMe = !!currentUser && user.id === currentUser.id;
+  const isMe = user.id === currentUser?.id || user.id === 'current_user';
 
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user.displayName);

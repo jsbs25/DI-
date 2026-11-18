@@ -34,36 +34,20 @@ function iaIdentifier(book: EmbeddableBookRef): string | null {
   return m?.[1] || null;
 }
 
+function gutenbergId(book: EmbeddableBookRef): string | null {
+  const sourceUrl = safeHttps(book.sourceUrl) || safeHttps(book.externalReadUrl);
+  const fromUrl = sourceUrl?.match(/gutenberg\.org\/ebooks\/(\d+)/)?.[1];
+  if (fromUrl) return fromUrl;
+  const ext = (book.externalId || book.identifier || '').replace(/^gutenberg_/, '');
+  return /^\d+$/.test(ext) ? ext : null;
+}
+
 export function getBookEmbedUrl(book: EmbeddableBookRef): { url: string; label: string } | null {
   const source = String(book.source || '').toLowerCase();
   const sourceUrl = safeHttps(book.sourceUrl) || safeHttps(book.externalReadUrl);
-  const directEmbed = safeHttps(book.embedUrl);
 
-  if (directEmbed) {
-    if (source === 'youtube' || /youtube\.com|youtu\.be/i.test(directEmbed)) {
-      return { url: directEmbed, label: 'YouTube 有声全本精读' };
-    }
-    if (source === 'bilibili' || /bilibili\.com/i.test(directEmbed)) {
-      return { url: directEmbed, label: 'Bilibili 读书精讲' };
-    }
-    if (source === 'googlebooks' || /books\.google\./i.test(directEmbed)) {
-      return { url: directEmbed, label: 'Google Books 官方在线预览' };
-    }
-    return { url: directEmbed, label: '官方嵌入阅读' };
-  }
-
-  if (source === 'youtube' || (sourceUrl && /(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/.test(sourceUrl))) {
-    const vid = book.identifier || sourceUrl?.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/)?.[1];
-    if (vid) {
-      return { url: `https://www.youtube.com/embed/${vid}?autoplay=1&enablejsapi=1&rel=0&playsinline=1`, label: 'YouTube 有声全本精读' };
-    }
-  }
-
-  if (source === 'bilibili' || (sourceUrl && /bilibili\.com\/video\/(BV[A-Za-z0-9]+)/i.test(sourceUrl))) {
-    const bvid = book.identifier || sourceUrl?.match(/bilibili\.com\/video\/(BV[A-Za-z0-9]+)/i)?.[1];
-    if (bvid) {
-      return { url: `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(bvid)}&high_quality=1&danmaku=0&autoplay=1`, label: 'Bilibili 读书精讲' };
-    }
+  if (safeHttps(book.embedUrl)) {
+    return { url: safeHttps(book.embedUrl)!, label: '官方嵌入阅读' };
   }
 
   const iaId = iaIdentifier(book);
@@ -71,14 +55,28 @@ export function getBookEmbedUrl(book: EmbeddableBookRef): { url: string; label: 
     if (iaId) return { url: `https://archive.org/embed/${encodeURIComponent(iaId)}`, label: 'Internet Archive 公开阅读' };
   }
 
-  // Open Library, Project Gutenberg, and Wikisource send X-Frame-Options / frame-ancestors
-  // headers blocking <iframe> embeds; those sources are read directly in the built-in chapter
-  // reader via full-text ingest or via external source link instead of blank frames.
+  const olMatch = sourceUrl?.match(/openlibrary\.org\/(works|books)\/([A-Za-z0-9]+)/);
+  if (source === 'openlibrary' || olMatch) {
+    if (olMatch) return { url: `https://openlibrary.org/${olMatch[1]}/${olMatch[2]}`, label: 'Open Library 官方页面/借阅' };
+    if (sourceUrl?.includes('openlibrary.org')) return { url: sourceUrl, label: 'Open Library 官方页面/借阅' };
+  }
+
+  const gutId = gutenbergId(book);
+  if (source === 'gutenberg' || source === 'project gutenberg' || gutId) {
+    if (gutId) return { url: `https://www.gutenberg.org/ebooks/${gutId}.html.images`, label: 'Project Gutenberg 在线阅读' };
+  }
+
+  if ((source === 'wikisource' || /zh\.wikisource\.org/.test(sourceUrl || '')) && book.pageTitle) {
+    return { url: `https://zh.wikisource.org/wiki/${encodeURIComponent(book.pageTitle)}`, label: 'Wikisource 在线阅读' };
+  }
+  if ((source === 'ar_wikisource' || /ar\.wikisource\.org/.test(sourceUrl || '')) && book.pageTitle) {
+    return { url: `https://ar.wikisource.org/wiki/${encodeURIComponent(book.pageTitle)}`, label: 'Arabic Wikisource 在线阅读' };
+  }
+  if (sourceUrl && /wikisource\.org\/wiki\//.test(sourceUrl)) {
+    return { url: sourceUrl, label: 'Wikisource 在线阅读' };
+  }
+
   if (sourceUrl && /google\.[^/]+\/books/.test(sourceUrl)) {
-    const gbId = book.identifier || sourceUrl.match(/[?&]id=([^&]+)/)?.[1];
-    if (gbId) {
-      return { url: `https://books.google.com/books?id=${encodeURIComponent(gbId)}&printsec=frontcover&output=embed`, label: 'Google Books 官方在线预览' };
-    }
     return { url: sourceUrl, label: 'Google Books（按来源权限预览）' };
   }
   return null;

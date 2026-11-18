@@ -1,18 +1,14 @@
-export type CompanionEmotion =
-  | 'calm'
-  | 'happy'
-  | 'excited'
-  | 'curious'
-  | 'concerned'
+export type VoiceEmotion =
+  | 'cheerful'
+  | 'affectionate'
   | 'empathetic'
   | 'playful'
-  | 'focused'
-  | 'thinking';
-
-export type VoiceEmotion = CompanionEmotion;
+  | 'excited'
+  | 'curious'
+  | 'calm';
 
 export interface EmotionAnalysisResult {
-  emotion: CompanionEmotion;
+  emotion: VoiceEmotion;
   intensity: number; // 0.35 - 1.0
   labelZh: string;
   labelEn: string;
@@ -25,7 +21,7 @@ export interface EmotionAnalysisResult {
 
 export interface ProsodyPhrase {
   text: string;
-  emotion: CompanionEmotion;
+  emotion: VoiceEmotion;
   pitch: number;
   rate: number;
   baiduSpd: number;
@@ -34,92 +30,153 @@ export interface ProsodyPhrase {
 }
 
 const VALID_EMOTIONS: ReadonlySet<string> = new Set([
-  'calm',
-  'happy',
-  'excited',
-  'curious',
-  'concerned',
+  'cheerful',
+  'affectionate',
   'empathetic',
   'playful',
-  'focused',
-  'thinking',
+  'excited',
+  'curious',
+  'calm',
 ]);
 
-const EMOTION_ALIASES: Record<string, CompanionEmotion> = {
-  cheerful: 'happy',
-  affectionate: 'empathetic',
-  empathetic: 'empathetic',
-  playful: 'playful',
-  excited: 'excited',
-  curious: 'curious',
-  calm: 'calm',
-  happy: 'happy',
-  concerned: 'concerned',
-  focused: 'focused',
-  thinking: 'thinking',
-};
-
-export function normalizeCompanionEmotion(raw?: string | null): CompanionEmotion | null {
-  if (!raw) return null;
-  const key = raw.toLowerCase().trim();
-  if (VALID_EMOTIONS.has(key)) return key as CompanionEmotion;
-  return EMOTION_ALIASES[key] || null;
-}
-
-export function extractEmotionTag(raw: string): { emotion: CompanionEmotion | null; text: string } {
-  let detected: CompanionEmotion | null = null;
+export function extractEmotionTag(raw: string): { emotion: VoiceEmotion | null; text: string } {
+  let detected: VoiceEmotion | null = null;
   const cleaned = raw
     .replace(/\[\[EMO:([a-z_-]+)\]\]\s*/gi, (_all, tag: string) => {
-      const normalized = normalizeCompanionEmotion(tag);
-      if (normalized) detected = normalized;
-      return '';
-    })
-    .replace(/\[\[EMOTION:([a-z_-]+)\]\]\s*/gi, (_all, tag: string) => {
-      const normalized = normalizeCompanionEmotion(tag);
-      if (normalized) detected = normalized;
+      const normalized = tag.toLowerCase().trim();
+      if (VALID_EMOTIONS.has(normalized)) {
+        detected = normalized as VoiceEmotion;
+      }
       return '';
     })
     .trimStart();
   return { emotion: detected, text: cleaned };
 }
 
-const EMOTION_PROFILES: Record<CompanionEmotion, Omit<EmotionAnalysisResult, 'emotion' | 'intensity'>> = {
-  calm: { labelZh: '平静', labelEn: 'Calm', auraHex: 0x8ecfff, basePitch: 1.0, baseRate: 1.12, baiduSpd: 5, audioPlaybackRate: 1.12 },
-  happy: { labelZh: '开心', labelEn: 'Happy', auraHex: 0xf9c74f, basePitch: 1.03, baseRate: 1.16, baiduSpd: 6, audioPlaybackRate: 1.14 },
-  excited: { labelZh: '雀跃', labelEn: 'Excited', auraHex: 0xff8fab, basePitch: 1.06, baseRate: 1.2, baiduSpd: 6, audioPlaybackRate: 1.18 },
-  curious: { labelZh: '好奇', labelEn: 'Curious', auraHex: 0x7dd3fc, basePitch: 1.02, baseRate: 1.14, baiduSpd: 5, audioPlaybackRate: 1.13 },
-  concerned: { labelZh: '关切', labelEn: 'Concerned', auraHex: 0xf59e0b, basePitch: 0.99, baseRate: 1.08, baiduSpd: 5, audioPlaybackRate: 1.08 },
-  empathetic: { labelZh: '共情', labelEn: 'Empathetic', auraHex: 0xc084fc, basePitch: 0.98, baseRate: 1.06, baiduSpd: 4, audioPlaybackRate: 1.06 },
-  playful: { labelZh: '俏皮', labelEn: 'Playful', auraHex: 0x34d399, basePitch: 1.04, baseRate: 1.18, baiduSpd: 6, audioPlaybackRate: 1.16 },
-  focused: { labelZh: '专注', labelEn: 'Focused', auraHex: 0x60a5fa, basePitch: 1.0, baseRate: 1.1, baiduSpd: 5, audioPlaybackRate: 1.1 },
-  thinking: { labelZh: '思考', labelEn: 'Thinking', auraHex: 0xa78bfa, basePitch: 0.99, baseRate: 1.05, baiduSpd: 4, audioPlaybackRate: 1.05 },
+const EMOTION_PROFILES: Record<
+  VoiceEmotion,
+  Omit<EmotionAnalysisResult, 'emotion' | 'intensity'>
+> = {
+  excited: {
+    labelZh: '兴奋雀跃',
+    labelEn: 'Excited',
+    auraHex: 0xfb923c,
+    basePitch: 1.06,
+    baseRate: 1.18,
+    baiduSpd: 6,
+    audioPlaybackRate: 1.15,
+  },
+  cheerful: {
+    labelZh: '愉悦开心',
+    labelEn: 'Cheerful',
+    auraHex: 0xf5c451,
+    basePitch: 1.04,
+    baseRate: 1.14,
+    baiduSpd: 6,
+    audioPlaybackRate: 1.12,
+  },
+  curious: {
+    labelZh: '好奇探索',
+    labelEn: 'Curious',
+    auraHex: 0x34d399,
+    basePitch: 1.03,
+    baseRate: 1.12,
+    baiduSpd: 5,
+    audioPlaybackRate: 1.1,
+  },
+  empathetic: {
+    labelZh: '温柔共情',
+    labelEn: 'Empathetic',
+    auraHex: 0xf472b6,
+    basePitch: 0.97,
+    baseRate: 1.02,
+    baiduSpd: 5,
+    audioPlaybackRate: 1.04,
+  },
+  affectionate: {
+    labelZh: '暖心陪伴',
+    labelEn: 'Warm',
+    auraHex: 0xfbbf24,
+    basePitch: 0.99,
+    baseRate: 1.06,
+    baiduSpd: 5,
+    audioPlaybackRate: 1.06,
+  },
+  playful: {
+    labelZh: '俏皮轻快',
+    labelEn: 'Playful',
+    auraHex: 0x2dd4bf,
+    basePitch: 1.07,
+    baseRate: 1.16,
+    baiduSpd: 6,
+    audioPlaybackRate: 1.14,
+  },
+  calm: {
+    labelZh: '平静聆听',
+    labelEn: 'Calm',
+    auraHex: 0x8ecfff,
+    basePitch: 1.0,
+    baseRate: 1.1,
+    baiduSpd: 5,
+    audioPlaybackRate: 1.1,
+  },
 };
 
-export function detectCompanionEmotion(userText: string, replyText = ''): CompanionEmotion {
-  const text = `${String(userText || '')}\n${String(replyText || '')}`.toLowerCase();
-  if (/累|疲|难受|压力|委屈|难过|抱歉|担心|焦虑|tired|stressed|worried|sorry|sad/.test(text)) return 'empathetic';
-  if (/不确定|问题|风险|小心|注意|出错|失败|concern|issue|risk|careful/.test(text)) return 'concerned';
-  if (/太棒|开心|高兴|好耶|喜欢|great|awesome|happy|glad|love/.test(text)) return 'happy';
-  if (/哇|惊|太酷|马上|立刻|超棒|excited|amazing|wow/.test(text)) return 'excited';
-  if (/为什么|怎么|原理|好奇|探索|what if|why|how|curious/.test(text)) return 'curious';
-  if (/哈哈|开玩笑|逗|调皮|haha|lol|joke|playful/.test(text)) return 'playful';
-  if (/专注|步骤|执行|任务|开始|继续|focus|task|step/.test(text)) return 'focused';
-  if (/分析|思考|推理|比较|评估|考虑|think|analy|reason|compare/.test(text)) return 'thinking';
-  return 'calm';
-}
-
+/**
+ * Genuine context-sensitive Emotional Engine:
+ * Analyzes explicit emotion tags, user sentiment, and assistant reply warmth/energy
+ * to drive orb aura colors, UI status, and vocal prosody subtly and naturally.
+ */
 export function analyzeDialogueEmotion(
   userText: string,
   replyText: string,
-  explicitEmotion?: CompanionEmotion | null
+  explicitEmotion?: VoiceEmotion | null
 ): EmotionAnalysisResult {
-  const emotion = normalizeCompanionEmotion(explicitEmotion) || detectCompanionEmotion(userText, replyText);
-  const profile = EMOTION_PROFILES[emotion] || EMOTION_PROFILES.calm;
-  return { emotion, intensity: 0.72, ...profile };
+  if (explicitEmotion && EMOTION_PROFILES[explicitEmotion]) {
+    return {
+      emotion: explicitEmotion,
+      intensity: 0.85,
+      ...EMOTION_PROFILES[explicitEmotion],
+    };
+  }
+
+  const u = (userText || '').trim();
+  const r = (replyText || '').trim();
+  const combined = `${u} ${r}`;
+
+  let emotion: VoiceEmotion = 'calm';
+  let intensity = 0.68;
+
+  if (/好累|累死了|疲惫|心累|难过|伤心|委屈|压力|焦虑|孤单|辛苦了|抱抱|sorry|tired|sad|stress|lonely|overwhelmed/i.test(combined)) {
+    emotion = 'empathetic';
+    intensity = 0.88;
+  } else if (/哈哈|笑死|逗我|幽默|开玩笑|俏皮|haha|lol|joke|playful/i.test(combined)) {
+    emotion = 'playful';
+    intensity = 0.84;
+  } else if (/太棒|太牛|厉害|兴奋|哇塞|惊喜|冲|amazing|awesome|excited|woohoo|!{2,}|！{2,}/i.test(combined)) {
+    emotion = 'excited';
+    intensity = 0.9;
+  } else if (/喜欢你|爱你|贴心|温柔|陪着你|暖心|thank you|love you|appreciate/i.test(combined)) {
+    emotion = 'affectionate';
+    intensity = 0.85;
+  } else if (/为什么|怎么|好奇|探索|原理|是什么|查一下|看看|curious|wonder|explore|how does|why/i.test(u)) {
+    emotion = 'curious';
+    intensity = 0.78;
+  } else if (/开心|高兴|快乐|好呀|没问题|搞定|顺利|happy|glad|great|enjoy/i.test(combined)) {
+    emotion = 'cheerful';
+    intensity = 0.8;
+  }
+
+  return {
+    emotion,
+    intensity,
+    ...EMOTION_PROFILES[emotion],
+  };
 }
 
 /**
- * Builds natural sentence segments for smooth TTS playback.
+ * Splits a reply into natural full-sentence segments for smooth, crisp,
+ * human-sounding speech delivery with emotion-matched prosody.
  */
 export function buildExpressivePhrases(
   rawText: string,
@@ -128,7 +185,6 @@ export function buildExpressivePhrases(
 ): ProsodyPhrase[] {
   const clean = rawText
     .replace(/\[\[EMO:[a-z_-]+\]\]/gi, '')
-    .replace(/\[\[EMOTION:[a-z_-]+\]\]/gi, '')
     .replace(/\[\[ACTION:[\s\S]*?\]\]/g, '')
     .replace(/[*_#`>~～]/g, '')
     .replace(/\s+/g, ' ')
@@ -137,11 +193,16 @@ export function buildExpressivePhrases(
   if (!clean) return [];
 
   const rawChunks = clean.match(/[^。！？!?;；\n]+[。！？!?;；\n]?/g) || [clean];
+
   const merged: string[] = [];
   for (const piece of rawChunks) {
     const trimmed = piece.trim();
     if (!trimmed) continue;
-    if (merged.length > 0 && trimmed.length < 14 && merged[merged.length - 1].length + trimmed.length <= 72) {
+    if (
+      merged.length > 0 &&
+      trimmed.length < 14 &&
+      merged[merged.length - 1].length + trimmed.length <= 72
+    ) {
       merged[merged.length - 1] = `${merged[merged.length - 1]} ${trimmed}`.trim();
     } else {
       merged.push(trimmed);
@@ -152,14 +213,23 @@ export function buildExpressivePhrases(
   const finalSegments: string[] = [];
   let acc = '';
   for (const seg of merged) {
-    if (!acc) acc = seg;
-    else if (acc.length + seg.length <= maxChunkLen) acc = `${acc} ${seg}`;
-    else {
+    if (!acc) {
+      acc = seg;
+    } else if (acc.length + seg.length <= maxChunkLen) {
+      acc = `${acc} ${seg}`;
+    } else {
       finalSegments.push(acc);
       acc = seg;
     }
   }
   if (acc) finalSegments.push(acc);
+
+  const pauseMs =
+    analysis.emotion === 'empathetic' || analysis.emotion === 'affectionate'
+      ? 55
+      : analysis.emotion === 'excited'
+        ? 15
+        : 25;
 
   return finalSegments.map((seg) => ({
     text: seg,
@@ -168,14 +238,6 @@ export function buildExpressivePhrases(
     rate: analysis.baseRate,
     baiduSpd: analysis.baiduSpd,
     audioPlaybackRate: analysis.audioPlaybackRate,
-    pauseAfterMs: 30,
+    pauseAfterMs: pauseMs,
   }));
-}
-
-export function inferEmotionFromToolCall(name?: string): CompanionEmotion | null {
-  if (!name) return null;
-  if (name === 'set_companion_emotion') return null;
-  if (/search|lookup|find/.test(name)) return 'curious';
-  if (/play|open|navigate|launch/.test(name)) return 'focused';
-  return null;
 }

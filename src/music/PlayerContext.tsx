@@ -24,11 +24,11 @@ import {
 export interface MusicPlayerApi {
   state: PlayerState;
   currentTrack: UnifiedTrack | null;
-  sessionActivated: boolean;
-  activateMusicSession: () => void;
   userStopped: boolean;
+  sessionActivated: boolean;
   failedTrackIds: Set<string>;
   isTrackFailed: (trackId: string) => boolean;
+  activateMusicSession: () => void;
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
@@ -60,8 +60,8 @@ const PlayerContext = createContext<MusicPlayerApi | null>(null);
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(playerReducer, undefined, createInitialState);
-  const [sessionActivated, setSessionActivated] = React.useState(false);
   const [userStopped, setUserStoppedState] = React.useState(false);
+  const [sessionActivated, setSessionActivated] = React.useState(false);
   const [failedTrackIds, setFailedTrackIds] = React.useState<Set<string>>(() => new Set());
   const userStoppedRef = useRef(false);
   const failedTrackIdsRef = useRef<Set<string>>(new Set());
@@ -153,30 +153,39 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
-    const onForceStop = () => {
-      if (stallTimerRef.current) {
-        clearTimeout(stallTimerRef.current);
-        stallTimerRef.current = null;
-      }
-      setSessionActivated(false);
-      setUserStopped(true);
-      engine.pause();
-      void engine.load(undefined);
-      lastTrackIdRef.current = undefined;
-      lastKindRef.current = undefined;
-      lastAudioSrcRef.current = undefined;
-      dispatch({ type: 'CLEAR_QUEUE' });
-      clearPersistedPlayerState();
-    };
-    window.addEventListener('one-music-force-stop', onForceStop);
-    return () => window.removeEventListener('one-music-force-stop', onForceStop);
-  }, [engine, setUserStopped]);
-
-  // Do NOT pop up music player on initial launch; keep home clean until Music is opened.
-  useEffect(() => {
     if (restoredOnceRef.current) return;
     restoredOnceRef.current = true;
     void probeClientMediaConnectivity();
+    const snap = loadPersistedPlayerState();
+    if (snap && Array.isArray(snap.queue)) {
+      const cleanedQueue = snap.queue.filter((item) => {
+        const audioUrl = String(item?.track?.playback?.audioUrl || '');
+        const title = String(item?.track?.title || '');
+        const hasAudio = Boolean(audioUrl);
+        return (
+          hasAudio &&
+          !audioUrl.includes('soundhelix.com') &&
+          !audioUrl.includes('testmp3testfile') &&
+          !audioUrl.includes('cdn.freesound.org/previews/') &&
+          !title.includes('Test Instrumental') &&
+          !title.includes('Connectivity Check') &&
+          !title.includes('Greatest Speeches') &&
+          !title.includes('Air Conditioner') &&
+          !title.includes('Conet Project')
+        );
+      });
+      if (cleanedQueue.length > 0) {
+        dispatch({
+          type: 'RESTORE',
+          snapshot: {
+            ...snap,
+            queue: cleanedQueue,
+            currentIndex: Math.min(Math.max(0, snap.currentIndex), cleanedQueue.length - 1),
+          },
+        });
+        return;
+      }
+    }
     dispatch({
       type: 'RESTORE',
       snapshot: {
@@ -240,44 +249,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   }, [engine, attemptFallback, pruneFailedTrackAndAdvance]);
 
   const currentTrack = getActiveTrack(state);
-
-  // Auto-advance YouTube & Bilibili embed tracks when playback ends
-  useEffect(() => {
-    if (!sessionActivated || userStopped || !state.isPlaying || !currentTrack) return;
-    if (currentTrack.playback.kind !== 'embed') return;
-
-    const onMessage = (e: MessageEvent) => {
-      if (typeof e.origin !== 'string' || !e.origin.includes('youtube')) return;
-      try {
-        const msg = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
-        // YouTube IFrame API sends info.playerState === 0 on video end
-        if (
-          (msg?.event === 'onStateChange' && msg?.info === 0) ||
-          (msg?.event === 'infoDelivery' && msg?.info?.playerState === 0)
-        ) {
-          dispatch({ type: 'NEXT' });
-        }
-      } catch {}
-    };
-    window.addEventListener('message', onMessage);
-
-    // Duration-based fallback auto-advance for embeds (especially Bilibili which has no postMessage API)
-    const dur = currentTrack.durationSeconds && currentTrack.durationSeconds > 15 && currentTrack.durationSeconds < 1800
-      ? currentTrack.durationSeconds
-      : 0;
-    const timer = dur
-      ? setTimeout(() => {
-          if (stateRef.current.isPlaying && !userStoppedRef.current) {
-            dispatch({ type: 'NEXT' });
-          }
-        }, (dur + 3) * 1000)
-      : null;
-
-    return () => {
-      window.removeEventListener('message', onMessage);
-      if (timer) clearTimeout(timer);
-    };
-  }, [sessionActivated, userStopped, state.isPlaying, currentTrack]);
 
   useEffect(() => {
     if (stallTimerRef.current) {
@@ -416,7 +387,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(stallTimerRef.current);
       stallTimerRef.current = null;
     }
-    setSessionActivated(false);
     setUserStopped(true);
     engine.pause();
     dispatch({ type: 'PAUSE' });
@@ -428,8 +398,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(stallTimerRef.current);
       stallTimerRef.current = null;
     }
-    setSessionActivated(false);
     setUserStopped(true);
+    setSessionActivated(false);
     engine.pause();
     void engine.load(undefined);
     lastTrackIdRef.current = undefined;
@@ -527,11 +497,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     () => ({
       state,
       currentTrack,
-      sessionActivated,
-      activateMusicSession,
       userStopped,
+      sessionActivated,
       failedTrackIds,
       isTrackFailed,
+      activateMusicSession,
       play,
       pause,
       togglePlay,
@@ -561,11 +531,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     [
       state,
       currentTrack,
-      sessionActivated,
-      activateMusicSession,
       userStopped,
+      sessionActivated,
       failedTrackIds,
       isTrackFailed,
+      activateMusicSession,
       play,
       pause,
       togglePlay,

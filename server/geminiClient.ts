@@ -1,23 +1,44 @@
 import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
 
-export const GEMINI_TEXT_MODEL = 'gemini-4-hydrogen';
-export const GEMINI_FAST_MODEL = 'gemini-3.1-flash-lite';
-export const GEMINI_LIVE_MODEL = 'gemini-3.8-live';
-export const GEMINI_TTS_MODEL = 'gemini-3.8-flash-lite-tts';
+dotenv.config();
 
-export function hasGeminiApiKey(): boolean {
-  return Boolean((process.env.GEMINI_API_KEY || '').trim());
+let cachedClient: GoogleGenAI | null = null;
+let cachedLiveClient: GoogleGenAI | null = null;
+let cachedKey = '';
+
+export function getGeminiApiKey(): string {
+  return (process.env.GEMINI_API_KEY || '').trim();
 }
 
-export function createGeminiClient(): GoogleGenAI | null {
-  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
-  if (!apiKey) return null;
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
+export function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    return null;
+  }
+  if (!cachedClient || cachedKey !== apiKey) {
+    cachedKey = apiKey;
+    cachedClient = new GoogleGenAI({
+      apiKey,
+      apiVersion: 'v1beta',
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
       },
-    },
-  });
+    });
+    cachedLiveClient = cachedClient;
+  }
+  return cachedClient;
+}
+
+export function getGeminiLiveClient(): GoogleGenAI | null {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    return null;
+  }
+  if (!cachedLiveClient || cachedKey !== apiKey) {
+    getGeminiClient();
+  }
+  return cachedLiveClient;
 }

@@ -1,23 +1,20 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { GlobeUserNode, GlobeCountryStat, Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
-import { latLngToVector3, createSubtleEarthCloudTexture } from './proceduralEarthTextures.ts';
+import { latLngToVector3 } from './proceduralEarthTextures.ts';
 import {
-  earthSurfaceVertexShader,
-  earthSurfaceFragmentShader,
-  earthCloudVertexShader,
-  earthCloudFragmentShader,
-  atmosphereVertexShader,
-  atmosphereFragmentShader,
-  innerAtmosphereVertexShader,
-  innerAtmosphereFragmentShader
-} from './earthShaders.ts';
+  buildPhotorealEarthRig,
+  buildPhotorealMoonRig,
+  type PhotorealEarthRig,
+  type PhotorealMoonRig,
+} from '../../universe/celestialMeshBuilders.ts';
 import { buildOrbitSystem, buildConnectionArcs, buildStarField } from './sceneBuilders.ts';
 import {
   ArrowRight,
@@ -38,7 +35,8 @@ import {
   Layers,
   ZoomIn,
   ZoomOut,
-  Cloud
+  Cloud,
+  Moon
 } from 'lucide-react';
 
 interface DigitalGlobeProps {
@@ -96,6 +94,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
   const [showISS, setShowISS] = useState(true);
   const [showEarthquakes, setShowEarthquakes] = useState(true);
   const [showClouds, setShowClouds] = useState(true);
+  const [showMoon, setShowMoon] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [hoveredNode, setHoveredNode] = useState<GlobeUserNode | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
@@ -137,7 +136,10 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     controls: null as OrbitControls | null,
     composer: null as EffectComposer | null,
     earthGroup: null as THREE.Group | null,
+    earthRig: null as PhotorealEarthRig | null,
     cloudMesh: null as THREE.Mesh | null,
+    lunarOrbitPivot: null as THREE.Group | null,
+    moonRig: null as PhotorealMoonRig | null,
     orbitSystem: null as { update: (elapsed: number) => void; dispose: () => void } | null,
     connectionArcs: null as { update: (elapsed: number) => void; dispose: () => void } | null,
     beaconGroup: null as THREE.Group | null,
@@ -149,6 +151,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     showISS: true,
     showEarthquakes: true,
     showClouds: true,
+    showMoon: true,
     reducedMotion: false,
     targetSphericalRotation: null as { x: number; y: number } | null,
     targetCameraDistance: null as number | null,
@@ -217,7 +220,20 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     if (stateRef.current.cloudMesh) {
       stateRef.current.cloudMesh.visible = showClouds;
     }
+    const shader = stateRef.current.earthRig?.earthMaterial?.userData?.shader as
+      | { uniforms?: Record<string, { value: number }> }
+      | undefined;
+    if (shader?.uniforms?.uCloudShadowStrength) {
+      shader.uniforms.uCloudShadowStrength.value = showClouds ? 0.48 : 0.0;
+    }
   }, [showClouds]);
+
+  useEffect(() => {
+    stateRef.current.showMoon = showMoon;
+    if (stateRef.current.lunarOrbitPivot) {
+      stateRef.current.lunarOrbitPivot.visible = showMoon;
+    }
+  }, [showMoon]);
 
   // Real-time telemetry fetching (ISS orbit & USGS earthquakes)
   useEffect(() => {
@@ -534,119 +550,88 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
     container.appendChild(renderer.domElement);
     stateRef.current.renderer = renderer;
 
-    // 3. DEEP SPACE BACKDROP — optical pinpoint stars
-    const starCount = isSoftwareGl ? 600 : isTouchOrCompact ? 950 : 1600;
+    // 3. DEEP SPACE BACKDROP & STUDIO ENVIRONMENT REFLECTION
+    const starCount = isSoftwareGl ? 600 : isTouchOrCompact ? 950 : 1800;
     const starField = buildStarField(starCount);
     scene.add(starField);
 
-    // 4. LIGHTING — bright sunlit orbital illumination
-    const sunDirection = new THREE.Vector3(-0.62, 0.32, 0.72).normalize();
-    const ambientLight = new THREE.AmbientLight(0x7ba7db, 1.25);
-    scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xfffaf2, 1.65);
-    directionalLight.position.copy(sunDirection).multiplyScalar(30);
-    scene.add(directionalLight);
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const roomEnv = new RoomEnvironment();
+    const envTarget = pmremGenerator.fromScene(roomEnv, 0.04);
+    scene.environment = envTarget.texture;
+    scene.environmentIntensity = 0.24;
+    roomEnv.dispose();
+    pmremGenerator.dispose();
 
-    // 5. CENTRAL EARTH SYSTEM
+    // 4. LIGHTING — cinematic solar key + subtle deep-space hemisphere fill + cool rim
+    const sunDirection = new THREE.Vector3(-0.62, 0.28, 0.73).normalize();
+    const hemiLight = new THREE.HemisphereLight(0x88b6ff, 0x050914, 0.34);
+    scene.add(hemiLight);
+    const directionalLight = new THREE.DirectionalLight(0xfff7ea, 2.85);
+    directionalLight.position.copy(sunDirection).multiplyScalar(40);
+    scene.add(directionalLight);
+    const rimFillLight = new THREE.DirectionalLight(0x4b7fc7, 0.36);
+    rimFillLight.position.copy(sunDirection).multiplyScalar(-30);
+    scene.add(rimFillLight);
+
+    // 5. CENTRAL EARTH SYSTEM (NASA Blue Marble 4K + Cloud Shadows + Ocean Specular + Black Marble + Rayleigh Atmosphere)
     const earthGroup = new THREE.Group();
     earthGroup.position.set(isNarrow ? 0 : 1.1, isNarrow ? -0.78 : 0.02, 0);
     earthGroup.rotation.set(INITIAL_ROTATION_X, INITIAL_ROTATION_Y, 0);
     scene.add(earthGroup);
     stateRef.current.earthGroup = earthGroup;
 
-    const textureLoader = new THREE.TextureLoader();
-    const loadTexture = (url: string, fallbackColor: number) => {
-      const tex = textureLoader.load(
-        url,
-        undefined,
-        undefined,
-        () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = 1;
-          canvas.height = 1;
-          const ctx = canvas.getContext('2d')!;
-          ctx.fillStyle = `#${fallbackColor.toString(16).padStart(6, '0')}`;
-          ctx.fillRect(0, 0, 1, 1);
-          tex.image = canvas as unknown as HTMLImageElement;
-          tex.needsUpdate = true;
-        }
-      );
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.ClampToEdgeWrapping;
-      tex.anisotropy = isSoftwareGl ? 1 : 8;
-      return tex;
-    };
-
-    const dayTexture = loadTexture('/assets/earth/earth_day_2048.jpg', 0x0a1a3a);
-    const nightTexture = loadTexture('/assets/earth/earth_night_2048.jpg', 0x020408);
-    const normalTexture = loadTexture('/assets/earth/earth_normal_2048.jpg', 0x808080);
-
     const segs = isSoftwareGl || isTouchOrCompact ? 64 : 128;
-    const earthGeo = new THREE.SphereGeometry(EARTH_RADIUS, segs, segs);
-    const earthMat = new THREE.ShaderMaterial({
-      vertexShader: earthSurfaceVertexShader,
-      fragmentShader: earthSurfaceFragmentShader,
-      uniforms: {
-        uDayMap: { value: dayTexture },
-        uNightMap: { value: nightTexture },
-        uNormalMap: { value: normalTexture },
-        uSunDirection: { value: sunDirection },
-        uDayIntensity: { value: 1.32 },
-        uNightIntensity: { value: 1.12 },
-        uNormalStrength: { value: 0.38 }
-      }
+    const maxAniso = isSoftwareGl ? 1 : Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
+    const earthRig = buildPhotorealEarthRig({
+      radius: EARTH_RADIUS,
+      segments: segs,
+      sunDirection,
+      anisotropy: maxAniso,
+      cloudOpacity: 0.56,
+      enableCloudShadows: stateRef.current.showClouds,
+      includeInnerAtmosphere: true,
     });
-    const earthMesh = new THREE.Mesh(earthGeo, earthMat);
-    earthGroup.add(earthMesh);
+    earthGroup.add(earthRig.group);
+    stateRef.current.earthRig = earthRig;
+    stateRef.current.cloudMesh = earthRig.cloudMesh;
+    earthRig.cloudMesh.visible = stateRef.current.showClouds;
 
-    // 5.15 Seamless Dynamic Procedural Cloud Layer
-    const cloudTexture = createSubtleEarthCloudTexture(isSoftwareGl || isTouchOrCompact ? 512 : 1024, isSoftwareGl || isTouchOrCompact ? 256 : 512);
-    const cloudGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.011, isSoftwareGl || isTouchOrCompact ? 48 : 96, isSoftwareGl || isTouchOrCompact ? 48 : 96);
-    const cloudMat = new THREE.ShaderMaterial({
-      vertexShader: earthCloudVertexShader,
-      fragmentShader: earthCloudFragmentShader,
-      uniforms: {
-        uCloudMap: { value: cloudTexture },
-        uSunDirection: { value: sunDirection },
-        uCloudOpacity: { value: 0.42 }
-      },
+    // 5.25 3D ORBITING NASA LRO MOON SYSTEM (5.14° lunar inclination, craters normal/displacement + Earthshine)
+    const lunarOrbitPivot = new THREE.Group();
+    lunarOrbitPivot.position.copy(earthGroup.position);
+    lunarOrbitPivot.rotation.z = 5.14 * (Math.PI / 180);
+    lunarOrbitPivot.rotation.x = 0.06;
+    lunarOrbitPivot.visible = stateRef.current.showMoon;
+    scene.add(lunarOrbitPivot);
+    stateRef.current.lunarOrbitPivot = lunarOrbitPivot;
+
+    const moonOrbitRadius = isNarrow ? EARTH_RADIUS * 2.15 : EARTH_RADIUS * 2.45;
+    const moonRadius = EARTH_RADIUS * 0.27;
+    const moonRig = buildPhotorealMoonRig({
+      radius: moonRadius,
+      segments: isSoftwareGl || isTouchOrCompact ? 48 : 96,
+      sunDirection,
+      anisotropy: maxAniso,
+      enableDisplacement: true,
+      displacementScale: moonRadius * 0.028,
+    });
+    moonRig.group.position.set(moonOrbitRadius, 0, -moonOrbitRadius * 0.15);
+    lunarOrbitPivot.add(moonRig.group);
+    stateRef.current.moonRig = moonRig;
+
+    const moonOrbitRingGeo = new THREE.RingGeometry(moonOrbitRadius - 0.008, moonOrbitRadius + 0.008, 192);
+    const moonOrbitRingMat = new THREE.MeshBasicMaterial({
+      color: 0x94a3b8,
       transparent: true,
-      depthWrite: false
-    });
-    const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
-    cloudMesh.visible = stateRef.current.showClouds;
-    earthGroup.add(cloudMesh);
-    stateRef.current.cloudMesh = cloudMesh;
-
-    // 5.2 Sun-Aware Atmospheric Fresnel Scattering (outer + inner layers)
-    const atmoGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.042, 80, 80);
-    const atmoMat = new THREE.ShaderMaterial({
-      vertexShader: atmosphereVertexShader,
-      fragmentShader: atmosphereFragmentShader,
-      uniforms: {
-        uSunDirection: { value: sunDirection }
-      },
+      opacity: 0.14,
+      side: THREE.DoubleSide,
+      depthWrite: false,
       blending: THREE.AdditiveBlending,
-      side: THREE.BackSide,
-      transparent: true,
-      depthWrite: false
     });
-    earthGroup.add(new THREE.Mesh(atmoGeo, atmoMat));
-
-    const innerAtmoGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.007, 64, 64);
-    const innerAtmoMat = new THREE.ShaderMaterial({
-      vertexShader: innerAtmosphereVertexShader,
-      fragmentShader: innerAtmosphereFragmentShader,
-      uniforms: {
-        uSunDirection: { value: sunDirection }
-      },
-      blending: THREE.AdditiveBlending,
-      side: THREE.FrontSide,
-      transparent: true,
-      depthWrite: false
-    });
-    earthGroup.add(new THREE.Mesh(innerAtmoGeo, innerAtmoMat));
+    const moonOrbitRing = new THREE.Mesh(moonOrbitRingGeo, moonOrbitRingMat);
+    moonOrbitRing.rotation.x = Math.PI / 2;
+    lunarOrbitPivot.add(moonOrbitRing);
 
     // 5.3 Orbital hairlines + global connection arcs
     const orbitSystem = buildOrbitSystem(EARTH_RADIUS);
@@ -829,6 +814,7 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       composer.setSize(w, h);
 
       earthGroup.position.set(nowNarrow ? 0 : 1.1, nowNarrow ? -0.78 : 0.02, 0);
+      lunarOrbitPivot.position.copy(earthGroup.position);
       controls.target.set(nowNarrow ? 0 : 1.1, nowNarrow ? -0.78 : 0.02, 0);
     };
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
@@ -900,9 +886,21 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
         }
       }
 
-      // Gentle independent cloud drift
+      // Gentle independent cloud drift + synced cloud shadow projection
       if (stateRef.current.cloudMesh && stateRef.current.cloudMesh.visible && !stateRef.current.reducedMotion) {
-        stateRef.current.cloudMesh.rotation.y += delta * 0.012;
+        stateRef.current.cloudMesh.rotation.y += delta * 0.018;
+        stateRef.current.earthRig?.syncCloudShadows(stateRef.current.cloudMesh.rotation.y);
+      }
+
+      // 3D Moon natural orbital revolution around Earth (tidal-locked face)
+      if (stateRef.current.lunarOrbitPivot && stateRef.current.lunarOrbitPivot.visible && !stateRef.current.reducedMotion) {
+        const lunarAngle = elapsed * 0.055 + 0.52;
+        moonRig.group.position.set(
+          Math.cos(lunarAngle) * moonOrbitRadius,
+          0,
+          Math.sin(lunarAngle) * moonOrbitRadius
+        );
+        moonRig.moonMesh.lookAt(earthGroup.position);
       }
 
       // Orbit rings & arcs
@@ -953,25 +951,17 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
       connectionArcs.dispose();
       (starField.userData.dispose as (() => void) | undefined)?.();
 
-      earthGeo.dispose();
-      earthMat.dispose();
-      cloudGeo.dispose();
-      cloudMat.dispose();
-      atmoGeo.dispose();
-      atmoMat.dispose();
-      innerAtmoGeo.dispose();
-      innerAtmoMat.dispose();
+      earthRig.dispose();
+      moonRig.dispose();
+      moonOrbitRingGeo.dispose();
+      moonOrbitRingMat.dispose();
+      envTarget.dispose();
       issCoreGeo.dispose();
       issCoreMat.dispose();
       panelGeo.dispose();
       panelMat.dispose();
       beaconRingGeo.dispose();
       beaconRingMat.dispose();
-
-      dayTexture.dispose();
-      nightTexture.dispose();
-      normalTexture.dispose();
-      cloudTexture.dispose();
 
       controls.dispose();
       composer.dispose();
@@ -1141,6 +1131,9 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
           <button onClick={() => setShowClouds(!showClouds)} className={`rounded-xl border border-white/10 bg-slate-950/75 p-2.5 ${showClouds ? 'text-sky-300' : 'text-slate-500'}`} aria-label="Clouds">
             <Cloud className="h-4 w-4" />
           </button>
+          <button onClick={() => setShowMoon(!showMoon)} className={`rounded-xl border border-white/10 bg-slate-950/75 p-2.5 ${showMoon ? 'text-slate-100' : 'text-slate-500'}`} aria-label="Moon">
+            <Moon className="h-4 w-4" />
+          </button>
           <button onClick={() => setAutoRotate(!autoRotate)} className={`rounded-xl border border-white/10 bg-slate-950/75 p-2.5 ${autoRotate ? 'text-cyan-300' : 'text-slate-500'}`} aria-label={t.autoRotation}>
             <RotateCw className="h-4 w-4" />
           </button>
@@ -1268,6 +1261,17 @@ export const DigitalGlobe: React.FC<DigitalGlobeProps> = ({
                 }`}
               >
                 {lang === 'zh' ? '云层' : 'Clouds'}
+              </button>
+              <button
+                type="button"
+                data-toggle-layer="moon"
+                aria-pressed={showMoon}
+                onClick={() => setShowMoon(!showMoon)}
+                className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer ${
+                  showMoon ? 'bg-white/[0.08] border-white/20 text-slate-100' : 'bg-transparent border-white/[0.08] text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {lang === 'zh' ? '月球' : 'Moon'}
               </button>
               <button
                 type="button"

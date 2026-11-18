@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Language, User } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import { SpaceFlight3D } from './SpaceFlight3D.tsx';
@@ -26,6 +26,17 @@ export const GameCenter: React.FC<GameCenterProps> = ({ currentUser, lang }) => 
   const t = translations[lang] || translations.zh;
 
   const [activeGame, setActiveGame] = useState<'flight' | 'gravity' | 'chess' | 'gomoku' | 'trivia'>('flight');
+
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const game = (ev as CustomEvent<{ game?: string }>).detail?.game;
+      if (game === 'flight' || game === 'gravity' || game === 'chess' || game === 'gomoku' || game === 'trivia') {
+        setActiveGame(game);
+      }
+    };
+    window.addEventListener('one-game-launch', handler);
+    return () => window.removeEventListener('one-game-launch', handler);
+  }, []);
 
   // -------------------------------------------------------------
   // 1. GOMOKU (Five-in-a-Row) Interactive Game State
