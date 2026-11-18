@@ -688,7 +688,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
 
     // After barge-in/stop, briefly ignore mic transcripts to avoid feeding echoed TTS tail back as user speech.
     if (wasSpeaking) {
-      suppressUserSpeechUntilRef.current = Date.now() + 700;
+      suppressUserSpeechUntilRef.current = Date.now() + 1200;
     }
 
     if (voiceActiveRef.current) {
@@ -846,7 +846,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       const finishAll = () => {
         if (mySeq === speakSeqRef.current) {
           // Suppress residual speaker echo so fallback speech recognition doesn't hear the AI as the user.
-          suppressUserSpeechUntilRef.current = Date.now() + 500;
+          suppressUserSpeechUntilRef.current = Date.now() + 1500;
           setPhase(voiceActiveRef.current ? 'listening' : 'idle');
           resumeMusicIfPausedForVoice();
         }
@@ -1163,12 +1163,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             else interimText += e.results[i][0].transcript;
           }
           const heard = interimText.trim() || finalText.trim();
-          // While AI is speaking, treat mic input as barge-in/echo and never forward it as the user's message.
+          // While AI is speaking, mic/SR will often pick up speaker output as "echo". Never treat it as a user turn.
           if (heard && phaseRef.current === 'speaking') {
-            stopAllOutputImmediately(true);
-            setEmotion('curious');
-            setEmotionReason(isZh ? '我在听，你说' : 'Interrupted — listening');
-            suppressUserSpeechUntilRef.current = Date.now() + 900;
+            suppressUserSpeechUntilRef.current = Math.max(
+              suppressUserSpeechUntilRef.current,
+              Date.now() + 1200
+            );
             return;
           }
           // Drop residual speaker echo tail after AI playback ends.
@@ -1306,6 +1306,20 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       if (msg.type === 'input_transcript' && typeof msg.text === 'string') {
         const piece = msg.text;
         if (!piece.trim()) return;
+
+        // During AI playback (or right after), incoming "user" transcripts are often speaker echo picked up by the mic.
+        // Ignore them to prevent self-dialogue loops; real barge-in is handled by local VAD / server interrupt.
+        const assistantPlaying =
+          phaseRef.current === 'speaking' ||
+          Boolean(audioClientRef.current?.isPlayingOutput());
+        if (assistantPlaying || Date.now() < suppressUserSpeechUntilRef.current) {
+          suppressUserSpeechUntilRef.current = Math.max(
+            suppressUserSpeechUntilRef.current,
+            Date.now() + 1200
+          );
+          return;
+        }
+
         currentOutputTurnIdRef.current = null;
         setTranscript((prev) => {
           const existingId = currentInputTurnIdRef.current;
@@ -1384,11 +1398,24 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       }
 
       if (msg.type === 'turn_complete') {
+        // If we are still inside an echo-suppression window, discard any half-captured "user" transcript (likely AI echo).
+        if (Date.now() < suppressUserSpeechUntilRef.current) {
+          if (currentInputTurnIdRef.current) {
+            const uid = currentInputTurnIdRef.current;
+            setTranscript((prev) => prev.filter((item) => item.id !== uid));
+          }
+          currentInputTurnIdRef.current = null;
+        }
         currentInputTurnIdRef.current = null;
         currentOutputTurnIdRef.current = null;
         audioClient.setAssistantOutputting(false);
         const finishTurn = () => {
           if (voiceActiveRef.current) {
+            // echo tail guard before re-arming listening state
+            suppressUserSpeechUntilRef.current = Math.max(
+              suppressUserSpeechUntilRef.current,
+              Date.now() + 800
+            );
             setPhase('listening');
           }
           resumeMusicIfPausedForVoice();

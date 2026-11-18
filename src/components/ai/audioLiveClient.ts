@@ -245,7 +245,7 @@ export class AudioLiveClient {
     src.onended = () => {
       this.activeSources.delete(src);
       if (this.activeSources.size === 0 && !this.isAssistantOutputting) {
-        this.echoSuppressUntil = Date.now() + 350;
+        this.echoSuppressUntil = Date.now() + 700;
       }
       try {
         src.disconnect();

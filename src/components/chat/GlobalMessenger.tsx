@@ -522,12 +522,23 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   const sorted = useMemo(() => {
     const q = convQuery.trim().toLowerCase();
-    return [...conversations]
-      .filter(c => !q || c.name.toLowerCase().includes(q) || (c.lastMessage || '').toLowerCase().includes(q))
-      .sort((a, b) => new Date(b.lastMessageAt || b.updatedAt || 0).getTime() - new Date(a.lastMessageAt || a.updatedAt || 0).getTime());
+    const filtered = [...conversations].filter(
+      c => !q || c.name.toLowerCase().includes(q) || (c.lastMessage || '').toLowerCase().includes(q)
+    );
+    const pinned = (c: Conversation) => (c.id === 'conv_global' || c.type === 'global_channel' ? 1 : 0);
+    return filtered.sort((a, b) => {
+      const pa = pinned(a), pb = pinned(b);
+      if (pa !== pb) return pb - pa; // keep main/global chat fixed at top
+      return new Date(b.lastMessageAt || b.updatedAt || 0).getTime() - new Date(a.lastMessageAt || a.updatedAt || 0).getTime();
+    });
   }, [conversations, convQuery]);
 
-  const activeConv = sorted.find(c => c.id === activeConversationId) || conversations.find(c => c.id === activeConversationId) || sorted[0] || conversations[0];
+  const activeConv =
+    conversations.find(c => c.id === activeConversationId) ||
+    sorted.find(c => c.id === activeConversationId) ||
+    conversations.find(c => c.id === 'conv_global' || c.type === 'global_channel') ||
+    sorted[0] ||
+    conversations[0];
 
   const api = async (path: string, init?: RequestInit) => {
     const headers: Record<string, string> = { ...(init?.headers as any || {}) };
@@ -1248,7 +1259,20 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   }, [authed, isVisible, activeConv?.id, mobileShowChat, tab]);
 
   useEffect(() => { if (activeConv?.id && authed) { setMessages([]); setHasMore(false); void fetchMessages(); } }, [activeConv?.id, authed]);
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length, activeConv?.id]);
+  const prevMsgLenRef = useRef(0);
+  const prevActiveConvRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const convChanged = prevActiveConvRef.current !== activeConv?.id;
+    const grew = messages.length > prevMsgLenRef.current;
+    prevActiveConvRef.current = activeConv?.id;
+    prevMsgLenRef.current = messages.length;
+    if (convChanged) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    } else if (grew) {
+      // scroll to bottom for newly appended messages (keeps main chat view stable on refetch/sync without growth)
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages.length, activeConv?.id]);
 
   const loadGroupDetail = async (id: string) => {
     try { const d = await api(`/api/conversations/${id}`); setGroupDetail(d.conversation || null); } catch { setGroupDetail(null); }
