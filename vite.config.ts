@@ -144,8 +144,8 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // Allow production domain and its subdomains (Vite host check) without disabling host checks.
-      allowedHosts: ['xn--dqry4os3s3gb.com', '.xn--dqry4os3s3gb.com'],
+      // Allow production domain (燃灯同学.com) and AI Studio preview hosts without disabling host checks.
+      allowedHosts: ['xn--dqry4os3s3gb.com', '.xn--dqry4os3s3gb.com', '.run.app', 'localhost', '127.0.0.1'],
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

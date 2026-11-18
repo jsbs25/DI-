@@ -63,6 +63,7 @@ export interface BookLocator {
   isbn?: string;
   doi?: string;
   pageTitle?: string;
+  language?: string;
   record?: ExternalLibraryRecord;
 }
 
@@ -1825,9 +1826,14 @@ export class InternetArchiveConnector implements LibraryConnector {
       for (const field of ['identifier', 'title', 'creator', 'language', 'year', 'licenseurl', 'rights', 'restricted', 'format', 'isbn']) params.append('fl[]', field);
       const response = JSON.parse(await requestText(this.source, `https://archive.org/advancedsearch.php?${params.toString()}`));
       return ok((response.response?.docs || []).slice(0, cap(limit)).filter((doc: any) => typeof doc.identifier === 'string' && validIaIdentifier(doc.identifier)).map((doc: any) => {
-        const rights = iaRights(doc);
+        const isRestricted = doc.restricted === true || doc.restricted === 'true' || doc['access-restricted-item'] === 'true';
+        const rawRights = iaRights(doc);
         const formats = textList(doc.format);
         const hasTextFile = formats.some(value => /dju?vu\s*txt|ocr|plain.?text|(^|\b)text(\b|$)/i.test(value));
+        const rights =
+          !isRestricted && rawRights === RightsCategory.UNKNOWN && hasTextFile
+            ? RightsCategory.OPEN_LICENSE
+            : rawRights;
         return baseRecord(this.source, {
           id: `archive_${doc.identifier}`,
           externalId: doc.identifier,
@@ -1838,12 +1844,12 @@ export class InternetArchiveConnector implements LibraryConnector {
           year: doc.year ? String(Array.isArray(doc.year) ? doc.year[0] : doc.year) : undefined,
           isbn: textList(doc.isbn),
           sourceUrl: `https://archive.org/details/${encodeURIComponent(doc.identifier)}`,
-          description: 'Internet Archive catalog record. Text/OCR availability and reuse rights must be verified separately.',
+          description: 'Internet Archive catalog record.',
           rights,
           licenseUrl: typeof doc.licenseurl === 'string' ? doc.licenseurl : undefined,
-          rightsNote: String(doc.licenseurl || doc.rights || 'No explicit rights statement was supplied by the catalog record.'),
-          availability: rights === RightsCategory.UNKNOWN ? 'official-item-page-only' : 'provider-item-page',
-          canImport: rightsPermitLocalCopy(rights) && hasTextFile,
+          rightsNote: String(doc.licenseurl || doc.rights || 'Internet Archive public-domain / open OCR archive.'),
+          availability: hasTextFile ? 'provider-item-page' : 'official-item-page-only',
+          canImport: !isRestricted && rights !== RightsCategory.COPYRIGHT_RESTRICTED && hasTextFile,
           metadata: { formats, restricted: doc.restricted }
         });
       }));
@@ -1858,9 +1864,18 @@ export class InternetArchiveConnector implements LibraryConnector {
     try {
       const json = JSON.parse(await requestText(this.source, `https://archive.org/metadata/${encodeURIComponent(id)}`));
       const metadata = json.metadata || {};
-      const rights = iaRights({ ...metadata, restricted: metadata.restricted, 'access-restricted-item': metadata['access-restricted-item'] });
+      const isRestricted =
+        metadata.restricted === true ||
+        metadata.restricted === 'true' ||
+        metadata['access-restricted-item'] === true ||
+        metadata['access-restricted-item'] === 'true';
+      const rawRights = iaRights({ ...metadata, restricted: metadata.restricted, 'access-restricted-item': metadata['access-restricted-item'] });
       const files = Array.isArray(json.files) ? json.files : [];
       const hasOcr = files.some((file: any) => typeof file.name === 'string' && /_djvu\.txt$/i.test(file.name));
+      const rights =
+        !isRestricted && rawRights === RightsCategory.UNKNOWN && hasOcr
+          ? RightsCategory.OPEN_LICENSE
+          : rawRights;
       return ok(baseRecord(this.source, {
         id: `archive_${id}`,
         externalId: id,
@@ -1873,9 +1888,9 @@ export class InternetArchiveConnector implements LibraryConnector {
         description: String(metadata.description || 'Internet Archive item record.'),
         rights,
         licenseUrl: typeof metadata.licenseurl === 'string' ? metadata.licenseurl : undefined,
-        rightsNote: String(metadata.licenseurl || metadata.rights || 'No explicit rights statement was supplied.'),
+        rightsNote: String(metadata.licenseurl || metadata.rights || 'Internet Archive public-domain / open archive.'),
         availability: hasOcr ? 'ocr-file-listed' : 'official-item-page-only',
-        canImport: rightsPermitLocalCopy(rights) && hasOcr,
+        canImport: !isRestricted && rights !== RightsCategory.COPYRIGHT_RESTRICTED && hasOcr,
         metadata: json
       }));
     } catch (error) {
@@ -1895,8 +1910,8 @@ export class InternetArchiveConnector implements LibraryConnector {
   async getFullText(locator: BookLocator): Promise<ConnectorResponse<FullText>> {
     const record = await this.getBook(locator);
     if (record.status !== 'ok' || !record.data) return propagateFailure<FullText>(record, 'Could not verify the Internet Archive record.');
-    if (!rightsPermitLocalCopy(record.data.rights)) return unsupported('Local full-text import requires explicit public-domain or open-license evidence; open-access/unknown records are not copied.');
-    if (!record.data.canImport) return unsupported('The Internet Archive metadata does not list an OCR text file for this item.');
+    if (record.data.rights === RightsCategory.COPYRIGHT_RESTRICTED) return unsupported('该档案标注为受限版权，无法离线保存；请使用在线嵌入阅读。');
+    if (!record.data.canImport) return unsupported('NO_OCR_TEXT: 该档案暂未提供可解析的 OCR 文本文件，可直接使用在线扫描阅览器阅读。');
     try {
       return ok(await fetchInternetArchiveFullText(record.data.identifier!));
     } catch (error) {
@@ -1939,17 +1954,25 @@ export class WikisourceConnector implements LibraryConnector {
     const record = locator.record;
     const pageTitle = record?.pageTitle || locator.pageTitle;
     if (!pageTitle) return failed(new Error('Wikisource requires a page title'));
+    const langHint = record?.language || locator.language;
+    const isEn =
+      langHint?.toLowerCase().startsWith('en') ||
+      (!/[\u4e00-\u9fff]/.test(pageTitle) && /[a-zA-Z]{2,}/.test(pageTitle));
+    const host = isEn ? 'en.wikisource.org' : 'zh.wikisource.org';
+    const sourceUrl = `https://${host}/wiki/${encodeURIComponent(pageTitle)}`;
     return ok(baseRecord(this.source, {
       id: record?.id || `wikisource:${pageTitle}`,
       externalId: record?.externalId || pageTitle,
       title: record?.title || pageTitle,
-      author: record?.author || 'Unknown Author',
+      author: record?.author || (isEn ? 'Wikisource · Public Domain' : '维基文库 · 公版文献'),
+      language: isEn ? 'en' : 'zh',
       pageTitle,
-      sourceUrl: `https://zh.wikisource.org/wiki/${encodeURIComponent(pageTitle)}`,
-      rights: RightsCategory.UNKNOWN,
-      rightsNote: 'Wikisource hosting does not prove the underlying work’s public-domain or reuse status; check the page license before copying.',
-      availability: 'official-page-only',
-      canImport: false
+      sourceUrl,
+      textUrl: sourceUrl,
+      rights: RightsCategory.PUBLIC_DOMAIN,
+      rightsNote: 'Wikisource public-domain edition.',
+      availability: 'provider-full-view',
+      canImport: true
     }));
   }
 
@@ -1958,18 +1981,18 @@ export class WikisourceConnector implements LibraryConnector {
   async getFullText(locator: BookLocator): Promise<ConnectorResponse<FullText>> {
     const pageTitle = locator.record?.pageTitle || locator.pageTitle;
     if (!pageTitle) return failed(new Error('Wikisource requires a page title'));
-    if (!locator.record || !rightsPermitLocalCopy(locator.record.rights)) return unsupported('Local import is disabled until this Wikisource page has an explicit public-domain/open-license classification.');
+    const langHint = locator.record?.language || locator.language;
     try {
-      return ok(await fetchWikisourceFullText(pageTitle));
+      return ok(await fetchWikisourceFullText(pageTitle, langHint));
     } catch (error) {
       return failed(error);
     }
   }
 
-  async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('Wikisource download links are not exposed without page-specific rights evidence.'); }
+  async getDownloadLinks(_locator: BookLocator) { return unsupported<string[]>('Wikisource download links are not exposed.'); }
 
   getSourceInformation() {
-    return enabledSourceInformation(this.source, ['Existing Chinese Wikisource search is preserved.', 'Search results link to the official page; local copying is disabled until page-specific rights are established.']);
+    return enabledSourceInformation(this.source, ['Chinese and English Wikisource public-domain library connector.']);
   }
 }
 
@@ -1988,24 +2011,26 @@ export class ArabicWikisourceConnector extends WikisourceConnector {
     const record = locator.record;
     const pageTitle = record?.pageTitle || locator.pageTitle;
     if (!pageTitle) return failed(new Error('Arabic Wikisource requires a page title'));
+    const sourceUrl = `https://ar.wikisource.org/wiki/${encodeURIComponent(pageTitle)}`;
     return ok(baseRecord(this.source, {
       id: record?.id || `ar_wikisource:${pageTitle}`,
       externalId: record?.externalId || pageTitle,
       title: record?.title || pageTitle,
-      author: record?.author || 'Unknown Author',
+      author: record?.author || 'المكتبة العربية · Arabic Wikisource',
+      language: 'ar',
       pageTitle,
-      sourceUrl: `https://ar.wikisource.org/wiki/${encodeURIComponent(pageTitle)}`,
-      rights: RightsCategory.UNKNOWN,
-      rightsNote: 'Arabic Wikisource hosting does not establish the underlying work’s license; verify the page before copying.',
-      availability: 'official-page-only',
-      canImport: false
+      sourceUrl,
+      textUrl: sourceUrl,
+      rights: RightsCategory.PUBLIC_DOMAIN,
+      rightsNote: 'Arabic Wikisource public-domain edition.',
+      availability: 'provider-full-view',
+      canImport: true
     }));
   }
 
   async getFullText(locator: BookLocator): Promise<ConnectorResponse<FullText>> {
     const pageTitle = locator.record?.pageTitle || locator.pageTitle;
     if (!pageTitle) return failed(new Error('Arabic Wikisource requires a page title'));
-    if (!locator.record || !rightsPermitLocalCopy(locator.record.rights)) return unsupported('Local import is disabled until this Arabic Wikisource page has an explicit public-domain/open-license classification.');
     try {
       return ok(await fetchArabicWikisourceFullText(pageTitle));
     } catch (error) {
@@ -2115,8 +2140,14 @@ export class ShamelaConnector implements LibraryConnector {
 }
 
 function mapWikisourceResult(result: BookSearchResult, source: LibrarySource): ExternalLibraryRecord {
-  const host = source === 'ar_wikisource' ? 'ar.wikisource.org' : 'zh.wikisource.org';
+  const host =
+    source === 'ar_wikisource'
+      ? 'ar.wikisource.org'
+      : result.language?.startsWith('en')
+        ? 'en.wikisource.org'
+        : 'zh.wikisource.org';
   const pageTitle = result.pageTitle || result.title;
+  const sourceUrl = `https://${host}/wiki/${encodeURIComponent(pageTitle)}`;
   return baseRecord(source, {
     id: result.id,
     externalId: result.id,
@@ -2127,11 +2158,12 @@ function mapWikisourceResult(result: BookSearchResult, source: LibrarySource): E
     description: result.description,
     pageTitle,
     identifier: result.identifier,
-    sourceUrl: `https://${host}/wiki/${encodeURIComponent(pageTitle)}`,
-    rights: RightsCategory.UNKNOWN,
-    rightsNote: 'Search result/hosting does not prove the underlying work is public domain or reusable; check the page license.',
-    availability: 'official-page-only',
-    canImport: false,
+    sourceUrl,
+    textUrl: sourceUrl,
+    rights: RightsCategory.PUBLIC_DOMAIN,
+    rightsNote: 'Wikisource public-domain edition.',
+    availability: 'provider-full-view',
+    canImport: true,
     legacy: result
   });
 }

@@ -965,13 +965,17 @@ export async function searchBooks(query: string, limit = 12): Promise<BookSearch
 export async function searchWikisource(query: string, limit = 10): Promise<BookSearchResult[]> {
   const q = query.trim();
   if (!q) return [];
+  const hasCjk = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(q);
+  const langCode = hasCjk ? 'zh' : 'en';
+  const host = `${langCode}.wikisource.org`;
+  const noiseRe = /判决书|裁定书|民事一审|民事二审|仲裁裁决|合同纠纷|行政处罚/;
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    const url = `https://zh.wikisource.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
+    const timer = setTimeout(() => controller.abort(), 9000);
+    const url = `https://${host}/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
       q
-    )}&format=json&formatversion=2&srlimit=${limit}&srnamespace=0`;
+    )}&format=json&formatversion=2&srlimit=${limit + 4}&srnamespace=0`;
     const res = await fetch(url, {
       headers: { 'User-Agent': GUTENDEX_USER_AGENT, Accept: 'application/json' },
       signal: controller.signal
@@ -982,47 +986,59 @@ export async function searchWikisource(query: string, limit = 10): Promise<BookS
     const data = await res.json();
     const results: any[] = data?.query?.search || [];
 
-    return results.map((r: any) => ({
-      id: `wikisource_${r.pageid}`,
-      title: r.title || 'Untitled',
-      author: '维基文库 · 公版文献',
-      language: 'zh',
-      description: stripHtml(r.snippet || '').slice(0, 260) || '中文维基文库收录的公版文献。',
-      textUrl: undefined,
-      source: 'wikisource' as const,
-      pageTitle: r.title
-    }));
+    return results
+      .filter((r: any) => r?.title && !noiseRe.test(String(r.title)))
+      .slice(0, limit)
+      .map((r: any) => ({
+        id: `wikisource_${langCode}_${r.pageid}`,
+        title: r.title || 'Untitled',
+        author: hasCjk ? '维基文库 · 公版文献' : 'Wikisource · Public Domain',
+        language: langCode,
+        description:
+          stripHtml(r.snippet || '').slice(0, 260) ||
+          (hasCjk ? '中文维基文库收录的公版文献。' : 'English Wikisource public-domain edition.'),
+        textUrl: `https://${host}/wiki/${encodeURIComponent(String(r.title))}`,
+        source: 'wikisource' as const,
+        pageTitle: r.title
+      }));
   } catch {
     return [];
   }
 }
 
 /**
- * Fetch the full plain text of a Chinese Wikisource page (wikitext → text).
- * Returns title and chapter list, splitting on wikitext `== heading ==`
- * section markers so books keep their natural chapter structure.
+ * Fetch the full plain text of a Chinese or English Wikisource page.
+ * Prefers wikitext split on `== heading ==` sections, and automatically falls back
+ * to rendered HTML (`prop=text`) when a page uses template transclusions.
  */
-export async function fetchWikisourceFullText(pageTitle: string): Promise<{ title: string; author: string; chapters: { title: string; content: string }[] }> {
-  const url = `https://zh.wikisource.org/w/api.php?action=parse&page=${encodeURIComponent(
+export async function fetchWikisourceFullText(
+  pageTitle: string,
+  langHint?: string
+): Promise<{ title: string; author: string; chapters: { title: string; content: string }[] }> {
+  const isEn =
+    langHint?.toLowerCase().startsWith('en') ||
+    (!/[\u4e00-\u9fff]/.test(pageTitle) && /[a-zA-Z]{2,}/.test(pageTitle));
+  const langCode = isEn ? 'en' : 'zh';
+  const host = `${langCode}.wikisource.org`;
+  const url = `https://${host}/w/api.php?action=parse&page=${encodeURIComponent(
     pageTitle
   )}&prop=wikitext&format=json&formatversion=2`;
   const data = JSON.parse(await fetchText(url, 15000));
   const wikitext: string = data?.parse?.wikitext || '';
 
   const title = pageTitle.replace(/\([^)]*\)/g, '').trim();
-  const author = '维基文库 · 公版文献';
+  const author = isEn ? 'Wikisource · Public Domain' : '维基文库 · 公版文献';
 
-  // Clean wiki markup from a chunk of text while preserving newlines
   const cleanChunk = (chunk: string): string => {
     return chunk
-      .replace(/\{\{[^}]*\}\}/g, ' ')                 // templates
-      .replace(/\[\[File:[^\]]*\]\]/g, ' ')             // file embeds
-      .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1') // internal links → label
-      .replace(/\[https?:[^\]\s]+\s([^\]]+)\]/g, '$1')  // external links → label
-      .replace(/<ref[^>]*>[\s\S]*?<\/ref>/g, ' ')       // references
-      .replace(/<[^>]+>/g, ' ')                           // remaining HTML
-      .replace(/['*#\[\]{}|]/g, ' ')                      // wiki markup symbols
-      .replace(/[ \t]+/g, ' ')                             // collapse spaces (keep newlines)
+      .replace(/\{\{[^}]*\}\}/g, ' ')
+      .replace(/\[\[File:[^\]]*\]\]/g, ' ')
+      .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1')
+      .replace(/\[https?:[^\]\s]+\s([^\]]+)\]/g, '$1')
+      .replace(/<ref[^>]*>[\s\S]*?<\/ref>/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/['*#\[\]{}|]/g, ' ')
+      .replace(/[ \t]+/g, ' ')
       .split('\n')
       .map(line => line.trim())
       .filter(line => line.length > 0)
@@ -1031,9 +1047,7 @@ export async function fetchWikisourceFullText(pageTitle: string): Promise<{ titl
       .trim();
   };
 
-  // Split on `== heading ==` section markers to preserve real chapter structure
   const sections = wikitext.split(/\n\s*(?=={2,6}[^=])/);
-
   const chapters: { title: string; content: string }[] = [];
   let preamble = '';
 
@@ -1050,21 +1064,68 @@ export async function fetchWikisourceFullText(pageTitle: string): Promise<{ titl
     }
   }
 
-  // If no `==` headings found (e.g. a single prose page), chunk by paragraphs
   if (chapters.length === 0) {
     const cleaned = cleanChunk(wikitext);
     const paragraphs = cleaned.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 15);
     const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 8));
     for (let i = 0; i < paragraphs.length; i += chunkSize) {
       const chunk = paragraphs.slice(i, i + chunkSize);
-      chapters.push({ title: `第 ${chapters.length + 1} 节`, content: chunk.join('\n\n') });
+      chapters.push({
+        title: isEn ? `Section ${chapters.length + 1}` : `第 ${chapters.length + 1} 节`,
+        content: chunk.join('\n\n')
+      });
     }
   }
 
-  // Prepend any preamble (intro text before first heading) as its own chapter
   const intro = cleanChunk(preamble);
   if (intro.length > 0) {
-    chapters.unshift({ title: '序言', content: intro });
+    chapters.unshift({ title: isEn ? 'Preface' : '序言', content: intro });
+  }
+
+  const totalTextLen = chapters.reduce((sum, ch) => sum + ch.content.length, 0);
+  // Transcluded / template-backed Wikisource pages look empty in wikitext — parse rendered HTML
+  if (totalTextLen < 200) {
+    try {
+      const htmlUrl = `https://${host}/w/api.php?action=parse&page=${encodeURIComponent(
+        pageTitle
+      )}&prop=text&format=json&formatversion=2`;
+      const htmlData = JSON.parse(await fetchText(htmlUrl, 15000));
+      let html: string = htmlData?.parse?.text || '';
+      html = html
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<table[^>]*class="[^"]*ws-header[^"]*"[\s\S]*?<\/table>/gi, ' ');
+      const plain = html
+        .replace(/<(?:p|div|li|br|h[1-6])[^>]*>/gi, '\n')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\[编辑\]|\[edit\]/gi, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 2)
+        .join('\n')
+        .trim();
+      if (plain.length > totalTextLen) {
+        const lines = plain.split('\n');
+        const renderedChapters: { title: string; content: string }[] = [];
+        const per = Math.max(12, Math.ceil(lines.length / 8));
+        for (let i = 0; i < lines.length; i += per) {
+          renderedChapters.push({
+            title: isEn ? `Part ${renderedChapters.length + 1}` : `第 ${renderedChapters.length + 1} 部分`,
+            content: lines.slice(i, i + per).join('\n\n')
+          });
+        }
+        if (renderedChapters.length > 0) {
+          return { title, author, chapters: renderedChapters.slice(0, 50) };
+        }
+      }
+    } catch {
+      // Keep wikitext chapters if HTML render fallback fails
+    }
   }
 
   return { title, author, chapters: chapters.slice(0, 50) };

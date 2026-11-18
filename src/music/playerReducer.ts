@@ -46,7 +46,7 @@ export function createInitialState(): PlayerState {
     durationSec: 0,
     volume: DEFAULT_VOLUME,
     muted: false,
-    mode: { shuffle: false, repeat: 'off' },
+    mode: { shuffle: false, repeat: 'all' },
     activeSourceId: undefined,
     error: null,
     fallbackNotice: null,

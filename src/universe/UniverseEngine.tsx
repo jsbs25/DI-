@@ -9,25 +9,20 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   CELESTIAL_BODIES,
   CelestialBody,
   getCelestialBodyById
 } from './celestialBodies';
 import {
+  createEarthDayTexture,
+  createEarthCloudTexture,
   createSaturnRingTexture,
   createJupiterTexture,
   createMarsTexture,
   createSunTexture,
   createCelestialTexture
 } from './proceduralPlanets';
-import {
-  buildPhotorealEarthRig,
-  buildPhotorealMoonRig,
-  type PhotorealEarthRig,
-  type PhotorealMoonRig
-} from './celestialMeshBuilders';
 import { PlanetTelemetryDrawer } from './PlanetTelemetryDrawer';
 import { getPlanetEcosystem } from './planetEcosystems';
 import {
@@ -50,10 +45,8 @@ interface UniverseEngineProps {
 interface PlanetMeshNode {
   body: CelestialBody;
   pivot: THREE.Group;
-  tiltGroup?: THREE.Group;
   mesh: THREE.Mesh;
   cloudMesh?: THREE.Mesh;
-  earthRig?: PhotorealEarthRig;
   ringsMesh?: THREE.Mesh;
   orbitLine: THREE.Line;
   currentAngle: number;
@@ -80,18 +73,10 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const planetNodesRef = useRef<PlanetMeshNode[]>([]);
   const orbitVisibleRef = useRef<boolean>(true);
-  const moonNodeRef = useRef<{
-    group: THREE.Group | null;
-    mesh: THREE.Mesh | null;
-    rig: PhotorealMoonRig | null;
-    angle: number;
-    parentAnchor: THREE.Object3D | null;
-  }>({
-    group: null,
+  const moonNodeRef = useRef<{ mesh: THREE.Mesh | null; angle: number; parentMesh: THREE.Mesh | null }>({
     mesh: null,
-    rig: null,
     angle: 0,
-    parentAnchor: null
+    parentMesh: null
   });
 
   // Simulation refs to avoid scene rebuild on control changes
@@ -188,16 +173,7 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
       return;
     }
 
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    const roomEnv = new RoomEnvironment();
-    const envTarget = pmremGenerator.fromScene(roomEnv, 0.04);
-    scene.environment = envTarget.texture;
-    scene.environmentIntensity = 0.22;
-    roomEnv.dispose();
-    pmremGenerator.dispose();
-
     const disposables: Array<THREE.BufferGeometry | THREE.Material> = [];
-    const extraDisposables: Array<{ dispose: () => void }> = [envTarget];
     const track = <T extends THREE.BufferGeometry | THREE.Material>(obj: T): T => {
       disposables.push(obj);
       return obj;
@@ -237,11 +213,11 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
     sunMesh.userData = { body: sunBody };
     scene.add(sunMesh);
 
-    const sunLight = new THREE.PointLight(0xfff6e6, 3.4, 720, 0.38);
+    const sunLight = new THREE.PointLight(0xfff6e6, 3.2, 650, 0.45);
     sunLight.position.set(0, 0, 0);
     scene.add(sunLight);
 
-    const ambientLight = new THREE.AmbientLight(0x223355, 0.42);
+    const ambientLight = new THREE.AmbientLight(0x223355, 0.6);
     scene.add(ambientLight);
 
     const coronaGeo = track(new THREE.SphereGeometry(sunBody.visual.displayRadius * 1.12, 32, 32));
@@ -285,74 +261,57 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
       orbitLine.visible = orbitVisibleRef.current;
       scene.add(orbitLine);
 
-      const maxAniso = Math.min(renderer.capabilities.getMaxAnisotropy(), 4);
-      let planetMesh: THREE.Mesh;
-      let tiltGroup: THREE.Group | undefined;
+      const sphereGeo = track(new THREE.SphereGeometry(body.visual.displayRadius, 48, 48));
+      let planetMat: THREE.Material;
+
+      if (body.id === 'earth') {
+        planetMat = track(
+          new THREE.MeshStandardMaterial({ map: createEarthDayTexture(), roughness: 0.65, metalness: 0.08 })
+        );
+      } else if (body.id === 'saturn') {
+        planetMat = track(
+          new THREE.MeshStandardMaterial({ map: createCelestialTexture('saturn_body'), roughness: 0.72, metalness: 0.04 })
+        );
+      } else if (body.id === 'jupiter') {
+        planetMat = track(new THREE.MeshStandardMaterial({ map: createJupiterTexture(), roughness: 0.62 }));
+      } else if (body.id === 'mars') {
+        planetMat = track(new THREE.MeshStandardMaterial({ map: createMarsTexture(), roughness: 0.82 }));
+      } else {
+        planetMat = track(new THREE.MeshStandardMaterial({ map: createCelestialTexture(body.id), roughness: 0.75 }));
+      }
+
+      const planetMesh = new THREE.Mesh(sphereGeo, planetMat);
+      planetMesh.position.set(body.visual.orbitDistance, 0, 0);
+      planetMesh.rotation.z = (body.physical.axialTiltDegrees * Math.PI) / 180;
+      planetMesh.userData = { body };
+      pivot.add(planetMesh);
+
       let cloudMesh: THREE.Mesh | undefined;
-      let earthRig: PhotorealEarthRig | undefined;
       let ringsMesh: THREE.Mesh | undefined;
 
       if (body.id === 'earth') {
-        tiltGroup = new THREE.Group();
-        tiltGroup.position.set(body.visual.orbitDistance, 0, 0);
-        tiltGroup.rotation.z = (body.physical.axialTiltDegrees * Math.PI) / 180;
-        pivot.add(tiltGroup);
-
-        earthRig = buildPhotorealEarthRig({
-          radius: body.visual.displayRadius,
-          segments: isTouchOrCompact ? 48 : 72,
-          sunDirection: new THREE.Vector3(-1, 0, 0),
-          anisotropy: maxAniso,
-          cloudOpacity: 0.56,
-          enableCloudShadows: true,
-          includeInnerAtmosphere: true,
-        });
-        tiltGroup.add(earthRig.group);
-        extraDisposables.push(earthRig);
-
-        planetMesh = earthRig.earthMesh;
-        planetMesh.userData = { body };
-        cloudMesh = earthRig.cloudMesh;
+        const cloudGeo = track(new THREE.SphereGeometry(body.visual.displayRadius * 1.025, 48, 48));
+        const cloudMat = track(
+          new THREE.MeshStandardMaterial({
+            map: createEarthCloudTexture(),
+            transparent: true,
+            opacity: 0.72,
+            blending: THREE.NormalBlending,
+            depthWrite: false
+          })
+        );
+        cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+        planetMesh.add(cloudMesh);
 
         const moonBody = getCelestialBodyById('moon')!;
-        const moonRig = buildPhotorealMoonRig({
-          radius: moonBody.visual.displayRadius,
-          segments: isTouchOrCompact ? 36 : 56,
-          sunDirection: new THREE.Vector3(-1, 0, 0),
-          anisotropy: maxAniso,
-          enableDisplacement: false,
-        });
-        moonRig.moonMesh.userData = { body: moonBody };
-        tiltGroup.add(moonRig.group);
-        extraDisposables.push(moonRig);
-        moonNodeRef.current = {
-          group: moonRig.group,
-          mesh: moonRig.moonMesh,
-          rig: moonRig,
-          angle: 0,
-          parentAnchor: tiltGroup
-        };
-      } else {
-        const sphereGeo = track(new THREE.SphereGeometry(body.visual.displayRadius, 48, 48));
-        let planetMat: THREE.Material;
-
-        if (body.id === 'saturn') {
-          planetMat = track(
-            new THREE.MeshStandardMaterial({ map: createCelestialTexture('saturn_body'), roughness: 0.72, metalness: 0.04 })
-          );
-        } else if (body.id === 'jupiter') {
-          planetMat = track(new THREE.MeshStandardMaterial({ map: createJupiterTexture(), roughness: 0.62 }));
-        } else if (body.id === 'mars') {
-          planetMat = track(new THREE.MeshStandardMaterial({ map: createMarsTexture(), roughness: 0.82 }));
-        } else {
-          planetMat = track(new THREE.MeshStandardMaterial({ map: createCelestialTexture(body.id), roughness: 0.75 }));
-        }
-
-        planetMesh = new THREE.Mesh(sphereGeo, planetMat);
-        planetMesh.position.set(body.visual.orbitDistance, 0, 0);
-        planetMesh.rotation.z = (body.physical.axialTiltDegrees * Math.PI) / 180;
-        planetMesh.userData = { body };
-        pivot.add(planetMesh);
+        const moonGeo = track(new THREE.SphereGeometry(moonBody.visual.displayRadius, 24, 24));
+        const moonMat = track(
+          new THREE.MeshStandardMaterial({ map: createCelestialTexture('moon'), roughness: 0.92 })
+        );
+        const moonMesh = new THREE.Mesh(moonGeo, moonMat);
+        moonMesh.userData = { body: moonBody };
+        planetMesh.add(moonMesh);
+        moonNodeRef.current = { mesh: moonMesh, angle: 0, parentMesh: planetMesh };
       }
 
       if (body.visual.rings) {
@@ -390,10 +349,8 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
       nodes.push({
         body,
         pivot,
-        tiltGroup,
         mesh: planetMesh,
         cloudMesh,
-        earthRig,
         ringsMesh,
         orbitLine,
         currentAngle: initialAngle
@@ -539,8 +496,6 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
     // Animation loop
     let animId = 0;
     let lastTime = performance.now();
-    const tmpWorldPos = new THREE.Vector3();
-    const tmpSunDir = new THREE.Vector3();
 
     const animate = () => {
       animId = requestAnimationFrame(animate);
@@ -556,35 +511,18 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
           const baseOrbitalSpeed = Math.sqrt(100 / (node.body.visual.orbitDistance || 1)) * 0.08;
           node.currentAngle += baseOrbitalSpeed * speedMultiplier;
           node.pivot.rotation.y = node.currentAngle;
-          if (node.earthRig) {
-            node.earthRig.group.rotation.y += 0.015;
-            node.earthRig.cloudMesh.rotation.y += 0.003;
-            node.earthRig.syncCloudShadows(node.earthRig.cloudMesh.rotation.y);
-            node.earthRig.earthMesh.getWorldPosition(tmpWorldPos);
-            tmpSunDir.copy(tmpWorldPos).negate().normalize();
-            node.earthRig.setSunDirection(tmpSunDir);
-          } else {
-            node.mesh.rotation.y += 0.015;
-            if (node.cloudMesh) node.cloudMesh.rotation.y += 0.018;
-          }
+          node.mesh.rotation.y += 0.015;
+          if (node.cloudMesh) node.cloudMesh.rotation.y += 0.018;
         });
-        if (moonNodeRef.current.group && moonNodeRef.current.mesh) {
+        if (moonNodeRef.current.mesh) {
           moonNodeRef.current.angle += 0.3 * speedMultiplier;
           const moonDist = 5.2;
-          moonNodeRef.current.group.position.set(
+          moonNodeRef.current.mesh.position.set(
             Math.cos(moonNodeRef.current.angle) * moonDist,
             0,
             Math.sin(moonNodeRef.current.angle) * moonDist
           );
-          if (moonNodeRef.current.parentAnchor) {
-            moonNodeRef.current.parentAnchor.getWorldPosition(tmpWorldPos);
-            moonNodeRef.current.mesh.lookAt(tmpWorldPos);
-          }
-          if (moonNodeRef.current.rig) {
-            moonNodeRef.current.mesh.getWorldPosition(tmpWorldPos);
-            tmpSunDir.copy(tmpWorldPos).negate().normalize();
-            moonNodeRef.current.rig.setSunDirection(tmpSunDir);
-          }
+          moonNodeRef.current.mesh.rotation.y += 0.01;
         }
       }
 
@@ -651,13 +589,12 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
         container.removeChild(renderer.domElement);
       }
 
-      // Dispose scene resources (geometries/materials/rigs). Procedural textures are cached in module.
+      // Dispose scene resources (geometries/materials). Procedural textures are cached in module.
       disposables.forEach((d) => d.dispose());
-      extraDisposables.forEach((d) => d.dispose());
       renderer.dispose();
 
       planetNodesRef.current = [];
-      moonNodeRef.current = { group: null, mesh: null, rig: null, angle: 0, parentAnchor: null };
+      moonNodeRef.current = { mesh: null, angle: 0, parentMesh: null };
       sceneRef.current = null;
       cameraRef.current = null;
       rendererRef.current = null;

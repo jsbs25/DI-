@@ -92,7 +92,7 @@ type Copy = {
 const COPY: Record<Language, Copy> = {
   zh: {
     title: '语言学习中心',
-    subtitle: '部署多邻国多语言沉浸学习平台，联动实时英语引擎、阿拉伯语研习与全球数字图书馆。',
+    subtitle: '站内直连多邻国多语言沉浸系统，融合英语词典引擎、阿拉伯语研习与全球数字图书馆。',
     practice: '今日复习',
     alphabet: '字母表',
     library: '伊斯兰数字图书馆',
@@ -348,7 +348,6 @@ const COPY: Record<Language, Copy> = {
 interface ArabicLearningHubProps {
   lang: Language;
   onOpenLibrary: () => void;
-  onOpenUrlInBrowser?: (url: string) => void;
 }
 
 type MainTab = 'duolingo_platform' | 'english_engine' | 'letters' | 'islamic_library';
@@ -363,7 +362,7 @@ function readSavedProgress(): ArabicStudyState {
   }
 }
 
-export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOpenLibrary, onOpenUrlInBrowser }) => {
+export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOpenLibrary }) => {
   const t = COPY[lang] || COPY.en;
   const isRtl = lang === 'ar';
 
@@ -586,7 +585,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                 <div className="mb-1 flex items-center gap-2 text-xs font-medium text-[color:var(--color-one-gold)]">
                   <span>{lang === 'zh' ? '多邻国 · 多语言沉浸学习平台' : 'MULTI-LANGUAGE IMMERSION'}</span>
                   <span aria-hidden="true">·</span>
-                  <span className="text-[color:var(--color-one-text-dim)]">EN / AR / ES / FR / JA</span>
+                  <span className="text-[color:var(--color-one-text-dim)]">EN / 中文 / 한국어 / AR / ES / FR / JA</span>
                 </div>
                 <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-3xl">
                   {t.title}
@@ -710,7 +709,6 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
           <DuolingoImmersionPlatform
             lang={lang}
             onOpenEnglishEngine={() => setMainTab('english_engine')}
-            onOpenUrlInBrowser={onOpenUrlInBrowser}
           />
         )}
 
@@ -807,7 +805,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                                 }
                               : {
                                   color: 'var(--color-one-text-muted)',
-                                  background: 'rgba(244,243,238,0.03)',
+                                  background: 'var(--color-one-surface-soft)',
                                   border: '1px solid var(--color-one-border)'
                                 }
                           }
@@ -848,7 +846,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                                 }
                               : {
                                   color: 'var(--color-one-text-dim)',
-                                  background: 'rgba(244,243,238,0.02)',
+                                  background: 'var(--color-one-surface-soft)',
                                   border: '1px solid var(--color-one-border)'
                                 }
                           }
@@ -866,7 +864,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
               <div className="one-surface flex flex-col items-center justify-center px-6 py-14 text-center">
                 <div
                   className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border"
-                  style={{ borderColor: 'var(--color-one-border)', background: 'rgba(244,243,238,0.03)' }}
+                  style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
                 >
                   <Library className="h-7 w-7 text-[color:var(--color-one-text-dim)]" />
                 </div>
@@ -978,7 +976,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
                             <span
                               key={idx}
                               className="rounded-md px-1.5 py-0.5 text-[10px]"
-                              style={{ color: 'var(--color-one-text-dim)', background: 'rgba(244,243,238,0.04)' }}
+                              style={{ color: 'var(--color-one-text-dim)', background: 'var(--color-one-surface-soft)' }}
                             >
                               #{tag}
                             </span>
@@ -1277,7 +1275,7 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
             <div className="one-surface-elevated relative flex h-[88vh] w-full max-w-5xl flex-col overflow-hidden">
               <div
                 className="flex items-center justify-between gap-3 border-b px-4 py-3.5 sm:px-5"
-                style={{ borderColor: 'var(--color-one-border)', background: 'rgba(21,27,38,0.6)' }}
+                style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-elevated)' }}
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <div
@@ -1392,7 +1390,7 @@ function LetterGrid({ selectedId, onSelect }: { selectedId: string; onSelect: (i
                   }
                 : {
                     borderColor: 'var(--color-one-border)',
-                    background: 'rgba(244,243,238,0.02)',
+                    background: 'var(--color-one-surface-soft)',
                     color: 'var(--color-one-text)'
                   }
             }
@@ -1463,7 +1461,7 @@ function LetterDetail({
             <div
               key={key}
               className="rounded-xl border p-2 text-center"
-              style={{ borderColor: 'var(--color-one-border)', background: 'rgba(244,243,238,0.02)' }}
+              style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
             >
               <span className="block text-[9px] text-[color:var(--color-one-text-dim)]">{label}</span>
               <span dir="rtl" lang="ar" className="mt-1 block font-serif text-2xl text-[color:var(--color-one-text)]">
@@ -1475,7 +1473,7 @@ function LetterDetail({
       </div>
       <div
         className="mt-4 rounded-xl border p-3"
-        style={{ borderColor: 'var(--color-one-border)', background: 'rgba(244,243,238,0.02)' }}
+        style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
       >
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-one-text-dim)]">
           {t.example}

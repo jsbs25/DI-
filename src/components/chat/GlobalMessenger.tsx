@@ -6,16 +6,167 @@ import {
   Send, Languages, Sparkles, MessageCircle, Globe, Search, Plug, ShieldAlert,
   Users, UserPlus, Check, X, ImagePlus, Paperclip, Reply, Trash2, Undo2,
   Wifi, WifiOff, RefreshCw, Info, Crown, Shield, LogOut, UserMinus,
-  Download, ChevronLeft, ChevronRight, ChevronDown, FileText, AlertTriangle, Eye, Copy,
+  Download, ChevronLeft, ChevronRight, FileText, AlertTriangle, Eye, Copy,
   Bell, CheckCheck, User as UserIcon, Settings, Volume2, Phone, PhoneOff, Video, Mic, MicOff, VideoOff, Monitor, MonitorOff,
-  Minimize2, Maximize2, ShieldCheck
+  Minimize2, Maximize2, ShieldCheck, Play, Pause
 } from 'lucide-react';
 import { callApi } from '../../services/calls/api.ts';
 import { createCallMediaSession, type ICallMediaSession, type CallMediaState, friendlyMediaError, unlockCallAudioContext } from '../../services/calls/media.ts';
 import { startIncomingRingtone, startOutgoingRingback, stopCallTones } from '../../services/calls/ringtone.ts';
 import { CallCenterPanel, type CallLogEntry, type CallCapabilitiesSummary } from './CallCenterPanel.tsx';
-import { VoiceMessagePlayer } from './VoiceMessagePlayer.tsx';
 import { startClearVoiceRecorder, type VoiceRecorderSession } from '../../utils/voiceMessageAudio.ts';
+
+const VoiceAudioPlayer: React.FC<{ src: string; durationSec?: number; isMe?: boolean }> = ({ src, durationSec, isMe }) => {
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const ctxRef = React.useRef<AudioContext | null>(null);
+  const wiredRef = React.useRef(false);
+  const [playing, setPlaying] = React.useState(false);
+  const [curTime, setCurTime] = React.useState(0);
+  const [totalTime, setTotalTime] = React.useState(durationSec || 0);
+  const [rate, setRate] = React.useState<1 | 1.25 | 1.5>(1);
+
+  React.useEffect(() => {
+    setPlaying(false);
+    setCurTime(0);
+    setTotalTime(durationSec || 0);
+  }, [src, durationSec]);
+
+  React.useEffect(() => {
+    const el = audioRef.current;
+    if (el) el.playbackRate = rate;
+  }, [rate]);
+
+  React.useEffect(() => {
+    return () => {
+      try { void ctxRef.current?.close(); } catch {}
+    };
+  }, []);
+
+  const ensureClarityChain = () => {
+    const el = audioRef.current;
+    if (!el || wiredRef.current || typeof window === 'undefined') return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const source = ctx.createMediaElementSource(el);
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 85;
+      const presence = ctx.createBiquadFilter();
+      presence.type = 'peaking';
+      presence.frequency.value = 2800;
+      presence.Q.value = 1.1;
+      presence.gain.value = 3.5;
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -24;
+      comp.knee.value = 18;
+      comp.ratio.value = 3.5;
+      comp.attack.value = 0.005;
+      comp.release.value = 0.14;
+      const boost = ctx.createGain();
+      boost.gain.value = 1.25;
+      source.connect(hp);
+      hp.connect(presence);
+      presence.connect(comp);
+      comp.connect(boost);
+      boost.connect(ctx.destination);
+      ctxRef.current = ctx;
+      wiredRef.current = true;
+    } catch {
+      // Fallback safely to direct <audio> output
+    }
+  };
+
+  const togglePlay = async () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) {
+      el.pause();
+      return;
+    }
+    ensureClarityChain();
+    if (ctxRef.current?.state === 'suspended') {
+      try { await ctxRef.current.resume(); } catch {}
+    }
+    try {
+      await el.play();
+    } catch {}
+  };
+
+  const fmt = (sec: number) => {
+    const s = Math.max(0, Math.round(sec));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+  };
+
+  const dur = Number.isFinite(totalTime) && totalTime > 0 ? totalTime : (durationSec || 0);
+  const progressPct = dur > 0 ? Math.min(100, Math.max(0, (curTime / dur) * 100)) : 0;
+
+  return (
+    <div className="flex items-center gap-2.5 pt-0.5">
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        playsInline
+        onLoadedMetadata={(e) => {
+          const d = (e.currentTarget as HTMLAudioElement).duration;
+          if (Number.isFinite(d) && d > 0) setTotalTime(d);
+        }}
+        onTimeUpdate={(e) => setCurTime((e.currentTarget as HTMLAudioElement).currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setCurTime(0); }}
+      />
+      <button
+        type="button"
+        onClick={() => void togglePlay()}
+        className={`h-9 w-9 rounded-full flex items-center justify-center shrink-0 transition ${
+          isMe
+            ? 'bg-white text-sky-700 hover:bg-sky-50'
+            : 'bg-sky-600 text-white hover:bg-sky-500'
+        }`}
+        aria-label={playing ? 'Pause voice message' : 'Play voice message'}
+      >
+        {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+      </button>
+      <div className="flex-1 min-w-0 space-y-1">
+        <div
+          role="slider"
+          aria-label="Voice progress"
+          aria-valuemin={0}
+          aria-valuemax={dur || 1}
+          aria-valuenow={curTime}
+          tabIndex={0}
+          onClick={(e) => {
+            const el = audioRef.current;
+            if (!el || !dur) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / Math.max(1, rect.width)));
+            el.currentTime = frac * dur;
+            setCurTime(el.currentTime);
+          }}
+          className="h-2.5 rounded-full bg-current/20 overflow-hidden cursor-pointer flex items-center"
+        >
+          <div className="h-full rounded-full bg-current transition-[width] duration-75" style={{ width: `${progressPct}%` }} />
+        </div>
+        <div className="flex items-center justify-between text-[10px] opacity-80 tabular-nums">
+          <span>{playing || curTime > 0 ? `${fmt(curTime)} / ${fmt(dur)}` : fmt(dur)}</span>
+          <button
+            type="button"
+            onClick={() => setRate(r => (r === 1 ? 1.25 : r === 1.25 ? 1.5 : 1))}
+            className="rounded px-1.5 py-0.5 bg-current/15 hover:bg-current/25 font-semibold"
+            title="切换倍速"
+          >
+            {rate}x
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const CallTrackView: React.FC<{
   track?: MediaStreamTrack | null;
@@ -264,8 +415,6 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const mediaJoinedCallIdRef = useRef<string | null>(null);
   const mediaTokenRef = useRef<string | null>(null);
   const dismissedCallIdsRef = useRef<Set<string>>(new Set());
-  const pendingSignalAcksRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const [manualRelayOn, setManualRelayOn] = useState(false);
   const [audioPlaybackBlocked, setAudioPlaybackBlocked] = useState(false);
   const [playbackRetryTick, setPlaybackRetryTick] = useState(0);
   const [mediaState, setMediaState] = useState<CallMediaState>({ phase: 'idle', canPlaybackAudio: false, participants: {} });
@@ -279,23 +428,17 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const QUICK_REACTIONS = ['👍', '❤️', '🔥', '👏', '✨', '😂'] as const;
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
   const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
-  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const msgElRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const isNearBottomRef = useRef(true);
-  const [unreadBelowCount, setUnreadBelowCount] = useState(0);
   const [inChatSearchOpen, setInChatSearchOpen] = useState(false);
   const [inChatQuery, setInChatQuery] = useState('');
   const [inChatResults, setInChatResults] = useState<ChatMessage[]>([]);
   const [inChatSearching, setInChatSearching] = useState(false);
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [voiceSeconds, setVoiceSeconds] = useState(0);
+  const [voiceLevel, setVoiceLevel] = useState(0);
   const [voiceSending, setVoiceSending] = useState(false);
-  const [voiceLevels, setVoiceLevels] = useState<number[]>(() => Array(14).fill(14));
   const voiceSessionRef = useRef<VoiceRecorderSession | null>(null);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const voiceStartMsRef = useRef<number>(0);
-  const voicePlayRegistryRef = useRef<Map<string, () => void>>(new Map());
   const lastQuickActionSeqRef = useRef(0);
 
   useEffect(() => {
@@ -315,7 +458,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     }
   }, [directOpenSeq]);
 
-  type PendingUpload = { id: string; file: File; name: string; size: number; mimeType: string; kind: 'image' | 'file' | 'audio'; previewUrl?: string; durationSec?: number; progress: number; status: 'queued' | 'uploading' | 'sending' | 'error' | 'done'; error?: string; uploadedAttachment?: any };
+  type PendingUpload = { id: string; file: File; name: string; size: number; mimeType: string; kind: 'image' | 'file' | 'audio'; previewUrl?: string; progress: number; status: 'queued' | 'uploading' | 'sending' | 'error' | 'done'; error?: string; uploadedAttachment?: any };
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [lightbox, setLightbox] = useState<{ items: { url: string; name: string }[]; index: number } | null>(null);
@@ -326,7 +469,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   useEffect(() => () => { for (const p of pendingUploadsRef.current) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); }, []);
 
   const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-  const ALLOWED_MIME = new Set(['image/png','image/jpeg','image/gif','image/webp','audio/webm','audio/ogg','audio/mp4','audio/mpeg','audio/wav','audio/x-wav','audio/aac','audio/x-m4a','audio/m4a','application/pdf','text/plain','application/zip','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
+  const ALLOWED_MIME = new Set(['image/png','image/jpeg','image/gif','image/webp','audio/webm','audio/ogg','audio/mp4','audio/mpeg','audio/wav','application/pdf','text/plain','application/zip','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
   const BLOCKED_EXTS = new Set(['.html','.htm','.svg','.xml','.js','.mjs','.cjs','.sh','.bat','.cmd','.ps1','.exe','.msi','.apk','.php','.jsp','.asp','.aspx']);
   const formatBytes = (n?: number) => {
     if (!n && n !== 0) return '';
@@ -340,7 +483,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     if (ext && BLOCKED_EXTS.has(ext)) return '文件类型不允许';
     const mime = (file.type || '').toLowerCase().split(';')[0].trim();
     const allowedByMime = ALLOWED_MIME.has(mime) || (ext === '.docx' && mime === 'application/zip');
-    const allowedByExt = ['.png','.jpg','.jpeg','.gif','.webp','.webm','.ogg','.oga','.m4a','.aac','.mp3','.wav','.pdf','.txt','.zip','.doc','.docx'].includes(ext);
+    const allowedByExt = ['.png','.jpg','.jpeg','.gif','.webp','.webm','.ogg','.oga','.m4a','.mp3','.wav','.pdf','.txt','.zip','.doc','.docx'].includes(ext);
     if (!allowedByMime && !allowedByExt) return '文件类型不允许';
     if (file.size > MAX_UPLOAD_BYTES) return '文件过大（最大 10MB）';
     if (file.size <= 0) return '空文件';
@@ -824,15 +967,6 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         try {
           if (ws.readyState === 1) {
             ws.send(JSON.stringify({ type: 'active_conversation', conversationId: getViewedConversationId() }));
-            const curCall = activeCallRef.current;
-            if (curCall && ['ringing', 'connecting', 'active', 'reconnecting'].includes(curCall.status)) {
-              ws.send(JSON.stringify({
-                type: 'call_resume',
-                callId: curCall.id,
-                afterSeq: mediaSessionRef.current?.getLastSignalSeq?.() || 0,
-              }));
-              void mediaSessionRef.current?.recoverConnection?.('ws-reopen');
-            }
           }
         } catch {}
         if (pingTimer) clearInterval(pingTimer);
@@ -854,40 +988,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         let msg: any;
         try { msg = JSON.parse(String(ev.data)); } catch { return; }
         const type = msg?.type;
-        if (!type || type === 'pong' || type === 'hello' || type === 'call_heartbeat_ack') return;
-
-        if (type === 'call_signal_ack') {
-          if (msg.signalId) {
-            const t = pendingSignalAcksRef.current.get(String(msg.signalId));
-            if (t) {
-              clearTimeout(t);
-              pendingSignalAcksRef.current.delete(String(msg.signalId));
-            }
-          }
-          return;
-        }
-        if (type === 'call_sync') {
-          if (msg.call) {
-            if (activeCallRef.current?.id === msg.call.id) setActiveCall(msg.call);
-            else if (!activeCallRef.current && !dismissedCallIdsRef.current.has(msg.call.id) && ['connecting', 'active', 'reconnecting'].includes(msg.call.status)) {
-              setActiveCall(msg.call);
-            }
-          }
-          if (Array.isArray(msg.signals) && mediaJoinedCallIdRef.current === msg.call?.id && mediaSessionRef.current?.handleRemoteSignal) {
-            for (const s of msg.signals) {
-              if (s?.fromUserId && s?.signal) {
-                void mediaSessionRef.current.handleRemoteSignal(s.fromUserId, s.signal, s.seq);
-              }
-            }
-          }
-          return;
-        }
-        if (type === 'call_peer_online') {
-          if (mediaJoinedCallIdRef.current === msg.callId && mediaSessionRef.current?.recoverConnection) {
-            void mediaSessionRef.current.recoverConnection('peer-online');
-          }
-          return;
-        }
+        if (!type || type === 'pong' || type === 'hello') return;
 
         if (type === 'presence') {
           setFriends(prev => prev.map(f => f.id === msg.userId ? { ...f, isOnline: !!msg.online, lastActiveAt: msg.lastActiveAt || f.lastActiveAt } : f));
@@ -911,19 +1012,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         }
         if (type === 'message' && msg.message) {
           const incomingMsg: ChatMessage = msg.message;
-          const incomingClientId = msg.clientMsgId || (incomingMsg as any).clientMsgId;
           const targetCid = msg.conversationId || incomingMsg.conversationId;
           if (targetCid === activeConvIdRef.current) {
-            if (incomingClientId) pendingClientIds.current.delete(String(incomingClientId));
-            let isBrandNew = false;
             setMessages(prev => {
-              const existed = prev.some(m => m.id === incomingMsg.id || (incomingClientId && (m.id === incomingClientId || (m as any).clientMsgId === incomingClientId)));
-              isBrandNew = !existed;
-              const map = new Map<string, ChatMessage>();
-              for (const m of prev) {
-                if (incomingClientId && (m.id === incomingClientId || (m as any).clientMsgId === incomingClientId)) continue;
-                map.set(m.id, m);
-              }
+              const map = new Map(prev.map(m => [m.id, m]));
               map.set(incomingMsg.id, incomingMsg);
               return Array.from(map.values()).sort((a, b) => {
                 const ta = new Date(a.createdAt).getTime(), tb = new Date(b.createdAt).getTime();
@@ -931,9 +1023,6 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 return String(a.id).localeCompare(String(b.id));
               });
             });
-            if (isBrandNew && incomingMsg.senderId !== currentUser?.id && !isNearBottomRef.current) {
-              setUnreadBelowCount(c => c + 1);
-            }
             if (ws.readyState === 1 && incomingMsg.senderId !== currentUser?.id && getViewedConversationId() === targetCid) {
               clearConvNotifsLocal(targetCid);
               try { ws.send(JSON.stringify({ type: 'read', conversationId: targetCid })); } catch {}
@@ -947,21 +1036,19 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           if (cid) pendingClientIds.current.delete(cid);
           if (msg.ok && msg.message) {
             setMessages(prev => {
-              const map = new Map<string, ChatMessage>();
-              for (const m of prev) {
-                if (cid && (m.id === cid || (m as any).clientMsgId === cid)) continue;
-                map.set(m.id, m);
+              const replaced = prev.map(m => m.id === cid ? msg.message : m);
+              const seen = new Set<string>();
+              const deduped: ChatMessage[] = [];
+              for (const m of replaced) {
+                if (seen.has(m.id)) continue;
+                seen.add(m.id);
+                deduped.push(m);
               }
-              map.set(msg.message.id, msg.message);
-              return Array.from(map.values()).sort((a, b) => {
-                const ta = new Date(a.createdAt).getTime(), tb = new Date(b.createdAt).getTime();
-                if (ta !== tb) return ta - tb;
-                return String(a.id).localeCompare(String(b.id));
-              });
+              return deduped;
             });
             void onRefreshConversations?.();
           } else if (!msg.ok && cid) {
-            setMessages(prev => prev.map(m => (m.id === cid || (m as any).clientMsgId === cid) ? { ...m, status: 'failed' } : m));
+            setMessages(prev => prev.map(m => m.id === cid ? { ...m, status: 'failed' } : m));
           }
           return;
         }
@@ -1063,7 +1150,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         if (wsRef.current === ws) wsRef.current = null;
         if (stopped) return;
         setWsStatus('closed');
-        const delay = Math.min(8000, 500 * Math.pow(2, reconnectAttemptRef.current));
+        const delay = Math.min(10000, 1000 * Math.pow(2, reconnectAttemptRef.current));
         reconnectAttemptRef.current += 1;
         reconnectRef.current = setTimeout(connect, delay);
       };
@@ -1080,13 +1167,6 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         void pollCalls();
       }
     }, 3500);
-    const callHeartbeatTimer = setInterval(() => {
-      if (stopped) return;
-      const c = activeCallRef.current;
-      if (wsRef.current?.readyState === 1 && c && ['ringing', 'connecting', 'active', 'reconnecting'].includes(c.status)) {
-        try { wsRef.current.send(JSON.stringify({ type: 'call_heartbeat', callId: c.id })); } catch {}
-      }
-    }, 15000);
     const resumeConnection = () => {
       if (stopped) return;
       void syncSince();
@@ -1100,32 +1180,25 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           try { cur.close(); } catch {}
         }
       }
-      if (mediaSessionRef.current?.recoverConnection && activeCallRef.current) {
-        void mediaSessionRef.current.recoverConnection('network-resume');
-      }
     };
     const onOnline = () => resumeConnection();
     const onVisibilityResume = () => {
       if (document.visibilityState === 'visible') resumeConnection();
     };
     const onPageShow = () => resumeConnection();
-    const navConn = typeof navigator !== 'undefined' ? (navigator as any).connection : null;
     window.addEventListener('online', onOnline);
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('focus', onOnline);
     document.addEventListener('visibilitychange', onVisibilityResume);
-    try { navConn?.addEventListener?.('change', resumeConnection); } catch {}
     return () => {
       stopped = true;
       if (pingTimer) clearInterval(pingTimer);
       clearInterval(syncTimer);
       clearInterval(callTimer);
-      clearInterval(callHeartbeatTimer);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('focus', onOnline);
       document.removeEventListener('visibilitychange', onVisibilityResume);
-      try { navConn?.removeEventListener?.('change', resumeConnection); } catch {}
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
       try { wsRef.current?.close(); } catch {}
       wsRef.current = null;
@@ -1174,40 +1247,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authed, isVisible, activeConv?.id, mobileShowChat, tab]);
 
-  useEffect(() => {
-    if (activeConv?.id && authed) {
-      setMessages([]);
-      setHasMore(false);
-      isNearBottomRef.current = true;
-      setUnreadBelowCount(0);
-      void fetchMessages();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConv?.id, authed]);
-
-  const handleMessagesScroll = () => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const near = distFromBottom < 120;
-    isNearBottomRef.current = near;
-    if (near && unreadBelowCount > 0) setUnreadBelowCount(0);
-  };
-
-  const scrollToLatestMessages = () => {
-    isNearBottomRef.current = true;
-    setUnreadBelowCount(0);
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    const last = messages[messages.length - 1];
-    if (isNearBottomRef.current || (last && last.senderId === currentUser?.id)) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      if (unreadBelowCount > 0) setUnreadBelowCount(0);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length, activeConv?.id]);
+  useEffect(() => { if (activeConv?.id && authed) { setMessages([]); setHasMore(false); void fetchMessages(); } }, [activeConv?.id, authed]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length, activeConv?.id]);
 
   const loadGroupDetail = async (id: string) => {
     try { const d = await api(`/api/conversations/${id}`); setGroupDetail(d.conversation || null); } catch { setGroupDetail(null); }
@@ -1246,58 +1287,43 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     const text = inputText.trim();
     const clientId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
     const optimistic: ChatMessage = {
-      id: clientId, clientMsgId: clientId, conversationId: activeConv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
+      id: clientId, conversationId: activeConv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
       senderAvatar: currentUser?.avatar || '', senderCountry: currentUser?.location?.countryCode || 'UN', content: text,
       createdAt: new Date().toISOString(), status: 'sending', readBy: [currentUser?.id || ''], deliveredTo: [], replyToId: replyTo?.id
     } as any;
     pendingClientIds.current.add(clientId);
-    isNearBottomRef.current = true;
     setMessages(prev => [...prev, optimistic]);
     setInputText('');
     setReplyTo(null);
     setIsSending(true);
     sendTyping(false);
-
-    const reconcileSentMessage = (confirmed: ChatMessage) => {
-      setMessages(prev => {
-        const map = new Map<string, ChatMessage>();
-        for (const m of prev) {
-          if (m.id === clientId || (m as any).clientMsgId === clientId) continue;
-          map.set(m.id, m);
-        }
-        map.set(confirmed.id, confirmed);
-        return Array.from(map.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-      });
-    };
-
     try {
       if (wsRef.current?.readyState === 1) {
         wsRef.current.send(JSON.stringify({ type: 'send', conversationId: activeConv.id, content: text, clientMsgId: clientId, replyToId: optimistic.replyToId, autoTranslate, targetLanguage: targetTranslateLang }));
+        // ack handled by ws; fallback timeout
         setTimeout(() => {
           if (pendingClientIds.current.has(clientId)) {
+            // fallback to HTTP if no ack
             (async () => {
               try {
                 const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: text, replyToId: optimistic.replyToId, targetLanguage: targetTranslateLang, autoTranslate, clientMsgId: clientId }) });
                 pendingClientIds.current.delete(clientId);
-                if (data.success && data.message) reconcileSentMessage(data.message);
-                await onRefreshConversations?.();
-              } catch {
-                pendingClientIds.current.delete(clientId);
-                setMessages(prev => prev.map(m => m.id === clientId ? { ...m, status: 'failed' } : m));
-              }
+                if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
+              } catch { pendingClientIds.current.delete(clientId); setMessages(prev => prev.map(m => m.id === clientId ? { ...m, status: 'failed' } : m)); }
             })();
           }
-        }, 4500);
+        }, 5000);
       } else {
         const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: text, replyToId: optimistic.replyToId, targetLanguage: targetTranslateLang, autoTranslate, clientMsgId: clientId }) });
         pendingClientIds.current.delete(clientId);
-        if (data.success && data.message) reconcileSentMessage(data.message);
+        if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
         await onRefreshConversations?.();
       }
     } catch (err: any) {
       pendingClientIds.current.delete(clientId);
       setMessages(prev => prev.map(m => m.id === clientId ? { ...m, status: 'failed' } : m));
-      setConnError(err?.message || '发送失败，请点击消息旁的“重试”');
+      setConnError(err?.message || '发送失败，请重试。');
+      setInputText(text);
     } finally {
       setIsSending(false);
     }
@@ -1332,14 +1358,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     for (const file of list) {
       const err = validateLocalFile(file);
       const mime = (file.type || '').toLowerCase();
-      const ext = fileExt(file.name);
-      const isImg = mime.startsWith('image/') || ['.png','.jpg','.jpeg','.gif','.webp'].includes(ext);
-      const isAud = mime.startsWith('audio/') || ['.webm','.ogg','.oga','.m4a','.aac','.mp3','.wav'].includes(ext);
+      const isImg = mime.startsWith('image/') || ['.png','.jpg','.jpeg','.gif','.webp'].includes(fileExt(file.name));
       next.push({
         id: `pend_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
         file, name: file.name, size: file.size, mimeType: file.type || 'application/octet-stream',
-        kind: isImg ? 'image' : isAud ? 'audio' : 'file',
-        previewUrl: (isImg || isAud) ? URL.createObjectURL(file) : undefined,
+        kind: isImg ? 'image' : 'file',
+        previewUrl: isImg ? URL.createObjectURL(file) : undefined,
         progress: 0,
         status: err ? 'error' : 'queued',
         error: err || undefined,
@@ -1369,15 +1393,12 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           if (!att) {
             setPendingUploads(prev => prev.map(p => p.id === item.id ? { ...p, status: 'uploading', progress: 1, error: undefined } : p));
             att = await uploadOne(item.file, activeConv.id, (p) => setPendingUploads(prev => prev.map(x => x.id === item.id ? { ...x, progress: p } : x)));
-            if (item.durationSec) att.durationSec = item.durationSec;
             setPendingUploads(prev => prev.map(p => p.id === item.id ? { ...p, uploadedAttachment: att, progress: 100 } : p));
-          } else if (item.durationSec && !att.durationSec) {
-            att.durationSec = item.durationSec;
           }
           setPendingUploads(prev => prev.map(p => p.id === item.id ? { ...p, status: 'sending', error: undefined } : p));
           const clientId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
           const optimistic: ChatMessage = {
-            id: clientId, clientMsgId: clientId, conversationId: activeConv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
+            id: clientId, conversationId: activeConv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
             senderAvatar: currentUser?.avatar || '', senderCountry: currentUser?.location?.countryCode || 'UN', content: '',
             createdAt: new Date().toISOString(), status: 'sending', readBy: [currentUser?.id || ''], deliveredTo: [], attachments: [att]
           } as any;
@@ -1385,17 +1406,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           setMessages(prev => [...prev, optimistic].sort((a,b)=>{ const ta=new Date(a.createdAt).getTime(), tb=new Date(b.createdAt).getTime(); if(ta!==tb) return ta-tb; return String(a.id).localeCompare(String(b.id)); }));
           const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '', attachments: [att], clientMsgId: clientId }) });
           pendingClientIds.current.delete(clientId);
-          if (data.success && data.message) {
-            setMessages(prev => {
-              const map = new Map<string, ChatMessage>();
-              for (const m of prev) {
-                if (m.id === clientId || (m as any).clientMsgId === clientId) continue;
-                map.set(m.id, m);
-              }
-              map.set(data.message.id, data.message);
-              return Array.from(map.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-            });
-          }
+          if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
           await onRefreshConversations?.();
           setPendingUploads(prev => prev.map(p => p.id === item.id ? { ...p, status: 'done', progress: 100 } : p));
         } catch (e: any) {
@@ -1604,32 +1615,21 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     setMessages(prev => prev.filter(m => m.id !== msg.id));
     const clientId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
     const optimistic: ChatMessage = {
-      id: clientId, clientMsgId: clientId, conversationId: activeConv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
+      id: clientId, conversationId: activeConv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
       senderAvatar: currentUser?.avatar || '', senderCountry: currentUser?.location?.countryCode || 'UN', content: text,
       createdAt: new Date().toISOString(), status: 'sending', readBy: [currentUser?.id || ''], deliveredTo: [], replyToId, attachments
     } as any;
     pendingClientIds.current.add(clientId);
     setMessages(prev => [...prev, optimistic].sort((a,b)=> new Date(a.createdAt).getTime()-new Date(b.createdAt).getTime()));
-    const reconcileRetry = (confirmed: ChatMessage) => {
-      setMessages(prev => {
-        const map = new Map<string, ChatMessage>();
-        for (const m of prev) {
-          if (m.id === clientId || (m as any).clientMsgId === clientId) continue;
-          map.set(m.id, m);
-        }
-        map.set(confirmed.id, confirmed);
-        return Array.from(map.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-      });
-    };
     try {
       if (wsRef.current?.readyState === 1) {
-        wsRef.current.send(JSON.stringify({ type: 'send', conversationId: activeConv.id, content: text, clientMsgId: clientId, replyToId, attachments, autoTranslate, targetLanguage: targetTranslateLang }));
+        wsRef.current.send(JSON.stringify({ type: 'send', conversationId: activeConv.id, content: text, clientMsgId: clientId, replyToId, attachments }));
         setTimeout(async () => {
           if (pendingClientIds.current.has(clientId)) {
             try {
-              const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: text, replyToId, attachments, autoTranslate, targetLanguage: targetTranslateLang, clientMsgId: clientId }) });
+              const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: text, replyToId, attachments, clientMsgId: clientId }) });
               pendingClientIds.current.delete(clientId);
-              if (data.success && data.message) reconcileRetry(data.message);
+              if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
               await onRefreshConversations?.();
             } catch {
               pendingClientIds.current.delete(clientId);
@@ -1637,11 +1637,11 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               setConnError('重试失败，请检查网络后再试。');
             }
           }
-        }, 4500);
+        }, 5000);
       } else {
-        const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: text, replyToId, attachments, autoTranslate, targetLanguage: targetTranslateLang, clientMsgId: clientId }) });
+        const data = await api(`/api/conversations/${activeConv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: text, replyToId, attachments, clientMsgId: clientId }) });
         pendingClientIds.current.delete(clientId);
-        if (data.success && data.message) reconcileRetry(data.message);
+        if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
         await onRefreshConversations?.();
       }
     } catch {
@@ -1714,31 +1714,26 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     voiceSessionRef.current = null;
     setIsRecordingVoice(false);
     setVoiceSeconds(0);
-    setVoiceLevels(Array(14).fill(14));
+    setVoiceLevel(0);
   };
 
   const startVoiceRecording = async () => {
     if (!activeConv || !authed || isRecordingVoice || voiceSending) return;
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setConnError('当前浏览器不支持语音录制');
+      return;
+    }
     try {
-      voiceStartMsRef.current = Date.now();
       const session = await startClearVoiceRecorder({
-        onLevel: (lv) => {
-          setVoiceLevels((prev) => {
-            const pct = Math.max(16, Math.min(100, Math.round(16 + lv * 84)));
-            return [...prev.slice(1), pct];
-          });
-        },
+        onLevel: (lvl) => setVoiceLevel(lvl),
       });
       voiceSessionRef.current = session;
       setIsRecordingVoice(true);
       setVoiceSeconds(0);
+      setVoiceLevel(0);
       voiceTimerRef.current = setInterval(() => {
-        const sec = Math.floor((Date.now() - voiceStartMsRef.current) / 1000);
-        setVoiceSeconds(sec);
-        if (sec >= 120) {
-          void sendVoiceRecording();
-        }
-      }, 250);
+        setVoiceSeconds(s => s + 1);
+      }, 1000);
     } catch (e: any) {
       setConnError(friendlyMediaError(e));
       stopVoiceRecordingCleanup();
@@ -1749,72 +1744,37 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     const session = voiceSessionRef.current;
     const conv = activeConv;
     if (!session || !conv) { stopVoiceRecordingCleanup(); return; }
-    voiceSessionRef.current = null;
+    const fallbackDuration = Math.max(1, voiceSeconds);
     if (voiceTimerRef.current) { clearInterval(voiceTimerRef.current); voiceTimerRef.current = null; }
-    setIsRecordingVoice(false);
-    setVoiceLevels(Array(14).fill(14));
     setVoiceSending(true);
-    let voiceFile: File | null = null;
-    let uploadedAtt: any = null;
     try {
-      const res = await session.stopAndFinalize();
+      const recorded = await session.stopAndFinalize();
+      voiceSessionRef.current = null;
+      setIsRecordingVoice(false);
       setVoiceSeconds(0);
-      if (!res || !res.file || res.durationSec < 0.45 || !res.file.size) {
-        setNotice('说话时间太短，请再试一次');
-        setTimeout(() => setNotice(n => n === '说话时间太短，请再试一次' ? null : n), 2200);
-        return;
-      }
-      const duration = Math.max(1, Math.round(res.durationSec));
-      voiceFile = res.file;
-      uploadedAtt = await uploadOne(voiceFile, conv.id, () => {});
-      uploadedAtt.durationSec = duration;
+      setVoiceLevel(0);
+      if (!recorded || !recorded.file.size) { setVoiceSending(false); return; }
+      const att = await uploadOne(recorded.file, conv.id, () => {});
+      att.durationSec = Math.max(fallbackDuration, recorded.durationSec);
       const clientId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
       const optimistic: ChatMessage = {
-        id: clientId, clientMsgId: clientId, conversationId: conv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
+        id: clientId, conversationId: conv.id, senderId: currentUser?.id || '', senderName: currentUser?.displayName || 'Me',
         senderAvatar: currentUser?.avatar || '', senderCountry: currentUser?.location?.countryCode || 'UN', content: '',
-        createdAt: new Date().toISOString(), status: 'sending', readBy: [currentUser?.id || ''], deliveredTo: [], attachments: [uploadedAtt]
+        createdAt: new Date().toISOString(), status: 'sending', readBy: [currentUser?.id || ''], deliveredTo: [], attachments: [att]
       } as any;
       pendingClientIds.current.add(clientId);
-      isNearBottomRef.current = true;
       setMessages(prev => [...prev, optimistic]);
-      const data = await api(`/api/conversations/${conv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '', attachments: [uploadedAtt], clientMsgId: clientId }) });
+      const data = await api(`/api/conversations/${conv.id}/messages`, { method: 'POST', body: JSON.stringify({ content: '', attachments: [att], clientMsgId: clientId }) });
       pendingClientIds.current.delete(clientId);
-      if (data.success && data.message) {
-        setMessages(prev => {
-          const map = new Map<string, ChatMessage>();
-          for (const m of prev) {
-            if (m.id === clientId || (m as any).clientMsgId === clientId) continue;
-            map.set(m.id, m);
-          }
-          map.set(data.message.id, data.message);
-          return Array.from(map.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-        });
-      }
+      if (data.success && data.message) setMessages(prev => prev.map(m => m.id === clientId ? data.message : m));
       await onRefreshConversations?.();
     } catch (e: any) {
-      if (voiceFile) {
-        setPendingUploads(prev => [...prev, {
-          id: `u_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-          file: voiceFile!,
-          name: voiceFile!.name,
-          size: voiceFile!.size,
-          mimeType: voiceFile!.type,
-          kind: 'audio',
-          previewUrl: URL.createObjectURL(voiceFile!),
-          durationSec: Math.max(1, voiceSeconds),
-          progress: 0,
-          status: 'error',
-          error: e?.message || '发送失败，点击重发',
-          uploadedAttachment: uploadedAtt || undefined,
-        }]);
-      }
-      setConnError(e?.message || '语音发送失败，已保留在待发区，可点击重发');
+      setConnError(e?.message || '语音发送失败');
       stopVoiceRecordingCleanup();
     } finally {
       setVoiceSending(false);
     }
   };
-
   const clearConversationForMe = async () => {
     if (!activeConv) return;
     if (!window.confirm(lang==='ar'?'سيؤدي هذا إلى إزالة سجل هذه المحادثة من عرضك فقط (وليس للطرف الآخر). هل تريد المتابعة؟':lang==='en'?'This will remove this conversation history from your view only (not for others). Continue?':'这将仅从你的视图中清除此会话记录（不会删除对方记录）。继续吗？')) return;
@@ -1991,9 +1951,6 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const cleanupCallMedia = async (reason = 'ended') => {
     mediaJoinedCallIdRef.current = null;
     mediaTokenRef.current = null;
-    setManualRelayOn(false);
-    for (const t of pendingSignalAcksRef.current.values()) clearTimeout(t);
-    pendingSignalAcksRef.current.clear();
     const s = mediaSessionRef.current;
     mediaSessionRef.current = null;
     try { await s?.disconnect(reason); } catch {}
@@ -2058,22 +2015,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         initialCameraEnabled: initCam,
         reconnect,
         sendSignal: async (toUserId, signal) => {
-          const signalId = `sig_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          const isCritical = signal && ['offer', 'answer', 'ready', 'renegotiate'].includes(signal.type);
+          // Send once: prefer open WebSocket for low latency, fallback to HTTP signaling API
           if (wsRef.current?.readyState === 1) {
             try {
-              wsRef.current.send(JSON.stringify({ type: 'call_signal', callId: call.id, toUserId, signal, signalId }));
-              if (isCritical) {
-                const fallbackTimer = setTimeout(() => {
-                  pendingSignalAcksRef.current.delete(signalId);
-                  void callApi.signal(call.id, { toUserId, signal, signalId }).catch(() => {});
-                }, 900);
-                pendingSignalAcksRef.current.set(signalId, fallbackTimer);
-              }
+              wsRef.current.send(JSON.stringify({ type: 'call_signal', callId: call.id, toUserId, signal }));
               return;
             } catch {}
           }
-          try { await callApi.signal(call.id, { toUserId, signal, signalId }); } catch {}
+          try { await callApi.signal(call.id, { toUserId, signal }); } catch {}
         },
         sendAudioFrame: (pcm, sampleRate) => {
           if (wsRef.current?.readyState === 1) {
@@ -2089,7 +2038,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           const phaseChanged = st.phase !== lastReportedPhase;
           if (st.phase === 'connected') {
             lastReportedPhase = st.phase;
-            setCallMediaNote(st.error || (st.audioStats?.usingRelay ? '已开启加密语音中继防断线保护（弱网/UDP受限自动保障不断线）' : null));
+            setCallMediaNote(st.error || (st.audioStats?.usingRelay ? '已通过加密语音中继接通（P2P 受限网络自动切换）' : null));
             const needActiveSync =
               (phaseChanged && curServerStatus !== 'ringing') ||
               (curServerStatus === 'connecting' && Date.now() - lastActiveSyncAt > 2500);
@@ -2103,14 +2052,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               });
             }
           } else if (st.phase === 'reconnecting') {
-            setCallMediaNote(lang==='ar'?'جارٍ إعادة الاتصال بالوسائط…':lang==='en'?'Reconnecting media…':'网络波动，正在无缝重连并保持语音通道…');
+            setCallMediaNote(lang==='ar'?'جارٍ إعادة الاتصال بالوسائط…':lang==='en'?'Reconnecting media…':'媒体重连中…');
             if (phaseChanged) {
               lastReportedPhase = st.phase;
               void syncCallStateToServer(call.id, { status: 'reconnecting' });
             }
           } else if (st.phase === 'failed') {
             lastReportedPhase = st.phase;
-            setCallMediaNote(st.error || (lang==='ar'?'فشل اتصال الوسائط':lang==='en'?'Media connection failed':'媒体连接异常，可点击重连或开启防断线中继'));
+            setCallMediaNote(st.error || (lang==='ar'?'فشل اتصال الوسائط':lang==='en'?'Media connection failed':'媒体连接失败'));
           } else {
             lastReportedPhase = st.phase;
           }
@@ -2284,19 +2233,6 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     } catch (e: any) {
       setCallMediaNote(friendlyMediaError(e));
     }
-  };
-
-  const toggleManualRelayProtection = () => {
-    const session = mediaSessionRef.current;
-    if (!session?.setManualRelay) return;
-    const next = !manualRelayOn;
-    setManualRelayOn(next);
-    session.setManualRelay(next);
-    setCallMediaNote(
-      next
-        ? '已开启防断线加密中继保护（通过 WebSocket 双通道保底不断线）'
-        : '已恢复智能 P2P 优先 + 自动切换保护模式'
-    );
   };
 
   // Ringtone / ringback lifecycle synced with signaling & DND preferences
@@ -3010,8 +2946,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           </div>
         )}
 
-        <div className="relative flex-1 min-h-0 flex flex-col">
-        <div ref={scrollContainerRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 space-y-3 min-h-0">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 space-y-3 min-h-0">
           {hasMore && <div className="text-center"><button disabled={loadingMore} onClick={async()=>{ if(!messages[0]) return; setLoadingMore(true); await fetchMessages(true, messages[0].id); setLoadingMore(false); }} className="text-[11px] px-3 py-1 rounded-full border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06]">加载更早消息</button></div>}
           {connError && <div className="rounded-xl border border-amber-300 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-200 flex items-center justify-between gap-2"><span>{connError}</span><button onClick={()=>{setConnError(null); void fetchMessages(false);}} className="px-2 py-1 rounded bg-amber-200 dark:bg-amber-800/50">重试</button></div>}
           {messages.map(msg => {
@@ -3056,26 +2991,13 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                               <div className="flex items-center justify-between gap-2 text-[10px] opacity-80"><span className="truncate">{a.name}</span><button onClick={()=>void downloadAttachment(a)} className="inline-flex items-center gap-1 underline shrink-0"><Download className="w-3 h-3"/>{dlState[a.id]==='downloading'?'下载中…':dlState[a.id]==='error'?'重试下载':'下载'}</button></div>
                             </div>
                           ) : (a.type === 'audio' || (a.mimeType || '').startsWith('audio/')) ? (
-                            <VoiceMessagePlayer
-                              key={a.id}
-                              id={a.id}
-                              src={authFileUrl(a.url)}
-                              durationSec={a.durationSec}
-                              isMe={isMe}
-                              registerPlay={(aid, fn) => { voicePlayRegistryRef.current.set(aid, fn); }}
-                              unregisterPlay={(aid) => { voicePlayRegistryRef.current.delete(aid); }}
-                              onEndedNext={() => {
-                                const audioIds = messages
-                                  .filter(m => !m.recalled)
-                                  .flatMap(m => (m.attachments || []).filter(att => att.type === 'audio' || (att.mimeType || '').startsWith('audio/')))
-                                  .map(att => att.id);
-                                const idx = audioIds.indexOf(a.id);
-                                if (idx >= 0 && idx + 1 < audioIds.length) {
-                                  const nextFn = voicePlayRegistryRef.current.get(audioIds[idx + 1]);
-                                  nextFn?.();
-                                }
-                              }}
-                            />
+                            <div key={a.id} className="rounded-xl border border-current/20 bg-black/10 dark:bg-black/25 p-2.5 space-y-1.5 min-w-[220px] sm:min-w-[265px]">
+                              <div className="flex items-center justify-between gap-2 text-[11px] opacity-90">
+                                <span className="inline-flex items-center gap-1 font-medium"><Mic className="w-3.5 h-3.5"/>高清语音</span>
+                                <span className="text-[10px] opacity-75">{formatBytes(a.size)}</span>
+                              </div>
+                              <VoiceAudioPlayer src={authFileUrl(a.url)} durationSec={a.durationSec} isMe={isMe} />
+                            </div>
                           ) : (
                             <div key={a.id} className="rounded-xl border border-current/15 bg-black/5 dark:bg-black/20 p-2.5 space-y-2">
                               <div className="flex items-start gap-2 min-w-0">
@@ -3117,25 +3039,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                         })}
                       </div>
                     )}
-                    <div className={`relative flex flex-wrap items-center gap-2 text-[10px] opacity-80 ${isMe?'justify-end':''}`}>
+                    <div className={`relative flex items-center gap-2 text-[10px] opacity-80 ${isMe?'justify-end':''}`}>
                       {isMe && <span>{msg.status==='read'?'已读':msg.status==='delivered'?'已送达':msg.status==='failed'?<button onClick={()=>void retrySend(msg)} className="underline text-amber-200 hover:text-amber-100">失败·重试</button>:msg.status==='sending'?'发送中':'已发送'}</span>}
                       <button type="button" onClick={()=>setReactionPickerMsgId(cur => cur === msg.id ? null : msg.id)} className="hover:underline inline-flex items-center gap-0.5" title="表情回应">😊回应</button>
                       <button type="button" onClick={()=>setReplyTo(msg)} className="hover:underline inline-flex items-center gap-0.5"><Reply className="w-3 h-3"/>回复</button>
-                      {!!(msg.translatedContent || msg.content) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const txt = (msg.translatedContent && !showOrig) ? msg.translatedContent : (msg.content || '');
-                            try { void navigator.clipboard?.writeText(txt); } catch {}
-                            setCopiedMsgId(msg.id);
-                            setTimeout(() => setCopiedMsgId(cur => cur === msg.id ? null : cur), 1500);
-                          }}
-                          className="hover:underline inline-flex items-center gap-0.5"
-                        >
-                          {copiedMsgId === msg.id ? <Check className="w-3 h-3"/> : <Copy className="w-3 h-3"/>}
-                          {copiedMsgId === msg.id ? '已复制' : '复制'}
-                        </button>
-                      )}
                       {isMe && !msg.recalled && <button type="button" onClick={()=>void recallMessage(msg)} className="hover:underline inline-flex items-center gap-0.5"><Undo2 className="w-3 h-3"/>撤回</button>}
                       <button type="button" onClick={()=>void deleteForMe(msg)} className="hover:underline inline-flex items-center gap-0.5"><Trash2 className="w-3 h-3"/>删除</button>
                       {reactionPickerMsgId === msg.id && (
@@ -3165,17 +3072,6 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
           )}
           <div ref={messagesEndRef} />
         </div>
-        {unreadBelowCount > 0 && (
-          <button
-            type="button"
-            onClick={scrollToLatestMessages}
-            className="absolute bottom-3 right-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-sky-600 hover:bg-sky-500 text-white px-3 py-1.5 text-xs font-semibold shadow-lg transition"
-          >
-            <ChevronDown className="w-3.5 h-3.5" />
-            <span>{unreadBelowCount} 条新消息</span>
-          </button>
-        )}
-        </div>
 
         <form onSubmit={handleSendMessage} className="p-2.5 sm:p-3 bg-white dark:bg-black/20 border-t border-slate-200 dark:border-white/10 space-y-2 shrink-0">
           {replyTo && <div className="text-[11px] text-slate-700 dark:text-slate-300 flex items-center justify-between bg-slate-100 dark:bg-[rgba(15,20,28,0.72)] border border-slate-200 dark:border-white/10 rounded-lg px-3 py-1.5"><span className="truncate">回复：{replyTo.content || '[附件]'}</span><button type="button" onClick={()=>setReplyTo(null)}><X className="w-3.5 h-3.5"/></button></div>}
@@ -3186,17 +3082,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 {pendingUploads.map(p => (
                   <div key={p.id} className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-2 space-y-1.5">
                     <div className="flex items-start gap-2">
-                      {p.kind === 'image' && p.previewUrl ? <img src={p.previewUrl} alt={p.name} className="w-14 h-14 object-cover rounded-md border border-slate-200 dark:border-white/10"/> : p.kind === 'audio' ? <div className="w-10 h-10 rounded-md bg-sky-50 dark:bg-sky-500/15 flex items-center justify-center"><Mic className="w-4 h-4 text-sky-600 dark:text-sky-300"/></div> : <div className="w-10 h-10 rounded-md bg-slate-100 dark:bg-white/[0.06] flex items-center justify-center"><FileText className="w-4 h-4 text-slate-500 dark:text-slate-300"/></div>}
+                      {p.kind === 'image' && p.previewUrl ? <img src={p.previewUrl} alt={p.name} className="w-14 h-14 object-cover rounded-md border border-slate-200 dark:border-white/10"/> : <div className="w-10 h-10 rounded-md bg-slate-100 dark:bg-white/[0.06] flex items-center justify-center"><FileText className="w-4 h-4 text-slate-500 dark:text-slate-300"/></div>}
                       <div className="min-w-0 flex-1"><p className="text-xs text-slate-800 dark:text-slate-200 truncate">{p.name}</p><p className="text-[10px] text-slate-500">{formatBytes(p.size)} · {p.mimeType || 'file'}</p></div>
                       <button type="button" onClick={()=>removePending(p.id)} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-white/[0.06] text-slate-400"><X className="w-3.5 h-3.5"/></button>
                     </div>
-                    {p.kind === 'audio' && p.previewUrl && (
-                      <audio controls preload="metadata" src={p.previewUrl} className="w-full h-8" />
-                    )}
                     <div className="h-1.5 rounded-full bg-slate-200 dark:bg-white/[0.06] overflow-hidden"><div className={`h-full ${p.status==='error'?'bg-rose-500':'bg-sky-500'}`} style={{ width: `${p.progress}%` }} /></div>
                     <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                       <span>{p.status==='error' ? `失败：${p.error || '失败'}` : p.status==='uploading' ? `上传中 ${p.progress}%` : p.status==='sending' ? '发送中…' : p.status==='done' ? '已发送' : (p.uploadedAttachment ? '待发送' : '待上传')}</span>
-                      {p.status==='error' && <button type="button" onClick={()=>retryPending(p.id)} className="text-sky-600 dark:text-sky-300 underline font-medium">{p.uploadedAttachment ? '重新发送' : '重新上传'}</button>}
+                      {p.status==='error' && <button type="button" onClick={()=>retryPending(p.id)} className="text-sky-600 dark:text-sky-300 underline">重新上传</button>}
                     </div>
                   </div>
                 ))}
@@ -3204,24 +3097,24 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             </div>
           )}
           {isRecordingVoice ? (
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/10 px-3 py-2">
-              <div className="flex items-center gap-2.5 text-xs text-rose-700 dark:text-rose-200 min-w-0 flex-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
-                <span className="font-semibold tabular-nums shrink-0">{formatDuration(voiceSeconds)} / 02:00</span>
-                <div className="flex items-center gap-[2px] h-5 flex-1 max-w-[140px]">
-                  {voiceLevels.map((lvl, idx) => (
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/10 px-3 py-2">
+              <div className="flex items-center gap-2 text-xs text-rose-700 dark:text-rose-200 min-w-0">
+                <Mic className="w-4 h-4 text-rose-600 dark:text-rose-400 animate-pulse shrink-0" />
+                <span className="font-semibold tabular-nums shrink-0">{formatDuration(voiceSeconds)}</span>
+                <div className="flex items-center gap-0.5 h-4 shrink-0" aria-hidden="true">
+                  {[0.25, 0.55, 0.85, 0.6, 0.35].map((scale, idx) => (
                     <span
                       key={idx}
-                      className="flex-1 rounded-full bg-rose-500/75 dark:bg-rose-400/80 transition-all duration-75"
-                      style={{ height: `${Math.max(18, lvl)}%` }}
+                      className="w-1 rounded-full bg-rose-500/80 transition-all duration-75"
+                      style={{ height: `${Math.max(4, Math.min(16, Math.round(4 + voiceLevel * 14 * scale)))}px` }}
                     />
                   ))}
                 </div>
-                <span className="hidden sm:inline truncate opacity-80">正在录制语音…</span>
+                <span className="truncate">{voiceSending ? '降噪增强发送中…' : '高清录制中…'}</span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button type="button" onClick={stopVoiceRecordingCleanup} className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/15 bg-white dark:bg-white/10 text-xs text-slate-700 dark:text-slate-200">取消</button>
-                <button type="button" onClick={() => void sendVoiceRecording()} disabled={voiceSending} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-40">{voiceSending ? '发送中…' : '发送语音'}</button>
+                <button type="button" onClick={() => void sendVoiceRecording()} disabled={voiceSending} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-40">{voiceSending ? '处理中…' : '发送语音'}</button>
               </div>
             </div>
           ) : (
@@ -3305,7 +3198,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                       <span className="text-[10px] text-slate-500">JPG/PNG/WebP · ≤2MB</span>
                     </div>
                     <label className="block space-y-1"><span className="text-[11px] text-slate-500 dark:text-slate-400">{L('昵称','Display name','الاسم المعروض')}</span><input value={profileDraft.displayName} onChange={e=>{ setProfileDraft(p=>({...p, displayName:e.target.value})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[rgba(15,20,28,0.72)] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-slate-100" maxLength={40} /></label>
-                    <label className="block space-y-1"><span className="text-[11px] text-slate-500 dark:text-slate-400">{L('用户名 (唯一)','Username (unique)','اسم المستخدم (فريد)')}</span><input value={profileDraft.username} onChange={e=>{ setProfileDraft(p=>({...p, username:e.target.value.toLowerCase()})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[rgba(15,20,28,0.72)] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-slate-100" maxLength={30} placeholder="a-z 0-9 _ (3-30)" /><span className="text-[10px] text-slate-500">{L('3-30 位，小写字母/数字/下划线，修改后需全局唯一','3-30 chars: lowercase letters, numbers, underscore. Must be unique.','3-30 حرفًا: أحرف صغيرة/أرقام/شرطة سفلية، يجب أن يكون فريدًا.')}</span></label>
+                    <label className="block space-y-1"><span className="text-[11px] text-slate-500 dark:text-slate-400">{L('用户名 (唯一)','Username (unique)','اسم المستخدم (فريد)')}</span><input value={profileDraft.username} onChange={e=>{ setProfileDraft(p=>({...p, username:e.target.value.replace(/[\r\n\t\u0000-\u001F\u007F]/g, '')})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[rgba(15,20,28,0.72)] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-slate-100" maxLength={40} placeholder={L('输入用户名','Username','اسم المستخدم')} /><span className="text-[10px] text-slate-500">{L('1-40 个字符，全局唯一','1-40 characters, unique','1-40 حرفًا، فريد')}</span></label>
                     <label className="block space-y-1"><span className="text-[11px] text-slate-500 dark:text-slate-400">{L('个人简介','Bio','نبذة شخصية')}</span><textarea value={profileDraft.bio} onChange={e=>{ setProfileDraft(p=>({...p, bio:e.target.value})); setProfileSaveState('idle'); }} className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[rgba(15,20,28,0.72)] border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-slate-100 min-h-[72px]" maxLength={300} /></label>
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-[11px] min-h-[16px]">
@@ -3544,12 +3437,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 <div className="flex items-center gap-2">
                   {activeCall.kind === 'video' ? <Video className="w-4 h-4 text-cyan-300 shrink-0"/> : <Phone className="w-4 h-4 text-emerald-400 shrink-0"/>}
                   <span className="text-sm font-bold text-white truncate">{displayTitle}</span>
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full tabular-nums shrink-0 ${stats?.usingRelay ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/30' : 'bg-white/10 text-cyan-200'}`}>{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/10 text-cyan-200 tabular-nums shrink-0">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</span>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-                  {activeCall.kind === 'video' ? '视频通话' : '语音通话'} · {mediaPhaseLabel}
-                  {stats?.usingRelay ? ' · 加密中继防断线保护中' : stats?.p2pFlowing ? ' · P2P 高清直连' : ''}
-                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{activeCall.kind === 'video' ? '视频通话' : '语音通话'} · {mediaPhaseLabel}{stats?.usingRelay ? '（语音中继）' : ''}</p>
               </div>
               <button type="button" onClick={()=>setCallMinimized(true)} className="min-h-[40px] min-w-[40px] rounded-xl border border-white/15 bg-white/5 text-slate-200 inline-flex items-center justify-center" title="最小化"><Minimize2 className="w-4 h-4"/></button>
             </div>
@@ -3598,14 +3488,14 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <div className="space-y-1">
                     <h3 className="text-xl font-bold text-white">{displayTitle}</h3>
                     <p className="text-sm text-cyan-200 tabular-nums">{callElapsedSec > 0 ? formatDuration(callElapsedSec) : callStatusLabel(activeCall.status)}</p>
-                    <p className="text-xs text-slate-400">{mediaPhaseLabel}{stats?.usingRelay ? '（加密中继保底）' : stats?.p2pFlowing ? '（P2P直连）' : ''}</p>
+                    <p className="text-xs text-slate-400">{mediaPhaseLabel}{stats?.usingRelay ? '（加密中继）' : ''}</p>
                   </div>
                   {stats && (
                     <div className="px-3 py-1.5 rounded-full bg-white/[0.06] border border-white/10 text-[11px] text-slate-300 flex flex-wrap items-center justify-center gap-2 tabular-nums">
                       <span className={`w-2 h-2 rounded-full ${stats.hasLocalAudio ? (stats.localLevel > 4 ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400') : 'bg-rose-400'}`} />
                       <span>{stats.hasLocalAudio ? (callDevices.micEnabled ? `麦克风音量 ${stats.localLevel}%` : '已静音') : '未获取到麦克风'}</span>
                       <span className="text-white/25">|</span>
-                      <span>{stats.usingRelay ? `防断线中继 · ${stats.remoteAudioFrames}` : `ICE: ${stats.iceCandidateType || stats.iceState}${stats.transportProtocol ? `/${stats.transportProtocol.toUpperCase()}` : ''}`}</span>
+                      <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceCandidateType || stats.iceState}${stats.transportProtocol ? `/${stats.transportProtocol.toUpperCase()}` : ''}`}</span>
                       {typeof stats.rttMs === 'number' && <><span className="text-white/25">|</span><span>{stats.rttMs} ms</span></>}
                     </div>
                   )}
@@ -3620,7 +3510,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <span className={`w-2 h-2 rounded-full ${stats.hasLocalAudio ? (stats.localLevel > 4 ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400') : 'bg-rose-400'}`} />
                   <span>{stats.hasLocalAudio ? (callDevices.micEnabled ? `麦克风音量 ${stats.localLevel}%` : '已静音') : '未获取到麦克风'}</span>
                   <span className="text-white/25">|</span>
-                  <span>{stats.usingRelay ? `防断线中继 · ${stats.remoteAudioFrames}` : `ICE: ${stats.iceCandidateType || stats.iceState}${stats.transportProtocol ? `/${stats.transportProtocol.toUpperCase()}` : ''}`}</span>
+                  <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceCandidateType || stats.iceState}${stats.transportProtocol ? `/${stats.transportProtocol.toUpperCase()}` : ''}`}</span>
                   {stats.videoWidth && stats.videoHeight && <><span className="text-white/25">|</span><span>{stats.videoWidth}×{stats.videoHeight}{typeof stats.videoBitrateKbps === 'number' ? ` · ${stats.videoBitrateKbps}kbps` : ''}</span></>}
                   {typeof stats.rttMs === 'number' && <><span className="text-white/25">|</span><span>{stats.rttMs} ms</span></>}
                 </div>
@@ -3630,10 +3520,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0" />
                   <span>
                     {mediaPhase === 'reconnecting'
-                      ? '网络波动或切换中，正在自动无缝重连并开启语音中继保底…'
-                      : stats?.usingRelay
-                        ? '已自动启用加密语音中继保护，当前网络较弱但通话持续保持不断线'
-                        : `当前网络较弱${typeof stats?.rttMs === 'number' ? ` (延迟 ${stats.rttMs}ms${stats.packetLossPct ? ` · 丢包 ${stats.packetLossPct}%` : ''})` : ''}，通话质量可能下降`}
+                      ? '网络波动或切换中，正在自动重连音视频通道…'
+                      : `当前网络较弱${typeof stats?.rttMs === 'number' ? ` (延迟 ${stats.rttMs}ms${stats.packetLossPct ? ` · 丢包 ${stats.packetLossPct}%` : ''})` : ''}，通话质量可能下降`}
                   </span>
                 </div>
               )}
@@ -3674,12 +3562,6 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                       <RefreshCw className="w-5 h-5"/>
                       <span>重连</span>
                     </button>
-                    {mediaSessionRef.current?.setManualRelay && (
-                      <button type="button" onClick={toggleManualRelayProtection} className={`min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex flex-col items-center justify-center gap-1 text-[11px] font-medium ${(manualRelayOn || stats?.usingRelay) ? 'border-emerald-400/50 bg-emerald-500/20 text-emerald-200' : 'border-white/15 bg-white/10 text-slate-200'}`}>
-                        <ShieldCheck className="w-5 h-5"/>
-                        <span>{(manualRelayOn || stats?.usingRelay) ? '防断线中' : '防断线中继'}</span>
-                      </button>
-                    )}
                     {callCapabilities?.turnConfigured && mediaSessionRef.current?.setIceTransportPolicy && (
                       <button type="button" onClick={()=>void toggleForceTurnRelay()} className={`min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border flex flex-col items-center justify-center gap-1 text-[11px] font-medium ${stats?.iceTransportPolicy === 'relay' ? 'border-amber-400/50 bg-amber-500/20 text-amber-200' : 'border-white/15 bg-white/10 text-slate-200'}`}>
                         <ShieldCheck className="w-5 h-5"/>

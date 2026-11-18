@@ -26,7 +26,7 @@ export const callApi = {
   end: (id: string, reason?: string) => apiCall(`/api/calls/${id}/end`, { method: 'POST', body: JSON.stringify({ reason }) }),
   leave: (id: string) => apiCall(`/api/calls/${id}/leave`, { method: 'POST', body: '{}' }),
   token: (id: string) => apiCall(`/api/calls/${id}/token`, { method: 'POST', body: JSON.stringify({ transport: 'webrtc' }) }),
-  signal: (id: string, payload: { toUserId?: string; signal: any; signalId?: string }) =>
+  signal: (id: string, payload: { toUserId?: string; signal: any }) =>
     apiCall(`/api/calls/${id}/signal`, { method: 'POST', body: JSON.stringify(payload) }),
   signals: (id: string, afterSeq = 0) => apiCall(`/api/calls/${id}/signals?afterSeq=${afterSeq}`),
   state: (id: string, payload: any) => apiCall(`/api/calls/${id}/state`, { method: 'POST', body: JSON.stringify(payload) }),

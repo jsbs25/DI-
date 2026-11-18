@@ -1,11 +1,9 @@
 import type express from 'express';
 import type { MediaRegionMode, ResolvedRegion } from '../../src/types/media.ts';
-import { searchBilibiliVideos } from '../bilibiliCrawler.ts';
-import { musicStore } from '../musicStore.ts';
-import { resolveMusicEmbedUrl, searchYouTubeMusic } from '../youtubeMusicSearch.ts';
+import { buildBilibiliEmbedUrl, getBilibiliTrendingMusic, searchBilibiliVideos } from '../bilibiliCrawler.ts';
+import { getYouTubeDiscoveryMusic, resolveMusicEmbedUrl, searchYouTubeMusic } from '../youtubeMusicSearch.ts';
 import { searchYouTubeVideos } from '../youtubeSearch.ts';
-import { CURATED_GLOBAL_CN_MUSIC, enrichMusicTrack, enrichVideoItem } from './catalog.ts';
-import { searchJamendoAudio, searchWikimediaAudio } from './providers.ts';
+import { enrichMusicTrack, enrichVideoItem } from './catalog.ts';
 
 interface SearchCacheEntry {
   expiresAt: number;
@@ -13,7 +11,7 @@ interface SearchCacheEntry {
 }
 
 const searchCache = new Map<string, SearchCacheEntry>();
-const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export function resolveRegionFromRequest(req: express.Request): {
   mode: MediaRegionMode;
@@ -42,23 +40,23 @@ export function resolveRegionFromRequest(req: express.Request): {
 }
 
 function bilibiliToUnifiedMusicTrack(b: any, region: ResolvedRegion) {
-  const embedUrl = `https://player.bilibili.com/player.html?bvid=${b.bvid}&page=1&autoplay=0&danmaku=0`;
+  const embedUrl = buildBilibiliEmbedUrl(b.bvid, true);
   return enrichMusicTrack(
     {
       id: b.id || `bili_${b.bvid}`,
       title: b.title,
       artist: b.author || 'Bilibili 音乐人',
-      album: 'Bilibili 官方播放器',
-      genre: 'Bilibili',
-      durationSeconds: b.durationSeconds || 0,
+      album: 'Bilibili 音乐',
+      genre: b.category || 'Bilibili',
+      durationSeconds: b.durationSeconds || 210,
       durationFormatted: b.duration,
       embedUrl,
       coverUrl: b.pic || '/assets/music/electronic-pulse.jpg',
-      source: 'Bilibili 官方播放器',
+      source: 'Bilibili',
       sourceUrl: b.sourceUrl || `https://www.bilibili.com/video/${b.bvid}`,
       license: 'Bilibili official embed',
       crawledAt: new Date().toISOString(),
-      description: b.description || 'Bilibili 官方合规嵌入播放器，支持中国大陆与海外播放',
+      description: b.description || 'Bilibili 音乐流',
       playable: 'embed',
       views: b.play,
       bvid: b.bvid,
@@ -68,7 +66,7 @@ function bilibiliToUnifiedMusicTrack(b: any, region: ResolvedRegion) {
 }
 
 function bilibiliToUnifiedVideo(b: any, region: ResolvedRegion) {
-  const embedUrl = `https://player.bilibili.com/player.html?bvid=${b.bvid}&page=1&autoplay=0&danmaku=0`;
+  const embedUrl = buildBilibiliEmbedUrl(b.bvid, false);
   return enrichVideoItem(
     {
       id: b.id || `bili_${b.bvid}`,
@@ -116,7 +114,7 @@ function youtubeSearchResultToVideo(yt: any, region: ResolvedRegion) {
       title: yt.title,
       description: yt.snippet || 'YouTube 官方嵌入视频',
       videoUrl: '',
-      embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&rel=0`,
+      embedUrl: `https://www.youtube.com/embed/${videoId}?enablejsapi=1&rel=0`,
       sourceUrl: `https://www.youtube.com/watch?v=${videoId}`,
       source: 'YouTube',
       videoId,
@@ -133,6 +131,16 @@ function youtubeSearchResultToVideo(yt: any, region: ResolvedRegion) {
   );
 }
 
+function interleaveLists<T>(a: T[], b: T[]): T[] {
+  const out: T[] = [];
+  const max = Math.max(a.length, b.length);
+  for (let i = 0; i < max; i++) {
+    if (i < a.length) out.push(a[i]);
+    if (i < b.length) out.push(b[i]);
+  }
+  return out;
+}
+
 export async function dispatchUnifiedMusicSearch(options: {
   query: string;
   genre?: string;
@@ -144,99 +152,74 @@ export async function dispatchUnifiedMusicSearch(options: {
   mode?: string;
 }> {
   const q = options.query.trim();
-  const limit = Math.max(4, Math.min(30, options.limit || 18));
+  const genre = (options.genre || 'all').trim().toLowerCase();
+  const limit = Math.max(6, Math.min(30, options.limit || 20));
 
-  if (!q) {
-    const base = [...musicStore.getTracks(options.genre), ...CURATED_GLOBAL_CN_MUSIC];
-    const enriched = base.map((t) => enrichMusicTrack(t, options.region));
-    return { tracks: enriched, providersQueried: [{ providerId: 'one-native', count: enriched.length, ok: true }] };
+  // Direct link / BV / YouTube paste resolution
+  if (q) {
+    const direct = resolveMusicEmbedUrl(q);
+    if (direct) {
+      const enriched = enrichMusicTrack(direct, options.region);
+      return {
+        tracks: [enriched],
+        providersQueried: [{ providerId: enriched.providerId, count: 1, ok: true }],
+        mode: 'embed-url',
+      };
+    }
   }
 
-  // Direct link / BV / NetEase / SoundCloud / YouTube paste resolution
-  const direct = resolveMusicEmbedUrl(q);
-  if (direct) {
-    const enriched = enrichMusicTrack(direct, options.region);
-    return {
-      tracks: [enriched],
-      providersQueried: [{ providerId: enriched.providerId, count: 1, ok: true }],
-      mode: 'embed-url',
-    };
-  }
-
-  const cacheKey = `music:${options.region}:${options.genre || 'all'}:${q.toLowerCase()}:${limit}`;
+  const cacheKey = `ytbili_music:${options.region}:${genre}:${q.toLowerCase()}:${limit}`;
   const cached = searchCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.payload;
   }
 
-  const localRaw = [
-    ...musicStore.searchTracks(q, options.genre),
-    ...CURATED_GLOBAL_CN_MUSIC.filter(
-      (t) =>
-        t.title.toLowerCase().includes(q.toLowerCase()) ||
-        t.artist.toLowerCase().includes(q.toLowerCase())
-    ),
-  ];
-  const localEnriched = localRaw.map((t) => enrichMusicTrack(t, options.region));
-
-  const providersQueried: Array<{ providerId: string; count: number; ok: boolean; reason?: string }> = [
-    { providerId: 'one-native', count: localEnriched.length, ok: true },
-  ];
-
-  // Fault-tolerant parallel dispatch across legal providers appropriate for region
-  const biliTask = searchBilibiliVideos(`${q} 音乐`, options.region === 'cn' ? 10 : 5)
-    .then((rows) => ({ ok: true, rows: rows.map((r) => bilibiliToUnifiedMusicTrack(r, options.region)) }))
-    .catch((e: any) => ({ ok: false, rows: [], reason: e?.message || 'failed' }));
-
-  const wmTask = searchWikimediaAudio(q, 5)
-    .then((rows) => ({ ok: true, rows: rows.map((r) => enrichMusicTrack(r, options.region)) }))
-    .catch((e: any) => ({ ok: false, rows: [], reason: e?.message || 'failed' }));
-
-  const jamendoTask = (process.env.JAMENDO_CLIENT_ID || '').trim()
-    ? searchJamendoAudio(q, 5)
-        .then((rows) => ({ ok: true, rows: rows.map((r) => enrichMusicTrack(r, options.region)) }))
-        .catch((e: any) => ({ ok: false, rows: [], reason: e?.message || 'failed' }))
-    : Promise.resolve({ ok: false, rows: [], reason: 'JAMENDO_CLIENT_ID not configured' });
-
-  const ytIaTask = searchYouTubeMusic(q, options.region === 'cn' ? 6 : 12)
-    .then((rows) => ({ ok: true, rows: rows.map((r) => enrichMusicTrack(r, options.region)) }))
-    .catch((e: any) => ({ ok: false, rows: [], reason: e?.message || 'failed' }));
-
-  const [biliRes, wmRes, jamRes, ytIaRes] = await Promise.all([biliTask, wmTask, jamendoTask, ytIaTask]);
-
-  providersQueried.push(
-    { providerId: 'bilibili', count: biliRes.rows.length, ok: biliRes.ok, reason: (biliRes as any).reason },
-    { providerId: 'wikimedia', count: wmRes.rows.length, ok: wmRes.ok, reason: (wmRes as any).reason },
-    { providerId: 'jamendo', count: jamRes.rows.length, ok: jamRes.ok, reason: (jamRes as any).reason },
-    { providerId: 'youtube-and-archive', count: ytIaRes.rows.length, ok: ytIaRes.ok, reason: (ytIaRes as any).reason }
-  );
-
-  // Order merged tracks cleanly: directly playable audio first, then verified official embeds
-  const rawMerged =
-    options.region === 'cn'
-      ? [...localEnriched, ...jamRes.rows, ...wmRes.rows, ...ytIaRes.rows, ...biliRes.rows]
-      : [...localEnriched, ...ytIaRes.rows, ...wmRes.rows, ...jamRes.rows, ...biliRes.rows];
-
-  const isPlayableTrack = (item: any): boolean => {
-    if (!item) return false;
-    if (item.availabilityStatus === 'unavailable' || item.playbackType === 'external_redirect') return false;
-    const hasAudio = typeof item.audioUrl === 'string' && item.audioUrl.trim().length > 0;
-    const hasEmbed = typeof item.embedUrl === 'string' && item.embedUrl.trim().length > 0 && item.playable !== 'none';
-    return hasAudio || hasEmbed;
+  const biliQueryMap: Record<string, string> = {
+    all: '热门音乐 MV 无损音质',
+    mandopop: '华语流行 音乐 MV',
+    pop: '欧美流行 音乐 MV',
+    jkpop: '日语 韩语 热门音乐 MV',
+    piano: '钢琴 纯音乐 轻音乐',
+    bilibili: '音乐 现场 Live',
   };
 
-  // Sort direct audio tracks before embed-only items so background playback works across tabs
-  const sortedMerged = [...rawMerged]
-    .filter(isPlayableTrack)
-    .sort((a, b) => {
-      const aAudio = a.audioUrl ? 0 : 1;
-      const bAudio = b.audioUrl ? 0 : 1;
-      return aAudio - bAudio;
-    });
+  const wantYouTube = genre !== 'bilibili';
+  const wantBilibili = genre !== 'youtube';
+
+  const biliPromise = wantBilibili
+    ? (q
+        ? searchBilibiliVideos(`${q} 音乐`, Math.ceil(limit / 2))
+        : genre === 'all' || genre === 'bilibili'
+          ? getBilibiliTrendingMusic(Math.ceil(limit / 2))
+          : searchBilibiliVideos(biliQueryMap[genre] || biliQueryMap.all, Math.ceil(limit / 2))
+      )
+        .then((rows) => ({ ok: true, rows: rows.map((r) => bilibiliToUnifiedMusicTrack(r, options.region)) }))
+        .catch((e: any) => ({ ok: false, rows: [], reason: e?.message || 'failed' }))
+    : Promise.resolve({ ok: true, rows: [] as any[], reason: 'filtered' });
+
+  const ytPromise = wantYouTube
+    ? (q ? searchYouTubeMusic(q, Math.ceil(limit / 2)) : getYouTubeDiscoveryMusic(genre, Math.ceil(limit / 2)))
+        .then((rows) => ({ ok: true, rows: rows.map((r) => enrichMusicTrack(r, options.region)) }))
+        .catch((e: any) => ({ ok: false, rows: [], reason: e?.message || 'failed' }))
+    : Promise.resolve({ ok: true, rows: [] as any[], reason: 'filtered' });
+
+  const [biliRes, ytRes] = await Promise.all([biliPromise, ytPromise]);
+
+  const providersQueried = [
+    { providerId: 'youtube', count: ytRes.rows.length, ok: ytRes.ok, reason: (ytRes as any).reason },
+    { providerId: 'bilibili', count: biliRes.rows.length, ok: biliRes.ok, reason: (biliRes as any).reason },
+  ];
+
+  // Put CN region Bilibili first / Overseas region YouTube first, cleanly interleaved
+  const interleaved =
+    options.region === 'cn'
+      ? interleaveLists(biliRes.rows, ytRes.rows)
+      : interleaveLists(ytRes.rows, biliRes.rows);
 
   const seen = new Set<string>();
   const deduped: any[] = [];
-  for (const item of sortedMerged) {
+  for (const item of interleaved) {
+    if (!item || !item.embedUrl) continue;
     const key = String(item.sourceUrl || item.id || '');
     if (!key || seen.has(key)) continue;
     seen.add(key);
@@ -244,8 +227,10 @@ export async function dispatchUnifiedMusicSearch(options: {
     if (deduped.length >= limit) break;
   }
 
-  const payload = { tracks: deduped, providersQueried };
-  searchCache.set(cacheKey, { expiresAt: Date.now() + SEARCH_CACHE_TTL_MS, payload });
+  const payload = { tracks: deduped, providersQueried, mode: 'youtube-bilibili' };
+  if (deduped.length > 0) {
+    searchCache.set(cacheKey, { expiresAt: Date.now() + SEARCH_CACHE_TTL_MS, payload });
+  }
   return payload;
 }
 

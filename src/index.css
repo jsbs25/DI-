@@ -305,3 +305,28 @@ section[aria-label="JUPITER 全球互联网搜索与浏览器"] [role="tab"]:foc
     max-width: min(82vw, 320px);
   }
 }
+
+@keyframes one-aurora-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.one-wrist-aurora {
+  background: conic-gradient(
+    from 0deg,
+    #38bdf8,
+    #818cf8,
+    #e879f9,
+    #fb7185,
+    #fbbf24,
+    #34d399,
+    #38bdf8
+  );
+  animation: one-aurora-spin 4.2s linear infinite;
+  will-change: transform;
+}
+

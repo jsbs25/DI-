@@ -1038,8 +1038,7 @@ const ALLOWED_ATTACHMENT_TYPES = new Map<string, { kind: 'image' | 'file' | 'aud
   ['image/webp', { kind: 'image', exts: ['.webp'] }],
   ['audio/webm', { kind: 'audio', exts: ['.webm'] }],
   ['audio/ogg', { kind: 'audio', exts: ['.ogg', '.oga'] }],
-  ['audio/mp4', { kind: 'audio', exts: ['.m4a', '.mp4', '.aac'] }],
-  ['audio/aac', { kind: 'audio', exts: ['.aac', '.m4a'] }],
+  ['audio/mp4', { kind: 'audio', exts: ['.m4a', '.mp4'] }],
   ['audio/mpeg', { kind: 'audio', exts: ['.mp3'] }],
   ['audio/wav', { kind: 'audio', exts: ['.wav'] }],
   ['application/pdf', { kind: 'file', exts: ['.pdf'] }],
@@ -1083,9 +1082,6 @@ function resolveAllowedAttachment(name: string, claimedMime: string, buf: Buffer
   let mime = String(claimedMime || '').toLowerCase().split(';')[0].trim();
   if (mime === 'image/jpg') mime = 'image/jpeg';
   if (mime === 'video/webm' && ext === '.webm') mime = 'audio/webm';
-  if (mime === 'audio/x-m4a' || mime === 'audio/m4a' || mime === 'audio/mp4a-latm') mime = 'audio/mp4';
-  if (mime === 'audio/x-wav' || mime === 'audio/wave') mime = 'audio/wav';
-  if (mime === 'audio/x-aac') mime = 'audio/aac';
   const sniff = sniffMime(buf);
   if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && sniff === 'application/zip') {
     // docx is a zip container; allow only with correct extension
@@ -1261,34 +1257,38 @@ app.get('/api/messenger/files/:id', (req, res) => {
     const ownerDir = path.resolve(UPLOAD_DIR, owner);
     if (!resolved.startsWith(ownerDir + path.sep)) return res.status(403).json({ success: false, error: 'Forbidden' });
     if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: 'File not found' });
-    const stat = fs.statSync(resolved);
-    const total = stat.size;
     const wantDownload = req.query.download === '1' || req.query.download === 'true';
     const mime = typeof meta.mimeType === 'string' ? meta.mimeType : 'application/octet-stream';
     const inline = !wantDownload && (meta.type === 'image' || meta.type === 'audio' || mime.startsWith('audio/') || mime === 'application/pdf' || mime === 'text/plain');
-    res.setHeader('Content-Type', mime);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'private, max-age=300');
+    const stat = fs.statSync(resolved);
+    const totalSize = stat.size;
     const fname = encodeURIComponent(String(meta.name || 'file'));
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=0, no-store');
     res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${fname}`);
+
     const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
-    if (rangeHeader && total > 0) {
+    if (rangeHeader && totalSize > 0) {
       const m = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
       if (m) {
-        const start = m[1] ? parseInt(m[1], 10) : 0;
-        const end = m[2] ? Math.min(total - 1, parseInt(m[2], 10)) : total - 1;
-        if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && start <= end && start < total) {
+        const start = m[1] ? Math.min(totalSize - 1, Math.max(0, Number.parseInt(m[1], 10))) : Math.max(0, totalSize - Number.parseInt(m[2] || '0', 10));
+        const end = m[2] ? Math.min(totalSize - 1, Math.max(start, Number.parseInt(m[2], 10))) : totalSize - 1;
+        if (Number.isFinite(start) && Number.isFinite(end) && start <= end) {
           res.status(206);
-          res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+          res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
           res.setHeader('Content-Length', String(end - start + 1));
           return fs.createReadStream(resolved, { start, end }).pipe(res);
         }
-        res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
-        return;
       }
+      res.status(416);
+      res.setHeader('Content-Range', `bytes */${totalSize}`);
+      return res.end();
     }
-    res.setHeader('Content-Length', String(total));
+
+    res.setHeader('Content-Length', String(totalSize));
     return fs.createReadStream(resolved).pipe(res);
   } catch {}
   return res.status(404).json({ success: false, error: 'File not found' });
@@ -2182,15 +2182,12 @@ app.post('/api/calls/:id/signal', (req, res) => {
   if (!isActiveCallStatus(call.status)) return res.status(400).json({ success: false, error: 'Call not active' });
   const toUserId = typeof req.body?.toUserId === 'string' && req.body.toUserId ? req.body.toUserId : undefined;
   const signal = req.body?.signal;
-  const signalId = typeof req.body?.signalId === 'string' && req.body.signalId ? req.body.signalId : undefined;
   if (!signal || typeof signal !== 'object') return res.status(400).json({ success: false, error: 'signal object required' });
   if (toUserId && !(call.participantIds || []).includes(toUserId)) return res.status(403).json({ success: false, error: 'Forbidden' });
-  const { entry, deduplicated } = pushCallSignal(call.id, user.id, toUserId, signal, signalId);
-  if (!deduplicated) {
-    const recipients = toUserId ? [toUserId] : (call.participantIds || []).filter((id: string) => id !== user.id);
-    for (const rid of recipients) {
-      try { wsBroadcastToUser(rid, { type: 'call_signal', ...entry }); } catch {}
-    }
+  const entry = pushCallSignal(call.id, user.id, toUserId, signal);
+  const recipients = toUserId ? [toUserId] : (call.participantIds || []).filter((id: string) => id !== user.id);
+  for (const rid of recipients) {
+    try { wsBroadcastToUser(rid, { type: 'call_signal', ...entry }); } catch {}
   }
   res.json({ success: true, entry });
 });
@@ -2784,12 +2781,7 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
       msg = store.sendMessage(id, text, authUser, translatedContent, translatedTo, { attachments: atts, replyToId: typeof replyToId === 'string' ? replyToId : undefined, clientMsgId: cmid });
       senderMarkedNotifs = store.markConversationNotificationsRead(authUser.id, id);
       const convNow = store.conversations.find(c => c.id === id);
-      const attFirst = atts?.[0] as any;
-      const attMime = String(attFirst?.mimeType || '').toLowerCase();
-      const attLabel = attFirst
-        ? ((attFirst.type === 'audio' || attMime.startsWith('audio/')) ? '[语音消息]' : (attFirst.type === 'image' || attMime.startsWith('image/')) ? '[图片]' : `[文件] ${attFirst.name || ''}`.trim())
-        : '';
-      const preview = (text || attLabel).slice(0, 80);
+      const preview = (text || (atts?.length ? '[attachment]' : '')).slice(0, 80);
       for (const uid of (convNow?.participantIds || [])) {
         if (uid === authUser.id) continue;
         if (store.isBlockedEither(uid, authUser.id)) continue;

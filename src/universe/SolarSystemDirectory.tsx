@@ -8,22 +8,18 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { Orbit, Compass, ArrowRight, Eye } from 'lucide-react';
 import { CELESTIAL_BODIES, getCelestialBodyById } from './celestialBodies';
 import { getPlanetEcosystem } from './planetEcosystems';
 import {
+  createEarthDayTexture,
+  createEarthCloudTexture,
   createSaturnRingTexture,
   createJupiterTexture,
   createMarsTexture,
   createSunTexture,
   createCelestialTexture
 } from './proceduralPlanets';
-import {
-  buildPhotorealEarthRig,
-  buildPhotorealMoonRig,
-  type PhotorealEarthRig
-} from './celestialMeshBuilders';
 
 interface SolarSystemDirectoryProps {
   onSelectPlanet: (planetId: string) => void;
@@ -38,7 +34,7 @@ export const SolarSystemDirectory: React.FC<SolarSystemDirectoryProps> = ({ onSe
 
   const isDraggingRef = useRef(false);
   const prevMouseRef = useRef({ x: 0, y: 0 });
-  const activePlanetRootRef = useRef<THREE.Object3D | null>(null);
+  const activePlanetMeshRef = useRef<THREE.Mesh | null>(null);
   const activeCloudMeshRef = useRef<THREE.Mesh | null>(null);
 
   // Initialize and update 3D Planet Showcase
@@ -62,34 +58,22 @@ export const SolarSystemDirectory: React.FC<SolarSystemDirectoryProps> = ({ onSe
     }
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.22;
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    const roomEnv = new RoomEnvironment();
-    const envTarget = pmremGenerator.fromScene(roomEnv, 0.04);
-    scene.environment = envTarget.texture;
-    scene.environmentIntensity = 0.24;
-    roomEnv.dispose();
-    pmremGenerator.dispose();
-
-    const disposables: Array<{ dispose: () => void }> = [envTarget];
-    const track = <T extends { dispose: () => void }>(obj: T): T => {
+    const disposables: Array<THREE.BufferGeometry | THREE.Material> = [];
+    const track = <T extends THREE.BufferGeometry | THREE.Material>(obj: T): T => {
       disposables.push(obj);
       return obj;
     };
 
-    const sunDir = new THREE.Vector3(5, 3, 4).normalize();
-    const hemiLight = new THREE.HemisphereLight(0x8bb8ff, 0x060a14, 0.34);
-    scene.add(hemiLight);
-    const sunLight = new THREE.DirectionalLight(0xfff7e8, 2.75);
-    sunLight.position.copy(sunDir).multiplyScalar(12);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambientLight);
+    const sunLight = new THREE.DirectionalLight(0xfff7e8, 1.7);
+    sunLight.position.set(5, 3, 4);
     scene.add(sunLight);
-    const rimLight = new THREE.DirectionalLight(0x7fd4ff, 0.38);
-    rimLight.position.copy(sunDir).multiplyScalar(-10);
+    const rimLight = new THREE.DirectionalLight(0x7fd4ff, 0.45);
+    rimLight.position.set(-5, -2, -3);
     scene.add(rimLight);
 
     const starCount = 140;
@@ -105,95 +89,71 @@ export const SolarSystemDirectory: React.FC<SolarSystemDirectoryProps> = ({ onSe
     const stars = new THREE.Points(starGeo, starMat);
     scene.add(stars);
 
-    const maxAniso = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
-    let activeRoot: THREE.Object3D;
-    let earthRig: PhotorealEarthRig | undefined;
+    const geometry = track(new THREE.SphereGeometry(1.5, 64, 64));
+    let material: THREE.Material;
     let cloudMesh: THREE.Mesh | undefined;
     let ringsMesh: THREE.Mesh | undefined;
 
     if (activeBody.id === 'earth') {
-      earthRig = track(
-        buildPhotorealEarthRig({
-          radius: 1.5,
-          segments: 96,
-          sunDirection: sunDir.clone(),
-          anisotropy: maxAniso,
-          cloudOpacity: 0.56,
-          enableCloudShadows: true,
-          includeInnerAtmosphere: true,
+      material = track(new THREE.MeshStandardMaterial({ map: createEarthDayTexture(), roughness: 0.62, metalness: 0.08 }));
+      const cloudGeo = track(new THREE.SphereGeometry(1.52, 48, 48));
+      const cloudMat = track(
+        new THREE.MeshStandardMaterial({
+          map: createEarthCloudTexture(),
+          transparent: true,
+          opacity: 0.42,
+          blending: THREE.NormalBlending,
+          depthWrite: false
         })
       );
-      scene.add(earthRig.group);
-      activeRoot = earthRig.group;
-      cloudMesh = earthRig.cloudMesh;
-    } else if (activeBody.id === 'moon') {
-      const moonRig = track(
-        buildPhotorealMoonRig({
-          radius: 1.5,
-          segments: 96,
-          sunDirection: sunDir.clone(),
-          anisotropy: maxAniso,
-          enableDisplacement: true,
-          displacementScale: 0.042,
-        })
-      );
-      scene.add(moonRig.group);
-      activeRoot = moonRig.group;
-    } else {
-      const geometry = track(new THREE.SphereGeometry(1.5, 64, 64));
-      let material: THREE.Material;
-
-      if (activeBody.id === 'saturn') {
-        material = track(new THREE.MeshStandardMaterial({ map: createCelestialTexture('saturn_body'), roughness: 0.78 }));
-        const ringGeo = track(new THREE.RingGeometry(1.9, 3.2, 96));
-        const pos = ringGeo.attributes.position;
-        const uvs: number[] = [];
-        for (let i = 0; i < pos.count; i++) {
-          const vx = pos.getX(i);
-          const vy = pos.getY(i);
-          const dist = Math.sqrt(vx * vx + vy * vy);
-          uvs.push((dist - 1.9) / (3.2 - 1.9), 0.5);
-        }
-        ringGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-        const ringMat = track(
-          new THREE.MeshStandardMaterial({
-            map: createSaturnRingTexture(),
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.9,
-            depthWrite: false
-          })
-        );
-        ringsMesh = new THREE.Mesh(ringGeo, ringMat);
-        ringsMesh.rotation.x = Math.PI * 0.42;
-        ringsMesh.rotation.y = Math.PI * 0.08;
-        scene.add(ringsMesh);
-      } else if (activeBody.id === 'jupiter') {
-        material = track(new THREE.MeshStandardMaterial({ map: createJupiterTexture(), roughness: 0.7 }));
-      } else if (activeBody.id === 'mars') {
-        material = track(new THREE.MeshStandardMaterial({ map: createMarsTexture(), roughness: 0.85 }));
-      } else if (activeBody.id === 'sun') {
-        material = track(new THREE.MeshBasicMaterial({ map: createSunTexture() }));
-      } else {
-        material = track(new THREE.MeshStandardMaterial({ map: createCelestialTexture(activeBody.id), roughness: 0.75 }));
+      cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+      scene.add(cloudMesh);
+    } else if (activeBody.id === 'saturn') {
+      material = track(new THREE.MeshStandardMaterial({ map: createCelestialTexture('saturn_body'), roughness: 0.78 }));
+      const ringGeo = track(new THREE.RingGeometry(1.9, 3.2, 96));
+      // radial UVs for ring texture
+      const pos = ringGeo.attributes.position;
+      const uvs: number[] = [];
+      for (let i = 0; i < pos.count; i++) {
+        const vx = pos.getX(i);
+        const vy = pos.getY(i);
+        const dist = Math.sqrt(vx * vx + vy * vy);
+        uvs.push((dist - 1.9) / (3.2 - 1.9), 0.5);
       }
-
-      const planetMesh = new THREE.Mesh(geometry, material);
-      scene.add(planetMesh);
-      activeRoot = planetMesh;
+      ringGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      const ringMat = track(
+        new THREE.MeshStandardMaterial({
+          map: createSaturnRingTexture(),
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.9,
+          depthWrite: false
+        })
+      );
+      ringsMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringsMesh.rotation.x = Math.PI * 0.42;
+      ringsMesh.rotation.y = Math.PI * 0.08;
+      scene.add(ringsMesh);
+    } else if (activeBody.id === 'jupiter') {
+      material = track(new THREE.MeshStandardMaterial({ map: createJupiterTexture(), roughness: 0.7 }));
+    } else if (activeBody.id === 'mars') {
+      material = track(new THREE.MeshStandardMaterial({ map: createMarsTexture(), roughness: 0.85 }));
+    } else if (activeBody.id === 'sun') {
+      material = track(new THREE.MeshBasicMaterial({ map: createSunTexture() }));
+    } else {
+      material = track(new THREE.MeshStandardMaterial({ map: createCelestialTexture(activeBody.id), roughness: 0.75 }));
     }
 
-    activePlanetRootRef.current = activeRoot;
+    const planetMesh = new THREE.Mesh(geometry, material);
+    scene.add(planetMesh);
+    activePlanetMeshRef.current = planetMesh;
     activeCloudMeshRef.current = cloudMesh || null;
 
     let animFrame = 0;
     const animate = () => {
       animFrame = requestAnimationFrame(animate);
-      activeRoot.rotation.y += 0.003;
-      if (earthRig) {
-        earthRig.cloudMesh.rotation.y += 0.0012;
-        earthRig.syncCloudShadows(earthRig.cloudMesh.rotation.y);
-      }
+      if (planetMesh) planetMesh.rotation.y += 0.003;
+      if (cloudMesh) cloudMesh.rotation.y += 0.004;
       if (ringsMesh) ringsMesh.rotation.z += 0.0008;
       stars.rotation.y += 0.00015;
       renderer.render(scene, camera);
@@ -219,7 +179,7 @@ export const SolarSystemDirectory: React.FC<SolarSystemDirectoryProps> = ({ onSe
       }
       disposables.forEach((d) => d.dispose());
       renderer.dispose();
-      activePlanetRootRef.current = null;
+      activePlanetMeshRef.current = null;
       activeCloudMeshRef.current = null;
     };
   }, [activeBody]);
@@ -229,11 +189,12 @@ export const SolarSystemDirectory: React.FC<SolarSystemDirectoryProps> = ({ onSe
     prevMouseRef.current = { x: e.clientX, y: e.clientY };
   };
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDraggingRef.current || !activePlanetRootRef.current) return;
+    if (!isDraggingRef.current || !activePlanetMeshRef.current) return;
     const deltaX = e.clientX - prevMouseRef.current.x;
     const deltaY = e.clientY - prevMouseRef.current.y;
-    activePlanetRootRef.current.rotation.y += deltaX * 0.01;
-    activePlanetRootRef.current.rotation.x += deltaY * 0.01;
+    activePlanetMeshRef.current.rotation.y += deltaX * 0.01;
+    activePlanetMeshRef.current.rotation.x += deltaY * 0.01;
+    if (activeCloudMeshRef.current) activeCloudMeshRef.current.rotation.y += deltaX * 0.01;
     prevMouseRef.current = { x: e.clientX, y: e.clientY };
   };
   const handlePointerUp = () => {
