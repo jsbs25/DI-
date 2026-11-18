@@ -256,6 +256,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           (msg?.event === 'infoDelivery' && msg?.info?.playerState === 0)
         ) {
           dispatch({ type: 'NEXT' });
+          return;
+        }
+        // Auto-skip if uploader restricted embedding (100/101/150)
+        const errCode =
+          msg?.event === 'onError'
+            ? Number(msg?.info)
+            : msg?.event === 'infoDelivery' && msg?.info?.videoData?.errorCode
+              ? Number(msg.info.videoData.errorCode)
+              : NaN;
+        if ([2, 5, 100, 101, 150].includes(errCode)) {
+          if (!attemptFallback(`YouTube 嵌入受限 (${errCode})`)) {
+            pruneFailedTrackAndAdvance(currentTrack.id, `YouTube 嵌入受限 (${errCode})`);
+          }
         }
       } catch {}
     };

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Disc3,
+  ExternalLink,
   ListMusic,
   Loader2,
   Maximize2,
@@ -22,9 +23,12 @@ import type { MusicTrack } from '../types/music.ts';
 import { useMusicPlayer } from '../music/useMusicPlayer.ts';
 import {
   getEffectiveMediaRegion,
+  getMediaRegionMode,
   probeClientMediaConnectivity,
+  setMediaRegionMode,
   subscribeMediaScheduler,
 } from '../services/media/scheduler.ts';
+import type { MediaRegionMode } from '../types/media.ts';
 import type { VenusAgentAction } from '../utils/oneAgentController.ts';
 
 interface VenusMusicSpaceProps {
@@ -82,7 +86,11 @@ function normalizeServerTrack(t: any): MusicTrack {
 
 function isUrlOrBvidQuery(q: string): boolean {
   const s = q.trim();
-  return /^https?:\/\//i.test(s) || /^BV[0-9A-Za-z]{8,14}$/i.test(s);
+  return (
+    /^https?:\/\//i.test(s) ||
+    /^(?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be|bilibili\.com|b23\.tv)\//i.test(s) ||
+    /^BV[0-9A-Za-z]{8,14}$/i.test(s)
+  );
 }
 
 function handleCoverError(e: React.SyntheticEvent<HTMLImageElement>) {
@@ -109,6 +117,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
   const [showEmbedStage, setShowEmbedStage] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
+  const [regionMode, setRegionModeState] = useState<MediaRegionMode>(() => getMediaRegionMode());
   const [effectiveRegion, setEffectiveRegion] = useState(() => getEffectiveMediaRegion());
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -134,6 +143,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
     void probeClientMediaConnectivity();
     const unsub = subscribeMediaScheduler(() => {
       if (!mountedRef.current) return;
+      setRegionModeState(getMediaRegionMode());
       setEffectiveRegion(getEffectiveMediaRegion());
     });
     return () => {
@@ -389,6 +399,11 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
 
   const rawEmbedSrc = (currentTrack as any)?.playback?.embedUrl || (currentTrack as any)?.embedUrl;
   const hasEmbed = Boolean(rawEmbedSrc);
+  const activeSourceUrl = currentTrack?.playback?.sourceUrl || currentTrack?.sourceUrl;
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('one-venus-stage-change'));
+  }, [hasEmbed, showEmbedStage, player.userStopped, currentTrack?.id]);
 
   const togglePlay = () => {
     if (!currentTrack && visibleTracks.length > 0) {
@@ -412,7 +427,7 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
     <div className="w-full max-w-full bg-[var(--color-one-bg)] text-[var(--color-one-text)] transition-colors">
       <div className="mx-auto w-full max-w-[1200px] px-4 pb-8 pt-3 sm:px-6 md:px-8">
         {/* Clean Header */}
-        <header className="mb-5 flex items-center justify-between gap-3 border-b border-slate-200/80 pb-3.5 dark:border-white/10">
+        <header className="mb-5 flex flex-wrap items-center justify-between gap-2.5 border-b border-slate-200/80 pb-3.5 dark:border-white/10">
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
@@ -430,7 +445,32 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
             </span>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="inline-flex items-center rounded-xl bg-slate-100 p-1 dark:bg-white/6">
+              {([
+                { id: 'auto', zh: '自动', en: 'Auto' },
+                { id: 'overseas', zh: 'YouTube', en: 'YouTube' },
+                { id: 'cn', zh: 'B站', en: 'Bilibili' },
+              ] as const).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    setMediaRegionMode(m.id);
+                    if (m.id === 'overseas') setSelectedGenre((prev) => (prev === 'bilibili' ? 'youtube' : prev));
+                    if (m.id === 'cn') setSelectedGenre((prev) => (prev === 'youtube' ? 'bilibili' : prev));
+                  }}
+                  className={`min-h-[34px] rounded-lg px-2.5 text-xs font-medium transition whitespace-nowrap ${
+                    regionMode === m.id
+                      ? 'bg-white text-sky-600 shadow-2xs dark:bg-sky-500/20 dark:text-sky-300'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  {isZh ? m.zh : m.en}
+                </button>
+              ))}
+            </div>
+
             <div className="inline-flex items-center rounded-xl bg-slate-100 p-1 dark:bg-white/6">
               <button
                 type="button"
@@ -539,10 +579,23 @@ export const VenusMusicSpace: React.FC<VenusMusicSpaceProps> = ({ lang, onBack, 
               <h2 className="truncate text-base font-semibold tracking-tight text-slate-900 dark:text-white sm:text-lg">
                 {currentTrack?.title || (loading ? (isZh ? '正在自动载入歌曲…' : 'Auto-loading track…') : isZh ? '选择一首歌曲' : 'Select a track')}
               </h2>
-              <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
-                {currentTrack?.artist || 'YouTube · Bilibili'}
-                {currentTrack?.source ? ` · ${currentTrack.source}` : ''}
-              </p>
+              <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <p className="truncate">
+                  {currentTrack?.artist || 'YouTube · Bilibili'}
+                  {currentTrack?.source ? ` · ${currentTrack.source}` : ''}
+                </p>
+                {activeSourceUrl && (
+                  <a
+                    href={activeSourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+                  >
+                    <span>{isZh ? '原平台' : 'Source'}</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
             </div>
 
             <div className="mt-3.5 w-full overflow-hidden">

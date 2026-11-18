@@ -21,7 +21,7 @@
 - **悬浮一体音乐联动**：主界面悬浮 AI 球（`One.`）与音乐播放器无缝融合——说话时自动暂停音乐，结束回复后自动恢复续播。
 
 ### 3. Venus 统一音乐空间 & 媒体中心
-- **Venus Music Space**：沉浸式音乐播放空间、持久化播放列表与跨模块统一音频会话管理，集成 Bilibili / YouTube 音乐检索与元数据聚合。
+- **Venus Music Space（ONE Music）**：沉浸式音乐播放空间、持久化播放列表与跨模块统一音频会话管理；集成 YouTube（Data API / InnerTube / oEmbed 直链解析）与 Bilibili 多源实时检索，支持 `自动 / YouTube / B站` 音源切换、IFrame API 播放状态联动及嵌入受限自动切歌容错。
 - **数字图书馆（`DigitalLibrary`）**：支持 EPUB 与 PDF 在线阅读器、AI 伴读分析、安全沙箱解析与多来源图书检索。
 - **全球视频与发现中心（`VideoPortal` / `JupiterSearch`）**：视频流浏览、跨源发现引擎与知识图谱检索。
 

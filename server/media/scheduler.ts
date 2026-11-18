@@ -1,9 +1,16 @@
 import type express from 'express';
 import type { MediaRegionMode, ResolvedRegion } from '../../src/types/media.ts';
 import { buildBilibiliEmbedUrl, getBilibiliTrendingMusic, searchBilibiliVideos } from '../bilibiliCrawler.ts';
-import { getYouTubeDiscoveryMusic, resolveMusicEmbedUrl, searchYouTubeMusic } from '../youtubeMusicSearch.ts';
+import { getYouTubeDiscoveryMusic, resolveMusicEmbedUrlAsync, searchYouTubeMusic } from '../youtubeMusicSearch.ts';
 import { searchYouTubeVideos } from '../youtubeSearch.ts';
 import { enrichMusicTrack, enrichVideoItem } from './catalog.ts';
+
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
 
 interface SearchCacheEntry {
   expiresAt: number;
@@ -155,9 +162,9 @@ export async function dispatchUnifiedMusicSearch(options: {
   const genre = (options.genre || 'all').trim().toLowerCase();
   const limit = Math.max(6, Math.min(30, options.limit || 20));
 
-  // Direct link / BV / YouTube paste resolution
+  // Direct link / BV / YouTube paste resolution (with live oEmbed title/artist lookup)
   if (q) {
-    const direct = resolveMusicEmbedUrl(q);
+    const direct = await resolveMusicEmbedUrlAsync(q);
     if (direct) {
       const enriched = enrichMusicTrack(direct, options.region);
       return {
@@ -187,20 +194,28 @@ export async function dispatchUnifiedMusicSearch(options: {
   const wantBilibili = genre !== 'youtube';
 
   const biliPromise = wantBilibili
-    ? (q
-        ? searchBilibiliVideos(`${q} 音乐`, Math.ceil(limit / 2))
-        : genre === 'all' || genre === 'bilibili'
-          ? getBilibiliTrendingMusic(Math.ceil(limit / 2))
-          : searchBilibiliVideos(biliQueryMap[genre] || biliQueryMap.all, Math.ceil(limit / 2))
+    ? withTimeout(
+        (q
+          ? searchBilibiliVideos(`${q} 音乐`, Math.ceil(limit / 2))
+          : genre === 'all' || genre === 'bilibili'
+            ? getBilibiliTrendingMusic(Math.ceil(limit / 2))
+            : searchBilibiliVideos(biliQueryMap[genre] || biliQueryMap.all, Math.ceil(limit / 2))
+        )
+          .then((rows) => ({ ok: true, rows: rows.map((r) => bilibiliToUnifiedMusicTrack(r, options.region)) }))
+          .catch((e: any) => ({ ok: false, rows: [] as any[], reason: e?.message || 'failed' })),
+        8500,
+        { ok: false, rows: [] as any[], reason: 'timeout' }
       )
-        .then((rows) => ({ ok: true, rows: rows.map((r) => bilibiliToUnifiedMusicTrack(r, options.region)) }))
-        .catch((e: any) => ({ ok: false, rows: [], reason: e?.message || 'failed' }))
     : Promise.resolve({ ok: true, rows: [] as any[], reason: 'filtered' });
 
   const ytPromise = wantYouTube
-    ? (q ? searchYouTubeMusic(q, Math.ceil(limit / 2)) : getYouTubeDiscoveryMusic(genre, Math.ceil(limit / 2)))
-        .then((rows) => ({ ok: true, rows: rows.map((r) => enrichMusicTrack(r, options.region)) }))
-        .catch((e: any) => ({ ok: false, rows: [], reason: e?.message || 'failed' }))
+    ? withTimeout(
+        (q ? searchYouTubeMusic(q, Math.ceil(limit / 2)) : getYouTubeDiscoveryMusic(genre, Math.ceil(limit / 2)))
+          .then((rows) => ({ ok: true, rows: rows.map((r) => enrichMusicTrack(r, options.region)) }))
+          .catch((e: any) => ({ ok: false, rows: [] as any[], reason: e?.message || 'failed' })),
+        8500,
+        { ok: false, rows: [] as any[], reason: 'timeout' }
+      )
     : Promise.resolve({ ok: true, rows: [] as any[], reason: 'filtered' });
 
   const [biliRes, ytRes] = await Promise.all([biliPromise, ytPromise]);

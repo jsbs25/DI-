@@ -53,7 +53,7 @@ import {
   getKnowledgeNodeByCountry
 } from './server/knowledgeGraph.ts';
 import { musicStore } from './server/musicStore.ts';
-import { resolveMusicEmbedUrl, searchYouTubeMusic } from './server/youtubeMusicSearch.ts';
+import { resolveMusicEmbedUrlAsync, searchYouTubeMusic } from './server/youtubeMusicSearch.ts';
 import { getChannelIntegrations } from './server/channelIntegrations.ts';
 import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
 import { getMailProvider, mailStatus } from './server/mailProvider.ts';
@@ -4474,7 +4474,7 @@ app.get('/api/music/youtube-search', async (req, res) => {
   const limit = Math.max(1, Math.min(24, Number(req.query.limit) || 12));
   const regionCtx = resolveRegionFromRequest(req);
   try {
-    const direct = resolveMusicEmbedUrl(q);
+    const direct = await resolveMusicEmbedUrlAsync(q);
     const rawTracks = direct ? [direct] : await searchYouTubeMusic(q, limit);
     const tracks = rawTracks.map((t) => enrichMusicTrack(t, regionCtx.region));
     res.json({ success: true, region: regionCtx.region, query: q, tracks, mode: direct ? 'embed-url' : 'search' });

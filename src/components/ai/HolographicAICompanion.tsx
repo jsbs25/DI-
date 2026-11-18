@@ -260,10 +260,17 @@ function buildUnifiedEmbedUrl(rawUrl: string | undefined, isPlaying: boolean): s
   try {
     const u = new URL(rawUrl);
     if (u.hostname.includes('youtube')) {
-      u.searchParams.set('autoplay', '1');
+      if (!u.searchParams.has('autoplay')) {
+        u.searchParams.set('autoplay', isPlaying ? '1' : '0');
+      } else {
+        u.searchParams.set('autoplay', '1');
+      }
       u.searchParams.set('enablejsapi', '1');
       u.searchParams.set('playsinline', '1');
       u.searchParams.set('rel', '0');
+      if (typeof window !== 'undefined' && window.location?.origin) {
+        u.searchParams.set('origin', window.location.origin);
+      }
       return u.toString();
     }
     if (u.hostname.includes('bilibili')) {
@@ -525,11 +532,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
     if (popoverStageAnchorRef.current) ro.observe(popoverStageAnchorRef.current);
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
+    window.addEventListener('one-venus-stage-change', measure);
     const rafTick = setInterval(measure, 250);
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
+      window.removeEventListener('one-venus-stage-change', measure);
       clearInterval(rafTick);
     };
   }, [canRunAudioSession, liveEmbedSrc, isOnVenus, musicPopoverOpen, showMiniVideo, currentTrack?.id]);
@@ -1931,6 +1940,15 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             key={currentTrack?.id || liveEmbedSrc}
             title={trackTitle}
             src={liveEmbedSrc}
+            onLoad={() => {
+              if (!liveEmbedSrc || !liveEmbedSrc.includes('youtube')) return;
+              try {
+                const win = embedIframeRef.current?.contentWindow;
+                if (!win) return;
+                win.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
+                sendYouTubeCmd(isMusicPlayingRef.current ? 'playVideo' : 'pauseVideo');
+              } catch {}
+            }}
             className="h-full w-full border-0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
