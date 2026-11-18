@@ -1,605 +1,1224 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Volume2, VolumeX, ArrowRight } from 'lucide-react';
-import { User } from '../../types/index.ts';
+import { Water } from 'three/examples/jsm/objects/Water.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { ArrowRight, Volume2, VolumeX } from 'lucide-react';
+import type { Language, User } from '../../types/index.ts';
+import { BrandMark } from '../brand/brandLogos.tsx';
+import {
+  detectWebGLSupport,
+  isSoftwareRenderer,
+  prefersReducedMotion,
+} from '../spatial/webglCapabilities.ts';
+import {
+  createParadiseTextures,
+  detectParadiseQuality,
+} from '../paradise/paradiseQuality.ts';
+import {
+  createParadiseSkyDome,
+  ParadiseEnvironmentEngine,
+  sampleWindField,
+} from '../paradise/paradiseEnvironment.ts';
+import { sampleTerrainBiome, terrainHeightAt } from '../paradise/paradiseTerrain.ts';
+import { createParadiseArchitecture } from '../paradise/paradiseArchitecture.ts';
+import {
+  createParadisePostPipeline,
+  type ParadisePostPipeline,
+} from '../paradise/paradisePost.ts';
+import {
+  formatPersonalWelcomeVo,
+  INTRO_PHASES,
+  INTRO_TOTAL_DURATION_SEC,
+  SceneTimelineDirector,
+} from './cinematicTimeline.ts';
+import { CinematicAudioController } from './cinematicAudio.ts';
 
-/**
- * Three cinematic traversal phases merged into one continuous camera trajectory:
- * - 'hyperspace': Deep cosmic space & relativistic warp streaks
- * - 'cosmic': Stellar constellation, planetary orbits & celestial nexus
- * - 'digitalEarth': Luminous 3D Earth space with geo-arcs, beacons & atmosphere
- */
-export type FlightStage = 'hyperspace' | 'cosmic' | 'digitalEarth';
-
-interface CinematicIntroProps {
+export interface CinematicIntroProps {
   onComplete: () => void;
   onAuthSuccess?: (user: User, token: string, isNewRegistration: boolean) => void;
   currentUser?: User | null;
+  lang?: Language;
+  gestureUnlocked?: boolean;
 }
 
-// -------------------------------------------------------------
-// Cinematic Web Audio Ambient Synthesizer
-// -------------------------------------------------------------
-class CinematicAudioSynth {
-  private ctx: AudioContext | null = null;
-  private oscs: OscillatorNode[] = [];
-  private masterGain: GainNode | null = null;
-  private isPlaying = false;
+// Pre-allocated zero-GC math scratchpads
+const _windVec = new THREE.Vector3();
+const _sunProj = new THREE.Vector3();
+const _sunPos2D = new THREE.Vector2();
+const _godRayColor = new THREE.Color(0xffdca8);
+const _dummyMat4 = new THREE.Matrix4();
+const _dummyPos = new THREE.Vector3();
+const _dummyQuat = new THREE.Quaternion();
+const _dummyEuler = new THREE.Euler();
+const _dummyScale = new THREE.Vector3();
+const _tmpColor = new THREE.Color();
 
-  start() {
-    if (this.isPlaying) return;
-    try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      this.ctx = new AudioCtx();
-      this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
-      this.masterGain.gain.exponentialRampToValueAtTime(0.065, this.ctx.currentTime + 1.8);
-      this.masterGain.connect(this.ctx.destination);
-
-      // Deep harmonic cosmic chord: A1 (55Hz), E2 (82.4Hz), A2 (110Hz), E3 (164.8Hz), C#4 (277.2Hz)
-      const freqs = [55.0, 82.4, 110.0, 164.81, 277.18];
-      this.oscs = freqs.map((f, i) => {
-        const osc = this.ctx!.createOscillator();
-        osc.type = i % 2 === 0 ? 'sine' : 'triangle';
-        osc.frequency.setValueAtTime(f, this.ctx!.currentTime);
-        const subGain = this.ctx!.createGain();
-        subGain.gain.setValueAtTime(0.35 / (i + 1), this.ctx!.currentTime);
-        osc.connect(subGain);
-        subGain.connect(this.masterGain!);
-        osc.start();
-        return osc;
-      });
-      this.isPlaying = true;
-    } catch {
-      // Audio not permitted or supported
-    }
-  }
-
-  playArrivalChime() {
-    if (!this.isPlaying || !this.ctx || !this.masterGain) return;
-    try {
-      const now = this.ctx.currentTime;
-      [440.0, 659.25, 880.0, 1318.5].forEach((f, idx) => {
-        const chime = this.ctx!.createOscillator();
-        const gain = this.ctx!.createGain();
-        chime.type = 'sine';
-        chime.frequency.setValueAtTime(f, now + idx * 0.1);
-        gain.gain.setValueAtTime(0.08, now + idx * 0.1);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.1 + 1.4);
-        chime.connect(gain);
-        gain.connect(this.masterGain!);
-        chime.start(now + idx * 0.1);
-        chime.stop(now + idx * 0.1 + 1.5);
-      });
-    } catch {}
-  }
-
-  stop() {
-    if (!this.isPlaying || !this.ctx) return;
-    try {
-      if (this.masterGain) {
-        this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, this.ctx.currentTime);
-        this.masterGain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.6);
-      }
-      setTimeout(() => {
-        this.oscs.forEach((o) => {
-          try { o.stop(); } catch {}
-        });
-        this.oscs = [];
-        this.ctx?.close().catch(() => {});
-        this.ctx = null;
-        this.isPlaying = false;
-      }, 700);
-    } catch {
-      this.isPlaying = false;
-    }
-  }
+interface PetalParticle {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  rx: number;
+  ry: number;
+  rz: number;
+  spinX: number;
+  spinY: number;
+  spinZ: number;
+  scale: number;
+  phase: number;
+  isGinkgo: boolean;
 }
 
-export function CinematicIntro({ onComplete }: CinematicIntroProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const synthRef = useRef<CinematicAudioSynth | null>(null);
+/**
+ * Patches standard double-sided alpha-tested foliage/blossom cards so thin
+ * sunlit petals glow gently from behind rather than turning dark on backfaces
+ * (normal-flip technique verified in nicoo-474/sakura-sky-island).
+ */
+function applyBacklitFoliageNormalPatch(mat: THREE.MeshStandardMaterial) {
+  mat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <normal_fragment_begin>',
+      `
+      float faceDirection = 1.0;
+      vec3 normal = normalize( vNormal );
+      `
+    );
+  };
+  mat.customProgramCacheKey = () => 'one_intro_backlit_foliage_v1';
+}
 
-  const [soundEnabled, setSoundEnabled] = useState(false);
-  const [isFadingOut, setIsFadingOut] = useState(false);
-  const isDoneRef = useRef(false);
+function buildIntroTerrainGeometry(segments: number): THREE.BufferGeometry {
+  const geo = new THREE.PlaneGeometry(180, 180, segments, segments);
+  geo.rotateX(-Math.PI / 2);
 
-  // Three.js animation references
-  const animRef = useRef<{
-    rafId: number;
-    startTime: number;
-    speedBoost: number;
-    isDiving: boolean;
-  }>({
-    rafId: 0,
-    startTime: performance.now(),
-    speedBoost: 1.0,
-    isDiving: false,
+  const posAttr = geo.attributes.position as THREE.BufferAttribute;
+  const count = posAttr.count;
+  const colors = new Float32Array(count * 3);
+
+  const cDeepBed = new THREE.Color(0x1b2b31);
+  const cShore = new THREE.Color(0x746d58);
+  const cMeadow = new THREE.Color(0x33572d);
+  const cMeadowRich = new THREE.Color(0x234424);
+  const cPath = new THREE.Color(0x827d73);
+  const cRock = new THREE.Color(0x4f555d);
+  const cFarRidge = new THREE.Color(0x243b34);
+  const cTmp = new THREE.Color();
+
+  for (let i = 0; i < count; i++) {
+    const x = posAttr.getX(i);
+    const z = posAttr.getZ(i);
+    const s = sampleTerrainBiome(x, z);
+    posAttr.setY(i, s.height);
+
+    const n = 0.5 + 0.5 * Math.sin(x * 0.19 + Math.cos(z * 0.17) * 1.6);
+    cTmp.copy(cMeadow).lerp(cMeadowRich, n);
+
+    if (s.height < 0.05) {
+      const bedT = Math.max(0, Math.min(1, (0.05 - s.height) / 0.9));
+      cTmp.lerp(cDeepBed, bedT);
+    }
+    if (s.shoreWeight > 0) cTmp.lerp(cShore, s.shoreWeight * 0.8);
+    if (s.pathWeight > 0) cTmp.lerp(cPath, s.pathWeight * 0.85);
+    if (s.rockWeight > 0) cTmp.lerp(cRock, s.rockWeight * 0.88);
+    const dist = Math.hypot(x, z);
+    if (dist > 40) {
+      const ridgeT = Math.max(0, Math.min(1, (dist - 40) / 56));
+      cTmp.lerp(cFarRidge, ridgeT * 0.65);
+    }
+
+    colors[i * 3] = cTmp.r;
+    colors[i * 3 + 1] = cTmp.g;
+    colors[i * 3 + 2] = cTmp.b;
+  }
+
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function buildIntroCanopyGroves(
+  barkMap: THREE.CanvasTexture,
+  sakuraClusterMap: THREE.CanvasTexture,
+  ginkgoClusterMap: THREE.CanvasTexture,
+  pineClusterMap: THREE.CanvasTexture
+): {
+  group: THREE.Group;
+  treeMaterials: THREE.MeshStandardMaterial[];
+  dispose: () => void;
+} {
+  const group = new THREE.Group();
+  const geos: THREE.BufferGeometry[] = [];
+  const mats: THREE.Material[] = [];
+  const treeMaterials: THREE.MeshStandardMaterial[] = [];
+
+  const barkMat = new THREE.MeshStandardMaterial({
+    color: 0x4b3329,
+    map: barkMap,
+    roughness: 0.92,
+    metalness: 0.02,
+  });
+  const sakuraMat = new THREE.MeshStandardMaterial({
+    map: sakuraClusterMap,
+    alphaTest: 0.32,
+    transparent: false,
+    side: THREE.DoubleSide,
+    roughness: 0.72,
+    metalness: 0.02,
+    color: 0xffedf3,
+  });
+  const ginkgoMat = new THREE.MeshStandardMaterial({
+    map: ginkgoClusterMap,
+    alphaTest: 0.34,
+    transparent: false,
+    side: THREE.DoubleSide,
+    roughness: 0.68,
+    metalness: 0.02,
+    color: 0xffe48c,
+  });
+  const pineMat = new THREE.MeshStandardMaterial({
+    map: pineClusterMap,
+    alphaTest: 0.34,
+    transparent: false,
+    side: THREE.DoubleSide,
+    roughness: 0.84,
+    metalness: 0.02,
+    color: 0x2b4b31,
   });
 
-  // Sound initialization
-  useEffect(() => {
-    synthRef.current = new CinematicAudioSynth();
-    return () => {
-      synthRef.current?.stop();
-    };
-  }, []);
+  applyBacklitFoliageNormalPatch(sakuraMat);
+  applyBacklitFoliageNormalPatch(ginkgoMat);
+  applyBacklitFoliageNormalPatch(pineMat);
+  mats.push(barkMat, sakuraMat, ginkgoMat, pineMat);
+  treeMaterials.push(sakuraMat, ginkgoMat, pineMat);
 
-  const toggleSound = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (!soundEnabled) {
-      synthRef.current?.start();
-      setSoundEnabled(true);
-    } else {
-      synthRef.current?.stop();
-      setSoundEnabled(false);
+  const trunkGeo = new THREE.CylinderGeometry(0.11, 0.24, 3.3, 8);
+  trunkGeo.translate(0, 1.65, 0);
+  const boughGeo = new THREE.CylinderGeometry(0.05, 0.11, 2.05, 6);
+  boughGeo.translate(0, 1.0, 0);
+  const clusterPlane = new THREE.PlaneGeometry(3.2, 3.2);
+  geos.push(trunkGeo, boughGeo, clusterPlane);
+
+  const addTree = (x: number, z: number, kind: 'sakura' | 'ginkgo' | 'pine', scale: number, seed: number) => {
+    const y = terrainHeightAt(x, z);
+    if (!Number.isFinite(y) || y < -0.1) return;
+
+    const tree = new THREE.Group();
+    tree.position.set(x, y - 0.12, z);
+    tree.scale.setScalar(scale);
+
+    const trunk = new THREE.Mesh(trunkGeo, barkMat);
+    trunk.rotation.z = Math.sin(seed) * 0.08;
+    trunk.castShadow = true;
+    trunk.receiveShadow = true;
+    tree.add(trunk);
+
+    const leafMat = kind === 'sakura' ? sakuraMat : kind === 'ginkgo' ? ginkgoMat : pineMat;
+
+    // 3 diverging boughs forming natural organic crown silhouette
+    for (let b = 0; b < 3; b++) {
+      const ang = (b * Math.PI * 2) / 3 + seed * 0.7;
+      const bough = new THREE.Mesh(boughGeo, barkMat);
+      bough.position.set(0, 2.35, 0);
+      bough.rotation.order = 'YXZ';
+      bough.rotation.y = ang;
+      bough.rotation.x = 0.56;
+      tree.add(bough);
+
+      const clusterX = Math.sin(ang) * 1.15;
+      const clusterZ = Math.cos(ang) * 1.15;
+      for (let c = 0; c < 2; c++) {
+        const card = new THREE.Mesh(clusterPlane, leafMat);
+        card.position.set(clusterX * (0.85 + c * 0.2), 3.45 + c * 0.45, clusterZ * (0.85 + c * 0.2));
+        card.rotation.y = ang + c * 1.05;
+        card.rotation.x = -0.22 + c * 0.35;
+        card.scale.setScalar(0.82 + ((seed + b + c) % 3) * 0.16);
+        card.castShadow = true;
+        tree.add(card);
+      }
     }
+
+    // Crown apex card
+    const apex = new THREE.Mesh(clusterPlane, leafMat);
+    apex.position.set(0, 4.35, 0);
+    apex.rotation.y = seed;
+    apex.rotation.x = -0.35;
+    apex.scale.setScalar(0.95);
+    tree.add(apex);
+
+    group.add(tree);
   };
 
-  // Smooth final zoom and exit into the application
-  const finishFlight = useCallback(() => {
+  // Sculpted sakura shore grove (eastern & right-shore framing; keeps center camera corridor open!)
+  const sakuraSites: Array<[number, number, number]> = [
+    [11.5, 4.2, 1.15],
+    [15.4, 8.8, 1.24],
+    [18.8, 2.2, 1.08],
+    [14.2, -13.6, 1.22],
+    [8.2, -14.8, 1.05],
+    [20.4, -7.8, 1.28],
+    [9.8, 14.5, 1.04],
+    [-16.2, -11.4, 1.12],
+    [-21.5, -2.5, 1.22],
+    [22.4, 10.6, 1.18],
+  ];
+  sakuraSites.forEach(([x, z, s], idx) => addTree(x, z, 'sakura', s, idx * 1.9 + 0.4));
+
+  // Sculpted golden ginkgo grove (western & northern shore balance)
+  const ginkgoSites: Array<[number, number, number]> = [
+    [-11.8, 6.2, 1.18],
+    [-15.8, 11.2, 1.24],
+    [-14.6, -2.2, 1.12],
+    [-11.4, -15.4, 1.22],
+    [-2.5, -18.2, 1.16],
+    [4.4, -17.4, 1.08],
+    [-19.2, 4.8, 1.28],
+    [17.6, -16.8, 1.24],
+  ];
+  ginkgoSites.forEach(([x, z, s], idx) => addTree(x, z, 'ginkgo', s, idx * 2.3 + 1.1));
+
+  // Evergreen alpine perimeter pines framing distant horizon ridges
+  const pineSites: Array<[number, number, number]> = [
+    [-26.0, -18.0, 1.45],
+    [-18.5, -26.5, 1.55],
+    [-6.0, -28.0, 1.5],
+    [8.5, -26.5, 1.48],
+    [21.0, -23.5, 1.52],
+    [29.5, -11.0, 1.45],
+    [-29.5, 12.0, 1.42],
+    [28.5, 15.0, 1.4],
+  ];
+  pineSites.forEach(([x, z, s], idx) => addTree(x, z, 'pine', s, idx * 1.7 + 2.2));
+
+  return {
+    group,
+    treeMaterials,
+    dispose: () => {
+      geos.forEach((g) => g.dispose());
+      mats.forEach((m) => m.dispose());
+    },
+  };
+}
+
+/**
+ * View-angle-attenuated volumetric sunrise shaft cones (technique inspired by sakura-sky-island)
+ */
+function createSunBeams(): {
+  group: THREE.Group;
+  uniforms: { uTime: { value: number }; uIntensity: { value: number }; uColor: { value: THREE.Color } };
+  dispose: () => void;
+} {
+  const group = new THREE.Group();
+  const uniforms = {
+    uTime: { value: 0 },
+    uIntensity: { value: 0.25 },
+    uColor: { value: new THREE.Color(0xffdca2) },
+  };
+
+  const geo = new THREE.CylinderGeometry(1.1, 4.6, 32, 20, 1, true);
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    uniforms,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vNormalView;
+      varying vec3 vViewPos;
+      void main() {
+        vUv = uv;
+        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+        vViewPos = -mvPos.xyz;
+        vNormalView = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * mvPos;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uIntensity;
+      uniform vec3 uColor;
+      varying vec2 vUv;
+      varying vec3 vNormalView;
+      varying vec3 vViewPos;
+
+      void main() {
+        vec3 N = normalize(vNormalView);
+        vec3 V = normalize(vViewPos);
+        float edgeFade = pow(abs(dot(N, V)), 1.35);
+        float verticalFade = smoothstep(0.0, 0.28, vUv.y) * (1.0 - smoothstep(0.55, 1.0, vUv.y));
+        float shimmer = 0.85 + 0.15 * sin(uTime * 0.7 + vUv.x * 12.56);
+        float alpha = edgeFade * verticalFade * shimmer * uIntensity * 0.16;
+        gl_FragColor = vec4(uColor, alpha);
+      }
+    `,
+  });
+
+  const placements: Array<[number, number, number, number, number]> = [
+    [7.5, 12.5, -5.5, 0.42, 0.26],
+    [-4.2, 13.0, -3.5, 0.38, 0.3],
+    [13.8, 12.2, 2.5, 0.44, 0.24],
+    [-11.0, 11.8, 4.5, 0.4, 0.28],
+  ];
+
+  placements.forEach(([x, y, z, rz, rx]) => {
+    const beam = new THREE.Mesh(geo, mat);
+    beam.position.set(x, y, z);
+    beam.rotation.set(rx, 0, rz);
+    group.add(beam);
+  });
+
+  return {
+    group,
+    uniforms,
+    dispose: () => {
+      geo.dispose();
+      mat.dispose();
+    },
+  };
+}
+
+export const CinematicIntro: React.FC<CinematicIntroProps> = ({
+  onComplete,
+  currentUser,
+  lang = 'zh',
+  gestureUnlocked = false,
+}) => {
+  const isZh = lang === 'zh';
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const audioRef = useRef<CinematicAudioController | null>(null);
+  const directorRef = useRef<SceneTimelineDirector | null>(null);
+  if (!directorRef.current) {
+    directorRef.current = new SceneTimelineDirector();
+  }
+
+  const [webglReady] = useState<boolean>(() => detectWebGLSupport());
+  const [contextLost, setContextLost] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const [activePhaseId, setActivePhaseId] = useState(INTRO_PHASES[0].id);
+  const [brandOpacity, setBrandOpacity] = useState(0);
+  const [welcomeOpacity, setWelcomeOpacity] = useState(0);
+  const [activeCaption, setActiveCaption] = useState('');
+  const [progressRatio, setProgressRatio] = useState(0);
+
+  const isDoneRef = useRef(false);
+  const speedBoostRef = useRef(1.0);
+  const soundEnabledRef = useRef(false);
+  const userNameRef = useRef<string | undefined>(
+    currentUser?.displayName || currentUser?.username || undefined
+  );
+  userNameRef.current = currentUser?.displayName || currentUser?.username || undefined;
+
+  // Initialize audio & honor user-gesture unlock if triggered via Sign In / Replay
+  useEffect(() => {
+    const audio = new CinematicAudioController();
+    audioRef.current = audio;
+
+    if (gestureUnlocked) {
+      const ok = audio.startAmbient();
+      if (ok) {
+        soundEnabledRef.current = true;
+        setSoundEnabled(true);
+      }
+    }
+
+    const unlockOnFirstGesture = () => {
+      if (isDoneRef.current || soundEnabledRef.current) return;
+      const ok = audio.startAmbient();
+      if (ok) {
+        soundEnabledRef.current = true;
+        setSoundEnabled(true);
+      }
+    };
+
+    window.addEventListener('pointerdown', unlockOnFirstGesture, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockOnFirstGesture);
+      audio.dispose();
+      audioRef.current = null;
+    };
+  }, [gestureUnlocked]);
+
+  const toggleSound = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!soundEnabledRef.current) {
+      const started = audio.startAmbient();
+      if (started) {
+        soundEnabledRef.current = true;
+        setSoundEnabled(true);
+      }
+    } else {
+      const next = !soundEnabledRef.current;
+      audio.setMuted(!next);
+      soundEnabledRef.current = next;
+      setSoundEnabled(next);
+    }
+  }, []);
+
+  const finishCeremony = useCallback(() => {
     if (isDoneRef.current) return;
     isDoneRef.current = true;
-    animRef.current.isDiving = true;
-    animRef.current.speedBoost = 5.0;
+    speedBoostRef.current = 3.2;
     setIsFadingOut(true);
-    synthRef.current?.playArrivalChime();
+    audioRef.current?.playArrivalChime();
 
     window.setTimeout(() => {
-      synthRef.current?.stop();
+      audioRef.current?.dispose();
       onComplete();
-    }, 750);
+    }, 780);
   }, [onComplete]);
 
-  // Click anywhere or press key to glide into Earth
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') {
         e.preventDefault();
-        finishFlight();
+        finishCeremony();
       } else if (e.key === 'm' || e.key === 'M') {
         toggleSound();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [finishFlight, soundEnabled]);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [finishCeremony, toggleSound]);
 
-  // -------------------------------------------------------------
-  // CONTINUOUS 3D FLIGHT: Cosmic Universe -> Zoom into Earth Space
-  // -------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Main 3D Paradise Dawn Awakening & CatmullRomCurve3 Cinema Render Loop
+  // -------------------------------------------------------------------------
   useEffect(() => {
+    if (!webglReady) {
+      const t = window.setTimeout(finishCeremony, 2200);
+      return () => window.clearTimeout(t);
+    }
+
     const container = containerRef.current;
     if (!container) return;
 
-    const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x020617, 0.012);
+    const reducedMotion = prefersReducedMotion();
+    if (reducedMotion) {
+      setBrandOpacity(1);
+      setActivePhaseId('brandReveal');
+      const timer = window.setTimeout(finishCeremony, 2400);
+      return () => window.clearTimeout(timer);
+    }
 
-    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 700);
-    // Initial cosmic universe camera position (high, distant, looking into the void towards Earth)
-    camera.position.set(22, 42, 230);
+    let disposed = false;
+    let frameId = 0;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const width = Math.max(320, container.clientWidth || 1280);
+    const height = Math.max(240, container.clientHeight || 720);
+
+    let renderer: THREE.WebGLRenderer | null = null;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance',
+      });
+    } catch {
+      const t = window.setTimeout(finishCeremony, 1800);
+      return () => window.clearTimeout(t);
+    }
+
+    const gl = renderer.getContext();
+    const isSoftwareGl = isSoftwareRenderer(gl);
+    const quality = detectParadiseQuality(isSoftwareGl, reducedMotion, width, height, 'auto');
+
+    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(quality.pixelRatio, 1.5));
+    renderer.setSize(width, height, false);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    renderer.shadowMap.enabled = quality.enableShadows && !isSoftwareGl;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.domElement.style.position = 'absolute';
     renderer.domElement.style.inset = '0';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
     container.appendChild(renderer.domElement);
 
-    // 1. PHASE 1: HYPERSPACE (Streak lines rushing along the cosmic axis)
-    // -------------------------------------------------------------
-    const warpCount = 1100;
-    const warpPositions = new Float32Array(warpCount * 6);
-    const warpColors = new Float32Array(warpCount * 6);
-    const warpSpeeds = new Float32Array(warpCount);
-    const warpLengths = new Float32Array(warpCount);
+    const onContextLost = (ev: Event) => {
+      ev.preventDefault();
+      setContextLost(true);
+    };
+    const onContextRestored = () => {
+      setContextLost(false);
+    };
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
 
-    for (let i = 0; i < warpCount; i++) {
-      const x = (Math.random() - 0.5) * 160;
-      const y = (Math.random() - 0.5) * 140;
-      const z = Math.random() * 260 - 30;
-      const len = 4.0 + Math.random() * 9.0;
+    const scene = new THREE.Scene();
+    const fog = new THREE.FogExp2(0x284068, 0.0155);
+    scene.fog = fog;
+    scene.background = new THREE.Color(0x1f3458);
 
-      warpPositions[i * 6] = x;
-      warpPositions[i * 6 + 1] = y;
-      warpPositions[i * 6 + 2] = z;
-      warpPositions[i * 6 + 3] = x;
-      warpPositions[i * 6 + 4] = y;
-      warpPositions[i * 6 + 5] = z - len;
+    const camera = new THREE.PerspectiveCamera(48, width / height, 0.25, 240);
 
-      const pCol = Math.random();
-      let r = 0.2, g = 0.8, b = 1.0;
-      if (pCol > 0.7) {
-        r = 1.0; g = 1.0; b = 1.0; // Pure white streak
-      } else if (pCol > 0.4) {
-        r = 0.65; g = 0.35; b = 1.0; // Electric violet
-      }
+    // PMREM environment reflection for mirror-smooth water & lantern bronze
+    const pmremGen = new THREE.PMREMGenerator(renderer);
+    const roomEnv = new RoomEnvironment();
+    const envRT = pmremGen.fromScene(roomEnv, 0.05);
+    scene.environment = envRT.texture;
+    scene.environmentIntensity = 0.5;
+    roomEnv.dispose();
+    pmremGen.dispose();
 
-      warpColors[i * 6] = r;
-      warpColors[i * 6 + 1] = g;
-      warpColors[i * 6 + 2] = b;
-      warpColors[i * 6 + 3] = r * 0.15;
-      warpColors[i * 6 + 4] = g * 0.15;
-      warpColors[i * 6 + 5] = b * 0.35;
+    const textures = createParadiseTextures(renderer.capabilities.getMaxAnisotropy());
+    const envEngine = new ParadiseEnvironmentEngine(0.214, 'morning-fog');
+    envEngine.autoCycle = false;
+    envEngine.autoWeather = false;
 
-      warpSpeeds[i] = 1.6 + Math.random() * 2.8;
-      warpLengths[i] = len;
+    // 1. Dynamic Dawn Sky Dome + Volumetric Clouds
+    const skyDome = createParadiseSkyDome();
+    scene.add(skyDome.mesh);
+
+    // 2. Calibrated Lighting Rig
+    const hemiLight = new THREE.HemisphereLight(0x6e8ec2, 0x263222, 0.72);
+    scene.add(hemiLight);
+
+    const sunLight = new THREE.DirectionalLight(0xffcb94, 1.45);
+    sunLight.position.set(18, 12, -16);
+    if (renderer.shadowMap.enabled) {
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.set(quality.shadowMapSize, quality.shadowMapSize);
+      sunLight.shadow.camera.near = 2;
+      sunLight.shadow.camera.far = 92;
+      const d = 30;
+      sunLight.shadow.camera.left = -d;
+      sunLight.shadow.camera.right = d;
+      sunLight.shadow.camera.top = d;
+      sunLight.shadow.camera.bottom = -d;
+      sunLight.shadow.bias = -0.0005;
+      sunLight.shadow.normalBias = 0.025;
+    }
+    scene.add(sunLight);
+
+    // 3. Terrain Valley & Shoreline Basin
+    const terrainSegs = quality.tier === 'high' ? 116 : quality.tier === 'medium' ? 92 : 68;
+    const terrainGeo = buildIntroTerrainGeometry(terrainSegs);
+    const terrainMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      map: textures.terrainDetail,
+      roughness: 0.88,
+      metalness: 0.03,
+    });
+    const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
+    terrainMesh.receiveShadow = true;
+    scene.add(terrainMesh);
+
+    // 4. Reflective Animated Water Surface
+    const waterGeo = new THREE.PlaneGeometry(78, 66);
+    let waterHandle: Water | null = null;
+    let fallbackWaterMesh: THREE.Mesh | null = null;
+    let fallbackWaterMat: THREE.ShaderMaterial | null = null;
+
+    if (!isSoftwareGl && quality.tier !== 'low') {
+      waterHandle = new Water(waterGeo, {
+        textureWidth: quality.tier === 'high' ? 512 : 256,
+        textureHeight: quality.tier === 'high' ? 512 : 256,
+        waterNormals: textures.waterNormals,
+        sunDirection: new THREE.Vector3(0.5, 0.35, -0.7).normalize(),
+        sunColor: 0xffd5a2,
+        waterColor: 0x164952,
+        distortionScale: 1.65,
+        fog: true,
+      });
+      waterHandle.rotation.x = -Math.PI / 2;
+      waterHandle.position.set(1.5, 0.0, -3.5);
+      scene.add(waterHandle);
+    } else {
+      fallbackWaterMat = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 },
+          uSkyColor: { value: new THREE.Color(0xeba175) },
+          uDeepColor: { value: new THREE.Color(0x133845) },
+          uSunDir: { value: new THREE.Vector3(0.5, 0.35, -0.7).normalize() },
+        },
+        transparent: true,
+        vertexShader: /* glsl */ `
+          varying vec3 vWorldPos;
+          void main() {
+            vec4 wp = modelMatrix * vec4(position, 1.0);
+            vWorldPos = wp.xyz;
+            gl_Position = projectionMatrix * viewMatrix * wp;
+          }
+        `,
+        fragmentShader: /* glsl */ `
+          uniform float uTime;
+          uniform vec3 uSkyColor;
+          uniform vec3 uDeepColor;
+          uniform vec3 uSunDir;
+          varying vec3 vWorldPos;
+          void main() {
+            vec2 p = vWorldPos.xz;
+            float r1 = sin(p.x * 1.4 + uTime * 1.2) * cos(p.y * 1.1 - uTime * 0.9);
+            float r2 = sin(p.x * 2.9 - p.y * 2.3 + uTime * 1.9);
+            vec3 N = normalize(vec3((r1 + r2 * 0.5) * 0.08, 1.0, (r1 - r2 * 0.5) * 0.08));
+            vec3 V = normalize(cameraPosition - vWorldPos);
+            float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.2);
+            vec3 R = reflect(-V, N);
+            float sunSpec = pow(max(dot(R, normalize(uSunDir)), 0.0), 72.0);
+            vec3 col = mix(uDeepColor, uSkyColor, clamp(fresnel * 0.82 + 0.14, 0.0, 1.0));
+            col += vec3(1.0, 0.88, 0.7) * sunSpec * 0.95;
+            gl_FragColor = vec4(col, 0.92);
+          }
+        `,
+      });
+      fallbackWaterMesh = new THREE.Mesh(waterGeo, fallbackWaterMat);
+      fallbackWaterMesh.rotation.x = -Math.PI / 2;
+      fallbackWaterMesh.position.set(1.5, 0.0, -3.5);
+      scene.add(fallbackWaterMesh);
     }
 
-    const warpGeo = new THREE.BufferGeometry();
-    warpGeo.setAttribute('position', new THREE.BufferAttribute(warpPositions, 3));
-    warpGeo.setAttribute('color', new THREE.BufferAttribute(warpColors, 3));
-    const warpLines = new THREE.LineSegments(
-      warpGeo,
-      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending })
+    // 5. Traditional Pagoda Pavilion, Arched Footbridge & Stone Lanterns
+    const architecture = createParadiseArchitecture(quality, textures);
+    scene.add(architecture.group);
+
+    // 6. Sculpted Sakura, Ginkgo & Pine Shoreline Groves
+    const groves = buildIntroCanopyGroves(
+      textures.barkMap,
+      textures.sakuraClusterMap,
+      textures.ginkgoClusterMap,
+      textures.pineClusterMap
     );
-    scene.add(warpLines);
+    scene.add(groves.group);
 
-    // 2. PHASE 2: COSMIC (Celestial planetary cluster & energy nexus around Z = 60 to 20)
-    // -------------------------------------------------------------
-    const cosmicGroup = new THREE.Group();
-    cosmicGroup.position.set(0, 0, 35);
-    scene.add(cosmicGroup);
+    // 7. Aerodynamic Sakura Petal & Golden Ginkgo Leaf Instanced Systems
+    const petalCount = quality.tier === 'high' ? 280 : quality.tier === 'medium' ? 200 : 130;
+    const ginkgoCount = quality.tier === 'high' ? 190 : quality.tier === 'medium' ? 140 : 90;
+    const totalDriftCount = petalCount + ginkgoCount;
 
-    // Crystalline Nexus Polyhedron
-    const nexusCore = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(1.8, 1),
-      new THREE.MeshBasicMaterial({ color: 0x818cf8, wireframe: true, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending })
-    );
-    const nexusInner = new THREE.Mesh(
-      new THREE.OctahedronGeometry(1.1, 0),
-      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending })
-    );
-    cosmicGroup.add(nexusCore, nexusInner);
-
-    // Orbiting celestial planet bodies with laser beams
-    const planetData = [
-      { color: 0xfbbf24, dist: 5.2, speed: 0.8, size: 0.28 }, // Sun
-      { color: 0x38bdf8, dist: 7.0, speed: 0.65, size: 0.22 }, // Earth
-      { color: 0xe2e8f0, dist: 7.8, speed: 0.8, size: 0.14 }, // Moon
-      { color: 0xfb923c, dist: 9.2, speed: 0.45, size: 0.32 }, // Jupiter
-      { color: 0xfde047, dist: 10.6, speed: 0.38, size: 0.26, hasRing: true }, // Saturn
-      { color: 0xef4444, dist: 11.8, speed: 0.55, size: 0.19 }, // Mars
-      { color: 0x3b82f6, dist: 13.0, speed: 0.32, size: 0.24 }, // Neptune
-      { color: 0xf472b6, dist: 14.2, speed: 0.5, size: 0.22 }, // Venus
-      { color: 0x94a3b8, dist: 15.4, speed: 0.75, size: 0.17 }, // Mercury
-      { color: 0x2dd4bf, dist: 16.6, speed: 0.35, size: 0.25 }, // Uranus
-    ];
-
-    const planetMeshes: THREE.Mesh[] = [];
-    const planetBeams: THREE.Line[] = [];
-
-    planetData.forEach((p) => {
-      const pMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(p.size, 16, 16),
-        new THREE.MeshBasicMaterial({ color: p.color, blending: THREE.AdditiveBlending })
-      );
-      if (p.hasRing) {
-        const ring = new THREE.Mesh(
-          new THREE.RingGeometry(p.size * 1.5, p.size * 2.5, 32),
-          new THREE.MeshBasicMaterial({ color: 0xfef08a, side: THREE.DoubleSide, transparent: true, opacity: 0.6 })
-        );
-        ring.rotation.x = Math.PI / 3;
-        pMesh.add(ring);
-      }
-      cosmicGroup.add(pMesh);
-      planetMeshes.push(pMesh);
-
-      const bGeo = new THREE.BufferGeometry();
-      bGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-      const bLine = new THREE.Line(
-        bGeo,
-        new THREE.LineBasicMaterial({ color: p.color, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending })
-      );
-      cosmicGroup.add(bLine);
-      planetBeams.push(bLine);
-    });
-
-    // 3. PHASE 3: DIGITAL EARTH (Target destination globe positioned at Z = 0)
-    // -------------------------------------------------------------
-    const earthGroup = new THREE.Group();
-    earthGroup.position.set(0, 0, 0);
-    scene.add(earthGroup);
-
-    // Geodesic wireframe globe
-    const earthWire = new THREE.Mesh(
-      new THREE.SphereGeometry(2.4, 46, 46),
-      new THREE.MeshBasicMaterial({ color: 0x06b6d4, wireframe: true, transparent: true, opacity: 0.45 })
-    );
-    // Atmospheric glow core
-    const earthCore = new THREE.Mesh(
-      new THREE.SphereGeometry(2.35, 36, 36),
-      new THREE.MeshBasicMaterial({ color: 0x0284c7, transparent: true, opacity: 0.22 })
-    );
-    earthGroup.add(earthWire, earthCore);
-
-    // Concentric orbital telemetry rings
-    const ring1 = new THREE.Mesh(
-      new THREE.RingGeometry(3.1, 3.13, 96),
-      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.65, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })
-    );
-    ring1.rotation.x = Math.PI / 2.3;
-    const ring2 = new THREE.Mesh(
-      new THREE.RingGeometry(3.55, 3.57, 80),
-      new THREE.MeshBasicMaterial({ color: 0xa855f7, transparent: true, opacity: 0.45, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })
-    );
-    ring2.rotation.x = -Math.PI / 3;
-    ring2.rotation.y = Math.PI / 6;
-    earthGroup.add(ring1, ring2);
-
-    // Global city coordinate beacons
-    const cityCoords = [
-      { name: 'Tokyo', lat: 35.67, lng: 139.65 },
-      { name: 'Beijing', lat: 39.9, lng: 116.4 },
-      { name: 'London', lat: 51.5, lng: -0.12 },
-      { name: 'New York', lat: 40.71, lng: -74.0 },
-      { name: 'Cairo', lat: 30.04, lng: 31.23 },
-      { name: 'Dubai', lat: 25.2, lng: 55.27 },
-      { name: 'Sydney', lat: -33.86, lng: 151.2 },
-      { name: 'Rio', lat: -22.9, lng: -43.17 },
-      { name: 'Paris', lat: 48.85, lng: 2.35 },
-      { name: 'Singapore', lat: 1.35, lng: 103.82 },
-    ];
-
-    const cityVecs: THREE.Vector3[] = [];
-    cityCoords.forEach((c) => {
-      const phi = (90 - c.lat) * (Math.PI / 180);
-      const theta = (c.lng + 180) * (Math.PI / 180);
-      const r = 2.42;
-      const v = new THREE.Vector3(
-        -(r * Math.sin(phi) * Math.cos(theta)),
-        r * Math.cos(phi),
-        r * Math.sin(phi) * Math.sin(theta)
-      );
-      cityVecs.push(v);
-
-      const beacon = new THREE.Mesh(
-        new THREE.SphereGeometry(0.065, 16, 16),
-        new THREE.MeshBasicMaterial({ color: 0x38bdf8, blending: THREE.AdditiveBlending })
-      );
-      beacon.position.copy(v);
-      earthGroup.add(beacon);
-
-      const topV = v.clone().multiplyScalar(1.25);
-      const pPositions = new Float32Array([v.x, v.y, v.z, topV.x, topV.y, topV.z]);
-      const pGeo = new THREE.BufferGeometry();
-      pGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
-      const pLine = new THREE.Line(
-        pGeo,
-        new THREE.LineBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending })
-      );
-      earthGroup.add(pLine);
-    });
-
-    // Great-circle data arcs crossing over the globe
-    const arcPairs = [[0, 1], [1, 5], [5, 4], [4, 8], [8, 2], [2, 3], [3, 7], [0, 6], [1, 9]];
-    arcPairs.forEach(([i1, i2]) => {
-      const v1 = cityVecs[i1];
-      const v2 = cityVecs[i2];
-      const pts: THREE.Vector3[] = [];
-      const segs = 32;
-      for (let s = 0; s <= segs; s++) {
-        const a = s / segs;
-        const p = new THREE.Vector3().lerpVectors(v1, v2, a);
-        const alt = 2.42 + Math.sin(a * Math.PI) * 0.48;
-        p.normalize().multiplyScalar(alt);
-        pts.push(p);
-      }
-      const arcGeo = new THREE.BufferGeometry().setFromPoints(pts);
-      const arcLine = new THREE.Line(
-        arcGeo,
-        new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending })
-      );
-      earthGroup.add(arcLine);
-    });
-
-    // 4. Galaxy Deep Starfield
-    // -------------------------------------------------------------
-    const starCount = 2400;
-    const starPos = new Float32Array(starCount * 3);
-    const starColors = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
-      starPos[i * 3] = (Math.random() - 0.5) * 260;
-      starPos[i * 3 + 1] = (Math.random() - 0.5) * 260;
-      starPos[i * 3 + 2] = (Math.random() - 0.5) * 350;
-
-      const rnd = Math.random();
-      starColors[i * 3] = rnd > 0.6 ? 0.6 : 1.0;
-      starColors[i * 3 + 1] = rnd > 0.3 ? 0.85 : 0.95;
-      starColors[i * 3 + 2] = 1.0;
+    const sakuraGeo = new THREE.PlaneGeometry(0.16, 0.16, 2, 2);
+    // Gentle petal cup curvature
+    const sPos = sakuraGeo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < sPos.count; i++) {
+      const x = sPos.getX(i);
+      const y = sPos.getY(i);
+      sPos.setZ(i, (x * x + y * y) * 2.2);
     }
-    const starGeo = new THREE.BufferGeometry();
-    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
-    const starField = new THREE.Points(
-      starGeo,
-      new THREE.PointsMaterial({ size: 0.08, vertexColors: true, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending })
-    );
-    scene.add(starField);
+    sakuraGeo.computeVertexNormals();
 
-    // Mouse parallax tracking
-    let mouseX = 0;
-    let mouseY = 0;
+    const ginkgoGeo = new THREE.PlaneGeometry(0.24, 0.24, 2, 2);
+    const gPos = ginkgoGeo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < gPos.count; i++) {
+      const x = gPos.getX(i);
+      const y = gPos.getY(i);
+      gPos.setZ(i, Math.sin(x * 16) * 0.015 - y * y * 0.8);
+    }
+    ginkgoGeo.computeVertexNormals();
+
+    const sakuraParticleMat = new THREE.MeshStandardMaterial({
+      map: textures.sakuraPetalTex,
+      alphaTest: 0.25,
+      transparent: true,
+      opacity: 0.94,
+      side: THREE.DoubleSide,
+      roughness: 0.62,
+      emissive: new THREE.Color(0x4d2032),
+      emissiveIntensity: 0.22,
+    });
+    applyBacklitFoliageNormalPatch(sakuraParticleMat);
+
+    const ginkgoParticleMat = new THREE.MeshStandardMaterial({
+      map: textures.ginkgoLeafTex,
+      alphaTest: 0.25,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      roughness: 0.58,
+      emissive: new THREE.Color(0x523c0a),
+      emissiveIntensity: 0.18,
+    });
+    applyBacklitFoliageNormalPatch(ginkgoParticleMat);
+
+    const sakuraInst = new THREE.InstancedMesh(sakuraGeo, sakuraParticleMat, petalCount);
+    const ginkgoInst = new THREE.InstancedMesh(ginkgoGeo, ginkgoParticleMat, ginkgoCount);
+    sakuraInst.frustumCulled = false;
+    ginkgoInst.frustumCulled = false;
+
+    const particles: PetalParticle[] = [];
+    for (let i = 0; i < totalDriftCount; i++) {
+      const isGinkgo = i >= petalCount;
+      particles.push({
+        x: (Math.random() - 0.5) * 44,
+        y: 1.0 + Math.random() * 14,
+        z: (Math.random() - 0.5) * 48,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: -(0.35 + Math.random() * 0.5),
+        vz: (Math.random() - 0.5) * 0.3,
+        rx: Math.random() * Math.PI * 2,
+        ry: Math.random() * Math.PI * 2,
+        rz: Math.random() * Math.PI * 2,
+        spinX: (Math.random() - 0.5) * 2.4,
+        spinY: (Math.random() - 0.5) * 2.1,
+        spinZ: (Math.random() - 0.5) * 2.4,
+        scale: isGinkgo ? 0.8 + Math.random() * 0.55 : 0.72 + Math.random() * 0.58,
+        phase: Math.random() * Math.PI * 2,
+        isGinkgo,
+      });
+
+      const idx = isGinkgo ? i - petalCount : i;
+      if (isGinkgo) {
+        _tmpColor.setHSL(0.11 + Math.random() * 0.03, 0.88, 0.56 + Math.random() * 0.14);
+        ginkgoInst.setColorAt(idx, _tmpColor);
+      } else {
+        _tmpColor.setHSL(0.94 + Math.random() * 0.03, 0.7 + Math.random() * 0.2, 0.86 + Math.random() * 0.12);
+        sakuraInst.setColorAt(idx, _tmpColor);
+      }
+    }
+    if (sakuraInst.instanceColor) sakuraInst.instanceColor.needsUpdate = true;
+    if (ginkgoInst.instanceColor) ginkgoInst.instanceColor.needsUpdate = true;
+    scene.add(sakuraInst, ginkgoInst);
+
+    // 8. Atmospheric Lake Mist Banks
+    const mistCount = 14;
+    const mistGeo = new THREE.PlaneGeometry(16, 7.5);
+    const mistMat = new THREE.MeshBasicMaterial({
+      map: textures.mistPuff,
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false,
+      color: 0xe6eff9,
+    });
+    const mistMeshes: Array<{ mesh: THREE.Mesh; baseX: number; speed: number; phase: number }> = [];
+    for (let i = 0; i < mistCount; i++) {
+      const m = new THREE.Mesh(mistGeo, mistMat);
+      const bx = (Math.random() - 0.5) * 42;
+      const bz = -18 + Math.random() * 34;
+      m.position.set(bx, 1.3 + Math.random() * 2.4, bz);
+      m.scale.setScalar(0.85 + Math.random() * 0.75);
+      scene.add(m);
+      mistMeshes.push({ mesh: m, baseX: bx, speed: 0.35 + Math.random() * 0.4, phase: Math.random() * Math.PI * 2 });
+    }
+
+    // 9. Crepuscular Volumetric Sunrise Beams
+    const sunBeams = createSunBeams();
+    scene.add(sunBeams.group);
+
+    // 10. Optional HDR Bloom / GodRays Pipeline (skipped cleanly on software WebGL)
+    let postPipeline: ParadisePostPipeline | null = null;
+    if (!isSoftwareGl && (quality.enableBloom || quality.enableGodRays)) {
+      postPipeline = createParadisePostPipeline(
+        renderer,
+        scene,
+        camera,
+        width,
+        height,
+        renderer.getPixelRatio(),
+        {
+          enableBloom: quality.enableBloom,
+          enableGodRays: quality.enableGodRays,
+          enableDOF: false,
+        }
+      );
+      postPipeline.setOptions({ cameraNear: 0.25, cameraFar: 240 });
+    } else {
+      try {
+        renderer.compile(scene, camera);
+      } catch {}
+    }
+
+    // Subtle mouse parallax
     let targetMouseX = 0;
     let targetMouseY = 0;
-
-    const onMouseMove = (e: MouseEvent) => {
+    let mouseX = 0;
+    let mouseY = 0;
+    const onPointerMove = (e: MouseEvent) => {
       const rect = container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
       targetMouseX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
       targetMouseY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
     };
-    window.addEventListener('mousemove', onMouseMove);
-
-    // -------------------------------------------------------------
-    // SMOOTH CAMERA ZOOM: Deep Universe -> Zoom into Earth Space
-    // -------------------------------------------------------------
-    const flightDuration = 6.8; // Duration in seconds of the seamless cosmic flight
-
-    const animate = () => {
-      const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced) {
-      finishFlight();
-      return () => {
-        window.removeEventListener('resize', onResize);
-        window.removeEventListener('mousemove', onMouseMove);
-      };
-    }
-    animRef.current.rafId = requestAnimationFrame(animate);
-      const elapsed = (performance.now() - animRef.current.startTime) / 1000;
-      const boost = animRef.current.speedBoost;
-
-      // Mouse smoothing
-      mouseX += (targetMouseX - mouseX) * 0.04;
-      mouseY += (targetMouseY - mouseY) * 0.04;
-
-      // Normalized progress with smooth ease-in-out curve
-      const rawProgress = Math.min(1.0, (elapsed * boost) / flightDuration);
-      // Smoothstep easing for cinematic camera acceleration and decelerated orbit arrival
-      const progress = rawProgress * rawProgress * (3 - 2 * rawProgress);
-
-      // Camera Trajectory:
-      // Z moves from deep space (230) -> sweeping through cosmic nexus (60) -> entering Earth space (4.8)
-      let camZ = 230 - progress * 225.2;
-      // Camera X and Y banking curves
-      let camX = (1 - progress) * (22 * Math.cos(elapsed * 0.45)) + mouseX * 1.5;
-      let camY = (1 - progress) * (42 * (1 - progress * 0.7) + Math.sin(elapsed * 0.3) * 5) + progress * 0.5 + mouseY * 1.5;
-
-      // Final hyper-dive if user clicks / completes
-      if (animRef.current.isDiving) {
-        camZ -= 3.5;
-      }
-
-      camera.position.set(camX, camY, camZ);
-      camera.lookAt(0, 0, 0);
-
-      // If flight completes smoothly, trigger finish
-      if (rawProgress >= 1.0 && !isDoneRef.current) {
-        finishFlight();
-      }
-
-      // Animate hyperspace streaks
-      const wPos = warpGeo.attributes.position.array as Float32Array;
-      const streakSpeed = (2.0 + Math.max(0, 1.2 - progress * 1.2)) * boost;
-      for (let i = 0; i < warpCount; i++) {
-        const spd = warpSpeeds[i] * streakSpeed;
-        const len = warpLengths[i];
-        wPos[i * 6 + 2] += spd;
-        wPos[i * 6 + 5] = wPos[i * 6 + 2] - len;
-        if (wPos[i * 6 + 2] > camera.position.z + 15) {
-          wPos[i * 6 + 2] = camera.position.z - 160;
-          wPos[i * 6 + 5] = wPos[i * 6 + 2] - len;
-        }
-      }
-      warpGeo.attributes.position.needsUpdate = true;
-
-      // Animate Cosmic nexus & planets
-      nexusCore.rotation.x += 0.008;
-      nexusCore.rotation.y += 0.012;
-      nexusInner.rotation.x -= 0.01;
-
-      planetData.forEach((p, idx) => {
-        const pAngle = elapsed * 0.5 * p.speed + (idx * Math.PI * 2) / 10;
-        const px = Math.cos(pAngle) * p.dist;
-        const py = Math.sin(elapsed * 0.7 + idx) * 0.4;
-        const pz = Math.sin(pAngle) * p.dist;
-
-        const pm = planetMeshes[idx];
-        pm.position.set(px, py, pz);
-
-        const bLine = planetBeams[idx];
-        const bPos = bLine.geometry.attributes.position.array as Float32Array;
-        bPos[0] = 0; bPos[1] = 0; bPos[2] = 0;
-        bPos[3] = px; bPos[4] = py; bPos[5] = pz;
-        bLine.geometry.attributes.position.needsUpdate = true;
-      });
-
-      // Animate Digital Earth rotation & pulses
-      earthGroup.rotation.y += 0.004;
-      ring1.rotation.z -= 0.0025;
-      ring2.rotation.z += 0.003;
-      earthWire.scale.setScalar(1 + Math.sin(elapsed * 2) * 0.008);
-
-      starField.rotation.y += 0.00025;
-
-      renderer.render(scene, camera);
-    };
-
-    const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced) {
-      finishFlight();
-      return () => {
-        window.removeEventListener('resize', onResize);
-        window.removeEventListener('mousemove', onMouseMove);
-      };
-    }
-    animRef.current.rafId = requestAnimationFrame(animate);
+    window.addEventListener('mousemove', onPointerMove, { passive: true });
 
     const onResize = () => {
-      if (!container || !camera || !renderer) return;
-      camera.aspect = container.clientWidth / container.clientHeight;
+      if (!container || !renderer || disposed) return;
+      const w = Math.max(300, container.clientWidth);
+      const h = Math.max(240, container.clientHeight);
+      camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setSize(w, h, false);
+      postPipeline?.setSize(w, h, renderer.getPixelRatio());
     };
     window.addEventListener('resize', onResize);
 
-    return () => {
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('mousemove', onMouseMove);
-      cancelAnimationFrame(animRef.current.rafId);
-      renderer.dispose();
-      if (renderer.domElement.parentNode) {
-        renderer.domElement.parentNode.removeChild(renderer.domElement);
+    const director = directorRef.current!;
+    let lastClockMs = performance.now();
+    let timelineSec = 0;
+    let hudSyncAccum = 0;
+    let lastPhaseId = INTRO_PHASES[0].id;
+    let lastCaption = '';
+
+    // Synchronize frame 0 immediately so no uninitialized flash occurs
+    const eval0 = director.evaluate(0, userNameRef.current);
+    camera.position.copy(eval0.cameraPos);
+    camera.lookAt(eval0.lookAt);
+
+    function afterDraw(cb: () => void) {
+      const context = renderer?.getContext() as WebGL2RenderingContext | null;
+      if (!context || typeof context.fenceSync !== 'function') {
+        frameId = window.setTimeout(cb, 80);
+        return;
+      }
+      const sync = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      context.flush();
+      const poll = () => {
+        if (disposed) {
+          if (sync) context.deleteSync(sync);
+          return;
+        }
+        const status = sync ? context.getSyncParameter(sync, context.SYNC_STATUS) : context.SIGNALED;
+        if (status === context.UNSIGNALED) {
+          frameId = window.setTimeout(poll, 5);
+        } else {
+          if (sync) context.deleteSync(sync);
+          frameId = window.setTimeout(cb, 80);
+        }
+      };
+      frameId = window.setTimeout(poll, 5);
+    }
+
+    const tick = () => {
+      if (disposed) return;
+      const nowMs = performance.now();
+      const rawDt = Math.min(0.08, Math.max(0.001, (nowMs - lastClockMs) / 1000));
+      lastClockMs = nowMs;
+
+      timelineSec = Math.min(
+        INTRO_TOTAL_DURATION_SEC,
+        timelineSec + rawDt * speedBoostRef.current
+      );
+
+      const ev = director.evaluate(timelineSec, userNameRef.current);
+
+      // Update environment lighting & sky dome from timeline phase
+      envEngine.timeOfDay = ev.timeOfDay;
+      envEngine.update(rawDt);
+      const atmo = envEngine.state;
+
+      fog.color.copy(atmo.fogColor);
+      fog.density = ev.fogDensity;
+      (scene.background as THREE.Color).copy(atmo.horizonColor);
+      renderer!.toneMappingExposure = atmo.exposure;
+
+      skyDome.uniforms.uTime.value += rawDt;
+      skyDome.uniforms.uSunDir.value.copy(atmo.sunDir);
+      skyDome.uniforms.uMoonDir.value.copy(atmo.moonDir);
+      skyDome.uniforms.uZenithColor.value.copy(atmo.zenithColor);
+      skyDome.uniforms.uHorizonColor.value.copy(atmo.horizonColor);
+      skyDome.uniforms.uCloudCover.value = THREE.MathUtils.lerp(0.55, 0.28, ev.progress);
+      skyDome.uniforms.uCloudDarkness.value = THREE.MathUtils.lerp(0.18, 0.04, ev.progress);
+      skyDome.uniforms.uDayFactor.value = atmo.dayFactor;
+      skyDome.uniforms.uTwilightFactor.value = atmo.twilightFactor;
+      skyDome.uniforms.uNightFactor.value = atmo.nightFactor;
+      skyDome.uniforms.uWindSpeed.value = ev.windStrength;
+
+      hemiLight.color.copy(atmo.hemiSkyColor);
+      hemiLight.groundColor.copy(atmo.hemiGroundColor);
+      hemiLight.intensity = 0.45 + atmo.dayFactor * 0.48 + atmo.twilightFactor * 0.22;
+
+      sunLight.position.copy(atmo.sunDir).multiplyScalar(42);
+      sunLight.color.copy(atmo.sunLightColor);
+      sunLight.intensity = 0.55 + atmo.dayFactor * 1.45 + atmo.twilightFactor * 0.65;
+
+      // Pavilion stone lantern warm glow
+      architecture.lanternLight.intensity = ev.lanternGlow * 2.6;
+      architecture.lanternGlassMat.emissiveIntensity = 0.25 + ev.lanternGlow * 2.2;
+
+      // Water uniforms
+      if (waterHandle) {
+        waterHandle.material.uniforms.time.value += rawDt * 0.42;
+        waterHandle.material.uniforms.sunDirection.value.copy(atmo.sunDir);
+        waterHandle.material.uniforms.sunColor.value.copy(atmo.sunLightColor);
+      } else if (fallbackWaterMat) {
+        fallbackWaterMat.uniforms.uTime.value += rawDt;
+        fallbackWaterMat.uniforms.uSkyColor.value.copy(atmo.horizonColor);
+        fallbackWaterMat.uniforms.uSunDir.value.copy(atmo.sunDir);
+      }
+
+      // Sunrise beams & mist
+      sunBeams.uniforms.uTime.value += rawDt;
+      sunBeams.uniforms.uIntensity.value = ev.godRayIntensity;
+      sunBeams.uniforms.uColor.value.copy(atmo.sunLightColor).lerp(_godRayColor, 0.5);
+
+      mistMat.opacity = 0.26 * ev.mistOpacity;
+      mistMat.color.copy(atmo.horizonColor).lerp(_godRayColor, 0.18);
+      for (const item of mistMeshes) {
+        item.mesh.position.x = item.baseX + Math.sin(skyDome.uniforms.uTime.value * 0.18 * item.speed + item.phase) * 3.8;
+        item.mesh.lookAt(camera.position.x, item.mesh.position.y, camera.position.z);
+      }
+
+      // Update aerodynamic Sakura petals & Ginkgo leaves
+      let sIdx = 0;
+      let gIdx = 0;
+      const tNow = skyDome.uniforms.uTime.value;
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        sampleWindField(p.x, p.y, p.z, tNow, ev.windStrength, _windVec);
+        const flutter = Math.sin(tNow * 2.6 + p.phase) * (0.28 + ev.windStrength * 0.42);
+        p.x += (_windVec.x * 0.55 + flutter * 0.35) * rawDt;
+        p.y += (p.vy * (0.8 + ev.windStrength * 0.25) + _windVec.y * 0.3) * rawDt;
+        p.z += (_windVec.z * 0.55 + Math.cos(tNow * 2.1 + p.phase) * 0.25) * rawDt;
+
+        p.rx += p.spinX * rawDt * (0.7 + ev.windStrength);
+        p.ry += p.spinY * rawDt * (0.7 + ev.windStrength);
+        p.rz += p.spinZ * rawDt * (0.7 + ev.windStrength);
+
+        if (p.y < 0.05 || Math.abs(p.x) > 26 || Math.abs(p.z) > 28) {
+          p.x = (Math.random() - 0.5) * 40;
+          p.y = 8.5 + Math.random() * 8.5;
+          p.z = (Math.random() - 0.5) * 42;
+        }
+
+        const visScale = p.scale * (0.65 + 0.55 * ev.petalIntensity);
+        _dummyPos.set(p.x, p.y, p.z);
+        _dummyEuler.set(p.rx, p.ry, p.rz);
+        _dummyQuat.setFromEuler(_dummyEuler);
+        _dummyScale.setScalar(visScale);
+        _dummyMat4.compose(_dummyPos, _dummyQuat, _dummyScale);
+
+        if (p.isGinkgo) {
+          ginkgoInst.setMatrixAt(gIdx++, _dummyMat4);
+        } else {
+          sakuraInst.setMatrixAt(sIdx++, _dummyMat4);
+        }
+      }
+      sakuraInst.instanceMatrix.needsUpdate = true;
+      ginkgoInst.instanceMatrix.needsUpdate = true;
+
+      // Subtle damped mouse parallax offset during flythrough
+      mouseX += (targetMouseX - mouseX) * Math.min(1, rawDt * 3.5);
+      mouseY += (targetMouseY - mouseY) * Math.min(1, rawDt * 3.5);
+      const parallaxAmp = 1.0 - ev.fadeOutOverlay;
+
+      camera.position.set(
+        ev.cameraPos.x + mouseX * 0.65 * parallaxAmp,
+        ev.cameraPos.y - mouseY * 0.35 * parallaxAmp,
+        ev.cameraPos.z
+      );
+      camera.fov = ev.fov;
+      camera.updateProjectionMatrix();
+      camera.lookAt(ev.lookAt);
+
+      // Update ambient audio & English Voice Over triggers cleanly
+      audioRef.current?.updateAtmosphere(ev.windStrength, ev.timeOfDay);
+      if (timelineSec >= 2.85 && timelineSec < 6.0) {
+        audioRef.current?.speakCueOnce('phase_brand', INTRO_PHASES[1].voLine || '');
+      } else if (timelineSec >= 6.45 && timelineSec < 10.2) {
+        audioRef.current?.speakCueOnce('phase_welcome', formatPersonalWelcomeVo(userNameRef.current));
+      }
+
+      // Render frame via PostPipeline or direct Renderer
+      if (postPipeline) {
+        _sunProj.copy(atmo.sunDir).multiplyScalar(100).project(camera);
+        _sunPos2D.set(_sunProj.x * 0.5 + 0.5, _sunProj.y * 0.5 + 0.5);
+        postPipeline.setOptions({
+          sunScreenPos: _sunPos2D,
+          godRayIntensity: ev.godRayIntensity,
+          godRayColor: atmo.sunLightColor,
+        });
+        postPipeline.render();
+      } else {
+        renderer!.render(scene, camera);
+      }
+
+      // Throttled React HUD sync (~16fps) to avoid layout thrashing
+      hudSyncAccum += rawDt;
+      if (hudSyncAccum >= 0.06 || ev.phase.id !== lastPhaseId || ev.activeCaption !== lastCaption) {
+        hudSyncAccum = 0;
+        lastPhaseId = ev.phase.id;
+        lastCaption = ev.activeCaption;
+        setActivePhaseId(ev.phase.id);
+        setBrandOpacity(ev.brandOpacity);
+        setWelcomeOpacity(ev.welcomeOpacity);
+        setActiveCaption(ev.activeCaption);
+        setProgressRatio(ev.progress);
+      }
+
+      if (timelineSec >= INTRO_TOTAL_DURATION_SEC && !isDoneRef.current) {
+        finishCeremony();
+        return;
+      }
+
+      if (isSoftwareGl) {
+        afterDraw(tick);
+      } else {
+        frameId = requestAnimationFrame(tick);
       }
     };
-  }, [finishFlight]);
+
+    if (isSoftwareGl) {
+      afterDraw(tick);
+    } else {
+      frameId = requestAnimationFrame(tick);
+    }
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frameId);
+      clearTimeout(frameId);
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('resize', onResize);
+      renderer?.domElement.removeEventListener('webglcontextlost', onContextLost);
+      renderer?.domElement.removeEventListener('webglcontextrestored', onContextRestored);
+
+      postPipeline?.dispose();
+      skyDome.dispose();
+      architecture.dispose();
+      groves.dispose();
+      terrainGeo.dispose();
+      terrainMat.dispose();
+      waterGeo.dispose();
+      waterHandle?.material?.dispose();
+      fallbackWaterMat?.dispose();
+      sakuraGeo.dispose();
+      ginkgoGeo.dispose();
+      sakuraParticleMat.dispose();
+      ginkgoParticleMat.dispose();
+      mistGeo.dispose();
+      mistMat.dispose();
+      sunBeams.dispose();
+      textures.dispose();
+      envRT.dispose();
+
+      if (renderer) {
+        renderer.dispose();
+        if (renderer.domElement.parentNode) {
+          renderer.domElement.parentNode.removeChild(renderer.domElement);
+        }
+      }
+    };
+  }, [finishCeremony, webglReady]);
+
+  const userDisplay = currentUser?.displayName || currentUser?.username;
+  const activePhaseMeta = INTRO_PHASES.find((p) => p.id === activePhaseId) || INTRO_PHASES[0];
 
   return (
     <div
-      onClick={finishFlight}
-      className={`fixed inset-0 z-[250] bg-[#020617] select-none cursor-pointer overflow-hidden transition-opacity duration-700 ease-out ${
+      className={`fixed inset-0 z-[250] overflow-hidden select-none transition-opacity duration-700 ease-out bg-gradient-to-b from-[#0b162a] via-[#1b2e4d] to-[#e49a73] ${
         isFadingOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
-      aria-label="ONE 宇宙穿梭"
-      title="点击任意处进入 ONE"
+      aria-label={isZh ? 'ONE 入场欢迎仪式' : 'ONE Opening Ceremony'}
     >
-      {/* 3D WebGL Canvas Layer (Pure Visual Spectacle, Zero Text Overlays) */}
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* Dedicated WebGL Stage */}
+      {webglReady && !contextLost && (
+        <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+      )}
 
-      {/* Atmospheric Cinematic Vignette & Gradients */}
-      <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-[#020617]/70 via-transparent to-[#020617]/60" />
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_45%,rgba(2,6,23,0.8)_100%)]" />
+      {/* Subtle Cinema Vignette Scrims (solid alpha gradients only — no backdrop-blur over WebGL) */}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-black/55" />
 
-      {/* Subtle Bottom Controls (Minimal Icons Only, Zero Text Overlay) */}
-      <div className="absolute bottom-6 left-6 right-6 flex items-center justify-between z-20 pointer-events-none">
-        {/* Audio Toggle (Icon only) */}
+      {/* Top Precision Timeline Progress Bar */}
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-20 h-[2px] bg-white/15">
+        <div
+          className="h-full bg-gradient-to-r from-[#C4A876] via-[#f7e7c4] to-[#ffffff] transition-[width] duration-100 ease-linear"
+          style={{ width: `${Math.round(progressRatio * 1000) / 10}%` }}
+        />
+      </div>
+
+      {/* Subtle Unboxed Chapter Indicator */}
+      <div className="pointer-events-none fixed left-6 top-6 z-20 flex items-center gap-2.5 text-xs font-medium tracking-[0.14em] text-white/80">
+        <span>{isZh ? activePhaseMeta.zhLabel : activePhaseMeta.enLabel}</span>
+        <span aria-hidden="true">·</span>
+        <span className="font-mono tabular-nums text-white/60">
+          {Math.round(progressRatio * 100)}%
+        </span>
+      </div>
+
+      {/* Phase 2: Restrained Brand Reveal */}
+      <div
+        className="pointer-events-none fixed inset-0 z-10 flex flex-col items-center justify-center px-6 text-center transition-transform duration-700 ease-out"
+        style={{
+          opacity: brandOpacity,
+          transform: `translate3d(0, ${(1 - brandOpacity) * 14}px, 0)`,
+        }}
+      >
+        <div className="mb-5 drop-shadow-[0_12px_36px_rgba(0,0,0,0.45)]">
+          <BrandMark concept="origin-final" mode="dark" lockup="symbol" size={76} />
+        </div>
+        <h1 className="text-[clamp(2.25rem,5vw,3.75rem)] font-semibold tracking-[0.28em] text-[#F7F5F0] drop-shadow-[0_4px_24px_rgba(0,0,0,0.55)]">
+          EARTH ONE
+        </h1>
+        <p className="mt-3 max-w-xl text-balance text-sm sm:text-base font-normal tracking-[0.12em] text-[#E6E2D8] drop-shadow-[0_2px_12px_rgba(0,0,0,0.65)]">
+          {isZh ? '同一个世界 · 无限可能' : 'One World · Infinite Possibilities'}
+        </p>
+      </div>
+
+      {/* Phase 3: Living Sanctuary Personalized Welcome */}
+      <div
+        className="pointer-events-none fixed inset-x-0 top-[18%] z-10 flex flex-col items-center px-6 text-center transition-transform duration-700 ease-out"
+        style={{
+          opacity: welcomeOpacity,
+          transform: `translate3d(0, ${(1 - welcomeOpacity) * 12}px, 0)`,
+        }}
+      >
+        <p className="text-xs font-medium tracking-[0.22em] text-[#EAD7B2] drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]">
+          {isZh ? '欢迎来到精神花园' : 'PARADISE SANCTUARY'}
+        </p>
+        <h2 className="mt-2 max-w-2xl text-balance text-[clamp(1.75rem,3.6vw,2.75rem)] font-medium tracking-wide text-white drop-shadow-[0_6px_28px_rgba(0,0,0,0.6)]">
+          {userDisplay
+            ? isZh
+              ? `欢迎回家，${userDisplay}`
+              : `Welcome home, ${userDisplay}`
+            : isZh
+              ? '欢迎来到 ONE'
+              : 'Welcome to ONE'}
+        </h2>
+      </div>
+
+      {/* Synchronized English Voice Over Subtitle Line */}
+      {activeCaption && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-20 z-20 flex justify-center px-5">
+          <p className="max-w-xl text-balance rounded-xl bg-[#070d18]/72 px-4 py-2 text-center text-xs sm:text-sm leading-relaxed text-[#F7F5F0] shadow-lg">
+            {activeCaption}
+          </p>
+        </div>
+      )}
+
+      {/* Clean Single-Row Bottom Action Controls (>= 44px touch targets, no backdrop-blur) */}
+      <div className="fixed inset-x-0 bottom-5 z-30 flex items-center justify-between px-5 sm:px-8 pointer-events-none">
         <button
           type="button"
           onClick={toggleSound}
-          className={`pointer-events-auto p-3 rounded-full border backdrop-blur-md transition-all ${
+          className={`pointer-events-auto inline-flex min-h-[44px] items-center gap-2 rounded-xl border px-3.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
             soundEnabled
-              ? 'border-cyan-500/70 bg-cyan-950/70 text-cyan-200 shadow-[0_0_15px_rgba(6,182,212,0.35)]'
-              : 'border-slate-800/80 bg-slate-950/60 text-slate-400 hover:text-slate-200'
+              ? 'border-[#C4A876]/60 bg-[#0b1322]/85 text-[#F7F5F0] hover:bg-[#132036]'
+              : 'border-white/20 bg-[#0b1322]/75 text-white/80 hover:bg-[#132036] hover:text-white'
           }`}
-          title={soundEnabled ? '静音音效 (M)' : '开启全息宇宙音频 (M)'}
+          aria-label={soundEnabled ? 'Mute sound' : 'Enable sound and voice over'}
         >
-          {soundEnabled ? <Volume2 className="w-4 h-4 text-cyan-400" /> : <VolumeX className="w-4 h-4" />}
+          {soundEnabled ? (
+            <Volume2 className="h-4 w-4 text-[#C4A876]" />
+          ) : (
+            <VolumeX className="h-4 w-4" />
+          )}
+          <span>
+            {soundEnabled
+              ? isZh
+                ? '语音与环境音开启'
+                : 'Audio On'
+              : isZh
+                ? '开启声景与旁白 (M)'
+                : 'Enable Audio (M)'}
+          </span>
         </button>
 
-        {/* Minimal Direct Enter Icon */}
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            finishFlight();
+            finishCeremony();
           }}
-          className="pointer-events-auto p-3 rounded-full border border-cyan-500/40 bg-slate-950/70 text-cyan-200 hover:text-white hover:border-cyan-400 hover:bg-cyan-950/80 transition-all shadow-[0_0_20px_rgba(6,182,212,0.2)] backdrop-blur-md group"
-          title="进入 ONE (Space / Esc)"
+          className="pointer-events-auto inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-white/25 bg-[#0b1322]/85 px-5 text-xs sm:text-sm font-medium text-[#F7F5F0] hover:border-[#C4A876]/80 hover:bg-[#15243d] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
         >
-          <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+          <span>{isZh ? '进入 ONE' : 'Enter ONE'}</span>
+          <ArrowRight className="h-4 w-4" />
         </button>
       </div>
     </div>
   );
-}
+};

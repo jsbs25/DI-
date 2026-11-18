@@ -44,9 +44,11 @@ export default function App() {
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.get('nointro') === '1') return false;
+      if (params.get('intro') === '1') return true;
       return !localStorage.getItem('earth-one-intro-seen');
     } catch { return false; }
   });
+  const [introGestureUnlocked, setIntroGestureUnlocked] = useState(false);
   const [lang, setLang] = useState<Language>('zh');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try {
@@ -278,7 +280,7 @@ export default function App() {
   const handleToggleJoinCommunity = async (commId: string) => { try { const res = await fetch(`/api/communities/${commId}/join`, { method: 'POST' }); const data = await res.json(); if (data.success) setCommunities(prev => prev.map(c => c.id === commId ? { ...c, isJoined: data.isJoined, membersCount: data.membersCount } : c)); } catch {} };
   const handleToggleLocationPrivacy = async () => { try { const res = await fetch('/api/auth/toggle-location', { method: 'POST' }); const data = await res.json(); if (data.success && data.user) { setCurrentUser(data.user); const nodesRes = await fetch('/api/globe/nodes'); const nodesData = await nodesRes.json(); if (nodesData.success) setNodes(nodesData.nodes); } } catch {} };
   const handleUpdateProfile = async (userData: Partial<User>) => { try { const res = await fetch('/api/auth/update-profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(userData) }); const data = await res.json(); if (data.success && data.user) setCurrentUser(data.user); } catch {} };
-  const handleAuthSuccess = (user: User, token: string, isNewRegistration: boolean) => { try { if (token) localStorage.setItem('earth_one_token', token); } catch {} setCurrentUser(user); void refreshConversations(); void refreshIntegrations(); let hasExplicitModule = false; try { const url = new URL(window.location.href); const m = url.searchParams.get('module'); if (m === 'brand') { url.searchParams.delete('module'); window.history.replaceState({}, '', url.pathname + url.search); navigateToTab('globe'); } else if (m || url.searchParams.get('conv')) { hasExplicitModule = true; } } catch {} if (isNewRegistration || user.hasCompletedOnboarding === false) setIsOnboardingModalOpen(true); else { setWelcomeToast(`Welcome back, ${user.displayName}!`); setTimeout(() => setWelcomeToast(null), 4000); if (!hasExplicitModule && user.location?.isPublic) { navigateToTab('globe'); setFocusCoordinates({ lat: user.location.lat, lng: user.location.lng, timestamp: Date.now() }); } } };
+  const handleAuthSuccess = (user: User, token: string, isNewRegistration: boolean) => { try { if (token) localStorage.setItem('earth_one_token', token); } catch {} setIntroGestureUnlocked(true); setCurrentUser(user); void refreshConversations(); void refreshIntegrations(); let hasExplicitModule = false; try { const url = new URL(window.location.href); const m = url.searchParams.get('module'); if (m === 'brand') { url.searchParams.delete('module'); window.history.replaceState({}, '', url.pathname + url.search); navigateToTab('globe'); } else if (m || url.searchParams.get('conv')) { hasExplicitModule = true; } } catch {} if (isNewRegistration || user.hasCompletedOnboarding === false) setIsOnboardingModalOpen(true); else { setWelcomeToast(`Welcome back, ${user.displayName}!`); setTimeout(() => setWelcomeToast(null), 4000); if (!hasExplicitModule && user.location?.isPublic) { navigateToTab('globe'); setFocusCoordinates({ lat: user.location.lat, lng: user.location.lng, timestamp: Date.now() }); } } };
   const handleOnboardingComplete = async (updatedUser: User) => { setCurrentUser(updatedUser); setIsOnboardingModalOpen(false); const nodesRes = await fetch('/api/globe/nodes'); const nodesData = await nodesRes.json(); if (nodesData.success) setNodes(nodesData.nodes); setWelcomeToast(`Beacon active in ${updatedUser.location?.cityName || ''}`); setTimeout(() => setWelcomeToast(null), 5000); navigateToTab('globe'); setFocusCoordinates({ lat: updatedUser.location.lat, lng: updatedUser.location.lng, timestamp: Date.now() }); };
   const handleLogout = async () => { window.dispatchEvent(new Event('one-music-force-stop')); try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {} try { localStorage.removeItem('earth_one_token'); } catch {} setCurrentUser(null); setConversations([]); setIntegrations([]); setActiveConversationId('conv_global'); setWelcomeToast('Logged out.'); setTimeout(() => setWelcomeToast(null), 3000); };
   const handleSelectGlobeUser = (node: GlobeUserNode) => { const fullUser: User = { id: node.userId, username: node.userId, displayName: node.displayName, avatar: node.avatar, bio: node.latestThought || '', location: { countryCode: node.countryCode, countryName: node.countryName, cityName: node.cityName, lat: node.lat, lng: node.lng, isPublic: true }, interests: [], followersCount: 0, followingCount: 0, tipsReceived: 0, isOnline: node.isOnline, verified: true, joinedAt: '' } as any; setProfileModalUser(fullUser); };
@@ -445,7 +447,18 @@ export default function App() {
   return (
     <PlayerProvider>
     <div className="min-h-[100dvh] w-full max-w-full bg-[var(--color-one-bg)] text-[var(--color-one-text)] font-sans overflow-x-clip transition-colors">
-      {showIntro && <CinematicIntro onComplete={() => { setShowIntro(false); try { localStorage.setItem('earth-one-intro-seen', '1'); } catch {} }} onAuthSuccess={handleAuthSuccess} currentUser={currentUser} />}
+      {showIntro && (
+        <CinematicIntro
+          lang={lang}
+          gestureUnlocked={introGestureUnlocked}
+          onComplete={() => {
+            setShowIntro(false);
+            try { localStorage.setItem('earth-one-intro-seen', '1'); } catch {}
+          }}
+          onAuthSuccess={handleAuthSuccess}
+          currentUser={currentUser}
+        />
+      )}
       {welcomeToast && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-2xl eo-glass text-sky-700 dark:text-cyan-100 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4 text-sky-500 dark:text-cyan-400" /><span>{welcomeToast}</span></div>}
 
       <div className={isMobileSubpage ? 'hidden md:block' : 'block'}>
@@ -467,7 +480,7 @@ export default function App() {
           onSearchChange={setSearchQuery}
           onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }}
           onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); navigateToTab('knowledge'); }}
-          onReplayIntro={() => setShowIntro(true)}
+          onReplayIntro={() => { setIntroGestureUnlocked(true); setShowIntro(true); }}
           onOpenCommand={() => setCommandOpen(true)}
         />
       </div>
@@ -690,7 +703,7 @@ export default function App() {
         onSetLang={setLang}
         onSetImmersive={setImmersive}
         onOpenCommandPalette={() => setCommandOpen(true)}
-        onReplayIntro={() => setShowIntro(true)}
+        onReplayIntro={() => { setIntroGestureUnlocked(true); setShowIntro(true); }}
         onCreatePost={handleCreatePost}
         onCreateArticle={handleCreateArticle}
         onFilterCountry={setActiveCountry}

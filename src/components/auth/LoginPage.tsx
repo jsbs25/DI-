@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Language, User } from '../../types/index.ts';
 import { Eye, EyeOff, Loader2, Moon, Sun } from 'lucide-react';
 import { PWAInstallButton } from '../layout/PWAInstallButton.tsx';
@@ -31,9 +31,100 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const bgCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = bgCanvasRef.current;
+    if (!canvas || typeof window === 'undefined') return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let raf = 0;
+    let disposed = false;
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      canvas.width = Math.max(1, Math.floor(window.innerWidth * dpr));
+      canvas.height = Math.max(1, Math.floor(window.innerHeight * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const flakes = Array.from({ length: 26 }, (_, i) => ({
+      x: Math.random() * window.innerWidth,
+      y: Math.random() * window.innerHeight,
+      vx: 0.25 + Math.random() * 0.45,
+      vy: 0.35 + Math.random() * 0.55,
+      rot: Math.random() * Math.PI * 2,
+      vRot: (Math.random() - 0.5) * 0.025,
+      size: 4 + Math.random() * 5,
+      isGinkgo: i % 3 === 0,
+      phase: Math.random() * Math.PI * 2,
+    }));
+
+    const draw = () => {
+      if (disposed) return;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      ctx.clearRect(0, 0, w, h);
+
+      for (const f of flakes) {
+        f.x += f.vx + Math.sin(f.phase + f.y * 0.012) * 0.35;
+        f.y += f.vy;
+        f.rot += f.vRot;
+        if (f.y > h + 20 || f.x > w + 24) {
+          f.x = Math.random() * w - 40;
+          f.y = -18;
+        }
+        ctx.save();
+        ctx.translate(f.x, f.y);
+        ctx.rotate(f.rot);
+        ctx.fillStyle = f.isGinkgo
+          ? theme === 'dark'
+            ? 'rgba(245, 200, 76, 0.38)'
+            : 'rgba(214, 154, 24, 0.34)'
+          : theme === 'dark'
+            ? 'rgba(252, 207, 224, 0.42)'
+            : 'rgba(232, 134, 168, 0.36)';
+        ctx.beginPath();
+        if (f.isGinkgo) {
+          ctx.moveTo(0, f.size * 0.3);
+          ctx.quadraticCurveTo(-f.size, -f.size * 0.6, 0, -f.size * 0.9);
+          ctx.quadraticCurveTo(f.size, -f.size * 0.6, 0, f.size * 0.3);
+        } else {
+          ctx.ellipse(0, 0, f.size * 0.52, f.size * 0.85, 0, 0, Math.PI * 2);
+        }
+        ctx.fill();
+        ctx.restore();
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', resize);
+    };
+  }, [theme]);
+
+  const completeWithTransition = (user: User, token: string, isNewRegistration: boolean) => {
+    setIsTransitioning(true);
+    const delay =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+        ? 60
+        : 480;
+    window.setTimeout(() => {
+      onAuthSuccess(user, token, isNewRegistration);
+    }, delay);
+  };
 
   const switchMode = (next: Mode) => {
-    if (loading) return;
+    if (loading || isTransitioning) return;
     setMode(next);
     setErrorMsg(null);
     setInfoMsg(null);
@@ -47,7 +138,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading) return;
+    if (loading || isTransitioning) return;
     setErrorMsg(null);
     setInfoMsg(null);
 
@@ -67,7 +158,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
         });
         const data = await parseJsonSafe(res);
         if (res.ok && data?.success && data?.user) {
-          onAuthSuccess(data.user, data.token || '', !data.user.hasCompletedOnboarding);
+          completeWithTransition(data.user, data.token || '', !data.user.hasCompletedOnboarding);
         } else {
           setErrorMsg(data?.error || L('登录失败，请检查账号和密码。', 'Sign-in failed. Check your credentials.', 'فشل تسجيل الدخول. تحقق من بياناتك.'));
         }
@@ -102,7 +193,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
       });
       const data = await parseJsonSafe(res);
       if (res.ok && data?.success && data?.user) {
-        onAuthSuccess(data.user, data.token || '', true);
+        completeWithTransition(data.user, data.token || '', true);
       } else {
         setErrorMsg(data?.error || L('注册失败，请稍后重试。', 'Registration failed. Please try again.', 'فشل إنشاء الحساب. حاول مرة أخرى.'));
       }
@@ -115,10 +206,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
 
   return (
     <div
-      className="min-h-[100dvh] bg-gradient-to-br from-[#eef4fc] via-[#f9fbff] to-[#e9f1fb] dark:from-[#121e35] dark:via-[#0f172a] dark:to-[#0c1424] text-slate-900 dark:text-slate-100 flex items-center justify-center px-4 py-6 transition-colors"
+      className={`relative min-h-[100dvh] overflow-hidden bg-gradient-to-br from-[#eef4fc] via-[#f9fbff] to-[#f4ece3] dark:from-[#0f1b33] dark:via-[#121f38] dark:to-[#1d2236] text-slate-900 dark:text-slate-100 flex items-center justify-center px-4 py-6 transition-all duration-500 ease-out ${
+        isTransitioning ? 'opacity-0 scale-[1.015] pointer-events-none' : 'opacity-100 scale-100'
+      }`}
       dir={lang === 'ar' ? 'rtl' : 'ltr'}
     >
-      <div className="w-full max-w-[420px]">
+      <canvas
+        ref={bgCanvasRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 w-full h-full z-0"
+      />
+      <div className="relative z-10 w-full max-w-[420px]">
         <div className="mb-6">
           <div className="flex items-center justify-between gap-3 mb-5">
             <div className="flex items-center gap-3">
@@ -271,11 +369,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || isTransitioning}
               className="w-full h-11 mt-2 rounded-xl bg-sky-600 text-white text-sm font-semibold hover:bg-sky-500 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
             >
-              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              {loading ? L('处理中…', 'Please wait…', 'يرجى الانتظار…') : (mode === 'login' ? L('登录', 'Sign in', 'تسجيل الدخول') : L('创建账号', 'Create account', 'إنشاء حساب'))}
+              {(loading || isTransitioning) && <Loader2 className="w-4 h-4 animate-spin" />}
+              {isTransitioning
+                ? L('开启世界…', 'Awakening world…', 'تفعيل العالم…')
+                : loading
+                  ? L('处理中…', 'Please wait…', 'يرجى الانتظار…')
+                  : (mode === 'login' ? L('登录', 'Sign in', 'تسجيل الدخول') : L('创建账号', 'Create account', 'إنشاء حساب'))}
             </button>
           </form>
 
