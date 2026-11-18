@@ -7,5 +7,11 @@ coverage/
 .env*
 !.env.example
 server_data/
+server_data.json
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+tmp/
 dev-dist/
 .aistudio/
