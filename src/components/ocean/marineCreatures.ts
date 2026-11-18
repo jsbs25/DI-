@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export interface MarineCreatureTier {
   baitfishCount: number;
@@ -22,6 +21,7 @@ export interface ArticulatedCreatureRig {
   bellMesh?: THREE.Object3D;
   tentacles?: THREE.Object3D[];
   armSegments?: THREE.Object3D[];
+  swimUniforms?: { uTime: { value: number }; uSpeed: { value: number } };
   wingUniforms?: { uTime: { value: number }; uPhase: { value: number } };
   phase: number;
   baseScale: number;
@@ -47,40 +47,232 @@ export interface MarineCreaturesHandle {
   dispose: () => void;
 }
 
-/**
- * Safely merges non-indexed/indexed BufferGeometries by converting each to non-indexed
- * with clean normals and UVs so mergeGeometries never fails.
- */
-function mergeParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const normalized = parts.map((g) => {
-    const clean = g.index ? g.toNonIndexed() : g.clone();
-    if (!clean.attributes.normal) clean.computeVertexNormals();
-    if (!clean.attributes.uv) {
-      const count = clean.attributes.position.count;
-      clean.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
-    }
-    // Strip unexpected extra attributes before merge
-    for (const key of Object.keys(clean.attributes)) {
-      if (key !== 'position' && key !== 'normal' && key !== 'uv') {
-        clean.deleteAttribute(key);
-      }
-    }
-    return clean;
-  });
-  const merged = mergeGeometries(normalized, false);
-  for (const c of normalized) c.dispose();
-  if (!merged) {
-    return new THREE.SphereGeometry(0.3, 8, 8);
-  }
-  merged.computeVertexNormals();
-  return merged;
+interface SpineStation {
+  t: number; // 0 = rear (-Z), 1 = snout (+Z)
+  rx: number;
+  ryTop: number;
+  ryBot: number;
+  yOffset: number;
 }
 
-function createFishFlankTexture(
-  topColor: string,
-  midColor: string,
-  bellyColor: string,
-  stripeColor?: string
+/**
+ * Lofts an anatomical, watertight organic marine body along Z (+Z snout, -Z tail)
+ * with independent dorsal/ventral profiles and smooth UVs for flank textures.
+ */
+function buildLoftedBodyGeometry(
+  stations: SpineStation[],
+  radialSegs: number,
+  length: number
+): THREE.BufferGeometry {
+  const rings = stations.length;
+  const cols = radialSegs + 1;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  for (let r = 0; r < rings; r++) {
+    const st = stations[r];
+    const z = (st.t - 0.5) * length;
+    for (let c = 0; c <= radialSegs; c++) {
+      const u = c / radialSegs;
+      const theta = u * Math.PI * 2; // 0 = top dorsal (+Y), PI/2 = right (+X), PI = belly (-Y)
+      const sinT = Math.sin(theta);
+      const cosT = Math.cos(theta);
+      const ry = cosT >= 0 ? st.ryTop : st.ryBot;
+      const x = sinT * st.rx;
+      const y = cosT * ry + st.yOffset;
+      positions.push(x, y, z);
+      // Map U so theta=0 (dorsal) maps to v=0, theta=PI (belly) maps to v=1 on flank canvas texture!
+      const bellyV = 0.5 - cosT * 0.5;
+      uvs.push(st.t, bellyV);
+    }
+  }
+
+  for (let r = 0; r < rings - 1; r++) {
+    for (let c = 0; c < radialSegs; c++) {
+      const a = r * cols + c;
+      const b = a + 1;
+      const d = (r + 1) * cols + c;
+      const e = d + 1;
+      indices.push(a, d, b);
+      indices.push(b, d, e);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+interface FinSpanSection {
+  spanPos: number; // position along span axis
+  zCenter: number; // swept Z offset
+  chord: number; // fore-aft length
+  thickness: number;
+  offsetY?: number;
+}
+
+/**
+ * Builds a cambered NACA-profile swept hydrofoil fin along +X span (horizontal or rotated vertical).
+ */
+function buildHydrofoilFinGeometry(sections: FinSpanSection[], chordSegs = 8): THREE.BufferGeometry {
+  const rows = sections.length;
+  const cols = chordSegs * 2 + 1; // wraps top surface leading->trailing->bottom->leading
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  for (let r = 0; r < rows; r++) {
+    const sec = sections[r];
+    const x = sec.spanPos;
+    const halfC = Math.max(0.002, sec.chord * 0.5);
+    const yOff = sec.offsetY ?? 0;
+
+    for (let c = 0; c < cols; c++) {
+      const isTop = c <= chordSegs;
+      const p = isTop ? c / chordSegs : 1 - (c - chordSegs) / chordSegs; // 0 = leading (+Z), 1 = trailing (-Z)
+      // NACA 00xx half-thickness profile
+      const naca =
+        5.0 *
+        (0.2969 * Math.sqrt(Math.max(0, p)) -
+          0.126 * p -
+          0.3516 * p * p +
+          0.2843 * p * p * p -
+          0.1015 * p * p * p * p);
+      const localZ = sec.zCenter + (0.5 - p) * (halfC * 2);
+      const localY = yOff + (isTop ? 1 : -1) * naca * sec.thickness;
+      positions.push(x, localY, localZ);
+      uvs.push(p, r / Math.max(1, rows - 1));
+    }
+  }
+
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < cols - 1; c++) {
+      const a = r * cols + c;
+      const b = a + 1;
+      const d = (r + 1) * cols + c;
+      const e = d + 1;
+      indices.push(a, d, b);
+      indices.push(b, d, e);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function createSharkSkinTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  if (ctx) {
+    const grad = ctx.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0.0, '#1a2a38');
+    grad.addColorStop(0.42, '#2d4659');
+    grad.addColorStop(0.56, '#768d9d');
+    grad.addColorStop(0.68, '#cbd7df');
+    grad.addColorStop(1.0, '#dfe7ec');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 128);
+
+    // Subtle organic dermal mottling
+    for (let i = 0; i < 420; i++) {
+      const x = (Math.sin(i * 19.3) * 0.5 + 0.5) * 256;
+      const y = (Math.cos(i * 41.7) * 0.5 + 0.5) * 74;
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(18, 30, 40, 0.14)' : 'rgba(140, 170, 190, 0.08)';
+      ctx.fillRect(x, y, 3, 2);
+    }
+
+    // 5 crisp anatomical gill slits near u ~ 0.65..0.74
+    ctx.strokeStyle = 'rgba(12, 22, 30, 0.72)';
+    ctx.lineWidth = 2.2;
+    for (let g = 0; g < 5; g++) {
+      const gx = 165 + g * 6.5;
+      ctx.beginPath();
+      ctx.moveTo(gx, 48);
+      ctx.quadraticCurveTo(gx - 2, 62, gx + 1, 76);
+      ctx.stroke();
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function createWhaleSkinTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  if (ctx) {
+    const grad = ctx.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0.0, '#0f1c2b');
+    grad.addColorStop(0.55, '#1d3247');
+    grad.addColorStop(0.75, '#466176');
+    grad.addColorStop(1.0, '#9fb5c6');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 128);
+
+    // Pale ventral throat grooves (baleen pleats) along forward belly
+    ctx.strokeStyle = 'rgba(20, 34, 48, 0.52)';
+    ctx.lineWidth = 1.6;
+    for (let y = 84; y < 126; y += 4.5) {
+      ctx.beginPath();
+      ctx.moveTo(118, y);
+      ctx.lineTo(246, y);
+      ctx.stroke();
+    }
+
+    // Subtle organic barnacle & scar mottling
+    for (let i = 0; i < 180; i++) {
+      const x = (Math.sin(i * 31.7) * 0.5 + 0.5) * 250;
+      const y = (Math.cos(i * 17.3) * 0.5 + 0.5) * 116;
+      ctx.fillStyle = 'rgba(215, 228, 238, 0.14)';
+      ctx.beginPath();
+      ctx.arc(x, y, 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function createDolphinSkinTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  if (ctx) {
+    const grad = ctx.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0.0, '#223d56');
+    grad.addColorStop(0.45, '#4b7391');
+    grad.addColorStop(0.66, '#a9c4d6');
+    grad.addColorStop(1.0, '#dceaf2');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 128);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function createFishSkinTexture(
+  dorsal: string,
+  flank: string,
+  belly: string,
+  bandTint?: string
 ): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 128;
@@ -88,16 +280,16 @@ function createFishFlankTexture(
   const ctx = c.getContext('2d');
   if (ctx) {
     const grad = ctx.createLinearGradient(0, 0, 0, 64);
-    grad.addColorStop(0.0, topColor);
-    grad.addColorStop(0.48, midColor);
-    grad.addColorStop(1.0, bellyColor);
+    grad.addColorStop(0.0, dorsal);
+    grad.addColorStop(0.45, flank);
+    grad.addColorStop(1.0, belly);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 128, 64);
 
-    if (stripeColor) {
-      ctx.fillStyle = stripeColor;
-      for (let x = 18; x < 110; x += 22) {
-        ctx.fillRect(x, 4, 8, 54);
+    if (bandTint) {
+      ctx.fillStyle = bandTint;
+      for (let x = 26; x < 102; x += 18) {
+        ctx.fillRect(x, 6, 6, 48);
       }
     }
   }
@@ -107,25 +299,87 @@ function createFishFlankTexture(
   return tex;
 }
 
-function createTurtleShellTexture(): THREE.CanvasTexture {
+function createTurtleCarapaceTexture(): { map: THREE.CanvasTexture; bumpMap: THREE.CanvasTexture } {
   const c = document.createElement('canvas');
-  c.width = 128;
+  c.width = 256;
+  c.height = 256;
+  const b = document.createElement('canvas');
+  b.width = 256;
+  b.height = 256;
+  const ctx = c.getContext('2d');
+  const bCtx = b.getContext('2d');
+
+  if (ctx && bCtx) {
+    ctx.fillStyle = '#33422b';
+    ctx.fillRect(0, 0, 256, 256);
+    bCtx.fillStyle = '#555555';
+    bCtx.fillRect(0, 0, 256, 256);
+
+    const scutes = [
+      [128, 48, 34, 28],
+      [128, 102, 42, 30],
+      [128, 160, 40, 30],
+      [128, 212, 32, 24],
+      [68, 76, 32, 34],
+      [188, 76, 32, 34],
+      [64, 134, 34, 36],
+      [192, 134, 34, 36],
+      [74, 190, 30, 30],
+      [182, 190, 30, 30],
+    ];
+    for (let i = 0; i < scutes.length; i++) {
+      const [sx, sy, rx, ry] = scutes[i];
+      const grad = ctx.createRadialGradient(sx, sy, 2, sx, sy, rx);
+      grad.addColorStop(0.0, '#7c6238');
+      grad.addColorStop(0.65, '#465232');
+      grad.addColorStop(1.0, '#222c1f');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#9c8353';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      const bGrad = bCtx.createRadialGradient(sx, sy, 2, sx, sy, rx);
+      bGrad.addColorStop(0.0, '#e0e0e0');
+      bGrad.addColorStop(0.85, '#999999');
+      bGrad.addColorStop(1.0, '#222222');
+      bCtx.fillStyle = bGrad;
+      bCtx.beginPath();
+      bCtx.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2);
+      bCtx.fill();
+    }
+  }
+  const map = new THREE.CanvasTexture(c);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.needsUpdate = true;
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.needsUpdate = true;
+  return { map, bumpMap };
+}
+
+function createMantaTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 256;
   c.height = 128;
   const ctx = c.getContext('2d');
   if (ctx) {
-    ctx.fillStyle = '#334d37';
-    ctx.fillRect(0, 0, 128, 128);
-    ctx.strokeStyle = '#c8a96e';
-    ctx.lineWidth = 4;
-    for (let y = 16; y < 128; y += 32) {
-      for (let x = 16; x < 128; x += 32) {
-        ctx.fillStyle = (x + y) % 64 === 0 ? '#4e693e' : '#3b573b';
-        ctx.beginPath();
-        ctx.arc(x, y, 13, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      }
-    }
+    ctx.fillStyle = '#152230';
+    ctx.fillRect(0, 0, 256, 128);
+    // Soft pale chevron shoulder markings on dorsal wings
+    ctx.fillStyle = 'rgba(175, 206, 224, 0.36)';
+    ctx.beginPath();
+    ctx.moveTo(95, 28);
+    ctx.quadraticCurveTo(60, 48, 35, 68);
+    ctx.quadraticCurveTo(68, 56, 104, 42);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(161, 28);
+    ctx.quadraticCurveTo(196, 48, 221, 68);
+    ctx.quadraticCurveTo(188, 56, 152, 42);
+    ctx.fill();
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -134,68 +388,12 @@ function createTurtleShellTexture(): THREE.CanvasTexture {
 }
 
 /**
- * Builds streamlined fish geometry oriented strictly with +Z nose and -Z tail.
+ * Full-spine sinusoidal swimming shader for instanced schools (nose stays anchored, body ripples smoothly to tail).
  */
-function buildStreamlinedFishGeo(
-  len: number,
-  height: number,
-  width: number,
-  tallProfile = false
-): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-
-  // Torso sculpted from sphere
-  const body = new THREE.SphereGeometry(0.5, 14, 10);
-  const pos = body.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i); // +0.5 nose, -0.5 tail
-    const t = z + 0.5; // 0 tail .. 1 nose
-    const taper = t < 0.55 ? Math.pow(t / 0.55, 0.72) : Math.sin(((1 - t) / 0.45) * (Math.PI * 0.5));
-    const finalW = Math.max(0.06, taper) * width;
-    const finalH = Math.max(0.08, tallProfile ? Math.pow(taper, 0.55) : taper) * height;
-    pos.setXYZ(i, x * finalW, y * finalH, z * len);
-  }
-  parts.push(body);
-
-  // Forked caudal fin at tail (-Z)
-  const tailShape = new THREE.Shape();
-  tailShape.moveTo(0, 0.04 * height);
-  tailShape.lineTo(-0.34 * len, 0.48 * height);
-  tailShape.lineTo(-0.22 * len, 0.0);
-  tailShape.lineTo(-0.34 * len, -0.48 * height);
-  tailShape.lineTo(0, -0.04 * height);
-  tailShape.closePath();
-
-  const tailGeo = new THREE.ExtrudeGeometry(tailShape, { depth: 0.015, bevelEnabled: false });
-  tailGeo.rotateY(-Math.PI / 2);
-  tailGeo.translate(0.0075, 0, -len * 0.44);
-  parts.push(tailGeo);
-
-  // Dorsal fin
-  const dorsalShape = new THREE.Shape();
-  dorsalShape.moveTo(0.1 * len, 0);
-  dorsalShape.lineTo(-0.08 * len, (tallProfile ? 0.55 : 0.34) * height);
-  dorsalShape.lineTo(-0.22 * len, 0);
-  dorsalShape.closePath();
-  const dorsalGeo = new THREE.ExtrudeGeometry(dorsalShape, { depth: 0.012, bevelEnabled: false });
-  dorsalGeo.rotateY(-Math.PI / 2);
-  dorsalGeo.translate(0.006, height * 0.34, 0);
-  parts.push(dorsalGeo);
-
-  const merged = mergeParts(parts);
-  for (const p of parts) p.dispose();
-  return merged;
-}
-
-/**
- * Adds GPU tail-undulation wave along Z axis (nose at +Z rigid, tail at -Z sways smoothly).
- */
-function applyFishSwimShader(
+function applyInstancedSpineSwimShader(
   mat: THREE.MeshStandardMaterial,
   timeUniform: { value: number },
-  tailSpan: number,
+  bodyLen: number,
   amp: number,
   freq: number
 ) {
@@ -206,9 +404,36 @@ function applyFishSwimShader(
       shader.vertexShader.replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-        float tailWeight = clamp((0.18 * ${tailSpan.toFixed(2)} - position.z) / ${tailSpan.toFixed(2)}, 0.0, 1.0);
-        float swimWave = sin(uSwimTime * ${freq.toFixed(2)} + aSwimPhase + position.z * 5.2);
-        transformed.x += swimWave * pow(tailWeight, 1.35) * ${amp.toFixed(3)};`
+        float spineT = clamp((0.45 * ${bodyLen.toFixed(2)} - position.z) / ${bodyLen.toFixed(2)}, 0.0, 1.0);
+        float envelope = pow(spineT, 1.45);
+        float wave = sin(uSwimTime * ${freq.toFixed(2)} + aSwimPhase - position.z * ${(5.4 / bodyLen).toFixed(2)});
+        transformed.x += wave * envelope * ${amp.toFixed(3)};`
+      );
+  };
+}
+
+/**
+ * Full-spine swim shader + overhead dynamic caustic glint for solo hero swimmers (Sharks, Dolphins, Whales).
+ */
+function applySoloSwimmerShader(
+  mat: THREE.MeshStandardMaterial,
+  uniforms: { uTime: { value: number }; uSpeed: { value: number } },
+  bodyLen: number,
+  amp: number,
+  freq: number,
+  verticalFluke = false
+) {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = uniforms.uTime;
+    shader.uniforms.uSpeed = uniforms.uSpeed;
+    shader.vertexShader =
+      `uniform float uTime;\nuniform float uSpeed;\n` +
+      shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        float spineT = clamp((0.35 * ${bodyLen.toFixed(2)} - position.z) / ${bodyLen.toFixed(2)}, 0.0, 1.0);
+        float wave = sin(uTime * ${freq.toFixed(2)} * uSpeed - position.z * ${(4.2 / bodyLen).toFixed(2)}) * pow(spineT, 1.55) * ${amp.toFixed(3)};
+        ${verticalFluke ? 'transformed.y += wave;' : 'transformed.x += wave;'}`
       );
   };
 }
@@ -223,60 +448,160 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
   const tropicalTimeUniform = { value: 0 };
 
   // Textures
-  const baitTex = createFishFlankTexture('#1f5a78', '#8ad2f2', '#e3f7ff');
-  const tropTex = createFishFlankTexture('#0e7490', '#f59e0b', '#fef3c7', 'rgba(15, 23, 42, 0.55)');
-  const sharkTex = createFishFlankTexture('#1d3548', '#48677e', '#cfdce6');
-  const whaleTex = createFishFlankTexture('#0e1f33', '#1d3a57', '#7b97ad');
-  const dolphinTex = createFishFlankTexture('#294b6b', '#5f89ab', '#dcebf5');
-  const turtleTex = createTurtleShellTexture();
-  const mantaTex = createFishFlankTexture('#0c1c2e', '#1a3852', '#c8e4f4');
-  disposablesTex.push(baitTex, tropTex, sharkTex, whaleTex, dolphinTex, turtleTex, mantaTex);
+  const baitTex = createFishSkinTexture('#1b455e', '#7fb9d4', '#dcecf4');
+  const tropTex = createFishSkinTexture('#194f75', '#b57b3b', '#e2d7be', 'rgba(20, 32, 48, 0.42)');
+  const sharkTex = createSharkSkinTexture();
+  const whaleTex = createWhaleSkinTexture();
+  const dolphinTex = createDolphinSkinTexture();
+  const { map: turtleMap, bumpMap: turtleBump } = createTurtleCarapaceTexture();
+  const mantaTex = createMantaTexture();
+  disposablesTex.push(baitTex, tropTex, sharkTex, whaleTex, dolphinTex, turtleMap, turtleBump, mantaTex);
 
-  // 1. Baitfish Boids School (InstancedMesh)
-  const baitGeo = buildStreamlinedFishGeo(0.56, 0.16, 0.1, false);
+  const eyeGeo = new THREE.SphereGeometry(0.042, 10, 8);
+  const eyeMat = new THREE.MeshStandardMaterial({ color: '#05090d', roughness: 0.08, metalness: 0.25 });
+  disposablesGeo.push(eyeGeo);
+  disposablesMat.push(eyeMat);
+
+  // =========================================================================
+  // 1. Baitfish School (Lofted Sardine/Mackerel Body + Forked Hydrofoil Tail)
+  // =========================================================================
+  const baitStations: SpineStation[] = [
+    { t: 0.0, rx: 0.012, ryTop: 0.018, ryBot: 0.018, yOffset: 0 },
+    { t: 0.16, rx: 0.025, ryTop: 0.045, ryBot: 0.042, yOffset: 0 },
+    { t: 0.48, rx: 0.048, ryTop: 0.078, ryBot: 0.074, yOffset: 0 },
+    { t: 0.78, rx: 0.044, ryTop: 0.068, ryBot: 0.062, yOffset: 0 },
+    { t: 0.94, rx: 0.022, ryTop: 0.036, ryBot: 0.032, yOffset: 0 },
+    { t: 1.0, rx: 0.005, ryTop: 0.008, ryBot: 0.008, yOffset: 0 },
+  ];
+  const baitBodyGeo = buildLoftedBodyGeometry(baitStations, 12, 0.56);
+  const baitTailGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: -0.11, zCenter: -0.35, chord: 0.09, thickness: 0.012 },
+      { spanPos: -0.02, zCenter: -0.29, chord: 0.06, thickness: 0.014 },
+      { spanPos: 0.02, zCenter: -0.29, chord: 0.06, thickness: 0.014 },
+      { spanPos: 0.11, zCenter: -0.35, chord: 0.09, thickness: 0.012 },
+    ],
+    6
+  );
+  baitTailGeo.rotateZ(Math.PI / 2);
+
+  // Merge lofted body + vertical forked caudal fin cleanly
+  const baitMerged = (() => {
+    const a = baitBodyGeo.toNonIndexed();
+    const b = baitTailGeo.toNonIndexed();
+    const posA = a.attributes.position.array as Float32Array;
+    const posB = b.attributes.position.array as Float32Array;
+    const normA = a.attributes.normal.array as Float32Array;
+    const normB = b.attributes.normal.array as Float32Array;
+    const uvA = a.attributes.uv.array as Float32Array;
+    const uvB = b.attributes.uv.array as Float32Array;
+    const pos = new Float32Array(posA.length + posB.length);
+    pos.set(posA, 0);
+    pos.set(posB, posA.length);
+    const norm = new Float32Array(normA.length + normB.length);
+    norm.set(normA, 0);
+    norm.set(normB, normA.length);
+    const uv = new Float32Array(uvA.length + uvB.length);
+    uv.set(uvA, 0);
+    uv.set(uvB, uvA.length);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    a.dispose();
+    b.dispose();
+    return g;
+  })();
+  baitBodyGeo.dispose();
+  baitTailGeo.dispose();
+
   const baitfishPhases = new Float32Array(tier.baitfishCount);
   for (let i = 0; i < tier.baitfishCount; i++) baitfishPhases[i] = Math.random() * Math.PI * 2;
-  baitGeo.setAttribute('aSwimPhase', new THREE.InstancedBufferAttribute(baitfishPhases, 1));
-  disposablesGeo.push(baitGeo);
+  baitMerged.setAttribute('aSwimPhase', new THREE.InstancedBufferAttribute(baitfishPhases, 1));
+  disposablesGeo.push(baitMerged);
 
   const baitMat = new THREE.MeshStandardMaterial({
     map: baitTex,
-    roughness: 0.25,
-    metalness: 0.55,
-    color: '#d9f4ff',
+    roughness: 0.18,
+    metalness: 0.68,
+    color: '#d4edf7',
   });
-  applyFishSwimShader(baitMat, baitfishTimeUniform, 0.56, 0.085, 8.2);
+  applyInstancedSpineSwimShader(baitMat, baitfishTimeUniform, 0.56, 0.085, 8.6);
   disposablesMat.push(baitMat);
 
-  const baitfishInst = new THREE.InstancedMesh(baitGeo, baitMat, tier.baitfishCount);
+  const baitfishInst = new THREE.InstancedMesh(baitMerged, baitMat, tier.baitfishCount);
   baitfishInst.frustumCulled = false;
   const col = new THREE.Color();
   for (let i = 0; i < tier.baitfishCount; i++) {
-    col.setHSL(0.54 + (Math.random() - 0.5) * 0.05, 0.65, 0.68 + Math.random() * 0.18);
+    col.setHSL(0.54 + (Math.random() - 0.5) * 0.03, 0.25, 0.78 + Math.random() * 0.16);
     baitfishInst.setColorAt(i, col);
   }
   if (baitfishInst.instanceColor) baitfishInst.instanceColor.needsUpdate = true;
   group.add(baitfishInst);
 
-  // 2. Tropical Reef Fish School (InstancedMesh)
-  const tropGeo = buildStreamlinedFishGeo(0.72, 0.42, 0.14, true);
+  // =========================================================================
+  // 2. Tropical Reef Fish School (Organic Disc Profile + Swept Dorsal/Caudal)
+  // =========================================================================
+  const tropStations: SpineStation[] = [
+    { t: 0.0, rx: 0.015, ryTop: 0.035, ryBot: 0.035, yOffset: 0 },
+    { t: 0.18, rx: 0.035, ryTop: 0.12, ryBot: 0.11, yOffset: 0 },
+    { t: 0.52, rx: 0.072, ryTop: 0.20, ryBot: 0.18, yOffset: 0 },
+    { t: 0.80, rx: 0.056, ryTop: 0.14, ryBot: 0.12, yOffset: 0 },
+    { t: 0.96, rx: 0.022, ryTop: 0.045, ryBot: 0.04, yOffset: -0.01 },
+    { t: 1.0, rx: 0.005, ryTop: 0.01, ryBot: 0.01, yOffset: -0.01 },
+  ];
+  const tropBodyGeo = buildLoftedBodyGeometry(tropStations, 14, 0.68);
+  const tropTailGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: -0.17, zCenter: -0.43, chord: 0.12, thickness: 0.016 },
+      { spanPos: 0.0, zCenter: -0.35, chord: 0.09, thickness: 0.02 },
+      { spanPos: 0.17, zCenter: -0.43, chord: 0.12, thickness: 0.016 },
+    ],
+    6
+  );
+  tropTailGeo.rotateZ(Math.PI / 2);
+
+  const tropMerged = (() => {
+    const a = tropBodyGeo.toNonIndexed();
+    const b = tropTailGeo.toNonIndexed();
+    const pos = new Float32Array(a.attributes.position.array.length + b.attributes.position.array.length);
+    pos.set(a.attributes.position.array as Float32Array, 0);
+    pos.set(b.attributes.position.array as Float32Array, a.attributes.position.array.length);
+    const norm = new Float32Array(a.attributes.normal.array.length + b.attributes.normal.array.length);
+    norm.set(a.attributes.normal.array as Float32Array, 0);
+    norm.set(b.attributes.normal.array as Float32Array, a.attributes.normal.array.length);
+    const uv = new Float32Array(a.attributes.uv.array.length + b.attributes.uv.array.length);
+    uv.set(a.attributes.uv.array as Float32Array, 0);
+    uv.set(b.attributes.uv.array as Float32Array, a.attributes.uv.array.length);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    a.dispose();
+    b.dispose();
+    return g;
+  })();
+  tropBodyGeo.dispose();
+  tropTailGeo.dispose();
+
   const tropicalPhases = new Float32Array(tier.tropicalCount);
   for (let i = 0; i < tier.tropicalCount; i++) tropicalPhases[i] = Math.random() * Math.PI * 2;
-  tropGeo.setAttribute('aSwimPhase', new THREE.InstancedBufferAttribute(tropicalPhases, 1));
-  disposablesGeo.push(tropGeo);
+  tropMerged.setAttribute('aSwimPhase', new THREE.InstancedBufferAttribute(tropicalPhases, 1));
+  disposablesGeo.push(tropMerged);
 
   const tropMat = new THREE.MeshStandardMaterial({
     map: tropTex,
-    roughness: 0.36,
-    metalness: 0.2,
+    roughness: 0.34,
+    metalness: 0.24,
     color: '#ffffff',
   });
-  applyFishSwimShader(tropMat, tropicalTimeUniform, 0.72, 0.11, 7.0);
+  applyInstancedSpineSwimShader(tropMat, tropicalTimeUniform, 0.68, 0.095, 7.2);
   disposablesMat.push(tropMat);
 
-  const tropicalInst = new THREE.InstancedMesh(tropGeo, tropMat, tier.tropicalCount);
+  const tropicalInst = new THREE.InstancedMesh(tropMerged, tropMat, tier.tropicalCount);
   tropicalInst.frustumCulled = false;
-  const tropColors = ['#ff8a4c', '#ffd166', '#22d3ee', '#fb7185', '#a78bfa', '#34d399'];
+  // Realistic Pacific reef tangs & damselfish tones
+  const tropColors = ['#c98746', '#408ba8', '#7896a3', '#a66253', '#528073', '#b39a56'];
   for (let i = 0; i < tier.tropicalCount; i++) {
     col.set(tropColors[i % tropColors.length]);
     tropicalInst.setColorAt(i, col);
@@ -284,67 +609,83 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
   if (tropicalInst.instanceColor) tropicalInst.instanceColor.needsUpdate = true;
   group.add(tropicalInst);
 
-  // 3. Hero Pelagic Fish (articulated tail so speed surges cleanly when charging screen)
-  const pelagicBodyGeo = new THREE.SphereGeometry(0.5, 16, 12);
-  const pb = pelagicBodyGeo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pb.count; i++) {
-    const x = pb.getX(i);
-    const y = pb.getY(i);
-    const z = pb.getZ(i);
-    const t = z + 0.5;
-    const taper = Math.sin(Math.pow(t, 0.75) * Math.PI);
-    pb.setXYZ(i, x * taper * 0.42, y * taper * 0.58, z * 1.9);
-  }
-  pelagicBodyGeo.computeVertexNormals();
+  // =========================================================================
+  // 3. Pelagic Swimmers (Jacks / Tuna with Cambered Hydrofoil Fins)
+  // =========================================================================
+  const pelagicStations: SpineStation[] = [
+    { t: 0.0, rx: 0.03, ryTop: 0.045, ryBot: 0.045, yOffset: 0 },
+    { t: 0.16, rx: 0.075, ryTop: 0.14, ryBot: 0.13, yOffset: 0 },
+    { t: 0.45, rx: 0.17, ryTop: 0.29, ryBot: 0.27, yOffset: 0 },
+    { t: 0.72, rx: 0.18, ryTop: 0.28, ryBot: 0.25, yOffset: 0 },
+    { t: 0.90, rx: 0.10, ryTop: 0.16, ryBot: 0.14, yOffset: 0 },
+    { t: 1.0, rx: 0.015, ryTop: 0.02, ryBot: 0.02, yOffset: 0 },
+  ];
+  const pelagicBodyGeo = buildLoftedBodyGeometry(pelagicStations, 18, 1.85);
+  const pelagicTailGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: -0.38, zCenter: -0.34, chord: 0.18, thickness: 0.024 },
+      { spanPos: -0.14, zCenter: -0.16, chord: 0.14, thickness: 0.032 },
+      { spanPos: 0.0, zCenter: -0.05, chord: 0.14, thickness: 0.04 },
+      { spanPos: 0.14, zCenter: -0.16, chord: 0.14, thickness: 0.032 },
+      { spanPos: 0.38, zCenter: -0.34, chord: 0.18, thickness: 0.024 },
+    ],
+    8
+  );
+  pelagicTailGeo.rotateZ(Math.PI / 2);
 
-  const pelagicTailShape = new THREE.Shape();
-  pelagicTailShape.moveTo(0, 0.06);
-  pelagicTailShape.lineTo(-0.62, 0.46);
-  pelagicTailShape.lineTo(-0.34, 0);
-  pelagicTailShape.lineTo(-0.62, -0.46);
-  pelagicTailShape.lineTo(0, -0.06);
-  pelagicTailShape.closePath();
-  const pelagicTailGeo = new THREE.ExtrudeGeometry(pelagicTailShape, { depth: 0.025, bevelEnabled: false });
-  pelagicTailGeo.rotateY(-Math.PI / 2);
-  pelagicTailGeo.translate(0.0125, 0, 0);
+  const pelagicDorsalGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: 0.0, zCenter: 0.0, chord: 0.36, thickness: 0.03 },
+      { spanPos: 0.18, zCenter: -0.1, chord: 0.22, thickness: 0.02 },
+      { spanPos: 0.34, zCenter: -0.22, chord: 0.08, thickness: 0.01 },
+    ],
+    6
+  );
+  pelagicDorsalGeo.rotateZ(Math.PI / 2);
 
-  const pelagicDorsalShape = new THREE.Shape();
-  pelagicDorsalShape.moveTo(0.25, 0);
-  pelagicDorsalShape.lineTo(-0.1, 0.36);
-  pelagicDorsalShape.lineTo(-0.28, 0);
-  pelagicDorsalShape.closePath();
-  const pelagicDorsalGeo = new THREE.ExtrudeGeometry(pelagicDorsalShape, { depth: 0.02, bevelEnabled: false });
-  pelagicDorsalGeo.rotateY(-Math.PI / 2);
+  const pelagicPecGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: 0.0, zCenter: 0.0, chord: 0.2, thickness: 0.022 },
+      { spanPos: 0.24, zCenter: -0.12, chord: 0.12, thickness: 0.015 },
+      { spanPos: 0.42, zCenter: -0.24, chord: 0.05, thickness: 0.008 },
+    ],
+    6
+  );
 
-  const eyeGeo = new THREE.SphereGeometry(0.045, 8, 8);
-  const eyeMat = new THREE.MeshStandardMaterial({ color: '#05080f', roughness: 0.1, metalness: 0.2 });
   const pelagicMat = new THREE.MeshStandardMaterial({
     map: baitTex,
-    color: '#7dd3fc',
-    roughness: 0.26,
-    metalness: 0.45,
+    color: '#9fcce0',
+    roughness: 0.2,
+    metalness: 0.56,
   });
-  disposablesGeo.push(pelagicBodyGeo, pelagicTailGeo, pelagicDorsalGeo, eyeGeo);
-  disposablesMat.push(eyeMat, pelagicMat);
+  disposablesGeo.push(pelagicBodyGeo, pelagicTailGeo, pelagicDorsalGeo, pelagicPecGeo);
+  disposablesMat.push(pelagicMat);
 
   const pelagics: ArticulatedCreatureRig[] = [];
   for (let i = 0; i < tier.pelagicCount; i++) {
     const root = new THREE.Group();
-    const bodyMesh = new THREE.Mesh(pelagicBodyGeo, pelagicMat);
+    const body = new THREE.Mesh(pelagicBodyGeo, pelagicMat);
     const dorsal = new THREE.Mesh(pelagicDorsalGeo, pelagicMat);
-    dorsal.position.set(0.01, 0.22, 0.05);
+    dorsal.position.set(0, 0.25, 0.08);
+    const pecL = new THREE.Mesh(pelagicPecGeo, pelagicMat);
+    pecL.position.set(0.14, -0.08, 0.26);
+    pecL.rotation.set(0.12, -0.28, -0.35);
+    const pecR = new THREE.Mesh(pelagicPecGeo, pelagicMat);
+    pecR.scale.x = -1;
+    pecR.position.set(-0.14, -0.08, 0.26);
+    pecR.rotation.set(0.12, 0.28, 0.35);
+
     const eL = new THREE.Mesh(eyeGeo, eyeMat);
     const eR = new THREE.Mesh(eyeGeo, eyeMat);
-    eL.position.set(0.14, 0.06, 0.65);
-    eR.position.set(-0.14, 0.06, 0.65);
+    eL.position.set(0.12, 0.06, 0.62);
+    eR.position.set(-0.12, 0.06, 0.62);
 
     const tailPivot = new THREE.Group();
-    tailPivot.position.set(0, 0, -0.78);
-    const tailMesh = new THREE.Mesh(pelagicTailGeo, pelagicMat);
-    tailPivot.add(tailMesh);
+    tailPivot.position.set(0, 0, -0.86);
+    tailPivot.add(new THREE.Mesh(pelagicTailGeo, pelagicMat));
 
-    root.add(bodyMesh, dorsal, eL, eR, tailPivot);
-    const sc = 0.85 + (i % 3) * 0.24;
+    root.add(body, dorsal, pecL, pecR, eL, eR, tailPivot);
+    const sc = 0.88 + (i % 3) * 0.22;
     root.scale.setScalar(sc);
     group.add(root);
 
@@ -357,81 +698,86 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
     });
   }
 
-  // 4. Dolphins (Pod of 3 with vertical pitching fluke & sleek rostrum)
-  const dolphinBodyGeo = new THREE.SphereGeometry(0.5, 20, 14);
-  const dp = dolphinBodyGeo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < dp.count; i++) {
-    const x = dp.getX(i);
-    const y = dp.getY(i);
-    const z = dp.getZ(i); // +0.5 nose .. -0.5 tail
-    const t = z + 0.5;
-    let rad = Math.sin(Math.pow(t, 0.7) * Math.PI) * 0.52;
-    if (t > 0.84) rad *= 0.42; // beak rostrum pinch
-    dp.setXYZ(i, x * rad * 1.65, y * rad * 1.78, z * 3.6);
-  }
-  dolphinBodyGeo.computeVertexNormals();
-
-  const flukeShape = new THREE.Shape();
-  flukeShape.moveTo(0, 0.08);
-  flukeShape.lineTo(0.68, -0.35);
-  flukeShape.lineTo(0.12, -0.18);
-  flukeShape.lineTo(0, -0.26);
-  flukeShape.lineTo(-0.12, -0.18);
-  flukeShape.lineTo(-0.68, -0.35);
-  flukeShape.closePath();
-  const flukeGeo = new THREE.ExtrudeGeometry(flukeShape, { depth: 0.04, bevelEnabled: false });
-  flukeGeo.rotateX(Math.PI / 2);
-
-  const dolphinDorsal = new THREE.ExtrudeGeometry(
-    (() => {
-      const s = new THREE.Shape();
-      s.moveTo(0.32, 0);
-      s.lineTo(-0.22, 0.58);
-      s.lineTo(-0.18, 0);
-      s.closePath();
-      return s;
-    })(),
-    { depth: 0.035, bevelEnabled: false }
+  // =========================================================================
+  // 4. Dolphins (Sleek Melon + Narrow Rostrum + Falcate Fin + Curved Flukes)
+  // =========================================================================
+  const dolphinStations: SpineStation[] = [
+    { t: 0.0, rx: 0.04, ryTop: 0.055, ryBot: 0.055, yOffset: -0.02 },
+    { t: 0.14, rx: 0.09, ryTop: 0.14, ryBot: 0.12, yOffset: 0 },
+    { t: 0.36, rx: 0.24, ryTop: 0.33, ryBot: 0.28, yOffset: 0.03 },
+    { t: 0.58, rx: 0.34, ryTop: 0.41, ryBot: 0.34, yOffset: 0.04 },
+    { t: 0.78, rx: 0.29, ryTop: 0.34, ryBot: 0.26, yOffset: 0.02 },
+    { t: 0.87, rx: 0.17, ryTop: 0.22, ryBot: 0.14, yOffset: -0.02 }, // melon curve
+    { t: 0.92, rx: 0.085, ryTop: 0.085, ryBot: 0.075, yOffset: -0.06 }, // rostrum base
+    { t: 1.0, rx: 0.032, ryTop: 0.032, ryBot: 0.028, yOffset: -0.07 }, // rostrum tip
+  ];
+  const dolphinBodyGeo = buildLoftedBodyGeometry(dolphinStations, 24, 3.5);
+  const dolphinFlukeGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: -0.62, zCenter: -0.32, chord: 0.22, thickness: 0.028 },
+      { spanPos: -0.25, zCenter: -0.14, chord: 0.32, thickness: 0.044 },
+      { spanPos: 0.0, zCenter: -0.18, chord: 0.26, thickness: 0.052 },
+      { spanPos: 0.25, zCenter: -0.14, chord: 0.32, thickness: 0.044 },
+      { spanPos: 0.62, zCenter: -0.32, chord: 0.22, thickness: 0.028 },
+    ],
+    8
   );
-  dolphinDorsal.rotateY(-Math.PI / 2);
+  const dolphinDorsalGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: 0.0, zCenter: 0.05, chord: 0.62, thickness: 0.045 },
+      { spanPos: 0.25, zCenter: -0.12, chord: 0.40, thickness: 0.036 },
+      { spanPos: 0.48, zCenter: -0.32, chord: 0.14, thickness: 0.018 },
+    ],
+    8
+  );
+  dolphinDorsalGeo.rotateZ(Math.PI / 2);
 
-  const dolphinPec = new THREE.ConeGeometry(0.16, 0.65, 6);
-  dolphinPec.rotateZ(Math.PI / 2);
+  const dolphinPecGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: 0.0, zCenter: 0.0, chord: 0.36, thickness: 0.04 },
+      { spanPos: 0.28, zCenter: -0.16, chord: 0.24, thickness: 0.028 },
+      { spanPos: 0.56, zCenter: -0.34, chord: 0.09, thickness: 0.012 },
+    ],
+    8
+  );
 
-  const dolphinMat = new THREE.MeshStandardMaterial({
-    map: dolphinTex,
-    roughness: 0.24,
-    metalness: 0.12,
-  });
-  disposablesGeo.push(dolphinBodyGeo, flukeGeo, dolphinDorsal, dolphinPec);
-  disposablesMat.push(dolphinMat);
+  disposablesGeo.push(dolphinBodyGeo, dolphinFlukeGeo, dolphinDorsalGeo, dolphinPecGeo);
 
   const dolphins: ArticulatedCreatureRig[] = [];
   for (let i = 0; i < tier.dolphinCount; i++) {
-    const root = new THREE.Group();
-    const body = new THREE.Mesh(dolphinBodyGeo, dolphinMat);
-    const dorsal = new THREE.Mesh(dolphinDorsal, dolphinMat);
-    dorsal.position.set(0.017, 0.34, 0.05);
+    const swimUniforms = { uTime: { value: 0 }, uSpeed: { value: 1 } };
+    const dMat = new THREE.MeshStandardMaterial({
+      map: dolphinTex,
+      roughness: 0.18,
+      metalness: 0.14,
+    });
+    applySoloSwimmerShader(dMat, swimUniforms, 3.5, 0.18, 4.8, true);
+    disposablesMat.push(dMat);
 
-    const pecL = new THREE.Mesh(dolphinPec, dolphinMat);
-    pecL.position.set(0.45, -0.16, 0.45);
-    pecL.rotation.set(0.2, -0.45, -0.45);
-    const pecR = new THREE.Mesh(dolphinPec, dolphinMat);
-    pecR.position.set(-0.45, -0.16, 0.45);
-    pecR.rotation.set(0.2, 0.45, 0.45 + Math.PI);
+    const root = new THREE.Group();
+    const body = new THREE.Mesh(dolphinBodyGeo, dMat);
+    const dorsal = new THREE.Mesh(dolphinDorsalGeo, dMat);
+    dorsal.position.set(0, 0.37, 0.08);
+
+    const pecL = new THREE.Mesh(dolphinPecGeo, dMat);
+    pecL.position.set(0.26, -0.16, 0.45);
+    pecL.rotation.set(0.14, -0.22, -0.46);
+    const pecR = new THREE.Mesh(dolphinPecGeo, dMat);
+    pecR.scale.x = -1;
+    pecR.position.set(-0.26, -0.16, 0.45);
+    pecR.rotation.set(0.14, 0.22, 0.46);
 
     const tailPivot = new THREE.Group();
-    tailPivot.position.set(0, 0, -1.55);
-    const fluke = new THREE.Mesh(flukeGeo, dolphinMat);
-    tailPivot.add(fluke);
+    tailPivot.position.set(0, -0.02, -1.68);
+    tailPivot.add(new THREE.Mesh(dolphinFlukeGeo, dMat));
 
     const dEyeL = new THREE.Mesh(eyeGeo, eyeMat);
     const dEyeR = new THREE.Mesh(eyeGeo, eyeMat);
-    dEyeL.position.set(0.24, 0.1, 1.05);
-    dEyeR.position.set(-0.24, 0.1, 1.05);
+    dEyeL.position.set(0.17, 0.05, 1.15);
+    dEyeR.position.set(-0.17, 0.05, 1.15);
 
     root.add(body, dorsal, pecL, pecR, tailPivot, dEyeL, dEyeR);
-    const sc = 0.85 + i * 0.1;
+    const sc = 0.86 + i * 0.09;
     root.scale.setScalar(sc);
     group.add(root);
 
@@ -439,74 +785,98 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
       kind: 'dolphin',
       root,
       tailPivot,
+      swimUniforms,
       phase: i * 1.7,
       baseScale: sc,
     });
   }
 
-  // 5. Sea Turtles (Carapace + Scute texture + Sweeping Front Wing Flippers)
-  const shellGeo = new THREE.SphereGeometry(0.85, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.56);
-  shellGeo.scale(0.95, 0.44, 1.24);
-  const plastronGeo = new THREE.CylinderGeometry(0.7, 0.6, 0.14, 14);
-  plastronGeo.scale(0.95, 1, 1.2);
-  const turtleHeadGeo = new THREE.SphereGeometry(0.24, 12, 10);
-  turtleHeadGeo.scale(0.85, 0.8, 1.35);
+  // =========================================================================
+  // 5. Sea Turtles (Keratin Scute Carapace + Cambered Swept Wing Flippers)
+  // =========================================================================
+  const turtleShellGeo = new THREE.SphereGeometry(0.84, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.56);
+  turtleShellGeo.scale(0.92, 0.40, 1.24);
+  const turtlePlastronGeo = new THREE.SphereGeometry(0.76, 18, 10, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5);
+  turtlePlastronGeo.scale(0.92, 0.24, 1.22);
 
-  const frontFlipperGeo = new THREE.BoxGeometry(0.95, 0.06, 0.34);
-  frontFlipperGeo.translate(0.47, 0, 0);
-  const rearFlipperGeo = new THREE.BoxGeometry(0.42, 0.05, 0.24);
-  rearFlipperGeo.translate(0.21, 0, 0);
+  const turtleHeadStations: SpineStation[] = [
+    { t: 0.0, rx: 0.14, ryTop: 0.13, ryBot: 0.11, yOffset: 0 },
+    { t: 0.45, rx: 0.17, ryTop: 0.16, ryBot: 0.14, yOffset: 0.02 },
+    { t: 0.80, rx: 0.14, ryTop: 0.13, ryBot: 0.11, yOffset: 0.01 },
+    { t: 1.0, rx: 0.04, ryTop: 0.04, ryBot: 0.03, yOffset: -0.02 },
+  ];
+  const turtleHeadGeo = buildLoftedBodyGeometry(turtleHeadStations, 14, 0.58);
+
+  // Curved swept hydrofoil wing flippers (ZERO BoxGeometry!)
+  const turtleWingGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: 0.0, zCenter: 0.0, chord: 0.34, thickness: 0.055 },
+      { spanPos: 0.35, zCenter: -0.08, chord: 0.36, thickness: 0.045, offsetY: 0.02 },
+      { spanPos: 0.72, zCenter: -0.26, chord: 0.24, thickness: 0.032, offsetY: 0.01 },
+      { spanPos: 1.02, zCenter: -0.46, chord: 0.10, thickness: 0.016, offsetY: -0.01 },
+    ],
+    8
+  );
+  const turtleRearGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: 0.0, zCenter: 0.0, chord: 0.22, thickness: 0.035 },
+      { spanPos: 0.26, zCenter: -0.14, chord: 0.20, thickness: 0.024 },
+      { spanPos: 0.44, zCenter: -0.26, chord: 0.09, thickness: 0.012 },
+    ],
+    6
+  );
 
   const shellMat = new THREE.MeshStandardMaterial({
-    map: turtleTex,
-    roughness: 0.62,
-    metalness: 0.05,
-  });
-  const turtleSkinMat = new THREE.MeshStandardMaterial({
-    color: '#4f7356',
-    roughness: 0.55,
+    map: turtleMap,
+    bumpMap: turtleBump,
+    bumpScale: 0.05,
+    roughness: 0.54,
     metalness: 0.04,
   });
-  disposablesGeo.push(shellGeo, plastronGeo, turtleHeadGeo, frontFlipperGeo, rearFlipperGeo);
+  const turtleSkinMat = new THREE.MeshStandardMaterial({
+    color: '#496144',
+    bumpMap: turtleBump,
+    bumpScale: 0.02,
+    roughness: 0.52,
+    metalness: 0.04,
+  });
+  disposablesGeo.push(turtleShellGeo, turtlePlastronGeo, turtleHeadGeo, turtleWingGeo, turtleRearGeo);
   disposablesMat.push(shellMat, turtleSkinMat);
 
   const turtles: ArticulatedCreatureRig[] = [];
   for (let i = 0; i < tier.turtleCount; i++) {
     const root = new THREE.Group();
-    const shell = new THREE.Mesh(shellGeo, shellMat);
-    const belly = new THREE.Mesh(plastronGeo, turtleSkinMat);
-    belly.position.set(0, -0.04, 0);
+    const shell = new THREE.Mesh(turtleShellGeo, shellMat);
+    const belly = new THREE.Mesh(turtlePlastronGeo, turtleSkinMat);
     const head = new THREE.Mesh(turtleHeadGeo, turtleSkinMat);
-    head.position.set(0, 0.05, 1.15);
+    head.position.set(0, 0.03, 1.12);
 
     const tEyeL = new THREE.Mesh(eyeGeo, eyeMat);
     const tEyeR = new THREE.Mesh(eyeGeo, eyeMat);
-    tEyeL.position.set(0.15, 0.1, 1.25);
-    tEyeR.position.set(-0.15, 0.1, 1.25);
+    tEyeL.position.set(0.11, 0.07, 1.26);
+    tEyeR.position.set(-0.11, 0.07, 1.26);
 
     const leftFlipper = new THREE.Group();
-    leftFlipper.position.set(0.62, 0, 0.52);
-    const ffL = new THREE.Mesh(frontFlipperGeo, turtleSkinMat);
-    ffL.rotation.y = -0.35;
+    leftFlipper.position.set(0.56, -0.03, 0.52);
+    const ffL = new THREE.Mesh(turtleWingGeo, turtleSkinMat);
     leftFlipper.add(ffL);
 
     const rightFlipper = new THREE.Group();
-    rightFlipper.position.set(-0.62, 0, 0.52);
-    const ffR = new THREE.Mesh(frontFlipperGeo, turtleSkinMat);
+    rightFlipper.position.set(-0.56, -0.03, 0.52);
+    const ffR = new THREE.Mesh(turtleWingGeo, turtleSkinMat);
     ffR.scale.x = -1;
-    ffR.rotation.y = 0.35;
     rightFlipper.add(ffR);
 
-    const rfL = new THREE.Mesh(rearFlipperGeo, turtleSkinMat);
-    rfL.position.set(0.4, -0.05, -0.82);
-    rfL.rotation.y = -0.9;
-    const rfR = new THREE.Mesh(rearFlipperGeo, turtleSkinMat);
+    const rfL = new THREE.Mesh(turtleRearGeo, turtleSkinMat);
+    rfL.position.set(0.32, -0.06, -0.82);
+    rfL.rotation.y = -0.78;
+    const rfR = new THREE.Mesh(turtleRearGeo, turtleSkinMat);
     rfR.scale.x = -1;
-    rfR.position.set(-0.4, -0.05, -0.82);
-    rfR.rotation.y = 0.9;
+    rfR.position.set(-0.32, -0.06, -0.82);
+    rfR.rotation.y = 0.78;
 
     root.add(shell, belly, head, tEyeL, tEyeR, leftFlipper, rightFlipper, rfL, rfR);
-    const sc = 1.05 + i * 0.2;
+    const sc = 1.05 + i * 0.18;
     root.scale.setScalar(sc);
     group.add(root);
 
@@ -520,141 +890,176 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
     });
   }
 
-  // 6. Bioluminescent Jellyfish (Physical Bell + 6 Undulating Tube Tentacles)
-  const bellGeo = new THREE.SphereGeometry(0.65, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.58);
-  const bellMatPalette = ['#38bdf8', '#c084fc', '#2dd4bf', '#f472b6'];
-  const jellyTentacleCurve = new THREE.CatmullRomCurve3([
+  // =========================================================================
+  // 6. Bioluminescent Medusa Jellyfish (Double Dome + Lacy Oral Arms + 8 Filaments)
+  // =========================================================================
+  const outerBellGeo = new THREE.SphereGeometry(0.66, 26, 16, 0, Math.PI * 2, 0, Math.PI * 0.56);
+  const innerBellGeo = new THREE.SphereGeometry(0.46, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.54);
+  const tentacleCurve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0.08, -0.55, 0.05),
-    new THREE.Vector3(-0.06, -1.15, -0.05),
-    new THREE.Vector3(0.09, -1.75, 0.06),
+    new THREE.Vector3(0.06, -0.62, 0.04),
+    new THREE.Vector3(-0.08, -1.32, -0.05),
+    new THREE.Vector3(0.07, -2.05, 0.04),
   ]);
-  const jellyTentacleGeo = new THREE.TubeGeometry(jellyTentacleCurve, 14, 0.022, 6, false);
-  const jellyCoreGeo = new THREE.SphereGeometry(0.24, 12, 10);
-  disposablesGeo.push(bellGeo, jellyTentacleGeo, jellyCoreGeo);
+  const filamentGeo = new THREE.TubeGeometry(tentacleCurve, 18, 0.013, 6, false);
+  const oralCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0.11, -0.45, 0.06),
+    new THREE.Vector3(-0.09, -0.95, -0.08),
+    new THREE.Vector3(0.08, -1.35, 0.05),
+  ]);
+  const oralArmGeo = new THREE.TubeGeometry(oralCurve, 14, 0.036, 6, false);
+  disposablesGeo.push(outerBellGeo, innerBellGeo, filamentGeo, oralArmGeo);
 
+  const jellyColors = ['#54b4d3', '#8b7ec8', '#48a89d', '#b87098'];
   const jellies: ArticulatedCreatureRig[] = [];
   for (let i = 0; i < tier.jellyCount; i++) {
-    const tint = bellMatPalette[i % bellMatPalette.length];
-    const bellMat = new THREE.MeshPhysicalMaterial({
+    const tint = jellyColors[i % jellyColors.length];
+    const outerMat = new THREE.MeshPhysicalMaterial({
       color: tint,
       emissive: tint,
-      emissiveIntensity: 0.45,
-      roughness: 0.14,
-      metalness: 0.04,
+      emissiveIntensity: 0.25,
+      roughness: 0.12,
+      metalness: 0.02,
       transparent: true,
-      opacity: 0.72,
-      transmission: tier.isSoftwareGl ? 0 : 0.38,
+      opacity: 0.58,
+      transmission: tier.isSoftwareGl ? 0 : 0.45,
       side: THREE.DoubleSide,
     });
-    const coreMat = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
+    const innerMat = new THREE.MeshStandardMaterial({
+      color: '#e0f7ff',
       emissive: tint,
-      emissiveIntensity: 1.4,
-      roughness: 0.2,
+      emissiveIntensity: 0.95,
+      transparent: true,
+      opacity: 0.72,
+      roughness: 0.28,
     });
-    disposablesMat.push(bellMat, coreMat);
+    disposablesMat.push(outerMat, innerMat);
 
     const root = new THREE.Group();
-    const bellMesh = new THREE.Mesh(bellGeo, bellMat);
-    const coreMesh = new THREE.Mesh(jellyCoreGeo, coreMat);
-    coreMesh.position.y = -0.08;
-    root.add(bellMesh, coreMesh);
+    const bellGroup = new THREE.Group();
+    const outerBell = new THREE.Mesh(outerBellGeo, outerMat);
+    const innerBell = new THREE.Mesh(innerBellGeo, innerMat);
+    innerBell.position.y = -0.04;
+    bellGroup.add(outerBell, innerBell);
+    root.add(bellGroup);
 
     const tentacles: THREE.Object3D[] = [];
-    for (let t = 0; t < 6; t++) {
-      const ang = (t / 6) * Math.PI * 2;
-      const tent = new THREE.Mesh(jellyTentacleGeo, coreMat);
-      tent.position.set(Math.cos(ang) * 0.28, -0.02, Math.sin(ang) * 0.28);
-      tent.rotation.y = ang;
-      root.add(tent);
-      tentacles.push(tent);
+    for (let o = 0; o < 4; o++) {
+      const ang = (o / 4) * Math.PI * 2;
+      const oral = new THREE.Mesh(oralArmGeo, innerMat);
+      oral.position.set(Math.cos(ang) * 0.12, -0.06, Math.sin(ang) * 0.12);
+      oral.rotation.y = ang;
+      root.add(oral);
+      tentacles.push(oral);
+    }
+    for (let t = 0; t < 8; t++) {
+      const ang = (t / 8) * Math.PI * 2;
+      const fil = new THREE.Mesh(filamentGeo, outerMat);
+      fil.position.set(Math.cos(ang) * 0.36, -0.02, Math.sin(ang) * 0.36);
+      fil.rotation.y = ang;
+      root.add(fil);
+      tentacles.push(fil);
     }
 
-    const sc = 0.65 + (i % 3) * 0.22;
+    const sc = 0.68 + (i % 3) * 0.2;
     root.scale.setScalar(sc);
     group.add(root);
 
     jellies.push({
       kind: 'jelly',
       root,
-      bellMesh,
+      bellMesh: bellGroup,
       tentacles,
-      phase: i * 1.13,
+      phase: i * 1.17,
       baseScale: sc,
     });
   }
 
-  // 7. Sharks (Patrolling in midground/background + fierce candidate for glass charge)
-  const sharkFrontGeo = new THREE.SphereGeometry(0.55, 22, 16);
-  const sp = sharkFrontGeo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < sp.count; i++) {
-    const x = sp.getX(i);
-    const y = sp.getY(i);
-    const z = sp.getZ(i);
-    const t = z + 0.5; // 0 rear .. 1 snout
-    const profile = t > 0.45 ? Math.cos(((t - 0.45) / 0.55) * (Math.PI * 0.48)) : 0.65 + 0.35 * (t / 0.45);
-    sp.setXYZ(i, x * profile * 1.15, y * profile * 1.08, z * 4.4);
-  }
-  sharkFrontGeo.computeVertexNormals();
+  // =========================================================================
+  // 7. Sharks (Anatomical Lofted Torso + Heterocercal Tail + Hydrofoil Fins)
+  // =========================================================================
+  const sharkStations: SpineStation[] = [
+    { t: 0.0, rx: 0.055, ryTop: 0.075, ryBot: 0.075, yOffset: 0 },
+    { t: 0.14, rx: 0.13, ryTop: 0.18, ryBot: 0.15, yOffset: 0 },
+    { t: 0.38, rx: 0.33, ryTop: 0.42, ryBot: 0.32, yOffset: 0.02 },
+    { t: 0.62, rx: 0.46, ryTop: 0.52, ryBot: 0.38, yOffset: 0.04 },
+    { t: 0.80, rx: 0.40, ryTop: 0.40, ryBot: 0.28, yOffset: 0.03 },
+    { t: 0.93, rx: 0.24, ryTop: 0.20, ryBot: 0.12, yOffset: 0.02 },
+    { t: 1.0, rx: 0.045, ryTop: 0.045, ryBot: 0.028, yOffset: 0.01 },
+  ];
+  const sharkBodyGeo = buildLoftedBodyGeometry(sharkStations, 24, 4.5);
 
-  const sharkDorsalShape = new THREE.Shape();
-  sharkDorsalShape.moveTo(0.45, 0);
-  sharkDorsalShape.lineTo(-0.35, 1.15);
-  sharkDorsalShape.lineTo(-0.12, 0);
-  sharkDorsalShape.closePath();
-  const sharkDorsalGeo = new THREE.ExtrudeGeometry(sharkDorsalShape, { depth: 0.05, bevelEnabled: false });
-  sharkDorsalGeo.rotateY(-Math.PI / 2);
+  const sharkDorsalGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: 0.0, zCenter: 0.05, chord: 0.92, thickness: 0.065 },
+      { spanPos: 0.45, zCenter: -0.18, chord: 0.56, thickness: 0.045 },
+      { spanPos: 0.95, zCenter: -0.48, chord: 0.16, thickness: 0.02 },
+    ],
+    8
+  );
+  sharkDorsalGeo.rotateZ(Math.PI / 2);
 
-  const sharkTailShape = new THREE.Shape();
-  sharkTailShape.moveTo(0, 0.24);
-  sharkTailShape.lineTo(-1.35, 1.15);
-  sharkTailShape.lineTo(-0.62, 0.05);
-  sharkTailShape.lineTo(-0.98, -0.68);
-  sharkTailShape.lineTo(0, -0.18);
-  sharkTailShape.closePath();
-  const sharkTailGeo = new THREE.ExtrudeGeometry(sharkTailShape, { depth: 0.05, bevelEnabled: false });
-  sharkTailGeo.rotateY(-Math.PI / 2);
+  // Asymmetric heterocercal shark caudal fin (tall swept upper lobe, shorter lower lobe)
+  const sharkTailGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: -0.62, zCenter: -0.65, chord: 0.22, thickness: 0.028 },
+      { spanPos: -0.22, zCenter: -0.32, chord: 0.32, thickness: 0.045 },
+      { spanPos: 0.0, zCenter: -0.18, chord: 0.38, thickness: 0.065 },
+      { spanPos: 0.55, zCenter: -0.62, chord: 0.40, thickness: 0.045 },
+      { spanPos: 1.08, zCenter: -1.16, chord: 0.18, thickness: 0.022 },
+    ],
+    8
+  );
+  sharkTailGeo.rotateZ(Math.PI / 2);
 
-  const sharkPecGeo = new THREE.ConeGeometry(0.32, 1.25, 6);
-  sharkPecGeo.rotateZ(Math.PI / 2);
-
-  const sharkMat = new THREE.MeshStandardMaterial({
-    map: sharkTex,
-    roughness: 0.34,
-    metalness: 0.14,
-  });
-  disposablesGeo.push(sharkFrontGeo, sharkDorsalGeo, sharkTailGeo, sharkPecGeo);
-  disposablesMat.push(sharkMat);
+  const sharkPecGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: 0.0, zCenter: 0.0, chord: 0.58, thickness: 0.058 },
+      { spanPos: 0.52, zCenter: -0.24, chord: 0.38, thickness: 0.04 },
+      { spanPos: 1.04, zCenter: -0.58, chord: 0.12, thickness: 0.015 },
+    ],
+    8
+  );
+  disposablesGeo.push(sharkBodyGeo, sharkDorsalGeo, sharkTailGeo, sharkPecGeo);
 
   const sharks: ArticulatedCreatureRig[] = [];
   for (let i = 0; i < tier.sharkCount; i++) {
-    const root = new THREE.Group();
-    const body = new THREE.Mesh(sharkFrontGeo, sharkMat);
-    const dorsal = new THREE.Mesh(sharkDorsalGeo, sharkMat);
-    dorsal.position.set(0.025, 0.44, 0.15);
+    const swimUniforms = { uTime: { value: 0 }, uSpeed: { value: 1 } };
+    const sMat = new THREE.MeshStandardMaterial({
+      map: sharkTex,
+      roughness: 0.32,
+      metalness: 0.12,
+    });
+    applySoloSwimmerShader(sMat, swimUniforms, 4.5, 0.24, 3.2, false);
+    disposablesMat.push(sMat);
 
-    const pecL = new THREE.Mesh(sharkPecGeo, sharkMat);
-    pecL.position.set(0.78, -0.25, 0.65);
-    pecL.rotation.set(0.18, -0.45, -0.35);
-    const pecR = new THREE.Mesh(sharkPecGeo, sharkMat);
-    pecR.position.set(-0.78, -0.25, 0.65);
-    pecR.rotation.set(0.18, 0.45, 0.35 + Math.PI);
+    const root = new THREE.Group();
+    const body = new THREE.Mesh(sharkBodyGeo, sMat);
+    const dorsal = new THREE.Mesh(sharkDorsalGeo, sMat);
+    dorsal.position.set(0, 0.44, 0.18);
+
+    const pecL = new THREE.Mesh(sharkPecGeo, sMat);
+    pecL.position.set(0.36, -0.24, 0.55);
+    pecL.rotation.set(0.12, -0.25, -0.32);
+    const pecR = new THREE.Mesh(sharkPecGeo, sMat);
+    pecR.scale.x = -1;
+    pecR.position.set(-0.36, -0.24, 0.55);
+    pecR.rotation.set(0.12, 0.25, 0.32);
 
     const tailPivot = new THREE.Group();
-    tailPivot.position.set(0, 0, -1.95);
-    const tailFin = new THREE.Mesh(sharkTailGeo, sharkMat);
-    tailPivot.add(tailFin);
+    tailPivot.position.set(0, 0.02, -2.18);
+    tailPivot.add(new THREE.Mesh(sharkTailGeo, sMat));
 
     const sEyeL = new THREE.Mesh(eyeGeo, eyeMat);
     const sEyeR = new THREE.Mesh(eyeGeo, eyeMat);
-    sEyeL.scale.setScalar(1.6);
-    sEyeR.scale.setScalar(1.6);
-    sEyeL.position.set(0.32, 0.1, 1.55);
-    sEyeR.position.set(-0.32, 0.1, 1.55);
+    sEyeL.scale.setScalar(1.45);
+    sEyeR.scale.setScalar(1.45);
+    sEyeL.position.set(0.24, 0.06, 1.56);
+    sEyeR.position.set(-0.24, 0.06, 1.56);
 
     root.add(body, dorsal, pecL, pecR, tailPivot, sEyeL, sEyeR);
-    const sc = 1.05 + i * 0.25;
+    const sc = 1.05 + i * 0.22;
     root.scale.setScalar(sc);
     group.add(root);
 
@@ -662,92 +1067,119 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
       kind: 'shark',
       root,
       tailPivot,
+      swimUniforms,
       phase: i * 1.9,
       baseScale: sc,
     });
   }
 
-  // 8. Humpback Whale (Majestic distant silhouette gliding across the abyss)
-  const whaleBodyGeo = new THREE.SphereGeometry(1.0, 24, 18);
-  const wp = whaleBodyGeo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < wp.count; i++) {
-    const x = wp.getX(i);
-    const y = wp.getY(i);
-    const z = wp.getZ(i);
-    const t = z + 1.0; // 0 tail .. 2 head
-    const swell = t > 1.2 ? Math.cos(((t - 1.2) / 0.8) * Math.PI * 0.48) : 0.22 + 0.78 * (t / 1.2);
-    wp.setXYZ(i, x * swell * 1.45, y * swell * 1.28, z * 6.8);
-  }
-  whaleBodyGeo.computeVertexNormals();
+  // =========================================================================
+  // 8. Humpback Whale (Anatomical Baleen Torso + Long Scalloped Hydrofoil Wings)
+  // =========================================================================
+  const whaleStations: SpineStation[] = [
+    { t: 0.0, rx: 0.14, ryTop: 0.18, ryBot: 0.18, yOffset: 0 },
+    { t: 0.15, rx: 0.36, ryTop: 0.46, ryBot: 0.42, yOffset: 0 },
+    { t: 0.38, rx: 0.92, ryTop: 1.06, ryBot: 0.88, yOffset: 0.08 },
+    { t: 0.62, rx: 1.38, ryTop: 1.28, ryBot: 1.35, yOffset: 0.06 },
+    { t: 0.82, rx: 1.34, ryTop: 0.96, ryBot: 1.18, yOffset: 0 },
+    { t: 0.94, rx: 0.88, ryTop: 0.48, ryBot: 0.62, yOffset: -0.05 },
+    { t: 1.0, rx: 0.32, ryTop: 0.14, ryBot: 0.20, yOffset: -0.08 },
+  ];
+  const whaleBodyGeo = buildLoftedBodyGeometry(whaleStations, 28, 13.5);
 
-  const whalePecGeo = new THREE.BoxGeometry(3.8, 0.14, 0.95);
-  whalePecGeo.translate(1.9, 0, 0);
-  const whaleFlukeGeo = new THREE.BoxGeometry(3.4, 0.12, 1.15);
-  whaleFlukeGeo.translate(0, 0, -0.55);
+  const whalePecGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: 0.0, zCenter: 0.0, chord: 1.25, thickness: 0.14 },
+      { spanPos: 1.35, zCenter: -0.45, chord: 1.05, thickness: 0.11 },
+      { spanPos: 2.85, zCenter: -1.18, chord: 0.68, thickness: 0.075 },
+      { spanPos: 4.15, zCenter: -1.92, chord: 0.26, thickness: 0.032 },
+    ],
+    8
+  );
 
+  const whaleFlukeGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: -2.05, zCenter: -0.92, chord: 0.56, thickness: 0.065 },
+      { spanPos: -0.85, zCenter: -0.35, chord: 0.92, thickness: 0.11 },
+      { spanPos: 0.0, zCenter: -0.42, chord: 0.72, thickness: 0.13 },
+      { spanPos: 0.85, zCenter: -0.35, chord: 0.92, thickness: 0.11 },
+      { spanPos: 2.05, zCenter: -0.92, chord: 0.56, thickness: 0.065 },
+    ],
+    8
+  );
+
+  const whaleSwimUniforms = { uTime: { value: 0 }, uSpeed: { value: 1 } };
   const whaleMat = new THREE.MeshStandardMaterial({
     map: whaleTex,
     roughness: 0.46,
-    metalness: 0.08,
+    metalness: 0.06,
   });
+  applySoloSwimmerShader(whaleMat, whaleSwimUniforms, 13.5, 0.42, 1.15, true);
   disposablesGeo.push(whaleBodyGeo, whalePecGeo, whaleFlukeGeo);
   disposablesMat.push(whaleMat);
 
   const whaleRoot = new THREE.Group();
   const whaleBody = new THREE.Mesh(whaleBodyGeo, whaleMat);
   const wPecL = new THREE.Mesh(whalePecGeo, whaleMat);
-  wPecL.position.set(1.1, -0.35, 1.8);
-  wPecL.rotation.set(0.15, -0.45, -0.22);
+  wPecL.position.set(1.05, -0.42, 2.2);
+  wPecL.rotation.set(0.1, -0.35, -0.26);
   const wPecR = new THREE.Mesh(whalePecGeo, whaleMat);
   wPecR.scale.x = -1;
-  wPecR.position.set(-1.1, -0.35, 1.8);
-  wPecR.rotation.set(0.15, 0.45, 0.22);
+  wPecR.position.set(-1.05, -0.42, 2.2);
+  wPecR.rotation.set(0.1, 0.35, 0.26);
 
   const whaleTailPivot = new THREE.Group();
-  whaleTailPivot.position.set(0, 0, -5.8);
+  whaleTailPivot.position.set(0, 0, -6.55);
   whaleTailPivot.add(new THREE.Mesh(whaleFlukeGeo, whaleMat));
   whaleRoot.add(whaleBody, wPecL, wPecR, whaleTailPivot);
-  whaleRoot.scale.setScalar(1.35);
+  whaleRoot.scale.setScalar(1.32);
   group.add(whaleRoot);
 
   const whale: ArticulatedCreatureRig = {
     kind: 'whale',
     root: whaleRoot,
     tailPivot: whaleTailPivot,
+    swimUniforms: whaleSwimUniforms,
     phase: 0.4,
-    baseScale: 1.35,
+    baseScale: 1.32,
   };
 
-  // 9. Manta Rays (Wing-flap GLSL shader on broad diamond wings + whip tail)
-  const mantaGeo = new THREE.PlaneGeometry(3.8, 2.3, 24, 14);
-  mantaGeo.rotateX(-Math.PI / 2);
-  const mp = mantaGeo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < mp.count; i++) {
-    const x = mp.getX(i); // -1.9..1.9 wing span
-    const z = mp.getZ(i); // -1.15..1.15 fore-aft
-    const span = Math.abs(x) / 1.9;
-    const chordScale = Math.max(0.14, 1.0 - Math.pow(span, 1.25) * 0.85);
-    const thickness = Math.exp(-span * span * 5.0) * 0.18 * (1 - Math.abs(z));
-    mp.setXYZ(i, x, thickness, z * chordScale - span * 0.35);
-  }
-  mantaGeo.computeVertexNormals();
-
-  const mantaTailCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, 0.02, -0.9),
-    new THREE.Vector3(0, -0.05, -2.2),
-    new THREE.Vector3(0, 0.02, -3.4),
+  // =========================================================================
+  // 9. Manta Rays (Sculpted Wing Span + Curled Cephalic Lobes + Whip Tail)
+  // =========================================================================
+  const mantaGeo = buildHydrofoilFinGeometry(
+    [
+      { spanPos: -2.15, zCenter: -0.68, chord: 0.26, thickness: 0.03 },
+      { spanPos: -1.45, zCenter: -0.28, chord: 0.85, thickness: 0.075 },
+      { spanPos: -0.75, zCenter: 0.08, chord: 1.38, thickness: 0.16 },
+      { spanPos: 0.0, zCenter: 0.18, chord: 1.68, thickness: 0.30 },
+      { spanPos: 0.75, zCenter: 0.08, chord: 1.38, thickness: 0.16 },
+      { spanPos: 1.45, zCenter: -0.28, chord: 0.85, thickness: 0.075 },
+      { spanPos: 2.15, zCenter: -0.68, chord: 0.26, thickness: 0.03 },
+    ],
+    12
+  );
+  const cephalicCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0.05, -0.02, 0.22),
+    new THREE.Vector3(0.02, -0.08, 0.42),
   ]);
-  const mantaTailGeo = new THREE.TubeGeometry(mantaTailCurve, 10, 0.028, 6, false);
-  disposablesGeo.push(mantaGeo, mantaTailGeo);
+  const cephalicGeo = new THREE.TubeGeometry(cephalicCurve, 8, 0.048, 6, false);
+  const mantaTailCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0.01, -0.66),
+    new THREE.Vector3(0, -0.04, -1.9),
+    new THREE.Vector3(0, 0.02, -3.25),
+  ]);
+  const mantaTailGeo = new THREE.TubeGeometry(mantaTailCurve, 12, 0.024, 6, false);
+  disposablesGeo.push(mantaGeo, cephalicGeo, mantaTailGeo);
 
   const mantas: ArticulatedCreatureRig[] = [];
   for (let i = 0; i < tier.mantaCount; i++) {
     const wingUniforms = { uTime: { value: 0 }, uPhase: { value: i * 2.1 } };
     const mMat = new THREE.MeshStandardMaterial({
       map: mantaTex,
-      roughness: 0.38,
-      metalness: 0.1,
-      side: THREE.DoubleSide,
+      roughness: 0.36,
+      metalness: 0.12,
     });
     mMat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = wingUniforms.uTime;
@@ -757,8 +1189,8 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
         shader.vertexShader.replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
-          float wingSpan = abs(position.x) / 1.9;
-          float flap = sin(uTime * 2.35 + uPhase - wingSpan * 1.9) * pow(wingSpan, 1.2) * 0.62;
+          float wingSpan = abs(position.x) / 2.15;
+          float flap = sin(uTime * 2.1 + uPhase - wingSpan * 2.1) * pow(wingSpan, 1.25) * 0.68;
           transformed.y += flap;`
         );
     };
@@ -767,7 +1199,13 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
     const root = new THREE.Group();
     const wings = new THREE.Mesh(mantaGeo, mMat);
     const tail = new THREE.Mesh(mantaTailGeo, mMat);
-    root.add(wings, tail);
+    const hornL = new THREE.Mesh(cephalicGeo, mMat);
+    hornL.position.set(0.26, -0.02, 0.84);
+    const hornR = new THREE.Mesh(cephalicGeo, mMat);
+    hornR.scale.x = -1;
+    hornR.position.set(-0.26, -0.02, 0.84);
+
+    root.add(wings, tail, hornL, hornR);
     const sc = 0.95 + i * 0.25;
     root.scale.setScalar(sc);
     group.add(root);
@@ -781,34 +1219,51 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
     });
   }
 
-  // 10. Octopus (Bulbous mantle + 8 curved undulating arms)
-  const octoHeadGeo = new THREE.SphereGeometry(0.42, 16, 12);
-  octoHeadGeo.scale(0.88, 1.35, 0.95);
+  // =========================================================================
+  // 10. Reef Octopus (Smooth Muscular Mantle + 8 Tapered Sinusoidal Arms)
+  // =========================================================================
+  const octoMantleGeo = new THREE.SphereGeometry(0.4, 18, 14);
+  octoMantleGeo.scale(0.84, 1.38, 0.92);
   const octoArmCurve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(0.32, -0.35, 0.12),
-    new THREE.Vector3(0.62, -0.78, -0.1),
-    new THREE.Vector3(0.88, -1.05, 0.16),
+    new THREE.Vector3(0.32, -0.34, 0.12),
+    new THREE.Vector3(0.64, -0.76, -0.08),
+    new THREE.Vector3(0.92, -1.06, 0.15),
   ]);
-  const octoArmGeo = new THREE.TubeGeometry(octoArmCurve, 12, 0.06, 7, false);
+  const octoArmGeo = new THREE.TubeGeometry(octoArmCurve, 14, 0.068, 8, false);
+  // Taper octopus arm tip naturally
+  const oPos = octoArmGeo.attributes.position as THREE.BufferAttribute;
+  const oUv = octoArmGeo.attributes.uv as THREE.BufferAttribute;
+  const oTmp = new THREE.Vector3();
+  for (let i = 0; i < oPos.count; i++) {
+    const t = Math.min(1, Math.max(0, oUv.getX(i)));
+    octoArmCurve.getPointAt(t, oTmp);
+    const taper = 1 - t * 0.85;
+    oPos.setXYZ(
+      i,
+      oTmp.x + (oPos.getX(i) - oTmp.x) * taper,
+      oTmp.y + (oPos.getY(i) - oTmp.y) * taper,
+      oTmp.z + (oPos.getZ(i) - oTmp.z) * taper
+    );
+  }
+  octoArmGeo.computeVertexNormals();
+
   const octoMat = new THREE.MeshStandardMaterial({
-    color: '#d95b72',
-    emissive: '#3b0c1e',
-    emissiveIntensity: 0.45,
-    roughness: 0.44,
-    metalness: 0.06,
+    color: '#8e454e',
+    roughness: 0.42,
+    metalness: 0.04,
   });
-  disposablesGeo.push(octoHeadGeo, octoArmGeo);
+  disposablesGeo.push(octoMantleGeo, octoArmGeo);
   disposablesMat.push(octoMat);
 
   const octoRoot = new THREE.Group();
-  const octoHead = new THREE.Mesh(octoHeadGeo, octoMat);
+  const octoHead = new THREE.Mesh(octoMantleGeo, octoMat);
   octoHead.position.y = 0.28;
   octoHead.rotation.x = -0.24;
   const oEyeL = new THREE.Mesh(eyeGeo, eyeMat);
   const oEyeR = new THREE.Mesh(eyeGeo, eyeMat);
-  oEyeL.position.set(0.24, 0.14, 0.34);
-  oEyeR.position.set(-0.24, 0.14, 0.34);
+  oEyeL.position.set(0.22, 0.14, 0.32);
+  oEyeR.position.set(-0.22, 0.14, 0.32);
   octoRoot.add(octoHead, oEyeL, oEyeR);
 
   const armSegments: THREE.Object3D[] = [];
@@ -817,12 +1272,12 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
     const armPivot = new THREE.Group();
     armPivot.rotation.y = ang;
     const armMesh = new THREE.Mesh(octoArmGeo, octoMat);
-    armMesh.position.set(0.18, -0.05, 0);
+    armMesh.position.set(0.16, -0.05, 0);
     armPivot.add(armMesh);
     octoRoot.add(armPivot);
     armSegments.push(armPivot);
   }
-  octoRoot.scale.setScalar(1.05);
+  octoRoot.scale.setScalar(1.0);
   group.add(octoRoot);
 
   const octopus: ArticulatedCreatureRig = {
@@ -830,38 +1285,42 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
     root: octoRoot,
     armSegments,
     phase: 0.8,
-    baseScale: 1.05,
+    baseScale: 1.0,
   };
 
   const animateRig = (rig: ArticulatedCreatureRig, elapsed: number, speedFactor: number) => {
+    if (rig.swimUniforms) {
+      rig.swimUniforms.uTime.value = elapsed;
+      rig.swimUniforms.uSpeed.value = 0.85 + speedFactor * 0.65;
+    }
+
     const t = elapsed * (0.9 + speedFactor * 1.15) + rig.phase;
     switch (rig.kind) {
       case 'pelagic':
-        if (rig.tailPivot) rig.tailPivot.rotation.y = Math.sin(t * 7.5) * 0.45;
+        if (rig.tailPivot) rig.tailPivot.rotation.y = Math.sin(t * 7.5) * 0.42;
         break;
       case 'shark':
-        if (rig.tailPivot) rig.tailPivot.rotation.y = Math.sin(t * 3.4) * 0.34;
+        if (rig.tailPivot) rig.tailPivot.rotation.y = Math.sin(t * 3.2) * 0.32;
         break;
       case 'dolphin':
-        // Dolphins swim via vertical fluke oscillation
-        if (rig.tailPivot) rig.tailPivot.rotation.x = Math.sin(t * 5.2) * 0.38;
+        if (rig.tailPivot) rig.tailPivot.rotation.x = Math.sin(t * 4.8) * 0.34;
         break;
       case 'whale':
-        if (rig.tailPivot) rig.tailPivot.rotation.x = Math.sin(elapsed * 1.15 + rig.phase) * 0.24;
+        if (rig.tailPivot) rig.tailPivot.rotation.x = Math.sin(elapsed * 1.15 + rig.phase) * 0.22;
         break;
       case 'turtle':
         if (rig.leftFlipper && rig.rightFlipper) {
-          const stroke = Math.sin(elapsed * 2.15 + rig.phase);
-          const twist = Math.cos(elapsed * 2.15 + rig.phase);
-          rig.leftFlipper.rotation.z = stroke * 0.55;
-          rig.leftFlipper.rotation.y = twist * 0.28;
-          rig.rightFlipper.rotation.z = -stroke * 0.55;
-          rig.rightFlipper.rotation.y = -twist * 0.28;
+          const stroke = Math.sin(elapsed * 2.05 + rig.phase);
+          const feather = Math.cos(elapsed * 2.05 + rig.phase);
+          rig.leftFlipper.rotation.z = stroke * 0.54;
+          rig.leftFlipper.rotation.x = feather * 0.24;
+          rig.rightFlipper.rotation.z = -stroke * 0.54;
+          rig.rightFlipper.rotation.x = feather * 0.24;
         }
         break;
       case 'jelly':
         if (rig.bellMesh) {
-          const pulse = Math.sin(elapsed * 2.1 + rig.phase);
+          const pulse = Math.sin(elapsed * 2.05 + rig.phase);
           const bellR = 1 + pulse * 0.14;
           const bellH = 1 - pulse * 0.11;
           rig.bellMesh.scale.set(bellR, bellH, bellR);
@@ -869,8 +1328,8 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
         if (rig.tentacles) {
           for (let i = 0; i < rig.tentacles.length; i++) {
             const tent = rig.tentacles[i];
-            tent.rotation.x = Math.sin(elapsed * 1.8 + rig.phase + i * 0.7) * 0.14;
-            tent.rotation.z = Math.cos(elapsed * 1.5 + rig.phase + i * 0.9) * 0.12;
+            tent.rotation.x = Math.sin(elapsed * 1.7 + rig.phase + i * 0.65) * 0.13;
+            tent.rotation.z = Math.cos(elapsed * 1.45 + rig.phase + i * 0.85) * 0.11;
           }
         }
         break;
@@ -881,8 +1340,8 @@ export function createMarineCreatures(tier: MarineCreatureTier): MarineCreatures
         if (rig.armSegments) {
           for (let i = 0; i < rig.armSegments.length; i++) {
             const arm = rig.armSegments[i];
-            arm.rotation.z = Math.sin(elapsed * 2.6 + i * 0.8) * 0.22;
-            arm.rotation.x = Math.cos(elapsed * 2.1 + i * 0.6) * 0.14;
+            arm.rotation.z = Math.sin(elapsed * 2.5 + i * 0.8) * 0.2;
+            arm.rotation.x = Math.cos(elapsed * 2.0 + i * 0.6) * 0.13;
           }
         }
         break;
