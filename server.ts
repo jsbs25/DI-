@@ -3807,6 +3807,9 @@ function sanitizeCompanionReply(rawText: string): {
   let extractedEmotion: string | null = null;
   const extractedToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const cleanReply = (rawText || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
+    .replace(/<(?:think|thought)>[\s\S]*$/i, '')
     .replace(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]\s*/gi, (_all, tag: string) => {
       extractedEmotion = normalizeCompanionEmotion(tag);
       return '';

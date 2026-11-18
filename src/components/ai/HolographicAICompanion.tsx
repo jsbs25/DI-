@@ -224,6 +224,9 @@ function mapCompanionToVoiceEmotion(c: CompanionEmotion): VoiceEmotion {
 
 function stripCompanionMarkup(raw: string): string {
   return (raw || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
+    .replace(/<(?:think|thought)>[\s\S]*$/i, '')
     .replace(/\[\[(?:EMO|EMOTION):[^\]]*\]\]\s*/gi, '')
     .replace(/\[\[ACTION:[\s\S]*?\]\]\s*/gi, '')
     .replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, '')

@@ -55,6 +55,9 @@ export function stripAiControlTags(raw: string): {
   let action: Record<string, any> | null = null;
 
   text = text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
+    .replace(/<(?:think|thought)>[\s\S]*$/i, '')
     .replace(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]\s*/gi, (_all, tag: string) => {
       emotion = emotion || tag.toLowerCase().trim();
       return '';
