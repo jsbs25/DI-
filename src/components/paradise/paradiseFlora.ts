@@ -199,6 +199,33 @@ export function createParadiseFlora(
     cacheKey: 'paradise-pine-wind',
   });
 
+  const mergeSafe = (parts: THREE.BufferGeometry[]): THREE.BufferGeometry => {
+    if (parts.length === 0) {
+      return trackGeo(new THREE.BoxGeometry(0.1, 0.4, 0.1));
+    }
+    const normalized = parts.map((p) => {
+      const nonIdx = p.index ? p.toNonIndexed() : p.clone();
+      if (!nonIdx.attributes.normal) nonIdx.computeVertexNormals();
+      return nonIdx;
+    });
+    const hasAllUv = normalized.every((g) => Boolean(g.attributes.uv));
+    const keepAttrs = hasAllUv ? new Set(['position', 'normal', 'uv']) : new Set(['position', 'normal']);
+    for (const g of normalized) {
+      for (const attr of Object.keys(g.attributes)) {
+        if (!keepAttrs.has(attr)) {
+          g.deleteAttribute(attr);
+        }
+      }
+    }
+    const merged = BufferGeometryUtils.mergeGeometries(normalized, false);
+    normalized.forEach((g) => g.dispose());
+    parts.forEach((g) => g.dispose());
+    if (!merged) {
+      return trackGeo(new THREE.BoxGeometry(0.1, 0.4, 0.1));
+    }
+    return trackGeo(merged);
+  };
+
   // Build composite Sakura tree prototype (curved trunk + 3 boughs)
   const buildTrunkClusterGeo = (scaleH: number) => {
     const mainTrunk = new THREE.CylinderGeometry(0.14, 0.28, scaleH, 7);
@@ -210,11 +237,7 @@ export function createParadiseFlora(
     b2.rotateZ(-0.52);
     b2.rotateY(1.2);
     b2.translate(-scaleH * 0.18, scaleH * 0.75, -0.1);
-    const merged = BufferGeometryUtils.mergeGeometries([mainTrunk, b1, b2]);
-    mainTrunk.dispose();
-    b1.dispose();
-    b2.dispose();
-    return trackGeo(merged);
+    return mergeSafe([mainTrunk, b1, b2]);
   };
 
   // Multi-puff organic blossom crown geometry
@@ -233,9 +256,7 @@ export function createParadiseFlora(
       s.translate(ox, oy, oz);
       parts.push(s);
     }
-    const merged = BufferGeometryUtils.mergeGeometries(parts);
-    parts.forEach((p) => p.dispose());
-    return trackGeo(merged);
+    return mergeSafe(parts);
   };
 
   // Willow drooping frond canopy
@@ -252,9 +273,7 @@ export function createParadiseFlora(
       frond.translate(Math.cos(ang) * 1.42, 2.75, Math.sin(ang) * 1.42);
       parts.push(frond);
     }
-    const merged = BufferGeometryUtils.mergeGeometries(parts);
-    parts.forEach((p) => p.dispose());
-    return trackGeo(merged);
+    return mergeSafe(parts);
   };
 
   // Layered conifer pine geometry
@@ -265,9 +284,7 @@ export function createParadiseFlora(
       c.translate(0, 2.6 + tier * 1.25, 0);
       parts.push(c);
     }
-    const merged = BufferGeometryUtils.mergeGeometries(parts);
-    parts.forEach((p) => p.dispose());
-    return trackGeo(merged);
+    return mergeSafe(parts);
   };
 
   const sakuraTrunkGeo = buildTrunkClusterGeo(3.2);
@@ -460,9 +477,7 @@ export function createParadiseFlora(
   // =========================================================================
   const stemPart = new THREE.CylinderGeometry(0.018, 0.024, 0.42, 4).translate(0, 0.21, 0);
   const blossomHead = new THREE.DodecahedronGeometry(0.11, 0).scale(1.15, 0.55, 1.15).translate(0, 0.45, 0);
-  const flowerGeo = trackGeo(BufferGeometryUtils.mergeGeometries([stemPart, blossomHead]));
-  stemPart.dispose();
-  blossomHead.dispose();
+  const flowerGeo = mergeSafe([stemPart, blossomHead]);
 
   const flowerMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -524,9 +539,7 @@ export function createParadiseFlora(
   // =========================================================================
   const reedShaft = new THREE.CylinderGeometry(0.015, 0.028, 1.35, 5).translate(0, 0.675, 0);
   const reedHead = new THREE.CapsuleGeometry(0.042, 0.16, 3, 5).translate(0, 1.24, 0);
-  const reedGeo = trackGeo(BufferGeometryUtils.mergeGeometries([reedShaft, reedHead]));
-  reedShaft.dispose();
-  reedHead.dispose();
+  const reedGeo = mergeSafe([reedShaft, reedHead]);
 
   const reedMat = trackMat(
     new THREE.MeshStandardMaterial({
