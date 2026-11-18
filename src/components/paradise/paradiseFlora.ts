@@ -469,42 +469,52 @@ export function createParadiseFlora(
   const isClearTreeSite = (x: number, z: number, minPathDist = 0.55): boolean => {
     const h = terrainHeightAt(x, z);
     if (h < 0.24) return false;
-    if (lakeSignedDist(x, z) < 1.2) return false;
+    if (lakeSignedDist(x, z) < 1.3) return false;
     const st = streamDistanceAndFlow(x, z);
     if (st.dist < st.width * 1.45) return false;
     if (gardenPathFactor(x, z) > minPathDist) return false;
-    if (Math.hypot(x - 12.8, z + 7.8) < 4.7) return false;
-    if (Math.hypot(x + 6.4, z + 8.4) < 4.8) return false;
-    if (Math.hypot(x + 4.5, z - 23.5) < 4.4) return false;
+    // Keep pavilion & bridge plazas clear
+    if (Math.hypot(x - 12.8, z + 7.8) < 5.0) return false;
+    if (Math.hypot(x + 6.4, z + 8.4) < 5.0) return false;
+    // Keep panoramic Overlook camera sightline corridor [-4.5, 23.5] -> [2.5, -1.5] open
+    const camX = -4.5;
+    const camZ = 23.5;
+    const dirX = 7.0;
+    const dirZ = -25.0;
+    const tProj = ((x - camX) * dirX + (z - camZ) * dirZ) / (dirX * dirX + dirZ * dirZ);
+    if (tProj >= -0.15 && tProj <= 1.05) {
+      const cx = camX + dirX * tProj;
+      const cz = camZ + dirZ * tProj;
+      const corridorHalfWidth = 9.2 - tProj * 1.4;
+      if (Math.hypot(x - cx, z - cz) < corridorHalfWidth) return false;
+    }
+    if (z > 14 && Math.abs(x + 2.0) < 11.5) return false;
     return true;
   };
 
   const heroSakuraCoords: Array<[number, number, number]> = [
-    [16.8, -5.2, 1.12],
-    [17.4, -10.4, 1.18],
-    [9.8, -12.8, 1.08],
-    [14.6, 5.4, 1.16],
-    [9.2, 7.6, 1.05],
-    [2.6, 8.2, 1.1],
-    [-2.4, -13.2, 1.14],
-    [3.8, -12.4, 1.06],
-    [16.2, 11.2, 1.18],
-    [11.4, 14.5, 1.1],
-    [-2.6, 13.4, 1.04],
-    [6.4, 17.6, 1.15],
+    [17.4, -5.2, 1.12],
+    [18.2, -10.6, 1.18],
+    [10.2, -13.2, 1.08],
+    [15.4, 5.8, 1.15],
+    [11.8, 10.6, 1.08],
+    [16.8, 12.2, 1.16],
+    [-2.4, -13.6, 1.12],
+    [3.8, -12.8, 1.06],
+    [13.4, 17.8, 1.12],
+    [19.2, 1.5, 1.16],
   ];
 
   const heroGinkgoCoords: Array<[number, number, number]> = [
-    [-11.2, -4.4, 1.16],
-    [-12.6, -10.8, 1.12],
-    [-14.8, 2.2, 1.22],
-    [-9.6, 6.4, 1.1],
-    [-13.4, 11.4, 1.18],
-    [-17.8, 7.8, 1.24],
-    [-18.6, -5.6, 1.2],
-    [-15.2, -16.8, 1.14],
-    [-8.4, 15.8, 1.08],
-    [-16.4, 16.5, 1.18],
+    [-12.8, -4.8, 1.16],
+    [-13.4, -11.2, 1.12],
+    [-15.8, 2.6, 1.2],
+    [-14.2, 8.6, 1.14],
+    [-17.4, 12.8, 1.18],
+    [-19.2, 6.4, 1.22],
+    [-18.8, -5.8, 1.18],
+    [-15.4, -16.8, 1.14],
+    [-15.8, 18.2, 1.12],
   ];
 
   const sakuraBuckets: PlacementItem[][] = sakuraProtos.map(() => []);
