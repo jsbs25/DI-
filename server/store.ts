@@ -1125,7 +1125,17 @@ class DataStore {
 
     const conv = this.conversations.find(c => c.id === conversationId);
     if (conv) {
-      conv.lastMessage = msg.recalled ? 'Message recalled' : (content || (msg.attachments?.length ? '[attachment]' : ''));
+      let preview = content;
+      if (!preview && msg.attachments?.length) {
+        const first = msg.attachments[0] as any;
+        const mime = String(first?.mimeType || '').toLowerCase();
+        preview = (first?.type === 'audio' || mime.startsWith('audio/'))
+          ? '[语音消息]'
+          : (first?.type === 'image' || mime.startsWith('image/'))
+            ? '[图片]'
+            : `[文件] ${first?.name || ''}`.trim();
+      }
+      conv.lastMessage = msg.recalled ? 'Message recalled' : preview;
       conv.lastMessageTime = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       conv.lastMessageAt = now;
       conv.updatedAt = now;

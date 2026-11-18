@@ -27,6 +27,7 @@ import {
   Zap,
 } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
+import { apiUrl, wsUrl } from '../../apiBase.ts';
 import { useOptionalPlayerContext } from '../../music/PlayerContext.tsx';
 import { getAiProfileKey } from '../../utils/aiProfile.ts';
 import { AudioLiveClient } from './audioLiveClient.ts';
@@ -42,6 +43,7 @@ import {
 } from '../../utils/oneAgentController.ts';
 import {
   analyzeDialogueEmotion,
+  buildExpressivePhrases,
   type VoiceEmotion,
 } from '../../utils/emotionEngine.ts';
 import {
@@ -210,6 +212,22 @@ function mapVoiceEmotionToCompanion(v: VoiceEmotion): CompanionEmotion {
   return 'calm';
 }
 
+function mapCompanionToVoiceEmotion(c: CompanionEmotion): VoiceEmotion {
+  if (c === 'happy') return 'cheerful';
+  if (c === 'excited') return 'excited';
+  if (c === 'curious') return 'curious';
+  if (c === 'empathetic' || c === 'concerned') return 'empathetic';
+  if (c === 'playful') return 'playful';
+  return 'calm';
+}
+
+function stripCompanionMarkup(raw: string): string {
+  return (raw || '')
+    .replace(/\[\[(?:EMO|EMOTION):[^\]]*\]\]\s*/gi, '')
+    .replace(/\[\[ACTION:[\s\S]*?\]\]\s*/gi, '')
+    .trim();
+}
+
 function EmotionIcon({ emotion }: { emotion: CompanionEmotion }) {
   const cls = 'h-3.5 w-3.5 shrink-0';
   switch (emotion) {
@@ -325,6 +343,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
   const wsRef = useRef<WebSocket | null>(null);
   const audioClientRef = useRef<AudioLiveClient | null>(null);
   const fallbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const fallbackObjectUrlRef = useRef<string | null>(null);
+  const speakSeqRef = useRef(0);
+  const autoSpeakTextRef = useRef(false);
   const speechRecRef = useRef<any>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -584,35 +605,36 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
     }
   }, [transcript, hudOpen]);
 
-
-  const stripEmotionAndActionTags = useCallback((raw: string): string => {
-    if (!raw) return '';
-    let text = String(raw);
-    text = text.replace(/\[\[(?:EMO|EMOTION):[a-z_-]+\]\]\s*/gi, '');
-    text = text.replace(/\[\[ACTION:[\s\S]*?\]\]\s*/gi, '');
-    return text.trim();
-  }, []);
-
   const appendEntry = useCallback(
     (role: TranscriptEntry['role'], text: string, extra?: Partial<TranscriptEntry>) => {
-      const clean = stripEmotionAndActionTags(text);
+      const clean = stripCompanionMarkup(text);
+
       if (!clean) return '';
       const id = `${role}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       setTranscript((prev) => [...prev.slice(-24), { id, role, text: clean, ...extra }]);
       return id;
     },
-    [stripEmotionAndActionTags]
+    []
   );
 
   // Stop all AI audio output immediately (< 5ms)
   const stopAllOutputImmediately = useCallback((markInterrupted = true) => {
+    speakSeqRef.current += 1;
     audioClientRef.current?.flushOutput();
     if (fallbackAudioRef.current) {
       try {
+        fallbackAudioRef.current.onended = null;
+        fallbackAudioRef.current.onerror = null;
         fallbackAudioRef.current.pause();
         fallbackAudioRef.current.src = '';
       } catch {}
       fallbackAudioRef.current = null;
+    }
+    if (fallbackObjectUrlRef.current) {
+      try {
+        URL.revokeObjectURL(fallbackObjectUrlRef.current);
+      } catch {}
+      fallbackObjectUrlRef.current = null;
     }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
@@ -671,6 +693,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
 
   const stopVoiceSession = useCallback(() => {
     voiceActiveRef.current = false;
+    autoSpeakTextRef.current = false;
     setVoiceActive(false);
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
@@ -710,23 +733,91 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
     };
   }, [stopVoiceSession]);
 
-  // Speak via Gemini TTS (/api/ai/tts) or SpeechSynthesis fallback
+  // Speak via Gemini TTS (POST /api/ai/tts), expressive keyless server TTS phrases (GET /api/ai/tts), or SpeechSynthesis fallback
   const speakFallbackReply = useCallback(
     async (text: string, replyEmotion: CompanionEmotion) => {
       if (mutedOutputRef.current) {
         resumeMusicIfPausedForVoice();
         return;
       }
-      const clean = stripEmotionAndActionTags(text).replace(/[*_#`>]/g, '').trim();
+      const clean = stripCompanionMarkup(text).replace(/[*_#`>]/g, '').trim();
+
       if (!clean) {
         resumeMusicIfPausedForVoice();
         return;
       }
 
+      const mySeq = ++speakSeqRef.current;
       pauseMusicForVoice(false);
       setPhase('speaking');
+
+      const playAudioAndWait = (audio: HTMLAudioElement, objectUrl?: string): Promise<boolean> =>
+        new Promise((resolve) => {
+          if (mySeq !== speakSeqRef.current || mutedOutputRef.current) {
+            if (objectUrl) {
+              try {
+                URL.revokeObjectURL(objectUrl);
+              } catch {}
+            }
+            resolve(false);
+            return;
+          }
+          fallbackAudioRef.current = audio;
+          fallbackObjectUrlRef.current = objectUrl || null;
+          let settled = false;
+          const done = (ok: boolean) => {
+            if (settled) return;
+            settled = true;
+            if (fallbackAudioRef.current === audio) fallbackAudioRef.current = null;
+            if (objectUrl && fallbackObjectUrlRef.current === objectUrl) {
+              try {
+                URL.revokeObjectURL(objectUrl);
+              } catch {}
+              fallbackObjectUrlRef.current = null;
+            }
+            resolve(ok);
+          };
+          audio.onended = () => done(true);
+          audio.onerror = () => done(false);
+          audio.play().catch(() => done(false));
+        });
+
+      const speakUttAndWait = (phraseText: string, rate: number, pitch: number): Promise<boolean> =>
+        new Promise((resolve) => {
+          if (mySeq !== speakSeqRef.current || mutedOutputRef.current || typeof window === 'undefined' || !('speechSynthesis' in window)) {
+            resolve(false);
+            return;
+          }
+          try {
+            window.speechSynthesis.cancel();
+            const utt = new SpeechSynthesisUtterance(phraseText);
+            utt.lang = isZh ? 'zh-CN' : 'en-US';
+            utt.rate = rate;
+            utt.pitch = pitch;
+            let settled = false;
+            const done = (ok: boolean) => {
+              if (settled) return;
+              settled = true;
+              resolve(ok);
+            };
+            utt.onend = () => done(true);
+            utt.onerror = () => done(false);
+            window.speechSynthesis.speak(utt);
+          } catch {
+            resolve(false);
+          }
+        });
+
+      const finishAll = () => {
+        if (mySeq === speakSeqRef.current) {
+          setPhase(voiceActiveRef.current ? 'listening' : 'idle');
+          resumeMusicIfPausedForVoice();
+        }
+      };
+
+      // 1. Primary expressive Gemini TTS (when GEMINI_API_KEY is configured)
       try {
-        const res = await fetch('/api/ai/tts', {
+        const res = await fetch(apiUrl('/api/ai/tts'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -735,45 +826,78 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             voiceName: voiceNameRef.current,
           }),
         });
+        if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
         if (res.ok) {
           const data = await res.json();
           if (data?.success && data.audioBase64) {
             const audio = new Audio(`data:audio/wav;base64,${data.audioBase64}`);
-            fallbackAudioRef.current = audio;
-            const finishPlayback = () => {
-              fallbackAudioRef.current = null;
-              setPhase(voiceActiveRef.current ? 'listening' : 'idle');
-              resumeMusicIfPausedForVoice();
-            };
-            audio.onended = finishPlayback;
-            audio.onerror = finishPlayback;
-            await audio.play();
-            return;
+            const played = await playAudioAndWait(audio);
+            if (played) {
+              finishAll();
+              return;
+            }
           }
         }
       } catch {
-        // fallback to Web Speech API
+        // fall through to expressive keyless server TTS
       }
 
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
+
+      // 2. Expressive multi-phrase server TTS (works without GEMINI_API_KEY, preserving full reply & emotional pacing)
+      const voiceEmo = mapCompanionToVoiceEmotion(replyEmotion);
+      const analysis = analyzeDialogueEmotion('', clean, voiceEmo);
+      const phrases = buildExpressivePhrases(clean, analysis, 'audio');
+      const phraseList =
+        phrases.length > 0
+          ? phrases
+          : [
+              {
+                text: clean.slice(0, 220),
+                emotion: voiceEmo,
+                pitch: analysis.basePitch,
+                rate: analysis.baseRate,
+                baiduSpd: analysis.baiduSpd,
+                audioPlaybackRate: analysis.audioPlaybackRate,
+                pauseAfterMs: 25,
+              },
+            ];
+
+      for (let i = 0; i < phraseList.length; i++) {
+        if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
+        const p = phraseList[i];
+        let phrasePlayed = false;
+
         try {
-          window.speechSynthesis.cancel();
-          const utt = new SpeechSynthesisUtterance(clean.slice(0, 420));
-          utt.lang = isZh ? 'zh-CN' : 'en-US';
-          utt.rate = replyEmotion === 'excited' ? 1.12 : replyEmotion === 'concerned' ? 0.96 : 1.04;
-          utt.pitch = replyEmotion === 'excited' || replyEmotion === 'playful' ? 1.1 : 1.02;
-          const finishUtt = () => {
-            setPhase(voiceActiveRef.current ? 'listening' : 'idle');
-            resumeMusicIfPausedForVoice();
-          };
-          utt.onend = finishUtt;
-          utt.onerror = finishUtt;
-          window.speechSynthesis.speak(utt);
-          return;
-        } catch {}
+          const ttsUrl = `${apiUrl('/api/ai/tts')}?text=${encodeURIComponent(p.text)}&lang=${isZh ? 'zh' : 'en'}&spd=${p.baiduSpd}`;
+          const getRes = await fetch(ttsUrl);
+          if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
+          if (getRes.ok) {
+            const blob = await getRes.blob();
+            if (blob.size > 200) {
+              const objectUrl = URL.createObjectURL(blob);
+              const audio = new Audio(objectUrl);
+              audio.playbackRate = p.audioPlaybackRate;
+              phrasePlayed = await playAudioAndWait(audio, objectUrl);
+            }
+          }
+        } catch {
+          phrasePlayed = false;
+        }
+
+        if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
+
+        if (!phrasePlayed) {
+          await speakUttAndWait(p.text, p.rate, p.pitch);
+        }
+
+        if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
+        if (i < phraseList.length - 1 && p.pauseAfterMs > 0) {
+          await new Promise((r) => setTimeout(r, p.pauseAfterMs));
+        }
       }
-      setPhase(voiceActiveRef.current ? 'listening' : 'idle');
-      resumeMusicIfPausedForVoice();
+
+      finishAll();
     },
     [isZh, pauseMusicForVoice, resumeMusicIfPausedForVoice]
   );
@@ -863,7 +987,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       abortControllerRef.current = ac;
 
       try {
-        const res = await fetch('/api/ai/companion-turn', {
+        const res = await fetch(apiUrl('/api/ai/companion-turn'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: ac.signal,
@@ -904,14 +1028,15 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             }
           }
 
-          const rawReplyText =
-            (typeof data.reply === 'string' && data.reply.trim()) ||
+          const cleanedDataReply = typeof data.reply === 'string' ? stripCompanionMarkup(data.reply) : '';
+          const finalReply =
+            cleanedDataReply ||
+
             (actionSummaries.length > 0
               ? isZh
                 ? `好的，已经为你搞定：${actionSummaries.join('、')}。`
                 : `All set! ${actionSummaries.join(', ')}.`
               : resolveConversationalFallback(clean, isZh));
-          const finalReply = stripEmotionAndActionTags(rawReplyText) || rawReplyText;
 
           // Also enrich emotion with local dialogue analysis if model stayed neutral
           if (nextEmotion === 'calm') {
@@ -955,13 +1080,25 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
   // Fallback Web SpeechRecognition loop when Gemini Live WS is unavailable
   const startSpeechRecognitionFallback = useCallback(() => {
     setLiveModeEngine('companion-api');
+    autoSpeakTextRef.current = true;
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) {
-      setPhase('error');
-      setEmotion('concerned');
-      setEmotionReason(isZh ? '浏览器不支持语音识别，可打字对话' : 'Speech recognition unavailable; use text input');
+      voiceActiveRef.current = false;
+      setVoiceActive(false);
+      setPhase('idle');
+      setEmotion('empathetic');
+      setEmotionReason(isZh ? 'One. 情绪对话与语音播报在线' : 'Emotional text + voice ready');
+      appendEntry(
+        'action',
+        isZh
+          ? '当前浏览器不支持持续麦克风听写，直接在下方输入文字，我同样会用带情绪的语音陪你聊。'
+          : 'Continuous mic recognition is unavailable in this browser; type below and I will still reply with expressive voice.'
+      );
       return;
     }
+
+    setEmotion('happy');
+    setEmotionReason(isZh ? 'One. 情绪伴侣在线 · 随时对话' : 'Emotional Companion Online');
 
     const launch = () => {
       if (!voiceActiveRef.current) return;
@@ -1017,9 +1154,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
     const audioClient = new AudioLiveClient();
     audioClientRef.current = audioClient;
 
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${window.location.host}/ws/ai-live?profileKey=${encodeURIComponent(profileKeyRef.current)}`;
-    const ws = new WebSocket(wsUrl);
+    const liveWsUrl = `${wsUrl('/ws/ai-live')}?profileKey=${encodeURIComponent(profileKeyRef.current)}`;
+    const ws = new WebSocket(liveWsUrl);
     wsRef.current = ws;
 
     let liveFailed = false;
@@ -1132,7 +1268,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       }
 
       if (msg.type === 'output_transcript' && typeof msg.text === 'string') {
-        const piece = stripEmotionAndActionTags(msg.text);
+        const piece = stripCompanionMarkup(msg.text);
         if (!piece.trim()) return;
         currentInputTurnIdRef.current = null;
         setTranscript((prev) => {
@@ -1289,7 +1425,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
         return;
       }
 
-      await runCompanionTurnApi(raw, voiceActiveRef.current);
+      await runCompanionTurnApi(raw, voiceActiveRef.current || autoSpeakTextRef.current);
     },
     [appendEntry, liveModeEngine, runCompanionTurnApi, stopAllOutputImmediately, textInput]
   );

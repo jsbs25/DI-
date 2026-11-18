@@ -17,6 +17,7 @@ import { getGeminiClient } from './server/geminiClient.ts';
 import {
   AI_COMPANION_TOOLS,
   buildCompanionSystemInstruction,
+  formatPageContextForModel,
   type LivePageContextSummary,
 } from './server/aiLiveTools.ts';
 import {
@@ -1032,7 +1033,8 @@ const ALLOWED_ATTACHMENT_TYPES = new Map<string, { kind: 'image' | 'file' | 'aud
   ['image/webp', { kind: 'image', exts: ['.webp'] }],
   ['audio/webm', { kind: 'audio', exts: ['.webm'] }],
   ['audio/ogg', { kind: 'audio', exts: ['.ogg', '.oga'] }],
-  ['audio/mp4', { kind: 'audio', exts: ['.m4a', '.mp4'] }],
+  ['audio/mp4', { kind: 'audio', exts: ['.m4a', '.mp4', '.aac'] }],
+  ['audio/aac', { kind: 'audio', exts: ['.aac', '.m4a'] }],
   ['audio/mpeg', { kind: 'audio', exts: ['.mp3'] }],
   ['audio/wav', { kind: 'audio', exts: ['.wav'] }],
   ['application/pdf', { kind: 'file', exts: ['.pdf'] }],
@@ -1076,6 +1078,9 @@ function resolveAllowedAttachment(name: string, claimedMime: string, buf: Buffer
   let mime = String(claimedMime || '').toLowerCase().split(';')[0].trim();
   if (mime === 'image/jpg') mime = 'image/jpeg';
   if (mime === 'video/webm' && ext === '.webm') mime = 'audio/webm';
+  if (mime === 'audio/x-m4a' || mime === 'audio/m4a' || mime === 'audio/mp4a-latm') mime = 'audio/mp4';
+  if (mime === 'audio/x-wav' || mime === 'audio/wave') mime = 'audio/wav';
+  if (mime === 'audio/x-aac') mime = 'audio/aac';
   const sniff = sniffMime(buf);
   if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' && sniff === 'application/zip') {
     // docx is a zip container; allow only with correct extension
@@ -1251,14 +1256,34 @@ app.get('/api/messenger/files/:id', (req, res) => {
     const ownerDir = path.resolve(UPLOAD_DIR, owner);
     if (!resolved.startsWith(ownerDir + path.sep)) return res.status(403).json({ success: false, error: 'Forbidden' });
     if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: 'File not found' });
+    const stat = fs.statSync(resolved);
+    const total = stat.size;
     const wantDownload = req.query.download === '1' || req.query.download === 'true';
     const mime = typeof meta.mimeType === 'string' ? meta.mimeType : 'application/octet-stream';
     const inline = !wantDownload && (meta.type === 'image' || meta.type === 'audio' || mime.startsWith('audio/') || mime === 'application/pdf' || mime === 'text/plain');
     res.setHeader('Content-Type', mime);
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Cache-Control', 'private, max-age=0, no-store');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'private, max-age=300');
     const fname = encodeURIComponent(String(meta.name || 'file'));
     res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${fname}`);
+    const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
+    if (rangeHeader && total > 0) {
+      const m = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
+      if (m) {
+        const start = m[1] ? parseInt(m[1], 10) : 0;
+        const end = m[2] ? Math.min(total - 1, parseInt(m[2], 10)) : total - 1;
+        if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && start <= end && start < total) {
+          res.status(206);
+          res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+          res.setHeader('Content-Length', String(end - start + 1));
+          return fs.createReadStream(resolved, { start, end }).pipe(res);
+        }
+        res.status(416).setHeader('Content-Range', `bytes */${total}`).end();
+        return;
+      }
+    }
+    res.setHeader('Content-Length', String(total));
     return fs.createReadStream(resolved).pipe(res);
   } catch {}
   return res.status(404).json({ success: false, error: 'File not found' });
@@ -2152,12 +2177,15 @@ app.post('/api/calls/:id/signal', (req, res) => {
   if (!isActiveCallStatus(call.status)) return res.status(400).json({ success: false, error: 'Call not active' });
   const toUserId = typeof req.body?.toUserId === 'string' && req.body.toUserId ? req.body.toUserId : undefined;
   const signal = req.body?.signal;
+  const signalId = typeof req.body?.signalId === 'string' && req.body.signalId ? req.body.signalId : undefined;
   if (!signal || typeof signal !== 'object') return res.status(400).json({ success: false, error: 'signal object required' });
   if (toUserId && !(call.participantIds || []).includes(toUserId)) return res.status(403).json({ success: false, error: 'Forbidden' });
-  const entry = pushCallSignal(call.id, user.id, toUserId, signal);
-  const recipients = toUserId ? [toUserId] : (call.participantIds || []).filter((id: string) => id !== user.id);
-  for (const rid of recipients) {
-    try { wsBroadcastToUser(rid, { type: 'call_signal', ...entry }); } catch {}
+  const { entry, deduplicated } = pushCallSignal(call.id, user.id, toUserId, signal, signalId);
+  if (!deduplicated) {
+    const recipients = toUserId ? [toUserId] : (call.participantIds || []).filter((id: string) => id !== user.id);
+    for (const rid of recipients) {
+      try { wsBroadcastToUser(rid, { type: 'call_signal', ...entry }); } catch {}
+    }
   }
   res.json({ success: true, entry });
 });
@@ -2751,7 +2779,12 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
       msg = store.sendMessage(id, text, authUser, translatedContent, translatedTo, { attachments: atts, replyToId: typeof replyToId === 'string' ? replyToId : undefined, clientMsgId: cmid });
       senderMarkedNotifs = store.markConversationNotificationsRead(authUser.id, id);
       const convNow = store.conversations.find(c => c.id === id);
-      const preview = (text || (atts?.length ? '[attachment]' : '')).slice(0, 80);
+      const attFirst = atts?.[0] as any;
+      const attMime = String(attFirst?.mimeType || '').toLowerCase();
+      const attLabel = attFirst
+        ? ((attFirst.type === 'audio' || attMime.startsWith('audio/')) ? '[语音消息]' : (attFirst.type === 'image' || attMime.startsWith('image/')) ? '[图片]' : `[文件] ${attFirst.name || ''}`.trim())
+        : '';
+      const preview = (text || attLabel).slice(0, 80);
       for (const uid of (convNow?.participantIds || [])) {
         if (uid === authUser.id) continue;
         if (store.isBlockedEither(uid, authUser.id)) continue;
@@ -3250,19 +3283,187 @@ function wrapPcm24kAsWav(pcmBuffer: Buffer, sampleRate = 24000, channels = 1): B
   return Buffer.concat([header, pcmBuffer]);
 }
 
+const VALID_COMPANION_EMOTIONS = new Set([
+  'calm',
+  'happy',
+  'excited',
+  'curious',
+  'concerned',
+  'empathetic',
+  'playful',
+  'focused',
+  'thinking',
+]);
 
-function stripCompanionTags(raw: string): { reply: string; emotion?: string } {
-  let text = typeof raw === 'string' ? raw : '';
-  let emotion: string | undefined;
-  while (true) {
-    const m = text.match(/^\s*\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]\s*/i);
-    if (!m) break;
-    emotion = emotion || m[1].toLowerCase();
-    text = text.slice(m[0].length);
+function normalizeCompanionEmotion(raw?: string | null): string {
+  const norm = (raw || '').trim().toLowerCase();
+  if (!norm) return 'calm';
+  if (norm === 'cheerful' || norm === 'affectionate' || norm === 'joy' || norm === 'warm') return 'happy';
+  if (norm === 'sad' || norm === 'tender' || norm === 'caring') return 'empathetic';
+  if (VALID_COMPANION_EMOTIONS.has(norm)) return norm;
+  return 'calm';
+}
+
+function getCompanionEmotionReason(emotion: string, isZh: boolean): string {
+  switch (emotion) {
+    case 'empathetic':
+      return isZh ? '温柔共情与照料' : 'Warm care & empathy';
+    case 'excited':
+      return isZh ? '充满活力与共鸣' : 'Energetic enthusiasm';
+    case 'happy':
+      return isZh ? '轻快愉悦陪伴' : 'Warm & cheerful';
+    case 'playful':
+      return isZh ? '俏皮轻松互动' : 'Light-hearted playfulness';
+    case 'curious':
+      return isZh ? '好奇探索追问' : 'Curious & inquisitive';
+    case 'concerned':
+      return isZh ? '认真关切留意' : 'Attentive concern';
+    case 'focused':
+      return isZh ? '专注执行任务' : 'Focused execution';
+    case 'thinking':
+      return isZh ? '深度思考梳理' : 'Thoughtful reasoning';
+    default:
+      return isZh ? '平静稳定陪伴' : 'Calm & attentive';
   }
-  text = text.replace(/^\s*\[\[ACTION:[\s\S]*?\]\]\s*/i, '').trim();
-  text = text.replace(/\[\[(?:EMO|EMOTION):[a-z_-]+\]\]\s*/gi, '').trim();
-  return { reply: text, emotion };
+}
+
+function convertInlineActionToToolCall(act: Record<string, any>): { name: string; args: Record<string, unknown> } | null {
+  const type = typeof act?.type === 'string' ? act.type : '';
+  if (!type || type === 'none') return null;
+  if (type === 'set_theme' && (act.theme === 'dark' || act.theme === 'light')) {
+    return { name: 'control_appearance', args: { theme: act.theme } };
+  }
+  if (type === 'set_language' && (act.lang === 'zh' || act.lang === 'en')) {
+    return { name: 'control_appearance', args: { language: act.lang } };
+  }
+  if (type === 'navigate_tab' && typeof act.tab === 'string') {
+    return { name: 'navigate_to_space', args: { space: act.tab } };
+  }
+  if (type === 'play_music') {
+    return {
+      name: 'control_music_player',
+      args: act.control
+        ? { action: act.control === 'prev' ? 'previous' : act.control }
+        : { action: 'play_query', query: act.query || '' },
+    };
+  }
+  if (type === 'watch_documentary' && typeof act.query === 'string') {
+    return {
+      name: 'watch_cinema_video',
+      args: { query: act.query, platform: act.platform || 'all', autoPlay: true },
+    };
+  }
+  if (type === 'open_book' && typeof act.query === 'string') {
+    return { name: 'open_book_action', args: { query: act.query, action: 'read' } };
+  }
+  if (type === 'browser_search' && typeof act.query === 'string') {
+    return { name: 'browser_and_search', args: { mode: 'search', query: act.query } };
+  }
+  if (type === 'fly_to' && typeof act.lat === 'number' && typeof act.lng === 'number') {
+    return {
+      name: 'control_earth_globe',
+      args: { action: 'fly_to', lat: act.lat, lng: act.lng, placeName: act.place || '' },
+    };
+  }
+  return null;
+}
+
+function sanitizeCompanionReply(rawText: string): {
+  cleanReply: string;
+  extractedEmotion: string | null;
+  extractedToolCalls: Array<{ name: string; args: Record<string, unknown> }>;
+} {
+  let extractedEmotion: string | null = null;
+  const extractedToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+  const cleanReply = (rawText || '')
+    .replace(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]\s*/gi, (_all, tag: string) => {
+      extractedEmotion = normalizeCompanionEmotion(tag);
+      return '';
+    })
+    .replace(/\[\[ACTION:([\s\S]*?)\]\]\s*/gi, (_all, jsonStr: string) => {
+      try {
+        const parsed = JSON.parse(jsonStr);
+        const mapped = convertInlineActionToToolCall(parsed);
+        if (mapped) extractedToolCalls.push(mapped);
+      } catch {
+        // ignore malformed inline action directive
+      }
+      return '';
+    })
+    .replace(/^\s*\n+/, '')
+    .trim();
+
+  return { cleanReply, extractedEmotion, extractedToolCalls };
+}
+
+function extractDeterministicFallbackTools(
+  cleanPrompt: string,
+  normalizedPrompt: string,
+  histArray: Array<{ role: 'user' | 'assistant'; content: string }>,
+  isZh: boolean,
+  isHypotheticalOrDiscussion: boolean
+): {
+  tools: Array<{ name: string; args: Record<string, unknown> }>;
+  instantReply: string;
+} {
+  const tools: Array<{ name: string; args: Record<string, unknown> }> = [];
+  let instantReply = '';
+  if (isHypotheticalOrDiscussion) return { tools, instantReply };
+
+  const wantsDark = /(?:深色|暗黑|夜间|暗色|dark\s*mode|night\s*mode)/i.test(normalizedPrompt);
+  const wantsLight = /(?:浅色|亮色|白天|日间|light\s*mode|day\s*mode)/i.test(normalizedPrompt);
+  if (wantsDark) tools.push({ name: 'control_appearance', args: { theme: 'dark' } });
+  else if (wantsLight) tools.push({ name: 'control_appearance', args: { theme: 'light' } });
+
+  const instant = parseInstantAgentAction(cleanPrompt, isZh, histArray);
+  if (instant && instant.type !== 'none') {
+    if (instant.type === 'set_theme' && !tools.some((t) => t.name === 'control_appearance')) {
+      tools.push({ name: 'control_appearance', args: { theme: instant.theme } });
+    } else if (instant.type === 'set_language') {
+      tools.push({ name: 'control_appearance', args: { language: instant.lang } });
+    } else if (instant.type === 'navigate_tab') {
+      tools.push({ name: 'navigate_to_space', args: { space: instant.tab } });
+    } else if (instant.type === 'play_music') {
+      tools.push({
+        name: 'control_music_player',
+        args: instant.control
+          ? { action: instant.control === 'prev' ? 'previous' : instant.control }
+          : { action: 'play_query', query: instant.query },
+      });
+    } else if (instant.type === 'watch_documentary') {
+      tools.push({ name: 'watch_cinema_video', args: { query: instant.query, platform: instant.platform, autoPlay: true } });
+    } else if (instant.type === 'open_book') {
+      tools.push({ name: 'open_book_action', args: { query: instant.query, action: 'read' } });
+    } else if (instant.type === 'browser_search') {
+      tools.push({ name: 'browser_and_search', args: { mode: 'search', query: instant.query } });
+    } else if (instant.type === 'fly_to') {
+      tools.push({
+        name: 'control_earth_globe',
+        args: { action: 'fly_to', lat: instant.lat, lng: instant.lng, placeName: instant.place },
+      });
+    }
+    if (instant.reply) instantReply = instant.reply;
+  }
+
+  return { tools, instantReply };
+}
+
+function mergeCompanionToolCalls(
+  base: Array<{ name: string; args: Record<string, unknown> }>,
+  extra: Array<{ name: string; args: Record<string, unknown> }>
+): Array<{ name: string; args: Record<string, unknown> }> {
+  const merged = [...base];
+  const seen = new Set(base.map((t) => `${t.name}:${JSON.stringify(t.args || {})}`));
+  for (const t of extra) {
+    const sig = `${t.name}:${JSON.stringify(t.args || {})}`;
+    if (!seen.has(sig)) {
+      seen.add(sig);
+      merged.push(t);
+    }
+  }
+  return merged;
+
 }
 
 app.post('/api/ai/companion-turn', async (req, res) => {
@@ -3297,12 +3498,12 @@ app.post('/api/ai/companion-turn', async (req, res) => {
   if (!cleanPrompt.includes('\n')) {
     const exact = solvePrecisionQuery(analysis.normalizedPrompt, isZh);
     if (exact) {
-      const ex = stripCompanionTags(exact.answer);
+      const ex = sanitizeCompanionReply(exact.answer);
       return res.json({
         success: true,
         model: 'one-precision-solver',
-        reply: ex.reply || exact.answer,
-        emotion: ex.emotion || 'focused',
+        reply: ex.cleanReply || exact.answer,
+        emotion: ex.extractedEmotion || 'focused',
         emotionIntensity: 0.72,
         emotionReason: isZh ? '精确计算' : 'Exact calculation',
         toolCalls: [],
@@ -3313,30 +3514,71 @@ app.post('/api/ai/companion-turn', async (req, res) => {
 
   const ai = getGeminiClient();
   if (!ai) {
-    // Graceful multi-engine fallback if Gemini key is absent
+    // Graceful multi-engine fallback (e.g. DeepSeek / OpenAI-compatible / live-knowledge) when Gemini key is absent
     try {
+      const { tools: detTools, instantReply } = extractDeterministicFallbackTools(
+        cleanPrompt,
+        analysis.normalizedPrompt,
+        histArray,
+        isZh,
+        analysis.isHypotheticalOrDiscussion
+      );
+
       const fallback = await executeAiTurn({
         prompt: cleanPrompt,
         history: histArray,
         mode: 'voice-agent',
         profileKey,
         userId: authUser?.id,
+        pageContext: pageContext ? formatPageContextForModel(pageContext as LivePageContextSummary) : undefined,
       });
-      const fb = stripCompanionTags(fallback.reply);
+
+      const sanitized = sanitizeCompanionReply(fallback.reply);
+      const mergedTools = analysis.isHypotheticalOrDiscussion
+        ? []
+        : mergeCompanionToolCalls(detTools, sanitized.extractedToolCalls);
+
+      const sentimentEmotion =
+        analysis.sentiment === 'tired' || analysis.sentiment === 'frustrated'
+          ? 'empathetic'
+          : analysis.sentiment === 'excited'
+            ? 'excited'
+            : analysis.sentiment === 'playful'
+              ? 'playful'
+              : 'calm';
+      const rawTagEmotion = sanitized.extractedEmotion || (fallback.emotion ? normalizeCompanionEmotion(fallback.emotion) : null);
+      const resolvedEmotion =
+        rawTagEmotion && rawTagEmotion !== 'calm'
+          ? rawTagEmotion
+          : sentimentEmotion !== 'calm'
+            ? sentimentEmotion
+            : mergedTools.length > 0
+              ? 'focused'
+              : 'calm';
+
+      const finalReply =
+        sanitized.cleanReply ||
+        instantReply ||
+        (mergedTools.length > 0
+          ? isZh
+            ? '好的，已经为你安排好啦。'
+            : 'All set for you.'
+          : '');
+
       return res.json({
         success: true,
         model: fallback.model,
-        reply: fb.reply || fallback.reply,
-        emotion: fb.emotion || (analysis.sentiment === 'tired' || analysis.sentiment === 'frustrated'
-            ? 'empathetic'
-            : analysis.sentiment === 'excited'
-              ? 'excited'
-              : analysis.sentiment === 'playful'
-                ? 'playful'
-                : 'calm'),
-        emotionIntensity: 0.72,
-        emotionReason: '',
-        toolCalls: [],
+        reply: finalReply,
+        emotion: resolvedEmotion,
+        emotionIntensity:
+          resolvedEmotion === 'empathetic' || resolvedEmotion === 'excited'
+            ? 0.86
+            : resolvedEmotion === 'calm'
+              ? 0.7
+              : 0.78,
+        emotionReason: getCompanionEmotionReason(resolvedEmotion, isZh),
+        toolCalls: mergedTools,
+
         savedMemories,
       });
     } catch {
@@ -3400,7 +3642,7 @@ app.post('/api/ai/companion-turn', async (req, res) => {
       const name = c.name || '';
       const args = (c.args || {}) as Record<string, unknown>;
       if (name === 'set_companion_emotion') {
-        if (typeof args.emotion === 'string') emotion = args.emotion;
+        if (typeof args.emotion === 'string') emotion = normalizeCompanionEmotion(args.emotion);
         if (typeof args.intensity === 'number') emotionIntensity = args.intensity;
         if (typeof args.reason === 'string') emotionReason = args.reason;
       } else if (name === 'recall_or_save_memory') {
@@ -3428,50 +3670,37 @@ app.post('/api/ai/companion-turn', async (req, res) => {
       }
     }
 
-    const replySan = stripCompanionTags((response.text || '').trim() || serverResolvedFacts[0] || '');
+    const sanitizedGemini = sanitizeCompanionReply((response.text || '').trim() || serverResolvedFacts[0] || '');
+    if (emotion === 'calm' && sanitizedGemini.extractedEmotion) {
+      emotion = sanitizedGemini.extractedEmotion;
+    }
+    const mergedGeminiTools = analysis.isHypotheticalOrDiscussion
+      ? clientToolCalls
+      : mergeCompanionToolCalls(clientToolCalls, sanitizedGemini.extractedToolCalls);
+
     return res.json({
       success: true,
       model: activeModel,
-      reply: replySan.reply,
-      emotion: replySan.emotion || emotion,
+      reply: sanitizedGemini.cleanReply,
+      emotion,
+
       emotionIntensity,
       emotionReason,
-      toolCalls: clientToolCalls,
+      toolCalls: mergedGeminiTools,
       savedMemories,
     });
   } catch {
     try {
-      const fallbackTools: Array<{ name: string; args: Record<string, unknown> }> = [];
-      let fallbackReply = '';
-
-      if (!analysis.isHypotheticalOrDiscussion) {
-        const clean = analysis.normalizedPrompt;
-        const wantsDark = /(?:深色|暗黑|夜间|暗色|dark\s*mode|night\s*mode)/i.test(clean);
-        const wantsLight = /(?:浅色|亮色|白天|日间|light\s*mode|day\s*mode)/i.test(clean);
-        if (wantsDark) fallbackTools.push({ name: 'control_appearance', args: { theme: 'dark' } });
-        else if (wantsLight) fallbackTools.push({ name: 'control_appearance', args: { theme: 'light' } });
-
-        const instant = parseInstantAgentAction(cleanPrompt, isZh, histArray);
-        if (instant && instant.type !== 'none') {
-          if (instant.type === 'set_theme' && !fallbackTools.some((t) => t.name === 'control_appearance')) {
-            fallbackTools.push({ name: 'control_appearance', args: { theme: instant.theme } });
-          } else if (instant.type === 'navigate_tab') {
-            fallbackTools.push({ name: 'navigate_to_space', args: { space: instant.tab } });
-          } else if (instant.type === 'play_music') {
-            fallbackTools.push({
-              name: 'control_music_player',
-              args: instant.control ? { action: instant.control } : { action: 'play_query', query: instant.query },
-            });
-          } else if (instant.type === 'watch_documentary') {
-            fallbackTools.push({ name: 'watch_cinema_video', args: { query: instant.query } });
-          } else if (instant.type === 'open_book') {
-            fallbackTools.push({ name: 'open_book_action', args: { query: instant.query, action: 'read' } });
-          } else if (instant.type === 'browser_search') {
-            fallbackTools.push({ name: 'browser_and_search', args: { mode: 'search', query: instant.query } });
-          }
-          if (instant.reply) fallbackReply = instant.reply;
-        }
-      }
+      const { tools: detTools, instantReply } = extractDeterministicFallbackTools(
+        cleanPrompt,
+        analysis.normalizedPrompt,
+        histArray,
+        isZh,
+        analysis.isHypotheticalOrDiscussion
+      );
+      let fallbackTools = [...detTools];
+      let fallbackReply = instantReply;
+      let extractedFallbackEmo: string | null = null;
 
       if (fallbackTools.length > 1 && analysis.sentiment === 'tired') {
         fallbackReply = isZh
@@ -3484,11 +3713,17 @@ app.post('/api/ai/companion-turn', async (req, res) => {
           mode: 'voice-agent',
           profileKey,
           userId: authUser?.id,
+          pageContext: pageContext ? formatPageContextForModel(pageContext as LivePageContextSummary) : undefined,
         });
-        fallbackReply = fallback.reply;
+        const sanitized = sanitizeCompanionReply(fallback.reply);
+        fallbackReply = sanitized.cleanReply || fallbackReply;
+        extractedFallbackEmo = sanitized.extractedEmotion || (fallback.emotion ? normalizeCompanionEmotion(fallback.emotion) : null);
+        if (!analysis.isHypotheticalOrDiscussion && sanitized.extractedToolCalls.length > 0) {
+          fallbackTools = mergeCompanionToolCalls(fallbackTools, sanitized.extractedToolCalls);
+        }
       }
 
-      const fallbackEmotion =
+      const sentimentEmotion =
         analysis.sentiment === 'tired' || analysis.sentiment === 'frustrated'
           ? 'empathetic'
           : analysis.sentiment === 'excited'
@@ -3496,15 +3731,18 @@ app.post('/api/ai/companion-turn', async (req, res) => {
             : analysis.sentiment === 'playful'
               ? 'playful'
               : 'calm';
+      const fallbackEmotion =
+        extractedFallbackEmo && extractedFallbackEmo !== 'calm' ? extractedFallbackEmo : sentimentEmotion;
 
-      const fbFinal = stripCompanionTags(fallbackReply);
+      const fbFinal = sanitizeCompanionReply(fallbackReply);
       return res.json({
         success: true,
         model: 'one-companion-fallback',
-        reply: fbFinal.reply || fallbackReply,
-        emotion: fbFinal.emotion || fallbackEmotion,
-        emotionIntensity: fallbackEmotion === 'empathetic' ? 0.85 : 0.72,
-        emotionReason: fallbackEmotion === 'empathetic' ? (isZh ? '温柔共情与照料' : 'Warm care & empathy') : (isZh ? '稳定响应' : 'Attentive response'),
+        reply: fbFinal.cleanReply || fallbackReply,
+        emotion: fbFinal.extractedEmotion || fallbackEmotion,
+        emotionIntensity: (fbFinal.extractedEmotion || fallbackEmotion) === 'empathetic' || (fbFinal.extractedEmotion || fallbackEmotion) === 'excited' ? 0.85 : 0.72,
+        emotionReason: getCompanionEmotionReason(fbFinal.extractedEmotion || fallbackEmotion, isZh),
+
         toolCalls: fallbackTools,
         savedMemories,
       });
@@ -3597,20 +3835,32 @@ app.get('/api/ai/tts', async (req, res) => {
     return res.send(cached);
   }
 
-  const providers = [
-    `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(cleanText)}&tl=${langParam === 'en' ? 'en' : 'zh-CN'}&client=tw-ob&ttsspeed=1`,
-    `https://fanyi.baidu.com/gettts?lan=${langParam}&text=${encodeURIComponent(cleanText)}&spd=${spdNum}&source=web`,
-  ];
+  const providers =
+    langParam === 'zh'
+      ? [
+          `https://fanyi.baidu.com/gettts?lan=zh&text=${encodeURIComponent(cleanText)}&spd=${spdNum}&source=web`,
+          `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanText)}&le=zh`,
+          `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(cleanText)}&tl=zh-CN&client=tw-ob&ttsspeed=1`,
+        ]
+      : [
+          `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(cleanText)}&tl=en&client=tw-ob&ttsspeed=1`,
+          `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanText)}&type=2`,
+          `https://fanyi.baidu.com/gettts?lan=en&text=${encodeURIComponent(cleanText)}&spd=${spdNum}&source=web`,
+        ];
 
   for (const url of providers) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 3200);
+    const timer = setTimeout(() => ctrl.abort(), 2200);
     try {
       const upstream = await fetch(url, {
         signal: ctrl.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
-          Referer: url.includes('baidu') ? 'https://fanyi.baidu.com/' : 'https://translate.google.com/',
+          Referer: url.includes('baidu')
+            ? 'https://fanyi.baidu.com/'
+            : url.includes('youdao')
+              ? 'https://dict.youdao.com/'
+              : 'https://translate.google.com/',
         },
       });
       if (!upstream.ok) continue;

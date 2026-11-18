@@ -2,15 +2,32 @@
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'http';
 import { store } from './store.ts';
+import { aiGateway } from './aiGateway.ts';
 import { decideNotification } from './notificationPolicy.ts';
 import { getCallById } from './calls/index.ts';
-import { isActiveCallStatus } from './calls/service.ts';
-import { pushCallSignal } from './calls/signals.ts';
+import { getActiveCallForUser, isActiveCallStatus, markReconnecting, touchCallHeartbeat } from './calls/service.ts';
+import { listCallSignalsForUser, pushCallSignal } from './calls/signals.ts';
 
-type Client = { ws: WebSocket; userId: string; deviceId: string; activeConversationId?: string | null };
+type Client = {
+  ws: WebSocket;
+  userId: string;
+  deviceId: string;
+  activeConversationId?: string | null;
+  isAlive: boolean;
+  connectedAt: number;
+};
 
 const clientsByUser = new Map<string, Set<Client>>();
 const typingTimers = new Map<string, NodeJS.Timeout>(); // key conv:user -> timeout
+
+function formatAttachmentPreview(attachments?: any[]): string {
+  if (!attachments || !attachments.length) return '';
+  const first = attachments[0];
+  const mime = String(first?.mimeType || '').toLowerCase();
+  if (first?.type === 'audio' || mime.startsWith('audio/')) return '[语音消息]';
+  if (first?.type === 'image' || mime.startsWith('image/')) return '[图片]';
+  return `[文件] ${first?.name || ''}`.trim();
+}
 
 export function isUserViewingConversation(userId: string, conversationId?: string | null): boolean {
   if (!userId || !conversationId) return false;
@@ -36,9 +53,48 @@ export function broadcastToUsers(userIds: string[], data: any, exceptDevice?: st
     if (!set) continue;
     for (const c of set) {
       if (exceptDevice && c.deviceId === exceptDevice) continue;
+      if (c.ws.readyState !== 1) continue;
       safeSend(c.ws, data);
     }
   }
+}
+
+function clearTypingForUser(userId: string) {
+  const suffix = `:${userId}`;
+  for (const [key, timer] of typingTimers.entries()) {
+    if (!key.endsWith(suffix)) continue;
+    clearTimeout(timer);
+    typingTimers.delete(key);
+    const convId = key.slice(0, key.length - suffix.length);
+    const conv = store.conversations.find(c => c.id === convId);
+    if (conv) {
+      broadcastToUsers(
+        (conv.participantIds || []).filter(id => id !== userId),
+        { type: 'typing', conversationId: convId, userId, on: false }
+      );
+    }
+  }
+}
+
+function notifyActiveCallOnDisconnect(userId: string) {
+  const remaining = clientsByUser.get(userId);
+  if (remaining && remaining.size > 0) return;
+  try {
+    const activeCall = getActiveCallForUser(store.calls || [], userId);
+    if (!activeCall || activeCall.status === 'ringing') return;
+    if (activeCall.status === 'active' || activeCall.status === 'connecting') {
+      markReconnecting(activeCall);
+    }
+    const recipients = (activeCall.participantIds || []).filter((id: string) => id !== userId);
+    broadcastToUsers(recipients, {
+      type: 'call_state',
+      callId: activeCall.id,
+      userId,
+      peerDisconnected: true,
+      call: activeCall,
+      at: new Date().toISOString(),
+    });
+  } catch {}
 }
 
 function broadcastPresence(userId: string) {
@@ -87,6 +143,29 @@ export function getTokenFromReq(req: IncomingMessage): string | null {
 }
 
 export function attachMessengerWs(wss: WebSocketServer) {
+  // Protocol-level WebSocket heartbeat to keep proxies/NATs alive & sweep half-open sockets
+  const heartbeatInterval = setInterval(() => {
+    for (const [uid, set] of clientsByUser.entries()) {
+      for (const client of Array.from(set)) {
+        if (!client.isAlive || client.ws.readyState > 1) {
+          try { (client.ws as any).terminate?.(); } catch { try { client.ws.close(); } catch {} }
+          set.delete(client);
+          if (set.size === 0) {
+            clientsByUser.delete(uid);
+            clearTypingForUser(uid);
+            broadcastPresence(uid);
+            notifyActiveCallOnDisconnect(uid);
+          }
+          continue;
+        }
+        client.isAlive = false;
+        try { (client.ws as any).ping?.(); } catch {}
+      }
+    }
+  }, 20_000);
+  heartbeatInterval.unref?.();
+  wss.on?.('close', () => clearInterval(heartbeatInterval));
+
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const token = getTokenFromReq(req);
     const user = token ? store.getUserByToken(token) : null;
@@ -97,16 +176,38 @@ export function attachMessengerWs(wss: WebSocketServer) {
     }
     let deviceId = '';
     try { const u = new URL(req.url || '/', 'http://localhost'); deviceId = u.searchParams.get('deviceId') || `dev_${Date.now()}_${Math.random().toString(36).slice(2,6)}`; } catch { deviceId = `dev_${Date.now()}`; }
-    const client: Client = { ws, userId: user.id, deviceId };
+    const client: Client = { ws, userId: user.id, deviceId, isAlive: true, connectedAt: Date.now() };
     if (!clientsByUser.has(user.id)) clientsByUser.set(user.id, new Set());
     clientsByUser.get(user.id)!.add(client);
+
+    (ws as any).on?.('pong', () => {
+      client.isAlive = true;
+    });
+
     // update server-side last active on connect
     try { (user as any).lastActiveAt = new Date().toISOString(); } catch {}
     safeSend(ws, { type: 'hello', userId: user.id, deviceId, serverTime: new Date().toISOString() });
     broadcastPresence(user.id);
+
+    // Immediately re-sync active call state if user just reconnected mid-call
+    try {
+      const activeCall = getActiveCallForUser(store.calls || [], user.id);
+      if (activeCall) {
+        safeSend(ws, { type: 'call_sync', call: activeCall, serverTime: new Date().toISOString() });
+        const recipients = (activeCall.participantIds || []).filter((id: string) => id !== user.id);
+        broadcastToUsers(recipients, {
+          type: 'call_peer_online',
+          callId: activeCall.id,
+          userId: user.id,
+          at: new Date().toISOString(),
+        });
+      }
+    } catch {}
+
     try { store.saveToDisk(); } catch {}
 
     ws.on('message', async (raw: any) => {
+      client.isAlive = true;
       let msg: any;
       try { msg = JSON.parse(String(raw)); } catch { return; }
       const type = msg?.type;
@@ -119,7 +220,7 @@ export function attachMessengerWs(wss: WebSocketServer) {
         const on = !!msg.on;
         const key = `${convId}:${user.id}`;
         const prev = typingTimers.get(key); if (prev) clearTimeout(prev);
-        if (on) typingTimers.set(key, setTimeout(() => { typingTimers.delete(key); broadcastToUsers(conv.participantIds||[], { type: 'typing', conversationId: convId, userId: user.id, on: false }); }, 4000));
+        if (on) typingTimers.set(key, setTimeout(() => { typingTimers.delete(key); broadcastToUsers((conv.participantIds||[]).filter(id => id !== user.id), { type: 'typing', conversationId: convId, userId: user.id, on: false }); }, 4000));
         else typingTimers.delete(key);
         broadcastToUsers((conv.participantIds||[]).filter(id => id !== user.id), { type: 'typing', conversationId: convId, userId: user.id, on });
         return;
@@ -161,7 +262,6 @@ export function attachMessengerWs(wss: WebSocketServer) {
         if (allowReceipt) {
           broadcastToUsers(conv.participantIds||[], { type: 'read', conversationId: convId, userId: user.id, readAt: new Date().toISOString() });
         } else {
-          // keep own devices in sync without exposing read receipt to others
           broadcastToUsers([user.id], { type: 'read', conversationId: convId, userId: user.id, readAt: new Date().toISOString(), selfOnly: true });
         }
         return;
@@ -173,7 +273,6 @@ export function attachMessengerWs(wss: WebSocketServer) {
         const clientMsgId = typeof msg.clientMsgId === 'string' ? msg.clientMsgId : undefined;
         const conv = store.conversations.find(c => c.id === convId);
         if (!conv || !store.canAccessConversation(user.id, conv)) { safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: 'forbidden' }); return; }
-        // block/privacy check for direct
         if (conv.type === 'direct') {
           const otherId = conv.participantIds.find(id => id !== user.id);
           if (otherId) {
@@ -182,18 +281,35 @@ export function attachMessengerWs(wss: WebSocketServer) {
           }
         }
         const attachments = Array.isArray(msg.attachments) ? msg.attachments : undefined;
-        if (!content.trim() && !(attachments && attachments.length)) { safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: 'empty' }); return; }
+        const trimmed = content.trim();
+        if (!trimmed && !(attachments && attachments.length)) { safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: 'empty' }); return; }
+
+        let translatedContent: string | undefined;
+        let translatedTo: string | undefined;
+        if (msg.autoTranslate && typeof msg.targetLanguage === 'string' && msg.targetLanguage && trimmed) {
+          try {
+            const dsRes = await aiGateway.generateContent(
+              aiGateway.getChatModelId(),
+              `Translate the following chat message to ${msg.targetLanguage}. Maintain conversational nuance, warmth, and friendly tone. Return ONLY the translated string without commentary:\n"${trimmed}"`
+            );
+            if (dsRes.success && dsRes.content?.trim()) {
+              translatedContent = dsRes.content.trim();
+              translatedTo = msg.targetLanguage;
+            }
+          } catch {}
+        }
+
         try {
           let saved: any;
           let senderMarkedNotifs = 0;
           await store.mutate(async () => {
-            saved = store.sendMessage(convId, content.trim(), user, undefined, undefined, { attachments, replyToId: msg.replyToId, clientMsgId });
+            saved = store.sendMessage(convId, trimmed, user, translatedContent, translatedTo, { attachments, replyToId: msg.replyToId, clientMsgId });
             senderMarkedNotifs = store.markConversationNotificationsRead(user.id, convId);
-            const preview = (content.trim() || (attachments?.length ? '[attachment]' : '')).slice(0, 80);
+            const preview = (trimmed || formatAttachmentPreview(attachments)).slice(0, 80);
             for (const uid of (conv.participantIds || [])) {
               if (uid === user.id) continue;
-              if (store.isBlockedEither(uid, user.id)) continue; // blocked: no notification from this actor
-              if (isUserViewingConversation(uid, convId)) continue; // already open/chatting in this conversation
+              if (store.isBlockedEither(uid, user.id)) continue;
+              if (isUserViewingConversation(uid, convId)) continue;
               const prefs = store.getNotificationPrefs(uid);
               const decision = decideNotification(prefs, 'message_new');
               const n = store.createNotification({ userId: uid, type: 'message_new', title: conv.name || user.displayName, body: `${user.displayName}: ${preview}`, actorId: user.id, actorName: user.displayName, actorAvatar: user.avatar, conversationId: convId, data: { messageId: saved.id } });
@@ -204,9 +320,8 @@ export function attachMessengerWs(wss: WebSocketServer) {
           if (senderMarkedNotifs > 0) {
             broadcastToUsers([user.id], { type: 'notification_sync', unreadCount: store.getUnreadNotificationCount(user.id), conversationId: convId });
           }
-          // ack to sender device and sync to sender's other devices
           broadcastToUsers([user.id], { type: 'send_ack', clientMsgId, ok: true, message: saved, fromDeviceId: deviceId });
-          broadcastToUsers((conv.participantIds||[]).filter(id => id !== user.id), { type: 'message', conversationId: convId, message: saved });
+          broadcastToUsers((conv.participantIds||[]).filter(id => id !== user.id), { type: 'message', conversationId: convId, message: saved, clientMsgId });
         } catch (e: any) {
           safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: e?.message || 'failed' });
         }
@@ -217,24 +332,65 @@ export function attachMessengerWs(wss: WebSocketServer) {
         const callId = String(msg.callId || '');
         const toUserId = typeof msg.toUserId === 'string' && msg.toUserId ? msg.toUserId : undefined;
         const signal = msg.signal;
+        const signalId = typeof msg.signalId === 'string' && msg.signalId ? msg.signalId : undefined;
         if (!callId || !signal || typeof signal !== 'object') return;
         const call = getCallById(store, callId);
         if (!call || !isActiveCallStatus(call.status)) return;
         if (!(call.participantIds || []).includes(user.id)) return;
         if (toUserId && !(call.participantIds || []).includes(toUserId)) return;
-        const entry = pushCallSignal(callId, user.id, toUserId, signal);
-        const recipients = toUserId
-          ? [toUserId]
-          : (call.participantIds || []).filter((id: string) => id !== user.id);
-        broadcastToUsers(recipients, {
-          type: 'call_signal',
-          callId,
-          fromUserId: user.id,
-          toUserId: entry.toUserId,
-          signal: entry.signal,
-          seq: entry.seq,
-          at: entry.at,
+        const { entry, deduplicated } = pushCallSignal(callId, user.id, toUserId, signal, signalId);
+        safeSend(ws, { type: 'call_signal_ack', callId, signalId, seq: entry.seq, ok: true });
+        if (!deduplicated) {
+          const recipients = toUserId
+            ? [toUserId]
+            : (call.participantIds || []).filter((id: string) => id !== user.id);
+          broadcastToUsers(recipients, {
+            type: 'call_signal',
+            callId,
+            fromUserId: user.id,
+            toUserId: entry.toUserId,
+            signal: entry.signal,
+            signalId: entry.signalId,
+            seq: entry.seq,
+            at: entry.at,
+          });
+        }
+        return;
+      }
+
+      if (type === 'call_resume') {
+        const callId = String(msg.callId || '');
+        const afterSeq = Math.max(0, Number(msg.afterSeq) || 0);
+        const call = callId ? getCallById(store, callId) : getActiveCallForUser(store.calls || [], user.id);
+        if (!call || !(call.participantIds || []).includes(user.id)) return;
+        touchCallHeartbeat(call, user.id);
+        const { signals, lastSeq } = listCallSignalsForUser(call.id, user.id, afterSeq);
+        safeSend(ws, {
+          type: 'call_sync',
+          call,
+          signals,
+          lastSeq,
+          serverTime: new Date().toISOString(),
         });
+        if (isActiveCallStatus(call.status)) {
+          const recipients = (call.participantIds || []).filter((id: string) => id !== user.id);
+          broadcastToUsers(recipients, {
+            type: 'call_peer_online',
+            callId: call.id,
+            userId: user.id,
+            at: new Date().toISOString(),
+          });
+        }
+        return;
+      }
+
+      if (type === 'call_heartbeat') {
+        const callId = String(msg.callId || '');
+        if (!callId) return;
+        const call = getCallById(store, callId);
+        if (!call || !isActiveCallStatus(call.status) || !(call.participantIds || []).includes(user.id)) return;
+        touchCallHeartbeat(call, user.id);
+        safeSend(ws, { type: 'call_heartbeat_ack', callId, t: Date.now() });
         return;
       }
 
@@ -267,10 +423,11 @@ export function attachMessengerWs(wss: WebSocketServer) {
         const callId = String(msg.callId || '');
         const pcm = typeof msg.pcm === 'string' ? msg.pcm : '';
         const sampleRate = Math.max(8000, Math.min(48000, Number(msg.sampleRate) || 16000));
-        if (!callId || !pcm || pcm.length > 16384) return;
+        if (!callId || !pcm || pcm.length > 32768) return;
         const call = getCallById(store, callId);
         if (!call || !isActiveCallStatus(call.status)) return;
         if (!(call.participantIds || []).includes(user.id)) return;
+        touchCallHeartbeat(call, user.id);
         const recipients = (call.participantIds || []).filter((id: string) => id !== user.id);
         broadcastToUsers(recipients, {
           type: 'call_audio',
@@ -278,6 +435,7 @@ export function attachMessengerWs(wss: WebSocketServer) {
           fromUserId: user.id,
           pcm,
           sampleRate,
+          seq: typeof msg.seq === 'number' ? msg.seq : undefined,
         });
         return;
       }
@@ -286,6 +444,10 @@ export function attachMessengerWs(wss: WebSocketServer) {
     ws.on('close', () => {
       const set = clientsByUser.get(user.id);
       if (set) { set.delete(client); if (set.size === 0) clientsByUser.delete(user.id); }
+      if (!clientsByUser.has(user.id)) {
+        clearTypingForUser(user.id);
+        notifyActiveCallOnDisconnect(user.id);
+      }
       broadcastPresence(user.id);
       try { store.saveToDisk(); } catch {}
     });
@@ -297,7 +459,6 @@ export function wsBroadcastConversationEvent(conversationId: string, event: any)
   const conv = store.conversations.find(c => c.id === conversationId);
   if (!conv) return;
   const baseIds: string[] = (conv.participantIds || []);
-  // Re-check membership at delivery time (permissions may change while sockets stay open)
   for (const uid of baseIds) {
     try {
       const latest = store.conversations.find(c => c.id === conversationId);
