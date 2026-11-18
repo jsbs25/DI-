@@ -186,9 +186,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right: Fixed Utilities & Apple-Standard Personal Profile Capsule */}
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
-          <div className="hidden sm:block">
-            <PWAInstallButton lang={lang} compact={true} />
-          </div>
+          <PWAInstallButton lang={lang} compact={true} />
           {onToggleTheme && (
             <button
               type="button"
@@ -238,6 +236,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">@{currentUser.username}</span>
                     </div>
                   </div>
+                  <PWAInstallButton lang={lang} variant="menu-item" onActionDone={() => setUserDropdownOpen(false)} />
                   <button type="button" onClick={() => { setUserDropdownOpen(false); onOpenProfile(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]"><UserIcon className="h-4 w-4" /><span>{t.myProfile || 'Profile'}</span></button>
                   <button type="button" onClick={() => { setUserDropdownOpen(false); onOpenOnboarding(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]"><MapPin className="h-4 w-4" /><span>{t.editGlobeBeacon || 'Beacon'}</span></button>
                   <button type="button" onClick={() => { setUserDropdownOpen(false); onToggleLocationPrivacy(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]">{currentUser.location?.isPublic ? <Eye className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> : <EyeOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />}<span>{currentUser.location?.isPublic ? t.locationPublic : t.locationPrivate}</span></button>

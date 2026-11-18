@@ -6,6 +6,18 @@ import { getApiBase } from './apiBase.ts';
 
 registerSW({ immediate: true });
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    (window as any).__oneDeferredInstallPrompt = e;
+    window.dispatchEvent(new Event('one-pwa-prompt-ready'));
+  });
+  window.addEventListener('appinstalled', () => {
+    (window as any).__oneDeferredInstallPrompt = null;
+    window.dispatchEvent(new Event('one-pwa-installed'));
+  });
+}
+
 const apiBase = getApiBase();
 const origFetch = window.fetch.bind(window);
 const wrappedFetch: typeof window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {

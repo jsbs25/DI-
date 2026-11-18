@@ -15,6 +15,7 @@ import { createCallMediaSession, type ICallMediaSession, type CallMediaState, fr
 import { startIncomingRingtone, startOutgoingRingback, stopCallTones } from '../../services/calls/ringtone.ts';
 import { CallCenterPanel, type CallLogEntry, type CallCapabilitiesSummary } from './CallCenterPanel.tsx';
 import { VoiceMessagePlayer } from './VoiceMessagePlayer.tsx';
+import { startClearVoiceRecorder, type VoiceRecorderSession } from '../../utils/voiceMessageAudio.ts';
 
 const CallTrackView: React.FC<{
   track?: MediaStreamTrack | null;
@@ -104,6 +105,8 @@ interface GlobalMessengerProps {
   isVisible?: boolean;
   workspaceClassName?: string;
   quickAction?: MessengerQuickAction | null;
+  onBackToHome?: () => void;
+  onMobileChatChange?: (open: boolean) => void;
 }
 
 type FriendUser = { id: string; earthId?: string; username: string; displayName: string; avatar: string; isOnline?: boolean; bio?: string; lastActiveAt?: string };
@@ -122,6 +125,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   isVisible = true,
   workspaceClassName,
   quickAction = null,
+  onBackToHome,
+  onMobileChatChange,
 }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -287,14 +292,21 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   const [voiceSeconds, setVoiceSeconds] = useState(0);
   const [voiceSending, setVoiceSending] = useState(false);
   const [voiceLevels, setVoiceLevels] = useState<number[]>(() => Array(14).fill(14));
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const voiceStreamRef = useRef<MediaStream | null>(null);
-  const voiceChunksRef = useRef<BlobPart[]>([]);
+  const voiceSessionRef = useRef<VoiceRecorderSession | null>(null);
   const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceStartMsRef = useRef<number>(0);
-  const voiceAnalyserCleanupRef = useRef<(() => void) | null>(null);
   const voicePlayRegistryRef = useRef<Map<string, () => void>>(new Map());
   const lastQuickActionSeqRef = useRef(0);
+
+  useEffect(() => {
+    onMobileChatChange?.(mobileShowChat);
+  }, [mobileShowChat, onMobileChatChange]);
+
+  useEffect(() => {
+    const onCloseChat = () => setMobileShowChat(false);
+    window.addEventListener('one-messenger-close-chat', onCloseChat);
+    return () => window.removeEventListener('one-messenger-close-chat', onCloseChat);
+  }, []);
 
   useEffect(() => {
     if (directOpenSeq > 0) {
@@ -1698,13 +1710,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   const stopVoiceRecordingCleanup = () => {
     if (voiceTimerRef.current) { clearInterval(voiceTimerRef.current); voiceTimerRef.current = null; }
-    try { voiceAnalyserCleanupRef.current?.(); } catch {}
-    voiceAnalyserCleanupRef.current = null;
-    try { voiceStreamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
-    voiceStreamRef.current = null;
-    mediaRecorderRef.current = null;
-    voiceChunksRef.current = [];
-    voiceStartMsRef.current = 0;
+    try { voiceSessionRef.current?.cancel(); } catch {}
+    voiceSessionRef.current = null;
     setIsRecordingVoice(false);
     setVoiceSeconds(0);
     setVoiceLevels(Array(14).fill(14));
@@ -1712,58 +1719,19 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   const startVoiceRecording = async () => {
     if (!activeConv || !authed || isRecordingVoice || voiceSending) return;
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setConnError('当前浏览器不支持语音录制');
-      return;
-    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      const preferredTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
-      const picked = preferredTypes.find(t => { try { return MediaRecorder.isTypeSupported(t); } catch { return false; } }) || '';
-      const rec = picked ? new MediaRecorder(stream, { mimeType: picked }) : new MediaRecorder(stream);
-      voiceStreamRef.current = stream;
-      mediaRecorderRef.current = rec;
-      voiceChunksRef.current = [];
       voiceStartMsRef.current = Date.now();
-      rec.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) voiceChunksRef.current.push(ev.data);
-      };
-      rec.start(200);
+      const session = await startClearVoiceRecorder({
+        onLevel: (lv) => {
+          setVoiceLevels((prev) => {
+            const pct = Math.max(16, Math.min(100, Math.round(16 + lv * 84)));
+            return [...prev.slice(1), pct];
+          });
+        },
+      });
+      voiceSessionRef.current = session;
       setIsRecordingVoice(true);
       setVoiceSeconds(0);
-
-      // Live microphone waveform meter
-      try {
-        const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const ctx: AudioContext = new AudioCtx();
-          const src = ctx.createMediaStreamSource(stream);
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 64;
-          src.connect(analyser);
-          const bins = new Uint8Array(analyser.frequencyBinCount);
-          const meterTimer = setInterval(() => {
-            try {
-              analyser.getByteFrequencyData(bins);
-              const bars: number[] = [];
-              for (let i = 0; i < 14; i++) {
-                const idx = Math.min(bins.length - 1, Math.floor((i * bins.length) / 14));
-                const pct = Math.max(14, Math.min(100, Math.round((bins[idx] / 255) * 100)));
-                bars.push(pct);
-              }
-              setVoiceLevels(bars);
-            } catch {}
-          }, 80);
-          voiceAnalyserCleanupRef.current = () => {
-            clearInterval(meterTimer);
-            try { src.disconnect(); } catch {}
-            try { void ctx.close(); } catch {}
-          };
-        }
-      } catch {}
-
       voiceTimerRef.current = setInterval(() => {
         const sec = Math.floor((Date.now() - voiceStartMsRef.current) / 1000);
         setVoiceSeconds(sec);
@@ -1778,32 +1746,26 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   };
 
   const sendVoiceRecording = async () => {
-    const rec = mediaRecorderRef.current;
+    const session = voiceSessionRef.current;
     const conv = activeConv;
-    if (!rec || !conv) { stopVoiceRecordingCleanup(); return; }
-    const elapsedMs = voiceStartMsRef.current > 0 ? (Date.now() - voiceStartMsRef.current) : (voiceSeconds * 1000);
-    const duration = Math.max(1, Math.round(elapsedMs / 1000));
+    if (!session || !conv) { stopVoiceRecordingCleanup(); return; }
+    voiceSessionRef.current = null;
+    if (voiceTimerRef.current) { clearInterval(voiceTimerRef.current); voiceTimerRef.current = null; }
+    setIsRecordingVoice(false);
+    setVoiceLevels(Array(14).fill(14));
     setVoiceSending(true);
     let voiceFile: File | null = null;
     let uploadedAtt: any = null;
     try {
-      const blob: Blob = await new Promise((resolve) => {
-        rec.onstop = () => {
-          const rawMime = (rec.mimeType || 'audio/webm').split(';')[0].trim();
-          resolve(new Blob(voiceChunksRef.current, { type: rawMime }));
-        };
-        try { rec.requestData?.(); } catch {}
-        try { rec.stop(); } catch { resolve(new Blob(voiceChunksRef.current, { type: 'audio/webm' })); }
-      });
-      stopVoiceRecordingCleanup();
-      if (elapsedMs < 500 || !blob.size) {
+      const res = await session.stopAndFinalize();
+      setVoiceSeconds(0);
+      if (!res || !res.file || res.durationSec < 0.45 || !res.file.size) {
         setNotice('说话时间太短，请再试一次');
         setTimeout(() => setNotice(n => n === '说话时间太短，请再试一次' ? null : n), 2200);
         return;
       }
-      const mime = blob.type || 'audio/webm';
-      const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : mime.includes('wav') ? 'wav' : 'webm';
-      voiceFile = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
+      const duration = Math.max(1, Math.round(res.durationSec));
+      voiceFile = res.file;
       uploadedAtt = await uploadOne(voiceFile, conv.id, () => {});
       uploadedAtt.durationSec = duration;
       const clientId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
@@ -1830,20 +1792,19 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       }
       await onRefreshConversations?.();
     } catch (e: any) {
-      // Preserve failed voice recording in pendingUploads so user can play and retry!
       if (voiceFile) {
         setPendingUploads(prev => [...prev, {
-          id: `voice_fail_${Date.now()}`,
+          id: `u_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
           file: voiceFile!,
-          name: `语音消息 (${duration}s)`,
+          name: voiceFile!.name,
           size: voiceFile!.size,
-          mimeType: voiceFile!.type || 'audio/webm',
+          mimeType: voiceFile!.type,
           kind: 'audio',
           previewUrl: URL.createObjectURL(voiceFile!),
-          durationSec: duration,
-          progress: uploadedAtt ? 100 : 0,
+          durationSec: Math.max(1, voiceSeconds),
+          progress: 0,
           status: 'error',
-          error: e?.message || '语音发送失败',
+          error: e?.message || '发送失败，点击重发',
           uploadedAttachment: uploadedAtt || undefined,
         }]);
       }
@@ -1853,6 +1814,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       setVoiceSending(false);
     }
   };
+
   const clearConversationForMe = async () => {
     if (!activeConv) return;
     if (!window.confirm(lang==='ar'?'سيؤدي هذا إلى إزالة سجل هذه المحادثة من عرضك فقط (وليس للطرف الآخر). هل تريد المتابعة؟':lang==='en'?'This will remove this conversation history from your view only (not for others). Continue?':'这将仅从你的视图中清除此会话记录（不会删除对方记录）。继续吗？')) return;
@@ -2430,14 +2392,25 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   return (
     <div className={isVisible ? (workspaceClassName || 'w-full h-full min-h-0 flex flex-col') : 'hidden'} aria-hidden={!isVisible}>
-    <div className="w-full h-full min-h-0 p-1.5 sm:p-4 lg:p-5"><div className="mx-auto h-full min-h-0 max-w-[1680px] rounded-[22px] sm:rounded-[28px] border border-slate-200/90 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl shadow-lg dark:shadow-[0_24px_80px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col lg:flex-row text-slate-900 dark:text-slate-100">
+    <div className="w-full h-full min-h-0 p-0 sm:p-4 lg:p-5"><div className="mx-auto h-full min-h-0 max-w-[1680px] rounded-none sm:rounded-[28px] border-0 sm:border border-slate-200/90 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl shadow-lg dark:shadow-[0_24px_80px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col lg:flex-row text-slate-900 dark:text-slate-100">
       {/* Left rail / list */}
       <aside className={`w-full lg:w-[390px] xl:w-[430px] border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-white/10 bg-slate-50/85 dark:bg-[#111b2e]/90 p-3 sm:p-4 flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex lg:shrink-0" : "flex flex-1 lg:flex-initial lg:shrink-0"}`}>
         <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10 mb-3 gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            {onBackToHome && (
+              <button
+                type="button"
+                onClick={onBackToHome}
+                className="md:hidden rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.06] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 shrink-0 min-h-[38px] px-2.5 inline-flex items-center gap-0.5 text-xs font-medium"
+                aria-label="返回"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>返回</span>
+              </button>
+            )}
             <div className="w-9 h-9 rounded-xl border border-sky-200 dark:border-sky-400/20 bg-sky-50 dark:bg-sky-400/10 flex items-center justify-center shrink-0"><MessageCircle className="w-4 h-4 text-sky-600 dark:text-sky-300" /></div>
             <div className="min-w-0">
-              <h2 className="font-semibold text-sm sm:text-[15px] tracking-tight text-slate-900 dark:text-slate-100 truncate">ONE MESSENGER</h2>
+              <h2 className="font-semibold text-sm sm:text-[15px] tracking-tight text-slate-900 dark:text-slate-100 truncate">信息与聊天</h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">对话、联系人与通知</p>
             </div>
           </div>

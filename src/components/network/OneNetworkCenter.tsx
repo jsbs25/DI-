@@ -292,7 +292,7 @@ export const OneNetworkCenter: React.FC<OneNetworkCenterProps> = ({
   };
 
   return (
-    <div className="min-h-[100dvh] w-full max-w-full pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-10 px-4 sm:px-6 overflow-x-hidden">
+    <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.5rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-10 px-4 sm:px-6 overflow-x-hidden">
       <div className="mx-auto max-w-6xl space-y-6 py-4">
         {/* Header */}
         <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 dark:border-white/12 bg-white dark:bg-[#162238] p-5 sm:p-6 shadow-sm">

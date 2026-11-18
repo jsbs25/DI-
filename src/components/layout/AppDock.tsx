@@ -9,9 +9,10 @@ type Props = {
   onSelectTab: (tab: string) => void;
   lang: Language;
   hidden?: boolean;
+  hideMobileDock?: boolean;
 };
 
-export const AppDock: React.FC<Props> = ({ currentTab, onSelectTab, lang, hidden }) => {
+export const AppDock: React.FC<Props> = ({ currentTab, onSelectTab, lang, hidden, hideMobileDock }) => {
   const [moreOpen, setMoreOpen] = useState(false);
   const items = DOCK_ITEMS;
   const label = (it: { labelZh: string; labelEn: string }) => (lang === 'zh' ? it.labelZh : it.labelEn);
@@ -70,10 +71,10 @@ export const AppDock: React.FC<Props> = ({ currentTab, onSelectTab, lang, hidden
         </button>
       </nav>
 
-      {/* Mobile Bottom Spatial Dock */}
+      {/* Mobile Bottom Spatial Dock (only shown on Home root, hidden inside independent pages/chats) */}
       <nav
         aria-label={lang === 'zh' ? '移动端主导航' : 'Mobile spatial dock'}
-        className="pointer-events-auto fixed inset-x-0 bottom-0 z-50 md:hidden"
+        className={`pointer-events-auto fixed inset-x-0 bottom-0 z-50 ${hideMobileDock ? 'hidden' : 'md:hidden'}`}
       >
         <div className="mx-auto flex max-w-xl items-center justify-around border-t border-slate-200/80 dark:border-white/[0.12] bg-white/85 dark:bg-[#0B0D14]/82 px-1 pb-[max(0.45rem,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-2xl saturate-150 shadow-sm">
           {items.slice(0, 5).map((it) => {

@@ -33,6 +33,8 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
   unregisterPlay,
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const wiredRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(Math.max(0, Number(durationSec) || 0));
@@ -47,6 +49,40 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
     setPlaying(false);
   };
 
+  const ensureClarityChain = () => {
+    const el = audioRef.current;
+    if (!el || wiredRef.current || typeof window === 'undefined') return;
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const source = ctx.createMediaElementSource(el);
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 85;
+      const presence = ctx.createBiquadFilter();
+      presence.type = 'peaking';
+      presence.frequency.value = 2800;
+      presence.Q.value = 1.1;
+      presence.gain.value = 3.5;
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -24;
+      comp.knee.value = 18;
+      comp.ratio.value = 3.5;
+      comp.attack.value = 0.005;
+      comp.release.value = 0.14;
+      const boost = ctx.createGain();
+      boost.gain.value = 1.25;
+      source.connect(hp);
+      hp.connect(presence);
+      presence.connect(comp);
+      comp.connect(boost);
+      boost.connect(ctx.destination);
+      ctxRef.current = ctx;
+      wiredRef.current = true;
+    } catch {}
+  };
+
   const startPlay = async () => {
     const el = audioRef.current;
     if (!el) return;
@@ -56,6 +92,10 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
     activeVoiceStopFn = pauseSelf;
     setError(false);
     try {
+      ensureClarityChain();
+      if (ctxRef.current?.state === 'suspended') {
+        try { await ctxRef.current.resume(); } catch {}
+      }
       el.playbackRate = playbackRate;
       if (el.ended || (totalDuration > 0 && el.currentTime >= totalDuration - 0.1)) {
         el.currentTime = 0;
@@ -72,6 +112,7 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
     if (playing) {
       pauseSelf();
       if (activeVoiceStopFn === pauseSelf) activeVoiceStopFn = null;
+      try { void ctxRef.current?.close(); } catch {}
     } else {
       void startPlay();
     }
@@ -120,6 +161,7 @@ export const VoiceMessagePlayer: React.FC<VoiceMessagePlayerProps> = ({
         ref={audioRef}
         src={src}
         preload="metadata"
+        playsInline
         onLoadedMetadata={(e) => {
           const d = e.currentTarget.duration;
           if (Number.isFinite(d) && d > 0) setTotalDuration(d);
