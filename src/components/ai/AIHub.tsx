@@ -1,4 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+
+const stripAiTags = (t: string) => {
+  let s = t || '';
+  s = s.replace(/\[\[(?:EMO|EMOTION):[a-z_-]+\]\]\s*/gi, '');
+  s = s.replace(/\[\[ACTION:[\s\S]*?\]\]\s*/gi, '');
+  s = s.replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, ''); // partial trailing tag
+  return s.trimStart();
+};
 import { Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import { readAIStream } from '../../utils/aiStream.ts';
@@ -164,7 +172,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     if (!('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
-      const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      const clean = stripAiTags(text).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
       const utterance = new SpeechSynthesisUtterance(clean);
       utterance.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
       utterance.rate = 1.02;
@@ -174,7 +182,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
 
   const handleCopy = (id: string, text: string) => {
     try {
-      const clean = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      const clean = stripAiTags(text).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
       navigator.clipboard.writeText(clean);
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
@@ -216,15 +224,17 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         const streamResult = await readAIStream(res, delta => {
           setStreamingMessageId(activeStreamId);
           replyContent += delta;
-          setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, content: message.content + delta } : message));
+          const display = stripAiTags(replyContent).replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, '').trimStart();
+          setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, content: display } : message));
         });
+        replyContent = stripAiTags(replyContent);
         setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, model: streamResult.model || selectedModel, tokens: streamResult.tokens } : message));
         if (voiceOutput) speakText(replyContent);
         return;
       }
       const data = await res.json();
       const replyContent = data.success && data.reply ? data.reply : (data.error || (isZh ? '没有收到有效回复，请重试。' : 'No valid reply received. Please try again.'));
-      const aiMsg: Message = { id: `ai_${Date.now()}`, role: 'assistant', content: replyContent, model: data.model || selectedModel, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), tokens: data.tokens };
+      const aiMsg: Message = { id: `ai_${Date.now()}`, role: 'assistant', content: stripAiTags(replyContent), model: data.model || selectedModel, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), tokens: data.tokens };
       setMessages(prev => [...prev, aiMsg]);
       if (voiceOutput) speakText(replyContent);
     } catch (error) {
@@ -237,7 +247,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         });
         if (localRes.ok) {
           const lData = await localRes.json();
-          const localReply = lData?.message?.content || lData?.response || '';
+          const localReply = stripAiTags(lData?.message?.content || lData?.response || '');
           if (localReply) {
             setMessages(prev => [...prev, { id: `ai_${Date.now()}`, role: 'assistant', content: localReply, model: `${isZh ? '本地 Ollama' : 'Local Ollama'} (${rawModel})`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
             if (voiceOutput) speakText(localReply);
@@ -285,13 +295,14 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   ];
 
   const parseThoughtAndAnswer = (content: string) => {
-    const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+    const cleaned = stripAiTags(content);
+    const thinkMatch = cleaned.match(/<think>([\s\S]*?)<\/think>/);
     if (thinkMatch) {
       const thought = thinkMatch[1].trim();
-      const answer = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+      const answer = cleaned.replace(/<think>[\s\S]*?<\/think>/, '').trim();
       return { thought, answer };
     }
-    return { thought: null, answer: content };
+    return { thought: null, answer: cleaned };
   };
 
   const ollamaConnected = availableModels.some(m => m.id.startsWith('ollama:'));

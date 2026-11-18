@@ -16,6 +16,20 @@ import { answerWithLiveKnowledge } from './liveKnowledge.ts';
 import { solvePrecisionQuery } from '../src/utils/precisionSolver.ts';
 import { matchPureSocialBanter } from '../src/utils/oneAgentController.ts';
 
+function sanitizeReply(raw: string): { reply: string; emotion?: string } {
+  let text = typeof raw === 'string' ? raw : '';
+  let emotion: string | undefined;
+  while (true) {
+    const m = text.match(/^\s*\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]\s*/i);
+    if (!m) break;
+    emotion = emotion || m[1].toLowerCase();
+    text = text.slice(m[0].length);
+  }
+  text = text.replace(/^\s*\[\[ACTION:[\s\S]*?\]\]\s*/i, '').trim();
+  text = text.replace(/\[\[(?:EMO|EMOTION):[a-z_-]+\]\]\s*/gi, '').trim();
+  return { reply: text, emotion };
+}
+
 export interface ExecuteAiTurnParams {
   prompt: string;
   history?: unknown;
@@ -87,13 +101,14 @@ export async function executeAiTurn(params: ExecuteAiTurnParams): Promise<Execut
   if ((mode === 'general' || mode === 'voice-agent') && !userPrompt.includes('\n')) {
     const exact = solvePrecisionQuery(analysis.normalizedPrompt, analysis.isZh);
     if (exact) {
-      params.onDelta?.(exact.answer);
+      const exSan = sanitizeReply(exact.answer);
+      params.onDelta?.(exSan.reply || exact.answer);
       return {
-        reply: exact.answer,
+        reply: exSan.reply || exact.answer,
         model: 'one-precision-solver',
-        tokens: Math.ceil(exact.answer.length / 2),
+        tokens: Math.ceil((exSan.reply || exact.answer).length / 2),
         intent: analysis.intent,
-        emotion: (exact as any).emotion || 'focused',
+        emotion: exSan.emotion || (exact as any).emotion || 'focused',
         savedMemories,
         recalledMemoriesCount: recalledMemories.length,
         memoryWindow,
@@ -103,13 +118,14 @@ export async function executeAiTurn(params: ExecuteAiTurnParams): Promise<Execut
     if (mode === 'voice-agent' && analysis.intent === 'casual_banter') {
       const banter = matchPureSocialBanter(analysis.normalizedPrompt, analysis.isZh);
       if (banter) {
-        params.onDelta?.(banter);
+        const bSan = sanitizeReply(banter);
+        params.onDelta?.(bSan.reply || banter);
         return {
-          reply: banter,
+          reply: bSan.reply || banter,
           model: 'one-instant-companion',
-          tokens: Math.ceil(banter.length / 2),
+          tokens: Math.ceil((bSan.reply || banter).length / 2),
           intent: analysis.intent,
-          emotion: (banter.match(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]/i)||[])[1] || 'happy',
+          emotion: bSan.emotion || (banter.match(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]/i)||[])[1] || 'happy',
           savedMemories,
           recalledMemoriesCount: recalledMemories.length,
           memoryWindow,
@@ -150,11 +166,12 @@ export async function executeAiTurn(params: ExecuteAiTurnParams): Promise<Execut
         throw abortErr;
       }
       if (result.success && result.content.trim()) {
-        const emo = (result.content.match(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]/i)||[])[1];
+        const san = sanitizeReply(result.content);
+        const emo = san.emotion || (result.content.match(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]/i)||[])[1];
         return {
-          reply: result.content,
+          reply: san.reply || result.content.trim(),
           model: resolvedModelId,
-          tokens: result.tokens || Math.ceil(result.content.length / 2.5),
+          tokens: result.tokens || Math.ceil((san.reply || result.content).length / 2.5),
           intent: analysis.intent,
           emotion: emo || undefined,
           savedMemories,
@@ -212,11 +229,12 @@ export async function executeAiTurn(params: ExecuteAiTurnParams): Promise<Execut
     }
   }
 
-  const liveEmo = (liveAns.text.match(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]/i)||[])[1];
+  const liveSan = sanitizeReply(liveAns.text);
+  const liveEmo = liveSan.emotion || (liveAns.text.match(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]/i)||[])[1];
   return {
-    reply: liveAns.text,
+    reply: liveSan.reply || liveAns.text.trim(),
     model: `one-live-${liveAns.source}`,
-    tokens: Math.ceil(liveAns.text.length / 2),
+    tokens: Math.ceil((liveSan.reply || liveAns.text).length / 2),
     intent: analysis.intent,
     emotion: liveEmo || undefined,
     savedMemories,

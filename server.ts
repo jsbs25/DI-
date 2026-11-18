@@ -3250,6 +3250,21 @@ function wrapPcm24kAsWav(pcmBuffer: Buffer, sampleRate = 24000, channels = 1): B
   return Buffer.concat([header, pcmBuffer]);
 }
 
+
+function stripCompanionTags(raw: string): { reply: string; emotion?: string } {
+  let text = typeof raw === 'string' ? raw : '';
+  let emotion: string | undefined;
+  while (true) {
+    const m = text.match(/^\s*\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]\s*/i);
+    if (!m) break;
+    emotion = emotion || m[1].toLowerCase();
+    text = text.slice(m[0].length);
+  }
+  text = text.replace(/^\s*\[\[ACTION:[\s\S]*?\]\]\s*/i, '').trim();
+  text = text.replace(/\[\[(?:EMO|EMOTION):[a-z_-]+\]\]\s*/gi, '').trim();
+  return { reply: text, emotion };
+}
+
 app.post('/api/ai/companion-turn', async (req, res) => {
   const {
     prompt,
@@ -3282,11 +3297,12 @@ app.post('/api/ai/companion-turn', async (req, res) => {
   if (!cleanPrompt.includes('\n')) {
     const exact = solvePrecisionQuery(analysis.normalizedPrompt, isZh);
     if (exact) {
+      const ex = stripCompanionTags(exact.answer);
       return res.json({
         success: true,
         model: 'one-precision-solver',
-        reply: exact.answer,
-        emotion: 'focused',
+        reply: ex.reply || exact.answer,
+        emotion: ex.emotion || 'focused',
         emotionIntensity: 0.72,
         emotionReason: isZh ? '精确计算' : 'Exact calculation',
         toolCalls: [],
@@ -3306,18 +3322,18 @@ app.post('/api/ai/companion-turn', async (req, res) => {
         profileKey,
         userId: authUser?.id,
       });
+      const fb = stripCompanionTags(fallback.reply);
       return res.json({
         success: true,
         model: fallback.model,
-        reply: fallback.reply,
-        emotion:
-          analysis.sentiment === 'tired' || analysis.sentiment === 'frustrated'
+        reply: fb.reply || fallback.reply,
+        emotion: fb.emotion || (analysis.sentiment === 'tired' || analysis.sentiment === 'frustrated'
             ? 'empathetic'
             : analysis.sentiment === 'excited'
               ? 'excited'
               : analysis.sentiment === 'playful'
                 ? 'playful'
-                : 'calm',
+                : 'calm'),
         emotionIntensity: 0.72,
         emotionReason: '',
         toolCalls: [],
@@ -3412,12 +3428,12 @@ app.post('/api/ai/companion-turn', async (req, res) => {
       }
     }
 
-    const replyText = (response.text || '').trim() || serverResolvedFacts[0] || '';
+    const replySan = stripCompanionTags((response.text || '').trim() || serverResolvedFacts[0] || '');
     return res.json({
       success: true,
       model: activeModel,
-      reply: replyText,
-      emotion,
+      reply: replySan.reply,
+      emotion: replySan.emotion || emotion,
       emotionIntensity,
       emotionReason,
       toolCalls: clientToolCalls,
@@ -3481,11 +3497,12 @@ app.post('/api/ai/companion-turn', async (req, res) => {
               ? 'playful'
               : 'calm';
 
+      const fbFinal = stripCompanionTags(fallbackReply);
       return res.json({
         success: true,
         model: 'one-companion-fallback',
-        reply: fallbackReply,
-        emotion: fallbackEmotion,
+        reply: fbFinal.reply || fallbackReply,
+        emotion: fbFinal.emotion || fallbackEmotion,
         emotionIntensity: fallbackEmotion === 'empathetic' ? 0.85 : 0.72,
         emotionReason: fallbackEmotion === 'empathetic' ? (isZh ? '温柔共情与照料' : 'Warm care & empathy') : (isZh ? '稳定响应' : 'Attentive response'),
         toolCalls: fallbackTools,

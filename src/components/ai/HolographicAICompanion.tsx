@@ -584,15 +584,24 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
     }
   }, [transcript, hudOpen]);
 
+
+  const stripEmotionAndActionTags = useCallback((raw: string): string => {
+    if (!raw) return '';
+    let text = String(raw);
+    text = text.replace(/\[\[(?:EMO|EMOTION):[a-z_-]+\]\]\s*/gi, '');
+    text = text.replace(/\[\[ACTION:[\s\S]*?\]\]\s*/gi, '');
+    return text.trim();
+  }, []);
+
   const appendEntry = useCallback(
     (role: TranscriptEntry['role'], text: string, extra?: Partial<TranscriptEntry>) => {
-      const clean = text.trim();
+      const clean = stripEmotionAndActionTags(text);
       if (!clean) return '';
       const id = `${role}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       setTranscript((prev) => [...prev.slice(-24), { id, role, text: clean, ...extra }]);
       return id;
     },
-    []
+    [stripEmotionAndActionTags]
   );
 
   // Stop all AI audio output immediately (< 5ms)
@@ -708,7 +717,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
         resumeMusicIfPausedForVoice();
         return;
       }
-      const clean = text.replace(/[*_#`>]/g, '').trim();
+      const clean = stripEmotionAndActionTags(text).replace(/[*_#`>]/g, '').trim();
       if (!clean) {
         resumeMusicIfPausedForVoice();
         return;
@@ -895,13 +904,14 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             }
           }
 
-          const finalReply =
+          const rawReplyText =
             (typeof data.reply === 'string' && data.reply.trim()) ||
             (actionSummaries.length > 0
               ? isZh
                 ? `好的，已经为你搞定：${actionSummaries.join('、')}。`
                 : `All set! ${actionSummaries.join(', ')}.`
               : resolveConversationalFallback(clean, isZh));
+          const finalReply = stripEmotionAndActionTags(rawReplyText) || rawReplyText;
 
           // Also enrich emotion with local dialogue analysis if model stayed neutral
           if (nextEmotion === 'calm') {
@@ -1122,7 +1132,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       }
 
       if (msg.type === 'output_transcript' && typeof msg.text === 'string') {
-        const piece = msg.text;
+        const piece = stripEmotionAndActionTags(msg.text);
         if (!piece.trim()) return;
         currentInputTurnIdRef.current = null;
         setTranscript((prev) => {
