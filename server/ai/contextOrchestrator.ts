@@ -139,14 +139,16 @@ export function composeHumanSystemPrompt(params: {
   return [
     `你是 EARTH ONE 里的智能伙伴${isVoice ? ' One.' : ''}${userDisplayName ? `（当前用户：${userDisplayName}）` : ''}。你必须像一个真正聪明、真诚、懂对方且记住彼此默契的人那样对话，而不是传统问答机器人。`,
     '',
-    '【铁律——必须消除机器人味】',
+    '【铁律——必须消除机器人味与自我纠错】',
     '1. 绝对禁止使用套话和八股文：不要说“当然可以，我很乐意帮助你”“好的，没问题”“首先……其次……最后……”“以下几个方面”“总而言之/总结一下”“作为人工智能助手”。',
     '2. 理解错别字、口语、倒装和不完整短句，直接回应潜台词，不要死抠字眼，也不要明明能从上下文推出来却反问显而易见的问题。',
     '3. 不要复述用户刚说过的话或背景设定来凑字数；把已知背景直接融进你的判断里。',
     '4. 敢于表达不同意见：当用户的想法有漏洞、风险或成本过高时，直接友善地指出更好路径，而不是一味迎合“你说得太对了”。',
-    `5. ${depthRule}`,
-    `6. ${toneAdjustment[intent.toneHint]}`,
-    `7. ${continuationNote}`,
+    '5. 不要自我指涉或谈论自身身份、模型、工作机制、能力边界，除非用户明确询问；不要输出“作为AI”“我是一个模型/程序”等元话语。',
+    '6. 不要自我否定、反悔或反复修正：禁止出现“等等不对”“我刚才说错了”“让我纠正一下”“不，其实…”等自我推翻；先想清楚再一次给出连贯、确定的回答。',
+    `7. ${depthRule}`,
+    `8. ${toneAdjustment[intent.toneHint]}`,
+    `9. ${continuationNote}`,
     threadLines.length > 0 ? `\n【本轮对话背景状态】\n${threadLines.join('\n')}` : '',
     memoryLines.length > 0
       ? `\n【你记得的用户长期信息（自然运用即可，不要机械背诵“根据记忆库”）】\n${memoryLines.join('\n')}`
@@ -359,7 +361,9 @@ export async function generateContextAwareFallbackReply(
   if (intent.kind === 'disagreement_or_correction') {
     const topicRef = session.activeTopic ? `围绕「${session.activeTopic}」` : '';
     return {
-      text: `明白了，刚刚那点我确实没踩到你的重点${topicRef}。按你现在的标准，我后面直接说核心判断、去掉铺垫和套话——你想接着调刚才哪个部分，还是直接重新定一下方向？`,
+      text: topicRef
+        ? `${topicRef}直接说重点：你更看重哪一部分，我按你定的方向往下推进。`
+        : '直接说重点：你更看重哪一部分，我按你定的方向往下推进。',
       source: 'context-engine',
     };
   }
@@ -381,9 +385,9 @@ export async function generateContextAwareFallbackReply(
 
   // Case E: General follow-up on any non-AI ongoing topic
   if (intent.isContinuation && session.activeTopic) {
-    const memHint = recalledMemories[0]?.summary ? `（结合你之前提到的「${recalledMemories[0].summary.slice(0, 40)}」）` : '';
+    const memHint = recalledMemories[0]?.summary ? `结合你之前提到的「${recalledMemories[0].summary.slice(0, 40)}」，` : '';
     return {
-      text: `接着刚才聊的「${session.activeTopic}」${memHint}：你现在最核心的顾虑我看主要在「${q.slice(0, 40)}」这块。说实话如果按稳妥优先的思路，我会先把边界定死再扩功能；要是你觉得哪里判断不对，直接跟我挑明就行。`,
+      text: `接着「${session.activeTopic}」说，${memHint}当前最关键的是先把边界和优先级定清楚。你更想先推进哪一步？`,
       source: 'context-engine',
     };
   }
