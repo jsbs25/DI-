@@ -3,30 +3,10 @@ export interface AIConversationMessage {
   content: string;
 }
 
-export interface SlidingWindowOptions {
-  maxRecentTurns?: number;
-  maxTotalChars?: number;
-  maxTurnChars?: number;
-  maxSummaryChars?: number;
-}
-
-export interface SlidingWindowResult {
-  messages: AIConversationMessage[];
-  evictedTurns: number;
-  totalInputTurns: number;
-  pinnedConstraints: string[];
-  estimatedTokens: number;
-  compactedSummary: string;
-}
-
-export function normalizeConversationHistory(
-  history: unknown,
-  maxTurns = 16,
-  maxTurnChars = 3000
-): AIConversationMessage[] {
+export function normalizeConversationHistory(history: unknown): AIConversationMessage[] {
   if (!Array.isArray(history)) return [];
 
-  return history.slice(-maxTurns).flatMap((entry: unknown) => {
+  return history.slice(-20).flatMap((entry: unknown) => {
     if (!entry || typeof entry !== 'object') return [];
     const item = entry as { role?: unknown; content?: unknown; parts?: unknown };
     const role = item.role === 'user' ? 'user' :
@@ -42,66 +22,9 @@ export function normalizeConversationHistory(
             : []
         ).join('')
         : '';
-    const trimmed = content.trim().slice(0, maxTurnChars);
+    const trimmed = content.trim().slice(0, 4000);
     return trimmed ? [{ role, content: trimmed }] : [];
   });
-}
-
-export function manageSlidingWindowHistory(
-  history: unknown,
-  options: SlidingWindowOptions = {}
-): SlidingWindowResult {
-  const maxRecentTurns = Math.max(2, options.maxRecentTurns ?? 8);
-  const maxTotalChars = Math.max(400, options.maxTotalChars ?? 4200);
-  const maxTurnChars = Math.max(120, options.maxTurnChars ?? 960);
-  const maxSummaryChars = Math.max(120, options.maxSummaryChars ?? 480);
-
-  const normalizedAll = normalizeConversationHistory(history, 40, maxTurnChars);
-  const totalInputTurns = normalizedAll.length;
-
-  const retained: AIConversationMessage[] = [];
-  let charBudget = 0;
-  for (let i = normalizedAll.length - 1; i >= 0; i--) {
-    const turn = normalizedAll[i];
-    if (retained.length >= maxRecentTurns) break;
-    if (retained.length > 0 && charBudget + turn.content.length > maxTotalChars) break;
-    retained.unshift(turn);
-    charBudget += turn.content.length;
-  }
-
-  const evictedCount = Math.max(0, totalInputTurns - retained.length);
-  const evicted = normalizedAll.slice(0, evictedCount);
-
-  const constraintPattern = /记住|不要|别再|以后|偏好|习惯|用中文|用英文|简洁|简短|分点|remember|don't|do not|always|prefer|respond in|keep it/i;
-  const pinnedConstraints: string[] = [];
-  for (const turn of normalizedAll) {
-    if (turn.role === 'user' && constraintPattern.test(turn.content)) {
-      const compact = turn.content.replace(/\s+/g, ' ').slice(0, 120);
-      if (!pinnedConstraints.includes(compact)) pinnedConstraints.push(compact);
-    }
-  }
-
-  let compactedSummary = '';
-  if (evicted.length > 0) {
-    const snippets = evicted
-      .slice(-6)
-      .map((t) => `${t.role === 'user' ? 'U' : 'A'}: ${t.content.replace(/\s+/g, ' ').slice(0, 90)}`)
-      .join(' | ');
-    compactedSummary = snippets.slice(0, maxSummaryChars);
-  }
-
-  const estimatedTokens = Math.ceil(
-    (retained.reduce((sum, m) => sum + m.content.length, 0) + compactedSummary.length) * 0.65
-  );
-
-  return {
-    messages: retained,
-    evictedTurns: evictedCount,
-    totalInputTurns,
-    pinnedConstraints: pinnedConstraints.slice(-5),
-    estimatedTokens,
-    compactedSummary,
-  };
 }
 
 export function buildConversationPrompt(prompt: string, history: unknown): string {

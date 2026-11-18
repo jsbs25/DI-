@@ -42,13 +42,14 @@ const VALID_EMOTIONS: ReadonlySet<string> = new Set([
 export function extractEmotionTag(raw: string): { emotion: VoiceEmotion | null; text: string } {
   let detected: VoiceEmotion | null = null;
   const cleaned = raw
-    .replace(/\[\[EMO:([a-z_-]+)\]\]\s*/gi, (_all, tag: string) => {
+    .replace(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]\s*/gi, (_all, tag: string) => {
       const normalized = tag.toLowerCase().trim();
       if (VALID_EMOTIONS.has(normalized)) {
         detected = normalized as VoiceEmotion;
       }
       return '';
     })
+    .replace(/\[\[ACTION:[\s\S]*?\]\]\s*/gi, '')
     .trimStart();
   return { emotion: detected, text: cleaned };
 }
@@ -184,7 +185,7 @@ export function buildExpressivePhrases(
   mode: 'audio' | 'speech' = 'audio'
 ): ProsodyPhrase[] {
   const clean = rawText
-    .replace(/\[\[EMO:[a-z_-]+\]\]/gi, '')
+    .replace(/\[\[(?:EMO|EMOTION):[a-z_-]+\]\]/gi, '')
     .replace(/\[\[ACTION:[\s\S]*?\]\]/g, '')
     .replace(/[*_#`>~～]/g, '')
     .replace(/\s+/g, ' ')

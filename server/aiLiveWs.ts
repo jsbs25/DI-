@@ -1,3 +1,10 @@
+/**
+ * EARTH ONE — Unified Real-Time AI Live WebSocket Engine (/ws/ai-live)
+ * Bridges BOTH:
+ *  1) Persistent SQLite Multi-Turn Dialogue & DeepSeek/Ollama Streaming Protocol (`user_turn`, `interrupt`, `ping`)
+ *  2) Optional Gemini Live Full-Duplex PCM Audio + Tool Calling Protocol (`init`, `audio`, `text`, `context`, `tool_response`)
+ * backed by a single unified SQLite long-term memory & session store.
+ */
 import {
   ActivityHandling,
   Modality,
@@ -5,8 +12,19 @@ import {
   type LiveServerMessage,
   type Session,
 } from '@google/genai';
-import type { IncomingMessage } from 'node:http';
+import type http from 'node:http';
+// @ts-ignore
 import type { WebSocket, WebSocketServer } from 'ws';
+import { aiGateway } from './aiGateway.ts';
+import { normalizeConversationHistory } from './aiConversation.ts';
+import { aiMemoryStore } from './ai/memoryStore.ts';
+import {
+  generateContextAwareFallbackReply,
+  persistTurnAndExtractMemories,
+  prepareDialogueContext,
+  stripAiControlTags,
+} from './ai/contextOrchestrator.ts';
+import { extractMemoryCandidates } from './ai/intentAnalyzer.ts';
 import { getGeminiLiveClient } from './geminiClient.ts';
 import {
   AI_COMPANION_TOOLS,
@@ -14,32 +32,37 @@ import {
   formatPageContextForModel,
   type LivePageContextSummary,
 } from './aiLiveTools.ts';
-import { store } from './store.ts';
-import {
-  commitMemoriesFromTurn,
-  normalizeProfileKey,
-  retrieveRelevantMemories,
-  upsertMemory,
-} from './aiMemory.ts';
 import { answerWithLiveKnowledge } from './liveKnowledge.ts';
 import { solvePrecisionQuery } from '../src/utils/precisionSolver.ts';
+import { matchPureSocialBanter } from '../src/utils/oneAgentController.ts';
 
-function safeSend(ws: WebSocket, payload: Record<string, unknown>) {
-  try {
-    if (ws.readyState === 1) {
-      ws.send(JSON.stringify(payload));
-    }
-  } catch {
-    // ignore closed socket errors
-  }
+export interface AiLiveUserIdentity {
+  id: string;
+  name?: string;
 }
 
-interface ClientInitPayload {
-  type: 'init' | 'audio' | 'text' | 'context' | 'tool_response' | 'interrupt' | 'ping';
+interface WsIncomingMessage {
+  type:
+    | 'user_turn'
+    | 'init'
+    | 'audio'
+    | 'text'
+    | 'context'
+    | 'tool_response'
+    | 'interrupt'
+    | 'ping';
+  turnId?: string;
+  sessionId?: string;
+  prompt?: string;
+  mode?: string;
+  channel?: 'hub' | 'voice' | 'api';
+  modelId?: string;
+  history?: unknown;
+  maxTokens?: number;
   lang?: string;
   voiceName?: string;
   profileKey?: string;
-  pageContext?: LivePageContextSummary;
+  pageContext?: LivePageContextSummary | string;
   data?: string;
   text?: string;
   responses?: Array<{ id?: string; name?: string; response: Record<string, unknown> }>;
@@ -47,66 +70,308 @@ interface ClientInitPayload {
 
 const ALLOWED_VOICES = new Set(['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir']);
 
-export function attachAiLiveWs(wss: WebSocketServer) {
-  wss.on('connection', (clientWs: WebSocket, req?: IncomingMessage) => {
-    let session: Session | null = null;
+function safeSend(ws: WebSocket, payload: Record<string, unknown>) {
+  try {
+    if (ws.readyState === 1) {
+      ws.send(JSON.stringify(payload));
+    }
+  } catch {
+    // ignore closed socket send errors
+  }
+}
+
+export function attachAiLiveWs(
+  wss: WebSocketServer,
+  resolveUser?: (req: http.IncomingMessage) => AiLiveUserIdentity | undefined
+) {
+  wss.on('connection', (clientWs: WebSocket, req?: http.IncomingMessage) => {
+    const authUser = req && resolveUser ? resolveUser(req) : undefined;
+    let urlProfileKey = '';
+    try {
+      const reqUrl = new URL(req?.url || '/ws/ai-live', 'http://localhost');
+      urlProfileKey = (reqUrl.searchParams.get('profileKey') || '').trim().slice(0, 64);
+    } catch {}
+
+    const resolveMemoryUserId = () =>
+      authUser?.id || urlProfileKey || 'guest';
+
+    // Shared stateful orchestrator state
+    let activeTurnController: AbortController | null = null;
+    let activeTurnId: string | null = null;
+    let currentSessionId: string | undefined;
+
+    // Gemini Live Audio state (used only when client sends `init` + GEMINI_API_KEY exists)
+    let geminiSession: Session | null = null;
     let isClosing = false;
     let latestLang = 'zh';
     let latestVoice = 'Zephyr';
-    let latestContext: LivePageContextSummary | null = null;
+    let latestContext: LivePageContextSummary | string | null = null;
     let connectingPromise: Promise<Session | null> | null = null;
     const pendingToolTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-    let profileKey = normalizeProfileKey(undefined, undefined);
-    try {
-      const reqUrl = new URL(req?.url || '/ws/ai-live', 'http://localhost');
-      const rawProfile = reqUrl.searchParams.get('profileKey');
-      if (rawProfile) {
-        profileKey = normalizeProfileKey(rawProfile, undefined);
-      }
-    } catch {
-      // keep default profileKey
-    }
-
     let bufferedUserSpeech = '';
-    const recentTurns: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     let currentAssistantSpeech = '';
 
-    const flushUserMemory = (overrideText?: string) => {
-      const textToCommit = (overrideText ?? bufferedUserSpeech).trim();
-      bufferedUserSpeech = '';
-      if (!textToCommit) return;
-      recentTurns.push({ role: 'user', content: textToCommit });
-      if (recentTurns.length > 12) recentTurns.shift();
-      try {
-        const saved = commitMemoriesFromTurn(store, profileKey, textToCommit, recentTurns);
-        if (saved.length > 0) {
-          safeSend(clientWs, { type: 'memory_saved', count: saved.length, items: saved });
-        }
-      } catch {
-        // non-fatal memory persistence
+    safeSend(clientWs, {
+      type: 'ready',
+      engine: getGeminiLiveClient() ? 'hybrid-live' : 'deepseek',
+      streaming: true,
+      userId: resolveMemoryUserId(),
+    });
+
+    const cancelActiveTurn = (reason = 'interrupted') => {
+      if (activeTurnController) {
+        try {
+          activeTurnController.abort();
+        } catch {}
+        activeTurnController = null;
+      }
+      if (activeTurnId) {
+        safeSend(clientWs, {
+          type: 'interrupted',
+          turnId: activeTurnId,
+          reason,
+        });
+        activeTurnId = null;
       }
     };
 
     const closeGeminiSession = () => {
       for (const timer of pendingToolTimers.values()) clearTimeout(timer);
       pendingToolTimers.clear();
-      if (session) {
+      if (geminiSession) {
         try {
-          session.close();
-        } catch {
-          // ignore
+          geminiSession.close();
+        } catch {}
+        geminiSession = null;
+      }
+    };
+
+    const flushAudioUserTurnMemory = (userText?: string, assistantText?: string) => {
+      const uText = (userText ?? bufferedUserSpeech).trim();
+      const aText = (assistantText ?? currentAssistantSpeech).trim();
+      bufferedUserSpeech = '';
+      if (!uText && !aText) return;
+      const uid = resolveMemoryUserId();
+      try {
+        const sess = aiMemoryStore.getOrCreateSession(uid, currentSessionId, 'voice');
+        currentSessionId = sess.id;
+        if (uText) {
+          const candidates = extractMemoryCandidates(uText, sess);
+          const saved: Array<{ action: string; summary: string }> = [];
+          for (const c of candidates) {
+            const res = aiMemoryStore.upsertMemory(c);
+            if (res.memory && res.action !== 'rejected') {
+              saved.push({ action: res.action, summary: res.memory.summary });
+            }
+          }
+          if (saved.length > 0) {
+            safeSend(clientWs, { type: 'memory_saved', count: saved.length, items: saved });
+          }
         }
-        session = null;
+        if (uText || aText) {
+          if (uText) {
+            aiMemoryStore.appendMessage({
+              sessionId: sess.id,
+              userId: uid,
+              role: 'user',
+              content: uText,
+              intent: 'voice_live',
+            });
+          }
+          if (aText) {
+            aiMemoryStore.appendMessage({
+              sessionId: sess.id,
+              userId: uid,
+              role: 'assistant',
+              content: aText,
+              intent: 'voice_live',
+              model: 'gemini-3.8-live',
+            });
+          }
+        }
+      } catch {
+        // non-fatal SQLite persistence guard
+      }
+    };
+
+    const executeOrchestratedTurn = async (params: {
+      prompt: string;
+      turnId: string;
+      sessionId?: string;
+      mode: string;
+      channel: 'hub' | 'voice' | 'api';
+      modelId: string;
+      history?: unknown;
+      maxTokens?: number;
+      pageContext?: LivePageContextSummary | string | null;
+      emitLiveTranscript?: boolean;
+    }) => {
+      cancelActiveTurn('superseded_by_new_turn');
+
+      const controller = new AbortController();
+      activeTurnController = controller;
+      activeTurnId = params.turnId;
+
+      const userId = resolveMemoryUserId();
+      const pageContextText = params.pageContext
+        ? formatPageContextForModel(params.pageContext)
+        : undefined;
+
+      const ctx = prepareDialogueContext({
+        userId,
+        userDisplayName: authUser?.name,
+        sessionId: params.sessionId || currentSessionId,
+        channel: params.channel,
+        prompt: params.prompt,
+        mode: params.mode,
+        clientHistory: normalizeConversationHistory(params.history),
+        requestedMaxTokens: params.maxTokens,
+        pageContext: pageContextText,
+      });
+      currentSessionId = ctx.session.id;
+
+      safeSend(clientWs, {
+        type: 'turn_start',
+        turnId: params.turnId,
+        sessionId: ctx.session.id,
+        intent: ctx.intent.kind,
+        recalledCount: ctx.recalledMemories.length,
+      });
+
+      const finishTurn = (rawReplyText: string, modelLabel: string) => {
+        if (controller.signal.aborted || activeTurnId !== params.turnId) return;
+        const clean = stripAiControlTags(rawReplyText).reply || rawReplyText.trim();
+        const savedMemories = persistTurnAndExtractMemories({
+          ctx,
+          rawUserInput: params.prompt,
+          assistantReply: clean,
+          modelLabel,
+        });
+        activeTurnController = null;
+        activeTurnId = null;
+
+        safeSend(clientWs, {
+          type: 'done',
+          turnId: params.turnId,
+          sessionId: ctx.session.id,
+          reply: clean,
+          model: modelLabel,
+          tokens: Math.ceil(clean.length / 2),
+          intent: ctx.intent.kind,
+          recalledMemories: ctx.recalledMemories.map((m) => ({
+            id: m.id,
+            category: m.category,
+            summary: m.summary,
+          })),
+          savedMemories,
+        });
+        if (params.emitLiveTranscript) {
+          safeSend(clientWs, { type: 'turn_complete' });
+        }
+      };
+
+      const emitChunk = (chunk: string) => {
+        if (controller.signal.aborted || activeTurnId !== params.turnId) return;
+        safeSend(clientWs, { type: 'delta', turnId: params.turnId, delta: chunk });
+        if (params.emitLiveTranscript) {
+          safeSend(clientWs, { type: 'output_transcript', text: chunk });
+        }
+      };
+
+      try {
+        // 1. Instant deterministic precision solver (<1ms)
+        if ((params.mode === 'general' || params.mode === 'voice-agent') && !params.prompt.includes('\n')) {
+          const exact = solvePrecisionQuery(ctx.intent.normalizedInput, ctx.intent.isZh);
+          if (exact) {
+            const clean = stripAiControlTags(exact.answer).reply || exact.answer;
+            emitChunk(clean);
+            finishTurn(clean, 'one-precision-solver');
+            return;
+          }
+          if (
+            params.mode === 'voice-agent' &&
+            ctx.intent.kind === 'casual_greeting' &&
+            !ctx.session.activeTopic &&
+            ctx.mergedHistory.length <= 2
+          ) {
+            const banter = matchPureSocialBanter(ctx.intent.normalizedInput, ctx.intent.isZh);
+            if (banter) {
+              const clean = stripAiControlTags(banter).reply || banter;
+              emitChunk(clean);
+              finishTurn(clean, 'one-instant-companion');
+              return;
+            }
+          }
+        }
+
+        // 2. Explicit memory recall / save / forget
+        if (ctx.intent.kind === 'memory_management') {
+          const memRes = await generateContextAwareFallbackReply(ctx, params.mode);
+          emitChunk(memRes.text);
+          finishTurn(memRes.text, `one-${memRes.source}`);
+          return;
+        }
+
+        // 3. Live DeepSeek / Ollama streaming turn
+        if (aiGateway.hasLiveEngine()) {
+          let streamedReply = '';
+          const res = await aiGateway.generateContent(
+            params.modelId,
+            params.prompt,
+            ctx.systemPrompt,
+            (token) => {
+              if (controller.signal.aborted || activeTurnId !== params.turnId) return;
+              const cleanToken = stripAiControlTags(token).reply;
+              streamedReply += token;
+              if (cleanToken) {
+                emitChunk(cleanToken);
+              }
+            },
+            ctx.mergedHistory,
+            ctx.resolvedMaxTokens,
+            controller.signal
+          );
+          if (controller.signal.aborted || activeTurnId !== params.turnId) return;
+          if (res.success && (streamedReply || res.content)) {
+            const finalText = stripAiControlTags(res.content || streamedReply).reply;
+            if (!streamedReply && finalText) {
+              emitChunk(finalText);
+            }
+            finishTurn(finalText, params.modelId);
+            return;
+          }
+        }
+
+        // 4. Context-aware non-robotic multi-turn fallback
+        const fallback = await generateContextAwareFallbackReply(ctx, params.mode);
+        if (controller.signal.aborted || activeTurnId !== params.turnId) return;
+        const cleanFb = stripAiControlTags(fallback.text).reply || fallback.text;
+        emitChunk(cleanFb);
+        finishTurn(cleanFb, `one-${fallback.source}`);
+      } catch (err: any) {
+        if (controller.signal.aborted || err?.name === 'AbortError') return;
+        try {
+          const fallback = await generateContextAwareFallbackReply(ctx, params.mode);
+          if (controller.signal.aborted || activeTurnId !== params.turnId) return;
+          const cleanFb = stripAiControlTags(fallback.text).reply || fallback.text;
+          emitChunk(cleanFb);
+          finishTurn(cleanFb, `one-${fallback.source}`);
+        } catch {
+          safeSend(clientWs, {
+            type: 'error',
+            turnId: params.turnId,
+            error: err instanceof Error ? err.message : 'Live WS turn failed',
+          });
+        }
       }
     };
 
     const connectGeminiLive = async (
       lang: string,
       voiceName: string,
-      pageContext: LivePageContextSummary | null
+      pageContext: LivePageContextSummary | string | null
     ): Promise<Session | null> => {
-      if (session) return session;
+      if (geminiSession) return geminiSession;
       if (connectingPromise) return connectingPromise;
 
       const ai = getGeminiLiveClient();
@@ -114,13 +379,19 @@ export function attachAiLiveWs(wss: WebSocketServer) {
         safeSend(clientWs, {
           type: 'live_unavailable',
           reason: 'missing_gemini_key',
-          message: 'GEMINI_API_KEY is not configured; using companion API fallback.',
+          fallbackAvailable: true,
+          message: 'GEMINI_API_KEY is not configured; using companion API + SQLite orchestrator.',
         });
         return null;
       }
 
       const resolvedVoice = ALLOWED_VOICES.has(voiceName) ? voiceName : 'Zephyr';
-      const recalledMemories = retrieveRelevantMemories(store, profileKey, '', recentTurns, 640);
+      const uid = resolveMemoryUserId();
+      const recalledMemories = aiMemoryStore.recallMemories(uid, '', {
+        limit: 8,
+        includeCorePreferences: true,
+        bumpRecallStats: false,
+      });
 
       connectingPromise = (async () => {
         try {
@@ -179,13 +450,16 @@ export function attachAiLiveWs(wss: WebSocketServer) {
 
                 if (sc?.outputTranscription?.text) {
                   if (bufferedUserSpeech.trim()) {
-                    flushUserMemory();
+                    flushAudioUserTurnMemory(bufferedUserSpeech, undefined);
                   }
-                  currentAssistantSpeech += sc.outputTranscription.text;
-                  safeSend(clientWs, {
-                    type: 'output_transcript',
-                    text: sc.outputTranscription.text,
-                  });
+                  const cleanChunk = stripAiControlTags(sc.outputTranscription.text).reply;
+                  currentAssistantSpeech += cleanChunk || sc.outputTranscription.text;
+                  if (cleanChunk) {
+                    safeSend(clientWs, {
+                      type: 'output_transcript',
+                      text: cleanChunk,
+                    });
+                  }
                 }
 
                 for (const part of sc?.modelTurn?.parts ?? []) {
@@ -231,44 +505,55 @@ export function attachAiLiveWs(wss: WebSocketServer) {
                       const queryOrContent = String(args.queryOrContent || '').trim();
                       if (act === 'save' && queryOrContent) {
                         const kindRaw = String(args.kind || 'fact');
-                        const kind = (['identity', 'preference', 'project', 'fact'].includes(kindRaw)
-                          ? kindRaw
-                          : 'fact') as 'identity' | 'preference' | 'project' | 'fact';
-                        const res = upsertMemory(store, profileKey, {
-                          kind,
-                          normalizedKey: `${kind}.voice_${Date.now().toString(36)}`,
-                          content: queryOrContent,
+                        const category =
+                          kindRaw === 'identity'
+                            ? 'fact'
+                            : kindRaw === 'preference'
+                              ? 'preference'
+                              : kindRaw === 'project'
+                                ? 'project'
+                                : 'fact';
+                        const res = aiMemoryStore.upsertMemory({
+                          userId: uid,
+                          category,
+                          canonicalKey: `${category}:voice_${Date.now().toString(36)}`,
+                          summary: queryOrContent,
+                          keywords: queryOrContent,
                           confidence: 0.96,
-                          salience: 0.95,
-                          source: 'user_explicit',
+                          importance: 9,
+                          sourceSessionId: currentSessionId || '',
+                          sourceQuote: queryOrContent,
+                          replacesConflictingKey: true,
                         });
-                        safeSend(clientWs, { type: 'memory_saved', count: 1, items: [res.item] });
+                        if (res.memory) {
+                          safeSend(clientWs, {
+                            type: 'memory_saved',
+                            count: 1,
+                            items: [{ action: res.action, summary: res.memory.summary }],
+                          });
+                        }
                         immediateResponses.push({
                           id: call.id,
                           name,
-                          response: { ok: true, saved: true, content: res.item.content },
+                          response: { ok: true, saved: true, content: res.memory?.summary || queryOrContent },
                         });
                       } else {
-                        const memories = retrieveRelevantMemories(
-                          store,
-                          profileKey,
-                          queryOrContent,
-                          recentTurns,
-                          640
-                        );
+                        const memories = aiMemoryStore.recallMemories(uid, queryOrContent, {
+                          limit: 8,
+                          includeCorePreferences: true,
+                        });
                         immediateResponses.push({
                           id: call.id,
                           name,
                           response: {
                             ok: true,
-                            memories: memories.map((m) => ({ kind: m.kind, content: m.content })),
+                            memories: memories.map((m) => ({ category: m.category, summary: m.summary })),
                           },
                         });
                       }
                     } else if (name === 'lookup_live_knowledge') {
                       const q = String(args.query || '').trim();
-                      const isZh = latestLang === 'zh';
-                      const exact = q ? solvePrecisionQuery(q, isZh) : null;
+                      const exact = q ? solvePrecisionQuery(q, lang === 'zh') : null;
                       if (exact) {
                         immediateResponses.push({
                           id: call.id,
@@ -277,10 +562,7 @@ export function attachAiLiveWs(wss: WebSocketServer) {
                         });
                       } else if (q) {
                         try {
-                          const live = await answerWithLiveKnowledge(q, 'voice-agent', {
-                            history: recentTurns,
-                            memories: retrieveRelevantMemories(store, profileKey, q, recentTurns, 400),
-                          });
+                          const live = await answerWithLiveKnowledge(q, 'voice-agent');
                           immediateResponses.push({
                             id: call.id,
                             name,
@@ -307,21 +589,12 @@ export function attachAiLiveWs(wss: WebSocketServer) {
 
                   if (immediateResponses.length > 0) {
                     try {
-                      liveSession.sendToolResponse({
-                        functionResponses: immediateResponses,
-                      });
-                    } catch {
-                      // ignore
-                    }
+                      liveSession.sendToolResponse({ functionResponses: immediateResponses });
+                    } catch {}
                   }
 
                   if (clientCalls.length > 0) {
-                    safeSend(clientWs, {
-                      type: 'tool_call',
-                      calls: clientCalls,
-                    });
-
-                    // Safety timeout so Live session never stalls if client disconnects mid-tool
+                    safeSend(clientWs, { type: 'tool_call', calls: clientCalls });
                     for (const c of clientCalls) {
                       const key = c.id || `${c.name}_${Date.now()}`;
                       const timer = setTimeout(() => {
@@ -329,16 +602,10 @@ export function attachAiLiveWs(wss: WebSocketServer) {
                         try {
                           liveSession.sendToolResponse({
                             functionResponses: [
-                              {
-                                id: c.id,
-                                name: c.name,
-                                response: { ok: true, status: 'dispatched' },
-                              },
+                              { id: c.id, name: c.name, response: { ok: true, status: 'dispatched' } },
                             ],
                           });
-                        } catch {
-                          // ignore
-                        }
+                        } catch {}
                       }, 5500);
                       pendingToolTimers.set(key, timer);
                     }
@@ -346,12 +613,8 @@ export function attachAiLiveWs(wss: WebSocketServer) {
                 }
 
                 if (sc?.turnComplete) {
-                  flushUserMemory();
-                  if (currentAssistantSpeech.trim()) {
-                    recentTurns.push({ role: 'assistant', content: currentAssistantSpeech.trim() });
-                    if (recentTurns.length > 12) recentTurns.shift();
-                    currentAssistantSpeech = '';
-                  }
+                  flushAudioUserTurnMemory(undefined, currentAssistantSpeech);
+                  currentAssistantSpeech = '';
                   safeSend(clientWs, { type: 'turn_complete' });
                 }
               },
@@ -364,19 +627,21 @@ export function attachAiLiveWs(wss: WebSocketServer) {
                 }
               },
               onclose: () => {
-                session = null;
+                geminiSession = null;
                 if (!isClosing) {
                   safeSend(clientWs, { type: 'closed' });
                 }
               },
             },
           });
-          session = liveSession;
+
+          geminiSession = liveSession;
           return liveSession;
         } catch (err: any) {
           safeSend(clientWs, {
             type: 'live_unavailable',
             reason: 'connect_failed',
+            fallbackAvailable: true,
             message: err?.message || 'Failed to connect Gemini Live session.',
           });
           return null;
@@ -388,23 +653,83 @@ export function attachAiLiveWs(wss: WebSocketServer) {
       return connectingPromise;
     };
 
+    clientWs.on('close', () => {
+      isClosing = true;
+      cancelActiveTurn('socket_closed');
+      flushAudioUserTurnMemory();
+      closeGeminiSession();
+    });
+
+    clientWs.on('error', () => {
+      isClosing = true;
+      cancelActiveTurn('socket_error');
+      closeGeminiSession();
+    });
+
     clientWs.on('message', async (raw: Buffer | string) => {
-      let msg: ClientInitPayload;
+      let msg: WsIncomingMessage;
       try {
-        msg = JSON.parse(raw.toString()) as ClientInitPayload;
+        msg = JSON.parse(raw.toString()) as WsIncomingMessage;
       } catch {
         return;
       }
+      if (!msg || typeof msg !== 'object') return;
 
       if (msg.type === 'ping') {
-        safeSend(clientWs, { type: 'pong', engine: 'gemini-3.8-live' });
+        safeSend(clientWs, {
+          type: 'pong',
+          engine: geminiSession ? 'gemini-3.8-live' : 'deepseek',
+          ts: Date.now(),
+        });
+        return;
+      }
+
+      if (msg.type === 'interrupt') {
+        currentAssistantSpeech = '';
+        cancelActiveTurn('client_barge_in');
+        safeSend(clientWs, { type: 'interrupted', reason: 'client_barge_in' });
+        return;
+      }
+
+      if (msg.type === 'user_turn') {
+        const prompt = typeof msg.prompt === 'string' ? msg.prompt.trim() : '';
+        if (!prompt) {
+          safeSend(clientWs, {
+            type: 'error',
+            turnId: msg.turnId || null,
+            error: 'Prompt is required.',
+          });
+          return;
+        }
+        if (msg.profileKey && !authUser?.id) {
+          urlProfileKey = msg.profileKey.trim().slice(0, 64);
+        }
+        if (msg.pageContext) latestContext = msg.pageContext;
+        await executeOrchestratedTurn({
+          prompt,
+          turnId: typeof msg.turnId === 'string' && msg.turnId ? msg.turnId : `turn_${Date.now()}`,
+          sessionId: typeof msg.sessionId === 'string' ? msg.sessionId : undefined,
+          mode: typeof msg.mode === 'string' && msg.mode.trim() ? msg.mode.trim() : 'voice-agent',
+          channel: msg.channel === 'hub' || msg.channel === 'api' ? msg.channel : 'voice',
+          modelId:
+            typeof msg.modelId === 'string' && msg.modelId.trim()
+              ? msg.modelId.trim()
+              : aiGateway.getChatModelId(),
+          history: msg.history,
+          maxTokens:
+            typeof msg.maxTokens === 'number' && msg.maxTokens > 0
+              ? Math.min(4096, Math.max(64, Math.floor(msg.maxTokens)))
+              : undefined,
+          pageContext: msg.pageContext || latestContext,
+          emitLiveTranscript: false,
+        });
         return;
       }
 
       if (msg.type === 'init') {
         if (msg.lang) latestLang = msg.lang;
         if (msg.voiceName) latestVoice = msg.voiceName;
-        if (msg.profileKey) profileKey = normalizeProfileKey(msg.profileKey, undefined);
+        if (msg.profileKey && !authUser?.id) urlProfileKey = msg.profileKey.trim().slice(0, 64);
         if (msg.pageContext) latestContext = msg.pageContext;
         closeGeminiSession();
         await connectGeminiLive(latestLang, latestVoice, latestContext);
@@ -414,9 +739,9 @@ export function attachAiLiveWs(wss: WebSocketServer) {
       if (msg.type === 'context') {
         if (msg.pageContext) {
           latestContext = msg.pageContext;
-          if (session) {
+          if (geminiSession) {
             try {
-              session.sendClientContent({
+              geminiSession.sendClientContent({
                 turns: [
                   {
                     role: 'user',
@@ -429,9 +754,7 @@ export function attachAiLiveWs(wss: WebSocketServer) {
                 ],
                 turnComplete: false,
               });
-            } catch {
-              // ignore context sync errors
-            }
+            } catch {}
           }
         }
         return;
@@ -439,43 +762,57 @@ export function attachAiLiveWs(wss: WebSocketServer) {
 
       if (msg.type === 'audio' && typeof msg.data === 'string' && msg.data.length > 0) {
         const activeSession =
-          session || (await connectGeminiLive(latestLang, latestVoice, latestContext));
+          geminiSession || (await connectGeminiLive(latestLang, latestVoice, latestContext));
         if (!activeSession) return;
         try {
           activeSession.sendRealtimeInput({
             audio: { data: msg.data, mimeType: 'audio/pcm;rate=16000' },
           });
-        } catch {
-          // ignore transient send errors
-        }
+        } catch {}
         return;
       }
 
       if (msg.type === 'text' && typeof msg.text === 'string' && msg.text.trim()) {
         const cleanText = msg.text.trim();
-        flushUserMemory(cleanText);
-        const activeSession =
-          session || (await connectGeminiLive(latestLang, latestVoice, latestContext));
-        if (!activeSession) return;
-        const contextPrefix = latestContext
-          ? `[Current screen: ${latestContext.currentTab || 'globe'} | ${latestContext.theme || 'light'} | music=${latestContext.music?.isPlaying ? latestContext.music.title : 'idle'}]\n`
-          : '';
-        try {
-          activeSession.sendClientContent({
-            turns: [
-              {
-                role: 'user',
-                parts: [{ text: `${contextPrefix}${cleanText}` }],
-              },
-            ],
-            turnComplete: true,
-          });
-        } catch (err: any) {
-          safeSend(clientWs, {
-            type: 'live_error',
-            message: err?.message || 'Failed to send text to Live session',
-          });
+        if (geminiSession) {
+          flushAudioUserTurnMemory(cleanText, undefined);
+          const contextSummary = latestContext
+            ? formatPageContextForModel(latestContext).split('\n').slice(0, 2).join(' | ')
+            : '';
+          try {
+            geminiSession.sendClientContent({
+              turns: [
+                {
+                  role: 'user',
+                  parts: [
+                    {
+                      text: contextSummary ? `[Current screen: ${contextSummary}]\n${cleanText}` : cleanText,
+                    },
+                  ],
+                },
+              ],
+              turnComplete: true,
+            });
+          } catch (err: any) {
+            safeSend(clientWs, {
+              type: 'live_error',
+              message: err?.message || 'Failed to send text to Live session',
+            });
+          }
+          return;
         }
+
+        // Seamless DeepSeek/Orchestrator fallback when Gemini Live audio session is inactive
+        await executeOrchestratedTurn({
+          prompt: cleanText,
+          turnId: `turn_${Date.now()}`,
+          mode: 'voice-agent',
+          channel: 'voice',
+          modelId: aiGateway.getChatModelId(),
+          history: msg.history,
+          pageContext: latestContext,
+          emitLiveTranscript: true,
+        });
         return;
       }
 
@@ -488,37 +825,18 @@ export function attachAiLiveWs(wss: WebSocketServer) {
             pendingToolTimers.delete(key);
           }
         }
-        if (session) {
+        if (geminiSession) {
           try {
-            session.sendToolResponse({
+            geminiSession.sendToolResponse({
               functionResponses: msg.responses.map((r) => ({
                 id: r.id,
                 name: r.name,
                 response: r.response,
               })),
             });
-          } catch {
-            // ignore
-          }
+          } catch {}
         }
-        return;
       }
-
-      if (msg.type === 'interrupt') {
-        currentAssistantSpeech = '';
-        safeSend(clientWs, { type: 'interrupted' });
-      }
-    });
-
-    clientWs.on('close', () => {
-      isClosing = true;
-      flushUserMemory();
-      closeGeminiSession();
-    });
-
-    clientWs.on('error', () => {
-      isClosing = true;
-      closeGeminiSession();
     });
   });
 }

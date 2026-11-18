@@ -146,41 +146,50 @@ class AIGateway {
     }, 10000);
   }
 
+  private isUsableKey(key: string | undefined): boolean {
+    const k = (key || '').trim();
+    if (!k || k.length < 12) return false;
+    if (/^(x|test|demo|none|null|undefined|placeholder|changeme|MY_API_KEY)$/i.test(k)) return false;
+    return true;
+  }
+
   private maskKey(key: string | undefined): string {
-    if (!key || key.trim() === '') return '未配置 (自动走 DeepSeek 免费直连)';
-    if (key.length <= 8) return '********';
-    return `${key.slice(0, 4)}...${key.slice(-4)}`;
+    if (!this.isUsableKey(key)) return '未配置 (请设置 DEEPSEEK_API_KEY 或在 AI 工作台填入)';
+    const k = String(key).trim();
+    return `${k.slice(0, 4)}...${k.slice(-4)}`;
   }
 
   private initProviders() {
-    this.deepseekKey = (process.env.DEEPSEEK_API_KEY || '').trim();
-    this.customKey = (process.env.CUSTOM_API_KEY || '').trim();
+    const rawDs = (process.env.DEEPSEEK_API_KEY || '').trim();
+    this.deepseekKey = this.isUsableKey(rawDs) ? rawDs : '';
+    const rawCustom = (process.env.CUSTOM_API_KEY || '').trim();
+    this.customKey = this.isUsableKey(rawCustom) ? rawCustom : '';
 
     this.models = [
       {
-        id: 'deepseek-r1-open',
-        name: 'DeepSeek-R1 (深度推理 · 全局引擎)',
-        provider: 'DeepSeek',
-        category: 'reasoning',
-        status: 'active',
-        isDefault: !this.deepseekKey,
-        totalCalls: 0,
-        totalTokens: 0,
-        averageLatencyMs: 240,
-        apiKeyMasked: this.deepseekKey ? this.maskKey(this.deepseekKey) : 'DeepSeek 免费直连 · 零配置即问即答',
-        isFree: true
-      },
-      {
         id: 'deepseek-v3',
-        name: 'DeepSeek-V3 (官方高速对话引擎)',
+        name: 'DeepSeek-V3 (极速对话 · 全站语音默认)',
         provider: 'DeepSeek',
         category: 'text',
         status: 'active',
-        isDefault: Boolean(this.deepseekKey),
+        isDefault: true,
         totalCalls: 0,
         totalTokens: 0,
-        averageLatencyMs: 180,
-        apiKeyMasked: this.deepseekKey ? this.maskKey(this.deepseekKey) : 'DeepSeek 智能直连',
+        averageLatencyMs: 140,
+        apiKeyMasked: this.deepseekKey ? this.maskKey(this.deepseekKey) : '未配置密钥',
+        isFree: !this.deepseekKey
+      },
+      {
+        id: 'deepseek-r1-open',
+        name: 'DeepSeek-R1 (深度推理 · 复杂分析)',
+        provider: 'DeepSeek',
+        category: 'reasoning',
+        status: 'active',
+        isDefault: false,
+        totalCalls: 0,
+        totalTokens: 0,
+        averageLatencyMs: 320,
+        apiKeyMasked: this.deepseekKey ? this.maskKey(this.deepseekKey) : '未配置密钥',
         isFree: !this.deepseekKey
       },
       {
@@ -197,6 +206,14 @@ class AIGateway {
         isFree: true
       }
     ];
+  }
+
+  public hasLiveEngine(): boolean {
+    return (
+      this.isUsableKey(this.deepseekKey) ||
+      this.isUsableKey(this.customKey) ||
+      this.localOllamaModels.length > 0
+    );
   }
 
   public getModels(): AIModelMeta[] {
@@ -217,9 +234,22 @@ class AIGateway {
    * Register or update a user-supplied DeepSeek / OpenAI-compatible or Ollama provider.
    */
   public registerCustomProvider(apiKey: string, baseUrl?: string, model?: string): void {
-    this.customKey = (apiKey || '').trim();
-    this.customBaseUrl = (baseUrl || 'https://api.deepseek.com/v1').trim();
+    const cleanKey = (apiKey || '').trim();
+    const cleanUrl = (baseUrl || 'https://api.deepseek.com/v1').trim();
+    this.customKey = cleanKey;
+    this.customBaseUrl = cleanUrl;
     this.customModel = (model || 'deepseek-chat').trim();
+
+    if (this.isUsableKey(cleanKey) && cleanUrl.toLowerCase().includes('deepseek.com')) {
+      this.deepseekKey = cleanKey;
+      for (const m of this.models) {
+        if (m.id === 'deepseek-v3' || m.id === 'deepseek-r1-open') {
+          m.status = 'active';
+          m.apiKeyMasked = this.maskKey(cleanKey);
+          m.errorMessage = undefined;
+        }
+      }
+    }
 
     const entry = this.models.find(m => m.id === 'custom');
     if (entry) {
@@ -378,21 +408,12 @@ class AIGateway {
     return this.getOllamaRoleAssignment();
   }
 
-  public hasLiveEngine(): boolean {
-    return Boolean(
-      this.deepseekKey ||
-      this.customKey ||
-      this.localOllamaModels.length > 0 ||
-      this.ollamaChatModel
-    );
-  }
-
   public getChatModelId(): string {
-    return this.deepseekKey ? 'deepseek-v3' : 'deepseek-r1-open';
+    return 'deepseek-v3';
   }
 
   public getCrawlerModelId(): string {
-    return this.deepseekKey ? 'deepseek-v3' : 'deepseek-r1-open';
+    return 'deepseek-v3';
   }
 
   /**
@@ -433,8 +454,15 @@ ${page.content.slice(0, 4500)}
     onToken?: (token: string) => void,
     history?: AIConversationMessage[],
     maxTokens?: number,
-    options?: { temperature?: number; signal?: AbortSignal }
+    signalOrOptions?: AbortSignal | { temperature?: number; signal?: AbortSignal }
   ): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
+    const resolvedOptions =
+      signalOrOptions && typeof signalOrOptions === 'object' && ('signal' in signalOrOptions || 'temperature' in signalOrOptions)
+        ? signalOrOptions
+        : { signal: signalOrOptions as AbortSignal | undefined };
+    const signal = resolvedOptions.signal;
+    const temperature = resolvedOptions.temperature;
+
     let targetModel = this.getModel(modelId);
     if (modelId.startsWith('ollama:') && !targetModel) {
       await this.detectLocalOllama();
@@ -460,7 +488,8 @@ ${page.content.slice(0, 4500)}
           onToken,
           history,
           maxTokens,
-          options
+          signal,
+          temperature
         );
         const latency = Date.now() - startTime;
         const tokens = result.tokens || Math.ceil((prompt.length + result.content.length) / 3.5);
@@ -476,7 +505,6 @@ ${page.content.slice(0, 4500)}
 
         return { success: true, content: result.content, tokens };
       } catch (err: any) {
-        if (err?.name === 'AbortError' || options?.signal?.aborted) throw err;
         const message = String(err?.message || err);
         targetModel.status = 'error';
         targetModel.errorMessage = message;
@@ -489,15 +517,7 @@ ${page.content.slice(0, 4500)}
       const modelName = targetModel.id.slice('ollama:'.length);
       if (modelName.toLowerCase().startsWith('qwen3') || modelName.toLowerCase().includes('deepseek')) {
         try {
-          const result = await this.runFastOllamaModel(
-            modelName,
-            prompt,
-            systemInstruction,
-            onToken,
-            history,
-            maxTokens,
-            options
-          );
+          const result = await this.runFastOllamaModel(modelName, prompt, systemInstruction, onToken, history, signal);
           const latency = Date.now() - startTime;
           const tokens = result.tokens || Math.ceil((prompt.length + result.content.length) / 3.5);
           targetModel.status = 'active';
@@ -521,9 +541,12 @@ ${page.content.slice(0, 4500)}
         baseUrl: LOCAL_OLLAMA_BASE_URL,
         model: modelName,
         prompt,
-        systemInstruction
+        systemInstruction,
+        history,
+        maxTokens,
+        onToken,
+        signal
       });
-      if (res.success && onToken && res.content) onToken(res.content);
       return res;
     }
 
@@ -534,9 +557,12 @@ ${page.content.slice(0, 4500)}
         apiKey: this.customKey || this.deepseekKey,
         model: this.customModel || 'deepseek-chat',
         prompt,
-        systemInstruction
+        systemInstruction,
+        history,
+        maxTokens,
+        onToken,
+        signal
       });
-      if (res.success && onToken && res.content) onToken(res.content);
       return res;
     }
 
@@ -559,7 +585,8 @@ ${page.content.slice(0, 4500)}
     onToken?: (token: string) => void,
     history: AIConversationMessage[] = [],
     maxTokens?: number,
-    options?: { temperature?: number; signal?: AbortSignal }
+    signal?: AbortSignal,
+    temperature = 0.65
   ): Promise<{ content: string; tokens?: number }> {
     const messages: ChatMessage[] = [];
     if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
@@ -570,28 +597,34 @@ ${page.content.slice(0, 4500)}
     }
     messages.push({ role: 'user', content: prompt });
 
-    // Primary path: Official DeepSeek API when DEEPSEEK_API_KEY is present
-    if (this.deepseekKey) {
+    // Primary path: Official DeepSeek API when valid DEEPSEEK_API_KEY is present
+    if (this.isUsableKey(this.deepseekKey)) {
       const dsModel = modelId === 'deepseek-r1-open' ? 'deepseek-reasoner' : 'deepseek-chat';
       const controller = new AbortController();
-      const onOuterAbort = () => controller.abort();
-      options?.signal?.addEventListener('abort', onOuterAbort, { once: true });
-      const timer = setTimeout(() => controller.abort(), 30000);
+      const onExternalAbort = () => controller.abort();
+      if (signal) {
+        if (signal.aborted) controller.abort();
+        else signal.addEventListener('abort', onExternalAbort, { once: true });
+      }
+      const timer = setTimeout(() => controller.abort(), 28000);
       try {
         const useStream = Boolean(onToken);
+        const requestBody: Record<string, any> = {
+          model: dsModel,
+          messages,
+          temperature: dsModel === 'deepseek-reasoner' ? undefined : temperature,
+          stream: useStream
+        };
+        if (typeof maxTokens === 'number' && maxTokens > 0) {
+          requestBody.max_tokens = maxTokens;
+        }
         const response = await fetch('https://api.deepseek.com/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${this.deepseekKey}`
           },
-          body: JSON.stringify({
-            model: dsModel,
-            messages,
-            ...(typeof maxTokens === 'number' && maxTokens > 0 ? { max_tokens: maxTokens } : {}),
-            temperature: dsModel === 'deepseek-reasoner' ? undefined : (options?.temperature ?? 0.7),
-            stream: useStream
-          }),
+          body: JSON.stringify(requestBody),
           signal: controller.signal
         });
 
@@ -640,8 +673,12 @@ ${page.content.slice(0, 4500)}
         }
       } catch (err) {
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onExternalAbort);
         console.warn('[DeepSeek Official API error]:', err instanceof Error ? err.message : err);
         throw err instanceof Error ? err : new Error(String(err));
+      } finally {
+        clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onExternalAbort);
       }
     }
 
@@ -651,9 +688,8 @@ ${page.content.slice(0, 4500)}
       this.ollamaChatModel ||
       (this.localOllamaModels.length > 0 ? this.localOllamaModels[0] : null);
     if (localDeepSeek) {
-      const fallbackRes = await this.callOllamaNative(localDeepSeek, prompt, systemInstruction);
+      const fallbackRes = await this.callOllamaNative(localDeepSeek, prompt, systemInstruction, history, onToken, signal);
       if (fallbackRes.success) {
-        onToken?.(fallbackRes.content);
         return { content: fallbackRes.content, tokens: fallbackRes.tokens };
       }
     }
@@ -667,13 +703,15 @@ ${page.content.slice(0, 4500)}
     systemInstruction?: string,
     onToken?: (token: string) => void,
     history: AIConversationMessage[] = [],
-    maxTokens?: number,
-    options?: { temperature?: number; signal?: AbortSignal }
+    signal?: AbortSignal
   ): Promise<{ content: string; tokens?: number }> {
     await this.localOllamaWarmup;
     const controller = new AbortController();
-    const onOuterAbort = () => controller.abort();
-    options?.signal?.addEventListener('abort', onOuterAbort, { once: true });
+    const onExternalAbort = () => controller.abort();
+    if (signal) {
+      if (signal.aborted) controller.abort();
+      else signal.addEventListener('abort', onExternalAbort, { once: true });
+    }
     const timeout = setTimeout(() => controller.abort(), LOCAL_OLLAMA_TIMEOUT_MS);
 
     try {
@@ -691,8 +729,8 @@ ${page.content.slice(0, 4500)}
           think: false,
           keep_alive: -1,
           options: {
-            temperature: options?.temperature ?? 0.2,
-            num_predict: typeof maxTokens === 'number' && maxTokens > 0 ? maxTokens : getOllamaTokenBudget(prompt, history),
+            temperature: 0.2,
+            num_predict: getOllamaTokenBudget(prompt, history),
             num_ctx: getOllamaContextWindow(prompt, systemInstruction, history)
           }
         }),
@@ -756,6 +794,7 @@ ${page.content.slice(0, 4500)}
       throw error;
     } finally {
       clearTimeout(timeout);
+      if (signal) signal.removeEventListener('abort', onExternalAbort);
     }
   }
 
@@ -779,15 +818,26 @@ ${page.content.slice(0, 4500)}
   public async callOllamaNative(
     modelName: string,
     prompt: string,
-    systemInstruction?: string
+    systemInstruction?: string,
+    history: AIConversationMessage[] = [],
+    onToken?: (token: string) => void,
+    signal?: AbortSignal
   ): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
     const messages: Array<{ role: string; content: string }> = [];
     if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
+    for (const turn of history) {
+      if (turn?.content) messages.push({ role: turn.role, content: turn.content });
+    }
     messages.push({ role: 'user', content: prompt });
 
     for (const host of OLLAMA_HOSTS) {
       try {
         const controller = new AbortController();
+        const onExternalAbort = () => controller.abort();
+        if (signal) {
+          if (signal.aborted) controller.abort();
+          else signal.addEventListener('abort', onExternalAbort, { once: true });
+        }
         const timer = setTimeout(() => controller.abort(), LOCAL_OLLAMA_TIMEOUT_MS);
         const res = await fetch(`${host}/api/chat`, {
           method: 'POST',
@@ -795,20 +845,51 @@ ${page.content.slice(0, 4500)}
           body: JSON.stringify({
             model: modelName,
             messages,
-            stream: false
+            stream: Boolean(onToken)
           }),
           signal: controller.signal
         });
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onExternalAbort);
         if (res.ok) {
-          const data = await res.json();
-          const content = data?.message?.content || data?.response || '';
-          if (content) {
-            return {
-              success: true,
-              content,
-              tokens: data?.eval_count || Math.ceil((prompt.length + content.length) / 3.5)
-            };
+          if (onToken && res.body) {
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let fullText = '';
+            let evalCount: number | undefined;
+            while (true) {
+              const { value, done } = await reader.read();
+              buffer += decoder.decode(value, { stream: !done });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+              for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                  const chunk = JSON.parse(line);
+                  const tok = typeof chunk?.message?.content === 'string' ? chunk.message.content : '';
+                  if (tok) {
+                    fullText += tok;
+                    onToken(tok);
+                  }
+                  if (Number.isFinite(chunk?.eval_count)) evalCount = chunk.eval_count;
+                } catch {}
+              }
+              if (done) break;
+            }
+            if (fullText) {
+              return { success: true, content: fullText, tokens: evalCount || Math.ceil((prompt.length + fullText.length) / 3.5) };
+            }
+          } else {
+            const data = await res.json();
+            const content = data?.message?.content || data?.response || '';
+            if (content) {
+              return {
+                success: true,
+                content,
+                tokens: data?.eval_count || Math.ceil((prompt.length + content.length) / 3.5)
+              };
+            }
           }
         }
       } catch {
@@ -831,16 +912,23 @@ ${page.content.slice(0, 4500)}
     model: string;
     prompt: string;
     systemInstruction?: string;
+    history?: AIConversationMessage[];
+    maxTokens?: number;
+    onToken?: (token: string) => void;
+    signal?: AbortSignal;
   }): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
     const isLocalOllama = opts.baseUrl.includes('localhost:11434') || opts.baseUrl.includes('127.0.0.1:11434');
     if (isLocalOllama) {
       // 优先走本地 Ollama 原生端点，完全免外网
-      const nativeRes = await this.callOllamaNative(opts.model, opts.prompt, opts.systemInstruction);
+      const nativeRes = await this.callOllamaNative(opts.model, opts.prompt, opts.systemInstruction, opts.history || [], opts.onToken, opts.signal);
       if (nativeRes.success) return nativeRes;
     }
 
     const messages: ChatMessage[] = [];
     if (opts.systemInstruction) messages.push({ role: 'system', content: opts.systemInstruction });
+    for (const turn of opts.history || []) {
+      if (turn?.content) messages.push({ role: turn.role, content: turn.content });
+    }
     messages.push({ role: 'user', content: opts.prompt });
 
     try {
@@ -849,7 +937,11 @@ ${page.content.slice(0, 4500)}
         apiKey: opts.apiKey,
         model: opts.model,
         messages: messages as OpenAICompatibleMessage[],
-        timeoutMs: isLocalOllama ? LOCAL_OLLAMA_TIMEOUT_MS : undefined
+        timeoutMs: isLocalOllama ? LOCAL_OLLAMA_TIMEOUT_MS : undefined,
+        maxTokens: opts.maxTokens,
+        stream: Boolean(opts.onToken),
+        onToken: opts.onToken,
+        signal: opts.signal
       });
       return {
         success: true,

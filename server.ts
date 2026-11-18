@@ -10,9 +10,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { store, stripBookContent } from './server/store.ts';
 import { toPublicUser } from './server/privacy.ts';
 import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
-import { aiGateway } from './server/aiGateway.ts';
-import { executeAiTurn } from './server/aiTurnOrchestrator.ts';
 import { Modality, ThinkingLevel } from '@google/genai';
+import { aiGateway } from './server/aiGateway.ts';
 import { getGeminiClient } from './server/geminiClient.ts';
 import {
   AI_COMPANION_TOOLS,
@@ -20,18 +19,24 @@ import {
   formatPageContextForModel,
   type LivePageContextSummary,
 } from './server/aiLiveTools.ts';
+import { buildConversationPrompt, normalizeConversationHistory } from './server/aiConversation.ts';
 import {
-  commitMemoriesFromTurn,
-  deleteMemoryItem,
-  listMemories,
-  normalizeProfileKey,
-  retrieveRelevantMemories,
-  updateMemoryItem,
-  upsertMemory,
-} from './server/aiMemory.ts';
-import { analyzeTurnContext, isConversationalFramingNotCommand } from './server/aiIntent.ts';
+  aiMemoryStore,
+  type MemoryCategory,
+  type MemoryStatus,
+} from './server/ai/memoryStore.ts';
+import {
+  analyzeDialogueTurn,
+  isConversationalFramingNotCommand,
+} from './server/ai/intentAnalyzer.ts';
+import {
+  generateContextAwareFallbackReply,
+  persistTurnAndExtractMemories,
+  prepareDialogueContext,
+  stripAiControlTags,
+} from './server/ai/contextOrchestrator.ts';
 import { solvePrecisionQuery } from './src/utils/precisionSolver.ts';
-import { parseInstantAgentAction } from './src/utils/oneAgentController.ts';
+import { matchPureSocialBanter, parseInstantAgentAction } from './src/utils/oneAgentController.ts';
 import { cacheJupiterSearch, getCachedJupiterSearch, getJupiterEarthContent, mergeAndRankJupiterResults, searchEarthAudio, searchEarthImages, searchEarthIndex, type JupiterResult } from './server/jupiterSearch.ts';
 import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryReadingAi.ts';
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
@@ -3035,6 +3040,12 @@ app.get('/api/ai/stats', (req, res) => {
   res.json({ success: true, totalCalls, totalTokens, models });
 });
 
+function resolveAiMemoryOwnerId(authUserId?: string, rawProfileKey?: string): string {
+  if (authUserId && authUserId.trim()) return authUserId.trim();
+  const cleanKey = typeof rawProfileKey === 'string' ? rawProfileKey.trim().slice(0, 80) : '';
+  return cleanKey && cleanKey !== 'default' ? cleanKey : 'guest';
+}
+
 app.post('/api/ai/chat', async (req, res) => {
   const {
     prompt,
@@ -3043,174 +3054,600 @@ app.post('/api/ai/chat', async (req, res) => {
     modelId,
     model,
     mode = 'general',
+    sessionId: requestedSessionId,
+    channel: requestedChannel,
+    profileKey: rawProfileKey,
+    pageContext,
     apiKey,
     baseUrl,
     customModel,
     stream,
     maxTokens,
-    profileKey,
   } = req.body || {};
 
-  const userPrompt =
-    prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '');
+  // If the user supplied a custom API key, register it as the custom provider
+  // and route this request through it.
+  if (apiKey) {
+    aiGateway.registerCustomProvider(apiKey, baseUrl, customModel);
+  }
+
+  const resolvedModelId = apiKey
+    ? 'custom'
+    : (modelId || model || aiGateway.getChatModelId());
+  const userPrompt = String(
+    prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '') || ''
+  ).trim();
   if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
 
   const authUser = getAuthUser(req);
+  const userId = resolveAiMemoryOwnerId(authUser?.id, typeof rawProfileKey === 'string' ? rawProfileKey : undefined);
+  const channel: 'hub' | 'voice' | 'api' =
+    requestedChannel === 'voice' || requestedChannel === 'api'
+      ? requestedChannel
+      : mode === 'voice-agent'
+      ? 'voice'
+      : 'hub';
+
+  const conversationHistory = normalizeConversationHistory(history);
+  const requestedMaxTokens =
+    typeof maxTokens === 'number' && maxTokens > 0
+      ? Math.min(4096, Math.max(64, Math.floor(maxTokens)))
+      : undefined;
+
+  const formattedPageContext = pageContext
+    ? formatPageContextForModel(pageContext as LivePageContextSummary | string)
+    : undefined;
+
+  const ctx = prepareDialogueContext({
+    userId,
+    userDisplayName: authUser?.displayName || authUser?.username,
+    sessionId: typeof requestedSessionId === 'string' ? requestedSessionId : undefined,
+    channel,
+    prompt: userPrompt,
+    mode,
+    clientHistory: conversationHistory,
+    requestedMaxTokens,
+    pageContext: formattedPageContext,
+  });
+
+  const abortController = new AbortController();
+  req.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
+  });
+
   const shouldStream = stream === true;
-  const turnAbort = new AbortController();
-  if (shouldStream) {
-    req.on('close', () => {
-      if (!res.writableEnded) turnAbort.abort();
+  const emitDirectAnswer = (rawReplyText: string, modelLabel: string) => {
+    const cleanText = stripAiControlTags(rawReplyText).reply || rawReplyText.trim();
+    const savedMemories = persistTurnAndExtractMemories({
+      ctx,
+      rawUserInput: userPrompt,
+      assistantReply: cleanText,
+      modelLabel,
     });
+    const recalledPayload = ctx.recalledMemories.map((m) => ({
+      id: m.id,
+      category: m.category,
+      summary: m.summary,
+    }));
+
+    if (shouldStream) {
+      res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.flushHeaders();
+      res.write(`${JSON.stringify({ delta: cleanText })}\n`);
+      res.write(
+        `${JSON.stringify({
+          done: true,
+          tokens: Math.ceil(cleanText.length / 2),
+          model: modelLabel,
+          sessionId: ctx.session.id,
+          intent: ctx.intent.kind,
+          recalledMemories: recalledPayload,
+          savedMemories,
+        })}\n`
+      );
+      return res.end();
+    }
+    return res.json({
+      success: true,
+      reply: cleanText,
+      sessionId: ctx.session.id,
+      intent: ctx.intent.kind,
+      recalledMemories: recalledPayload,
+      savedMemories,
+      message: {
+        role: 'assistant',
+        content: cleanText,
+        timestamp: new Date().toISOString(),
+      },
+      tokens: Math.ceil(cleanText.length / 2),
+      model: modelLabel,
+    });
+  };
+
+  // 1. Exact deterministic solver (<1ms, 100% exact arithmetic, units, comparisons & dates)
+  if ((mode === 'general' || mode === 'voice-agent') && !userPrompt.includes('\n')) {
+    const exact = solvePrecisionQuery(userPrompt, ctx.intent.isZh);
+    if (exact) {
+      return emitDirectAnswer(exact.answer, 'one-precision-solver');
+    }
+    // Only use instant small-talk shortcut when this is a genuine standalone greeting with no active topic
+    if (
+      mode === 'voice-agent' &&
+      ctx.intent.kind === 'casual_greeting' &&
+      !ctx.session.activeTopic &&
+      ctx.mergedHistory.length <= 2
+    ) {
+      const banter = matchPureSocialBanter(userPrompt, ctx.intent.isZh);
+      if (banter) {
+        return emitDirectAnswer(banter, 'one-instant-companion');
+      }
+    }
+  }
+
+  // 2. Explicit memory command / query / delete goes straight through SQLite memory store
+  if (ctx.intent.kind === 'memory_management') {
+    const memAns = await generateContextAwareFallbackReply(ctx, mode);
+    return emitDirectAnswer(memAns.text, `one-${memAns.source}`);
+  }
+
+  // 3. If no live DeepSeek API / local Ollama is configured, use multi-turn context + memory engine + live knowledge
+  if (!apiKey && !aiGateway.hasLiveEngine()) {
+    const ctxReply = await generateContextAwareFallbackReply(ctx, mode);
+    return emitDirectAnswer(ctxReply.text, `one-${ctxReply.source}`);
+  }
+
+  if (shouldStream) {
     res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.flushHeaders();
-  }
-
-  try {
-    const result = await executeAiTurn({
-      prompt: String(userPrompt),
-      history,
-      modelId: modelId || model,
-      mode,
-      profileKey: typeof profileKey === 'string' ? profileKey : undefined,
-      userId: authUser?.id,
-      apiKey,
-      baseUrl,
-      customModel,
-      maxTokens,
-      signal: turnAbort.signal,
-      onDelta: shouldStream
-        ? (token) => {
-            if (!res.writableEnded) {
-              res.write(`${JSON.stringify({ delta: token })}\n`);
-            }
+    let streamedText = '';
+    try {
+      const result = await aiGateway.generateContent(
+        resolvedModelId,
+        userPrompt,
+        ctx.systemPrompt,
+        (token) => {
+          streamedText += token;
+          if (!res.writableEnded) {
+            res.write(`${JSON.stringify({ delta: token })}\n`);
           }
-        : undefined,
-    });
+        },
+        ctx.mergedHistory,
+        ctx.resolvedMaxTokens,
+        abortController.signal
+      );
 
-    if (shouldStream) {
+      if (result.success) {
+        const finalContent = stripAiControlTags(result.content || streamedText).reply || (result.content || streamedText).trim();
+        const savedMemories = persistTurnAndExtractMemories({
+          ctx,
+          rawUserInput: userPrompt,
+          assistantReply: finalContent,
+          modelLabel: resolvedModelId,
+        });
+        if (!res.writableEnded) {
+          res.write(
+            `${JSON.stringify({
+              done: true,
+              tokens: result.tokens,
+              model: resolvedModelId,
+              sessionId: ctx.session.id,
+              intent: ctx.intent.kind,
+              recalledMemories: ctx.recalledMemories.map((m) => ({
+                id: m.id,
+                category: m.category,
+                summary: m.summary,
+              })),
+              savedMemories,
+            })}\n`
+          );
+        }
+      } else {
+        const fallback = await generateContextAwareFallbackReply(ctx, mode);
+        const cleanFallback = stripAiControlTags(fallback.text).reply || fallback.text;
+        const savedMemories = persistTurnAndExtractMemories({
+          ctx,
+          rawUserInput: userPrompt,
+          assistantReply: cleanFallback,
+          modelLabel: `one-${fallback.source}`,
+        });
+        if (!res.writableEnded) {
+          res.write(`${JSON.stringify({ delta: cleanFallback })}\n`);
+          res.write(
+            `${JSON.stringify({
+              done: true,
+              tokens: Math.ceil(cleanFallback.length / 2),
+              model: `one-${fallback.source}`,
+              sessionId: ctx.session.id,
+              intent: ctx.intent.kind,
+              recalledMemories: ctx.recalledMemories.map((m) => ({
+                id: m.id,
+                category: m.category,
+                summary: m.summary,
+              })),
+              savedMemories,
+            })}\n`
+          );
+        }
+      }
+    } catch {
+      const fallback = await generateContextAwareFallbackReply(ctx, mode);
+      const cleanFallback = stripAiControlTags(fallback.text).reply || fallback.text;
+      const savedMemories = persistTurnAndExtractMemories({
+        ctx,
+        rawUserInput: userPrompt,
+        assistantReply: cleanFallback,
+        modelLabel: `one-${fallback.source}`,
+      });
       if (!res.writableEnded) {
+        res.write(`${JSON.stringify({ delta: cleanFallback })}\n`);
         res.write(
           `${JSON.stringify({
             done: true,
-            tokens: result.tokens,
-            model: result.model,
-            intent: result.intent,
-            savedMemories: result.savedMemories,
-            recalledMemoriesCount: result.recalledMemoriesCount,
-            memoryWindow: result.memoryWindow,
+            tokens: Math.ceil(cleanFallback.length / 2),
+            model: `one-${fallback.source}`,
+            sessionId: ctx.session.id,
+            intent: ctx.intent.kind,
+            recalledMemories: ctx.recalledMemories.map((m) => ({
+              id: m.id,
+              category: m.category,
+              summary: m.summary,
+            })),
+            savedMemories,
           })}\n`
         );
-        return res.end();
       }
-      return;
     }
+    return res.end();
+  }
 
+  const usesStructuredHistory =
+    resolvedModelId.startsWith('deepseek') ||
+    resolvedModelId === 'custom' ||
+    resolvedModelId.startsWith('ollama:');
+  const contextualPrompt = buildConversationPrompt(userPrompt, ctx.mergedHistory);
+  const result = await aiGateway.generateContent(
+    resolvedModelId,
+    usesStructuredHistory ? userPrompt : contextualPrompt,
+    ctx.systemPrompt,
+    undefined,
+    ctx.mergedHistory,
+    ctx.resolvedMaxTokens,
+    abortController.signal
+  );
+
+  if (result.success) {
+    const cleanReply = stripAiControlTags(result.content).reply || result.content.trim();
+    const savedMemories = persistTurnAndExtractMemories({
+      ctx,
+      rawUserInput: userPrompt,
+      assistantReply: cleanReply,
+      modelLabel: resolvedModelId,
+    });
     return res.json({
       success: true,
-      reply: result.reply,
+      reply: cleanReply,
+      sessionId: ctx.session.id,
+      intent: ctx.intent.kind,
+      recalledMemories: ctx.recalledMemories.map((m) => ({
+        id: m.id,
+        category: m.category,
+        summary: m.summary,
+      })),
+      savedMemories,
       message: {
         role: 'assistant',
-        content: result.reply,
+        content: cleanReply,
         timestamp: new Date().toISOString(),
       },
       tokens: result.tokens,
-      model: result.model,
-      intent: result.intent,
-      savedMemories: result.savedMemories,
-      recalledMemoriesCount: result.recalledMemoriesCount,
-      memoryWindow: result.memoryWindow,
+      model: resolvedModelId,
     });
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      if (shouldStream && !res.writableEnded) return res.end();
-      return;
-    }
-    const msg = err instanceof Error ? err.message : 'AI request failed';
-    if (shouldStream && !res.writableEnded) {
-      res.write(`${JSON.stringify({ error: msg })}\n`);
-      return res.end();
-    }
-    return res.status(500).json({ success: false, error: msg });
   }
+
+  const fallback = await generateContextAwareFallbackReply(ctx, mode);
+  return emitDirectAnswer(fallback.text, `one-${fallback.source}`);
 });
 
-// Persistent Long-Term AI Memory Governance Endpoints
+// -------------------------------------------------------------
+// 7B. AI CONVERSATION SESSIONS & LONG-TERM MEMORY MANAGEMENT
+// -------------------------------------------------------------
+app.get('/api/ai/sessions', (req, res) => {
+  const authUser = getAuthUser(req);
+  const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
+  const userId = resolveAiMemoryOwnerId(authUser?.id, rawKey);
+  const channelParam = typeof req.query.channel === 'string' ? req.query.channel : undefined;
+  const channel =
+    channelParam === 'hub' || channelParam === 'voice' || channelParam === 'api'
+      ? channelParam
+      : undefined;
+  const sessions = aiMemoryStore.listSessions(userId, channel, 40);
+  res.json({ success: true, sessions });
+});
+
+app.get('/api/ai/sessions/:id/messages', (req, res) => {
+  const authUser = getAuthUser(req);
+  const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
+  const userId = resolveAiMemoryOwnerId(authUser?.id, rawKey);
+  const session = aiMemoryStore.getSession(userId, req.params.id);
+  if (!session) return res.status(404).json({ success: false, error: 'Session not found' });
+  const messages = aiMemoryStore.getSessionMessages(userId, session.id, 100);
+  res.json({ success: true, session, messages });
+});
+
+app.delete('/api/ai/sessions/:id', (req, res) => {
+  const authUser = getAuthUser(req);
+  const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
+  const userId = resolveAiMemoryOwnerId(authUser?.id, rawKey);
+  const deleted = aiMemoryStore.deleteSession(userId, req.params.id);
+  if (!deleted) return res.status(404).json({ success: false, error: 'Session not found' });
+  res.json({ success: true });
+});
+
+const VALID_MEMORY_CATEGORIES = new Set<MemoryCategory>([
+  'goal',
+  'project',
+  'habit',
+  'preference',
+  'decision',
+  'fact',
+  'relationship',
+]);
+
+function normalizeMemoryCategory(raw?: unknown): MemoryCategory {
+  if (typeof raw !== 'string') return 'fact';
+  const low = raw.trim().toLowerCase();
+  if (VALID_MEMORY_CATEGORIES.has(low as MemoryCategory)) return low as MemoryCategory;
+  if (low === 'style' || low === 'tone') return 'preference';
+  return 'fact';
+}
+
+app.get('/api/ai/memories', (req, res) => {
+  const authUser = getAuthUser(req);
+  const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
+  const userId = resolveAiMemoryOwnerId(authUser?.id, rawKey);
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const statusParam = typeof req.query.status === 'string' ? req.query.status : 'active';
+  const status: MemoryStatus | 'all' =
+    statusParam === 'superseded' || statusParam === 'archived' || statusParam === 'all'
+      ? statusParam
+      : 'active';
+
+  const memories = q
+    ? aiMemoryStore.recallMemories(userId, q, {
+        limit: 40,
+        includeCorePreferences: false,
+        bumpRecallStats: false,
+      })
+    : aiMemoryStore.listMemories(userId, { status, limit: 120 });
+
+  res.json({ success: true, userId, memories });
+});
+
+app.post('/api/ai/memories', (req, res) => {
+  const authUser = getAuthUser(req);
+  const {
+    summary,
+    content,
+    category,
+    kind,
+    importance,
+    salience,
+    keywords = '',
+    canonicalKey = '',
+    normalizedKey = '',
+    profileKey,
+  } = req.body || {};
+  const userId = resolveAiMemoryOwnerId(authUser?.id, typeof profileKey === 'string' ? profileKey : undefined);
+  const text = typeof summary === 'string' && summary.trim() ? summary.trim() : typeof content === 'string' ? content.trim() : '';
+  if (!text) {
+    return res.status(400).json({ success: false, error: 'Memory summary is required' });
+  }
+  const safeCat = normalizeMemoryCategory(category ?? kind);
+  const resolvedImp =
+    typeof importance === 'number'
+      ? importance
+      : typeof salience === 'number'
+        ? Math.max(1, Math.min(10, Math.round(salience * 10)))
+        : 8;
+  const resolvedKey =
+    typeof canonicalKey === 'string' && canonicalKey.trim()
+      ? canonicalKey.trim()
+      : typeof normalizedKey === 'string' && normalizedKey.trim()
+        ? normalizedKey.trim()
+        : '';
+
+  const result = aiMemoryStore.upsertMemory({
+    userId,
+    category: safeCat,
+    summary: text,
+    keywords: typeof keywords === 'string' && keywords.trim() ? keywords.trim() : text,
+    canonicalKey: resolvedKey,
+    confidence: 1.0,
+    importance: resolvedImp,
+    replacesConflictingKey: Boolean(resolvedKey),
+  });
+  if (result.action === 'rejected' || !result.memory) {
+    return res.status(400).json({ success: false, error: 'Memory rejected as transient or invalid' });
+  }
+  res.json({ success: true, action: result.action, memory: result.memory });
+});
+
+app.patch('/api/ai/memories/:id', (req, res) => {
+  const authUser = getAuthUser(req);
+  const { summary, content, category, kind, importance, salience, status, profileKey } = req.body || {};
+  const userId = resolveAiMemoryOwnerId(authUser?.id, typeof profileKey === 'string' ? profileKey : undefined);
+  const text = typeof summary === 'string' && summary.trim() ? summary.trim() : typeof content === 'string' && content.trim() ? content.trim() : undefined;
+  const catInput = category ?? kind;
+  const impInput =
+    typeof importance === 'number'
+      ? importance
+      : typeof salience === 'number'
+        ? Math.max(1, Math.min(10, Math.round(salience * 10)))
+        : undefined;
+  const updated = aiMemoryStore.updateMemory(userId, req.params.id, {
+    ...(text ? { summary: text } : {}),
+    ...(catInput ? { category: normalizeMemoryCategory(catInput) } : {}),
+    ...(typeof impInput === 'number' ? { importance: impInput } : {}),
+    ...(status === 'active' || status === 'superseded' || status === 'archived' ? { status } : {}),
+  });
+  if (!updated) return res.status(404).json({ success: false, error: 'Memory not found or invalid' });
+  res.json({ success: true, memory: updated });
+});
+
+app.delete('/api/ai/memories/:id', (req, res) => {
+  const authUser = getAuthUser(req);
+  const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
+  const userId = resolveAiMemoryOwnerId(authUser?.id, rawKey);
+  const deleted = aiMemoryStore.deleteMemory(userId, req.params.id);
+  if (!deleted) return res.status(404).json({ success: false, error: 'Memory not found' });
+  res.json({ success: true });
+});
+
+// Unified /api/ai/memory compatibility routes backed by SQLite aiMemoryStore
 app.get('/api/ai/memory', (req, res) => {
   const authUser = getAuthUser(req);
   const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
   const includeInactive = req.query.includeInactive === 'true';
-  const resolvedKey = normalizeProfileKey(rawKey, authUser?.id);
-  const memories = listMemories(store, resolvedKey, includeInactive);
+  const userId = resolveAiMemoryOwnerId(authUser?.id, rawKey);
+  const memories = aiMemoryStore.listMemories(userId, {
+    status: includeInactive ? 'all' : 'active',
+    limit: 120,
+  });
   res.json({
     success: true,
-    profileKey: resolvedKey,
+    profileKey: userId,
     totalActive: memories.filter((m) => m.status === 'active').length,
-    memories,
+    memories: memories.map((m) => ({
+      ...m,
+      kind: m.category,
+      content: m.summary,
+    })),
   });
 });
 
 app.post('/api/ai/memory', (req, res) => {
   const authUser = getAuthUser(req);
-  const { content, kind = 'fact', normalizedKey, profileKey, salience } = req.body || {};
-  const clean = typeof content === 'string' ? content.trim() : '';
-  if (!clean || clean.length < 2) {
+  const {
+    content,
+    summary,
+    kind = 'fact',
+    category,
+    normalizedKey,
+    canonicalKey,
+    profileKey,
+    salience,
+    importance,
+  } = req.body || {};
+  const text = typeof content === 'string' && content.trim() ? content.trim() : typeof summary === 'string' ? summary.trim() : '';
+  if (!text || text.length < 2) {
     return res.status(400).json({ success: false, error: 'Memory content is required' });
   }
-  const resolvedKey = normalizeProfileKey(typeof profileKey === 'string' ? profileKey : undefined, authUser?.id);
-  const resUpsert = upsertMemory(store, resolvedKey, {
-    kind,
-    normalizedKey: typeof normalizedKey === 'string' && normalizedKey.trim() ? normalizedKey.trim() : `${kind}.manual`,
-    content: clean,
+  const userId = resolveAiMemoryOwnerId(authUser?.id, typeof profileKey === 'string' ? profileKey : undefined);
+  const safeCat = normalizeMemoryCategory(category ?? kind);
+  const cKey =
+    typeof canonicalKey === 'string' && canonicalKey.trim()
+      ? canonicalKey.trim()
+      : typeof normalizedKey === 'string' && normalizedKey.trim()
+        ? normalizedKey.trim()
+        : `${safeCat}.manual`;
+  const imp =
+    typeof importance === 'number'
+      ? importance
+      : typeof salience === 'number'
+        ? Math.max(1, Math.min(10, Math.round(salience * 10)))
+        : 9;
+  const resUpsert = aiMemoryStore.upsertMemory({
+    userId,
+    category: safeCat,
+    canonicalKey: cKey,
+    summary: text,
+    keywords: text,
     confidence: 0.98,
-    salience: typeof salience === 'number' ? salience : 0.95,
-    source: 'user_explicit',
+    importance: imp,
+    replacesConflictingKey: true,
   });
-  return res.json({ success: true, action: resUpsert.action, memory: resUpsert.item });
+  if (resUpsert.action === 'rejected' || !resUpsert.memory) {
+    return res.status(400).json({ success: false, error: 'Memory rejected as transient or invalid' });
+  }
+  return res.json({
+    success: true,
+    action: resUpsert.action,
+    memory: { ...resUpsert.memory, kind: resUpsert.memory.category, content: resUpsert.memory.summary },
+  });
 });
 
 app.patch('/api/ai/memory/:id', (req, res) => {
   const authUser = getAuthUser(req);
-  const { content, kind, status, salience, profileKey } = req.body || {};
-  const resolvedKey = normalizeProfileKey(typeof profileKey === 'string' ? profileKey : undefined, authUser?.id);
-  const updated = updateMemoryItem(store, resolvedKey, req.params.id, { content, kind, status, salience });
+  const { content, summary, kind, category, status, salience, importance, profileKey } = req.body || {};
+  const userId = resolveAiMemoryOwnerId(authUser?.id, typeof profileKey === 'string' ? profileKey : undefined);
+  const text = typeof content === 'string' && content.trim() ? content.trim() : typeof summary === 'string' && summary.trim() ? summary.trim() : undefined;
+  const catInput = category ?? kind;
+  const imp =
+    typeof importance === 'number'
+      ? importance
+      : typeof salience === 'number'
+        ? Math.max(1, Math.min(10, Math.round(salience * 10)))
+        : undefined;
+  const updated = aiMemoryStore.updateMemory(userId, req.params.id, {
+    ...(text ? { summary: text } : {}),
+    ...(catInput ? { category: normalizeMemoryCategory(catInput) } : {}),
+    ...(typeof imp === 'number' ? { importance: imp } : {}),
+    ...(status === 'active' || status === 'superseded' || status === 'archived' ? { status } : {}),
+  });
   if (!updated) return res.status(404).json({ success: false, error: 'Memory item not found' });
-  return res.json({ success: true, memory: updated });
+  return res.json({
+    success: true,
+    memory: { ...updated, kind: updated.category, content: updated.summary },
+  });
 });
 
 app.delete('/api/ai/memory/:id', (req, res) => {
   const authUser = getAuthUser(req);
   const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
   const clearAll = req.query.clearAll === 'true';
-  const resolvedKey = normalizeProfileKey(rawKey, authUser?.id);
-  const removed = deleteMemoryItem(store, resolvedKey, req.params.id, clearAll);
-  return res.json({ success: true, removed });
+  const userId = resolveAiMemoryOwnerId(authUser?.id, rawKey);
+  if (clearAll) {
+    const all = aiMemoryStore.listMemories(userId, { status: 'all', limit: 500 });
+    let removed = 0;
+    for (const item of all) {
+      if (aiMemoryStore.deleteMemory(userId, item.id)) removed += 1;
+    }
+    return res.json({ success: true, removed });
+  }
+  const deleted = aiMemoryStore.deleteMemory(userId, req.params.id);
+  return res.json({ success: true, removed: deleted ? 1 : 0 });
 });
 
 app.delete('/api/ai/memory', (req, res) => {
   const authUser = getAuthUser(req);
   const rawKey = typeof req.query.profileKey === 'string' ? req.query.profileKey : undefined;
-  const resolvedKey = normalizeProfileKey(rawKey, authUser?.id);
-  const removed = deleteMemoryItem(store, resolvedKey, undefined, true);
+  const userId = resolveAiMemoryOwnerId(authUser?.id, rawKey);
+  const all = aiMemoryStore.listMemories(userId, { status: 'all', limit: 500 });
+  let removed = 0;
+  for (const item of all) {
+    if (aiMemoryStore.deleteMemory(userId, item.id)) removed += 1;
+  }
   return res.json({ success: true, removed });
 });
 
 app.post('/api/ai/agent-command', async (req, res) => {
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
   const lang = req.body?.lang === 'en' ? 'en' : 'zh';
-  const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  const history = Array.isArray(req.body?.history) ? normalizeConversationHistory(req.body.history) : [];
   if (!text) return res.json({ success: true, action: { type: 'none' } });
 
   const isZh = lang === 'zh';
-
   // Fast deterministic intent match with conversational anti-hijack guard
   const instant = parseInstantAgentAction(text, isZh, history);
   if (instant && instant.type !== 'none') {
     return res.json({ success: true, action: instant });
   }
 
-  // If this looks like conversational framing / project brainstorming / informational Q&A, do not fire commands
+  // Never hijack conversational brainstorming, hypotheticals, or informational questions
   if (isConversationalFramingNotCommand(text, history)) {
     return res.json({ success: true, action: { type: 'none' } });
   }
@@ -3300,6 +3737,8 @@ function normalizeCompanionEmotion(raw?: string | null): string {
   if (!norm) return 'calm';
   if (norm === 'cheerful' || norm === 'affectionate' || norm === 'joy' || norm === 'warm') return 'happy';
   if (norm === 'sad' || norm === 'tender' || norm === 'caring') return 'empathetic';
+  if (norm === 'frustrated') return 'empathetic';
+  if (norm === 'skeptical') return 'thinking';
   if (VALID_COMPANION_EMOTIONS.has(norm)) return norm;
   return 'calm';
 }
@@ -3375,7 +3814,6 @@ function sanitizeCompanionReply(rawText: string): {
 } {
   let extractedEmotion: string | null = null;
   const extractedToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
-
   const cleanReply = (rawText || '')
     .replace(/\[\[(?:EMO|EMOTION):([a-z_-]+)\]\]\s*/gi, (_all, tag: string) => {
       extractedEmotion = normalizeCompanionEmotion(tag);
@@ -3391,9 +3829,9 @@ function sanitizeCompanionReply(rawText: string): {
       }
       return '';
     })
+    .replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, '')
     .replace(/^\s*\n+/, '')
     .trim();
-
   return { cleanReply, extractedEmotion, extractedToolCalls };
 }
 
@@ -3463,7 +3901,6 @@ function mergeCompanionToolCalls(
     }
   }
   return merged;
-
 }
 
 app.post('/api/ai/companion-turn', async (req, res) => {
@@ -3472,6 +3909,7 @@ app.post('/api/ai/companion-turn', async (req, res) => {
     lang = 'zh',
     pageContext,
     history,
+    sessionId: requestedSessionId,
     profileKey: rawProfileKey,
   } = req.body || {};
 
@@ -3481,287 +3919,303 @@ app.post('/api/ai/companion-turn', async (req, res) => {
   }
 
   const authUser = getAuthUser(req);
-  const profileKey = normalizeProfileKey(typeof rawProfileKey === 'string' ? rawProfileKey : undefined, authUser?.id);
-  const histArray = Array.isArray(history)
-    ? history
-        .slice(-10)
-        .filter((h: any) => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string')
-        .map((h: any) => ({ role: h.role as 'user' | 'assistant', content: String(h.content) }))
-    : [];
+  const userId = resolveAiMemoryOwnerId(authUser?.id, typeof rawProfileKey === 'string' ? rawProfileKey : undefined);
+  const histArray = normalizeConversationHistory(history);
+  const formattedPageContext = pageContext
+    ? formatPageContextForModel(pageContext as LivePageContextSummary | string)
+    : undefined;
 
-  const savedMemories = commitMemoriesFromTurn(store, profileKey, cleanPrompt, histArray);
-  const recalledMemories = retrieveRelevantMemories(store, profileKey, cleanPrompt, histArray, 560);
-  const analysis = analyzeTurnContext(cleanPrompt, histArray, recalledMemories);
-  const isZh = lang === 'zh' || analysis.isZh;
+  const ctx = prepareDialogueContext({
+    userId,
+    userDisplayName: authUser?.displayName || authUser?.username,
+    sessionId: typeof requestedSessionId === 'string' ? requestedSessionId : undefined,
+    channel: 'voice',
+    prompt: cleanPrompt,
+    mode: 'voice-agent',
+    clientHistory: histArray,
+    pageContext: formattedPageContext,
+  });
+
+  const isZh = lang === 'zh' || ctx.intent.isZh;
+  const isHypotheticalOrDiscussion = isConversationalFramingNotCommand(cleanPrompt, ctx.mergedHistory);
+  const recalledPayload = ctx.recalledMemories.map((m) => ({
+    id: m.id,
+    category: m.category,
+    summary: m.summary,
+  }));
+
+  const emitCompanionResponse = (payload: {
+    model: string;
+    reply: string;
+    emotion: string;
+    emotionIntensity: number;
+    emotionReason: string;
+    toolCalls: Array<{ name: string; args: Record<string, unknown> }>;
+  }) => {
+    const cleanReply = sanitizeCompanionReply(payload.reply).cleanReply || payload.reply.trim();
+    const savedMemories = persistTurnAndExtractMemories({
+      ctx,
+      rawUserInput: cleanPrompt,
+      assistantReply: cleanReply,
+      modelLabel: payload.model,
+    });
+    return res.json({
+      success: true,
+      model: payload.model,
+      reply: cleanReply,
+      emotion: payload.emotion,
+      emotionIntensity: payload.emotionIntensity,
+      emotionReason: payload.emotionReason,
+      toolCalls: payload.toolCalls,
+      sessionId: ctx.session.id,
+      intent: ctx.intent.kind,
+      recalledMemories: recalledPayload,
+      savedMemories,
+    });
+  };
 
   // 1. Exact deterministic precision solver fast-path (<1ms)
   if (!cleanPrompt.includes('\n')) {
-    const exact = solvePrecisionQuery(analysis.normalizedPrompt, isZh);
+    const exact = solvePrecisionQuery(ctx.intent.normalizedInput, isZh);
     if (exact) {
-      const ex = sanitizeCompanionReply(exact.answer);
-      return res.json({
-        success: true,
+      return emitCompanionResponse({
         model: 'one-precision-solver',
-        reply: ex.cleanReply || exact.answer,
-        emotion: ex.extractedEmotion || 'focused',
+        reply: exact.answer,
+        emotion: 'focused',
         emotionIntensity: 0.72,
         emotionReason: isZh ? '精确计算' : 'Exact calculation',
         toolCalls: [],
-        savedMemories,
       });
     }
+  }
+
+  // 2. Explicit memory command / recall / delete goes straight through SQLite memory store
+  if (ctx.intent.kind === 'memory_management') {
+    const memAns = await generateContextAwareFallbackReply(ctx, 'voice-agent');
+    return emitCompanionResponse({
+      model: `one-${memAns.source}`,
+      reply: memAns.text,
+      emotion: 'happy',
+      emotionIntensity: 0.78,
+      emotionReason: getCompanionEmotionReason('happy', isZh),
+      toolCalls: [],
+    });
   }
 
   const ai = getGeminiClient();
-  if (!ai) {
-    // Graceful multi-engine fallback (e.g. DeepSeek / OpenAI-compatible / live-knowledge) when Gemini key is absent
+  const { tools: detTools, instantReply } = extractDeterministicFallbackTools(
+    cleanPrompt,
+    ctx.intent.normalizedInput,
+    ctx.mergedHistory,
+    isZh,
+    isHypotheticalOrDiscussion
+  );
+
+  // 3. Optional Gemini function-calling path when GEMINI_API_KEY is configured
+  if (ai && ctx.intent.kind !== 'disagreement_or_correction') {
     try {
-      const { tools: detTools, instantReply } = extractDeterministicFallbackTools(
-        cleanPrompt,
-        analysis.normalizedPrompt,
-        histArray,
-        isZh,
-        analysis.isHypotheticalOrDiscussion
-      );
+      const contents = [
+        ...ctx.mergedHistory.map((h) => ({
+          role: h.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: h.content }],
+        })),
+        { role: 'user', parts: [{ text: cleanPrompt }] },
+      ];
 
-      const fallback = await executeAiTurn({
-        prompt: cleanPrompt,
-        history: histArray,
-        mode: 'voice-agent',
-        profileKey,
-        userId: authUser?.id,
-        pageContext: pageContext ? formatPageContextForModel(pageContext as LivePageContextSummary) : undefined,
-      });
+      const callModel = (modelName: string) =>
+        Promise.race([
+          ai.models.generateContent({
+            model: modelName,
+            contents,
+            config: {
+              systemInstruction: buildCompanionSystemInstruction(
+                lang,
+                (pageContext && typeof pageContext === 'object' ? pageContext : null) as LivePageContextSummary | null,
+                ctx.recalledMemories
+              ),
+              thinkingConfig: modelName.includes('hydrogen') ? { thinkingLevel: ThinkingLevel.LOW } : undefined,
+              tools: [{ functionDeclarations: AI_COMPANION_TOOLS }],
+              temperature: ctx.intent.complexity === 'deep' ? 0.68 : 0.75,
+              maxOutputTokens: 512,
+            },
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`${modelName} timeout`)), 7500)
+          ),
+        ]);
 
-      const sanitized = sanitizeCompanionReply(fallback.reply);
-      const mergedTools = analysis.isHypotheticalOrDiscussion
-        ? []
-        : mergeCompanionToolCalls(detTools, sanitized.extractedToolCalls);
+      let activeModel = 'gemini-4-hydrogen';
+      let response;
+      try {
+        response = await callModel('gemini-4-hydrogen');
+      } catch {
+        activeModel = 'gemini-2.5-flash';
+        response = await callModel('gemini-2.5-flash');
+      }
 
-      const sentimentEmotion =
-        analysis.sentiment === 'tired' || analysis.sentiment === 'frustrated'
-          ? 'empathetic'
-          : analysis.sentiment === 'excited'
-            ? 'excited'
-            : analysis.sentiment === 'playful'
-              ? 'playful'
-              : 'calm';
-      const rawTagEmotion = sanitized.extractedEmotion || (fallback.emotion ? normalizeCompanionEmotion(fallback.emotion) : null);
-      const resolvedEmotion =
-        rawTagEmotion && rawTagEmotion !== 'calm'
-          ? rawTagEmotion
-          : sentimentEmotion !== 'calm'
-            ? sentimentEmotion
-            : mergedTools.length > 0
-              ? 'focused'
-              : 'calm';
+      const rawCalls = response.functionCalls || [];
+      let emotion = 'calm';
+      let emotionIntensity = 0.72;
+      let emotionReason = '';
+      const clientToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+      const serverResolvedFacts: string[] = [];
 
-      const finalReply =
-        sanitized.cleanReply ||
-        instantReply ||
-        (mergedTools.length > 0
-          ? isZh
-            ? '好的，已经为你安排好啦。'
-            : 'All set for you.'
-          : '');
+      for (const c of rawCalls) {
+        const name = c.name || '';
+        const args = (c.args || {}) as Record<string, unknown>;
+        if (name === 'set_companion_emotion') {
+          if (typeof args.emotion === 'string') emotion = normalizeCompanionEmotion(args.emotion);
+          if (typeof args.intensity === 'number') emotionIntensity = args.intensity;
+          if (typeof args.reason === 'string') emotionReason = args.reason;
+        } else if (name === 'recall_or_save_memory') {
+          const act = String(args.action || 'recall');
+          const queryOrContent = String(args.queryOrContent || '').trim();
+          if (act === 'save' && queryOrContent) {
+            aiMemoryStore.upsertMemory({
+              userId,
+              category: 'fact',
+              canonicalKey: `companion:${queryOrContent.slice(0, 16)}`,
+              summary: queryOrContent,
+              keywords: queryOrContent,
+              confidence: 0.96,
+              importance: 9,
+              sourceSessionId: ctx.session.id,
+              sourceQuote: cleanPrompt,
+              replacesConflictingKey: true,
+            });
+          }
+        } else if (name === 'lookup_live_knowledge') {
+          const q = String(args.query || '').trim();
+          const exact = q ? solvePrecisionQuery(q, isZh) : null;
+          if (exact) serverResolvedFacts.push(exact.answer);
+        } else if (name) {
+          if (
+            isHypotheticalOrDiscussion &&
+            (name === 'navigate_to_space' ||
+              name === 'control_music_player' ||
+              name === 'watch_cinema_video' ||
+              name === 'open_book_action')
+          ) {
+            continue;
+          }
+          clientToolCalls.push({ name, args });
+        }
+      }
 
-      return res.json({
-        success: true,
-        model: fallback.model,
-        reply: finalReply,
-        emotion: resolvedEmotion,
-        emotionIntensity:
-          resolvedEmotion === 'empathetic' || resolvedEmotion === 'excited'
-            ? 0.86
-            : resolvedEmotion === 'calm'
-              ? 0.7
-              : 0.78,
-        emotionReason: getCompanionEmotionReason(resolvedEmotion, isZh),
-        toolCalls: mergedTools,
+      const sanitizedGemini = sanitizeCompanionReply((response.text || '').trim() || serverResolvedFacts[0] || '');
+      if (emotion === 'calm' && sanitizedGemini.extractedEmotion) {
+        emotion = sanitizedGemini.extractedEmotion;
+      }
+      const mergedGeminiTools = isHypotheticalOrDiscussion
+        ? clientToolCalls
+        : mergeCompanionToolCalls(clientToolCalls, sanitizedGemini.extractedToolCalls);
+      const replyText =
+        sanitizedGemini.cleanReply ||
+        (mergedGeminiTools.length > 0 ? (isZh ? '好的，已经为你安排好了。' : 'All set for you.') : '');
 
-        savedMemories,
-      });
-    } catch {
-      return res.status(503).json({ success: false, error: 'AI engine unavailable' });
+      if (replyText) {
+        return emitCompanionResponse({
+          model: activeModel,
+          reply: replyText,
+          emotion,
+          emotionIntensity,
+          emotionReason: emotionReason || getCompanionEmotionReason(emotion, isZh),
+          toolCalls: mergedGeminiTools,
+        });
+      }
+    } catch (e2: any) {
+      console.warn('[companion-turn] Gemini fallback triggered:', e2?.message || e2);
     }
   }
 
+  // 4. Unified DeepSeek / Ollama / Context Orchestrator path
   try {
-    const contents = [
-      ...histArray.map((h) => ({
-        role: h.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: h.content }],
-      })),
-      { role: 'user', parts: [{ text: cleanPrompt }] },
-    ];
+    let replyText = '';
+    let activeModel = aiGateway.getChatModelId();
+    let extractedEmotion: string | null = null;
+    let extractedTools: Array<{ name: string; args: Record<string, unknown> }> = [];
 
-    const callModel = (modelName: string) =>
-      Promise.race([
-        ai.models.generateContent({
-          model: modelName,
-          contents,
-          config: {
-            systemInstruction: buildCompanionSystemInstruction(
-              lang,
-              (pageContext || null) as LivePageContextSummary | null,
-              recalledMemories
-            ),
-            thinkingConfig: modelName.includes('hydrogen') ? { thinkingLevel: ThinkingLevel.LOW } : undefined,
-            tools: [{ functionDeclarations: AI_COMPANION_TOOLS }],
-            temperature: analysis.temperatureHint ?? 0.7,
-            maxOutputTokens: 512,
-          },
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`${modelName} timeout`)), 7500)
-        ),
-      ]);
-
-    let activeModel = 'gemini-4-hydrogen';
-    let response;
-    try {
-      response = await callModel('gemini-4-hydrogen');
-    } catch {
-      try {
-        activeModel = 'gemini-2.5-flash';
-        response = await callModel('gemini-2.5-flash');
-      } catch (e2: any) {
-        console.warn('[companion-turn] Gemini fallback triggered:', e2?.message || e2);
-        throw e2;
-      }
-    }
-
-    const rawCalls = response.functionCalls || [];
-    let emotion = 'calm';
-    let emotionIntensity = 0.7;
-    let emotionReason = '';
-    const clientToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
-    const serverResolvedFacts: string[] = [];
-
-    for (const c of rawCalls) {
-      const name = c.name || '';
-      const args = (c.args || {}) as Record<string, unknown>;
-      if (name === 'set_companion_emotion') {
-        if (typeof args.emotion === 'string') emotion = normalizeCompanionEmotion(args.emotion);
-        if (typeof args.intensity === 'number') emotionIntensity = args.intensity;
-        if (typeof args.reason === 'string') emotionReason = args.reason;
-      } else if (name === 'recall_or_save_memory') {
-        const act = String(args.action || 'recall');
-        const queryOrContent = String(args.queryOrContent || '').trim();
-        if (act === 'save' && queryOrContent) {
-          upsertMemory(store, profileKey, {
-            kind: 'fact',
-            normalizedKey: `fact.companion_${Date.now().toString(36)}`,
-            content: queryOrContent,
-            confidence: 0.96,
-            salience: 0.94,
-            source: 'user_explicit',
-          });
-        }
-      } else if (name === 'lookup_live_knowledge') {
-        const q = String(args.query || '').trim();
-        const exact = q ? solvePrecisionQuery(q, isZh) : null;
-        if (exact) serverResolvedFacts.push(exact.answer);
-      } else if (name) {
-        if (analysis.isHypotheticalOrDiscussion && (name === 'navigate_to_space' || name === 'control_music_player' || name === 'watch_cinema_video' || name === 'open_book_action')) {
-          continue;
-        }
-        clientToolCalls.push({ name, args });
-      }
-    }
-
-    const sanitizedGemini = sanitizeCompanionReply((response.text || '').trim() || serverResolvedFacts[0] || '');
-    if (emotion === 'calm' && sanitizedGemini.extractedEmotion) {
-      emotion = sanitizedGemini.extractedEmotion;
-    }
-    const mergedGeminiTools = analysis.isHypotheticalOrDiscussion
-      ? clientToolCalls
-      : mergeCompanionToolCalls(clientToolCalls, sanitizedGemini.extractedToolCalls);
-
-    return res.json({
-      success: true,
-      model: activeModel,
-      reply: sanitizedGemini.cleanReply,
-      emotion,
-
-      emotionIntensity,
-      emotionReason,
-      toolCalls: mergedGeminiTools,
-      savedMemories,
-    });
-  } catch {
-    try {
-      const { tools: detTools, instantReply } = extractDeterministicFallbackTools(
+    if (detTools.length === 1 && instantReply && !isHypotheticalOrDiscussion) {
+      replyText = instantReply;
+      activeModel = 'one-instant-companion';
+    } else if (aiGateway.hasLiveEngine()) {
+      const gwRes = await aiGateway.generateContent(
+        activeModel,
         cleanPrompt,
-        analysis.normalizedPrompt,
-        histArray,
-        isZh,
-        analysis.isHypotheticalOrDiscussion
+        ctx.systemPrompt,
+        undefined,
+        ctx.mergedHistory,
+        ctx.resolvedMaxTokens
       );
-      let fallbackTools = [...detTools];
-      let fallbackReply = instantReply;
-      let extractedFallbackEmo: string | null = null;
-
-      if (fallbackTools.length > 1 && analysis.sentiment === 'tired') {
-        fallbackReply = isZh
-          ? '辛苦了，先别硬撑。我已经帮你切好深色护眼模式并放上舒缓音乐，靠着休息一会儿吧。'
-          : 'You sound tired—take a breather. I switched to dark mode and put on soothing music for you.';
-      } else if (fallbackTools.length === 0 || !fallbackReply) {
-        const fallback = await executeAiTurn({
-          prompt: cleanPrompt,
-          history: histArray,
-          mode: 'voice-agent',
-          profileKey,
-          userId: authUser?.id,
-          pageContext: pageContext ? formatPageContextForModel(pageContext as LivePageContextSummary) : undefined,
-        });
-        const sanitized = sanitizeCompanionReply(fallback.reply);
-        fallbackReply = sanitized.cleanReply || fallbackReply;
-        extractedFallbackEmo = sanitized.extractedEmotion || (fallback.emotion ? normalizeCompanionEmotion(fallback.emotion) : null);
-        if (!analysis.isHypotheticalOrDiscussion && sanitized.extractedToolCalls.length > 0) {
-          fallbackTools = mergeCompanionToolCalls(fallbackTools, sanitized.extractedToolCalls);
-        }
+      if (gwRes.success && gwRes.content) {
+        const sanitized = sanitizeCompanionReply(gwRes.content);
+        replyText = sanitized.cleanReply;
+        extractedEmotion = sanitized.extractedEmotion;
+        extractedTools = isHypotheticalOrDiscussion ? [] : sanitized.extractedToolCalls;
       }
-
-      const sentimentEmotion =
-        analysis.sentiment === 'tired' || analysis.sentiment === 'frustrated'
-          ? 'empathetic'
-          : analysis.sentiment === 'excited'
-            ? 'excited'
-            : analysis.sentiment === 'playful'
-              ? 'playful'
-              : 'calm';
-      const fallbackEmotion =
-        extractedFallbackEmo && extractedFallbackEmo !== 'calm' ? extractedFallbackEmo : sentimentEmotion;
-
-      const fbFinal = sanitizeCompanionReply(fallbackReply);
-      return res.json({
-        success: true,
-        model: 'one-companion-fallback',
-        reply: fbFinal.cleanReply || fallbackReply,
-        emotion: fbFinal.extractedEmotion || fallbackEmotion,
-        emotionIntensity: (fbFinal.extractedEmotion || fallbackEmotion) === 'empathetic' || (fbFinal.extractedEmotion || fallbackEmotion) === 'excited' ? 0.85 : 0.72,
-        emotionReason: getCompanionEmotionReason(fbFinal.extractedEmotion || fallbackEmotion, isZh),
-
-        toolCalls: fallbackTools,
-        savedMemories,
-      });
-    } catch (innerErr: any) {
-      return res.status(500).json({
-        success: false,
-        error: innerErr?.message || 'Companion turn failed',
-      });
     }
+
+    if (!replyText) {
+      const fallback = await generateContextAwareFallbackReply(ctx, 'voice-agent');
+      const sanitized = sanitizeCompanionReply(fallback.text);
+      replyText = sanitized.cleanReply || instantReply || fallback.text;
+      if (!extractedEmotion) extractedEmotion = sanitized.extractedEmotion;
+      activeModel = `one-${fallback.source}`;
+    }
+
+    const mergedTools = isHypotheticalOrDiscussion
+      ? []
+      : mergeCompanionToolCalls(detTools, extractedTools);
+
+    const toneToEmotion: Record<string, string> = {
+      playful: 'playful',
+      frustrated: 'empathetic',
+      skeptical: 'thinking',
+      focused: mergedTools.length > 0 ? 'focused' : 'curious',
+      warm: 'happy',
+      casual: mergedTools.length > 0 ? 'focused' : 'calm',
+    };
+    const resolvedEmotion =
+      extractedEmotion && extractedEmotion !== 'calm'
+        ? extractedEmotion
+        : toneToEmotion[ctx.intent.toneHint] || 'calm';
+
+    const finalReply =
+      replyText ||
+      instantReply ||
+      (mergedTools.length > 0
+        ? isZh
+          ? '好的，已经为你安排好啦。'
+          : 'All set for you.'
+        : '');
+
+    return emitCompanionResponse({
+      model: activeModel,
+      reply: finalReply,
+      emotion: resolvedEmotion,
+      emotionIntensity:
+        resolvedEmotion === 'empathetic' || resolvedEmotion === 'excited'
+          ? 0.86
+          : resolvedEmotion === 'calm'
+            ? 0.7
+            : 0.78,
+      emotionReason: getCompanionEmotionReason(resolvedEmotion, isZh),
+      toolCalls: mergedTools,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Companion turn failed',
+    });
   }
 });
 
 app.post('/api/ai/tts', async (req, res) => {
   const { text, emotion = 'calm', voiceName = 'Zephyr' } = req.body || {};
-  const cleanText = typeof text === 'string' ? text.trim().slice(0, 600) : '';
+  const cleanText = typeof text === 'string' ? stripAiControlTags(text).reply.trim().slice(0, 600) : '';
   if (!cleanText) {
     return res.status(400).json({ success: false, error: 'text is required' });
   }
-
   const ai = getGeminiClient();
   if (!ai) {
     return res.status(503).json({ success: false, error: 'GEMINI_API_KEY not configured' });
@@ -3778,7 +4232,6 @@ app.post('/api/ai/tts', async (req, res) => {
     thinking: 'Speak thoughtfully and calmly:',
     calm: 'Speak naturally, warmly, and clearly:',
   };
-
   const allowedVoices = new Set(['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir']);
   const safeVoice = allowedVoices.has(String(voiceName)) ? String(voiceName) : 'Zephyr';
   const promptPrefix = styleHints[String(emotion)] || styleHints.calm;
@@ -3796,7 +4249,6 @@ app.post('/api/ai/tts', async (req, res) => {
         },
       },
     });
-
     const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!data) {
       return res.status(502).json({ success: false, error: 'Empty audio output' });
@@ -3821,7 +4273,7 @@ app.get('/api/ai/tts', async (req, res) => {
   if (!rawText) return res.status(400).json({ success: false, error: 'text required' });
 
   const cleanText = rawText
-    .replace(/\[\[EMO:[^\]]+\]\]/gi, '')
+    .replace(/\[\[(?:EMO|EMOTION):[^\]]+\]\]/gi, '')
     .replace(/\[\[ACTION:[\s\S]*?\]\]/g, '')
     .trim()
     .slice(0, 220);
@@ -3850,7 +4302,7 @@ app.get('/api/ai/tts', async (req, res) => {
 
   for (const url of providers) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 2200);
+    const timer = setTimeout(() => ctrl.abort(), 3200);
     try {
       const upstream = await fetch(url, {
         signal: ctrl.signal,
@@ -5306,7 +5758,10 @@ async function startServer() {
   const wss = new WebSocketServer({ noServer: true });
   attachMessengerWs(wss as any);
   const aiLiveWss = new WebSocketServer({ noServer: true });
-  attachAiLiveWs(aiLiveWss as any);
+  attachAiLiveWs(aiLiveWss as any, (wsReq) => {
+    const u = getAuthUser(wsReq as any);
+    return u ? { id: u.id, name: u.displayName || u.username } : undefined;
+  });
 
   httpServer.on('upgrade', (request, socket, head) => {
     const reqPath = (request.url || '').split('?')[0];

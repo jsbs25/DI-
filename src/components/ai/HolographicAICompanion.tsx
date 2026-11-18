@@ -123,6 +123,7 @@ export interface HolographicAICompanionProps {
 }
 
 const VOICE_PREF_KEY = 'earth-one-ai-voice-pref:v2';
+const VOICE_SESSION_STORAGE_KEY = 'earth-one-voice-session:v1';
 const POS_KEY = 'earth-one-ai-launcher-pos:v1';
 const DEFAULT_MUSIC_COVER = '/assets/music/ambient-space.jpg';
 
@@ -225,6 +226,8 @@ function stripCompanionMarkup(raw: string): string {
   return (raw || '')
     .replace(/\[\[(?:EMO|EMOTION):[^\]]*\]\]\s*/gi, '')
     .replace(/\[\[ACTION:[\s\S]*?\]\]\s*/gi, '')
+    .replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, '')
+    .replace(/\[\[ACTION:[\s\S]*$/i, '')
     .trim();
 }
 
@@ -339,6 +342,19 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
   const listeningModeRef = useRef<VoiceListeningMode>(listeningMode);
   listeningModeRef.current = listeningMode;
   const profileKeyRef = useRef<string>(getAiProfileKey());
+  const voiceSessionIdRef = useRef<string>(
+    (() => {
+      try {
+        const saved = localStorage.getItem(VOICE_SESSION_STORAGE_KEY);
+        if (saved && saved.trim()) return saved.trim();
+      } catch {}
+      const fresh = `voice_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+      try {
+        localStorage.setItem(VOICE_SESSION_STORAGE_KEY, fresh);
+      } catch {}
+      return fresh;
+    })()
+  );
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioClientRef = useRef<AudioLiveClient | null>(null);
@@ -915,7 +931,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
 
       const recentHistory = transcript
         .filter((t) => t.role === 'user' || t.role === 'assistant')
-        .slice(-8)
+        .slice(-14)
         .map((t) => ({ role: t.role as 'user' | 'assistant', content: t.text }));
 
       // Instant deterministic fast-path for crisp single commands (compound/emotional prompts go to Gemini)
@@ -994,6 +1010,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
           body: JSON.stringify({
             prompt: clean,
             lang,
+            sessionId: voiceSessionIdRef.current,
             profileKey: profileKeyRef.current,
             pageContext: getPageContext(),
             history: recentHistory,
@@ -1002,6 +1019,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
 
         const data = await res.json().catch(() => ({}));
         if (ac.signal.aborted) return;
+
+        if (typeof data?.sessionId === 'string' && data.sessionId.trim()) {
+          voiceSessionIdRef.current = data.sessionId.trim();
+          try {
+            localStorage.setItem(VOICE_SESSION_STORAGE_KEY, data.sessionId.trim());
+          } catch {}
+        }
 
         if (res.ok && data?.success) {
           let nextEmotion = (EMOTION_META[data.emotion as CompanionEmotion]
@@ -1166,6 +1190,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
         JSON.stringify({
           type: 'init',
           lang,
+          sessionId: voiceSessionIdRef.current,
           voiceName: voiceNameRef.current,
           profileKey: profileKeyRef.current,
           pageContext: getPageContext(),
@@ -1210,6 +1235,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       }
 
       if (msg.type === 'ready') {
+        if (msg.engine === 'deepseek' || msg.streaming) return;
         setLiveModeEngine('gemini-live');
         if (voiceActiveRef.current) {
           setPhase('listening');
