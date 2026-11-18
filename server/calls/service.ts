@@ -11,11 +11,12 @@ export function isActiveCallStatus(status: string) {
 
 export function cleanupStaleCallsDetailed(
   calls: CallRecord[],
-  opts?: { ringTimeoutMs?: number; staleConnectingMs?: number }
+  opts?: { ringTimeoutMs?: number; staleConnectingMs?: number; staleReconnectingMs?: number }
 ): { changed: boolean; newlyMissed: CallRecord[] } {
   if (!Array.isArray(calls) || calls.length === 0) return { changed: false, newlyMissed: [] };
   const ringTimeoutMs = opts?.ringTimeoutMs ?? 65_000;
   const staleConnectingMs = opts?.staleConnectingMs ?? 180_000;
+  const staleReconnectingMs = opts?.staleReconnectingMs ?? 150_000;
   const nowMs = Date.now();
   const iso = nowIso();
   let changed = false;
@@ -43,6 +44,12 @@ export function cleanupStaleCallsDetailed(
       c.status = 'ended';
       c.endedAt = iso;
       c.endReason = 'timeout';
+      c.updatedAt = iso;
+      changed = true;
+    } else if (c.status === 'reconnecting' && nowMs - refTs > staleReconnectingMs) {
+      c.status = 'ended';
+      c.endedAt = iso;
+      c.endReason = 'network_timeout';
       c.updatedAt = iso;
       changed = true;
     }
@@ -229,9 +236,17 @@ export function markActive(call: CallRecord) {
 }
 
 export function markReconnecting(call: CallRecord) {
-  if (call.status === 'active' || call.status === 'connecting') {
+  if (call.status === 'active' || call.status === 'connecting' || call.status === 'reconnecting') {
     call.status = 'reconnecting';
     call.updatedAt = nowIso();
+  }
+}
+
+export function touchCallHeartbeat(call: CallRecord, userId: string) {
+  const iso = nowIso();
+  call.updatedAt = iso;
+  if (call.participants && call.participants[userId]) {
+    (call.participants[userId] as any).lastSeenAt = iso;
   }
 }
 
@@ -279,6 +294,7 @@ export function getWebRtcIceServers(): RTCIceServer[] {
   const list: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:stun.qq.com:3478' },
     { urls: 'stun:stun.miwifi.com:3478' },

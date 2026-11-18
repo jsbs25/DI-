@@ -51,6 +51,8 @@ export interface CallAudioDiagnostics {
   videoFps?: number;
   videoBitrateKbps?: number;
   iceTransportPolicy?: RTCIceTransportPolicy;
+  p2pFlowing?: boolean;
+  manualRelay?: boolean;
 }
 
 export interface CallMediaState {
@@ -97,6 +99,9 @@ export interface ICallMediaSession {
   setScreenShareEnabled(enabled: boolean): Promise<void>;
   setAudioOutputDevice?(deviceId: string): Promise<void>;
   setIceTransportPolicy?(policy: RTCIceTransportPolicy): Promise<void>;
+  setManualRelay?(enabled: boolean): void;
+  recoverConnection?(reason?: string): Promise<void>;
+  getLastSignalSeq?(): number;
   startAudioPlayback(): Promise<void>;
   disconnect(reason?: string): Promise<void>;
   handleRemoteSignal?(fromUserId: string, signal: any, seq?: number): Promise<void>;
@@ -475,6 +480,13 @@ export class LiveKitCallSession implements ICallMediaSession {
     try { await this.room?.startAudio(); this.emit({ canPlaybackAudio: !!this.room?.canPlaybackAudio }); } catch {}
   }
 
+  async recoverConnection() {
+    this.refreshParticipants();
+    try { await this.room?.startAudio(); } catch {}
+  }
+
+  getLastSignalSeq() { return 0; }
+
   async disconnect(reason = 'leave') {
     this.disposed = reason !== 'replace';
     const room = this.room;
@@ -587,11 +599,16 @@ export class WebRTCCallSession implements ICallMediaSession {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private relayFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private disconnectRelayTimer: ReturnType<typeof setTimeout> | null = null;
   private pollingInFlight = false;
   private usingRelay = false;
+  private manualRelay = false;
   private localAudioLevel = 0;
   private remoteAudioFrames = 0;
   private webrtcBytesReceived = 0;
+  private lastBytesIncreasedAt = 0;
+  private consecutiveFlowTicks = 0;
+  private stalledIceRestarted = false;
   private captureNode: ScriptProcessorNode | null = null;
   private captureSrc: MediaStreamAudioSourceNode | null = null;
   private captureGain: GainNode | null = null;
@@ -604,6 +621,7 @@ export class WebRTCCallSession implements ICallMediaSession {
   private lastVideoTier: 'high' | 'low' = 'high';
   private prevVideoBytes = 0;
   private prevVideoAt = 0;
+  private networkChangeCleanup: (() => void) | null = null;
 
   getState() { return this.state; }
 
@@ -738,9 +756,11 @@ export class WebRTCCallSession implements ICallMediaSession {
         : [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
             { urls: 'stun:stun.cloudflare.com:3478' },
           ],
       iceTransportPolicy: this.iceTransportPolicy,
+      iceCandidatePoolSize: 6,
     });
     const entry: PeerEntry = {
       pc,
@@ -778,8 +798,6 @@ export class WebRTCCallSession implements ICallMediaSession {
 
     pc.onnegotiationneeded = async () => {
       if (this.disposed) return;
-      // Avoid initial offer collisions: only impolite peer sends initial offer,
-      // while polite peer triggers offers for subsequent mid-call track changes.
       if (polite && !pc.remoteDescription) return;
       await this.createAndSendOffer(peerId, entry, false);
     };
@@ -808,10 +826,17 @@ export class WebRTCCallSession implements ICallMediaSession {
       }
     };
 
+    const clearDisconnectRelayTimer = () => {
+      if (this.disconnectRelayTimer) {
+        clearTimeout(this.disconnectRelayTimer);
+        this.disconnectRelayTimer = null;
+      }
+    };
+
     const scheduleIceRestart = (delayMs: number) => {
       if (this.disposed || this.iceRestartTimers.has(peerId)) return;
       const last = this.lastIceRestartAt.get(peerId) || 0;
-      if (Date.now() - last < 6000) return;
+      if (Date.now() - last < 3500) return;
       const t = setTimeout(async () => {
         this.iceRestartTimers.delete(peerId);
         if (this.disposed) return;
@@ -838,15 +863,25 @@ export class WebRTCCallSession implements ICallMediaSession {
       const iceStates = Array.from(this.peers.values()).map((p) => p.pc.iceConnectionState);
       if (states.some((s) => s === 'connected') || iceStates.some((s) => s === 'connected' || s === 'completed')) {
         clearRestartTimer();
-        if (this.usingRelay && this.webrtcBytesReceived > 0) this.usingRelay = false;
-        this.emit({ phase: 'connected', connectionQuality: 'excellent' });
+        clearDisconnectRelayTimer();
+        this.stalledIceRestarted = false;
+        this.emit({ phase: 'connected', connectionQuality: this.usingRelay ? 'good' : 'excellent' });
       } else if (this.usingRelay) {
         this.emit({ phase: 'connected', connectionQuality: 'good' });
       } else if (states.some((s) => s === 'disconnected') || iceStates.some((s) => s === 'disconnected')) {
         this.emit({ phase: 'reconnecting', connectionQuality: 'poor' });
-        scheduleIceRestart(2200);
+        scheduleIceRestart(900);
+        // If P2P remains disconnected for 1.5s, immediately activate WS audio relay so voice never drops
+        if (this.opts?.sendAudioFrame && !this.disconnectRelayTimer) {
+          this.disconnectRelayTimer = setTimeout(() => {
+            this.disconnectRelayTimer = null;
+            if (!this.disposed && !isAnyPeerConnected()) {
+              this.activateAudioRelay();
+            }
+          }, 1500);
+        }
       } else if (states.length && (states.every((s) => s === 'failed') || iceStates.every((s) => s === 'failed'))) {
-        scheduleIceRestart(400);
+        scheduleIceRestart(300);
         if (this.opts?.sendAudioFrame) {
           this.activateAudioRelay();
         } else {
@@ -861,10 +896,12 @@ export class WebRTCCallSession implements ICallMediaSession {
       if (this.disposed) return;
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         clearRestartTimer();
+        clearDisconnectRelayTimer();
+        this.stalledIceRestarted = false;
       } else if (pc.iceConnectionState === 'disconnected') {
-        scheduleIceRestart(2200);
+        scheduleIceRestart(900);
       } else if (pc.iceConnectionState === 'failed') {
-        scheduleIceRestart(400);
+        scheduleIceRestart(300);
         if (!isAnyPeerConnected() && this.opts?.sendAudioFrame) {
           this.activateAudioRelay();
         }
@@ -915,10 +952,7 @@ export class WebRTCCallSession implements ICallMediaSession {
 
         proc.onaudioprocess = (ev) => {
           if (this.disposed || !this.usingRelay || !this.micEnabled || !this.localAudioTrack?.enabled) return;
-          const isP2pFlowing = this.webrtcBytesReceived > 0 && Array.from(this.peers.values()).some(
-            (p) => p.pc.connectionState === 'connected' || p.pc.iceConnectionState === 'connected' || p.pc.iceConnectionState === 'completed'
-          );
-          if (isP2pFlowing) {
+          if (!this.manualRelay && this.isP2pActivelyFlowing()) {
             this.usingRelay = false;
             return;
           }
@@ -928,9 +962,13 @@ export class WebRTCCallSession implements ICallMediaSession {
           while (carry.length >= neededIn) {
             const slice = carry.splice(0, neededIn);
             const pcm = new Int16Array(640);
+            const maxSrcIdx = Math.max(0, slice.length - 1);
             for (let j = 0; j < 640; j++) {
-              const idx = Math.min(slice.length - 1, Math.floor(j * ratio));
-              const sample = Math.max(-1, Math.min(1, slice[idx]));
+              const pos = j * ratio;
+              const i0 = Math.min(maxSrcIdx, Math.floor(pos));
+              const i1 = Math.min(maxSrcIdx, i0 + 1);
+              const frac = pos - i0;
+              const sample = Math.max(-1, Math.min(1, slice[i0] + (slice[i1] - slice[i0]) * frac));
               pcm[j] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
             }
             try { this.opts?.sendAudioFrame?.(int16ToBase64(pcm), outRate); } catch {}
@@ -941,6 +979,20 @@ export class WebRTCCallSession implements ICallMediaSession {
         void ctx.resume().catch(() => {});
       }
     } catch {}
+  }
+
+  private isP2pActivelyFlowing(): boolean {
+    const p2pConnected = Array.from(this.peers.values()).some(
+      (p) =>
+        p.pc.connectionState === 'connected' &&
+        (p.pc.iceConnectionState === 'connected' || p.pc.iceConnectionState === 'completed')
+    );
+    if (!p2pConnected) return false;
+    return (
+      this.consecutiveFlowTicks >= 2 &&
+      this.lastBytesIncreasedAt > 0 &&
+      Date.now() - this.lastBytesIncreasedAt < 2500
+    );
   }
 
   private stopAudioCapture() {
@@ -971,12 +1023,20 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.emit({ phase: 'connected', connectionQuality: 'good' });
   }
 
+  setManualRelay(enabled: boolean) {
+    this.manualRelay = enabled;
+    if (enabled) {
+      this.activateAudioRelay();
+    } else if (this.isP2pActivelyFlowing()) {
+      this.usingRelay = false;
+    }
+    void this.refreshAudioDiagnostics();
+  }
+
   handleRemoteAudioFrame(fromUserId: string, pcmBase64: string, sampleRate: number): void {
     if (this.disposed || !fromUserId || fromUserId === this.opts?.selfUserId || !pcmBase64) return;
-    const peer = this.peers.get(fromUserId);
-    const peerConnected = !!(peer && (peer.pc.connectionState === 'connected' || peer.pc.iceConnectionState === 'connected' || peer.pc.iceConnectionState === 'completed'));
-    if (peerConnected && this.webrtcBytesReceived > 0) {
-      return; // P2P RTP confirmed flowing
+    if (!this.manualRelay && this.isP2pActivelyFlowing()) {
+      return; // P2P RTP confirmed actively flowing (bytes increasing)
     }
     if (!this.usingRelay) {
       this.activateAudioRelay();
@@ -1001,8 +1061,8 @@ export class WebRTCCallSession implements ICallMediaSession {
       src.buffer = buf;
       src.connect(ctx.destination);
       const now = ctx.currentTime;
-      if (this.nextRelayPlayTime < now || this.nextRelayPlayTime > now + 0.6) {
-        this.nextRelayPlayTime = now + 0.05;
+      if (this.nextRelayPlayTime < now || this.nextRelayPlayTime > now + 0.35) {
+        this.nextRelayPlayTime = now + 0.03;
       }
       src.start(this.nextRelayPlayTime);
       this.nextRelayPlayTime += buf.duration;
@@ -1121,13 +1181,37 @@ export class WebRTCCallSession implements ICallMediaSession {
       }
     }
 
+    const prevBytes = this.webrtcBytesReceived;
     this.webrtcBytesReceived = bytesReceived;
+    if (bytesReceived > prevBytes) {
+      this.lastBytesIncreasedAt = nowMs;
+      this.consecutiveFlowTicks += 1;
+    } else {
+      this.consecutiveFlowTicks = 0;
+    }
+
     const p2pConnected = Array.from(this.peers.values()).some(
       (p) => p.pc.connectionState === 'connected' || p.pc.iceConnectionState === 'connected' || p.pc.iceConnectionState === 'completed'
     );
-    if (this.usingRelay && p2pConnected && bytesReceived > 0) {
+    const p2pFlowing = this.isP2pActivelyFlowing();
+
+    // Detect silent RTP stall while peer claims connected (e.g. abrupt Wi-Fi drop before ICE times out)
+    if (p2pConnected && this.lastBytesIncreasedAt > 0 && nowMs - this.lastBytesIncreasedAt > 2600) {
+      if (this.opts?.sendAudioFrame && !this.usingRelay) {
+        this.activateAudioRelay();
+      }
+      if (!this.stalledIceRestarted) {
+        this.stalledIceRestarted = true;
+        void this.recoverConnection('rtp-stall');
+      }
+    }
+
+    if (this.manualRelay) {
+      this.usingRelay = true;
+    } else if (this.usingRelay && p2pFlowing) {
       this.usingRelay = false;
     }
+
     const nextConnectionQuality = weakNetwork
       ? 'poor'
       : this.usingRelay
@@ -1160,6 +1244,8 @@ export class WebRTCCallSession implements ICallMediaSession {
         videoFps,
         videoBitrateKbps,
         iceTransportPolicy: this.iceTransportPolicy,
+        p2pFlowing,
+        manualRelay: this.manualRelay,
       },
     });
   }
@@ -1193,8 +1279,12 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.pollAfterSeq = 0;
     this.seenSeqs.clear();
     this.usingRelay = false;
+    this.manualRelay = false;
     this.remoteAudioFrames = 0;
     this.webrtcBytesReceived = 0;
+    this.lastBytesIncreasedAt = 0;
+    this.consecutiveFlowTicks = 0;
+    this.stalledIceRestarted = false;
     this.nextRelayPlayTime = 0;
     this.iceTransportPolicy = opts.iceTransportPolicy || 'all';
     this.lastVideoTier = 'high';
@@ -1237,7 +1327,6 @@ export class WebRTCCallSession implements ICallMediaSession {
     }
     this.rebuildParticipants();
 
-    // Flush any remote signals that arrived while waiting for mic/camera permissions
     if (this.preMediaSignals.length > 0) {
       const queued = [...this.preMediaSignals];
       this.preMediaSignals = [];
@@ -1246,10 +1335,9 @@ export class WebRTCCallSession implements ICallMediaSession {
       }
     }
 
-    // Announce readiness so remote peer initiates/re-syncs offer cleanly
     try { await opts.sendSignal?.(undefined, { type: 'ready', ...(opts.reconnect ? { reset: true } : {}) }); } catch {}
 
-    // If direct P2P ICE fails to connect within 2.8s (e.g. symmetric NAT without TURN), seamlessly activate WS audio relay
+    // If direct P2P ICE fails to connect within 2.4s (e.g. symmetric NAT without TURN), seamlessly activate WS audio relay
     if (opts.sendAudioFrame) {
       this.relayFallbackTimer = setTimeout(() => {
         if (this.disposed) return;
@@ -1259,35 +1347,85 @@ export class WebRTCCallSession implements ICallMediaSession {
         if (!connected) {
           this.activateAudioRelay();
         }
-      }, 2800);
+      }, 2400);
     }
 
     this.statsTimer = setInterval(() => {
       void this.refreshAudioDiagnostics();
     }, 600);
 
-    // Resilient polling fallback for SDP/ICE signals
+    // Watch network interface changes (Wi-Fi <-> 4G/5G handoff) to recover before call drops
+    try {
+      const conn: any = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
+      if (conn && typeof conn.addEventListener === 'function') {
+        const onNetChange = () => {
+          if (!this.disposed) void this.recoverConnection('network-change');
+        };
+        conn.addEventListener('change', onNetChange);
+        this.networkChangeCleanup = () => {
+          try { conn.removeEventListener('change', onNetChange); } catch {}
+        };
+      }
+    } catch {}
+
     if (opts.pollSignals) {
-      const pull = async () => {
-        if (this.disposed || this.pollingInFlight || !opts.pollSignals) return;
-        this.pollingInFlight = true;
-        try {
-          const d = await opts.pollSignals(this.pollAfterSeq);
-          for (const item of d?.signals || []) {
-            if (item?.fromUserId && item?.signal) {
-              await this.handleRemoteSignal(item.fromUserId, item.signal, item.seq);
-            }
-          }
-          if (typeof d?.lastSeq === 'number' && d.lastSeq > this.pollAfterSeq) {
-            this.pollAfterSeq = d.lastSeq;
-          }
-        } catch {
-        } finally {
-          this.pollingInFlight = false;
+      void this.pullSignalsNow();
+      this.pollTimer = setInterval(() => { void this.pullSignalsNow(); }, 1000);
+    }
+  }
+
+  private async pullSignalsNow() {
+    const pollSignals = this.opts?.pollSignals;
+    if (this.disposed || this.pollingInFlight || !pollSignals) return;
+    this.pollingInFlight = true;
+    try {
+      const d = await pollSignals(this.pollAfterSeq);
+      for (const item of d?.signals || []) {
+        if (item?.fromUserId && item?.signal) {
+          await this.handleRemoteSignal(item.fromUserId, item.signal, item.seq);
         }
-      };
-      void pull();
-      this.pollTimer = setInterval(() => { void pull(); }, 1000);
+      }
+      if (typeof d?.lastSeq === 'number' && d.lastSeq > this.pollAfterSeq) {
+        this.pollAfterSeq = d.lastSeq;
+      }
+    } catch {
+    } finally {
+      this.pollingInFlight = false;
+    }
+  }
+
+  getLastSignalSeq(): number {
+    return this.pollAfterSeq;
+  }
+
+  async recoverConnection(reason = 'manual'): Promise<void> {
+    if (this.disposed) return;
+    if (reason === 'ws-reopen' || reason === 'network-change') {
+      this.lastIceRestartAt.clear();
+    }
+    await this.pullSignalsNow();
+    const selfId = this.opts?.selfUserId || '';
+    for (const [peerId, entry] of this.peers.entries()) {
+      const pc = entry.pc;
+      const connected =
+        pc.connectionState === 'connected' &&
+        (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed');
+      const stalled = this.lastBytesIncreasedAt > 0 && Date.now() - this.lastBytesIncreasedAt > 2500;
+      if (!connected || stalled) {
+        if (this.opts?.sendAudioFrame && !this.usingRelay) {
+          this.activateAudioRelay();
+        }
+        const polite = selfId < peerId;
+        const last = this.lastIceRestartAt.get(peerId) || 0;
+        if (Date.now() - last >= 2000) {
+          this.lastIceRestartAt.set(peerId, Date.now());
+          if (!polite) {
+            await this.createAndSendOffer(peerId, entry, true);
+          } else {
+            try { await this.opts?.sendSignal?.(peerId, { type: 'ready', reset: true }); } catch {}
+          }
+        }
+      }
     }
   }
 
@@ -1539,10 +1677,19 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.mediaReady = false;
     this.preMediaSignals = [];
     this.usingRelay = false;
+    this.manualRelay = false;
     this.seenSeqs.clear();
+    if (this.networkChangeCleanup) {
+      this.networkChangeCleanup();
+      this.networkChangeCleanup = null;
+    }
     for (const t of this.iceRestartTimers.values()) clearTimeout(t);
     this.iceRestartTimers.clear();
     this.lastIceRestartAt.clear();
+    if (this.disconnectRelayTimer) {
+      clearTimeout(this.disconnectRelayTimer);
+      this.disconnectRelayTimer = null;
+    }
     if (this.relayFallbackTimer) {
       clearTimeout(this.relayFallbackTimer);
       this.relayFallbackTimer = null;
