@@ -137,7 +137,7 @@ const VolumetricAndDOFShader = {
             illuminationDecay *= 0.91;
           }
 
-          float radialMask = smoothstep(1.35, 0.08, lightDist);
+          float radialMask = 1.0 - smoothstep(0.08, 1.35, lightDist);
           col += uGodRayColor * (rayAccum / 14.0) * uGodRayIntensity * radialMask;
         }
       }

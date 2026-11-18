@@ -646,7 +646,7 @@ export function createParadiseSkyDome(): SkyDomeHandle {
           if (rnd > 0.962) {
             float d = length(gv - (vec2(rnd, fract(rnd * 37.0)) - 0.5) * 0.55);
             float twinkle = 0.65 + 0.35 * sin(uTime * (1.3 + rnd * 3.1) + rnd * 62.0);
-            float star = smoothstep(0.115, 0.0, d) * twinkle * smoothstep(0.02, 0.26, dir.y);
+            float star = (1.0 - smoothstep(0.0, 0.115, d)) * twinkle * smoothstep(0.02, 0.26, dir.y);
             vec3 starTint = mix(vec3(0.75, 0.86, 1.0), vec3(1.0, 0.92, 0.8), fract(rnd * 13.7));
             sky += starTint * star * uNightFactor * (1.0 - uCloudCover * 0.9) * (0.75 + rnd * 0.55);
           }
@@ -673,7 +673,7 @@ export function createParadiseSkyDome(): SkyDomeHandle {
           sky += vec3(0.72, 0.84, 1.0) * cloudScatter * 0.95;
 
           float boltX = abs(dir.x - (uLightningAzimuth + 0.04 * sin(dir.y * 34.0 + uTime * 40.0) + 0.02 * sin(dir.y * 78.0)));
-          float boltMask = smoothstep(0.008, 0.001, boltX) * smoothstep(0.04, 0.15, dir.y) * smoothstep(0.62, 0.35, dir.y);
+          float boltMask = (1.0 - smoothstep(0.001, 0.008, boltX)) * smoothstep(0.04, 0.15, dir.y) * (1.0 - smoothstep(0.35, 0.62, dir.y));
           sky += vec3(0.92, 0.97, 1.0) * boltMask * uLightningFlash * 2.2;
         }
 

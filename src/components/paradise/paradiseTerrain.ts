@@ -362,7 +362,7 @@ export function createParadiseTerrain(
           float summitMask = smoothstep(14.5, 25.0, wy) * smoothstep(0.45, 0.85, detailMacro);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.47, 0.50), summitMask * 0.32);
 
-          float ginkgoZone = smoothstep(-2.0, -14.0, wp.x) * smoothstep(-22.0, 22.0, wp.z) * smoothstep(0.18, 0.6, wy) * smoothstep(0.75, 0.92, upDot);
+          float ginkgoZone = (1.0 - smoothstep(-14.0, -2.0, wp.x)) * (1.0 - smoothstep(14.0, 22.0, abs(wp.y))) * smoothstep(0.18, 0.6, wy) * smoothstep(0.75, 0.92, upDot);
           float ginkgoPatch = smoothstep(0.42, 0.72, tFbm(wp * 0.28 + 11.4)) * smoothstep(0.32, 0.78, detailMicro);
           vec3 goldLeafCol = mix(vec3(0.68, 0.45, 0.08), vec3(0.88, 0.68, 0.14), detailMicro);
           diffuseColor.rgb = mix(diffuseColor.rgb, goldLeafCol, ginkgoZone * ginkgoPatch * 0.72);
@@ -494,7 +494,7 @@ export function createParadiseTerrain(
           float age = fract(t * (1.25 + fract(h * 7.3) * 0.6) + h * 11.0);
           float d = length((vec2(float(i), float(j)) + offset) - f);
           float radius = age * 0.52;
-          acc += smoothstep(0.045, 0.0, abs(d - radius)) * (1.0 - age);
+          acc += (1.0 - smoothstep(0.0, 0.045, abs(d - radius))) * (1.0 - age);
         }
       }
       return clamp(acc * rainAmt, 0.0, 1.0);
@@ -567,7 +567,7 @@ export function createParadiseTerrain(
   const wfPos = wfGeo.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < wfPos.count; i++) {
     const vy = wfPos.getY(i);
-    const fallT = 1 - (vy + 5.9) / 11.8;
+    const fallT = Math.max(0, Math.min(1, 1 - (vy + 5.9) / 11.8));
     const stepLedge = Math.sin(fallT * Math.PI * 2) * 0.18;
     wfPos.setZ(i, wfPos.getZ(i) + Math.pow(fallT, 1.32) * 2.45 + stepLedge);
   }
@@ -634,9 +634,9 @@ export function createParadiseTerrain(
         float foam = smoothstep(0.38, 0.84, streak1 * 0.62 + streak2 * 0.38);
 
         float midLedge = exp(-pow((vUv.y - 0.52) / 0.1, 2.0)) * 0.55;
-        float bottomSpray = smoothstep(0.32, 0.0, vUv.y);
+        float bottomSpray = 1.0 - smoothstep(0.0, 0.32, vUv.y);
         float topCrest = smoothstep(0.84, 1.0, vUv.y);
-        float edgeFade = smoothstep(0.0, 0.14, vUv.x) * smoothstep(1.0, 0.86, vUv.x);
+        float edgeFade = smoothstep(0.0, 0.14, vUv.x) * (1.0 - smoothstep(0.86, 1.0, vUv.x));
 
         vec3 waterBase = mix(vec3(0.14, 0.22, 0.32), mix(vec3(0.48, 0.68, 0.78), uSkyHorizon, 0.35), uDayFactor);
         vec3 foamColor = mix(vec3(0.45, 0.54, 0.68), vec3(0.96, 0.98, 1.0), uDayFactor);

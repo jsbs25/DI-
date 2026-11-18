@@ -151,7 +151,7 @@ export function createParadiseFauna(
             vec2 p = vUv - vec2(0.5, 0.5);
             float bodyAxis = abs(p.x);
             // Slender dark thorax & abdomen down centerline
-            float bodyMask = smoothstep(0.032, 0.015, bodyAxis) * smoothstep(0.32, 0.05, abs(p.y));
+            float bodyMask = (1.0 - smoothstep(0.015, 0.032, bodyAxis)) * (1.0 - smoothstep(0.05, 0.32, abs(p.y)));
 
             // Organic forewing + hindwing double-lobe silhouette
             vec2 fp = vec2(abs(p.x) - 0.23, p.y - 0.13);
@@ -167,7 +167,7 @@ export function createParadiseFauna(
             float angle = atan(p.y * 1.15, abs(p.x));
             float veins = smoothstep(0.86, 0.99, abs(sin(angle * 7.5 + wingShape * 4.0)));
             float rim = smoothstep(0.24, 0.41, wingShape);
-            float spotBand = smoothstep(0.045, 0.012, abs(wingShape - 0.34)) * step(0.3, fract(angle * 3.8));
+            float spotBand = (1.0 - smoothstep(0.012, 0.045, abs(wingShape - 0.34))) * step(0.3, fract(angle * 3.8));
 
             vec3 wingCol = mix(uMainColor, uEdgeColor, rim * 0.88 + veins * 0.28);
             wingCol = mix(wingCol, uSpotColor, spotBand * 0.75);
