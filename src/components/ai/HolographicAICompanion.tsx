@@ -372,6 +372,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
   const fallbackObjectUrlRef = useRef<string | null>(null);
   const speakSeqRef = useRef(0);
   const autoSpeakTextRef = useRef(false);
+  const suppressUserSpeechUntilRef = useRef(0);
   const speechRecRef = useRef<any>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
@@ -647,6 +648,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
 
   // Stop all AI audio output immediately (< 5ms)
   const stopAllOutputImmediately = useCallback((markInterrupted = true) => {
+    const wasSpeaking = phaseRef.current === 'speaking';
     speakSeqRef.current += 1;
     audioClientRef.current?.flushOutput();
     if (fallbackAudioRef.current) {
@@ -683,6 +685,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       );
     }
     currentOutputTurnIdRef.current = null;
+
+    // After barge-in/stop, briefly ignore mic transcripts to avoid feeding echoed TTS tail back as user speech.
+    if (wasSpeaking) {
+      suppressUserSpeechUntilRef.current = Date.now() + 700;
+    }
 
     if (voiceActiveRef.current) {
       setPhase('listening');
@@ -838,6 +845,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
 
       const finishAll = () => {
         if (mySeq === speakSeqRef.current) {
+          // Suppress residual speaker echo so fallback speech recognition doesn't hear the AI as the user.
+          suppressUserSpeechUntilRef.current = Date.now() + 500;
           setPhase(voiceActiveRef.current ? 'listening' : 'idle');
           resumeMusicIfPausedForVoice();
         }
@@ -1153,11 +1162,18 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
             else interimText += e.results[i][0].transcript;
           }
-          // Instant interruption on first detected speech
-          if ((interimText.trim() || finalText.trim()) && phaseRef.current === 'speaking') {
+          const heard = interimText.trim() || finalText.trim();
+          // While AI is speaking, treat mic input as barge-in/echo and never forward it as the user's message.
+          if (heard && phaseRef.current === 'speaking') {
             stopAllOutputImmediately(true);
             setEmotion('curious');
             setEmotionReason(isZh ? '我在听，你说' : 'Interrupted — listening');
+            suppressUserSpeechUntilRef.current = Date.now() + 900;
+            return;
+          }
+          // Drop residual speaker echo tail after AI playback ends.
+          if (Date.now() < suppressUserSpeechUntilRef.current) {
+            return;
           }
           if (finalText.trim()) {
             void runCompanionTurnApi(finalText.trim(), true);

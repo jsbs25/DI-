@@ -60,6 +60,7 @@ export class AudioLiveClient {
   private consecutiveSpeechFrames = 0;
   private lastBargeInAt = 0;
   private isAssistantOutputting = false;
+  private echoSuppressUntil = 0;
   private analyserData = new Uint8Array(32);
 
   public setAssistantOutputting(active: boolean) {
@@ -163,21 +164,34 @@ export class AudioLiveClient {
         this.noiseFloor = this.noiseFloor * 0.96 + rms * 0.04;
       }
 
+      const nowTs = Date.now();
+      const assistantPlaying = this.isPlayingOutput() || this.isAssistantOutputting;
+      let bargeTriggered = false;
       const bargeThreshold = Math.max(0.055, this.noiseFloor * 3.4);
-      if ((this.isPlayingOutput() || this.isAssistantOutputting) && rms > bargeThreshold) {
+      if (assistantPlaying && rms > bargeThreshold) {
         this.consecutiveSpeechFrames += 1;
-        if (this.consecutiveSpeechFrames >= 2 && Date.now() - this.lastBargeInAt > 380) {
-          this.lastBargeInAt = Date.now();
+        if (this.consecutiveSpeechFrames >= 2 && nowTs - this.lastBargeInAt > 380) {
+          this.lastBargeInAt = nowTs;
           this.consecutiveSpeechFrames = 0;
           this.flushOutput();
+          this.echoSuppressUntil = 0;
           callbacks.onLocalBargeIn?.();
+          bargeTriggered = true;
         }
       } else {
         this.consecutiveSpeechFrames = Math.max(0, this.consecutiveSpeechFrames - 1);
       }
 
-      const b64 = float32ToPcm16Base64(samples);
-      callbacks.onMicPcmBase64(b64);
+      // Gate mic uplink while AI audio is playing to prevent echo/self-hearing loops.
+      // On local barge-in we flush output and forward this frame so interruption is captured.
+      if (!assistantPlaying || bargeTriggered) {
+        if (!bargeTriggered && nowTs < this.echoSuppressUntil) {
+          // Drop residual acoustic echo tail after AI playback.
+        } else {
+          const b64 = float32ToPcm16Base64(samples);
+          callbacks.onMicPcmBase64(b64);
+        }
+      }
     };
 
     source.connect(processor);
@@ -230,6 +244,9 @@ export class AudioLiveClient {
     this.activeSources.add(src);
     src.onended = () => {
       this.activeSources.delete(src);
+      if (this.activeSources.size === 0 && !this.isAssistantOutputting) {
+        this.echoSuppressUntil = Date.now() + 350;
+      }
       try {
         src.disconnect();
       } catch {}
