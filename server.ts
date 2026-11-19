@@ -5326,8 +5326,31 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
   const { prompt, systemInstruction } = buildReadingPrompt(evidence, req.body.replyLanguage);
   let replyContent = '';
   let errorMsg = '';
+  let provider: 'gemini' | 'fallback' | 'none' = 'none';
+  let model: string | undefined;
 
-  if (oneAiRouter.hasAnyUsableEngine()) {
+  // Prefer Gemini when configured (context-aware, evidence-grounded)
+  try {
+    const gemini = getGeminiClient();
+    if (gemini) {
+      const geminiModel = process.env.GEMINI_FLASH_MODEL || 'gemini-2.5-flash';
+      const resp = await gemini.models.generateContent({
+        model: geminiModel,
+        contents: [{ role: 'user', parts: [{ text: `${systemInstruction}\n\n${prompt}` }] }],
+        config: { temperature: 0.2, maxOutputTokens: 1200 },
+      });
+      const textOut = (resp as any)?.text?.trim?.() || '';
+      if (textOut) {
+        replyContent = textOut;
+        provider = 'gemini';
+        model = geminiModel;
+      }
+    }
+  } catch (e: any) {
+    errorMsg = e?.message || String(e);
+  }
+
+  if (!replyContent && oneAiRouter.hasAnyUsableEngine()) {
     const reqUser = getSessionUser(req);
     const routed = await oneAiRouter.executeUnifiedTurn({
       requestId: `libread_${Date.now().toString(36)}`,
@@ -5340,13 +5363,14 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
         { role: 'user', content: prompt },
       ],
       mode: 'library-reading',
-      maxTokens: 768,
+      maxTokens: 1024,
       stream: false,
     });
     if (routed.success && routed.content.trim()) {
       replyContent = routed.content.trim();
+      provider = 'fallback';
     } else {
-      errorMsg = routed.errorMessage || '';
+      errorMsg = routed.errorMessage || errorMsg;
     }
   }
 
@@ -5354,6 +5378,7 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
     const result = await aiGateway.generateContent('one-ai', prompt, systemInstruction, undefined, undefined, undefined, { mode: 'library-reading' });
     if (result.success && result.content.trim()) {
       replyContent = result.content.trim();
+      provider = 'fallback';
     } else {
       errorMsg = result.errorMessage || errorMsg;
     }
@@ -5365,16 +5390,22 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
       error: errorMsg || '当前没有可用的 AI 模型；正文和引用已核验，但未生成回答。',
       citation: evidence.citation,
       coverage: evidence.coverage,
-      notice: evidence.notice
+      notice: evidence.notice,
+      provider,
+      model,
     });
   }
 
   res.json({
     success: true,
+    // Keep both fields for compatibility (AppleBookReader reads `answer`, some clients read `message.content`)
+    answer: replyContent,
     message: { content: replyContent },
     citation: evidence.citation,
     coverage: evidence.coverage,
-    notice: evidence.notice
+    notice: evidence.notice,
+    provider,
+    model,
   });
 });
 

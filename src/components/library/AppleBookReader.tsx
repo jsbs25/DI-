@@ -633,15 +633,17 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
       const res = await fetch(`/api/library/books/${encodeURIComponent(book.id)}/ai-reading`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           chapterId: activeChapter.id,
           selectedText: passage,
           mode: 'explain',
+          replyLanguage: isZh ? 'zh' : 'en',
         }),
       });
       const data = await res.json();
-      if (data?.success && data.answer) {
-        setAiAnswer(data.answer);
+      if (data?.success && (data.answer || data.message?.content)) {
+        setAiAnswer(data.answer || data.message?.content || '');
         setAiCitation(data.citation || null);
       } else {
         setAiAnswer(data?.error || (isZh ? '暂时未能生成 AI 伴读解析，请稍后再试。' : 'Could not generate AI insight right now.'));
@@ -702,12 +704,19 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         const res = await fetch('/api/library/ai/explain-page', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
-            title: `${book.title} · ${activeChapter.title}`,
+            bookId: book.id,
+            title: book.title,
+            bookTitle: book.title,
+            chapterTitle: activeChapter.title,
             pageNumber: spreadLeftIdx + 1,
             pageText: pageContent,
             question: q || undefined,
+            language: book.language || 'zh',
             lang: isZh ? 'zh' : 'en',
+            uiLanguage: isZh ? 'zh' : 'en',
+            surroundingContext: pageContent.slice(0, 3000),
           }),
         });
         const data = await res.json();
@@ -743,11 +752,19 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         const res = await fetch('/api/library/ai/lookup-word', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
+            bookId: book.id,
             word: cleaned,
-            contextSentence: (contextSentence || currentVisiblePageText).slice(0, 320),
+            selectedText: cleaned,
+            contextSentence: (contextSentence || currentVisiblePageText).slice(0, 600),
+            surroundingContext: (contextSentence || currentVisiblePageText).slice(0, 1200),
             bookTitle: book.title,
+            title: book.title,
+            chapterTitle: activeChapter.title,
+            language: book.language || 'zh',
             lang: isZh ? 'zh' : 'en',
+            uiLanguage: isZh ? 'zh' : 'en',
           }),
         });
         const data = await res.json();
