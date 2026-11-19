@@ -740,6 +740,39 @@ class DataStore {
         return this.loadBookContent(book);
       });
 
+      // Smart-merge newly added curated SEED_BOOKS & upgrade legacy stub editions
+      // (preserving user progress and all user-ingested books).
+      const byId = new Map<string, Book>();
+      for (const b of this.books) byId.set(b.id, b);
+      for (const seed of SEED_BOOKS) {
+        const existing = byId.get(seed.id);
+        if (!existing) {
+          this.writeBookContent(seed);
+          this.books.unshift({ ...seed });
+          byId.set(seed.id, seed);
+          migrated = true;
+        } else {
+          const seedChapters = seed.chapters?.length || 0;
+          const existingChapters = existing.chapters?.length || 0;
+          const hasLegacyUnsplash = typeof existing.coverImage === 'string' && existing.coverImage.includes('unsplash.com');
+          if (existingChapters < seedChapters || hasLegacyUnsplash) {
+            const upgraded: Book = {
+              ...existing,
+              title: seed.title,
+              author: seed.author,
+              coverImage: seed.coverImage,
+              description: seed.description,
+              textAvailability: seed.textAvailability,
+              chapters: existingChapters < seedChapters ? seed.chapters : existing.chapters,
+            };
+            this.writeBookContent(upgraded);
+            const idx = this.books.findIndex((b) => b.id === seed.id);
+            if (idx !== -1) this.books[idx] = upgraded;
+            migrated = true;
+          }
+        }
+      }
+
       this.crawlerTasks = data.crawlerTasks && data.crawlerTasks.length > 0 ? data.crawlerTasks : [...SEED_CRAWLER_TASKS];
       this.crawledPages = data.crawledPages && data.crawledPages.length > 0 ? data.crawledPages : [...SEED_CRAWLED_PAGES];
       this.browserBookmarks = data.browserBookmarks || [];
@@ -2431,7 +2464,15 @@ class DataStore {
     return item;
   }
 
-  addAnnotation(bookId: string, chapterId: string, selectedText: string, note: string, aiExplanation?: string, userId?: string): BookAnnotation {
+  addAnnotation(
+    bookId: string,
+    chapterId: string,
+    selectedText: string,
+    note: string,
+    aiExplanation?: string,
+    userId?: string,
+    extra?: { color?: BookAnnotation['color']; kind?: BookAnnotation['kind']; pageIndex?: number }
+  ): BookAnnotation {
     const ann: BookAnnotation = {
       id: `ann_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       bookId,
@@ -2439,12 +2480,25 @@ class DataStore {
       selectedText,
       note,
       aiExplanation,
+      ...(extra?.color ? { color: extra.color } : {}),
+      ...(extra?.kind ? { kind: extra.kind } : {}),
+      ...(typeof extra?.pageIndex === 'number' ? { pageIndex: extra.pageIndex } : {}),
       ...(userId ? { userId } : {}),
       createdAt: new Date().toISOString()
     };
     this.bookAnnotations.push(ann);
     this.saveToDisk();
     return ann;
+  }
+
+  deleteAnnotation(bookId: string, annotationId: string, userId?: string): boolean {
+    const idx = this.bookAnnotations.findIndex(
+      (a) => a.id === annotationId && a.bookId === bookId && (!a.userId || a.userId === userId)
+    );
+    if (idx === -1) return false;
+    this.bookAnnotations.splice(idx, 1);
+    this.saveToDisk();
+    return true;
   }
 
   addUserAnnotation(

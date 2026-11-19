@@ -1148,7 +1148,7 @@ export const CinematicIntro: React.FC<CinematicIntroProps> = ({
           EARTH ONE
         </h1>
         <p className="mt-3 max-w-xl text-balance text-sm sm:text-base font-normal tracking-[0.14em] text-[#EAE4D7] drop-shadow-[0_2px_12px_rgba(0,0,0,0.65)]">
-          {isZh ? '天堂花园 · 同一个世界，无限可能' : 'Paradise World · One World, Infinite Possibilities'}
+          {isZh ? '同一个世界，无限可能' : 'One World, Infinite Possibilities'}
         </p>
       </div>
 
@@ -1161,16 +1161,16 @@ export const CinematicIntro: React.FC<CinematicIntroProps> = ({
         }}
       >
         <p className="text-xs font-medium tracking-[0.22em] text-[#E6CE9E] drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]">
-          {isZh ? '欢迎来到天堂花园' : 'PARADISE WORLD'}
+          {isZh ? '欢迎来到 ONE' : 'WELCOME TO ONE'}
         </p>
         <h2 className="mt-2 max-w-2xl text-balance text-[clamp(1.75rem,3.6vw,2.75rem)] font-medium tracking-wide text-[#faf7f0] drop-shadow-[0_6px_28px_rgba(0,0,0,0.6)]">
           {userDisplay
             ? isZh
-              ? `欢迎回家，${userDisplay}`
-              : `Welcome home, ${userDisplay}`
+              ? `欢迎来到 ONE，${userDisplay}`
+              : `Welcome to ONE, ${userDisplay}`
             : isZh
-              ? '欢迎来到 EARTH ONE'
-              : 'Welcome to EARTH ONE'}
+              ? '欢迎来到 ONE'
+              : 'Welcome to ONE'}
         </h2>
       </div>
 
@@ -1219,7 +1219,7 @@ export const CinematicIntro: React.FC<CinematicIntroProps> = ({
           }}
           className="pointer-events-auto inline-flex min-h-[44px] items-center gap-2 rounded-full border border-[#d6b77f]/55 bg-[#f7f3eb]/90 px-5 text-xs sm:text-sm font-semibold text-[#1e2d26] hover:bg-[#ffffff] transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-[0_8px_24px_rgba(4,10,16,0.35)]"
         >
-          <span>{isZh ? '步入天堂花园' : 'Enter Paradise'}</span>
+          <span>{isZh ? '进入 ONE' : 'Enter ONE'}</span>
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

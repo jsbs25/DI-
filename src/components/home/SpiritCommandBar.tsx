@@ -211,11 +211,17 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
           <button
             type="button"
             onClick={() => setEditingName(true)}
-            className={`inline-flex h-8 max-w-[92px] shrink-0 items-center rounded-full px-2.5 text-xs font-semibold tracking-tight transition-colors cursor-pointer ${
+            className={`inline-flex h-8 max-w-[116px] shrink-0 items-center gap-1.5 rounded-full pl-1 pr-2.5 text-xs font-semibold tracking-tight transition-colors cursor-pointer ${
               isDay ? 'bg-black/[0.06] text-[#1f2e27] hover:bg-black/[0.11]' : 'bg-white/[0.1] text-[#f4f0e8] hover:bg-white/[0.16]'
             }`}
             title={isZh ? '点击自定义 AI 名称' : 'Click to rename AI'}
           >
+            <img
+              src="/assets/spirit/one-butterfly-avatar.jpg"
+              alt={snap.aiName}
+              referrerPolicy="no-referrer"
+              className="h-6 w-6 shrink-0 rounded-full object-cover ring-1 ring-black/10 dark:ring-white/20"
+            />
             <span className="truncate">{snap.aiName}</span>
           </button>
         )}
@@ -252,7 +258,7 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
           className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer ${
             snap.languageStudioOpen ? sendBtnCls : pillBtnCls
           }`}
-          title={isZh ? '学语言 · 实景口语与免费画室' : 'Language Studio & Free Art'}
+          title={isZh ? '学语言 · 实景口语与画室' : 'Language & Art Studio'}
         >
           <GraduationCap className="h-3.5 w-3.5" />
         </button>

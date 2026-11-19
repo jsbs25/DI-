@@ -120,6 +120,8 @@ export default function App() {
   const [focusCoordinates, setFocusCoordinates] = useState<{ lat: number; lng: number; timestamp?: number } | null>(null);
   const [welcomeToast, setWelcomeToast] = useState<string | null>(null);
   const [libraryFocusBookId, setLibraryFocusBookId] = useState<string | null>(null);
+  const [libraryFocusSeq, setLibraryFocusSeq] = useState<number>(0);
+  const [libraryFocusAutoRead, setLibraryFocusAutoRead] = useState<boolean>(false);
   const [knowledgeFocusNodeId, setKnowledgeFocusNodeId] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<any[]>([]);
   const [directOpenSeq, setDirectOpenSeq] = useState<number>(() => {
@@ -325,8 +327,10 @@ export default function App() {
   useEffect(() => {
     registerAgentClientHandlers({
       onNavigateTab: navigateToTab,
-      onOpenBookById: (bookId) => {
+      onOpenBookById: (bookId, opts) => {
         setLibraryFocusBookId(bookId);
+        setLibraryFocusAutoRead(opts?.autoRead !== false);
+        setLibraryFocusSeq((s) => s + 1);
         navigateToTab('library');
       },
       onOpenBookAction: (opts) => {
@@ -350,6 +354,10 @@ export default function App() {
         navigateToTab('mercury');
       },
       onPlayMusicAction: (opts) => {
+        if (opts.control === 'stop' || opts.control === 'pause') {
+          window.dispatchEvent(new Event('one-music-force-stop'));
+          return;
+        }
         setVenusQuickAction({
           seq: Date.now(),
           kind: 'crawl_and_play',
@@ -684,7 +692,7 @@ export default function App() {
           onMobileChatChange={handleMobileChatChange}
         />
         {currentTab === 'aihub' && <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8"><AIHub lang={lang} /></div>}
-        <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[#121e36] text-slate-100"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} quickAction={libraryQuickAction} /></div></div>
+        <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[#121e36] text-slate-100"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} focusBookSeq={libraryFocusSeq} focusBookAutoRead={libraryFocusAutoRead} quickAction={libraryQuickAction} /></div></div>
         {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonSpaceObservatory lang={lang} onBack={goBack} /></div>}
         {currentTab === 'arabic-learning' && (
           <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]">

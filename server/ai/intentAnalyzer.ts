@@ -485,7 +485,15 @@ export function isConversationalFramingNotCommand(
     return true;
   }
 
+  // Explicit direct user actions (music, reading, learning, art, weather) must NEVER be suppressed
+  // even when prefixed by conversational bridges like "但是我想看书" or "嗯，我想听歌".
+  const hasExplicitAction =
+    /(?:我想|我要|帮我|给我|请|快|马上|现在)?(?:听歌|听首歌|听点歌|听音乐|放歌|放首歌|放音乐|播放音乐|来首歌|来点音乐|换一首|下一首|上一首|暂停音乐|停止音乐|看书|读书|看本书|找一?本.*书|推荐一?本.*书|打开图书馆|学英语|练英语|学阿拉伯语|练阿拉伯语|画一?张|生成一?张|切换.*(?:模式|天气|白天|夜晚|黑夜|黄昏)|play\s+(?:a\s+)?(?:song|music)|listen\s+to\s+music|read\s+a\s+book|find\s+(?:me\s+)?a\s+book)/i.test(
+      clean
+    );
+
   if (
+    !hasExplicitAction &&
     /(?:我想做一个|我要做一个|正在开发|正在设计|构想|思路|讨论一下|如果能|比如|例如|像.+一样|既能.+又能|不仅.+还能|我希望它(?:能够?)?|设计一个|打造一个|评估一下)/i.test(
       clean
     )
@@ -494,13 +502,18 @@ export function isConversationalFramingNotCommand(
   }
 
   if (
+    !hasExplicitAction &&
     /(?:能学啥|有什么用|是什么|什么意思|为什么|怎么样|好用吗|原理|区别|介绍|推荐一下.+概念)/.test(clean) &&
     !/^(打开|进入|切换|播放|放|听|看|读|找|带我去)/.test(clean)
   ) {
     return true;
   }
 
-  if (/^(对[，,\s]*|嗯[，,\s]*|是啊[，,\s]*|没错[，,\s]*|但是|不过|可是|那如果|其实)/.test(clean) && history.length > 0) {
+  if (
+    !hasExplicitAction &&
+    /^(对[，,\s]*|嗯[，,\s]*|是啊[，,\s]*|没错[，,\s]*|但是|不过|可是|那如果|其实)/.test(clean) &&
+    history.length > 0
+  ) {
     return true;
   }
 

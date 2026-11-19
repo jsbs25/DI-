@@ -389,6 +389,9 @@ export interface BookAnnotation {
   selectedText: string;
   note: string;
   aiExplanation?: string;
+  color?: 'yellow' | 'green' | 'blue' | 'pink' | 'purple';
+  kind?: 'highlight' | 'bookmark' | 'note';
+  pageIndex?: number;
   citation?: {
     title: string;
     author: string;

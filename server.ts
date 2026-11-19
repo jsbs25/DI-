@@ -126,6 +126,7 @@ import {
   type IslamicLibraryCategory,
   type IslamicLibrarySource
 } from './server/islamicLibraryCrawler.ts';
+import { registerNoorIslamicLibraryRoutes } from './server/noorIslamicPdfService.ts';
 
 dotenv.config();
 
@@ -157,6 +158,9 @@ app.use((req, res, next) => {
 
 app.use((req, res, next) => {
   if (req.path === '/api/messenger/upload/stream') return next();
+  if (req.path === '/api/library/islamic/upload-pdf') {
+    return express.json({ limit: '65mb' })(req, res, next);
+  }
   return express.json({ limit: '20mb' })(req, res, next);
 });
 
@@ -5391,14 +5395,44 @@ app.post('/api/library/books/:id/progress', (req, res) => {
   res.json({ success: true, readProgress: book.readProgress });
 });
 
+app.get('/api/library/books/:id/annotations', (req, res) => {
+  const user = getSessionUser(req);
+  const annotations = store.getAnnotations(req.params.id, user?.id);
+  res.json({ success: true, annotations });
+});
+
 app.post('/api/library/books/:id/annotations', (req, res) => {
-  const user = requireSessionUser(req, res);
-  if (!user) return;
-  const { chapterId, selectedText, note, aiExplanation } = req.body;
-  if (!selectedText) return res.status(400).json({ success: false, error: 'Selected text required' });
-  const ann = store.addAnnotation(req.params.id, chapterId, selectedText, note || '', aiExplanation, user.id);
+  const user = getSessionUser(req);
+  const { chapterId, selectedText, note, aiExplanation, color, kind, pageIndex } = req.body || {};
+  if (!selectedText || typeof selectedText !== 'string') {
+    return res.status(400).json({ success: false, error: 'Selected text required' });
+  }
+  const ann = store.addAnnotation(
+    req.params.id,
+    String(chapterId || 'ch1'),
+    selectedText.slice(0, 2000),
+    typeof note === 'string' ? note.slice(0, 4000) : '',
+    typeof aiExplanation === 'string' ? aiExplanation.slice(0, 8000) : undefined,
+    user?.id,
+    {
+      color: ['yellow', 'green', 'blue', 'pink', 'purple'].includes(color) ? color : undefined,
+      kind: ['highlight', 'bookmark', 'note'].includes(kind) ? kind : undefined,
+      pageIndex: typeof pageIndex === 'number' && Number.isFinite(pageIndex) ? pageIndex : undefined,
+    }
+  );
   res.json({ success: true, annotation: ann });
 });
+
+app.delete('/api/library/books/:id/annotations/:annotationId', (req, res) => {
+  const user = getSessionUser(req);
+  const removed = store.deleteAnnotation(req.params.id, req.params.annotationId, user?.id);
+  if (!removed) return res.status(404).json({ success: false, error: 'Annotation not found' });
+  res.json({ success: true });
+});
+
+// Mount Noor / Islamic PDF Library APIs (IslamHouse 5,099+ PDFs, Archive.org resolver,
+// CORS-free streaming & download proxy, and local PDF vault + Noor Book upload)
+registerNoorIslamicLibraryRoutes(app, store);
 
 // -------------------------------------------------------------
 // 9. WEB CRAWLER & CONTENT INGESTION (CHAPTER 6)

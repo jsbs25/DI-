@@ -1070,7 +1070,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
               <div className="min-w-0">
                 <div className="font-semibold truncate">{agentSnap.imageLightbox.captionZh}</div>
                 <div className="text-[11px] opacity-65 truncate">
-                  {agentSnap.imageLightbox.providerLabelZh || 'ONE AI 免费额度重组画室'}
+                  {agentSnap.imageLightbox.providerLabelZh || 'ONE 画室'}
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">

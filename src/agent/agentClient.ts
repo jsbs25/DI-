@@ -22,7 +22,7 @@ export interface LearningAgentAction {
 
 export interface AgentClientHandlers {
   onNavigateTab?: (tab: string) => void;
-  onOpenBookById?: (bookId: string) => void;
+  onOpenBookById?: (bookId: string, opts?: { autoRead?: boolean }) => void;
   onOpenBookAction?: (opts: { query: string }) => void;
   onOpenLanguageLesson?: (action: LearningAgentAction) => void;
   onBrowserSearchAction?: (query: string) => void;
@@ -56,8 +56,11 @@ export function dispatchAgentClientActions(actions: Array<Record<string, unknown
         if (typeof act.tab === 'string') registeredHandlers.onNavigateTab?.(act.tab);
         break;
       case 'open_book_by_id':
-        if (typeof act.bookId === 'string') registeredHandlers.onOpenBookById?.(act.bookId);
-        else if (typeof act.query === 'string') registeredHandlers.onOpenBookAction?.({ query: act.query });
+        if (typeof act.bookId === 'string') {
+          registeredHandlers.onOpenBookById?.(act.bookId, { autoRead: act.autoRead !== false });
+        } else if (typeof act.query === 'string') {
+          registeredHandlers.onOpenBookAction?.({ query: act.query });
+        }
         break;
       case 'open_book':
         registeredHandlers.onOpenBookAction?.({ query: typeof act.query === 'string' ? act.query : '' });
@@ -151,7 +154,7 @@ export function dispatchAgentClientActions(actions: Array<Record<string, unknown
           uiStateManager.setSpiritBubble({
             visible: true,
             isLoading: false,
-            badge: img.providerLabelZh || '免费额度画室',
+            badge: 'ONE 画室',
             text: img.captionZh || '已为你生成画面',
             generatedImage: img,
             rescueCards: undefined,
@@ -381,8 +384,8 @@ export async function submitSpiritCommand(
     isLoading: true,
     loadingLabel: isImageIntent
       ? opts.lang === 'zh'
-        ? '正在重组免费 AI 额度为你绘制画面...'
-        : 'Generating image from free AI pool...'
+        ? '正在为你极速绘制画面...'
+        : 'Generating your artwork...'
       : isRescueIntent
         ? opts.lang === 'zh'
           ? '马上为你准备可直接开口说的表达...'
@@ -621,7 +624,7 @@ export async function generateFreePoolImage(
   uiStateManager.setSpiritBubble({
     visible: true,
     isLoading: true,
-    loadingLabel: '正在调度免费 AI 额度池为你绘制画面...',
+    loadingLabel: '正在为你极速绘制画面...',
   });
   const res = await fetch('/api/ai/generate-image', {
     method: 'POST',
@@ -636,7 +639,7 @@ export async function generateFreePoolImage(
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data?.success || !data?.image) {
-    const errMsg = data?.error || '免费图像池暂时繁忙，请稍后再试。';
+    const errMsg = data?.error || '画室当前繁忙，请稍后再试。';
     uiStateManager.setSpiritBubble({
       visible: true,
       isLoading: false,
@@ -650,7 +653,7 @@ export async function generateFreePoolImage(
   uiStateManager.setSpiritBubble({
     visible: true,
     isLoading: false,
-    badge: data.image.providerLabelZh || '免费额度画室',
+    badge: 'ONE 画室',
     text: data.image.captionZh,
     generatedImage: data.image,
     rescueExpanded: false,

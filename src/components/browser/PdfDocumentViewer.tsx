@@ -3,90 +3,206 @@ import {
   getDocument,
   GlobalWorkerOptions,
   type PDFDocumentProxy,
-  type RenderTask
+  type RenderTask,
 } from 'pdfjs-dist';
-import { ArrowLeft, ArrowRight, ExternalLink, Minus, Plus, Search } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  Download,
+  ExternalLink,
+  Minus,
+  Moon,
+  Plus,
+  Search,
+  Sun,
+} from 'lucide-react';
 import { Language } from '../../types/index.ts';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
-interface PdfDocumentViewerProps {
+type PdfThemeId = 'light' | 'paper' | 'dark';
+
+const PDF_THEMES: Record<
+  PdfThemeId,
+  { label: string; shellBg: string; chromeBg: string; ink: string; muted: string; border: string; canvasFilter?: string }
+> = {
+  light: {
+    label: '原始白',
+    shellBg: '#F5F5F7',
+    chromeBg: '#FFFFFF',
+    ink: '#1D1D1F',
+    muted: '#6E6E73',
+    border: '#E5E5EA',
+  },
+  paper: {
+    label: '护眼纸',
+    shellBg: '#EFE7D6',
+    chromeBg: '#F8F3E8',
+    ink: '#2B241B',
+    muted: '#736654',
+    border: '#DDD0B8',
+    canvasFilter: 'sepia(0.14) contrast(0.98)',
+  },
+  dark: {
+    label: '夜间黑',
+    shellBg: '#121215',
+    chromeBg: '#1C1C1F',
+    ink: '#EBEBF0',
+    muted: '#9A9AA0',
+    border: '#2E2E34',
+  },
+};
+
+export interface PdfDocumentViewerProps {
   sourceUrl: string;
   title: string;
   lang: Language;
+  /** Optional original external source URL (e.g. IslamHouse / Archive / Noor page). */
+  originPageUrl?: string;
 }
 
-export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({ sourceUrl, title, lang }) => {
+function resolveProxyPdfUrl(rawUrl: string, title: string, download = false): string {
+  if (!rawUrl) return rawUrl;
+  if (rawUrl.startsWith('/api/library/pdf-stream')) {
+    if (!download) return rawUrl;
+    return rawUrl.includes('download=') ? rawUrl : `${rawUrl}&download=1`;
+  }
+  if (rawUrl.startsWith('/api/library/local-pdfs/') || rawUrl.startsWith('/') || rawUrl.startsWith('blob:')) {
+    if (!download) return rawUrl;
+    return rawUrl.includes('?') ? `${rawUrl}&download=1` : `${rawUrl}?download=1&filename=${encodeURIComponent(title)}`;
+  }
+  const params = new URLSearchParams({ url: rawUrl, filename: title.slice(0, 80) });
+  if (download) params.set('download', '1');
+  return `/api/library/pdf-stream?${params.toString()}`;
+}
+
+export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
+  sourceUrl,
+  title,
+  lang,
+  originPageUrl,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [documentProxy, setDocumentProxy] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
+  const [pageInput, setPageInput] = useState('1');
   const [pageCount, setPageCount] = useState(0);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(1.25);
+  const [themeId, setThemeId] = useState<PdfThemeId>('paper');
   const [searchText, setSearchText] = useState('');
   const [matchingPages, setMatchingPages] = useState<number[]>([]);
-  const [matchIndex, setMatchIndex] = useState(0);
   const [status, setStatus] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState('');
   const isChinese = lang === 'zh';
+
+  const streamUrl = resolveProxyPdfUrl(sourceUrl, title, false);
+  const downloadUrl = resolveProxyPdfUrl(sourceUrl, title, true);
+  const theme = PDF_THEMES[themeId];
+
+  useEffect(() => {
+    setPageInput(String(pageNumber));
+  }, [pageNumber]);
 
   useEffect(() => {
     let cancelled = false;
-    const task = getDocument({ url: sourceUrl, withCredentials: false });
     setDocumentProxy(null);
-    setPageCount(0);
     setPageNumber(1);
-    setError(null);
-    setStatus(isChinese ? '正在从来源加载 PDF…' : 'Loading the PDF from its source…');
+    setPageInput('1');
+    setPageCount(0);
+    setMatchingPages([]);
+    setError('');
+    setStatus(isChinese ? '正在载入 PDF 典籍…' : 'Loading PDF document…');
 
-    task.promise.then(document => {
-      if (cancelled) {
-        const docWithDestroy = document as PDFDocumentProxy & { destroy?: () => Promise<void> };
-        void (docWithDestroy.destroy ? docWithDestroy.destroy() : document.cleanup());
-        return;
-      }
-      setDocumentProxy(document);
-      setPageCount(document.numPages);
-      setStatus('');
-    }).catch(reason => {
-      if (cancelled) return;
-      setError(reason instanceof Error ? reason.message : String(reason));
-      setStatus('');
+    const task = getDocument({
+      url: streamUrl,
+      withCredentials: false,
+      cMapPacked: true,
     });
+
+    task.promise
+      .then((pdf) => {
+        if (cancelled) return;
+        setDocumentProxy(pdf);
+        setPageCount(pdf.numPages);
+        setStatus('');
+      })
+      .catch((reason) => {
+        if (cancelled) return;
+        const msg = reason instanceof Error ? reason.message : String(reason);
+        setError(
+          isChinese
+            ? `PDF 载入未完成：${msg}。您可以点击右上角「下载 PDF」直接下载到本地阅读。`
+            : `Could not load PDF: ${msg}. You can still download the PDF directly.`
+        );
+        setStatus('');
+      });
 
     return () => {
       cancelled = true;
       void task.destroy();
     };
-  }, [sourceUrl, isChinese]);
+  }, [streamUrl, isChinese]);
 
   useEffect(() => {
     if (!documentProxy) return;
     let cancelled = false;
     let renderTask: RenderTask | undefined;
 
-    documentProxy.getPage(pageNumber).then(page => {
-      if (cancelled) return;
-      const canvas = canvasRef.current;
-      const context = canvas?.getContext('2d');
-      if (!canvas || !context) return;
-      const viewport = page.getViewport({ scale: zoom });
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
-      renderTask = page.render({ canvas, canvasContext: context, viewport });
-      return renderTask.promise.catch(reason => {
-        if (!cancelled && (reason as Error)?.name !== 'RenderingCancelledException') {
-          setError(reason instanceof Error ? reason.message : String(reason));
-        }
+    documentProxy
+      .getPage(pageNumber)
+      .then((page) => {
+        if (cancelled) return;
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext('2d');
+        if (!canvas || !context) return;
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const cssViewport = page.getViewport({ scale: zoom });
+        const hiDpiViewport = page.getViewport({ scale: zoom * dpr });
+
+        canvas.width = Math.ceil(hiDpiViewport.width);
+        canvas.height = Math.ceil(hiDpiViewport.height);
+        canvas.style.width = `${Math.ceil(cssViewport.width)}px`;
+        canvas.style.height = `${Math.ceil(cssViewport.height)}px`;
+
+        renderTask = page.render({ canvas, canvasContext: context, viewport: hiDpiViewport });
+        return renderTask.promise.catch((reason) => {
+          if (!cancelled && (reason as Error)?.name !== 'RenderingCancelledException') {
+            setError(reason instanceof Error ? reason.message : String(reason));
+          }
+        });
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
       });
-    }).catch(reason => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
-    });
 
     return () => {
       cancelled = true;
       renderTask?.cancel();
     };
   }, [documentProxy, pageNumber, zoom]);
+
+  // Keyboard navigation
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        setPageNumber((p) => Math.min(pageCount || 1, p + 1));
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        setPageNumber((p) => Math.max(1, p - 1));
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [pageCount]);
+
+  const handleJumpPage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const target = Math.max(1, Math.min(pageCount || 1, Number.parseInt(pageInput, 10) || 1));
+    setPageNumber(target);
+  };
 
   const handleSearch = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -97,101 +213,240 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({ sourceUrl,
       return;
     }
 
-    setStatus(isChinese ? '正在搜索文档文字…' : 'Searching document text…');
-    const matches: number[] = [];
-    try {
-      for (let page = 1; page <= documentProxy.numPages; page += 1) {
-        const pageData = await documentProxy.getPage(page);
-        const textContent = await pageData.getTextContent();
-        const text = textContent.items
-          .map(item => 'str' in item ? item.str : '')
-          .join(' ')
-          .toLocaleLowerCase();
-        if (text.includes(query)) matches.push(page);
-      }
-    } catch (reason) {
-      setMatchingPages([]);
-      setStatus(isChinese ? `文档搜索失败：${reason instanceof Error ? reason.message : String(reason)}` : `Document search failed: ${reason instanceof Error ? reason.message : String(reason)}`);
-      return;
+    setStatus(isChinese ? '正在检索全文…' : 'Searching document text…');
+    const hits: number[] = [];
+    const scanLimit = Math.min(documentProxy.numPages, 120);
+    for (let pageIndex = 1; pageIndex <= scanLimit; pageIndex += 1) {
+      const page = await documentProxy.getPage(pageIndex);
+      const text = await page.getTextContent();
+      const pageText = text.items
+        .map((item) => ('str' in item ? item.str : ''))
+        .join(' ')
+        .toLocaleLowerCase();
+      if (pageText.includes(query)) hits.push(pageIndex);
     }
-    setMatchingPages(matches);
-    setMatchIndex(0);
-    if (matches.length) {
-      setPageNumber(matches[0]);
-      setStatus(isChinese ? `在 ${matches.length} 页中找到匹配。` : `Found matches on ${matches.length} page(s).`);
-    } else {
-      setStatus(isChinese ? '未找到匹配文字。' : 'No matching text found.');
-    }
-  };
 
-  const changeMatch = (direction: -1 | 1) => {
-    if (!matchingPages.length) return;
-    const nextIndex = (matchIndex + direction + matchingPages.length) % matchingPages.length;
-    setMatchIndex(nextIndex);
-    setPageNumber(matchingPages[nextIndex]);
+    setMatchingPages(hits);
+    if (hits.length > 0) {
+      setPageNumber(hits[0]);
+      setStatus(isChinese ? `找到 ${hits.length} 页匹配内容` : `Found ${hits.length} matching pages`);
+    } else {
+      setStatus(
+        isChinese
+          ? '未在前 120 页检索到该文字（部分古籍扫描版 PDF 为图像页）。'
+          : 'No matching text found in first 120 pages.'
+      );
+    }
   };
 
   return (
-    <section aria-label={isChinese ? 'PDF 文档查看器' : 'PDF document viewer'} className="mx-auto w-full max-w-5xl">
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] backdrop-blur-xl p-4 sm:p-5">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-amber-200/80">JUPITER · PDF</p>
-          <h1 className="mt-1 break-words text-lg font-semibold text-white sm:text-xl">{title}</h1>
-          <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex max-w-full items-center gap-1.5 break-all text-xs text-cyan-200 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70">
-            {isChinese ? '来源网站 / 下载（遵循来源权限）' : 'Source / download (subject to source permissions)'}
-            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-          </a>
-        </div>
-      </header>
-
-      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-        <button type="button" onClick={() => setPageNumber(page => Math.max(1, page - 1))} disabled={!documentProxy || pageNumber <= 1} aria-label={isChinese ? '上一页' : 'Previous page'} className="rounded-lg p-2 text-slate-200 hover:bg-white/[0.08] disabled:opacity-40">
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <span className="min-w-20 text-center text-xs text-slate-300" aria-live="polite">
-          {isChinese ? `${pageNumber} / ${pageCount || '—'} 页` : `Page ${pageNumber} / ${pageCount || '—'}`}
-        </span>
-        <button type="button" onClick={() => setPageNumber(page => Math.min(pageCount, page + 1))} disabled={!documentProxy || pageNumber >= pageCount} aria-label={isChinese ? '下一页' : 'Next page'} className="rounded-lg p-2 text-slate-200 hover:bg-white/[0.08] disabled:opacity-40">
-          <ArrowRight className="h-4 w-4" />
-        </button>
-        <span className="mx-1 h-5 border-l border-white/10" aria-hidden="true" />
-        <button type="button" onClick={() => setZoom(value => Math.max(0.6, Math.round((value - 0.2) * 10) / 10))} aria-label={isChinese ? '缩小' : 'Zoom out'} className="rounded-lg p-2 text-slate-200 hover:bg-white/[0.08]">
-          <Minus className="h-4 w-4" />
-        </button>
-        <span className="min-w-12 text-center text-xs text-slate-400">{Math.round(zoom * 100)}%</span>
-        <button type="button" onClick={() => setZoom(value => Math.min(2.5, Math.round((value + 0.2) * 10) / 10))} aria-label={isChinese ? '放大' : 'Zoom in'} className="rounded-lg p-2 text-slate-200 hover:bg-white/[0.08]">
-          <Plus className="h-4 w-4" />
-        </button>
-
-        <form onSubmit={handleSearch} className="flex min-w-[220px] flex-1 items-center gap-2 sm:ml-auto sm:max-w-md">
-          <label htmlFor="jupiter-pdf-search" className="sr-only">{isChinese ? '搜索文档文字' : 'Search document text'}</label>
-          <input id="jupiter-pdf-search" value={searchText} onChange={event => setSearchText(event.target.value)} placeholder={isChinese ? '在 PDF 中搜索' : 'Search in PDF'} className="min-h-10 min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-3 text-sm text-white outline-none focus:border-cyan-300/50" />
-          <button type="submit" disabled={!documentProxy} aria-label={isChinese ? '搜索文档' : 'Search document'} className="rounded-xl bg-cyan-300/10 p-2.5 text-cyan-100 hover:bg-cyan-300/20 disabled:opacity-40">
-            <Search className="h-4 w-4" />
+    <section
+      aria-label={isChinese ? 'Apple 风格 PDF 阅读器' : 'PDF Document Reader'}
+      className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border shadow-2xl transition-colors duration-200"
+      style={{
+        backgroundColor: theme.shellBg,
+        borderColor: theme.border,
+        color: theme.ink,
+      }}
+    >
+      {/* Apple Books-style top toolbar */}
+      <div
+        className="flex flex-wrap items-center justify-between gap-2.5 border-b px-3.5 py-2.5 sm:px-5"
+        style={{ backgroundColor: theme.chromeBg, borderColor: theme.border }}
+      >
+        {/* Left: Page navigation & jump */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
+            disabled={pageNumber <= 1}
+            aria-label="上一页"
+            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border transition disabled:opacity-35"
+            style={{ borderColor: theme.border }}
+          >
+            <ArrowLeft className="h-4 w-4" />
           </button>
-        </form>
 
-        {matchingPages.length > 0 && (
-          <div className="flex items-center gap-1 text-xs text-slate-300">
-            <button type="button" onClick={() => changeMatch(-1)} aria-label={isChinese ? '上一个搜索结果' : 'Previous search result'} className="rounded-lg p-2 hover:bg-white/[0.08]"><ArrowLeft className="h-3.5 w-3.5" /></button>
-            <span>{matchIndex + 1}/{matchingPages.length}</span>
-            <button type="button" onClick={() => changeMatch(1)} aria-label={isChinese ? '下一个搜索结果' : 'Next search result'} className="rounded-lg p-2 hover:bg-white/[0.08]"><ArrowRight className="h-3.5 w-3.5" /></button>
+          <form onSubmit={handleJumpPage} className="flex items-center gap-1 text-xs font-medium">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={pageInput}
+              onChange={(e) => setPageInput(e.target.value.replace(/[^0-9]/g, ''))}
+              aria-label="页码"
+              className="h-9 w-12 rounded-xl border bg-transparent text-center text-xs font-semibold tabular-nums focus:outline-none"
+              style={{ borderColor: theme.border }}
+            />
+            <span style={{ color: theme.muted }}>/ {pageCount || '…'}</span>
+          </form>
+
+          <button
+            type="button"
+            onClick={() => setPageNumber((p) => Math.min(pageCount || 1, p + 1))}
+            disabled={!pageCount || pageNumber >= pageCount}
+            aria-label="下一页"
+            className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border transition disabled:opacity-35"
+            style={{ borderColor: theme.border }}
+          >
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Center: Zoom & Paper Themes */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className="inline-flex items-center rounded-xl border p-0.5"
+            style={{ borderColor: theme.border }}
+          >
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.max(0.65, Number((z - 0.15).toFixed(2))))}
+              aria-label="缩小"
+              className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg hover:opacity-75"
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+            <span className="px-2 text-xs font-medium tabular-nums">{Math.round(zoom * 100)}%</span>
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.min(2.4, Number((z + 0.15).toFixed(2))))}
+              aria-label="放大"
+              className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg hover:opacity-75"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
           </div>
-        )}
+
+          <div
+            className="inline-flex items-center gap-1 rounded-xl border p-0.5 text-[11px]"
+            style={{ borderColor: theme.border }}
+          >
+            {(['light', 'paper', 'dark'] as PdfThemeId[]).map((tid) => (
+              <button
+                key={tid}
+                type="button"
+                onClick={() => setThemeId(tid)}
+                className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-2.5 font-medium transition"
+                style={{
+                  backgroundColor: themeId === tid ? (tid === 'dark' ? '#32323A' : '#1D1D1F') : 'transparent',
+                  color: themeId === tid ? '#FFFFFF' : theme.muted,
+                }}
+              >
+                {tid === 'dark' ? <Moon className="h-3 w-3" /> : tid === 'paper' ? <BookOpen className="h-3 w-3" /> : <Sun className="h-3 w-3" />}
+                <span>{PDF_THEMES[tid].label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Right: Search & Direct Download */}
+        <div className="flex flex-wrap items-center gap-2">
+          <form onSubmit={handleSearch} className="flex items-center gap-1">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-50" />
+              <input
+                type="search"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder={isChinese ? '搜文档内文字…' : 'Search PDF…'}
+                className="h-9 w-36 rounded-xl border bg-transparent pl-8 pr-2.5 text-xs focus:outline-none sm:w-44"
+                style={{ borderColor: theme.border }}
+              />
+            </div>
+          </form>
+
+          <a
+            href={downloadUrl}
+            download
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>{isChinese ? '下载 PDF' : 'Download PDF'}</span>
+          </a>
+
+          {originPageUrl && (
+            <a
+              href={originPageUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-9 items-center gap-1 rounded-xl border px-3 text-xs font-medium transition hover:opacity-80"
+              style={{ borderColor: theme.border, color: theme.ink }}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{isChinese ? '来源页' : 'Source'}</span>
+            </a>
+          )}
+        </div>
       </div>
 
-      {status && <p role="status" className="mb-3 text-center text-xs text-slate-400">{status}</p>}
-      {error ? (
-        <div role="alert" className="rounded-2xl border border-rose-300/15 bg-rose-950/30 p-6 text-sm text-rose-100">
-          <p>{isChinese ? '无法在 JUPITER 中显示此 PDF。文件可能受网络、跨域或来源访问政策限制。' : 'JUPITER could not display this PDF. Network, cross-origin, or source access policies may restrict it.'}</p>
-          <p className="mt-2 break-words text-xs text-rose-100/70">{error}</p>
-          <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-2 underline underline-offset-4">
-            {isChinese ? '在来源网站打开' : 'Open at source'} <ExternalLink className="h-3.5 w-3.5" />
-          </a>
+      {/* Status / Search match strip */}
+      {(status || error || matchingPages.length > 0) && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 text-xs"
+          style={{ borderColor: theme.border, backgroundColor: theme.chromeBg }}
+        >
+          <div>
+            {error ? (
+              <span className="font-medium text-rose-500">{error}</span>
+            ) : (
+              <span style={{ color: theme.muted }}>{status}</span>
+            )}
+          </div>
+          {matchingPages.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              {matchingPages.slice(0, 12).map((hitPage) => (
+                <button
+                  key={hitPage}
+                  type="button"
+                  onClick={() => setPageNumber(hitPage)}
+                  className="cursor-pointer rounded-md border px-2 py-0.5 text-[11px] font-medium"
+                  style={{
+                    borderColor: theme.border,
+                    backgroundColor: hitPage === pageNumber ? '#10B981' : 'transparent',
+                    color: hitPage === pageNumber ? '#FFFFFF' : theme.ink,
+                  }}
+                >
+                  P.{hitPage}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      ) : (
-        <div className="overflow-auto rounded-2xl border border-white/10 bg-black/20 p-3 sm:p-5">
-          <canvas ref={canvasRef} aria-label={isChinese ? `PDF 第 ${pageNumber} 页` : `PDF page ${pageNumber}`} className="mx-auto block h-auto max-w-full shadow-2xl" />
+      )}
+
+      {/* PDF Canvas Viewport */}
+      <div className="flex min-h-[55vh] flex-1 items-start justify-center overflow-auto p-4 sm:p-6">
+        <div className="relative">
+          <canvas
+            ref={canvasRef}
+            aria-label={title}
+            className="mx-auto block rounded-lg shadow-[0_14px_42px_rgba(0,0,0,0.22)] transition-all"
+            style={theme.canvasFilter ? { filter: theme.canvasFilter } : undefined}
+          />
+        </div>
+      </div>
+
+      {/* Bottom Apple Books page scrubber */}
+      {pageCount > 1 && (
+        <div
+          className="flex items-center gap-3 border-t px-5 py-2.5 text-xs"
+          style={{ backgroundColor: theme.chromeBg, borderColor: theme.border }}
+        >
+          <span className="shrink-0 font-medium tabular-nums" style={{ color: theme.muted }}>
+            {pageNumber} / {pageCount}
+          </span>
+          <input
+            type="range"
+            min={1}
+            max={pageCount}
+            value={pageNumber}
+            onChange={(e) => setPageNumber(Number(e.target.value))}
+            aria-label="页面进度滑块"
+            className="h-1.5 flex-1 cursor-pointer accent-emerald-600"
+          />
+          <span className="shrink-0 tabular-nums" style={{ color: theme.muted }}>
+            {Math.round((pageNumber / pageCount) * 100)}%
+          </span>
         </div>
       )}
     </section>

@@ -17,7 +17,12 @@ import { getAiProfileKey } from '../utils/aiProfile.ts';
 import { AudioLiveClient } from '../components/ai/audioLiveClient.ts';
 import { stopSteadyVoice, unlockSteadyVoiceAudio } from '../utils/steadyVoicePlayer.ts';
 import { uiStateManager } from './uiStateManager.ts';
-import { stopSpiritSpeech, submitSpiritCommand } from './agentClient.ts';
+import {
+  dispatchAgentClientActions,
+  stopSpiritSpeech,
+  submitSpiritCommand,
+} from './agentClient.ts';
+import { parseInstantAgentAction } from '../utils/oneAgentController.ts';
 
 class SpiritLiveVoiceController {
   private active = false;
@@ -31,6 +36,7 @@ class SpiritLiveVoiceController {
   private fallbackBusy = false;
   private currentAiText = '';
   private currentUserText = '';
+  private lastDispatchedUtterance = '';
   private suppressUserUntil = 0;
 
   public isActive(): boolean {
@@ -235,6 +241,9 @@ class SpiritLiveVoiceController {
             .replace(/<think>[\s\S]*?<\/think>/gi, '')
             .replace(/\[\[(?:EMO|EMOTION|ACTION):[^\]]*\]\]/gi, '');
           if (!cleanPiece) return;
+          if (this.currentUserText.trim()) {
+            void this.maybeExecuteSpokenIntent(this.currentUserText.trim());
+          }
           this.currentUserText = '';
           this.currentAiText += cleanPiece;
           uiStateManager.setSpiritBubble({
@@ -250,6 +259,9 @@ class SpiritLiveVoiceController {
         if (msg.type === 'turn_complete') {
           audioClient.setAssistantOutputting(false);
           this.suppressUserUntil = Date.now() + 750;
+          if (this.currentUserText.trim()) {
+            void this.maybeExecuteSpokenIntent(this.currentUserText.trim());
+          }
           const finishedText = this.currentAiText.trim();
           if (finishedText) {
             uiStateManager.appendChatMessage('assistant', finishedText);
@@ -279,6 +291,54 @@ class SpiritLiveVoiceController {
       };
     } catch {
       this.switchToContinuousFallback();
+    }
+  }
+
+  /**
+   * Bridges spoken utterances during Gemini Live duplex voice into real app actions
+   * (playing music in Venus Music Space, opening curated books directly in Apple Books Reader,
+   * switching views/weather, etc.) so voice requests always act instead of only talking.
+   */
+  private async maybeExecuteSpokenIntent(rawUtterance: string) {
+    const clean = rawUtterance.trim();
+    if (clean.length < 2) return;
+    if (clean === this.lastDispatchedUtterance) return;
+    this.lastDispatchedUtterance = clean;
+
+    const isZh = this.lang === 'zh';
+
+    // 1. Book / Reading / Noor Islamic PDF intent -> ask orchestrator to pick a real book or open Islamic PDF library
+    const wantsBook =
+      /(?:مكتبة\s*ال?نور|noor[\s-]?book|努尔图书馆|伊斯兰.*(?:书|pdf)|找一?本.*书|推荐一?本?.*书|想看书|要看书|去看书|看一?本书|读一?本书|看书|读书|图书馆|看《[^》]+》|read\s+a\s+book|find.*book)/i.test(
+        clean
+      );
+    if (wantsBook) {
+      try {
+        const res = await fetch('/api/one-ai/agent/turn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: clean,
+            lang: this.lang,
+            aiName: uiStateManager.getSnapshot().aiName || 'ONE',
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (data?.success && Array.isArray(data.clientActions) && data.clientActions.length > 0) {
+          dispatchAgentClientActions(data.clientActions);
+          return;
+        }
+      } catch {
+        // fall through to direct library open
+      }
+      dispatchAgentClientActions([{ type: 'open_book', query: clean }]);
+      return;
+    }
+
+    // 2. Music, Cinema, Navigation, Theme, Globe Fly-To via instant action parser
+    const instant = parseInstantAgentAction(clean, isZh, []);
+    if (instant && instant.type !== 'none') {
+      dispatchAgentClientActions([instant as unknown as Record<string, unknown>]);
     }
   }
 

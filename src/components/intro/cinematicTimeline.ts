@@ -93,8 +93,8 @@ export const INTRO_PHASES: readonly CinematicPhaseMeta[] = [
     id: 'mainWorldTransition',
     startSec: 10.6,
     endSec: INTRO_TOTAL_DURATION_SEC,
-    enLabel: 'Entering Paradise World',
-    zhLabel: '步入主世界',
+    enLabel: 'Entering ONE',
+    zhLabel: '进入 ONE',
   },
 ] as const;
 

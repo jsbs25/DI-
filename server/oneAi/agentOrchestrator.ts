@@ -703,98 +703,286 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
     }
 
     // ------------------------------------------------------------------
-    // 4. Library Book Recommendation & Auto-Open
+    // 3B. High-Priority Instant Music Playback & Control Fast-Path
     // ------------------------------------------------------------------
-    if (
-      !isHypothetical &&
-      /(?:找一本|找本|推荐一?本?.*书|看书|读书|图书馆|arabic\s+book|find.*book|recommend.*book)/i.test(cleanPrompt)
-    ) {
-      const q = extractBookSearchQuery(cleanPrompt);
-      const searchTokens = expandBilingualBookTokens(`${cleanPrompt} ${q}`);
-      const localMatches = (deps.store.books || [])
-        .filter((b: any) => {
-          const blob = `${b.title} ${b.author} ${b.description || ''} ${b.language || ''} ${b.category || ''}`.toLowerCase();
-          return searchTokens.some((tok) => tok && blob.includes(tok));
-        })
-        .slice(0, 4)
-        .map((b: any) => ({
-          source: 'earth_library',
-          id: b.id,
-          title: b.title,
-          author: b.author,
-          language: b.language,
-          category: b.category,
-          description: String(b.description || '').slice(0, 140),
-        }));
+    const musicControlStop =
+      /停止播放|停止放歌|停止音乐|别放了|别播了|别放歌|关掉音乐|关闭音乐|把音乐停|暂停播放|暂停音乐|stop playing|stop music|pause music/i.test(
+        cleanPrompt
+      );
+    const musicControlNext =
+      /下一首|下一曲|换一首|换首歌|换个歌|切歌|next song|next track|skip track/i.test(cleanPrompt);
+    const musicControlPrev =
+      /上一首|上一曲|previous song|previous track/i.test(cleanPrompt);
+    const musicControlResume =
+      /继续播放|继续放歌|恢复播放|恢复音乐|resume music|resume playing/i.test(cleanPrompt);
+    const wantsMusicPlay =
+      /听歌|听首歌|听点歌|想听歌|要听歌|放歌|放首歌|放点歌|放音乐|听音乐|播放音乐|开音乐|来首歌|来点音乐|来一首|放一首|听一首|打开.*音乐|去.*音乐|听钢琴|放钢琴|听轻音乐|放轻音乐|听纯音乐|想听.*(?:歌|曲|音乐)|play\s+(?:a\s+)?(?:song|music|track)|listen\s+to\s+music|open\s+music/i.test(
+        cleanPrompt
+      );
 
-      let openMatches: any[] = [];
-      try {
-        const crawled = await deps.crawlOpenBooks(q, 6);
-        const rawItems = Array.isArray(crawled?.results)
-          ? crawled.results
-          : Array.isArray(crawled?.books)
-            ? crawled.books
-            : [];
-        openMatches = rawItems.slice(0, 5).map((b: any) => ({
-          source: b.sourceName || b.source || 'open_library',
-          title: b.title,
-          author: b.author,
-          language: b.language,
-          year: b.year,
-          url: b.sourceUrl || b.providerFullTextUrl || b.textUrl,
-        }));
-      } catch {
-        // non-fatal; continue with local library matches
+    if (!isHypothetical && (musicControlStop || musicControlNext || musicControlPrev || musicControlResume || wantsMusicPlay)) {
+      const parsedMusic = parseInstantAgentAction(cleanPrompt, isZh, []);
+      let musicAction: AgentClientAction;
+      let musicReply: string;
+
+      if (parsedMusic && parsedMusic.type === 'play_music') {
+        musicAction = parsedMusic as AgentClientAction;
+        musicReply = parsedMusic.reply;
+      } else if (musicControlStop) {
+        musicAction = { type: 'play_music', control: 'stop' };
+        musicReply = isZh ? '好的，先为你暂停音乐。' : 'Paused the music for you.';
+      } else if (musicControlNext) {
+        musicAction = { type: 'play_music', control: 'next' };
+        musicReply = isZh ? '收到，马上为你切到下一首！' : 'Skipping to the next track!';
+      } else if (musicControlPrev) {
+        musicAction = { type: 'play_music', control: 'prev' };
+        musicReply = isZh ? '好的，切回上一首歌。' : 'Returning to the previous track.';
+      } else if (musicControlResume) {
+        musicAction = { type: 'play_music', control: 'resume' };
+        musicReply = isZh ? '好呀，继续为你播放音乐！' : 'Resuming your music!';
+      } else {
+        const extractedMusicQ = cleanPrompt
+          .replace(
+            /(?:我想|我要|帮我|给我|请|随便|随机|打开|进入|去|放一首|放首|放点|来一首|来首|来点|听一首|听首|听点|听歌|听音乐|放歌|放音乐|播放音乐|音乐空间|音乐|歌曲|首歌|曲子|的|吧|啊|呢|了)/gi,
+            ' '
+          )
+          .replace(/[，。！？、,.!?]/g, ' ')
+          .trim();
+        const safeQ = extractedMusicQ.length >= 2 ? extractedMusicQ : '';
+        musicAction = { type: 'play_music', query: safeQ, crawl: true };
+        musicReply = safeQ
+          ? isZh
+            ? `好呀！这就带你去音乐空间，马上为你播放「${safeQ}」。`
+            : `Taking you to Music Space and playing "${safeQ}" now.`
+          : isZh
+            ? '好呀！这就带你去音乐空间，马上为你放一首好听的歌。'
+            : 'Taking you to Music Space and starting a great track for you now!';
       }
 
+      clientActions.push(musicAction);
       steps.push({
-        id: 'step_library_search',
-        label: isZh ? '已完成馆藏与全球开放图书检索' : 'Searched internal & open libraries',
+        id: 'step_music_play',
+        label: isZh ? '已跳转到音乐空间并启动播放' : 'Opening Music Space & starting playback',
         status: 'completed',
-        detail: `${localMatches.length} 馆藏 · ${openMatches.length} 开放书籍`,
+        detail: (musicAction as any).query || (musicAction as any).control || 'auto-play',
         timestamp: nowIso(),
       });
+      oneAiDb.upsertAgentSession({
+        sessionId,
+        userId: subjectId,
+        status: 'completed',
+        intentSummary: cleanPrompt.slice(0, 80),
+        module: 'music',
+        steps,
+        result: { clientActions },
+      });
 
-      const candidatesSummary = JSON.stringify({ localMatches, openMatches }).slice(0, 2600);
-      let aiSummary = '';
-      if (localMatches.length > 0 || openMatches.length > 0) {
-        const aiTurn = await oneAiRouter.executeUnifiedTurn({
-          requestId: `ag_book_${Date.now()}`,
-          userId: authUser?.id || null,
-          subjectKey: quota.subjectKey,
-          userTier: quota.userTier,
-          prompt: `用户需求：「${cleanPrompt}」。\n检索到的真实书籍候选：${candidatesSummary}\n请基于以上真实书籍结果（严禁编造不存在的书名），用亲切简洁的中文（2~4句）分析哪本最适合并推荐给用户。`,
-          messages: [
-            { role: 'system', content: `你是 EARTH ONE 的 AI 伙伴「${customAiName}」，负责依据真实检索结果推荐书籍并打开阅读器。不要称呼用户为“小小”。` },
-            { role: 'user', content: `用户需求：「${cleanPrompt}」\n真实结果：${candidatesSummary}` },
-          ],
-          mode: 'agent-book',
-          maxTokens: 480,
-          stream: false,
+      return res.json({
+        success: true,
+        sessionId,
+        module: 'music',
+        model: 'ONE AI',
+        emotion: 'cheerful',
+        reply: musicReply,
+        steps,
+        clientActions,
+      });
+    }
+
+    // ------------------------------------------------------------------
+    // 4. Library Book Recommendation & Auto-Open (Apple Books Reader & Noor Islamic PDF)
+    // ------------------------------------------------------------------
+    const wantsNoorIslamicPdf =
+      !isHypothetical &&
+      /(?:مكتبة\s*ال?نور|noor[\s-]?book|努尔图书馆|伊斯兰(?:书籍|书库|电子书|图书|PDF)|下载.*伊斯兰.*(?:书|pdf)|阿语\s*pdf)/i.test(
+        cleanPrompt
+      );
+    if (wantsNoorIslamicPdf) {
+      clientActions.push({ type: 'open_book', query: '__noor_library__' });
+      steps.push({
+        id: 'step_noor_library_open',
+        label: isZh ? '已直达 مكتبة النور · 伊斯兰 PDF 书库' : 'Opening Noor Islamic PDF Library',
+        status: 'completed',
+        timestamp: nowIso(),
+      });
+      oneAiDb.upsertAgentSession({
+        sessionId,
+        userId: subjectId,
+        status: 'completed',
+        intentSummary: cleanPrompt.slice(0, 80),
+        module: 'library',
+        steps,
+        result: { clientActions },
+      });
+      return res.json({
+        success: true,
+        sessionId,
+        module: 'library',
+        model: 'ONE AI',
+        emotion: 'cheerful',
+        reply: isZh
+          ? '已为你打开「مكتبة النور · 伊斯兰 PDF 书库」！这里直连 5,099+ 阿语、中文及英文伊斯兰官方 PDF，点击即可在站内直接翻页阅读或一键下载，也支持把你从 noor-book.com 下载的 PDF 导入书库。'
+          : 'Opened the Noor Islamic PDF Library with 5,099+ Arabic, Chinese, and English PDFs ready to read and download directly.',
+        steps,
+        clientActions,
+      });
+    }
+
+    if (
+      !isHypothetical &&
+      /(?:找一?本.*书|推荐一?本?.*书|想看书|要看书|去看书|看一?本书|读一?本书|看书|读书|图书馆|看《[^》]+》|读《[^》]+》|arabic\s+book|find.*book|recommend.*book|read\s+a\s+book|open\s+a\s+book)/i.test(
+        cleanPrompt
+      )
+    ) {
+      const q = extractBookSearchQuery(cleanPrompt);
+      const isGenericBrowse =
+        /^(?:literature|book|books|书|看书|读书|一本书|好书|经典|推荐)$/i.test(q) ||
+        /^(?:但是|不过|那|嗯|其实)?(?:我)?(?:想|要|去)?(?:看书|读书|看一?本书|找一?本书让我看|给我找一?本书|推荐一?本书)[吧啊呢呀。！!]?$/i.test(
+          cleanPrompt.trim()
+        );
+
+      const allBooks = (deps.store.books || []).filter(
+        (b: any) => Array.isArray(b.chapters) && b.chapters.some((c: any) => String(c?.content || '').trim().length > 40)
+      );
+
+      let scoredLocal: Array<{ book: any; score: number }> = [];
+      if (isGenericBrowse) {
+        // Rotate across our rich curated classics so every "我想看书" feels fresh & thoughtful
+        const preferredOrder = [
+          'book_little_prince',
+          'book_walden',
+          'book_meditations',
+          'book_daodejing',
+          'book_zhuangzi',
+          'book_arabian_nights',
+          'book_pride',
+          'book_art_of_war',
+          'book_republic',
+          'book_copernicus',
+        ];
+        const sortedCurated = [...allBooks].sort((a: any, b: any) => {
+          const ia = preferredOrder.indexOf(a.id);
+          const ib = preferredOrder.indexOf(b.id);
+          if (ia !== -1 && ib !== -1) return ia - ib;
+          if (ia !== -1) return -1;
+          if (ib !== -1) return 1;
+          return (b.chapters?.length || 0) - (a.chapters?.length || 0);
         });
-        if (aiTurn.success && aiTurn.content.trim()) {
-          aiSummary = stripAiControlTags(aiTurn.content).reply || aiTurn.content.trim();
+        const pickIdx = sortedCurated.length > 0 ? Math.floor(Date.now() / 15000) % Math.min(6, sortedCurated.length) : 0;
+        const rotated = [
+          ...sortedCurated.slice(pickIdx),
+          ...sortedCurated.slice(0, pickIdx),
+        ];
+        scoredLocal = rotated.slice(0, 4).map((book, idx) => ({ book, score: 100 - idx }));
+      } else {
+        const searchTokens = expandBilingualBookTokens(`${cleanPrompt} ${q}`);
+        const qLower = q.toLowerCase();
+        scoredLocal = allBooks
+          .map((b: any) => {
+            const title = String(b.title || '').toLowerCase();
+            const author = String(b.author || '').toLowerCase();
+            const desc = String(b.description || '').toLowerCase();
+            const cat = String(b.category || '').toLowerCase();
+            const langTag = String(b.language || '').toLowerCase();
+            let score = 0;
+            if (qLower && title.includes(qLower)) score += 60;
+            if (qLower && author.includes(qLower)) score += 45;
+            for (const tok of searchTokens) {
+              if (!tok || tok.length < 2) continue;
+              if (title.includes(tok)) score += 28;
+              else if (author.includes(tok)) score += 20;
+              else if (cat.includes(tok)) score += 16;
+              else if (langTag === tok) score += 14;
+              else if (desc.includes(tok)) score += 8;
+            }
+            if ((b.chapters?.length || 0) >= 3) score += 4;
+            return { book: b, score };
+          })
+          .filter((item: { book: any; score: number }) => item.score >= 12)
+          .sort((a: { book: any; score: number }, b: { book: any; score: number }) => b.score - a.score)
+          .slice(0, 4);
+      }
+
+      const localMatches = scoredLocal.map(({ book: b }) => ({
+        source: 'earth_library',
+        id: b.id,
+        title: b.title,
+        author: b.author,
+        language: b.language,
+        category: b.category,
+        chaptersCount: Array.isArray(b.chapters) ? b.chapters.length : 0,
+        description: String(b.description || '').slice(0, 140),
+      }));
+
+      // Only hit external open-book crawlers if the user asked for a specific title not yet in our local library
+      let openMatches: any[] = [];
+      if (localMatches.length === 0) {
+        try {
+          const crawled = await deps.crawlOpenBooks(q, 6);
+          const rawItems = Array.isArray(crawled?.results)
+            ? crawled.results
+            : Array.isArray(crawled?.books)
+              ? crawled.books
+              : [];
+          openMatches = rawItems.slice(0, 5).map((b: any) => ({
+            source: b.sourceName || b.source || 'open_library',
+            title: b.title,
+            author: b.author,
+            language: b.language,
+            year: b.year,
+            url: b.sourceUrl || b.providerFullTextUrl || b.textUrl,
+          }));
+        } catch {
+          // non-fatal
         }
       }
 
-      const topBook = localMatches[0];
+      // If still nothing matched a specific query, offer our finest curated classic rather than leaving user empty-handed
+      const topBook =
+        localMatches[0] ||
+        (openMatches.length === 0 && allBooks[0]
+          ? {
+              source: 'earth_library',
+              id: allBooks[0].id,
+              title: allBooks[0].title,
+              author: allBooks[0].author,
+              language: allBooks[0].language,
+              category: allBooks[0].category,
+              chaptersCount: allBooks[0].chapters?.length || 1,
+              description: String(allBooks[0].description || '').slice(0, 140),
+            }
+          : null);
       const topOpen = openMatches[0];
-      const fallbackReply =
-        localMatches.length > 0
-          ? `为你从数字图书馆找到《${topBook.title}》（${topBook.author}），已为你打开图书馆阅读环境。`
-          : openMatches.length > 0
-            ? `从全球开放图书馆检索到《${topOpen.title}》（${topOpen.author}），已为你打开数字图书馆继续浏览。`
-            : `暂未检索到匹配“${q}”的书籍，我已为你打开数字图书馆，你可以换个关键词继续挑选。`;
+
+      steps.push({
+        id: 'step_library_search',
+        label: isZh ? '已为你挑选馆藏全文经典' : 'Selected curated full-text edition',
+        status: 'completed',
+        detail: topBook ? `《${topBook.title}》` : `${openMatches.length} 开放书籍`,
+        timestamp: nowIso(),
+      });
+
+      const replyText = topBook
+        ? isZh
+          ? `为你挑选了《${topBook.title}》（${topBook.author}），${topBook.description ? `${topBook.description.slice(0, 56)}… ` : ''}这就直接为你翻开沉浸阅读页！`
+          : `I picked "${topBook.title}" by ${topBook.author} — opening the reading page for you now.`
+        : topOpen
+          ? isZh
+            ? `已为你检索到《${topOpen.title}》（${topOpen.author}），正在进入图书馆为你打开阅读页。`
+            : `Found "${topOpen.title}" by ${topOpen.author} — opening the library reader now.`
+          : isZh
+            ? `已为你打开数字图书馆，马上挑选一本好书开始阅读吧。`
+            : `Opening the Digital Library so you can dive right into a great book.`;
 
       clientActions.push(
         topBook?.id
-          ? { type: 'open_book_by_id', bookId: topBook.id, query: q }
+          ? { type: 'open_book_by_id', bookId: topBook.id, autoRead: true, query: q }
           : { type: 'open_book', query: q }
       );
 
       steps.push({
         id: 'step_library_open',
-        label: isZh ? '正在为你呈现阅读界面' : 'Opening Digital Library',
+        label: isZh ? '已直接展开沉浸阅读器' : 'Opening full-screen reader',
         status: 'completed',
         timestamp: nowIso(),
       });
@@ -807,7 +995,7 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
         intentSummary: cleanPrompt.slice(0, 80),
         module: 'library',
         steps,
-        payload: { query: q },
+        payload: { query: q, bookId: topBook?.id },
         result: resultData,
       });
 
@@ -816,7 +1004,8 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
         sessionId,
         module: 'library',
         model: 'ONE AI',
-        reply: aiSummary || fallbackReply,
+        emotion: 'cheerful',
+        reply: replyText,
         steps,
         clientActions,
         resultData,
@@ -948,8 +1137,8 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
         .join('\n');
 
       steps.push({
-        id: 'step_free_image_pool',
-        label: isZh ? '正在动态重组免费 AI 额度为你绘制画面' : 'Recomposing free AI image pool',
+        id: 'step_one_image_studio',
+        label: isZh ? '正在为你绘制画面' : 'Generating artwork',
         status: 'completed',
         timestamp: nowIso(),
       });
@@ -968,8 +1157,8 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
         });
 
         const replyText = isZh
-          ? `已经为你画好了：「${image.captionZh}」（由 ${image.providerLabelZh} 免费额度实时生成，点击可放大或保存）。`
-          : `Here is your generated artwork: "${image.captionZh}" (created via ${image.providerLabelZh}).`;
+          ? `已经为你画好了：「${image.captionZh}」，点击可放大或保存。`
+          : `Here is your artwork: "${image.captionZh}".`;
 
         const resultData = { image, clientActions };
         oneAiDb.upsertAgentSession({

@@ -679,9 +679,9 @@ export async function executeGeminiToolCall(
           return {
             ok: true,
             summary: isZh
-              ? `已通过免费额度池生成图片 (${img.providerLabelZh || '免费池'})`
-              : `Generated image via free pool (${img.providerLabelZh || 'Free Pool'})`,
-            response: { ok: true, captionZh: img.captionZh, provider: img.providerLabelZh },
+              ? `已为你生成图片：「${img.captionZh || '画面'}」`
+              : `Generated artwork: "${img.captionZh || 'Artwork'}"`,
+            response: { ok: true, captionZh: img.captionZh },
           };
         }
       } catch {
@@ -689,7 +689,7 @@ export async function executeGeminiToolCall(
       }
       return {
         ok: false,
-        summary: isZh ? '免费生图节点暂时繁忙' : 'Free image pool temporarily busy',
+        summary: isZh ? '画室当前繁忙，请稍后重试' : 'Art studio temporarily busy',
         response: { ok: false, error: 'Image generation failed' },
       };
     }

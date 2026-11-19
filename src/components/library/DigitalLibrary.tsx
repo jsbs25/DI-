@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { Book, Chapter, BookAnnotation, BookShelfItem, BookshelfStatus, Language } from '../../types/index.ts';
 import { EpubReader } from './EpubReader.tsx';
+import { AppleBookReader } from './AppleBookReader.tsx';
+import { NoorIslamicPdfPortal } from './NoorIslamicPdfPortal.tsx';
 import { PdfDocumentViewer } from '../browser/PdfDocumentViewer.tsx';
 import { getBookEmbedUrl, getBookPdfUrl, isRtlLanguage } from './bookEmbedUrl.ts';
 import { AdminLibrary } from './AdminLibrary.tsx';
@@ -38,8 +40,10 @@ import type { LibraryAgentAction } from '../../utils/oneAgentController.ts';
 interface DigitalLibraryProps {
   lang: Language;
   currentUser?: { id: string } | null;
-  /** When set, opens the detail view for a specific book (cross-module navigation). */
+  /** When set, opens the detail view (or directly launches Apple Books Reader when focusBookAutoRead is true). */
   focusBookId?: string | null;
+  focusBookSeq?: number;
+  focusBookAutoRead?: boolean;
   /** Driven by One. voice AI: searches & immediately opens the matched book reader cleanly on mobile and desktop. */
   quickAction?: LibraryAgentAction | null;
 }
@@ -116,10 +120,11 @@ const SHELF_TABS: { id: BookshelfStatus | 'all'; label: string }[] = [
   { id: 'favorite', label: '收藏' }
 ];
 
-export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUser, focusBookId, quickAction }) => {
+export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUser, focusBookId, focusBookSeq, focusBookAutoRead, quickAction }) => {
   // ---- View routing ----
-  const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf' | 'admin'>('home');
+  const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf' | 'noor' | 'admin'>('home');
   const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [noorInitialQuery, setNoorInitialQuery] = useState<string>('');
 
   // ---- Data ----
   const [books, setBooks] = useState<Book[]>([]);
@@ -210,28 +215,40 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     loadBooks();
   }, [activeCategory, searchQuery]);
 
-  // Cross-module navigation: when a book id is provided from another module
-  // (e.g. Knowledge Universe), load that book and open its detail view.
+  // Cross-module & AI navigation: when a book id is provided, load full chapters
+  // and immediately open the Apple Books Reader if focusBookAutoRead is enabled.
   useEffect(() => {
     if (!focusBookId) return;
     let cancelled = false;
     fetch(`/api/library/books/${focusBookId}`)
       .then(r => r.json())
-      .then(d => {
+      .then(async d => {
         if (!cancelled && d.success && d.book) {
           setSelectedBook(d.book);
+          if (Array.isArray(d.annotations)) setAnnotations(d.annotations);
           setView('detail');
+          if (focusBookAutoRead) {
+            await openReader(d.book);
+          }
         }
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [focusBookId]);
+  }, [focusBookId, focusBookSeq, focusBookAutoRead]);
 
   const handledLibrarySeqRef = useRef<number>(0);
   useEffect(() => {
     if (!quickAction || !quickAction.query?.trim() || quickAction.seq === handledLibrarySeqRef.current) return;
     handledLibrarySeqRef.current = quickAction.seq;
     const q = quickAction.query.trim();
+    if (/^__noor_library__$|مكتبة\s*ال?نور|noor[\s-]?book|努尔图书馆|伊斯兰(?:书籍|书库|电子书|图书|PDF)/i.test(q)) {
+      const cleanedNoorQ = q
+        .replace(/__noor_library__|مكتبة\s*ال?نور|noor[\s-]?book|努尔图书馆|伊斯兰(?:书籍|书库|电子书|图书|PDF)/gi, '')
+        .trim();
+      setNoorInitialQuery(cleanedNoorQ);
+      setView('noor');
+      return;
+    }
     let cancelled = false;
 
     setView('home');
@@ -1008,9 +1025,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             </div>
           </div>
 
-          <nav className="grid grid-cols-3 gap-2 md:hidden" aria-label="ONE LIBRARY 导航">
+          <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:hidden" aria-label="ONE LIBRARY 导航">
             {[
               { id: 'home', label: '首页' },
+              { id: 'noor', label: 'مكتبة النور · PDF' },
               { id: 'shelf', label: '我的书架' },
               { id: 'admin', label: '管理' }
             ].map(n => (
@@ -1019,7 +1037,15 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 type="button"
                 onClick={() => setView(n.id as any)}
                 aria-current={view === n.id ? 'page' : undefined}
-                className={`min-h-11 rounded-xl px-3 text-sm font-medium transition-colors cursor-pointer ${view === n.id ? 'bg-[var(--color-one-accent)] text-[#071018]' : 'border border-[var(--color-one-border)] bg-white/[0.02] text-[var(--color-one-text-muted)] hover:bg-white/[0.05] hover:text-white'}`}
+                className={`min-h-11 rounded-xl px-3 text-xs font-medium transition-colors cursor-pointer ${
+                  view === n.id
+                    ? n.id === 'noor'
+                      ? 'bg-emerald-500 text-[#04140e] font-semibold'
+                      : 'bg-[var(--color-one-accent)] text-[#071018]'
+                    : n.id === 'noor'
+                      ? 'border border-emerald-500/35 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20'
+                      : 'border border-[var(--color-one-border)] bg-white/[0.02] text-[var(--color-one-text-muted)] hover:bg-white/[0.05] hover:text-white'
+                }`}
               >
                 {n.label}
               </button>
@@ -1029,13 +1055,22 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           <nav className="hidden items-center gap-1 rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] p-1 text-xs font-medium md:flex">
             {[
               { id: 'home', label: '首页' },
+              { id: 'noor', label: 'مكتبة النور · 伊斯兰 PDF' },
               { id: 'shelf', label: '我的书架' },
               { id: 'admin', label: '管理' }
             ].map(n => (
               <button
                 key={n.id}
                 onClick={() => setView(n.id as any)}
-                className={`rounded-xl px-3 py-2 transition-colors cursor-pointer ${view === n.id ? 'bg-white/[0.08] text-white' : 'text-[var(--color-one-text-muted)] hover:bg-white/[0.04] hover:text-white'}`}
+                className={`rounded-xl px-3 py-2 transition-colors cursor-pointer ${
+                  view === n.id
+                    ? n.id === 'noor'
+                      ? 'bg-emerald-500 text-[#04140e] font-semibold'
+                      : 'bg-white/[0.08] text-white'
+                    : n.id === 'noor'
+                      ? 'text-emerald-200 hover:bg-emerald-500/15 hover:text-white'
+                      : 'text-[var(--color-one-text-muted)] hover:bg-white/[0.04] hover:text-white'
+                }`}
               >
                 {n.label}
               </button>
@@ -1151,11 +1186,26 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   </div>
                 </div>
                 <div className="mt-4">
-                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">阿拉伯语馆藏官方入口 · 仅跳转，不复制全文</p>
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-emerald-300/80">مكتبة النور · 伊斯兰与阿拉伯语 PDF 书库（站内直读 + 下载）</p>
                   <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNoorInitialQuery(searchQuery.trim());
+                        setView('noor');
+                      }}
+                      className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-emerald-400/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25"
+                    >
+                      <BookOpen className="h-3.5 w-3.5" />
+                      <span>مكتبة النور · 进入 5,099+ 伊斯兰 PDF 书库</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                    <a href="https://www.noor-book.com/" target="_blank" rel="noopener noreferrer" title="مكتبة النور 官方网站" className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">
+                      <span>Noor Book 官网</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
                     <a href="https://waqfeya.net/books" target="_blank" rel="noopener noreferrer" title="Waqfeya 官方扫描书目录" className="inline-flex min-h-11 items-center rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">Waqfeya</a>
                     <a href="https://shamela.ws/search" target="_blank" rel="noopener noreferrer" title="Shamela 官方站内搜索" className="inline-flex min-h-11 items-center rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">Shamela</a>
-                    <a href="https://www.qdl.qa/en/search/site/" target="_blank" rel="noopener noreferrer" title="Qatar Digital Library 官方档案搜索" className="inline-flex min-h-11 items-center rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">Qatar Digital Library</a>
                   </div>
                 </div>
               </div>
@@ -1172,7 +1222,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   <p className="mb-3 text-[11px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">馆藏精选</p>
                   <div className="mx-auto aspect-[2/3] w-44 overflow-hidden rounded-2xl border border-white/10 shadow-[var(--shadow-one-md)] transition duration-300 group-hover:scale-[1.02] sm:w-52">
                     <img
-                      src={featuredBook.coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80'}
+                      src={featuredBook.coverImage || '/assets/library/cover-little-prince.jpg'}
                       alt={featuredBook.title}
                       className="h-full w-full object-cover"
                     />
@@ -1482,7 +1532,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             <div>
               <div className="w-full max-w-xs aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-slate-700/50 bg-slate-900">
                 <img
-                  src={selectedBook.coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80'}
+                  src={selectedBook.coverImage || '/assets/library/cover-little-prince.jpg'}
                   alt={selectedBook.title}
                   className="w-full h-full object-cover"
                 />
@@ -1657,269 +1707,45 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       )}
 
       {/* ===================================================================== */}
+      {/* NOOR ISLAMIC PDF PORTAL VIEW                                         */}
+      {/* ===================================================================== */}
+      {view === 'noor' && (
+        <NoorIslamicPdfPortal
+          lang={lang}
+          initialQuery={noorInitialQuery}
+          onBack={() => setView('home')}
+          onOpenPdf={(payload) => setPdfReader(payload)}
+          onBookSaved={(savedBook) => {
+            setBooks((prev) => (prev.some((b) => b.id === savedBook.id) ? prev : [savedBook, ...prev]));
+          }}
+        />
+      )}
+
+      {/* ===================================================================== */}
       {/* ADMIN VIEW                                                           */}
       {/* ===================================================================== */}
       {view === 'admin' && <AdminLibrary onBack={() => setView('home')} />}
 
       {/* ===================================================================== */}
-      {/* READER MODAL                                                         */}
+      {/* APPLE BOOKS FULL-SCREEN READER                                       */}
       {/* ===================================================================== */}
       {readingBook && activeChapter && (
-        <div ref={readerDialogRef} role="dialog" aria-modal="true" aria-labelledby="library-reader-title" tabIndex={-1} onKeyDown={handleReaderDialogKeyDown} className="fixed inset-0 z-50 bg-[#030712]/98 backdrop-blur-2xl flex flex-col animate-in fade-in duration-200 focus:outline-none">
-          {/* Reader header */}
-          <header className="min-h-16 border-b border-slate-800 px-3 sm:px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-2 py-2 select-none bg-[#02050f]/80 shrink-0">
-            <div className="flex w-full md:w-auto min-w-0 items-center justify-between gap-2">
-              <div className="flex items-center space-x-3 min-w-0">
-              <button
-                type="button"
-                onClick={closeReader}
-                aria-label="关闭阅读器"
-                className="min-h-11 min-w-11 flex items-center justify-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer shrink-0"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">返回</span>
-              </button>
-              <div className="min-w-0">
-                <h2 id="library-reader-title" className="text-sm font-serif font-bold text-white line-clamp-1">{readingBook.title}</h2>
-                <span className="text-[11px] text-amber-400">{readingBook.author}</span>
-              </div>
-              </div>
-              <div className="flex md:hidden items-center gap-1 shrink-0">
-                <button type="button" onClick={handleReadAloud} aria-label={isSpeaking ? '停止朗读' : '朗读本章'} title={isSpeaking ? '停止朗读' : '朗读本章'} className={`min-h-11 min-w-11 flex items-center justify-center rounded-xl text-xs font-semibold border transition-all cursor-pointer ${isSpeaking ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'}`}>
-                  {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
-                </button>
-                <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? '退出全屏' : '全屏'} title={isFullscreen ? '退出全屏' : '全屏'} className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white cursor-pointer">
-                  <Maximize2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="hidden md:flex items-center space-x-2">
-              {/* Read aloud */}
-              <button
-                type="button"
-                onClick={handleReadAloud}
-                aria-label={isSpeaking ? '停止朗读' : '朗读本章'}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                  isSpeaking ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
-                }`}
-              >
-                {isSpeaking ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
-                <span className="hidden sm:inline">{isSpeaking ? '停止' : '诵读'}</span>
-              </button>
-
-              {/* Font size */}
-              <div role="group" aria-label="字体大小" className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
-                <button type="button" aria-label="缩小字体" onClick={() => setFontSize(Math.max(14, fontSize - 2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">A-</button>
-                <span className="text-[10px] font-mono text-slate-300">{fontSize}</span>
-                <button type="button" aria-label="增大字体" onClick={() => setFontSize(Math.min(30, fontSize + 2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">A+</button>
-              </div>
-
-              {/* Line height */}
-              <div role="group" aria-label="行距" className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
-                <button type="button" aria-label="减小行距" onClick={() => setLineHeight(Math.max(1.4, lineHeight - 0.2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">行距-</button>
-                <button type="button" aria-label="增大行距" onClick={() => setLineHeight(Math.min(2.6, lineHeight + 0.2))} className="px-1.5 text-xs text-slate-400 hover:text-white cursor-pointer">行距+</button>
-              </div>
-
-              {/* Theme */}
-              <div role="group" aria-label="阅读主题" className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl p-1">
-                <button type="button" onClick={() => setReaderTheme('sepia')} aria-label="纸张背景" aria-pressed={readerTheme === 'sepia'} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'sepia' ? 'bg-amber-950 text-amber-300' : 'text-slate-400'}`} title="纸张"><Sun className="w-3.5 h-3.5" /></button>
-                <button type="button" onClick={() => setReaderTheme('dark')} aria-label="夜间背景" aria-pressed={readerTheme === 'dark'} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'dark' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="夜间"><Moon className="w-3.5 h-3.5" /></button>
-                <button type="button" onClick={() => setReaderTheme('focus')} aria-label="专注模式" aria-pressed={readerTheme === 'focus'} className={`p-1 rounded-lg cursor-pointer ${readerTheme === 'focus' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="专注"><Menu className="w-3.5 h-3.5" /></button>
-              </div>
-
-              {/* Bookmark */}
-              <button type="button" onClick={async()=>{ if(!readingBook) return; const ch=readingBook.chapters[activeChapterIndex]; try{ const res=await fetch(`/api/library/books/${readingBook.id}/annotations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chapterId:ch?.id||'ch1',selectedText:`书签：${ch?.title||''}`,note:`阅读进度书签（第 ${activeChapterIndex+1}/${readingBook.chapters.length} 章）`})}); const data=await res.json(); if(data.success&&data.annotation){setAnnotations(p=>[data.annotation,...p]); setIsAnnotationDrawerOpen(true);} }catch{} }} aria-label="添加书签" className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-amber-300 cursor-pointer" title="添加书签">
-                <Bookmark className="w-3.5 h-3.5" />
-              </button>
-              {/* Fullscreen */}
-              <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? '退出全屏' : '全屏'} className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white cursor-pointer" title={isFullscreen ? '退出全屏' : '全屏'}>
-                <Maximize2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div className="flex md:hidden w-full flex-wrap items-center gap-1.5" role="group" aria-label="阅读设置">
-              <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-1 py-1" role="group" aria-label="字体大小">
-                <button type="button" aria-label="缩小字体" onClick={() => setFontSize(Math.max(14, fontSize - 2))} className="min-h-11 min-w-11 rounded-lg text-xs text-slate-300 hover:text-white cursor-pointer">A-</button>
-                <span className="text-[10px] font-mono text-slate-300">{fontSize}</span>
-                <button type="button" aria-label="增大字体" onClick={() => setFontSize(Math.min(30, fontSize + 2))} className="min-h-11 min-w-11 rounded-lg text-xs text-slate-300 hover:text-white cursor-pointer">A+</button>
-              </div>
-              <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl px-1 py-1" role="group" aria-label="行距">
-                <button type="button" aria-label="减小行距" onClick={() => setLineHeight(Math.max(1.4, lineHeight - 0.2))} className="min-h-11 min-w-11 rounded-lg text-[11px] text-slate-300 hover:text-white cursor-pointer">行距-</button>
-                <button type="button" aria-label="增大行距" onClick={() => setLineHeight(Math.min(2.6, lineHeight + 0.2))} className="min-h-11 min-w-11 rounded-lg text-[11px] text-slate-300 hover:text-white cursor-pointer">行距+</button>
-              </div>
-              <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-xl p-1" role="group" aria-label="阅读主题">
-                <button type="button" onClick={() => setReaderTheme('sepia')} aria-label="纸张背景" aria-pressed={readerTheme === 'sepia'} className={`min-h-11 min-w-11 rounded-lg cursor-pointer ${readerTheme === 'sepia' ? 'bg-amber-950 text-amber-300' : 'text-slate-400'}`} title="纸张"><Sun className="w-4 h-4 mx-auto" /></button>
-                <button type="button" onClick={() => setReaderTheme('dark')} aria-label="夜间背景" aria-pressed={readerTheme === 'dark'} className={`min-h-11 min-w-11 rounded-lg cursor-pointer ${readerTheme === 'dark' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="夜间"><Moon className="w-4 h-4 mx-auto" /></button>
-                <button type="button" onClick={() => setReaderTheme('focus')} aria-label="专注模式" aria-pressed={readerTheme === 'focus'} className={`min-h-11 min-w-11 rounded-lg cursor-pointer ${readerTheme === 'focus' ? 'bg-slate-800 text-cyan-300' : 'text-slate-400'}`} title="专注"><Menu className="w-4 h-4 mx-auto" /></button>
-              </div>
-              <button type="button" onClick={async()=>{ if(!readingBook) return; const ch=readingBook.chapters[activeChapterIndex]; try{ const res=await fetch(`/api/library/books/${readingBook.id}/annotations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chapterId:ch?.id||'ch1',selectedText:`书签：${ch?.title||''}`,note:`阅读进度书签（第 ${activeChapterIndex+1}/${readingBook.chapters.length} 章）`})}); const data=await res.json(); if(data.success&&data.annotation){setAnnotations(p=>[data.annotation,...p]); setIsAnnotationDrawerOpen(true);} }catch{} }} aria-label="添加书签" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-amber-300 cursor-pointer" title="添加书签"><Bookmark className="w-4 h-4" /></button>
-            </div>
-          </header>
-
-          {/* Reader body */}
-          <div className="flex-1 flex overflow-hidden">
-            {/* TOC (hidden in focus mode) */}
-            {readerTheme !== 'focus' && (
-              <aside className="w-56 border-r border-slate-800 bg-[#060c20]/60 hidden md:flex flex-col p-4 select-none shrink-0">
-                <span className="text-xs font-semibold text-slate-400 mb-3 px-2">目录</span>
-                <div className="space-y-1 overflow-y-auto">
-                  {readingBook.chapters.map((ch, idx) => (
-                    <button
-                      key={ch.id}
-                      onClick={() => { setActiveChapterIndex(idx); setSelectedText(''); setAiExplanation(null); setAiCitation(null); setAiReadingNotice(null); setAiAnswerReady(false); setAiNoteSaved(false); setAiSaveMessage(null); }}
-                      className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                        activeChapterIndex === idx ? 'bg-amber-950/80 text-amber-300 border border-amber-600/50' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
-                      }`}
-                    >
-                      {ch.title}
-                    </button>
-                  ))}
-                </div>
-              </aside>
-            )}
-
-            {/* Main reading canvas */}
-            <main
-              onPointerUp={handleTextSelection}
-              dir={isRtlLanguage(readingBook.language) ? 'rtl' : 'ltr'}
-              lang={readingBook.language || undefined}
-              className={`flex-1 overflow-y-auto p-6 sm:p-12 lg:px-24 flex justify-center transition-colors ${readerBg}`}
-            >
-              <div className="max-w-3xl w-full">
-                <div className="mb-10 pb-6 border-b border-slate-700/50">
-                  <span className="text-xs text-amber-400 font-mono tracking-wider uppercase block mb-1">
-                    {activeChapterIndex + 1} / {readingBook.chapters.length}
-                  </span>
-                  <h1 className="text-2xl sm:text-3xl font-serif font-bold tracking-tight">{activeChapter.title}</h1>
-                </div>
-
-                <div className="font-serif leading-relaxed space-y-6" style={{ fontSize: `${fontSize}px`, ...readerLineHeight }}>
-                  {activeChapter.content.split('\n\n').map((para, i) => (
-                    <p key={i} className="text-justify">{para}</p>
-                  ))}
-                </div>
-
-                {/* Chapter navigation */}
-                <div className="mt-16 pt-8 border-t border-slate-700/50 flex items-center justify-between text-xs">
-                  <button
-                    type="button"
-                    disabled={activeChapterIndex === 0}
-                    onClick={() => { setActiveChapterIndex(prev => Math.max(0, prev - 1)); }}
-                    className="min-h-11 px-3 flex items-center space-x-1 hover:text-white disabled:opacity-30 cursor-pointer"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                    <span>上一章</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => saveProgress(Math.round(((activeChapterIndex + 1) / readingBook.chapters.length) * 100))}
-                    className="min-h-11 px-3 text-amber-400 hover:text-amber-300 cursor-pointer"
-                  >
-                    保存进度
-                  </button>
-                  <button
-                    type="button"
-                    disabled={activeChapterIndex === readingBook.chapters.length - 1}
-                    onClick={() => setActiveChapterIndex(prev => Math.min(readingBook.chapters.length - 1, prev + 1))}
-                    className="min-h-11 px-3 flex items-center space-x-1 hover:text-white disabled:opacity-30 cursor-pointer"
-                  >
-                    <span>下一章</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </main>
-
-            {/* Selection AI sidebar */}
-            {(selectedText || isAnnotationDrawerOpen) && readerTheme !== 'focus' && (
-              <aside aria-label={selectedText ? 'AI 智能阅读与批注' : '批注'} className="fixed inset-x-0 top-[35vh] bottom-0 z-[60] border-t border-slate-800 bg-[#060c22] flex flex-col p-4 overflow-y-auto rounded-t-2xl shadow-2xl md:relative md:inset-auto md:z-auto md:top-auto md:right-auto md:bottom-auto md:left-auto md:w-80 lg:w-96 md:rounded-none md:shadow-none md:border-t-0 md:border-l shrink-0">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
-                  <div className="flex items-center space-x-2">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <span className="font-semibold text-xs text-white">{selectedText ? 'AI 智能阅读' : '批注'}</span>
-                  </div>
-                  <button type="button" aria-label="关闭批注面板" onClick={() => { setSelectedText(''); setIsAnnotationDrawerOpen(false); setAiExplanation(null); setAiCitation(null); setAiReadingNotice(null); setAiAnswerReady(false); setAiNoteSaved(false); setAiSaveMessage(null); window.requestAnimationFrame(() => readerDialogRef.current?.focus()); }} className="min-h-11 min-w-11 flex items-center justify-center rounded-lg text-slate-400 hover:text-white cursor-pointer">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {selectedText && (
-                  <div className="space-y-4 mb-6">
-                    <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 text-xs italic text-amber-200">
-                      "{selectedText}"
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <button onClick={handleReadSelection} className="flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs cursor-pointer">
-                        <Volume2 className="w-3.5 h-3.5" /><span>朗读</span>
-                      </button>
-                      <button onClick={handleExplainSelection} disabled={isAiExplaining} className="flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-semibold text-xs cursor-pointer">
-                        <Sparkles className="w-3.5 h-3.5" /><span>{isAiExplaining ? '解读中...' : 'AI 解读'}</span>
-                      </button>
-                    </div>
-
-                    {aiExplanation && (
-                      <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-xl text-xs leading-relaxed text-slate-300 whitespace-pre-line">
-                        <div className="font-semibold text-amber-400 mb-2 flex items-center space-x-1">
-                          <Sparkles className="w-3.5 h-3.5" /><span>AI 解读:</span>
-                        </div>
-                        {aiExplanation}
-                      </div>
-                    )}
-
-                    {aiCitation && (
-                      <div className="bg-slate-950/70 border border-amber-700/40 p-3 rounded-xl text-[11px] leading-relaxed text-slate-300">
-                        <div className="font-semibold text-amber-300 mb-1">可核查引用</div>
-                        <div>《{aiCitation.title}》— {aiCitation.author}</div>
-                        <div>版本：{aiCitation.version}</div>
-                        <div>定位：{aiCitation.location}</div>
-                        <a href={safeHttpsUrl(aiCitation.sourceUrl)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-1 text-cyan-300 hover:text-cyan-200">
-                          核查原始来源 <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    )}
-                    {aiReadingNotice && <p className="text-[10px] leading-relaxed text-slate-400">{aiReadingNotice}</p>}
-
-                    <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">笔记:</label>
-                      <textarea
-                        rows={3}
-                        value={annotationNote}
-                        onChange={e => setAnnotationNote(e.target.value)}
-                        placeholder="记录你的思考..."
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                      />
-                      <button onClick={handleSaveAnnotation} disabled={aiNoteSaved} className="mt-2 w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-xs font-medium cursor-pointer">
-                        {aiNoteSaved ? '已保存为私有知识笔记' : aiCitation && aiAnswerReady ? '保存为私有知识笔记' : '保存批注'}
-                      </button>
-                      {aiSaveMessage && <p className="mt-2 text-[10px] text-amber-300">{aiSaveMessage}</p>}
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">批注 ({annotations.length})</span>
-                  {annotations.length === 0 ? (
-                    <div className="text-center text-slate-500 py-8 text-xs">划选正文即可 AI 解读并保存批注。</div>
-                  ) : (
-                    annotations.map(a => (
-                      <div key={a.id} className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1.5">
-                        <p className="text-xs italic text-amber-300 font-serif">"{a.selectedText}"</p>
-                        {a.note && <p className="text-xs text-slate-200">笔记: {a.note}</p>}
-                        {a.aiExplanation && <p className="text-[11px] text-slate-400 bg-slate-950/50 p-2 rounded-lg line-clamp-3">AI: {a.aiExplanation}</p>}
-                        {a.citation && (
-                          <a href={safeHttpsUrl(a.citation.sourceUrl)} target="_blank" rel="noreferrer" className="block text-[10px] text-cyan-300 hover:text-cyan-200">
-                            《{a.citation.title}》· {a.citation.version} · {a.citation.location} <ExternalLink className="inline w-3 h-3" />
-                          </a>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </aside>
-            )}
-          </div>
-        </div>
+        <AppleBookReader
+          key={readingBook.id}
+          book={readingBook}
+          lang={lang}
+          initialChapterIndex={activeChapterIndex}
+          initialAnnotations={annotations}
+          onClose={closeReader}
+          onSaveProgress={(progress, chapterId) => {
+            if (chapterId) {
+              const idx = readingBook.chapters.findIndex((c) => c.id === chapterId);
+              if (idx >= 0 && idx !== activeChapterIndex) setActiveChapterIndex(idx);
+            }
+            void saveProgress(progress);
+          }}
+          onAnnotationsChange={setAnnotations}
+        />
       )}
 
       {/* ===================================================================== */}
@@ -2012,24 +1838,28 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         </div>
       )}
       {pdfReader && (
-        <div role="dialog" aria-modal="true" aria-label="PDF 在线阅读" className="fixed inset-0 z-50 flex flex-col bg-[#030712]/98 backdrop-blur-2xl">
-          <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+        <div role="dialog" aria-modal="true" aria-label="PDF 在线阅读" className="fixed inset-0 z-50 flex flex-col bg-[#0b0e14]/98 backdrop-blur-2xl">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-2.5">
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-bold text-white">{pdfReader.title}</h2>
-              <p className="truncate text-[11px] text-slate-400">PDF 在线阅读（来源站点权限/CORS 可能影响加载）</p>
+              <h2 className="truncate text-sm font-semibold text-white">{pdfReader.title}</h2>
+              <p className="truncate text-[11px] text-slate-400">ONE PDF 阅读器 · 支持翻页、护眼/夜间纸张主题、站内搜索与一键下载</p>
             </div>
             <div className="ml-3 flex shrink-0 items-center gap-2">
               {pdfReader.sourceUrl && (
-                <a href={pdfReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-slate-700 px-3 text-[11px] text-slate-300 hover:text-white">
-                  <ExternalLink className="h-3.5 w-3.5" /> 官方来源
+                <a href={pdfReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-white/15 px-3 text-[11px] text-slate-300 hover:bg-white/10 hover:text-white">
+                  <ExternalLink className="h-3.5 w-3.5" /> 原始出处
                 </a>
               )}
-              <button type="button" onClick={() => setPdfReader(null)} aria-label="关闭阅读器" className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>
+              <button type="button" onClick={() => setPdfReader(null)} aria-label="关闭阅读器" className="cursor-pointer rounded-lg p-2 text-slate-300 hover:bg-white/10 hover:text-white"><X className="h-4 w-4" /></button>
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-auto p-4">
-            <PdfDocumentViewer sourceUrl={pdfReader.url} title={pdfReader.title} lang={lang} />
-            <p className="mx-auto mt-3 max-w-5xl text-[10px] text-slate-500">PDF 阅读进度/书签暂不自动保存到书架（受跨来源文件与客户端渲染限制）；如需持续阅读请在来源页面或保存后使用支持的阅读器。</p>
+          <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-4">
+            <PdfDocumentViewer
+              sourceUrl={pdfReader.url}
+              title={pdfReader.title}
+              lang={lang}
+              originPageUrl={pdfReader.sourceUrl}
+            />
           </div>
         </div>
       )}
@@ -2050,7 +1880,7 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] shadow-[var(--shadow-one-sm)] transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-[var(--color-one-border-strong)] group-hover:shadow-[var(--shadow-one-md)]">
         <img
-          src={book.coverImage || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80'}
+          src={book.coverImage || '/assets/library/cover-little-prince.jpg'}
           alt=""
           loading="lazy"
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"

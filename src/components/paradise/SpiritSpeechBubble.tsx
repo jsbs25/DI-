@@ -156,6 +156,12 @@ export const SpiritSpeechBubble: React.FC<SpiritSpeechBubbleProps> = ({ lang, co
           {/* Header Row */}
           <div className={`flex items-center justify-between gap-2 pb-1.5 mb-1.5 border-b ${isDay ? 'border-black/8' : 'border-white/10'}`}>
             <div className="flex items-center gap-1.5 min-w-0">
+              <img
+                src="/assets/spirit/one-butterfly-avatar.jpg"
+                alt={snap.aiName}
+                referrerPolicy="no-referrer"
+                className="h-6 w-6 shrink-0 rounded-full object-cover ring-1 ring-black/10 dark:ring-white/20"
+              />
               <span className="text-xs font-semibold tracking-tight truncate">{snap.aiName}</span>
               {liveBadgeText && (
                 <span
@@ -300,7 +306,7 @@ export const SpiritSpeechBubble: React.FC<SpiritSpeechBubbleProps> = ({ lang, co
                   </button>
                   <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[10px]">
                     <span className="truncate opacity-75">
-                      {bubble.generatedImage.providerLabelZh || (isZh ? '免费额度画室' : 'Free AI Pool')}
+                      {bubble.generatedImage.providerLabelZh || (isZh ? 'ONE 画室' : 'ONE Studio')}
                     </span>
                     <div className="flex items-center gap-1 shrink-0">
                       <button

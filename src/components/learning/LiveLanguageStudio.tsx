@@ -743,10 +743,15 @@ export const LiveLanguageStudio: React.FC<LiveLanguageStudioProps> = ({
       {/* Top Studio Header */}
       <div className={`flex items-center justify-between gap-2 border-b px-3.5 py-2.5 ${isDay ? 'border-black/10' : 'border-white/12'}`}>
         <div className="flex items-center gap-2 min-w-0">
-          <Sparkles className="h-4 w-4 shrink-0 opacity-80" />
+          <img
+            src="/assets/spirit/one-butterfly-avatar.jpg"
+            alt={snap.aiName}
+            referrerPolicy="no-referrer"
+            className="h-7 w-7 shrink-0 rounded-full object-cover ring-1 ring-black/10 dark:ring-white/20"
+          />
           <div className="min-w-0">
             <h3 className="text-sm font-semibold tracking-tight truncate">
-              {isZh ? 'AI 实景口语 · 闯关出题 · 免费画室' : 'Live Language & Free Art Studio'}
+              {isZh ? 'AI 实景口语 · 智能出题 · ONE 画室' : 'Live Language & ONE Art Studio'}
             </h3>
           </div>
         </div>
@@ -792,7 +797,7 @@ export const LiveLanguageStudio: React.FC<LiveLanguageStudioProps> = ({
           }`}
         >
           <ImageIcon className="h-3.5 w-3.5" />
-          <span>{isZh ? '免费生图' : 'Free Art'}</span>
+          <span>{isZh ? 'AI 绘图' : 'Art Studio'}</span>
         </button>
       </div>
 
@@ -1083,7 +1088,7 @@ export const LiveLanguageStudio: React.FC<LiveLanguageStudioProps> = ({
                 disabled={imageLoading || roleplayMessages.length === 0}
                 onClick={() => void handleIllustrateCurrentScene()}
                 className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[11px] font-medium cursor-pointer disabled:opacity-40 ${pillCls}`}
-                title="用免费 AI 额度把当前实景对话画成配图"
+                title="把当前实景对话立刻画成配图"
               >
                 {imageLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
                 <span>对话配图</span>
@@ -1359,9 +1364,9 @@ export const LiveLanguageStudio: React.FC<LiveLanguageStudioProps> = ({
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 text-xs font-semibold">
                 <Layers className="h-3.5 w-3.5" />
-                <span>免费额度动态重组生图引擎</span>
+                <span>ONE 极速视觉画室</span>
               </div>
-              <span className="text-[10px] opacity-65">零付费 Key · 多节点自动轮换</span>
+              <span className="text-[10px] opacity-65">多通道并行加速</span>
             </div>
 
             <textarea
@@ -1407,7 +1412,7 @@ export const LiveLanguageStudio: React.FC<LiveLanguageStudioProps> = ({
                 className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-semibold cursor-pointer disabled:opacity-40 ${activePillCls}`}
               >
                 {imageLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                <span>立即免费生成图片</span>
+                <span>立即生成图片</span>
               </button>
               <button
                 type="button"
@@ -1427,35 +1432,6 @@ export const LiveLanguageStudio: React.FC<LiveLanguageStudioProps> = ({
               </div>
             )}
           </div>
-
-          {/* Live Free Pool Nodes Overview */}
-          {poolNodes.length > 0 && (
-            <div className={`rounded-xl border p-2.5 space-y-1.5 ${cardCls}`}>
-              <div className="text-[11px] font-semibold opacity-80">当前可动态重组的免费额度节点池</div>
-              <div className="space-y-1">
-                {poolNodes.map((n) => (
-                  <div key={n.id} className="flex items-center justify-between gap-2 text-[10px]">
-                    <span className="truncate font-medium">{n.labelZh}</span>
-                    <span
-                      className={`shrink-0 rounded px-1.5 py-0.5 font-semibold ${
-                        n.status === 'ready'
-                          ? 'bg-emerald-600/18 text-emerald-700 dark:text-emerald-300'
-                          : n.status === 'cooldown'
-                            ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
-                            : 'opacity-55'
-                      }`}
-                    >
-                      {n.status === 'ready'
-                        ? '可用'
-                        : n.status === 'cooldown'
-                          ? `冷却 ${n.cooldownRemainingSec}s`
-                          : '待配置 Key'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Generated Artworks Gallery */}
           {generatedGallery.length > 0 && (
