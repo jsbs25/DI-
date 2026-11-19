@@ -149,22 +149,36 @@ export function resolveReadingEvidence(book: Book, chapterId: unknown, selectedT
 
 export function buildReadingPrompt(evidence: ReadingEvidence, replyLanguageCode = 'zh'): { prompt: string; systemInstruction: string } {
   const replyLanguage = SUPPORTED_REPLY_LANGUAGES[replyLanguageCode] || 'Chinese';
+  const { book, chapter, citation } = evidence;
+  const isArabic = (book.language || '').toLowerCase().startsWith('ar') || /[\u0600-\u06FF]/.test(evidence.selectedPassage.slice(0, 120));
   const prompt = [
-    `请用${replyLanguage}解释用户从书中选出的段落。`,
-    '请给出：必要时的翻译、关键词/难点、句法或表达说明，以及仅由所给原文支持的段落含义。',
-    '如果所给内容不足以回答某个部分，请直接说明不足；不要补造页码、章节、版本、引文或事实。',
-    '所选原文（来自服务器保存的正文）：',
+    `请用${replyLanguage}，严格依据当前书籍与所选段落的上下文进行解读（不要脱离原文、不要只给泛泛词典释义）。`,
+    `【书籍】《${citation.title}》 · ${citation.author}`,
+    `【版本/来源】${citation.version}；${citation.sourceUrl}`,
+    `【定位】${citation.location}${book.language ? `；原文语言：${book.language}` : ''}`,
+    `【文本范围】${evidence.coverage === 'full_text' ? '已存全文（本次仅提供所选段落及邻近上下文）' : '已存片段（非全书）'}`,
+    `【说明】${evidence.notice}`,
+    '',
+    '请按需提供（仅基于所给原文与邻近上下文能确认的部分）：',
+    '1) 准确翻译/转述（如原文为阿语等外语，给出通顺译文并可对关键词逐词/词组对应说明）',
+    '2) 关键词、难点词、语法/句法或修辞要点：必须结合“本句/本段”语境解释含义，不要脱离上下文',
+    isArabic ? '3) 若涉及阿拉伯语经典/宗教/学术文本：结合语境说明词义、用法或可能的语法角色；无法从当前上下文确认词根、学术观点或确切判读时必须明确说明“不确定”，不要编造' : '3) 结合文体与学科背景做谨慎解释；存在歧义或不同理解时如实说明，不把不确定内容说成定论',
+    '4) 仅由所给原文支持的段落含义与要点（不得声称已读全书或引用未提供内容）',
+    '',
+    '所选原文（服务器保存的正文，证据）：',
     JSON.stringify(evidence.selectedPassage),
-    '服务器核验的邻近上下文（同一章节）：',
+    '',
+    '服务器核验的邻近上下文（同一章节，证据）：',
     JSON.stringify(evidence.context),
-    `章节定位：${evidence.chapter.title}`
   ].join('\n');
   const systemInstruction = [
-    'You are an evidence-grounded reading assistant.',
-    'Use only the supplied source passage and its adjacent context as evidence for claims about this book.',
-    'Do not claim to have read the whole book. Do not infer missing text, page numbers, editions, or citations.',
-    'Clearly distinguish any optional general background from what the supplied text itself says; omit background if it cannot be stated reliably.',
-    `Answer in ${replyLanguage}.`
+    'You are an evidence-grounded, book-context-aware reading assistant for EARTH ONE Library.',
+    'Use only the supplied source passage and its adjacent context as evidence for claims about this book/chapter.',
+    'Stay grounded in the current book and selection: explain meaning in sentence and book context, not as detached dictionary-only answers.',
+    'For Arabic/Islamic/classical texts, be careful with grammar, rhetoric, jurisprudence, theology, and scholarly opinions; state uncertainty when the provided context is insufficient and never fabricate roots, citations, page numbers, or scholarly claims.',
+    'Do not claim to have read the whole book. Do not infer missing text, page numbers, editions, or citations beyond what is provided.',
+    'Clearly distinguish translation, explanation grounded in the text, and any optional general background; label background clearly and omit it if not reliable.',
+    `Reply in ${replyLanguage}.`,
   ].join(' ');
   return { prompt, systemInstruction };
 }
