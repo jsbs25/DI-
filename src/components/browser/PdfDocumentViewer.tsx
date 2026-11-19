@@ -204,7 +204,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
 
   // AI Page Explanation Drawer
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
-  const [aiAction, setAiAction] = useState<'explain' | 'translate' | 'summarize' | 'ask'>('explain');
+  const [aiAction, setAiAction] = useState<'explain' | 'translate' | 'summarize' | 'ask' | 'ocr'>('explain');
   const [aiTargetLang, setAiTargetLang] = useState<'zh' | 'en' | 'ar'>('zh');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiExplanation, setAiExplanation] = useState('');
@@ -423,7 +423,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   };
 
   const runLibraryAiAction = useCallback(
-    async (action: 'explain' | 'translate' | 'summarize' | 'ask', customQuestion?: string) => {
+    async (action: 'explain' | 'translate' | 'summarize' | 'ask' | 'ocr', customQuestion?: string) => {
       setAiPanelOpen(true);
       setAiAction(action);
       setAiLoading(true);
@@ -432,7 +432,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       const q = typeof customQuestion === 'string' ? customQuestion.trim() : '';
       let pageImageBase64: string | undefined;
       const ocrHint = /ocr|识别|识文|扫描/i.test(q || '');
-      const needsVision = ocrHint || currentPageText.trim().length < 40;
+      const needsVision = action === 'ocr' || ocrHint || currentPageText.trim().length < 40;
       if (needsVision && canvasRef.current && canvasRef.current.width > 0) {
         try { pageImageBase64 = canvasRef.current.toDataURL('image/jpeg', 0.72); } catch {}
       }
@@ -468,6 +468,10 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
           body.question = q || aiQuestion || (isChinese ? '请结合当前页内容回答。' : 'Answer based on this page.');
           body.pageImageBase64 = pageImageBase64;
           body.surroundingContext = currentPageText;
+        } else if (action === 'ocr') {
+          body.pageImageBase64 = pageImageBase64;
+          body.selectedText = currentPageText || undefined;
+          body.question = q || (isChinese ? '请识别本页可见文字。' : 'Extract visible text from this page.');
         }
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -477,7 +481,23 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
         });
         const data = await res.json();
         if (data?.success) {
-          const textOut = data.explanation || data.content || (typeof data.data?.text === 'string' ? data.data.text : '') || '';
+          let textOut = data.explanation || data.content || '';
+          if (action === 'ocr') {
+            const ocrText = data?.data?.text || (typeof data?.data === 'object' && data?.data && 'text' in data.data ? String((data.data as any).text || '') : '');
+            const warn = Array.isArray(data?.data?.warnings) ? (data.data.warnings as any[]).join('；') : '';
+            const conf = data?.data?.confidenceNote ? String(data.data.confidenceNote) : '';
+            const guess = data?.data?.languageGuess ? String(data.data.languageGuess) : '';
+            textOut = [
+              isChinese ? `【OCR 识别结果 · 第 ${pageNumber} 页】` : `[OCR Result · Page ${pageNumber}]`,
+              ocrText ? (isChinese ? `识别文本：\n${ocrText}` : `Extracted text:\n${ocrText}`) : '',
+              guess ? (isChinese ? `语言判断：${guess}` : `Language: ${guess}`) : '',
+              conf ? (isChinese ? `质量说明：${conf}` : `Confidence: ${conf}`) : '',
+              warn ? (isChinese ? `注意：${warn}` : `Warnings: ${warn}`) : '',
+              textOut && textOut !== ocrText ? (isChinese ? `\n补充说明：\n${textOut}` : `\nNotes:\n${textOut}`) : '',
+            ].filter(Boolean).join('\n\n');
+          } else if (!textOut && typeof data?.data?.text === 'string') {
+            textOut = data.data.text;
+          }
           setAiExplanation(textOut || (isChinese ? 'AI 已完成分析，但未返回可显示文本。' : 'No displayable text returned.'));
           setAiExplainedPage(pageNumber);
           const p = data.provider ? ` · ${data.provider}${data.model ? '/' + data.model : ''}` : '';
@@ -1086,10 +1106,10 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
               ))}
               <button
                 type="button"
-                onClick={() => void runLibraryAiAction('explain', '请对当前页进行 OCR/文字识别（如为扫描图请识别可见文字），并输出识别结果与不确定处说明。')}
+                onClick={() => void runLibraryAiAction('ocr')}
                 className="cursor-pointer rounded-lg px-2.5 py-1 text-[11px] font-medium transition"
-                style={{ border: `1px solid ${theme.border}`, color: theme.muted, backgroundColor: 'transparent' }}
-                title={isChinese ? '识别本页文字（扫描/OCR 辅助）' : 'OCR/extract text from this page'}
+                style={{ border: `1px solid ${aiAction === 'ocr' ? '#10B981' : theme.border}`, color: aiAction === 'ocr' ? '#059669' : theme.muted, backgroundColor: aiAction === 'ocr' ? 'rgba(16,185,129,0.12)' : 'transparent' }}
+                title={isChinese ? '识别本页文字（扫描/OCR）' : 'OCR/extract text from this page'}
               >
                 {isChinese ? '识文' : 'OCR'}
               </button>
