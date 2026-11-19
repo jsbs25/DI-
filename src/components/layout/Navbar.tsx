@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { User, Language, KnowledgeNode, Book, Community, Post } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
-import { Search, Command as CommandIcon, User as UserIcon, MapPin, ShieldCheck, Eye, EyeOff, LogOut, X, ChevronDown, Sparkles, Compass, BookOpen, Users2, Network, Sun, Moon } from 'lucide-react';
+import { Search, Command as CommandIcon, User as UserIcon, MapPin, ShieldCheck, Eye, EyeOff, LogOut, X, ChevronDown, Sparkles, Compass, BookOpen, Users2, Network, Sun, Moon, BatteryCharging, BatteryFull, BatteryLow, BatteryMedium } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton.tsx';
 
 interface NavbarProps {
@@ -53,10 +53,51 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [globalResults, setGlobalResults] = useState<{ users: User[]; posts: Post[]; books: Book[]; communities: Community[]; knowledge: KnowledgeNode[]; resources?: Array<{id:string;name:string;description:string;url:string;domain:string;primaryPlanet:string}> } | null>(null);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearching, setGlobalSearching] = useState(false);
+  const [batteryState, setBatteryState] = useState<{ level: number; charging: boolean } | null>(null);
 
   const searchWrapRef = useRef<HTMLDivElement>(null);
   const langMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const nav = navigator as Navigator & {
+      getBattery?: () => Promise<{
+        level: number;
+        charging: boolean;
+        addEventListener: (type: string, listener: () => void) => void;
+        removeEventListener: (type: string, listener: () => void) => void;
+      }>;
+    };
+    if (typeof nav.getBattery !== 'function') return;
+
+    let active = true;
+    let batteryObj: Awaited<ReturnType<NonNullable<typeof nav.getBattery>>> | null = null;
+    const syncBattery = () => {
+      if (!active || !batteryObj) return;
+      setBatteryState({
+        level: Math.max(0, Math.min(100, Math.round(batteryObj.level * 100))),
+        charging: Boolean(batteryObj.charging),
+      });
+    };
+
+    nav.getBattery()
+      .then((bat) => {
+        if (!active) return;
+        batteryObj = bat;
+        syncBattery();
+        bat.addEventListener('levelchange', syncBattery);
+        bat.addEventListener('chargingchange', syncBattery);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+      if (batteryObj) {
+        batteryObj.removeEventListener('levelchange', syncBattery);
+        batteryObj.removeEventListener('chargingchange', syncBattery);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
@@ -186,6 +227,34 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right: Fixed Utilities & Apple-Standard Personal Profile Capsule */}
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+          {batteryState && (
+            <div
+              title={
+                batteryState.charging
+                  ? (lang === 'zh' ? `设备正在充电 · ${batteryState.level}%` : `Charging · ${batteryState.level}%`)
+                  : (lang === 'zh' ? `设备电量 · ${batteryState.level}%` : `Battery · ${batteryState.level}%`)
+              }
+              aria-label={batteryState.charging ? `Charging ${batteryState.level}%` : `Battery ${batteryState.level}%`}
+              className={`hidden sm:inline-flex h-8 items-center gap-1 rounded-xl border px-2 text-[11px] font-medium tabular-nums transition-colors ${
+                batteryState.charging
+                  ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                  : batteryState.level <= 20
+                    ? 'border-rose-500/25 bg-rose-500/10 text-rose-600 dark:text-rose-300'
+                    : 'border-slate-900/10 dark:border-white/[0.1] bg-slate-900/[0.03] dark:bg-white/[0.04] text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              {batteryState.charging ? (
+                <BatteryCharging className="h-3.5 w-3.5 shrink-0" />
+              ) : batteryState.level <= 20 ? (
+                <BatteryLow className="h-3.5 w-3.5 shrink-0" />
+              ) : batteryState.level <= 65 ? (
+                <BatteryMedium className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <BatteryFull className="h-3.5 w-3.5 shrink-0" />
+              )}
+              <span>{batteryState.level}%</span>
+            </div>
+          )}
           <PWAInstallButton lang={lang} compact={true} />
           {onToggleTheme && (
             <button

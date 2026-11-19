@@ -415,7 +415,7 @@ export async function generateContextAwareFallbackReply(
   }
 
   return {
-    text: '这句有点偏具体探讨或实时推理，我本地百科词条里没有现成记录。如果你想和我自由深聊或写完整方案，可以在右上角设置里接上 DeepSeek 密钥或本地 Ollama，不过常规讨论、记事和控站我随时都能接住。',
+    text: '这句有点偏具体探讨或实时推理，我本地百科词条里没有现成记录。如果你想和我自由深聊或写完整方案，等管理员在后台调度面板接入更多云端引擎后就能深度展开，不过常规讨论、记事和控站我随时都能接住。',
     source: 'context-engine',
   };
 }

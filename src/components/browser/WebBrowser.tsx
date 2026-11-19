@@ -668,30 +668,22 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
     setIsOllamaTesting(true);
     const start = Date.now();
     try {
-      const res = await fetch('/api/ai/ollama/roles');
+      const res = await fetch('/api/one-ai/quota');
       const data = await res.json();
       const latency = Date.now() - start;
-      if (data.success && data.ollama) {
-        setOllamaStatus({
-          ...data.ollama,
-          latencyMs: latency
-        });
-      }
-    } catch {
-      try {
-        const local = await fetch('http://127.0.0.1:11434/api/tags');
-        const lData = await local.json();
-        const latency = Date.now() - start;
-        const models = Array.isArray(lData?.models) ? lData.models.map((m: any) => m.name) : [];
+      if (data?.success) {
         setOllamaStatus(prev => ({
           ...prev,
-          running: true,
-          localModels: models.length ? models : prev.localModels,
-          latencyMs: latency
+          running: Boolean(data.hasLiveEngine),
+          chatModel: 'ONE AI',
+          crawlerModel: 'ONE AI',
+          chatModelId: 'one-ai',
+          crawlerModelId: 'one-ai',
+          latencyMs: latency,
         }));
-      } catch {
-        setOllamaStatus(prev => ({ ...prev, latencyMs: 1 }));
       }
+    } catch {
+      setOllamaStatus(prev => ({ ...prev, running: false, latencyMs: 1 }));
     } finally {
       setIsOllamaTesting(false);
     }
@@ -723,7 +715,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
     setIsCrawlerExtracting(true);
     setIsAiPanelOpen(true);
     setAiAnalysisType('crawler');
-    setAiOutput('🕷️ 正在调用本地 Ollama 深度大模型执行爬虫结构化知识抽取 (127.0.0.1:11434)...\n正在深度分析 DOM 内容结构、提炼核心论据、实体与学科图谱...');
+    setAiOutput('🕷️ 正在通过 ONE AI 全球智能调度引擎执行网页结构化知识抽取...\n正在深度分析 DOM 内容结构、提炼核心论据、实体与学科图谱...');
     try {
       const res = await fetch('/api/crawler/ai-extract', {
         method: 'POST',
@@ -736,9 +728,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
       });
       const data = await res.json();
       if (data.success && data.extraction) {
-        setAiOutput(`【🕷️ 本地 Ollama 爬虫深度结构化抽取报告】\n调用模型: ${data.modelUsed || ollamaStatus.crawlerModel || '本地 Ollama 大模型'}\n目标来源: ${activeTab.url}\n\n${data.extraction}`);
+        setAiOutput(`【ONE AI 网页深度结构化抽取报告】\n目标来源: ${activeTab.url}\n\n${data.extraction}`);
       } else {
-        setAiOutput(data.error || '本地 Ollama 深度大模型抽取未完成。请确认本地电脑已运行 `ollama serve`。');
+        setAiOutput(data.error || 'ONE AI 网页抽取暂不可用，请稍后重试。');
       }
     } catch (err: any) {
       setAiOutput(`请求异常: ${err.message}`);
@@ -2356,7 +2348,7 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
           <button
             onClick={() => setIsAiPanelOpen(!isAiPanelOpen)}
             aria-label={isAiPanelOpen ? '关闭 AI 伴侣' : '打开 AI 伴侣'}
-            title={`打开 Ollama AI 伴侣 (对话: ${ollamaStatus.chatModel || 'qwen3'} · 深度爬虫: ${ollamaStatus.crawlerModel || '32b'})`}
+            title="打开 ONE AI 网页研究伴侣"
             className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-all ${
               isAiPanelOpen
                 ? 'border-violet-300/25 bg-violet-300/10 text-violet-100 shadow-sm shadow-violet-950/30'
@@ -3112,8 +3104,8 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
                 <div className="flex items-center space-x-2">
                   <Sparkles className="w-4 h-4 text-cyan-300" />
                   <div>
-                    <span className="block font-semibold text-sm text-slate-100">网页研究伴侣</span>
-                    <span className="block text-[10px] text-slate-400">基于当前页面内容的分析与抽取 · 需可用 AI/Ollama 服务</span>
+                    <span className="block font-semibold text-sm text-slate-100">ONE AI 网页研究伴侣</span>
+                    <span className="block text-[10px] text-slate-400">基于当前页面内容的分析、翻译与抽取 · 自动智能调度</span>
                   </div>
                 </div>
                 <button onClick={() => setIsAiPanelOpen(false)} className="rounded-lg p-1.5 text-slate-500 hover:bg-white/5 hover:text-slate-200" aria-label="关闭研究伴侣">
@@ -3121,12 +3113,12 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
                 </button>
               </div>
 
-              {/* Ollama Local Connection & Roles Indicator */}
+              {/* Unified ONE AI Status Indicator */}
               <div className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-[11px] text-slate-300">
                 <div className="flex items-center justify-between font-semibold">
                   <span className="flex items-center gap-1.5 text-slate-200">
-                    <span className={`h-2 w-2 rounded-full ${ollamaStatus.latencyMs && ollamaStatus.latencyMs < 5000 ? "bg-emerald-400" : "bg-slate-500"}`} />
-                    本地 Ollama 状态
+                    <span className={`h-2 w-2 rounded-full ${ollamaStatus.running ? "bg-emerald-400" : "bg-amber-400"}`} />
+                    ONE AI 智能调度状态
                   </span>
                   <button
                     onClick={() => void refreshOllamaStatus()}
@@ -3136,15 +3128,9 @@ export const WebBrowser: React.FC<WebBrowserProps> = ({ lang, initialQuery, quic
                     {isOllamaTesting ? '检测中…' : `刷新${ollamaStatus.latencyMs ? ` · ${ollamaStatus.latencyMs}ms` : ''}`}
                   </button>
                 </div>
-                <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-300">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">对话模型</span>
-                    <span className="font-mono text-cyan-200">{ollamaStatus.chatModel || '未检测到'}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">抽取模型</span>
-                    <span className="font-mono text-cyan-200">{ollamaStatus.crawlerModel || '未检测到'}</span>
-                  </div>
+                <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400">
+                  <span>调度通道</span>
+                  <span className="font-mono text-cyan-200">{ollamaStatus.running ? '自动多模型高可用路由' : '等待后端节点就绪'}</span>
                 </div>
               </div>
             </div>

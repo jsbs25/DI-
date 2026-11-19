@@ -12,6 +12,20 @@ import { toPublicUser } from './server/privacy.ts';
 import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy.ts';
 import { Modality, ThinkingLevel } from '@google/genai';
 import { aiGateway } from './server/aiGateway.ts';
+import { createOneAiAdminRouter } from './server/oneAi/adminRoutes.ts';
+import { oneAiDb } from './server/oneAi/db.ts';
+import { runGlobalModelDiscovery } from './server/oneAi/discovery.ts';
+import { oneAiRouter } from './server/oneAi/router.ts';
+import {
+  acquireStreamLock,
+  checkIdempotency,
+  checkUserQuota,
+  isOneAiAdmin,
+  markIdempotencyFinished,
+  markIdempotencyStarted,
+  requireAdminMiddleware,
+} from './server/oneAi/quotaAndSecurity.ts';
+import type { PrivacyMode, UnifiedContentPart, UnifiedMessage } from './server/oneAi/types.ts';
 import { getGeminiClient } from './server/geminiClient.ts';
 import {
   AI_COMPANION_TOOLS,
@@ -3004,32 +3018,79 @@ app.get('/api/games/rooms', (req, res) => {
 // -------------------------------------------------------------
 // 7. EARTH ONE UNIFIED AI GATEWAY & MULTI-MODEL DISPATCH
 // -------------------------------------------------------------
-app.get('/api/ai/models', async (_req, res) => {
+app.use('/api/admin/ai', createOneAiAdminRouter(getSessionUser));
+
+app.get(['/api/ai/quota', '/api/one-ai/quota', '/api/one-ai/status'], (req, res) => {
+  const sessionUser = getSessionUser(req);
+  const quota = checkUserQuota(sessionUser, req.ip || 'unknown');
+  res.json({
+    success: true,
+    tier: quota.userTier,
+    isAdmin: isOneAiAdmin(sessionUser),
+    hasLiveEngine: aiGateway.hasLiveEngine(),
+    requestsToday: quota.requestsToday,
+    dailyRequestLimit: quota.dailyRequestLimit,
+    tokensToday: quota.tokensToday,
+    dailyTokenLimit: quota.dailyTokenLimit,
+  });
+});
+
+app.get(['/api/ai/models', '/api/one-ai/models'], async (req, res) => {
+  const sessionUser = getSessionUser(req);
+  const hasLive = aiGateway.hasLiveEngine();
+  if (!isOneAiAdmin(sessionUser)) {
+    return res.json({
+      success: true,
+      hasLiveEngine: hasLive,
+      models: [
+        {
+          id: 'one-ai',
+          name: 'ONE AI',
+          provider: 'EARTH ONE',
+          category: 'text',
+          status: 'active',
+          isDefault: true,
+          isFree: true,
+        },
+      ],
+    });
+  }
   await aiGateway.detectLocalOllama();
-  res.json({ success: true, hasLiveEngine: aiGateway.hasLiveEngine(), models: aiGateway.getModels() });
+  res.json({ success: true, hasLiveEngine: hasLive, models: aiGateway.getModels() });
 });
 
 app.get('/api/ai/ollama/roles', (req, res) => {
+  if (!requireAdminMiddleware(getSessionUser, req, res)) return;
   res.json({ success: true, ...aiGateway.getOllamaRoleAssignment() });
 });
 
 app.post('/api/ai/ollama/roles', (req, res) => {
-  const { chatModel, crawlerModel } = req.body;
+  const admin = requireAdminMiddleware(getSessionUser, req, res);
+  if (!admin) return;
+  const { chatModel, crawlerModel } = req.body || {};
   const updated = aiGateway.setOllamaRoles(chatModel, crawlerModel);
+  oneAiDb.recordAdminAudit(admin.id, 'update_ollama_roles', 'ollama', { chatModel, crawlerModel });
   res.json({ success: true, ...updated });
 });
 
 app.post('/api/ai/custom-config', (req, res) => {
+  const admin = requireAdminMiddleware(getSessionUser, req, res);
+  if (!admin) return;
   const { apiKey, baseUrl, customModel } = req.body || {};
   aiGateway.registerCustomProvider(String(apiKey || ''), baseUrl ? String(baseUrl) : undefined, customModel ? String(customModel) : undefined);
+  oneAiDb.recordAdminAudit(admin.id, 'update_legacy_custom_config', 'custom', {
+    hasApiKey: Boolean(apiKey),
+    baseUrl: baseUrl ? String(baseUrl) : undefined,
+  });
   res.json({ success: true, hasLiveEngine: aiGateway.hasLiveEngine(), models: aiGateway.getModels() });
 });
 
 app.get('/api/ai/stats', (req, res) => {
+  if (!requireAdminMiddleware(getSessionUser, req, res)) return;
   const models = aiGateway.getModels();
   const totalCalls = models.reduce((acc, m) => acc + m.totalCalls, 0);
   const totalTokens = models.reduce((acc, m) => acc + m.totalTokens, 0);
-  res.json({ success: true, totalCalls, totalTokens, models });
+  res.json({ success: true, totalCalls, totalTokens, overview: oneAiDb.getOverviewMetrics(), models });
 });
 
 function resolveAiMemoryOwnerId(authUserId?: string, rawProfileKey?: string): string {
@@ -3038,14 +3099,17 @@ function resolveAiMemoryOwnerId(authUserId?: string, rawProfileKey?: string): st
   return cleanKey && cleanKey !== 'default' ? cleanKey : 'guest';
 }
 
-app.post('/api/ai/chat', async (req, res) => {
+app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
   const {
     prompt,
     messages,
     history,
+    attachments,
     modelId,
     model,
     mode = 'general',
+    privacyMode,
+    idempotencyKey,
     sessionId: requestedSessionId,
     channel: requestedChannel,
     profileKey: rawProfileKey,
@@ -3057,19 +3121,75 @@ app.post('/api/ai/chat', async (req, res) => {
     maxTokens,
   } = req.body || {};
 
-  // If the user supplied a custom API key, register it as the custom provider
-  // and route this request through it.
-  if (apiKey) {
+  const sessionUser = getSessionUser(req);
+  if (apiKey && isOneAiAdmin(sessionUser)) {
     aiGateway.registerCustomProvider(apiKey, baseUrl, customModel);
   }
 
-  const resolvedModelId = apiKey
+  const resolvedModelId = apiKey && isOneAiAdmin(sessionUser)
     ? 'custom'
     : (modelId || model || aiGateway.getChatModelId());
-  const userPrompt = String(
+
+  const cleanAttachments = Array.isArray(attachments)
+    ? attachments
+        .slice(0, 4)
+        .filter(
+          (a: any) =>
+            a &&
+            a.type === 'image_url' &&
+            typeof a.imageUrl === 'string' &&
+            /^(data:image\/(png|jpeg|jpg|webp|gif);base64,|https:\/\/)/i.test(a.imageUrl.trim()) &&
+            a.imageUrl.length <= 6_000_000
+        )
+        .map((a: any) => ({ type: 'image_url' as const, imageUrl: a.imageUrl.trim() }))
+    : [];
+
+  const rawPrompt = String(
     prompt || (Array.isArray(messages) && messages.length > 0 ? messages[messages.length - 1].content : '') || ''
   ).trim();
-  if (!userPrompt) return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
+  if (!rawPrompt && cleanAttachments.length === 0) {
+    return res.status(400).json({ success: false, error: 'Prompt or message content is required' });
+  }
+  const userPrompt = rawPrompt || '请分析这张图片的内容。';
+
+  const quota = checkUserQuota(sessionUser, req.ip || 'unknown');
+  if (!quota.allowed) {
+    return res.status(429).json({ success: false, error: quota.reason || '配额已达上限，请稍后再试。' });
+  }
+
+  const cleanIdem = typeof idempotencyKey === 'string' && idempotencyKey.trim() ? idempotencyKey.trim().slice(0, 80) : undefined;
+  const existingIdem = checkIdempotency(quota.subjectKey, cleanIdem);
+  if (existingIdem) {
+    if (existingIdem.inFlight) {
+      return res.status(409).json({ success: false, error: '相同请求正在处理中，请稍候。' });
+    }
+    if (existingIdem.result) {
+      if (stream === true) {
+        res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+        res.write(`${JSON.stringify({ delta: existingIdem.result.reply })}\n`);
+        res.write(`${JSON.stringify({ done: true, tokens: existingIdem.result.tokens, model: 'ONE AI', intent: existingIdem.result.intent })}\n`);
+        return res.end();
+      }
+      return res.json({
+        success: true,
+        reply: existingIdem.result.reply,
+        message: { role: 'assistant', content: existingIdem.result.reply, timestamp: new Date().toISOString() },
+        tokens: existingIdem.result.tokens,
+        model: 'ONE AI',
+        intent: existingIdem.result.intent,
+      });
+    }
+  }
+
+  const streamLock = acquireStreamLock(quota.subjectKey, quota.userTier);
+  if (!streamLock.ok) {
+    return res.status(429).json({ success: false, error: '已有正在进行的回复流，请等待当前回答完成。' });
+  }
+
+  const resolvedPrivacy: PrivacyMode | undefined =
+    privacyMode === 'strict_zdr' || privacyMode === 'no_training' || privacyMode === 'standard'
+      ? privacyMode
+      : undefined;
 
   const authUser = getAuthUser(req);
   const userId = resolveAiMemoryOwnerId(authUser?.id, typeof rawProfileKey === 'string' ? rawProfileKey : undefined);
@@ -3103,13 +3223,15 @@ app.post('/api/ai/chat', async (req, res) => {
   });
 
   const abortController = new AbortController();
-  req.on('close', () => {
+  res.on('close', () => {
     if (!res.writableEnded) {
       abortController.abort();
     }
   });
 
   const shouldStream = stream === true;
+  markIdempotencyStarted(quota.subjectKey, cleanIdem);
+  try {
   const emitDirectAnswer = (rawReplyText: string, modelLabel: string) => {
     const cleanText = stripAiControlTags(rawReplyText).reply || rawReplyText.trim();
     const savedMemories = persistTurnAndExtractMemories({
@@ -3159,13 +3281,92 @@ app.post('/api/ai/chat', async (req, res) => {
     });
   };
 
+  const runOneAiOrGateway = async (onDelta?: (delta: string) => void) => {
+    const useOneAiRouter =
+      !resolvedModelId.startsWith('ollama:') &&
+      resolvedModelId !== 'custom' &&
+      oneAiRouter.hasAnyUsableEngine();
+
+    if (useOneAiRouter) {
+      const unifiedMessages: UnifiedMessage[] = [];
+      if (ctx.systemPrompt) {
+        unifiedMessages.push({ role: 'system', content: ctx.systemPrompt });
+      }
+      for (const turn of ctx.mergedHistory) {
+        if (turn?.content) {
+          unifiedMessages.push({ role: turn.role, content: turn.content });
+        }
+      }
+      if (cleanAttachments.length > 0) {
+        const parts: UnifiedContentPart[] = [{ type: 'text', text: userPrompt }];
+        for (const att of cleanAttachments) {
+          parts.push({ type: 'image_url', imageUrl: att.imageUrl });
+        }
+        unifiedMessages.push({ role: 'user', content: parts });
+      } else {
+        unifiedMessages.push({ role: 'user', content: userPrompt });
+      }
+
+      const routed = await oneAiRouter.executeUnifiedTurn({
+        requestId: `chat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        idempotencyKey: cleanIdem,
+        userId: sessionUser?.id || null,
+        subjectKey: quota.subjectKey,
+        userTier: quota.userTier,
+        prompt: userPrompt,
+        messages: unifiedMessages,
+        mode,
+        explicitPrivacyMode: resolvedPrivacy,
+        hasPrivateMemoryContext: ctx.recalledMemories.length > 0,
+        maxTokens: ctx.resolvedMaxTokens,
+        stream: Boolean(onDelta),
+        signal: abortController.signal,
+        onDelta,
+      });
+      if (routed.success && routed.content.trim()) {
+        return {
+          success: true,
+          content: routed.content,
+          tokens: routed.totalTokens,
+          modelLabel: 'ONE AI',
+          taskType: routed.taskType,
+          privacyMode: routed.privacyMode,
+        };
+      }
+    }
+
+    const usesStructuredHistory =
+      resolvedModelId.startsWith('deepseek') ||
+      resolvedModelId === 'custom' ||
+      resolvedModelId.startsWith('ollama:') ||
+      resolvedModelId === 'one-ai';
+    const contextualPrompt = buildConversationPrompt(userPrompt, ctx.mergedHistory);
+    const gwRes = await aiGateway.generateContent(
+      resolvedModelId,
+      usesStructuredHistory ? userPrompt : contextualPrompt,
+      ctx.systemPrompt,
+      onDelta,
+      ctx.mergedHistory,
+      ctx.resolvedMaxTokens,
+      { signal: abortController.signal, mode }
+    );
+    return {
+      success: gwRes.success,
+      content: gwRes.content,
+      tokens: gwRes.tokens,
+      modelLabel: resolvedModelId === 'one-ai' ? 'ONE AI' : resolvedModelId,
+      taskType: undefined as string | undefined,
+      privacyMode: resolvedPrivacy,
+    };
+  };
+
   // 1. Exact deterministic solver (<1ms, 100% exact arithmetic, units, comparisons & dates)
-  if ((mode === 'general' || mode === 'voice-agent') && !userPrompt.includes('\n')) {
+  if ((mode === 'general' || mode === 'voice-agent') && !userPrompt.includes('\n') && cleanAttachments.length === 0) {
     const exact = solvePrecisionQuery(userPrompt, ctx.intent.isZh);
     if (exact) {
-      return emitDirectAnswer(exact.answer, 'one-precision-solver');
+      markIdempotencyFinished(quota.subjectKey, cleanIdem, { reply: exact.answer, tokens: Math.ceil(exact.answer.length / 2), intent: ctx.intent.kind });
+      return emitDirectAnswer(exact.answer, 'ONE AI');
     }
-    // Only use instant small-talk shortcut when this is a genuine standalone greeting with no active topic
     if (
       mode === 'voice-agent' &&
       ctx.intent.kind === 'casual_greeting' &&
@@ -3174,21 +3375,24 @@ app.post('/api/ai/chat', async (req, res) => {
     ) {
       const banter = matchPureSocialBanter(userPrompt, ctx.intent.isZh);
       if (banter) {
-        return emitDirectAnswer(banter, 'one-instant-companion');
+        markIdempotencyFinished(quota.subjectKey, cleanIdem, { reply: banter, tokens: Math.ceil(banter.length / 2), intent: ctx.intent.kind });
+        return emitDirectAnswer(banter, 'ONE AI');
       }
     }
   }
 
   // 2. Explicit memory command / query / delete goes straight through SQLite memory store
-  if (ctx.intent.kind === 'memory_management') {
+  if (ctx.intent.kind === 'memory_management' && cleanAttachments.length === 0) {
     const memAns = await generateContextAwareFallbackReply(ctx, mode);
-    return emitDirectAnswer(memAns.text, `one-${memAns.source}`);
+    markIdempotencyFinished(quota.subjectKey, cleanIdem, { reply: memAns.text, tokens: Math.ceil(memAns.text.length / 2), intent: ctx.intent.kind });
+    return emitDirectAnswer(memAns.text, 'ONE AI');
   }
 
-  // 3. If no live DeepSeek API / local Ollama is configured, use multi-turn context + memory engine + live knowledge
-  if (!apiKey && !aiGateway.hasLiveEngine()) {
+  // 3. If no live AI engine is configured, use multi-turn context + memory engine + live knowledge
+  if (!(apiKey && isOneAiAdmin(sessionUser)) && !aiGateway.hasLiveEngine()) {
     const ctxReply = await generateContextAwareFallbackReply(ctx, mode);
-    return emitDirectAnswer(ctxReply.text, `one-${ctxReply.source}`);
+    markIdempotencyFinished(quota.subjectKey, cleanIdem, { reply: ctxReply.text, tokens: Math.ceil(ctxReply.text.length / 2), intent: ctx.intent.kind });
+    return emitDirectAnswer(ctxReply.text, 'ONE AI');
   }
 
   if (shouldStream) {
@@ -3197,20 +3401,12 @@ app.post('/api/ai/chat', async (req, res) => {
     res.flushHeaders();
     let streamedText = '';
     try {
-      const result = await aiGateway.generateContent(
-        resolvedModelId,
-        userPrompt,
-        ctx.systemPrompt,
-        (token) => {
-          streamedText += token;
-          if (!res.writableEnded) {
-            res.write(`${JSON.stringify({ delta: token })}\n`);
-          }
-        },
-        ctx.mergedHistory,
-        ctx.resolvedMaxTokens,
-        abortController.signal
-      );
+      const result = await runOneAiOrGateway((token) => {
+        streamedText += token;
+        if (!res.writableEnded) {
+          res.write(`${JSON.stringify({ delta: token })}\n`);
+        }
+      });
 
       if (result.success) {
         const finalContent = stripAiControlTags(result.content || streamedText).reply || (result.content || streamedText).trim();
@@ -3218,14 +3414,21 @@ app.post('/api/ai/chat', async (req, res) => {
           ctx,
           rawUserInput: userPrompt,
           assistantReply: finalContent,
-          modelLabel: resolvedModelId,
+          modelLabel: result.modelLabel,
+        });
+        markIdempotencyFinished(quota.subjectKey, cleanIdem, {
+          reply: finalContent,
+          tokens: result.tokens ?? Math.ceil(finalContent.length / 2),
+          intent: ctx.intent.kind,
         });
         if (!res.writableEnded) {
           res.write(
             `${JSON.stringify({
               done: true,
               tokens: result.tokens,
-              model: resolvedModelId,
+              model: 'ONE AI',
+              taskType: result.taskType,
+              privacyMode: result.privacyMode,
               sessionId: ctx.session.id,
               intent: ctx.intent.kind,
               recalledMemories: ctx.recalledMemories.map((m) => ({
@@ -3246,13 +3449,18 @@ app.post('/api/ai/chat', async (req, res) => {
           assistantReply: cleanFallback,
           modelLabel: `one-${fallback.source}`,
         });
+        markIdempotencyFinished(quota.subjectKey, cleanIdem, {
+          reply: cleanFallback,
+          tokens: Math.ceil(cleanFallback.length / 2),
+          intent: ctx.intent.kind,
+        });
         if (!res.writableEnded) {
           res.write(`${JSON.stringify({ delta: cleanFallback })}\n`);
           res.write(
             `${JSON.stringify({
               done: true,
               tokens: Math.ceil(cleanFallback.length / 2),
-              model: `one-${fallback.source}`,
+              model: 'ONE AI',
               sessionId: ctx.session.id,
               intent: ctx.intent.kind,
               recalledMemories: ctx.recalledMemories.map((m) => ({
@@ -3265,7 +3473,12 @@ app.post('/api/ai/chat', async (req, res) => {
           );
         }
       }
-    } catch {
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || abortController.signal.aborted) {
+        markIdempotencyFinished(quota.subjectKey, cleanIdem);
+        if (!res.writableEnded) return res.end();
+        return;
+      }
       const fallback = await generateContextAwareFallbackReply(ctx, mode);
       const cleanFallback = stripAiControlTags(fallback.text).reply || fallback.text;
       const savedMemories = persistTurnAndExtractMemories({
@@ -3274,13 +3487,18 @@ app.post('/api/ai/chat', async (req, res) => {
         assistantReply: cleanFallback,
         modelLabel: `one-${fallback.source}`,
       });
+      markIdempotencyFinished(quota.subjectKey, cleanIdem, {
+        reply: cleanFallback,
+        tokens: Math.ceil(cleanFallback.length / 2),
+        intent: ctx.intent.kind,
+      });
       if (!res.writableEnded) {
         res.write(`${JSON.stringify({ delta: cleanFallback })}\n`);
         res.write(
           `${JSON.stringify({
             done: true,
             tokens: Math.ceil(cleanFallback.length / 2),
-            model: `one-${fallback.source}`,
+            model: 'ONE AI',
             sessionId: ctx.session.id,
             intent: ctx.intent.kind,
             recalledMemories: ctx.recalledMemories.map((m) => ({
@@ -3296,20 +3514,7 @@ app.post('/api/ai/chat', async (req, res) => {
     return res.end();
   }
 
-  const usesStructuredHistory =
-    resolvedModelId.startsWith('deepseek') ||
-    resolvedModelId === 'custom' ||
-    resolvedModelId.startsWith('ollama:');
-  const contextualPrompt = buildConversationPrompt(userPrompt, ctx.mergedHistory);
-  const result = await aiGateway.generateContent(
-    resolvedModelId,
-    usesStructuredHistory ? userPrompt : contextualPrompt,
-    ctx.systemPrompt,
-    undefined,
-    ctx.mergedHistory,
-    ctx.resolvedMaxTokens,
-    abortController.signal
-  );
+  const result = await runOneAiOrGateway();
 
   if (result.success) {
     const cleanReply = stripAiControlTags(result.content).reply || result.content.trim();
@@ -3317,13 +3522,20 @@ app.post('/api/ai/chat', async (req, res) => {
       ctx,
       rawUserInput: userPrompt,
       assistantReply: cleanReply,
-      modelLabel: resolvedModelId,
+      modelLabel: result.modelLabel,
+    });
+    markIdempotencyFinished(quota.subjectKey, cleanIdem, {
+      reply: cleanReply,
+      tokens: result.tokens ?? Math.ceil(cleanReply.length / 2),
+      intent: ctx.intent.kind,
     });
     return res.json({
       success: true,
       reply: cleanReply,
       sessionId: ctx.session.id,
       intent: ctx.intent.kind,
+      taskType: result.taskType,
+      privacyMode: result.privacyMode,
       recalledMemories: ctx.recalledMemories.map((m) => ({
         id: m.id,
         category: m.category,
@@ -3336,12 +3548,20 @@ app.post('/api/ai/chat', async (req, res) => {
         timestamp: new Date().toISOString(),
       },
       tokens: result.tokens,
-      model: resolvedModelId,
+      model: 'ONE AI',
     });
   }
 
   const fallback = await generateContextAwareFallbackReply(ctx, mode);
-  return emitDirectAnswer(fallback.text, `one-${fallback.source}`);
+  markIdempotencyFinished(quota.subjectKey, cleanIdem, {
+    reply: fallback.text,
+    tokens: Math.ceil(fallback.text.length / 2),
+    intent: ctx.intent.kind,
+  });
+  return emitDirectAnswer(fallback.text, 'ONE AI');
+  } finally {
+    streamLock.release();
+  }
 });
 
 // -------------------------------------------------------------
@@ -3626,7 +3846,7 @@ app.delete('/api/ai/memory', (req, res) => {
   return res.json({ success: true, removed });
 });
 
-app.post('/api/ai/agent-command', async (req, res) => {
+app.post(['/api/ai/agent-command', '/api/one-ai/agent-command'], async (req, res) => {
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
   const lang = req.body?.lang === 'en' ? 'en' : 'zh';
   const history = Array.isArray(req.body?.history) ? normalizeConversationHistory(req.body.history) : [];
@@ -3661,7 +3881,7 @@ Allowed actions:
 
   try {
     const resolvedModelId = aiGateway.getChatModelId();
-    const result = await aiGateway.generateContent(resolvedModelId, text, systemPrompt, undefined, history);
+    const result = await aiGateway.generateContent(resolvedModelId, text, systemPrompt, undefined, history, undefined, { mode: 'agent-command' });
     const raw = (result.content || '').trim();
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (result.success && jsonMatch) {
@@ -3676,12 +3896,12 @@ Allowed actions:
   return res.json({ success: true, action: { type: 'none' } });
 });
 
-app.post('/api/ai/translate', async (req, res) => {
+app.post(['/api/ai/translate', '/api/one-ai/translate'], async (req, res) => {
   const { text, targetLang = 'English' } = req.body;
   if (!text) return res.status(400).json({ success: false, error: 'Text required' });
 
   const prompt = `Translate the following text to ${targetLang}. Return ONLY the direct natural translation:\n"${text}"`;
-  const result = await aiGateway.generateContent(aiGateway.getChatModelId(), prompt);
+  const result = await aiGateway.generateContent(aiGateway.getChatModelId(), prompt, undefined, undefined, undefined, undefined, { mode: 'translate' });
 
   if (result.success) {
     res.json({ success: true, translation: result.content.trim() });
@@ -3898,7 +4118,7 @@ function mergeCompanionToolCalls(
   return merged;
 }
 
-app.post('/api/ai/companion-turn', async (req, res) => {
+app.post(['/api/ai/companion-turn', '/api/one-ai/companion-turn'], async (req, res) => {
   const {
     prompt,
     lang = 'zh',
@@ -4892,7 +5112,7 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
 
   const evidence = evidenceResult.evidence;
   const { prompt, systemInstruction } = buildReadingPrompt(evidence, req.body.replyLanguage);
-  const result = await aiGateway.generateContent('', prompt, systemInstruction);
+  const result = await aiGateway.generateContent('one-ai', prompt, systemInstruction, undefined, undefined, undefined, { mode: 'library-reading' });
   if (!result.success || !result.content.trim()) {
     return res.status(503).json({
       success: false,

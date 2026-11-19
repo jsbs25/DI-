@@ -4,6 +4,7 @@ import { readAIStream, type AIRecalledMemorySummary } from '../../utils/aiStream
 import { getAiProfileKey } from '../../utils/aiProfile.ts';
 import { loadAIConversationHistory, saveAIConversationHistory } from '../../utils/aiSessionHistory.ts';
 import { analyzeDialogueEmotion, buildExpressivePhrases } from '../../utils/emotionEngine.ts';
+import { OneAiAdminConsole } from './OneAiAdminConsole.tsx';
 import {
   Bot,
   Brain,
@@ -11,15 +12,18 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  Cpu,
   Edit3,
+  ImagePlus,
+  Lock,
   Mic,
   MicOff,
   Plus,
   RotateCcw,
   Send,
-  Settings2,
+  ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
+  Square,
   Trash2,
   User as UserIcon,
   Volume2,
@@ -35,6 +39,7 @@ interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  images?: string[];
   model?: string;
   timestamp: string;
   tokens?: number;
@@ -87,21 +92,22 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     return fresh;
   });
 
-  const [selectedModel, setSelectedModel] = useState<string>('deepseek-v3');
-  const [availableModels, setAvailableModels] = useState<
-    Array<{ id: string; name: string; status: string; isDefault: boolean; apiKeyMasked: string; isFree?: boolean }>
-  >([]);
   const [promptInput, setPromptInput] = useState('');
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [strictPrivacyMode, setStrictPrivacyMode] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const [voiceOutput, setVoiceOutput] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  const [showConfigDrawer, setShowConfigDrawer] = useState(false);
-  const [customApiKey, setCustomApiKey] = useState('');
-  const [customBaseUrl, setCustomBaseUrl] = useState('https://api.deepseek.com/v1');
-  const [customModel, setCustomModel] = useState('deepseek-chat');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminConsole, setShowAdminConsole] = useState(false);
+  const [quotaInfo, setQuotaInfo] = useState<{
+    tier: string;
+    hasLiveEngine: boolean;
+    requestsToday: number;
+    dailyRequestLimit: number;
+  } | null>(null);
 
   const [showMemoryDrawer, setShowMemoryDrawer] = useState(false);
   const [memories, setMemories] = useState<MemoryItem[]>([]);
@@ -115,6 +121,8 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const requestAbortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<any>(null);
 
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -129,7 +137,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     return [{
       id: 'msg_welcome',
       role: 'assistant',
-      model: 'ONE INTELLIGENCE',
+      model: 'ONE AI',
       timestamp: isZh ? '刚刚' : 'Now',
       content: isZh
         ? '你好，我是 EARTH ONE 智能伙伴。你可以直接和我连续探讨问题、打磨方案，或者让我记住你的项目背景与个人偏好，我会沿着你的语境一直聊下去。'
@@ -196,47 +204,26 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
       .catch(() => {});
   }, [isZh, sessionId]);
 
-  useEffect(() => {
-    fetch('/api/ai/models')
+  const refreshQuotaStatus = useCallback(() => {
+    fetch('/api/one-ai/quota')
       .then(r => r.json())
       .then(d => {
-        if (d.success && Array.isArray(d.models)) {
-          setAvailableModels(d.models);
-          const activeDefault =
-            d.models.find((m: any) => m.id === 'deepseek-v3') ||
-            d.models.find((m: any) => m.isDefault && m.id.startsWith('deepseek')) ||
-            d.models.find((m: any) => m.id.startsWith('deepseek')) ||
-            d.models[0];
-          if (activeDefault) setSelectedModel(activeDefault.id);
+        if (d?.success) {
+          setIsAdmin(Boolean(d.isAdmin));
+          setQuotaInfo({
+            tier: String(d.tier || 'free'),
+            hasLiveEngine: Boolean(d.hasLiveEngine),
+            requestsToday: Number(d.requestsToday || 0),
+            dailyRequestLimit: Number(d.dailyRequestLimit || 20),
+          });
         }
       })
       .catch(() => {});
+  }, []);
 
-    fetch('http://127.0.0.1:11434/api/tags')
-      .then(r => r.json())
-      .then(data => {
-        if (data?.models && Array.isArray(data.models) && data.models.length > 0) {
-          const localList = data.models
-            .filter((m: any) => String(m?.name || '').toLowerCase().includes('deepseek'))
-            .map((m: any) => ({
-              id: `ollama:${m.name}`,
-              name: `${isZh ? '本地 DeepSeek' : 'Local DeepSeek'} · ${m.name}`,
-              status: 'active',
-              isDefault: false,
-              apiKeyMasked: '127.0.0.1:11434',
-              isFree: true
-            }));
-          if (localList.length > 0) {
-            setAvailableModels(prev => {
-              const ids = new Set(prev.map(p => p.id));
-              const newOnes = localList.filter((l: any) => !ids.has(l.id));
-              return [...prev, ...newOnes];
-            });
-          }
-        }
-      })
-      .catch(() => {});
-  }, [isZh]);
+  useEffect(() => {
+    refreshQuotaStatus();
+  }, [refreshQuotaStatus]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -360,117 +347,115 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     } catch {}
   };
 
+  const handleAbort = () => {
+    requestAbortRef.current?.abort();
+    requestAbortRef.current = null;
+    setIsLoading(false);
+    setStreamingMessageId(null);
+  };
+
+  const handleImageFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const picked = Array.from(files).slice(0, Math.max(0, 4 - attachedImages.length));
+    for (const file of picked) {
+      if (!file.type.startsWith('image/') || file.size > 4_000_000) continue;
+      const dataUrl = await new Promise<string | null>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
+      if (dataUrl) {
+        setAttachedImages(prev => (prev.length < 4 ? [...prev, dataUrl] : prev));
+      }
+    }
+  };
+
   const handleSend = async (overrideText?: string) => {
     const textToSend = (overrideText || promptInput).trim();
-    if (!textToSend || isLoading) return;
-    if (!overrideText) setPromptInput('');
+    const imagesToSend = overrideText ? [] : attachedImages;
+    if ((!textToSend && imagesToSend.length === 0) || isLoading) return;
+    if (!overrideText) {
+      setPromptInput('');
+      setAttachedImages([]);
+    }
     const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const userMsg: Message = { id: `user_${Date.now()}`, role: 'user', content: textToSend, timestamp: nowTime };
+    const userMsg: Message = {
+      id: `user_${Date.now()}`,
+      role: 'user',
+      content: textToSend || (isZh ? '[已发送图片]' : '[Image attached]'),
+      images: imagesToSend.length > 0 ? imagesToSend : undefined,
+      timestamp: nowTime,
+    };
     const priorMessages = messages.filter((m) => m.id !== 'msg_welcome' && !m.id.startsWith('msg_init_'));
     setMessages(prev => [...prev, userMsg]);
     setIsLoading(true);
     let activeStreamId: string | null = null;
+    const abortCtrl = new AbortController();
+    requestAbortRef.current = abortCtrl;
+    const idempotencyKey = `idem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     try {
-      const shouldStream = !customApiKey.trim();
       const payload: any = {
-        prompt: textToSend,
+        prompt: textToSend || (isZh ? '请分析这张图片的内容。' : 'Please analyze this image.'),
         sessionId,
         channel: 'hub',
         profileKey: getAiProfileKey(),
-        modelId: selectedModel,
+        modelId: 'one-ai',
         mode: 'general',
+        privacyMode: strictPrivacyMode ? 'strict_zdr' : 'standard',
+        idempotencyKey,
         pageContext: { currentTab: 'aihub', lang },
         history: priorMessages.slice(-16).map(message => ({ role: message.role, content: message.content })),
-        ...(shouldStream ? { stream: true } : {})
+        attachments: imagesToSend.map(img => ({ type: 'image_url', imageUrl: img })),
+        stream: true,
       };
-      if (selectedModel === 'custom' || customApiKey.trim()) {
-        payload.apiKey = customApiKey.trim();
-        payload.baseUrl = customBaseUrl.trim();
-        payload.customModel = customModel.trim();
-      }
-      const res = await fetch('/api/ai/chat', {
+      const res = await fetch('/api/one-ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: abortCtrl.signal,
       });
-      if (shouldStream) {
-        activeStreamId = `ai_${Date.now()}`;
-        setMessages(prev => [...prev, { id: activeStreamId!, role: 'assistant', content: '', model: selectedModel, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
-        let replyContent = '';
-        const streamResult = await readAIStream(res, delta => {
-          setStreamingMessageId(activeStreamId);
-          replyContent += delta;
-          const display = stripAiTags(replyContent).replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, '').trimStart();
-          setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, content: display } : message));
-        });
-        replyContent = stripAiTags(replyContent).trim();
-        if (streamResult.sessionId && streamResult.sessionId !== sessionId) {
-          setSessionId(streamResult.sessionId);
-        }
-        setMessages(prev => prev.map(message => message.id === activeStreamId
-          ? {
-              ...message,
-              content: replyContent,
-              model: streamResult.model || selectedModel,
-              tokens: streamResult.tokens,
-              recalledMemories: streamResult.recalledMemories,
-              savedCount: streamResult.savedMemories?.length || 0,
-            }
-          : message
-        ));
-        if (streamResult.savedMemories && streamResult.savedMemories.length > 0) {
-          void fetchMemories();
-        }
-        if (voiceOutput) speakText(replyContent);
-        return;
+      activeStreamId = `ai_${Date.now()}`;
+      setMessages(prev => [...prev, { id: activeStreamId!, role: 'assistant', content: '', model: 'ONE AI', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
+      let replyContent = '';
+      const streamResult = await readAIStream(res, delta => {
+        setStreamingMessageId(activeStreamId);
+        replyContent += delta;
+        const display = stripAiTags(replyContent).replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, '').trimStart();
+        setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, content: display } : message));
+      });
+      replyContent = stripAiTags(replyContent).trim();
+      if (streamResult.sessionId && streamResult.sessionId !== sessionId) {
+        setSessionId(streamResult.sessionId);
       }
-      const data = await res.json();
-      if (data.sessionId && data.sessionId !== sessionId) {
-        setSessionId(data.sessionId);
-      }
-      const replyContent = stripAiTags(
-        data.success && data.reply ? data.reply : (data.error || (isZh ? '没有收到有效回复，请重试。' : 'No valid reply received. Please try again.'))
-      ).trim();
-      const aiMsg: Message = {
-        id: `ai_${Date.now()}`,
-        role: 'assistant',
-        content: replyContent,
-        model: data.model || selectedModel,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        tokens: data.tokens,
-        recalledMemories: data.recalledMemories,
-        savedCount: Array.isArray(data.savedMemories) ? data.savedMemories.length : 0,
-      };
-      setMessages(prev => [...prev, aiMsg]);
-      if (Array.isArray(data.savedMemories) && data.savedMemories.length > 0) {
+      setMessages(prev => prev.map(message => message.id === activeStreamId
+        ? {
+            ...message,
+            content: replyContent,
+            model: 'ONE AI',
+            tokens: streamResult.tokens,
+            recalledMemories: streamResult.recalledMemories,
+            savedCount: streamResult.savedMemories?.length || 0,
+          }
+        : message
+      ));
+      if (streamResult.savedMemories && streamResult.savedMemories.length > 0) {
         void fetchMemories();
       }
-      if (voiceOutput) speakText(replyContent);
-    } catch (error) {
-      try {
-        const rawModel = selectedModel.startsWith('ollama:') ? selectedModel.slice(7) : (customModel || 'deepseek-r1');
-        const localRes = await fetch('http://127.0.0.1:11434/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: rawModel, messages: [{ role: 'user', content: textToSend }], stream: false })
-        });
-        if (localRes.ok) {
-          const lData = await localRes.json();
-          const localReply = stripAiTags(lData?.message?.content || lData?.response || '').trim();
-          if (localReply) {
-            setMessages(prev => [...prev, { id: `ai_${Date.now()}`, role: 'assistant', content: localReply, model: `${isZh ? '本地 Ollama' : 'Local Ollama'} (${rawModel})`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
-            if (voiceOutput) speakText(localReply);
-            return;
-          }
-        }
-      } catch {}
-      const errorContent = error instanceof Error ? error.message : (isZh ? '请求失败。若使用本地模型，请确认 Ollama 已在本机运行。' : 'Request failed. If using a local model, ensure Ollama is running locally.');
+      refreshQuotaStatus();
+      if (voiceOutput && replyContent) speakText(replyContent);
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        return;
+      }
+      const errorContent = error instanceof Error ? error.message : (isZh ? '请求失败，请稍后重试。' : 'Request failed. Please try again.');
       if (activeStreamId) {
         setMessages(prev => prev.map(message => message.id === activeStreamId ? { ...message, content: errorContent } : message));
       } else {
-        setMessages(prev => [...prev, { id: `ai_err_${Date.now()}`, role: 'assistant', content: errorContent, model: selectedModel, timestamp: nowTime }]);
+        setMessages(prev => [...prev, { id: `ai_err_${Date.now()}`, role: 'assistant', content: errorContent, model: 'ONE AI', timestamp: nowTime }]);
       }
     } finally {
+      requestAbortRef.current = null;
       setIsLoading(false);
       setStreamingMessageId(null);
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -483,7 +468,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     setMessages([{
       id: `msg_init_${Date.now()}`,
       role: 'assistant',
-      model: 'ONE INTELLIGENCE',
+      model: 'ONE AI',
       timestamp: isZh ? '刚刚' : 'Now',
       content: isZh
         ? '新对话已开启，之前的长期记忆依然保留着。接下来聊什么？'
@@ -559,8 +544,6 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     return { thought: null, answer: cleaned };
   };
 
-  const ollamaConnected = availableModels.some(m => m.id.startsWith('ollama:'));
-
   return (
     <div className="flex min-h-[calc(100dvh-5.5rem)] md:min-h-[calc(100dvh-4.5rem)] flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col px-3 py-3 sm:px-6 md:py-6">
@@ -569,42 +552,26 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             <div className="flex items-center gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/15 bg-sky-50 dark:bg-sky-500/15 text-[var(--color-one-accent)]"><Sparkles className="h-5 w-5" /></span>
               <div className="min-w-0">
-                <h1 className="text-xl font-semibold tracking-[-0.03em] text-slate-900 dark:text-white sm:text-2xl">DeepSeek Intelligence</h1>
-                <p className="text-sm text-[var(--color-one-text-muted)]">{isZh ? '具备多轮语境连续推理、长期记忆沉淀与自然表达的 EARTH ONE 智能伙伴。' : 'Multi-turn contextual reasoning, persistent long-term memory, and natural dialogue.'}</p>
+                <h1 className="text-xl font-semibold tracking-[-0.03em] text-slate-900 dark:text-white sm:text-2xl">ONE AI</h1>
+                <p className="text-sm text-[var(--color-one-text-muted)]">{isZh ? 'EARTH ONE 全球人工智能聚合与智能调度中枢，自动为你匹配最合适的引擎。' : 'EARTH ONE Global AI Orchestrator — automatically selects the optimal engine for every task.'}</p>
               </div>
             </div>
             <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs text-[var(--color-one-text-dim)] tabular-nums">
-              <span className="font-medium text-[var(--color-one-accent)]">DeepSeek Engine</span>
+              <span className="font-medium text-[var(--color-one-accent)]">ONE AI Global Router</span>
               <span aria-hidden="true">·</span>
-              <span>{ollamaConnected ? (isZh ? '本地 DeepSeek Ollama 已连接' : 'Local Ollama Connected') : (isZh ? '语境与记忆在线' : 'Context & Memory Active')}</span>
+              <span>{quotaInfo?.hasLiveEngine ? (isZh ? '全球智能调度在线' : 'Global Router Online') : (isZh ? '本地知识与记忆在线' : 'Context & Memory Active')}</span>
+              {quotaInfo && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>{isZh ? `今日额度 ${quotaInfo.requestsToday}/${quotaInfo.dailyRequestLimit}` : `Quota ${quotaInfo.requestsToday}/${quotaInfo.dailyRequestLimit}`}</span>
+                </>
+              )}
               <span aria-hidden="true">·</span>
               <span>{isZh ? `${memories.length} 条长期记忆` : `${memories.length} memories`}</span>
-              <span aria-hidden="true">·</span>
-              <span>{isZh ? `${messages.length} 条消息` : `${messages.length} messages`}</span>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-0 flex-1 sm:w-auto sm:min-w-[210px] sm:flex-none">
-              <select
-                value={selectedModel}
-                onChange={e => setSelectedModel(e.target.value)}
-                className="h-11 w-full appearance-none rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 pr-9 text-sm text-slate-900 dark:text-white outline-none transition focus:border-sky-500"
-                aria-label={isZh ? '选择 DeepSeek 模型' : 'Select DeepSeek model'}
-              >
-                {availableModels.length === 0 ? (
-                  <option value="deepseek-v3">DeepSeek-V3</option>
-                ) : (
-                  availableModels.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))
-                )}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
-            </div>
-
             <button
               type="button"
               onClick={() => setShowMemoryDrawer(!showMemoryDrawer)}
@@ -615,12 +582,32 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
               <span className="hidden sm:inline text-xs font-medium">{isZh ? `记忆 (${memories.length})` : `Memory (${memories.length})`}</span>
             </button>
 
+            <button
+              type="button"
+              onClick={() => setStrictPrivacyMode(v => !v)}
+              className={`one-btn min-h-[44px] px-3 text-xs ${strictPrivacyMode ? 'one-btn-primary' : 'one-btn-secondary'}`}
+              title={isZh ? '隐私路由模式：启用后仅调度零数据留存（ZDR）节点' : 'Strict ZDR privacy routing'}
+            >
+              {strictPrivacyMode ? <Lock className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+              <span className="hidden sm:inline">{strictPrivacyMode ? (isZh ? '隐私无痕 (ZDR)' : 'Strict ZDR') : (isZh ? '智能路由' : 'Auto Route')}</span>
+            </button>
+
             <button type="button" onClick={() => setVoiceOutput(!voiceOutput)} className={`one-btn min-h-[44px] min-w-[44px] px-3 ${voiceOutput ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? '语音朗读' : 'Voice output'}>
               {voiceOutput ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </button>
-            <button type="button" onClick={() => setShowConfigDrawer(!showConfigDrawer)} className={`one-btn min-h-[44px] min-w-[44px] px-3 ${showConfigDrawer ? 'one-btn-primary' : 'one-btn-secondary'}`} title={isZh ? 'DeepSeek 接口设置' : 'DeepSeek settings'}>
-              <Settings2 className="h-4 w-4" />
-            </button>
+
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowAdminConsole(true)}
+                className="one-btn one-btn-secondary min-h-[44px] px-3 text-xs"
+                title={isZh ? 'ONE AI 后台调度与供应商管理控制台' : 'ONE AI Admin Console'}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                <span className="hidden md:inline">{isZh ? '调度后台' : 'Admin'}</span>
+              </button>
+            )}
+
             <button type="button" onClick={handleClearChat} className="one-btn one-btn-secondary min-h-[44px] min-w-[44px] px-3" title={isZh ? '开启新话题' : 'New conversation'}>
               <RotateCcw className="h-4 w-4" />
             </button>
@@ -739,56 +726,6 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           </div>
         )}
 
-        {showConfigDrawer && (
-          <div className="one-surface-subtle mb-4 p-4 sm:p-5">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-900 dark:text-white"><Cpu className="h-4 w-4 text-[var(--color-one-accent)]" />{isZh ? 'DeepSeek 官方 API / 本地 DeepSeek Ollama 配置' : 'DeepSeek API / Local DeepSeek Ollama'}</div>
-              <button onClick={() => setShowConfigDrawer(false)} className="text-xs text-[var(--color-one-text-muted)] hover:text-slate-900 dark:hover:text-white">{isZh ? '收起' : 'Close'}</button>
-            </div>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <label className="block space-y-1.5">
-                <span className="text-xs text-[var(--color-one-text-dim)]">Base URL</span>
-                <input type="text" value={customBaseUrl} onChange={e => setCustomBaseUrl(e.target.value)} className="h-11 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="https://api.deepseek.com/v1" />
-              </label>
-              <label className="block space-y-1.5">
-                <span className="text-xs text-[var(--color-one-text-dim)]">{isZh ? '模型名称' : 'Model name'}</span>
-                <input type="text" value={customModel} onChange={e => setCustomModel(e.target.value)} className="h-11 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder="deepseek-chat / deepseek-reasoner" />
-              </label>
-              <label className="block space-y-1.5">
-                <span className="text-xs text-[var(--color-one-text-dim)]">DeepSeek API Key</span>
-                <input type="password" value={customApiKey} onChange={e => setCustomApiKey(e.target.value)} className="h-11 w-full rounded-xl border border-slate-200 dark:border-white/15 bg-[var(--color-one-surface-soft)] px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-sky-500" placeholder={isZh ? '留空自动走智能引擎与本地推理' : 'Optional — leave empty for built-in engine'} />
-              </label>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-one-text-muted)]">
-              <span>{isZh ? '支持 DeepSeek 官方密钥（api.deepseek.com）或本地 DeepSeek Ollama（127.0.0.1:11434）。' : 'Supports official DeepSeek API or local DeepSeek Ollama.'}</span>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const res = await fetch('/api/ai/custom-config', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        apiKey: customApiKey.trim(),
-                        baseUrl: customBaseUrl.trim(),
-                        customModel: customModel.trim(),
-                      }),
-                    });
-                    const d = await res.json().catch(() => null);
-                    if (d?.success && Array.isArray(d.models)) setAvailableModels(d.models);
-                    window.dispatchEvent(new Event('one-ai-config-updated'));
-                  } catch {}
-                  setSelectedModel(customBaseUrl.toLowerCase().includes('deepseek.com') ? 'deepseek-v3' : 'custom');
-                  setShowConfigDrawer(false);
-                }}
-                className="one-btn one-btn-primary one-btn-md whitespace-nowrap shrink-0"
-              >
-                {isZh ? '应用并启用 DeepSeek 配置' : 'Apply DeepSeek config'}
-              </button>
-            </div>
-          </div>
-        )}
-
         <div className="one-surface-subtle flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             <div className="mx-auto max-w-3xl space-y-5">
@@ -823,6 +760,13 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                               {isThoughtOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                             </button>
                             {isThoughtOpen && <div className="max-h-56 overflow-y-auto border-t border-slate-200 dark:border-white/10 p-3 font-mono text-xs leading-6 text-[var(--color-one-text-muted)] whitespace-pre-wrap">{thought}</div>}
+                          </div>
+                        )}
+                        {Array.isArray(msg.images) && msg.images.length > 0 && (
+                          <div className="mb-2 flex flex-wrap gap-2">
+                            {msg.images.map((src, i) => (
+                              <img key={i} src={src} alt="attachment" className="max-h-40 rounded-lg border border-white/15 object-cover" />
+                            ))}
                           </div>
                         )}
                         <div className="whitespace-pre-wrap break-words">{answer}</div>
@@ -865,7 +809,44 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                 ))}
               </div>
 
+              {attachedImages.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {attachedImages.map((src, idx) => (
+                    <div key={idx} className="relative">
+                      <img src={src} alt="upload" className="h-14 w-14 rounded-xl border border-slate-200 dark:border-white/15 object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setAttachedImages(prev => prev.filter((_, i) => i !== idx))}
+                        className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-white text-[10px]"
+                        aria-label="Remove image"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="flex items-end gap-2 rounded-2xl border border-slate-200 dark:border-white/15 bg-white dark:bg-[#0f1829] p-2 focus-within:border-sky-500 shadow-sm">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={e => {
+                    void handleImageFiles(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mb-0.5 rounded-xl p-2.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white"
+                  title={isZh ? '上传图片（自动调度视觉模型）' : 'Attach image'}
+                >
+                  <ImagePlus className="h-4 w-4" />
+                </button>
                 <textarea
                   ref={inputRef}
                   rows={1}
@@ -877,17 +858,24 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
                       void handleSend();
                     }
                   }}
-                  placeholder={isZh ? '输入消息…（支持口语、连续追问与“记住…”长期记忆）' : 'Message ONE INTELLIGENCE… (supports continuous follow-ups & long-term memory)'}
+                  placeholder={isZh ? '向 ONE AI 提问…（自动调度最合适模型，支持多模态与“记住…”长期记忆）' : 'Ask ONE AI anything… (auto-routes to the best model, supports images & memory)'}
                   className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                 />
                 <div className="flex items-center gap-1 pb-0.5 pr-0.5">
                   <button type="button" onClick={toggleSpeechRecognition} className={`rounded-xl p-2.5 transition ${isListening ? 'bg-sky-50 dark:bg-sky-500/20 text-[var(--color-one-accent)]' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'}`} title={isZh ? '语音输入' : 'Voice input'}>
                     {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                   </button>
-                  <button type="button" onClick={() => void handleSend()} disabled={!promptInput.trim() || isLoading} className="one-btn one-btn-primary one-btn-sm disabled:cursor-not-allowed disabled:opacity-40">
-                    <Send className="h-4 w-4" />
-                    <span className="hidden sm:inline">{isZh ? '发送' : 'Send'}</span>
-                  </button>
+                  {isLoading ? (
+                    <button type="button" onClick={handleAbort} className="one-btn one-btn-secondary one-btn-sm text-rose-500" title={isZh ? '停止生成' : 'Stop'}>
+                      <Square className="h-3.5 w-3.5 fill-current" />
+                      <span className="hidden sm:inline">{isZh ? '停止' : 'Stop'}</span>
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => void handleSend()} disabled={!promptInput.trim() && attachedImages.length === 0} className="one-btn one-btn-primary one-btn-sm disabled:cursor-not-allowed disabled:opacity-40">
+                      <Send className="h-4 w-4" />
+                      <span className="hidden sm:inline">{isZh ? '发送' : 'Send'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
               <p className="text-[11px] text-[var(--color-one-text-dim)]">{isZh ? '会话状态与高价值长期记忆自动持久化于本地知识库；可在右上角“记忆”面板随时查看或修改。' : 'Multi-turn state and verified long-term memories persist automatically; inspect or edit anytime in the Memory panel.'}</p>
@@ -895,6 +883,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           </div>
         </div>
       </div>
+      {showAdminConsole && <OneAiAdminConsole isZh={isZh} onClose={() => { setShowAdminConsole(false); refreshQuotaStatus(); }} />}
     </div>
   );
 };

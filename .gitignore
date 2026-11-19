@@ -8,10 +8,12 @@ coverage/
 !.env.example
 server_data/
 server_data.json
+uploads/
 *.db
 *.db-wal
 *.db-shm
 *.sqlite*
+.one_ai_master_key*
 tmp/
 dev-dist/
 .aistudio/

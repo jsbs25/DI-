@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { OpenAICompatibleProvider, type OpenAICompatibleMessage } from './ai/providers/openAICompatibleProvider.ts';
+import { oneAiRouter } from './oneAi/router.ts';
 import { getOllamaContextWindow, getOllamaTokenBudget, type AIConversationMessage } from './aiConversation.ts';
 
 // Load .env here as well — ESM imports are hoisted above `dotenv.config()`
@@ -409,11 +410,11 @@ class AIGateway {
   }
 
   public getChatModelId(): string {
-    return 'deepseek-v3';
+    return 'one-ai';
   }
 
   public getCrawlerModelId(): string {
-    return 'deepseek-v3';
+    return 'one-ai';
   }
 
   /**
@@ -435,7 +436,7 @@ ${page.content.slice(0, 4500)}
 4. 【收录评级】(A级推荐/B级参考/C级待考)`;
 
     const sys = '你作为地球计划核心爬虫抽取引擎，请提供准确、结构化、高信息密度的专业学术分析。';
-    const result = await this.generateContent(targetModelId, prompt, sys);
+    const result = await this.generateContent(targetModelId, prompt, sys, undefined, undefined, undefined, { mode: 'crawler' });
     return {
       success: result.success,
       modelUsed: targetModelId,
@@ -454,14 +455,42 @@ ${page.content.slice(0, 4500)}
     onToken?: (token: string) => void,
     history?: AIConversationMessage[],
     maxTokens?: number,
-    signalOrOptions?: AbortSignal | { temperature?: number; signal?: AbortSignal }
+    signalOrOptions?: AbortSignal | { temperature?: number; signal?: AbortSignal; mode?: string }
   ): Promise<{ success: boolean; content: string; errorMessage?: string; tokens?: number }> {
-    const resolvedOptions =
-      signalOrOptions && typeof signalOrOptions === 'object' && ('signal' in signalOrOptions || 'temperature' in signalOrOptions)
-        ? signalOrOptions
+    const resolvedOptions: { temperature?: number; signal?: AbortSignal; mode?: string } =
+      signalOrOptions && typeof signalOrOptions === 'object' && ('signal' in signalOrOptions || 'temperature' in signalOrOptions || 'mode' in signalOrOptions)
+        ? (signalOrOptions as { temperature?: number; signal?: AbortSignal; mode?: string })
         : { signal: signalOrOptions as AbortSignal | undefined };
     const signal = resolvedOptions.signal;
     const temperature = resolvedOptions.temperature;
+    const mode = resolvedOptions.mode || 'general';
+
+    if (!modelId.startsWith('ollama:') && modelId !== 'custom' && oneAiRouter.hasAnyUsableEngine()) {
+      const messages = [
+        ...(systemInstruction ? [{ role: 'system' as const, content: systemInstruction }] : []),
+        ...(history || []).filter(h => h?.content).map(h => ({ role: h.role, content: h.content })),
+        { role: 'user' as const, content: prompt }
+      ];
+      const routed = await oneAiRouter.executeUnifiedTurn({
+        requestId: `gw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        subjectKey: mode === 'crawler' ? 'system:crawler' : 'system:gateway',
+        userTier: 'admin',
+        prompt,
+        messages,
+        mode,
+        temperature,
+        maxTokens,
+        stream: Boolean(onToken),
+        signal,
+        onDelta: onToken
+      });
+      if (routed.success && routed.content.trim()) {
+        return { success: true, content: routed.content, tokens: routed.totalTokens };
+      }
+      if (!this.isUsableKey(this.deepseekKey) && this.localOllamaModels.length === 0) {
+        return { success: false, content: '', errorMessage: routed.errorMessage || '暂无可用 AI 节点' };
+      }
+    }
 
     let targetModel = this.getModel(modelId);
     if (modelId.startsWith('ollama:') && !targetModel) {

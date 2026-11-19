@@ -105,11 +105,24 @@ async function queryDuckDuckGoInstant(topic: string, isVoice: boolean): Promise<
 async function queryWebSnippetFallback(query: string, lang: 'zh' | 'en', isVoice: boolean): Promise<string | null> {
   try {
     const hits = await Promise.race([
-      searchWeb(query, 3, 'auto', lang),
+      searchWeb(query, 4, 'auto', lang),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 2200)),
     ]);
     if (!Array.isArray(hits) || hits.length === 0) return null;
-    const usable = hits.find((h) => h.snippet && h.snippet.trim().length > 18);
+    const spamPattern =
+      /Nearby places|Gas stations|Map details|Hotels Restaurants|Directions|porn|xxx|xvideos|xnxx|onlyfans|digitalplayground|bubble\s*butt|watch the official .* trailer|casino|betting|slot|free spin/i;
+    const terms = query
+      .toLowerCase()
+      .split(/[\s,，。？?、]+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length >= 2);
+    const usable = hits.find((h) => {
+      const sn = (h.snippet || '').trim();
+      const tt = (h.title || '').trim();
+      const hay = `${tt} ${sn}`.toLowerCase();
+      if (sn.length <= 22 || spamPattern.test(hay)) return false;
+      return terms.length === 0 || terms.some((term) => hay.includes(term));
+    });
     if (!usable) return null;
     return summarizeExtract(usable.snippet, isVoice ? 2 : 3, isVoice ? 165 : 320);
   } catch {
@@ -170,11 +183,11 @@ export async function answerWithLiveKnowledge(
   // 4. Sincere transparent fallback if offline/unrecognized
   const transparent = isZh
     ? isVoice
-      ? '这个问题我现在没查到直接的百科词条，你可以换个关键词问我，或者在 AI 工作台配置 DeepSeek 密钥来解锁完整对话。'
-      : '未能从实时百科检索到该问题的直接词条。您可以换用更明确的关键词，或在 DeepSeek 工作台填入 API 密钥以开启完整深度推理。'
+      ? '这个问题我现在没查到直接的百科词条，你可以换个关键词问我，或者稍后再试，ONE AI 后台会自动为你调度最合适的引擎。'
+      : '未能从实时百科检索到该问题的直接词条。您可以换用更明确的关键词，当前已切换为本地常识兜底模式，完整推理引擎稍后会自动恢复。'
     : isVoice
-      ? 'I could not find a direct entry for that just now. Try a more specific keyword, or add a DeepSeek key in the AI Hub for open reasoning.'
-      : 'No direct live encyclopedic entry matched that query. Try a more specific topic or add a DeepSeek key in the AI Hub for full open reasoning.';
+      ? 'I could not find a direct entry for that just now. Try a more specific keyword, or try again shortly as ONE AI schedules an available engine.'
+      : 'No direct live encyclopedic entry matched that query. Try a more specific topic or try again shortly as ONE AI schedules an available engine.';
 
   return { text: transparent, source: 'conversational' };
 }
