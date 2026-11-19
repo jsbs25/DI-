@@ -797,13 +797,20 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       const res = await fetch(`/api/library/books/${encodeURIComponent(readingBook.id)}/ai-reading`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ chapterId: chapter.id, selectedText, replyLanguage: lang })
       });
       const data = await res.json();
       setAiCitation(data.citation || null);
-      setAiReadingNotice(data.notice || null);
-      if (data.success && data.message) {
-        setAiExplanation(data.message.content);
+      const noticeParts = [
+        typeof data.notice === 'string' ? data.notice : null,
+        data.provider ? `AI: ${data.provider}${data.model ? '/' + data.model : ''}` : null,
+        data.coverage ? `范围: ${data.coverage}` : null,
+      ].filter(Boolean) as string[];
+      setAiReadingNotice(noticeParts.length ? noticeParts.join(' · ') : null);
+      const answer = data.answer || data.message?.content || '';
+      if (data.success && answer) {
+        setAiExplanation(answer);
         setAiAnswerReady(true);
       } else {
         setAiExplanation(data.error || '无法核验当前正文，未生成 AI 解读。');
