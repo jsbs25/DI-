@@ -18,6 +18,8 @@ import {
   Minus,
   Moon,
   Plus,
+  RotateCw,
+  Rows3,
   Search,
   Send,
   Sparkles,
@@ -429,7 +431,8 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       setAiProviderInfo('');
       const q = typeof customQuestion === 'string' ? customQuestion.trim() : '';
       let pageImageBase64: string | undefined;
-      const needsVision = currentPageText.trim().length < 40;
+      const ocrHint = /ocr|识别|识文|扫描/i.test(q || '');
+      const needsVision = ocrHint || currentPageText.trim().length < 40;
       if (needsVision && canvasRef.current && canvasRef.current.width > 0) {
         try { pageImageBase64 = canvasRef.current.toDataURL('image/jpeg', 0.72); } catch {}
       }
@@ -748,6 +751,40 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
               </button>
             ))}
           </div>
+
+          <div className="hidden items-center gap-0.5 rounded-xl border p-0.5 md:inline-flex" style={{ borderColor: theme.border }}>
+            <button
+              type="button"
+              onClick={() => setViewMode('single')}
+              title={isChinese ? '单页' : 'Single page'}
+              className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition"
+              style={{ backgroundColor: viewMode === 'single' ? (theme.isDark ? '#32323A' : '#1D1D1F') : 'transparent', color: viewMode === 'single' ? '#FFFFFF' : theme.muted }}
+            >
+              <BookOpen className="h-3 w-3" />
+              <span>{isChinese ? '单页' : 'Single'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('continuous')}
+              title={isChinese ? '连续滚动' : 'Continuous scroll'}
+              className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition"
+              style={{ backgroundColor: viewMode === 'continuous' ? (theme.isDark ? '#32323A' : '#1D1D1F') : 'transparent', color: viewMode === 'continuous' ? '#FFFFFF' : theme.muted }}
+            >
+              <Rows3 className="h-3 w-3" />
+              <span>{isChinese ? '连续' : 'Continuous'}</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setRotation((r) => (r + 90) % 360)}
+            title={isChinese ? '旋转页面' : 'Rotate page'}
+            className="hidden h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85 md:inline-flex"
+            style={{ borderColor: theme.border }}
+          >
+            <RotateCw className="h-3.5 w-3.5" />
+            <span>{isChinese ? '旋转' : 'Rotate'}</span>
+          </button>
         </div>
 
         {/* Right: In-Document Search + Download PDF */}
@@ -1047,6 +1084,15 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                   {isChinese ? a.zh : a.en}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => void runLibraryAiAction('explain', '请对当前页进行 OCR/文字识别（如为扫描图请识别可见文字），并输出识别结果与不确定处说明。')}
+                className="cursor-pointer rounded-lg px-2.5 py-1 text-[11px] font-medium transition"
+                style={{ border: `1px solid ${theme.border}`, color: theme.muted, backgroundColor: 'transparent' }}
+                title={isChinese ? '识别本页文字（扫描/OCR 辅助）' : 'OCR/extract text from this page'}
+              >
+                {isChinese ? '识文' : 'OCR'}
+              </button>
               {aiAction === 'translate' && (
                 <select
                   value={aiTargetLang}
