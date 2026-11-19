@@ -343,6 +343,9 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
   const [pageAiError, setPageAiError] = useState('');
   const [pageAiQuestion, setPageAiQuestion] = useState('');
   const [pageAiKey, setPageAiKey] = useState('');
+  const [pageAiAction, setPageAiAction] = useState<'explain' | 'translate' | 'summarize' | 'ask'>('explain');
+  const [pageAiTargetLang, setPageAiTargetLang] = useState<'zh' | 'en' | 'ar'>('zh');
+  const [pageAiProvider, setPageAiProvider] = useState('');
 
   // Tap-Any-Word AI Dictionary Card ("点一个不会的单词点开自动查")
   const [lookupWord, setLookupWord] = useState<string | null>(null);
@@ -692,40 +695,58 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     chapterIndex >= chapters.length - 1 &&
     (effectiveLayout === 'scroll' || spreadLeftIdx + (effectiveLayout === 'spread' ? 2 : 1) >= pages.length);
 
-  const handleExplainCurrentPage = useCallback(
-    async (customQuestion?: string) => {
+  const runPageAiAction = useCallback(
+    async (action: 'explain' | 'translate' | 'summarize' | 'ask', customQuestion?: string) => {
       const pageContent = currentVisiblePageText.trim() || activeChapter.title;
       setPageAiOpen(true);
+      setPageAiAction(action);
       setPageAiLoading(true);
       setPageAiError('');
+      setPageAiProvider('');
       const q = typeof customQuestion === 'string' ? customQuestion.trim() : '';
-
+      const endpoint = action === 'explain' ? '/api/library/ai/explain-page' : `/api/library-ai/${action}`;
       try {
-        const res = await fetch('/api/library/ai/explain-page', {
+        const body: Record<string, unknown> = {
+          bookId: book.id,
+          title: book.title,
+          bookTitle: book.title,
+          author: book.author,
+          chapterId: activeChapter.id,
+          chapterTitle: activeChapter.title,
+          pageNumber: spreadLeftIdx + 1,
+          pageText: pageContent,
+          selectedText: selectedText || pageContent,
+          surroundingContext: pageContent.slice(0, 3500),
+          language: book.language || 'zh',
+          lang: isZh ? 'zh' : 'en',
+          uiLanguage: isZh ? 'zh' : 'en',
+        };
+        if (action === 'explain') {
+          body.question = q || undefined;
+        } else if (action === 'translate') {
+          body.targetLanguage = pageAiTargetLang;
+          body.question = q || undefined;
+        } else if (action === 'summarize') {
+          body.question = q || undefined;
+        } else if (action === 'ask') {
+          body.question = q || pageAiQuestion || (isZh ? '请结合当前页内容回答。' : 'Answer based on this page.');
+        }
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({
-            bookId: book.id,
-            title: book.title,
-            bookTitle: book.title,
-            chapterTitle: activeChapter.title,
-            pageNumber: spreadLeftIdx + 1,
-            pageText: pageContent,
-            question: q || undefined,
-            language: book.language || 'zh',
-            lang: isZh ? 'zh' : 'en',
-            uiLanguage: isZh ? 'zh' : 'en',
-            surroundingContext: pageContent.slice(0, 3000),
-          }),
+          body: JSON.stringify(body),
         });
         const data = await res.json();
-        if (data?.success && data.explanation) {
-          setPageAiAnswer(data.explanation);
+        if (data?.success) {
+          const textOut = data.explanation || data.content || data.answer || data.message?.content || '';
+          setPageAiAnswer(textOut || (isZh ? 'AI 已完成分析，但未返回可显示文本。' : 'No displayable text returned.'));
           setPageAiKey(currentPageKey);
+          const p = data.provider ? `${data.provider}${data.model ? '/' + data.model : ''}` : '';
+          setPageAiProvider(p);
           if (q) setPageAiQuestion('');
         } else {
-          setPageAiError(data?.error || (isZh ? 'AI 本页讲解暂时不可用，请稍后重试。' : 'Could not explain this page.'));
+          setPageAiError(data?.error || (isZh ? 'AI 本页处理失败，请稍后重试。' : 'AI request failed.'));
         }
       } catch {
         setPageAiError(isZh ? '网络波动，请稍后重试。' : 'Network error.');
@@ -733,7 +754,12 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         setPageAiLoading(false);
       }
     },
-    [activeChapter.title, book.title, currentPageKey, currentVisiblePageText, isZh, spreadLeftIdx]
+    [activeChapter.id, activeChapter.title, book.author, book.id, book.language, book.title, currentPageKey, currentVisiblePageText, isZh, pageAiQuestion, pageAiTargetLang, selectedText, spreadLeftIdx]
+  );
+
+  const handleExplainCurrentPage = useCallback(
+    async (customQuestion?: string) => runPageAiAction('explain', customQuestion),
+    [runPageAiAction]
   );
 
   const handleLookupWord = useCallback(
@@ -2027,7 +2053,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 <span style={{ color: theme.muted }}>{isZh ? '轻点书中任意单词即查' : 'Tap any word to look up'}</span>
                 <button
                   type="button"
-                  onClick={() => void handleExplainCurrentPage(`请结合本页讲解词条「${lookupWord}」以及所在段落的含义。`)}
+                  onClick={() => void runPageAiAction('explain', `请结合本页上下文讲解词条「${lookupWord}」在当前句子/段落中的具体含义（不要只给脱离上下文的词典释义），并说明词性/用法或词根（如可确认）。`)}
                   className="inline-flex items-center gap-1 font-semibold text-emerald-600 hover:underline dark:text-emerald-400 cursor-pointer"
                 >
                   <Sparkles className="h-3 w-3" />
@@ -2066,10 +2092,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 <Sparkles className="h-4 w-4 text-emerald-500" />
                 <div>
                   <div className="text-xs font-semibold">
-                    {isZh ? `AI 精讲本页 · 第 ${spreadLeftIdx + 1} 页` : `AI Page Tutor · P.${spreadLeftIdx + 1}`}
+                    {isZh ? `AI 阅读助手 · 第 ${spreadLeftIdx + 1} 页` : `AI Reading Assistant · P.${spreadLeftIdx + 1}`}
+                    {pageAiProvider ? <span className="ml-1 font-normal opacity-70">· {pageAiProvider}</span> : null}
                   </div>
                   <div className="text-[10px]" style={{ color: theme.muted }}>
-                    {isZh ? '帮你读懂这一页并梳理怎么讲给别人听' : 'Understand & teach this page'}
+                    {isZh ? '基于当前书籍/章节与本页内容作答，不脱离原文' : 'Grounded in current book/chapter/page context'}
                   </div>
                 </div>
               </div>
@@ -2077,10 +2104,10 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 {pageAiKey !== currentPageKey && !pageAiLoading && (
                   <button
                     type="button"
-                    onClick={() => void handleExplainCurrentPage()}
+                    onClick={() => void runPageAiAction(pageAiAction)}
                     className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white cursor-pointer hover:bg-emerald-500"
                   >
-                    {isZh ? '讲当前页' : 'Explain'}
+                    {isZh ? '分析当前页' : 'Analyze'}
                   </button>
                 )}
                 <button
@@ -2093,6 +2120,36 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               </div>
             </div>
 
+            <div className="border-b px-4 py-2 flex flex-wrap gap-1.5" style={{ borderColor: theme.border }}>
+              {([
+                { id: 'explain' as const, zh: '讲解', en: 'Explain' },
+                { id: 'translate' as const, zh: '翻译', en: 'Translate' },
+                { id: 'summarize' as const, zh: '总结', en: 'Summary' },
+                { id: 'ask' as const, zh: '问答', en: 'Ask' },
+              ]).map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => void runPageAiAction(a.id)}
+                  className="cursor-pointer rounded-lg px-2.5 py-1 text-[11px] font-medium transition"
+                  style={{ border: `1px solid ${pageAiAction === a.id ? '#10B981' : theme.border}`, color: pageAiAction === a.id ? '#059669' : theme.muted, backgroundColor: pageAiAction === a.id ? 'rgba(16,185,129,0.12)' : 'transparent' }}
+                >
+                  {isZh ? a.zh : a.en}
+                </button>
+              ))}
+              {pageAiAction === 'translate' && (
+                <select
+                  value={pageAiTargetLang}
+                  onChange={(e) => setPageAiTargetLang(e.target.value as 'zh' | 'en' | 'ar')}
+                  className="ml-auto h-7 rounded-lg border bg-transparent px-2 text-[11px]"
+                  style={{ borderColor: theme.border, color: theme.ink }}
+                >
+                  <option value="zh">译为中文</option>
+                  <option value="en">Translate to English</option>
+                  <option value="ar">ترجمة إلى العربية</option>
+                </select>
+              )}
+            </div>
             <div className="flex-1 overflow-y-auto px-4 py-3.5 text-xs leading-relaxed">
               {pageAiLoading ? (
                 <div className="flex flex-col items-center justify-center gap-2.5 py-12 text-center" style={{ color: theme.muted }}>
@@ -2104,7 +2161,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   <div>{pageAiError}</div>
                   <button
                     type="button"
-                    onClick={() => void handleExplainCurrentPage()}
+                    onClick={() => void runPageAiAction(pageAiAction)}
                     className="mt-2 rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-medium text-white cursor-pointer"
                   >
                     {isZh ? '重新分析' : 'Retry'}
@@ -2118,18 +2175,18 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!pageAiLoading) void handleExplainCurrentPage(pageAiQuestion);
+                if (!pageAiLoading) void runPageAiAction(pageAiQuestion.trim() ? 'ask' : pageAiAction, pageAiQuestion);
               }}
               className="p-3"
               style={{ borderTop: `1px solid ${theme.border}` }}
             >
               <div className="mb-2 flex flex-wrap gap-1.5">
-                {(isZh ? ['用大白话讲这一页', '怎么讲给别人听', '梳理重点词句'] : ['Explain simply', 'How to teach it', 'Key vocabulary']).map((preset) => (
+                {(isZh ? ['用大白话讲这一页', '翻译本页重点', '总结本页要点', '梳理重点词句'] : ['Explain simply', 'Translate page', 'Summarize page', 'Key vocabulary']).map((preset) => (
                   <button
                     key={preset}
                     type="button"
                     disabled={pageAiLoading}
-                    onClick={() => void handleExplainCurrentPage(preset)}
+                    onClick={() => void runPageAiAction(pageAiQuestion ? 'ask' : 'explain', preset)}
                     className="rounded-lg px-2 py-1 text-[11px] cursor-pointer disabled:opacity-40"
                     style={{ border: `1px solid ${theme.border}`, color: theme.muted }}
                   >
