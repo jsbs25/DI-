@@ -510,16 +510,21 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
         const res = await fetch('/api/library/ai/lookup-word', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             word: cleaned,
-            contextSentence: (contextSentence || currentPageText).slice(0, 400),
+            selectedText: cleaned,
+            contextSentence: (contextSentence || currentPageText).slice(0, 600),
+            surroundingContext: (contextSentence || currentPageText).slice(0, 1200),
             bookTitle: title,
+            title,
             bookId,
             chapterTitle,
             pageNumber,
-            pageText: currentPageText.slice(0, 1200),
+            pageText: currentPageText.slice(0, 1500),
             language: effectiveContentLang,
             lang: isChinese ? 'zh' : 'en',
+            uiLanguage: isChinese ? 'zh' : 'en',
           }),
         });
         const data = await res.json();
