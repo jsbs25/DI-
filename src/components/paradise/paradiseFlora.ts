@@ -473,9 +473,10 @@ export function createParadiseFlora(
     const st = streamDistanceAndFlow(x, z);
     if (st.dist < st.width * 1.45) return false;
     if (gardenPathFactor(x, z) > minPathDist) return false;
-    // Keep pavilion & bridge plazas clear
+    // Keep pavilion, bridge plazas, and Spirit Rest Cottage clear
     if (Math.hypot(x - 12.8, z + 7.8) < 5.0) return false;
     if (Math.hypot(x + 6.4, z + 8.4) < 5.0) return false;
+    if (Math.hypot(x + 11.4, z - 5.8) < 4.5) return false;
     // Keep panoramic Overlook camera sightline corridor [-4.5, 23.5] -> [2.5, -1.5] open
     const camX = -4.5;
     const camZ = 23.5;
@@ -718,6 +719,7 @@ export function createParadiseFlora(
     if (sample.height < 0.2 || sample.height > 4.6 || sample.pathWeight > 0.38) continue;
     if (Math.hypot(x - 12.8, z + 7.8) < 3.6) continue;
     if (Math.hypot(x + 6.4, z + 8.4) < 3.4) continue;
+    if (Math.hypot(x + 11.4, z - 5.8) < 3.4) continue;
 
     dummy.position.set(x, sample.height - 0.06, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
@@ -782,6 +784,7 @@ export function createParadiseFlora(
     const z = (rand() - 0.5) * 58;
     const sample = sampleTerrainBiome(x, z);
     if (sample.height < 0.16 || sample.height > 7.0 || sample.pathWeight > 0.34) continue;
+    if (Math.hypot(x + 11.4, z - 5.8) < 2.95) continue;
 
     dummy.position.set(x, sample.height - 0.03, z);
     dummy.rotation.set((rand() - 0.5) * 0.16, rand() * Math.PI * 2, (rand() - 0.5) * 0.16);
@@ -816,6 +819,7 @@ export function createParadiseFlora(
     const z = -22 + rand() * 44;
     const sample = sampleTerrainBiome(x, z);
     if (sample.height < 0.06 || sample.height > 2.4 || sample.pathWeight > 0.28) continue;
+    if (Math.hypot(x + 11.4, z - 5.8) < 3.1) continue;
 
     dummy.position.set(x, sample.height - 0.04, z);
     dummy.rotation.set((rand() - 0.5) * 0.18, rand() * Math.PI * 2, (rand() - 0.5) * 0.18);

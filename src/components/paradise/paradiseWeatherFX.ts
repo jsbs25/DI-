@@ -15,7 +15,8 @@ export interface ParadiseWeatherFXHandle {
     rainIntensity: number,
     fogDensity: number,
     dayFactor: number,
-    fogColor: THREE.Color
+    fogColor: THREE.Color,
+    pavilionSwirl?: number
   ) => void;
   dispose: () => void;
 }
@@ -316,7 +317,8 @@ export function createParadiseWeatherFX(
     dt: number,
     windStrength: number,
     rainIntensity: number,
-    gravityTerminal: number
+    gravityTerminal: number,
+    pavilionSwirl = 0
   ) => {
     const activeCount = Math.min(totalCount, Math.floor(totalCount * activeFraction));
     mesh.count = totalCount;
@@ -374,6 +376,21 @@ export function createParadiseWeatherFX(
           p.vel.y += (-gravityTerminal * wetGravityScale + relY * 1.8 - ny * vDotN * 1.35) * dt;
           p.vel.z += (relZ * dragCoeff - nz * vDotN * 1.45) * dt;
 
+          // Optional Pavilion Spirit Swirl: draw nearby petals into an ascending lotus vortex around (12.8, ~2.8, -7.8)
+          if (pavilionSwirl > 0.05) {
+            const dxP = 12.8 - p.pos.x;
+            const dzP = -7.8 - p.pos.z;
+            const distP = Math.hypot(dxP, dzP);
+            if (distP < 10.5 && distP > 0.35) {
+              const pull = pavilionSwirl * (1 - distP / 10.5) * 4.2;
+              const invD = 1 / distP;
+              // Tangential swirl + gentle upward thermal lift + soft inward draw
+              p.vel.x += (-dzP * invD * 2.1 + dxP * invD * 0.85) * pull * dt;
+              p.vel.z += (dxP * invD * 2.1 + dzP * invD * 0.85) * pull * dt;
+              p.vel.y += Math.max(0, 3.4 - p.pos.y) * 0.65 * pull * dt;
+            }
+          }
+
           // Flutter rocking side-glide
           const rock = Math.sin(elapsed * 4.4 + p.phase) * 0.55;
           p.vel.x += rock * cz * dt;
@@ -414,7 +431,8 @@ export function createParadiseWeatherFX(
     rainIntensity: number,
     fogDensity: number,
     dayFactor: number,
-    fogColor: THREE.Color
+    fogColor: THREE.Color,
+    pavilionSwirl = 0
   ) => {
     // 1. Update Rain Streaks
     if (rainIntensity > 0.02) {
@@ -464,7 +482,8 @@ export function createParadiseWeatherFX(
       dt,
       windStrength,
       rainIntensity,
-      0.52
+      0.52,
+      pavilionSwirl
     );
     stepLeafLayer(
       ginkgoLeaves,

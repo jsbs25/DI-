@@ -311,6 +311,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
   const [liveModeEngine, setLiveModeEngine] = useState<'gemini-live' | 'companion-api'>('gemini-live');
   const [listeningMode, setListeningMode] = useState<VoiceListeningMode>(() => readVoiceListeningMode());
 
+  useEffect(() => {
+    const onOpenHud = () => setHudOpen(true);
+    window.addEventListener('one-open-live-companion', onOpenHud);
+    return () => window.removeEventListener('one-open-live-companion', onOpenHud);
+  }, []);
+
   const [emotion, setEmotion] = useState<CompanionEmotion>('calm');
   const [emotionIntensity, setEmotionIntensity] = useState(0.65);
   const [emotionReason, setEmotionReason] = useState('');

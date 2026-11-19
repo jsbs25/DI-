@@ -38,6 +38,12 @@ import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx'
 import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
 import type { LibraryAgentAction, SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
+import { uiStateManager, useAgentUiState } from './agent/uiStateManager.ts';
+import {
+  registerAgentClientHandlers,
+  pauseActiveSpiritTask,
+  type LearningAgentAction,
+} from './agent/agentClient.ts';
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -128,7 +134,9 @@ export default function App() {
   const [venusQuickAction, setVenusQuickAction] = useState<VenusAgentAction | null>(null);
   const [saturnQuickAction, setSaturnQuickAction] = useState<SaturnAgentAction | null>(null);
   const [libraryQuickAction, setLibraryQuickAction] = useState<LibraryAgentAction | null>(null);
+  const [learningQuickAction, setLearningQuickAction] = useState<LearningAgentAction | null>(null);
   const [browserQuickSearch, setBrowserQuickSearch] = useState<{ seq: number; query: string } | null>(null);
+  const agentSnap = useAgentUiState();
 
   const tabHistoryRef = useRef<string[]>([currentTab]);
   const currentTabRef = useRef<string>(currentTab);
@@ -139,6 +147,9 @@ export default function App() {
   const navigateToTab = useCallback((nextTab: string) => {
     const normalized = normalizeModule(nextTab);
     if (normalized !== 'browser') setBrowserInitialQuery(null);
+    if (normalized !== 'globe' && uiStateManager.getSnapshot().commDrawerOpen) {
+      uiStateManager.setCommDrawerOpen(false);
+    }
     setCurrentTab((prev) => {
       if (prev === normalized) return prev;
       tabHistoryRef.current = [...tabHistoryRef.current.slice(-20), normalized];
@@ -288,18 +299,104 @@ export default function App() {
   const handleQuickCall = (kind: 'audio' | 'video', target: { targetUserId?: string; conversationId?: string }) => {
     if (target.conversationId) setActiveConversationId(target.conversationId);
     setMessengerQuickAction({ seq: Date.now(), kind, targetUserId: target.targetUserId, conversationId: target.conversationId });
-    navigateToTab('chat');
+    if (currentTabRef.current === 'globe') {
+      uiStateManager.setCommDrawerOpen(true);
+    } else {
+      navigateToTab('chat');
+    }
   };
   const handleOpenConversationFromHome = (conversationId: string) => {
     setActiveConversationId(conversationId);
     setMessengerQuickAction({ seq: Date.now(), kind: 'open_chat', conversationId });
-    navigateToTab('chat');
+    if (currentTabRef.current === 'globe') {
+      uiStateManager.setCommDrawerOpen(true);
+    } else {
+      navigateToTab('chat');
+    }
   };
   const handleOpenCallCenterFromHome = () => {
     setMessengerQuickAction({ seq: Date.now(), kind: 'open_calls' });
     navigateToTab('chat');
   };
   const handleEnterPlanet = (planetId: string) => { const eco = getPlanetEcosystem(planetId); if (!eco || !eco.available) return; navigateToTab(eco.tab); };
+
+  // Register unified ONE AI Agent frontend handlers & pause SQLite session on Communication Drawer open
+  useEffect(() => {
+    registerAgentClientHandlers({
+      onNavigateTab: navigateToTab,
+      onOpenBookById: (bookId) => {
+        setLibraryFocusBookId(bookId);
+        navigateToTab('library');
+      },
+      onOpenBookAction: (opts) => {
+        setLibraryQuickAction({
+          seq: Date.now(),
+          query: opts.query,
+          autoOpen: true,
+        });
+        navigateToTab('library');
+      },
+      onOpenLanguageLesson: (action) => {
+        setLearningQuickAction(action);
+        navigateToTab('arabic-learning');
+      },
+      onBrowserSearchAction: (query) => {
+        setBrowserQuickSearch({ seq: Date.now(), query });
+        navigateToTab('browser');
+      },
+      onGlobalSearchAction: (query) => {
+        setSearchQuery(query);
+        navigateToTab('mercury');
+      },
+      onPlayMusicAction: (opts) => {
+        setVenusQuickAction({
+          seq: Date.now(),
+          kind: 'crawl_and_play',
+          query: opts.query,
+        });
+        navigateToTab('venus');
+      },
+      onWatchDocumentaryAction: (opts) => {
+        setSaturnQuickAction({
+          seq: Date.now(),
+          query: opts.query,
+          platform: opts.platform,
+          autoPlayRandom: opts.randomPick ?? true,
+        });
+        navigateToTab('saturn');
+      },
+      onSetTheme: setTheme,
+      onSetLang: setLang,
+      onFlyTo: (lat, lng) => {
+        setFocusCoordinates({ lat, lng, timestamp: Date.now() });
+        navigateToTab('globe');
+      },
+      onOpenCommDrawer: (convId) => {
+        if (convId) {
+          setActiveConversationId(convId);
+          setMessengerQuickAction({ seq: Date.now(), kind: 'open_chat', conversationId: convId });
+        }
+        if (currentTabRef.current === 'globe') {
+          uiStateManager.setCommDrawerOpen(true);
+        } else {
+          navigateToTab('chat');
+        }
+      },
+      onQuickCall: handleQuickCall,
+      onOpenAuth: () => setIsAuthModalOpen(true),
+      onOpenCommandPalette: () => setCommandOpen(true),
+      onReplayIntro: () => {
+        setIntroGestureUnlocked(true);
+        setShowIntro(true);
+      },
+    });
+  }, [navigateToTab]);
+
+  useEffect(() => {
+    if (agentSnap.commDrawerOpen) {
+      void pauseActiveSpiritTask();
+    }
+  }, [agentSnap.commDrawerOpen]);
 
   const isMobileSubpage = currentTab !== 'globe';
   const mobileSubpageTitleMap: Record<string, string> = lang === 'ar'
@@ -550,6 +647,13 @@ export default function App() {
         {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8"><VenusMusicSpace lang={lang} onBack={goBack} quickAction={venusQuickAction} /></div>}
         {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MercurySearch lang={lang} onBack={goBack} onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); navigateToTab('knowledge'); }} onSelectTab={navigateToTab} /></div>}
         {currentTab === 'feed' && <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); navigateToTab('globe'); }} lang={lang} /></div>}
+        {currentTab === 'globe' && agentSnap.commDrawerOpen && (
+          <div
+            className="fixed inset-0 z-[57] bg-slate-950/35"
+            onClick={() => uiStateManager.setCommDrawerOpen(false)}
+            aria-hidden="true"
+          />
+        )}
         <GlobalMessenger
           conversations={conversations}
           activeConversationId={activeConversationId}
@@ -560,10 +664,21 @@ export default function App() {
           onRefreshConversations={refreshConversations}
           onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }}
           directOpenSeq={directOpenSeq}
-          isVisible={currentTab === 'chat'}
-          workspaceClassName="h-full w-full max-w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-16 md:pl-[5.5rem] md:pb-0 flex flex-col min-h-0"
+          isVisible={currentTab === 'chat' || (currentTab === 'globe' && agentSnap.commDrawerOpen)}
+          drawerMode={currentTab === 'globe' && agentSnap.commDrawerOpen}
+          workspaceClassName={
+            currentTab === 'globe' && agentSnap.commDrawerOpen
+              ? 'fixed inset-y-0 left-0 z-[58] w-full max-w-[460px] pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)] shadow-2xl border-r border-slate-200 dark:border-white/15 bg-white dark:bg-[#0f172a] flex flex-col min-h-0'
+              : 'h-full w-full max-w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-16 md:pl-[5.5rem] md:pb-0 flex flex-col min-h-0'
+          }
           quickAction={messengerQuickAction}
-          onBackToHome={goBack}
+          onBackToHome={() => {
+            if (currentTab === 'globe' && agentSnap.commDrawerOpen) {
+              uiStateManager.setCommDrawerOpen(false);
+            } else {
+              goBack();
+            }
+          }}
           onMobileChatChange={handleMobileChatChange}
         />
         {currentTab === 'aihub' && <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8"><AIHub lang={lang} /></div>}
@@ -574,6 +689,7 @@ export default function App() {
             <ArabicLearningHub
               lang={lang}
               onOpenLibrary={() => navigateToTab('library')}
+              quickAction={learningQuickAction}
             />
           </div>
         )}
@@ -640,7 +756,8 @@ export default function App() {
         currentTab={currentTab}
         lang={lang}
         hidden={(currentTab === 'globe' && immersive) || (isMobileKeyboardOpen && isViewportWorkspace)}
-        hideMobileDock={isMobileSubpage}
+        hideMobileDock={currentTab === 'globe' || isMobileSubpage}
+        hideDesktopDock={currentTab === 'globe'}
         onSelectTab={navigateToTab}
       />
 
@@ -657,7 +774,7 @@ export default function App() {
         isAuthenticated={true}
         userName={currentUser.displayName || currentUser.username}
         userCity={currentUser.location?.cityName}
-        showLauncher={!immersive && !(isNarrowViewport && currentTab === 'chat' && mobileChatOpen)}
+        showLauncher={currentTab !== 'globe' && !immersive && !(isNarrowViewport && currentTab === 'chat' && mobileChatOpen)}
         placement={currentTab === 'globe' ? 'center-bottom' : 'corner'}
         onFlyTo={(lat, lng) => {
           setFocusCoordinates({ lat, lng, timestamp: Date.now() });

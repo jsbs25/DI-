@@ -254,6 +254,7 @@ interface GlobalMessengerProps {
   onUserUpdate?: (user: User) => void;
   directOpenSeq?: number;
   isVisible?: boolean;
+  drawerMode?: boolean;
   workspaceClassName?: string;
   quickAction?: MessengerQuickAction | null;
   onBackToHome?: () => void;
@@ -274,6 +275,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   onUserUpdate,
   directOpenSeq = 0,
   isVisible = true,
+  drawerMode = false,
   workspaceClassName,
   quickAction = null,
   onBackToHome,
@@ -2352,20 +2354,21 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   return (
     <div className={isVisible ? (workspaceClassName || 'w-full h-full min-h-0 flex flex-col') : 'hidden'} aria-hidden={!isVisible}>
-    <div className="w-full h-full min-h-0 p-0 sm:p-4 lg:p-5"><div className="mx-auto h-full min-h-0 max-w-[1680px] rounded-none sm:rounded-[28px] border-0 sm:border border-slate-200/90 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl shadow-lg dark:shadow-[0_24px_80px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col lg:flex-row text-slate-900 dark:text-slate-100">
+    <div className={drawerMode ? 'w-full h-full min-h-0 p-0' : 'w-full h-full min-h-0 p-0 sm:p-4 lg:p-5'}>
+      <div className={drawerMode ? 'h-full min-h-0 bg-white dark:bg-[#0f172a] overflow-hidden flex flex-col text-slate-900 dark:text-slate-100' : 'mx-auto h-full min-h-0 max-w-[1680px] rounded-none sm:rounded-[28px] border-0 sm:border border-slate-200/90 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl shadow-lg dark:shadow-[0_24px_80px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col lg:flex-row text-slate-900 dark:text-slate-100'}>
       {/* Left rail / list */}
-      <aside className={`w-full lg:w-[390px] xl:w-[430px] border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-white/10 bg-slate-50/85 dark:bg-[#111b2e]/90 p-3 sm:p-4 flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex lg:shrink-0" : "flex flex-1 lg:flex-initial lg:shrink-0"}`}>
+      <aside className={drawerMode ? `w-full border-b-0 bg-slate-50/85 dark:bg-[#111b2e]/90 p-3 flex-col min-h-0 ${mobileShowChat ? 'hidden' : 'flex flex-1'}` : `w-full lg:w-[390px] xl:w-[430px] border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-white/10 bg-slate-50/85 dark:bg-[#111b2e]/90 p-3 sm:p-4 flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex lg:shrink-0" : "flex flex-1 lg:flex-initial lg:shrink-0"}`}>
         <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10 mb-3 gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {onBackToHome && (
               <button
                 type="button"
                 onClick={onBackToHome}
-                className="md:hidden rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.06] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 shrink-0 min-h-[38px] px-2.5 inline-flex items-center gap-0.5 text-xs font-medium"
-                aria-label="返回"
+                className={`${drawerMode ? 'inline-flex' : 'md:hidden inline-flex'} rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.06] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 shrink-0 min-h-[38px] px-2.5 items-center gap-0.5 text-xs font-medium cursor-pointer`}
+                aria-label={drawerMode ? '收起抽屉' : '返回'}
               >
                 <ChevronLeft className="w-4 h-4" />
-                <span>返回</span>
+                <span>{drawerMode ? '收起' : '返回'}</span>
               </button>
             )}
             <div className="w-9 h-9 rounded-xl border border-sky-200 dark:border-sky-400/20 bg-sky-50 dark:bg-sky-400/10 flex items-center justify-center shrink-0"><MessageCircle className="w-4 h-4 text-sky-600 dark:text-sky-300" /></div>
@@ -2899,10 +2902,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
       </aside>
 
       {/* Right: chat */}
-      <main className={`flex-1 bg-slate-50/40 dark:bg-[#0b1220]/70 flex-col overflow-hidden min-h-0 ${mobileShowChat ? "flex" : "hidden lg:flex"}`}>
+      <main className={`flex-1 bg-slate-50/40 dark:bg-[#0b1220]/70 flex-col overflow-hidden min-h-0 ${drawerMode ? (mobileShowChat ? 'flex' : 'hidden') : (mobileShowChat ? 'flex' : 'hidden lg:flex')}`}>
         <div className="px-2.5 py-2 sm:px-4 sm:py-3 border-b border-slate-200 dark:border-white/10 flex items-center justify-between gap-2 bg-white/90 dark:bg-white/[0.02] shrink-0">
           <div className="min-w-0 flex items-center gap-2 flex-1">
-            <button type="button" onClick={()=>setMobileShowChat(false)} className="lg:hidden rounded-xl border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06] shrink-0 min-h-[40px] min-w-[40px] inline-flex items-center justify-center" aria-label="Back"><ChevronLeft className="w-5 h-5"/></button>
+            <button type="button" onClick={()=>setMobileShowChat(false)} className={`${drawerMode ? '' : 'lg:hidden'} rounded-xl border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06] shrink-0 min-h-[40px] min-w-[40px] inline-flex items-center justify-center cursor-pointer`} aria-label="Back"><ChevronLeft className="w-5 h-5"/></button>
             {activeConv?.type !== 'global_channel' && (
               <div className="relative shrink-0 hidden xs:block sm:block">
                 <img src={activeConv?.otherUser?.avatar || activeConv?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-9 h-9 rounded-full object-cover border border-slate-200 dark:border-white/10" />

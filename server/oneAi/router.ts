@@ -194,7 +194,7 @@ export class OneAiRouterEngine {
       hasPrivateMemoryContext: params.hasPrivateMemoryContext,
     });
 
-    const { policy, candidates } = this.selectCandidates({
+    let { policy, candidates } = this.selectCandidates({
       taskType: classification.taskType,
       privacyMode: classification.privacyMode,
       estimatedInputTokens: classification.estimatedInputTokens,
@@ -204,6 +204,30 @@ export class OneAiRouterEngine {
       userTier: params.userTier,
       forceEndpointId: params.forceEndpointIdForAdminTest,
     });
+
+    // Out-of-the-box shared free pool fallback when no private API keys / ZDR endpoints are configured yet.
+    // STRICT SECURITY INVARIANT: Never downgrade explicit strict_zdr or private memory turns to may_train pools!
+    if (
+      candidates.length === 0 &&
+      !params.forceEndpointIdForAdminTest &&
+      params.explicitPrivacyMode !== 'strict_zdr' &&
+      !params.hasPrivateMemoryContext &&
+      classification.privacyMode === 'no_training'
+    ) {
+      const relaxed = this.selectCandidates({
+        taskType: classification.taskType,
+        privacyMode: 'standard',
+        estimatedInputTokens: classification.estimatedInputTokens,
+        hasImages: classification.hasImages,
+        requiresTools: classification.requiresTools,
+        requiresStructuredOutput: classification.requiresStructuredOutput,
+        userTier: params.userTier,
+      });
+      if (relaxed.candidates.length > 0) {
+        policy = relaxed.policy;
+        candidates = relaxed.candidates;
+      }
+    }
 
     const fallbackIds = candidates.map((c) => c.endpoint.endpointId);
 
@@ -279,11 +303,11 @@ export class OneAiRouterEngine {
             tools: params.tools,
             responseFormat: params.requiresStructuredOutput ? { type: 'json_object' } : undefined,
             temperature: params.temperature,
-            maxTokens: params.maxTokens,
+            maxTokens: params.maxTokens ?? 768,
             stream: params.stream && Boolean(params.onDelta),
             privacyMode: classification.privacyMode,
             timeoutMs: 35_000,
-            firstByteTimeoutMs: policy.maxFirstByteTimeoutMs,
+            firstByteTimeoutMs: Math.max(policy.maxFirstByteTimeoutMs, cand.provider.id === 'kilo' ? 8500 : policy.maxFirstByteTimeoutMs),
             signal: params.signal,
           },
           { apiKey: cand.provider.apiKey, accountId: cand.provider.accountId }

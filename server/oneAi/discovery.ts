@@ -47,10 +47,16 @@ async function fetchOpenRouterCatalog(): Promise<DiscoveredRawModel[]> {
 }
 
 async function fetchKiloCatalog(): Promise<DiscoveredRawModel[]> {
-  const res = await fetch('https://ai-gateway.kilo.ai/api/v1/models', {
+  let res = await fetch('https://api.kilo.ai/api/gateway/models', {
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(12_000),
-  });
+  }).catch(() => null);
+  if (!res || !res.ok) {
+    res = await fetch('https://ai-gateway.kilo.ai/api/v1/models', {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(12_000),
+    });
+  }
   if (!res.ok) throw new Error(`Kilo catalog HTTP ${res.status}`);
   const data: any = await res.json();
   const list = Array.isArray(data?.data) ? data.data : [];

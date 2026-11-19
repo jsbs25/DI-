@@ -41,6 +41,7 @@ import {
 } from './islamicLibraryData.ts';
 import { EnglishLearningSection } from './EnglishLearningSection.tsx';
 import { DuolingoImmersionPlatform } from './DuolingoImmersionPlatform.tsx';
+import type { LearningAgentAction } from '../../agent/agentClient.ts';
 
 const STORAGE_KEY = 'earth_one_arabic_learning_v1';
 const DAILY_NEW_LIMIT = 5;
@@ -348,6 +349,7 @@ const COPY: Record<Language, Copy> = {
 interface ArabicLearningHubProps {
   lang: Language;
   onOpenLibrary: () => void;
+  quickAction?: LearningAgentAction | null;
 }
 
 type MainTab = 'duolingo_platform' | 'english_engine' | 'letters' | 'islamic_library';
@@ -362,7 +364,7 @@ function readSavedProgress(): ArabicStudyState {
   }
 }
 
-export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOpenLibrary }) => {
+export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOpenLibrary, quickAction }) => {
   const t = COPY[lang] || COPY.en;
   const isRtl = lang === 'ar';
 
@@ -400,6 +402,34 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
     },
     []
   );
+
+  // Deep agent navigation hook
+  useEffect(() => {
+    if (!quickAction) return;
+    if (quickAction.language === 'en' || quickAction.tab === 'english') {
+      setMainTab('english_engine');
+      return;
+    }
+    if (quickAction.tab === 'islamic_library') {
+      setMainTab('islamic_library');
+      return;
+    }
+    if (quickAction.tab === 'duolingo_platform') {
+      setMainTab('duolingo_platform');
+      return;
+    }
+    setMainTab('letters');
+    if (quickAction.tab === 'practice') {
+      const nextQueue = createDailyReviewQueue(study, Date.now(), DAILY_NEW_LIMIT);
+      setQueue(nextQueue);
+      setQueueIndex(0);
+      setRevealed(false);
+      setSessionDone(nextQueue.length === 0);
+      setView('practice');
+    } else {
+      setView('alphabet');
+    }
+  }, [quickAction?.seq]);
 
   // Fetch initial books from API
   useEffect(() => {

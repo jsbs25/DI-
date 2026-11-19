@@ -2,10 +2,17 @@ import * as THREE from 'three';
 import type { ParadiseQualityProfile, ProceduralTextureSet } from './paradiseQuality.ts';
 import { gardenPathFactor, terrainHeightAt } from './paradiseTerrain.ts';
 
+export const PAVILION_WORLD_POS = new THREE.Vector3(12.8, terrainHeightAt(12.8, -7.8) + 0.64, -7.8);
+export const REST_HOUSE_WORLD_POS = new THREE.Vector3(-11.4, terrainHeightAt(-11.4, 5.8) + 0.32, 5.8);
+
 export interface ParadiseArchitectureHandle {
   group: THREE.Group;
+  pavilionGroup: THREE.Group;
+  restHouseGroup: THREE.Group;
   lanternLight: THREE.PointLight;
   lanternGlassMat: THREE.MeshStandardMaterial;
+  restHouseLight: THREE.PointLight;
+  restWindowMat: THREE.MeshStandardMaterial;
   wettableMaterials: THREE.MeshStandardMaterial[];
   dispose: () => void;
 }
@@ -605,10 +612,137 @@ export function createParadiseArchitecture(
     }
   }
 
+  // =========================================================================
+  // 5. Spirit Rest Cottage (精灵休息木屋) at (-11.4, y, 5.8)
+  // =========================================================================
+  const restHouseGroup = new THREE.Group();
+  const rhX = -11.4;
+  const rhZ = 5.8;
+  const rhBaseY = terrainHeightAt(rhX, rhZ);
+  restHouseGroup.position.set(rhX, rhBaseY, rhZ);
+  restHouseGroup.rotation.y = 0.72; // face southeast toward meadow, bridge & pavilion
+
+  const plasterWallMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xece3d2,
+      roughness: 0.86,
+      metalness: 0.02,
+      map: textures.terrainDetail,
+    })
+  );
+
+  const restWindowMat = new THREE.MeshStandardMaterial({
+    color: 0xffe4b3,
+    emissive: new THREE.Color(0xffa748),
+    emissiveIntensity: 0.24,
+    roughness: 0.32,
+    metalness: 0.04,
+  });
+  materials.push(restWindowMat);
+
+  // Granite stone foundation & timber veranda deck
+  const rhStoneBase = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.75, 0.36, 3.35)), graniteMat);
+  rhStoneBase.position.y = 0.08;
+  rhStoneBase.castShadow = quality.enableShadows;
+  rhStoneBase.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rhStoneBase);
+
+  const rhVeranda = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.45, 0.12, 3.15)), cedarDeckMat);
+  rhVeranda.position.y = 0.3;
+  rhVeranda.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rhVeranda);
+
+  // Two cozy veranda entry steps
+  for (let s = 0; s < 2; s++) {
+    const step = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.26, 0.12, 0.32)), plinthStoneMat);
+    step.position.set(0, 0.22 - s * 0.12, 1.66 + s * 0.28);
+    step.receiveShadow = quality.enableShadows;
+    restHouseGroup.add(step);
+  }
+
+  // Timber corner posts & roof framing
+  const rhPostGeo = trackGeo(new THREE.BoxGeometry(0.14, 1.95, 0.14));
+  const rhCols: Array<[number, number]> = [
+    [-1.42, -1.2],
+    [1.42, -1.2],
+    [-1.42, 0.76],
+    [1.42, 0.76],
+    [-1.42, 1.36],
+    [1.42, 1.36],
+  ];
+  for (const [cx, cz] of rhCols) {
+    const col = new THREE.Mesh(rhPostGeo, rosewoodMat);
+    col.position.set(cx, 1.32, cz);
+    col.castShadow = quality.enableShadows;
+    restHouseGroup.add(col);
+  }
+
+  // Warm plaster cottage enclosure (rear half enclosed, front porch open)
+  const rhMainBody = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.74, 1.84, 1.88)), plasterWallMat);
+  rhMainBody.position.set(0, 1.28, -0.22);
+  rhMainBody.castShadow = quality.enableShadows;
+  rhMainBody.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rhMainBody);
+
+  // Wooden door frame & recessed warm shoji doorway
+  const doorFrame = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.96, 1.46, 0.12)), rosewoodMat);
+  doorFrame.position.set(0, 1.09, 0.72);
+  restHouseGroup.add(doorFrame);
+
+  const doorGlow = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.76, 1.32)), restWindowMat);
+  doorGlow.position.set(0, 1.06, 0.785);
+  restHouseGroup.add(doorGlow);
+
+  // Side lattice shoji windows
+  for (const side of [-1, 1]) {
+    const winFrame = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.08, 0.74, 0.92)), rosewoodMat);
+    winFrame.position.set(side * 1.38, 1.34, -0.22);
+    restHouseGroup.add(winFrame);
+
+    const winPane = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.78, 0.58)), restWindowMat);
+    winPane.position.set(side * 1.425, 1.34, -0.22);
+    winPane.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+    restHouseGroup.add(winPane);
+  }
+
+  // Sweeping traditional pitched cottage roof with gentle eaves overhang
+  const rhRoofLeft = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.42, 0.11, 3.62)), ceramicTileMat);
+  rhRoofLeft.position.set(-0.98, 2.58, 0.14);
+  rhRoofLeft.rotation.z = 0.44;
+  rhRoofLeft.castShadow = quality.enableShadows;
+  rhRoofLeft.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rhRoofLeft);
+
+  const rhRoofRight = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.42, 0.11, 3.62)), ceramicTileMat);
+  rhRoofRight.position.set(0.98, 2.58, 0.14);
+  rhRoofRight.rotation.z = -0.44;
+  rhRoofRight.castShadow = quality.enableShadows;
+  rhRoofRight.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rhRoofRight);
+
+  const rhRidgeBeam = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.18, 0.18, 3.74)), ridgeStoneMat);
+  rhRidgeBeam.position.set(0, 3.09, 0.14);
+  restHouseGroup.add(rhRidgeBeam);
+
+  // Porch hanging lantern & cozy interior hearth light
+  const rhPorchLantern = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.1, 0.08, 0.24, 8)), restWindowMat);
+  rhPorchLantern.position.set(0.76, 1.98, 1.24);
+  restHouseGroup.add(rhPorchLantern);
+
+  const restHouseLight = new THREE.PointLight(0xffb463, 0.25, 9, 1.6);
+  restHouseLight.position.set(0, 1.35, 1.15);
+  restHouseGroup.add(restHouseLight);
+
+  group.add(restHouseGroup);
+
   return {
     group,
+    pavilionGroup: pav,
+    restHouseGroup,
     lanternLight,
     lanternGlassMat,
+    restHouseLight,
+    restWindowMat,
     wettableMaterials,
     dispose: () => {
       geometries.forEach((g) => g.dispose());

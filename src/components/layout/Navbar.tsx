@@ -152,7 +152,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-3 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.75rem,env(safe-area-inset-top))]">
       <div className="pointer-events-auto mx-auto flex min-h-12 w-full max-w-[1280px] items-center justify-between gap-2 rounded-2xl border border-slate-900/10 dark:border-white/[0.14] bg-white/80 dark:bg-[#0B0D14]/76 backdrop-blur-2xl saturate-150 px-2.5 py-1 sm:px-3.5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] dark:shadow-[0_14px_38px_rgba(0,0,0,0.45)]">
-        {/* Left: Fixed Brand Anchor */}
+        {/* Left: Fixed Brand Anchor + Quick Spaces Launcher */}
         <div className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
@@ -166,6 +166,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               EARTH ONE
             </span>
           </button>
+          {onOpenCommand && (
+            <button
+              type="button"
+              onClick={onOpenCommand}
+              className="hidden sm:inline-flex h-8 items-center gap-1 rounded-xl border border-slate-900/10 dark:border-white/[0.12] bg-slate-900/[0.04] dark:bg-white/[0.05] px-2.5 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-900/[0.08] dark:hover:bg-white/[0.1] transition-colors cursor-pointer"
+              title={lang === 'zh' ? '全部空间与功能 (⌘K)' : 'All Spaces (⌘K)'}
+            >
+              <Compass className="h-3.5 w-3.5 text-[#247864] dark:text-[#C4A876]" />
+              <span>{lang === 'zh' ? '全部空间' : 'Spaces'}</span>
+            </button>
+          )}
         </div>
 
         {/* Center: Adaptive Search Field */}

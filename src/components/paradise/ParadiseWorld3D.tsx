@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { ChevronDown, ChevronUp, Compass, RotateCcw, SlidersHorizontal, SunMedium, Wind } from 'lucide-react';
+import { ChevronDown, ChevronUp, Compass, LocateFixed, Radio, RotateCcw, SlidersHorizontal, SunMedium, Wind } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
+import { uiStateManager, useAgentUiState } from '../../agent/uiStateManager.ts';
 import {
   detectWebGLSupport,
   isSoftwareRenderer,
@@ -30,6 +31,9 @@ import { createParadiseFlora } from './paradiseFlora.ts';
 import { createParadiseFauna } from './paradiseFauna.ts';
 import { createParadiseWeatherFX } from './paradiseWeatherFX.ts';
 import { createParadisePostPipeline, type ParadisePostPipeline } from './paradisePost.ts';
+import { createParadiseSpirit } from './paradiseSpirit.ts';
+import { createParadiseCat } from './paradiseCat.ts';
+import { PavilionAiHud } from './PavilionAiHud.tsx';
 
 type CameraPresetId = 'overlook' | 'bridge' | 'blossoms' | 'pavilion';
 
@@ -57,6 +61,11 @@ const QUALITY_OPTIONS: Array<{ id: UserQualityChoice; zh: string; en: string }> 
 
 const QUALITY_STORAGE_KEY = 'earthone_paradise_quality_v1';
 
+function computeLocalWallTimeFraction(): number {
+  const now = new Date();
+  return (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400;
+}
+
 function readStoredQuality(): UserQualityChoice {
   try {
     const v = localStorage.getItem(QUALITY_STORAGE_KEY);
@@ -81,20 +90,27 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const isZh = lang === 'zh';
   const stageRef = useRef<HTMLDivElement | null>(null);
 
+  const agentSnap = useAgentUiState();
   const [webglReady, setWebglReady] = useState<boolean>(() => detectWebGLSupport());
   const [contextLost, setContextLost] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
 
   // Synced display HUD state (throttled updates so React never churns every animation frame)
-  const [autoCycle, setAutoCycle] = useState(true);
-  const [autoWeather, setAutoWeather] = useState(true);
-  const [timeOfDay, setTimeOfDay] = useState(0.44);
+  const [autoCycle, setAutoCycle] = useState(false);
+  const [autoWeather, setAutoWeather] = useState(false);
+  const [timeOfDay, setTimeOfDay] = useState(() => computeLocalWallTimeFraction());
   const [activeWeather, setActiveWeather] = useState<WeatherKind>('clear');
   const [cameraPreset, setCameraPreset] = useState<CameraPresetId>('overlook');
   const [userQuality, setUserQuality] = useState<UserQualityChoice>(() => readStoredQuality());
 
   // Mutable engine command refs shared with WebGL animation loop
   const envRef = useRef<ParadiseEnvironmentEngine | null>(null);
+  const realtimeSyncRef = useRef<boolean>(agentSnap.realtimeSync);
+  realtimeSyncRef.current = agentSnap.realtimeSync;
+  const spiritStateRef = useRef(agentSnap.spiritState);
+  spiritStateRef.current = agentSnap.spiritState;
+  const lastHandledEnvSeqRef = useRef<number>(0);
+
   const persistedRef = useRef<{
     timeOfDay: number;
     autoCycle: boolean;
@@ -104,10 +120,10 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     camPos: THREE.Vector3;
     camTarget: THREE.Vector3;
   }>({
-    timeOfDay: 0.44,
-    autoCycle: true,
+    timeOfDay: computeLocalWallTimeFraction(),
+    autoCycle: false,
     weather: 'clear',
-    autoWeather: true,
+    autoWeather: false,
     hasCam: false,
     camPos: new THREE.Vector3(-4.5, 8.2, 23.5),
     camTarget: new THREE.Vector3(2.5, 1.4, -2.5),
@@ -122,6 +138,120 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     targetPos: new THREE.Vector3(-4.5, 8.2, 23.5),
     targetLook: new THREE.Vector3(2.5, 1.4, -2.5),
   });
+
+  // Real-time external weather fetcher (Open-Meteo via /api/environment/weather)
+  const fetchLiveWeather = async (useGeoPrompt = false) => {
+    try {
+      let query = '';
+      if (useGeoPrompt && typeof navigator !== 'undefined' && navigator.geolocation) {
+        try {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 6000 })
+          );
+          query = `?lat=${pos.coords.latitude.toFixed(4)}&lon=${pos.coords.longitude.toFixed(4)}`;
+        } catch {
+          query = '';
+        }
+      } else if (typeof navigator !== 'undefined' && navigator.permissions && navigator.geolocation) {
+        try {
+          const perm = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+          if (perm.state === 'granted') {
+            const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+              navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4500 })
+            );
+            query = `?lat=${pos.coords.latitude.toFixed(4)}&lon=${pos.coords.longitude.toFixed(4)}`;
+          }
+        } catch {
+          // silent non-granted fallback
+        }
+      }
+
+      const res = await fetch(`/api/environment/weather${query}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        uiStateManager.setLiveWeather({
+          locationName: isZh ? '实时气象暂不可用' : 'Live weather unavailable',
+          temperatureC: 0,
+          humidityPct: 0,
+          windSpeedKmh: 0,
+          conditionZh: '未能获取实时气象',
+          conditionEn: 'Unavailable',
+          mappedWeather: 'clear',
+          observedAt: new Date().toISOString(),
+          unavailable: true,
+          error: data?.error || `HTTP ${res.status}`,
+        });
+        return;
+      }
+
+      uiStateManager.setLiveWeather(data);
+      if (realtimeSyncRef.current && envRef.current && data?.mappedWeather) {
+        envRef.current.autoWeather = false;
+        envRef.current.targetWeather = data.mappedWeather as WeatherKind;
+        if (data.mappedWeather === 'thunderstorm') envRef.current.triggerLightning();
+        setAutoWeather(false);
+        setActiveWeather(data.mappedWeather as WeatherKind);
+      }
+    } catch (err: any) {
+      uiStateManager.setLiveWeather({
+        locationName: isZh ? '实时气象暂不可用' : 'Live weather unavailable',
+        temperatureC: 0,
+        humidityPct: 0,
+        windSpeedKmh: 0,
+        conditionZh: '网络不可达',
+        conditionEn: 'Offline',
+        mappedWeather: 'clear',
+        observedAt: new Date().toISOString(),
+        unavailable: true,
+        error: err?.message || 'Network error',
+      });
+    }
+  };
+
+  useEffect(() => {
+    void fetchLiveWeather(false);
+    const id = window.setInterval(() => {
+      if (realtimeSyncRef.current) void fetchLiveWeather(false);
+    }, 10 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // Listen to ONE AI agent environment commands
+  useEffect(() => {
+    const cmd = agentSnap.weatherCommand;
+    if (!cmd || cmd.seq === lastHandledEnvSeqRef.current) return;
+    lastHandledEnvSeqRef.current = cmd.seq;
+
+    const engine = envRef.current;
+    if (cmd.realtimeSync === true) {
+      if (engine) {
+        engine.autoCycle = false;
+        engine.autoWeather = false;
+        engine.timeOfDay = computeLocalWallTimeFraction();
+        if (agentSnap.liveWeather && !agentSnap.liveWeather.unavailable) {
+          engine.targetWeather = agentSnap.liveWeather.mappedWeather;
+        }
+      }
+      setAutoCycle(false);
+      setAutoWeather(false);
+      void fetchLiveWeather(false);
+      return;
+    }
+
+    if (cmd.weatherPreset && engine) {
+      engine.autoWeather = false;
+      engine.targetWeather = cmd.weatherPreset;
+      if (cmd.weatherPreset === 'thunderstorm') engine.triggerLightning();
+      setAutoWeather(false);
+      setActiveWeather(cmd.weatherPreset);
+    }
+    if (cmd.timePreset && engine) {
+      engine.autoCycle = false;
+      engine.setTimePreset(cmd.timePreset);
+      setAutoCycle(false);
+      setTimeOfDay(TIME_PRESET_VALUES[cmd.timePreset]);
+    }
+  }, [agentSnap.weatherCommand]);
 
   useEffect(() => {
     if (!webglReady) return;
@@ -265,6 +395,12 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     const fauna = createParadiseFauna(quality, textures, flora.flowerSpots);
     scene.add(fauna.group);
 
+    const spirit = createParadiseSpirit(quality);
+    scene.add(spirit.group);
+
+    const cat = createParadiseCat(quality);
+    scene.add(cat.group);
+
     const weatherFX = createParadiseWeatherFX(quality, textures, flora.treeCanopies);
     scene.add(weatherFX.group);
 
@@ -348,6 +484,24 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
       if (moved > 8) return;
       updateNdc(e.clientX, e.clientY);
+
+      raycaster.setFromCamera(pointerNdc, camera);
+      const actorHits = raycaster.intersectObjects([spirit.hitTarget, cat.hitTarget, architecture.pavilionGroup], true);
+      if (actorHits.length > 0) {
+        const hitObj = actorHits[0].object;
+        if (hitObj === cat.hitTarget) {
+          weatherFX.emitPetalBurst(cat.group.position);
+          return;
+        }
+        // Clicked Spirit or Waterside Pavilion: wake Spirit & open Pavilion HUD
+        uiStateManager.setPavilionHudOpen(true);
+        if (spiritStateRef.current === 'idle_explore' || spiritStateRef.current === 'sleeping_in_house' || spiritStateRef.current === 'returning_to_rest') {
+          uiStateManager.setSpiritState('woken_approaching');
+        }
+        weatherFX.emitPetalBurst(spirit.spiritPos);
+        return;
+      }
+
       const hit = raycastGroundOrWater();
       if (!hit) return;
       if (hit.type === 'water') {
@@ -482,6 +636,12 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         }
       }
 
+      // Sync local wall-clock continuously when Real-Time Sync is active
+      if (realtimeSyncRef.current) {
+        envEngine.autoCycle = false;
+        envEngine.timeOfDay = computeLocalWallTimeFraction();
+      }
+
       // Advance continuous Day-Night & Weather simulation
       envEngine.update(reducedMotion ? dt * 0.25 : dt);
       const st = envEngine.state;
@@ -526,9 +686,12 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       lightningLight.intensity = st.lightningFlash * 3.4;
       lightningLight.position.set(st.lightningAzimuth * 30, 32, -36);
 
-      // Warm lakeside pavilion lantern glow & rain material wetness
+      // Warm lakeside pavilion lantern, Spirit Rest Cottage hearth & rain material wetness
       architecture.lanternLight.intensity = st.lanternGlow * 2.2;
       architecture.lanternGlassMat.emissiveIntensity = 0.12 + st.lanternGlow * 1.85;
+      const spiritSleeping = spiritStateRef.current === 'sleeping_in_house' || spiritStateRef.current === 'returning_to_rest';
+      architecture.restHouseLight.intensity = 0.25 + st.lanternGlow * 1.5 + (spiritSleeping ? 0.85 : 0);
+      architecture.restWindowMat.emissiveIntensity = 0.18 + st.lanternGlow * 1.35 + (spiritSleeping ? 0.55 : 0);
       for (const mat of architecture.wettableMaterials) {
         const baseR = typeof mat.userData.baseRoughness === 'number' ? mat.userData.baseRoughness : 0.7;
         mat.roughness = THREE.MathUtils.lerp(baseR, Math.max(0.14, baseR * 0.36), st.wetness);
@@ -577,7 +740,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       // Camera forward vector for curiosity butterflies & volumetric god-rays
       camera.getWorldDirection(camForward);
 
-      // Flora, Fauna, Weather FX
+      // Flora, Fauna, AI Spirit, Garden Cat, Weather FX
       flora.update(elapsed, reducedMotion ? st.windStrength * 0.25 : st.windStrength, st.dewAmount, st.nightFactor);
       fauna.update(
         elapsed,
@@ -592,6 +755,25 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         camera.position,
         camForward
       );
+      const visualSpiritState = spirit.update(
+        elapsed,
+        dt,
+        spiritStateRef.current,
+        camera.position,
+        st.nightFactor,
+        st.rainIntensity
+      );
+      cat.update(
+        elapsed,
+        dt,
+        st.dayFactor,
+        st.nightFactor,
+        st.rainIntensity,
+        spirit.spiritPos,
+        visualSpiritState,
+        fauna.butterflyPositions,
+        camera.position
+      );
       weatherFX.update(
         elapsed,
         dt,
@@ -600,7 +782,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         st.rainIntensity,
         st.fogDensity,
         st.dayFactor,
-        st.fogColor
+        st.fogColor,
+        spirit.pavilionSwirlIntensity
       );
 
       // Smooth damped camera preset transitions
@@ -708,6 +891,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       architecture.dispose();
       flora.dispose();
       fauna.dispose();
+      spirit.dispose();
+      cat.dispose();
       weatherFX.dispose();
       textures.dispose();
       envRT.dispose();
@@ -718,6 +903,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
   const applyTimePreset = (preset: TimePreset) => {
     const engine = envRef.current;
+    uiStateManager.setRealtimeSync(false);
     if (!engine) return;
     engine.autoCycle = false;
     engine.setTimePreset(preset);
@@ -727,6 +913,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
   const toggleAutoCycle = () => {
     const engine = envRef.current;
+    uiStateManager.setRealtimeSync(false);
     if (!engine) return;
     engine.autoCycle = !engine.autoCycle;
     setAutoCycle(engine.autoCycle);
@@ -734,6 +921,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
   const applyWeather = (w: WeatherKind) => {
     const engine = envRef.current;
+    uiStateManager.setRealtimeSync(false);
     if (!engine) return;
     engine.autoWeather = false;
     engine.targetWeather = w;
@@ -744,9 +932,28 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
   const toggleAutoWeather = () => {
     const engine = envRef.current;
+    uiStateManager.setRealtimeSync(false);
     if (!engine) return;
     engine.autoWeather = !engine.autoWeather;
     setAutoWeather(engine.autoWeather);
+  };
+
+  const restoreRealtimeSync = () => {
+    uiStateManager.setRealtimeSync(true);
+    const engine = envRef.current;
+    if (engine) {
+      engine.autoCycle = false;
+      engine.autoWeather = false;
+      engine.timeOfDay = computeLocalWallTimeFraction();
+      if (agentSnap.liveWeather && !agentSnap.liveWeather.unavailable) {
+        engine.targetWeather = agentSnap.liveWeather.mappedWeather;
+        setActiveWeather(agentSnap.liveWeather.mappedWeather);
+      }
+    }
+    setAutoCycle(false);
+    setAutoWeather(false);
+    setTimeOfDay(computeLocalWallTimeFraction());
+    void fetchLiveWeather(false);
   };
 
   const moveCameraToPreset = (preset: CameraPreset) => {
@@ -791,12 +998,55 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Compact Collapsible Environment Dock (Safe-area aware, leaves center & AI orb 100% unobstructed) */}
+      {/* Pavilion AI Workspace HUD (shown smoothly while Spirit works / presents, hidden inside Communication drawer) */}
+      <PavilionAiHud lang={lang} />
+
+      {/* Compact Collapsible Environment Dock (Anchored bottom-right on desktop / top-right on mobile so center garden & bottom Spirit bar stay unobstructed) */}
       <div
-        className="pointer-events-none fixed right-3 top-[calc(3.9rem+env(safe-area-inset-top))] md:top-auto md:right-auto md:bottom-[max(1.5rem,env(safe-area-inset-bottom))] md:left-[6.25rem] z-20 flex flex-col items-end md:items-start gap-2 max-w-[calc(100vw-1.5rem)] md:max-w-[440px]"
+        className="pointer-events-none fixed right-3 top-[calc(3.85rem+env(safe-area-inset-top))] md:top-auto md:bottom-[max(1.25rem,env(safe-area-inset-bottom))] md:right-4 z-20 flex flex-col items-end gap-2 max-w-[calc(100vw-1.5rem)] md:max-w-[430px]"
       >
         {controlsOpen && (
-          <div className="pointer-events-auto w-[min(92vw,420px)] rounded-2xl border border-white/15 bg-[#0c1420]/90 p-3.5 shadow-2xl text-xs text-slate-100">
+          <div className="pointer-events-auto w-[min(92vw,420px)] rounded-2xl border border-white/15 bg-[#0c1420]/92 p-3.5 shadow-2xl text-xs text-slate-100">
+            {/* Real-Time Weather & Local Clock Banner */}
+            <div className="mb-2.5 flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-2.5 py-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-200">
+                  <Radio className="h-3 w-3 shrink-0" />
+                  <span className="truncate">
+                    {agentSnap.liveWeather
+                      ? agentSnap.liveWeather.unavailable
+                        ? isZh
+                          ? '实时气象服务暂不可用'
+                          : 'Live weather unavailable'
+                        : `${agentSnap.liveWeather.locationName} · ${Math.round(agentSnap.liveWeather.temperatureC)}°C · ${isZh ? agentSnap.liveWeather.conditionZh : agentSnap.liveWeather.conditionEn}`
+                      : isZh
+                      ? '正在同步真实天气...'
+                      : 'Syncing live weather...'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => void fetchLiveWeather(true)}
+                  className="inline-flex h-7 items-center gap-1 rounded-lg bg-white/8 px-2 text-[10px] text-slate-200 hover:bg-white/16 cursor-pointer"
+                  title={isZh ? '按当前位置刷新真实天气' : 'Locate & refresh live weather'}
+                >
+                  <LocateFixed className="h-3 w-3" />
+                  <span>{isZh ? '定位' : 'Locate'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={restoreRealtimeSync}
+                  className={`inline-flex h-7 items-center rounded-lg px-2 text-[10px] font-medium cursor-pointer ${
+                    agentSnap.realtimeSync ? 'bg-emerald-400/22 text-emerald-200' : 'bg-white/10 text-slate-200 hover:bg-white/18'
+                  }`}
+                >
+                  {isZh ? '实时同步' : 'Live Sync'}
+                </button>
+              </div>
+            </div>
+
             {/* Day-Night Controls */}
             <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10">
               <div className="flex items-center gap-1.5 font-medium text-slate-100">
@@ -813,7 +1063,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                   autoCycle ? 'bg-amber-300/20 text-amber-200' : 'bg-white/8 text-slate-300 hover:bg-white/14'
                 }`}
               >
-                {autoCycle ? (isZh ? '自动流转' : 'Auto') : isZh ? '手动时间' : 'Manual'}
+                {agentSnap.realtimeSync ? (isZh ? '真实时间' : 'Real-Time') : autoCycle ? (isZh ? '自动演示' : 'Demo Cycle') : isZh ? '手动时间' : 'Manual'}
               </button>
             </div>
 
@@ -847,6 +1097,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
               aria-label={isZh ? '时间滑块' : 'Time of day'}
               onChange={(e) => {
                 const v = Number(e.target.value);
+                uiStateManager.setRealtimeSync(false);
                 if (envRef.current) {
                   envRef.current.autoCycle = false;
                   envRef.current.timeOfDay = v;
@@ -870,7 +1121,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                   autoWeather ? 'bg-sky-400/20 text-sky-200' : 'bg-white/8 text-slate-300 hover:bg-white/14'
                 }`}
               >
-                {autoWeather ? (isZh ? '自动演变' : 'Auto') : isZh ? '固定天气' : 'Fixed'}
+                {agentSnap.realtimeSync ? (isZh ? '跟随实况' : 'Live') : autoWeather ? (isZh ? '自动演变' : 'Auto') : isZh ? '固定天气' : 'Fixed'}
               </button>
             </div>
 
@@ -913,7 +1164,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
               ))}
             </div>
 
-            {/* Render Quality Tier Selector (High / Medium / Low / Auto) */}
+            {/* Render Quality Tier Selector */}
             <div className="mt-3 flex items-center justify-between gap-2 pt-2.5 border-t border-white/10">
               <div className="flex items-center gap-1.5 font-medium text-slate-100">
                 <SlidersHorizontal className="h-3.5 w-3.5 text-emerald-300" />
@@ -941,15 +1192,23 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         )}
 
         {/* Always-accessible single-row control strip */}
-        <div className="pointer-events-auto inline-flex items-center rounded-xl border border-white/15 bg-[#0c1420]/86 divide-x divide-white/12 shadow-lg overflow-hidden">
+        <div className="pointer-events-auto inline-flex items-center rounded-xl border border-white/15 bg-[#0c1420]/90 divide-x divide-white/12 shadow-lg overflow-hidden">
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
             className="inline-flex h-10 md:h-9 items-center gap-2 px-3 text-[11px] font-medium text-slate-100 hover:bg-white/8 transition-colors cursor-pointer whitespace-nowrap"
           >
+            {agentSnap.realtimeSync && (
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            )}
             <span className="tabular-nums text-amber-200">{currentClockLabel}</span>
             <span className="text-slate-300">
-              {currentPhaseLabel} · {isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}
+              {currentPhaseLabel} ·{' '}
+              {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && agentSnap.realtimeSync
+                ? `${Math.round(agentSnap.liveWeather.temperatureC)}°C ${isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}`
+                : isZh
+                ? activeWeatherMeta.zh
+                : activeWeatherMeta.en}
             </span>
             {controlsOpen ? <ChevronDown className="h-3.5 w-3.5 text-slate-300" /> : <ChevronUp className="h-3.5 w-3.5 text-slate-300" />}
           </button>

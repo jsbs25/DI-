@@ -13,6 +13,8 @@ import { canViewProfileByPolicy, canSearchByField } from './server/privacyPolicy
 import { Modality, ThinkingLevel } from '@google/genai';
 import { aiGateway } from './server/aiGateway.ts';
 import { createOneAiAdminRouter } from './server/oneAi/adminRoutes.ts';
+import { createOneAiAgentRouter } from './server/oneAi/agentOrchestrator.ts';
+import { handleEnvironmentWeatherRoute } from './server/environmentWeather.ts';
 import { oneAiDb } from './server/oneAi/db.ts';
 import { runGlobalModelDiscovery } from './server/oneAi/discovery.ts';
 import { oneAiRouter } from './server/oneAi/router.ts';
@@ -3019,6 +3021,21 @@ app.get('/api/games/rooms', (req, res) => {
 // 7. EARTH ONE UNIFIED AI GATEWAY & MULTI-MODEL DISPATCH
 // -------------------------------------------------------------
 app.use('/api/admin/ai', createOneAiAdminRouter(getSessionUser));
+app.get('/api/environment/weather', handleEnvironmentWeatherRoute);
+app.use(
+  '/api/one-ai/agent',
+  createOneAiAgentRouter({
+    getSessionUser,
+    store,
+    crawlOpenBooks,
+    searchWebProviders,
+    fetchAndExtract,
+    wsBroadcastConversationEvent,
+    wsBroadcastToUser,
+    isUserViewingConversation,
+    emitNotification,
+  })
+);
 
 app.get(['/api/ai/quota', '/api/one-ai/quota', '/api/one-ai/status'], (req, res) => {
   const sessionUser = getSessionUser(req);
@@ -3027,7 +3044,7 @@ app.get(['/api/ai/quota', '/api/one-ai/quota', '/api/one-ai/status'], (req, res)
     success: true,
     tier: quota.userTier,
     isAdmin: isOneAiAdmin(sessionUser),
-    hasLiveEngine: aiGateway.hasLiveEngine(),
+    hasLiveEngine: oneAiRouter.hasAnyUsableEngine() || aiGateway.hasLiveEngine(),
     requestsToday: quota.requestsToday,
     dailyRequestLimit: quota.dailyRequestLimit,
     tokensToday: quota.tokensToday,
@@ -3037,7 +3054,7 @@ app.get(['/api/ai/quota', '/api/one-ai/quota', '/api/one-ai/status'], (req, res)
 
 app.get(['/api/ai/models', '/api/one-ai/models'], async (req, res) => {
   const sessionUser = getSessionUser(req);
-  const hasLive = aiGateway.hasLiveEngine();
+  const hasLive = oneAiRouter.hasAnyUsableEngine() || aiGateway.hasLiveEngine();
   if (!isOneAiAdmin(sessionUser)) {
     return res.json({
       success: true,
@@ -3864,10 +3881,6 @@ app.post(['/api/ai/agent-command', '/api/one-ai/agent-command'], async (req, res
     return res.json({ success: true, action: { type: 'none' } });
   }
 
-  if (!aiGateway.hasLiveEngine()) {
-    return res.json({ success: true, action: { type: 'none' } });
-  }
-
   const systemPrompt = `You are the web-control planner for ONE. Given user speech, return ONLY valid JSON (no markdown) deciding whether the user wants to control the website RIGHT NOW, or {"type":"none"} if it is normal conversation, brainstorming, questions, or hypotheticals.
 Allowed actions:
 - {"type":"play_music","query":"optional song/mood","crawl":true,"reply":"short confirmation in ${lang}"}
@@ -3880,14 +3893,45 @@ Allowed actions:
 - {"type":"none"}`;
 
   try {
-    const resolvedModelId = aiGateway.getChatModelId();
-    const result = await aiGateway.generateContent(resolvedModelId, text, systemPrompt, undefined, history, undefined, { mode: 'agent-command' });
-    const raw = (result.content || '').trim();
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (result.success && jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed && typeof parsed.type === 'string') {
-        return res.json({ success: true, action: parsed });
+    const authUser = getSessionUser(req);
+    if (oneAiRouter.hasAnyUsableEngine()) {
+      const unifiedMessages: UnifiedMessage[] = [
+        { role: 'system', content: systemPrompt },
+        ...history.map((h) => ({ role: h.role, content: h.content })),
+        { role: 'user', content: text },
+      ];
+      const routed = await oneAiRouter.executeUnifiedTurn({
+        requestId: `agcmd_${Date.now()}`,
+        userId: authUser?.id || null,
+        subjectKey: authUser?.id ? `user:${authUser.id}` : `ip:${req.ip || 'unknown'}`,
+        userTier: isOneAiAdmin(authUser) ? 'admin' : authUser ? 'free' : 'guest',
+        prompt: text,
+        messages: unifiedMessages,
+        mode: 'agent-command',
+        requiresStructuredOutput: true,
+        maxTokens: 320,
+        stream: false,
+      });
+      const raw = (routed.content || '').trim();
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (routed.success && jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed && typeof parsed.type === 'string') {
+          return res.json({ success: true, action: parsed });
+        }
+      }
+    }
+
+    if (aiGateway.hasLiveEngine()) {
+      const resolvedModelId = aiGateway.getChatModelId();
+      const result = await aiGateway.generateContent(resolvedModelId, text, systemPrompt, undefined, history, undefined, { mode: 'agent-command' });
+      const raw = (result.content || '').trim();
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (result.success && jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed && typeof parsed.type === 'string') {
+          return res.json({ success: true, action: parsed });
+        }
       }
     }
   } catch {
@@ -4343,17 +4387,46 @@ app.post(['/api/ai/companion-turn', '/api/one-ai/companion-turn'], async (req, r
     }
   }
 
-  // 4. Unified DeepSeek / Ollama / Context Orchestrator path
+  // 4. Unified ONE AI Router -> DeepSeek / Ollama / Context Orchestrator path
   try {
     let replyText = '';
-    let activeModel = aiGateway.getChatModelId();
+    let activeModel = 'ONE AI';
     let extractedEmotion: string | null = null;
     let extractedTools: Array<{ name: string; args: Record<string, unknown> }> = [];
 
     if (detTools.length === 1 && instantReply && !isHypotheticalOrDiscussion) {
       replyText = instantReply;
       activeModel = 'one-instant-companion';
-    } else if (aiGateway.hasLiveEngine()) {
+    } else if (oneAiRouter.hasAnyUsableEngine()) {
+      const unifiedMessages: UnifiedMessage[] = [];
+      if (ctx.systemPrompt) unifiedMessages.push({ role: 'system', content: ctx.systemPrompt });
+      for (const h of ctx.mergedHistory) {
+        if (h?.content) unifiedMessages.push({ role: h.role, content: h.content });
+      }
+      unifiedMessages.push({ role: 'user', content: cleanPrompt });
+      const routed = await oneAiRouter.executeUnifiedTurn({
+        requestId: `comp_${Date.now().toString(36)}`,
+        userId: authUser?.id || null,
+        subjectKey: authUser?.id ? `user:${authUser.id}` : `ip:${req.ip || 'unknown'}`,
+        userTier: isOneAiAdmin(authUser) ? 'admin' : authUser ? 'free' : 'guest',
+        prompt: cleanPrompt,
+        messages: unifiedMessages,
+        mode: 'voice-agent',
+        hasPrivateMemoryContext: ctx.recalledMemories.length > 0,
+        maxTokens: ctx.resolvedMaxTokens,
+        stream: false,
+      });
+      if (routed.success && routed.content.trim()) {
+        const sanitized = sanitizeCompanionReply(routed.content);
+        replyText = sanitized.cleanReply;
+        extractedEmotion = sanitized.extractedEmotion;
+        extractedTools = isHypotheticalOrDiscussion ? [] : sanitized.extractedToolCalls;
+        activeModel = 'ONE AI';
+      }
+    }
+
+    if (!replyText && aiGateway.hasLiveEngine()) {
+      activeModel = aiGateway.getChatModelId();
       const gwRes = await aiGateway.generateContent(
         activeModel,
         cleanPrompt,
@@ -5112,11 +5185,45 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
 
   const evidence = evidenceResult.evidence;
   const { prompt, systemInstruction } = buildReadingPrompt(evidence, req.body.replyLanguage);
-  const result = await aiGateway.generateContent('one-ai', prompt, systemInstruction, undefined, undefined, undefined, { mode: 'library-reading' });
-  if (!result.success || !result.content.trim()) {
+  let replyContent = '';
+  let errorMsg = '';
+
+  if (oneAiRouter.hasAnyUsableEngine()) {
+    const reqUser = getSessionUser(req);
+    const routed = await oneAiRouter.executeUnifiedTurn({
+      requestId: `libread_${Date.now().toString(36)}`,
+      userId: reqUser?.id || null,
+      subjectKey: reqUser?.id ? `user:${reqUser.id}` : `ip:${req.ip || 'unknown'}`,
+      userTier: isOneAiAdmin(reqUser) ? 'admin' : reqUser ? 'free' : 'guest',
+      prompt,
+      messages: [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: prompt },
+      ],
+      mode: 'library-reading',
+      maxTokens: 768,
+      stream: false,
+    });
+    if (routed.success && routed.content.trim()) {
+      replyContent = routed.content.trim();
+    } else {
+      errorMsg = routed.errorMessage || '';
+    }
+  }
+
+  if (!replyContent && aiGateway.hasLiveEngine()) {
+    const result = await aiGateway.generateContent('one-ai', prompt, systemInstruction, undefined, undefined, undefined, { mode: 'library-reading' });
+    if (result.success && result.content.trim()) {
+      replyContent = result.content.trim();
+    } else {
+      errorMsg = result.errorMessage || errorMsg;
+    }
+  }
+
+  if (!replyContent) {
     return res.status(503).json({
       success: false,
-      error: result.errorMessage || '当前没有可用的 AI 模型；正文和引用已核验，但未生成回答。',
+      error: errorMsg || '当前没有可用的 AI 模型；正文和引用已核验，但未生成回答。',
       citation: evidence.citation,
       coverage: evidence.coverage,
       notice: evidence.notice
@@ -5125,7 +5232,7 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
 
   res.json({
     success: true,
-    message: { content: result.content },
+    message: { content: replyContent },
     citation: evidence.citation,
     coverage: evidence.coverage,
     notice: evidence.notice

@@ -18,6 +18,7 @@ export interface ParadiseFaunaHandle {
     cameraPos?: THREE.Vector3,
     cameraForward?: THREE.Vector3
   ) => void;
+  butterflyPositions: THREE.Vector3[];
   dispose: () => void;
 }
 
@@ -110,6 +111,7 @@ export function createParadiseFauna(
   ];
 
   const butterflies: ButterflyAgent[] = [];
+  const butterflyPositions: THREE.Vector3[] = [];
   for (let i = 0; i < quality.butterflyCount; i++) {
     const [cMain, cEdge, cSpot] = butterflySpecies[i % butterflySpecies.length];
     const mat = trackMat(
@@ -205,6 +207,7 @@ export function createParadiseFauna(
       phase: Math.random() * Math.PI * 2,
       homeFlowerIdx: homeIdx,
     });
+    butterflyPositions.push(startPos);
   }
 
   let nextCameraVisitAt = 5.5;
@@ -577,6 +580,7 @@ export function createParadiseFauna(
   return {
     group,
     update,
+    butterflyPositions,
     dispose: () => {
       geometries.forEach((g) => g.dispose());
       materials.forEach((m) => m.dispose());

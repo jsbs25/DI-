@@ -37,6 +37,7 @@ export const OneAiAdminConsole: React.FC<OneAiAdminConsoleProps> = ({ isZh, onCl
   const [discoveryRuns, setDiscoveryRuns] = useState<any[]>([]);
   const [ledger, setLedger] = useState<any[]>([]);
   const [adminAudit, setAdminAudit] = useState<any[]>([]);
+  const [providersGuide, setProvidersGuide] = useState<any[]>([]);
 
   const [catalogFilter, setCatalogFilter] = useState<string>('all');
   const [discovering, setDiscovering] = useState(false);
@@ -60,10 +61,11 @@ export const OneAiAdminConsole: React.FC<OneAiAdminConsoleProps> = ({ isZh, onCl
     setLoading(true);
     setError(null);
     try {
-      const [ovRes, catRes, audRes] = await Promise.all([
+      const [ovRes, catRes, audRes, guideRes] = await Promise.all([
         fetch('/api/admin/ai/overview'),
         fetch('/api/admin/ai/catalog'),
         fetch('/api/admin/ai/audit'),
+        fetch('/api/admin/ai/providers-guide'),
       ]);
       if (!ovRes.ok) {
         const d = await ovRes.json().catch(() => ({}));
@@ -72,6 +74,7 @@ export const OneAiAdminConsole: React.FC<OneAiAdminConsoleProps> = ({ isZh, onCl
       const ov = await ovRes.json();
       const cat = await catRes.json();
       const aud = await audRes.json();
+      const gd = guideRes.ok ? await guideRes.json().catch(() => ({})) : {};
       setMetrics(ov.metrics || null);
       setProviders(Array.isArray(ov.providers) ? ov.providers : []);
       setPolicies(Array.isArray(ov.policies) ? ov.policies : []);
@@ -80,6 +83,7 @@ export const OneAiAdminConsole: React.FC<OneAiAdminConsoleProps> = ({ isZh, onCl
       setEndpoints(Array.isArray(cat.endpoints) ? cat.endpoints : []);
       setLedger(Array.isArray(aud.ledger) ? aud.ledger : []);
       setAdminAudit(Array.isArray(aud.adminAudit) ? aud.adminAudit : []);
+      setProvidersGuide(Array.isArray(gd.guides) ? gd.guides : []);
     } catch (err: any) {
       setError(err?.message || '无法加载 ONE AI 管理数据');
     } finally {
@@ -482,6 +486,58 @@ export const OneAiAdminConsole: React.FC<OneAiAdminConsoleProps> = ({ isZh, onCl
                   </div>
                 ))}
               </div>
+
+              {providersGuide.length > 0 && (
+                <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] p-4 space-y-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">
+                      {isZh ? '全球免费额度与 API 接入向导（仅管理员可见）' : 'Global Free-Tier & API Readiness Guide'}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {isZh
+                        ? 'Kilo 免密公共免费池已开箱可用；配置官方免费 Key 后将自动解锁 ZDR 零留存保护与高速多节点热备。'
+                        : 'Kilo shared free pool works out-of-the-box; add official free BYOK keys for ZDR & multi-provider failover.'}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+                    {providersGuide.map((g) => (
+                      <div key={g.id} className="rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0f1829] p-3 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold">{g.name}</span>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                              g.readiness === 'configured_byok'
+                                ? 'bg-emerald-500/15 text-emerald-400'
+                                : g.readiness === 'active_shared_free'
+                                ? 'bg-sky-500/15 text-sky-400'
+                                : 'bg-amber-500/15 text-amber-400'
+                            }`}
+                          >
+                            {g.readiness === 'configured_byok'
+                              ? isZh ? '已配置密钥' : 'BYOK Ready'
+                              : g.readiness === 'active_shared_free'
+                              ? isZh ? '免密免费池在线' : 'Free Pool Active'
+                              : isZh ? '待补充密钥' : 'Missing Key'}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-300">{g.freeTierSummary}</div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">{g.zdrNote}</div>
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[10px] font-mono text-slate-400">
+                          <span>env: {Array.isArray(g.envVarNames) ? g.envVarNames.join(' / ') : ''}</span>
+                          <a
+                            href={g.signupUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sky-400 hover:underline font-sans"
+                          >
+                            {isZh ? '官方申请入口 ↗' : 'Console ↗'}
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {editingProvider && (
                 <div className="rounded-xl border border-sky-500/40 bg-sky-500/5 p-4 space-y-3">

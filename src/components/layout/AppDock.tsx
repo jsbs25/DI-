@@ -10,9 +10,10 @@ type Props = {
   lang: Language;
   hidden?: boolean;
   hideMobileDock?: boolean;
+  hideDesktopDock?: boolean;
 };
 
-export const AppDock: React.FC<Props> = ({ currentTab, onSelectTab, lang, hidden, hideMobileDock }) => {
+export const AppDock: React.FC<Props> = ({ currentTab, onSelectTab, lang, hidden, hideMobileDock, hideDesktopDock }) => {
   const [moreOpen, setMoreOpen] = useState(false);
   const items = DOCK_ITEMS;
   const label = (it: { labelZh: string; labelEn: string }) => (lang === 'zh' ? it.labelZh : it.labelEn);
@@ -24,7 +25,7 @@ export const AppDock: React.FC<Props> = ({ currentTab, onSelectTab, lang, hidden
       {/* Desktop Left Spatial Titanium Dock */}
       <nav
         aria-label={lang === 'zh' ? '主空间导航' : 'Primary spatial dock'}
-        className="pointer-events-auto fixed left-3 top-1/2 z-50 hidden max-h-[calc(100dvh-6rem)] -translate-y-1/2 flex-col gap-1 overflow-y-auto rounded-2xl border border-slate-900/10 dark:border-white/[0.14] bg-white/80 dark:bg-[#0B0D14]/76 p-1.5 backdrop-blur-2xl saturate-150 shadow-[0_14px_38px_rgba(0,0,0,0.18)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.55)] [scrollbar-width:none] md:flex"
+        className={`pointer-events-auto fixed left-3 top-1/2 z-50 hidden max-h-[calc(100dvh-6rem)] -translate-y-1/2 flex-col gap-1 overflow-y-auto rounded-2xl border border-slate-900/10 dark:border-white/[0.14] bg-white/80 dark:bg-[#0B0D14]/76 p-1.5 backdrop-blur-2xl saturate-150 shadow-[0_14px_38px_rgba(0,0,0,0.18)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.55)] [scrollbar-width:none] ${hideDesktopDock ? 'hidden' : 'md:flex'}`}
       >
         {items.map((it) => {
           const Icon = it.icon as any;

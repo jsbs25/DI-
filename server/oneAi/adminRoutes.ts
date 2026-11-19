@@ -49,6 +49,102 @@ export function createOneAiAdminRouter(resolveSessionUser: (req: express.Request
     res.json({ success: true, providers: oneAiDb.listProviders() });
   });
 
+  router.get('/providers-guide', (_req, res) => {
+    const providers = oneAiDb.listProviders();
+    const metaMap: Record<
+      string,
+      { envVars: string[]; signupUrl: string; freeTier: string; privacy: string; anonymousReady?: boolean }
+    > = {
+      kilo: {
+        envVars: ['KILO_API_KEY (可选)'],
+        signupUrl: 'https://kilo.ai/',
+        freeTier: '共享免费池无需密钥即可试跑 (kilo-auto/free, baidu/ernie-5.5-flash-preview:free)',
+        privacy: '共享免费池标记 may_train；高隐私任务默认隔离，仅在无私有 Key 时保底',
+        anonymousReady: true,
+      },
+      gemini: {
+        envVars: ['GEMINI_API_KEY'],
+        signupUrl: 'https://aistudio.google.com/apikey',
+        freeTier: 'AI Studio Free Tier + 实时语音 Live API / 多模态引擎',
+        privacy: 'Paid Tier 零训练保留；Free Tier 遵循 Google API 条款',
+      },
+      groq: {
+        envVars: ['GROQ_API_KEY'],
+        signupUrl: 'https://console.groq.com/keys',
+        freeTier: 'Developer Free Tier (~30 RPM / 1K RPD，超低延迟)',
+        privacy: '支持 ZDR 零数据保留',
+      },
+      cerebras: {
+        envVars: ['CEREBRAS_API_KEY'],
+        signupUrl: 'https://cloud.cerebras.ai/',
+        freeTier: '免费极速推理 Tier',
+        privacy: '默认 ZDR（零数据保留）',
+      },
+      openrouter: {
+        envVars: ['OPENROUTER_API_KEY'],
+        signupUrl: 'https://openrouter.ai/keys',
+        freeTier: ':free 聚合通道 (Llama 3.3 / Qwen / DeepSeek 等)',
+        privacy: '支持 provider.zdr = true 硬过滤',
+      },
+      deepseek: {
+        envVars: ['DEEPSEEK_API_KEY'],
+        signupUrl: 'https://platform.deepseek.com/api_keys',
+        freeTier: '新用户赠送额度 + 极低成本按量（已设每日/月预算锁）',
+        privacy: '官方直连 API',
+      },
+      qwen: {
+        envVars: ['DASHSCOPE_API_KEY', 'QWEN_API_KEY'],
+        signupUrl: 'https://bailian.console.aliyun.com/',
+        freeTier: '阿里云百炼新用户免费 Token 额度',
+        privacy: '企业 API 不用于训练',
+      },
+      zhipu: {
+        envVars: ['ZHIPU_API_KEY'],
+        signupUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
+        freeTier: 'glm-4-flash 官方长期免费（受 QPS 限制）',
+        privacy: '官方标准隐私策略',
+      },
+      workers_ai: {
+        envVars: ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID'],
+        signupUrl: 'https://dash.cloudflare.com/',
+        freeTier: '每日 10,000 Neurons 免费额度',
+        privacy: '不用输入输出训练模型 (ZDR)',
+      },
+      huggingface: {
+        envVars: ['HF_TOKEN', 'HUGGINGFACE_API_KEY'],
+        signupUrl: 'https://huggingface.co/settings/tokens',
+        freeTier: '开源推理免费月度额度',
+        privacy: '依赖具体托管方',
+      },
+    };
+
+    const guide = providers.map((p) => {
+      const m = metaMap[p.id] || {
+        envVars: [],
+        signupUrl: '',
+        freeTier: p.notes,
+        privacy: p.zdrEnabledAccount ? 'ZDR' : 'Standard',
+      };
+      const readiness = p.hasApiKey
+        ? 'configured_byok'
+        : m.anonymousReady
+          ? 'active_shared_free'
+          : 'missing_key';
+      return {
+        id: p.id,
+        name: p.name,
+        billingMode: p.billingMode,
+        status: p.status,
+        hasApiKey: p.hasApiKey,
+        apiKeyMask: p.apiKeyMask,
+        readiness,
+        ...m,
+      };
+    });
+
+    res.json({ success: true, guide });
+  });
+
   router.post('/providers', (req, res) => {
     const admin: User = (req as any).__oneAiAdmin;
     const {

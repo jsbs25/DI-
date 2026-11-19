@@ -166,6 +166,10 @@ export function sampleTerrainBiome(x: number, z: number): TerrainBiomeSample {
   const pavFlat = 1 - smoothstep(2.8, 6.0, pavDist);
   h = THREE.MathUtils.lerp(h, 0.94, pavFlat);
 
+  const restDist = Math.hypot(x + 11.4, z - 5.8);
+  const restFlat = 1 - smoothstep(2.1, 4.4, restDist);
+  h = THREE.MathUtils.lerp(h, 1.38, restFlat);
+
   const stream = streamDistanceAndFlow(x, z);
   const streamCarve = 1 - smoothstep(stream.width * 0.48, stream.width * 1.5, stream.dist);
   if (streamCarve > 0) {

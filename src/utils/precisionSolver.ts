@@ -343,7 +343,7 @@ const CURATED_FACTS: Array<{ test: RegExp; zh: string; en: string; kind: Precisi
     emotion: 'affectionate',
   },
   {
-    test: /圆周率|π是多少|pi\b/i,
+    test: /圆周率|π是多少|\bpi\b/i,
     zh: '圆周率 π 约等于 3.14159265，它是一个无限不循环的无理数，代表圆的周长与直径之比。',
     en: 'Pi (π) is approximately 3.14159265, the ratio of a circle’s circumference to its diameter.',
     kind: 'fact',

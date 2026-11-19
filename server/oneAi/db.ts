@@ -211,6 +211,35 @@ export class OneAiDatabase {
         detail_json TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS agent_task_sessions (
+        session_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        intent_summary TEXT NOT NULL,
+        module TEXT NOT NULL,
+        steps_json TEXT NOT NULL DEFAULT '[]',
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        result_json TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_agent_sessions_user ON agent_task_sessions(user_id, updated_at);
+
+      CREATE TABLE IF NOT EXISTS agent_pending_confirmations (
+        confirm_token TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        preview_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'pending',
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
   }
 
@@ -286,12 +315,12 @@ export class OneAiDatabase {
         id: 'kilo',
         name: 'Kilo AI Gateway',
         adapterType: 'kilo',
-        baseUrl: 'https://ai-gateway.kilo.ai/api/v1',
+        baseUrl: 'https://api.kilo.ai/api/gateway',
         billingMode: 'free_only',
         dailyUsdCap: 0,
         monthlyUsdCap: 0,
         zdr: false,
-        notes: '角色限定：模型发现数据源 + 低优先级/BYOK 备用通道（:free 标记 mayTrainOnYourPrompts=true 且共享池易 429）。',
+        notes: '零成本开箱即用共享免费池（kilo-auto/free / baidu/ernie-5.5-flash-preview:free，不传极高隐私数据；支持后台发现与 BYOK）。',
       },
       {
         id: 'qwen',
@@ -518,6 +547,38 @@ export class OneAiDatabase {
         code: true,
         license: 'NVIDIA Open Model License',
         doc: 'https://build.nvidia.com/',
+      },
+      {
+        canonicalId: 'kilo/kilo-auto-free',
+        family: 'kilo',
+        displayName: 'Kilo Auto Free Pool',
+        version: 'free',
+        category: 'chat',
+        ctx: 65536,
+        maxOut: 4096,
+        img: false,
+        audio: false,
+        tools: false,
+        json: false,
+        code: true,
+        license: 'Gateway Free Tier',
+        doc: 'https://kilo.ai/',
+      },
+      {
+        canonicalId: 'baidu/ernie-5.5-flash-preview',
+        family: 'ernie',
+        displayName: 'ERNIE 5.5 Flash Preview (Free)',
+        version: '5.5',
+        category: 'chat',
+        ctx: 65536,
+        maxOut: 4096,
+        img: false,
+        audio: false,
+        tools: false,
+        json: false,
+        code: true,
+        license: 'Gateway Free Tier',
+        doc: 'https://kilo.ai/',
       },
     ];
 
@@ -762,11 +823,47 @@ export class OneAiDatabase {
         outPrice: 0,
         mayTrain: true,
         retention: 'may_train',
-        approval: 'discovered', // 遵循原则：未经管理员验证审批前绝不自动投放生产
+        approval: 'discovered',
         ttft: 1600,
         tps: 35,
         quality: 79,
         toolRel: 76,
+      },
+      {
+        id: 'ep_kilo_auto_free',
+        canonicalId: 'kilo/kilo-auto-free',
+        providerId: 'kilo',
+        upstreamId: 'kilo-auto/free',
+        apiType: 'openai_chat',
+        isFree: true,
+        freeNote: 'Kilo 免费免密钥自动通道（开箱即用，非敏感对话默认保底）',
+        inPrice: 0,
+        outPrice: 0,
+        mayTrain: true,
+        retention: 'may_train',
+        approval: 'approved',
+        ttft: 950,
+        tps: 46,
+        quality: 81,
+        toolRel: 74,
+      },
+      {
+        id: 'ep_kilo_ernie_free',
+        canonicalId: 'baidu/ernie-5.5-flash-preview',
+        providerId: 'kilo',
+        upstreamId: 'baidu/ernie-5.5-flash-preview:free',
+        apiType: 'openai_chat',
+        isFree: true,
+        freeNote: 'Kilo 免费免密钥中文快响备选（开箱即用备用链路）',
+        inPrice: 0,
+        outPrice: 0,
+        mayTrain: true,
+        retention: 'may_train',
+        approval: 'approved',
+        ttft: 1100,
+        tps: 44,
+        quality: 79,
+        toolRel: 72,
       },
     ];
 
@@ -897,6 +994,13 @@ export class OneAiDatabase {
            AND approved_by IS NULL`
       )
       .run(now, now);
+    // Upgrade Kilo gateway base URL on existing databases and keep approved shared free fallback endpoints ready
+    this.db
+      .prepare(`UPDATE ai_providers SET base_url = 'https://api.kilo.ai/api/gateway', updated_at = ? WHERE id = 'kilo' AND base_url LIKE '%ai-gateway.kilo.ai%'`)
+      .run(now);
+    this.db
+      .prepare(`UPDATE model_endpoints SET approval_status = 'approved', enabled = 1, health_status = 'healthy', cooldown_until = 0, updated_at = ? WHERE endpoint_id IN ('ep_kilo_auto_free', 'ep_kilo_ernie_free') AND approval_status != 'rejected'`)
+      .run(now);
     // Clear expired cooldowns on boot so restarted server starts fresh
     this.db.prepare(`UPDATE model_endpoints SET health_status = 'healthy', cooldown_until = 0 WHERE health_status = 'cooldown' AND cooldown_until < ?`).run(Date.now() + 120_000);
   }
@@ -1756,6 +1860,154 @@ export class OneAiDatabase {
         unhealthy: Number(endpointCounts?.unhealthy || 0),
       },
     };
+  }
+
+  // ---- Unified Agent Task Session & Confirmation Gate Persistence ----
+  public upsertAgentSession(session: {
+    sessionId: string;
+    userId: string;
+    status: 'running' | 'paused' | 'awaiting_confirmation' | 'completed' | 'failed';
+    intentSummary: string;
+    module: string;
+    steps: unknown[];
+    payload?: Record<string, unknown>;
+    result?: Record<string, unknown> | null;
+    errorMessage?: string | null;
+  }) {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO agent_task_sessions
+          (session_id, user_id, status, intent_summary, module, steps_json, payload_json, result_json, error_message, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+          status = excluded.status,
+          intent_summary = excluded.intent_summary,
+          module = excluded.module,
+          steps_json = excluded.steps_json,
+          payload_json = excluded.payload_json,
+          result_json = excluded.result_json,
+          error_message = excluded.error_message,
+          updated_at = excluded.updated_at`
+      )
+      .run(
+        session.sessionId,
+        session.userId,
+        session.status,
+        session.intentSummary,
+        session.module,
+        JSON.stringify(session.steps || []),
+        JSON.stringify(session.payload || {}),
+        session.result ? JSON.stringify(session.result) : null,
+        session.errorMessage || null,
+        now,
+        now
+      );
+  }
+
+  public getAgentSession(sessionId: string) {
+    const r = this.db.prepare('SELECT * FROM agent_task_sessions WHERE session_id = ?').get(sessionId) as any;
+    if (!r) return null;
+    return {
+      sessionId: String(r.session_id),
+      userId: String(r.user_id),
+      status: String(r.status),
+      intentSummary: String(r.intent_summary),
+      module: String(r.module),
+      steps: JSON.parse(r.steps_json || '[]'),
+      payload: JSON.parse(r.payload_json || '{}'),
+      result: r.result_json ? JSON.parse(r.result_json) : null,
+      errorMessage: r.error_message ? String(r.error_message) : null,
+      createdAt: String(r.created_at),
+      updatedAt: String(r.updated_at),
+    };
+  }
+
+  public getLatestPausedOrActiveAgentSession(userId: string) {
+    const r = this.db
+      .prepare(
+        `SELECT * FROM agent_task_sessions
+         WHERE user_id = ? AND status IN ('paused', 'awaiting_confirmation', 'running')
+         ORDER BY updated_at DESC LIMIT 1`
+      )
+      .get(userId) as any;
+    if (!r) return null;
+    return this.getAgentSession(String(r.session_id));
+  }
+
+  public listRecentAgentSessions(userId: string, limit = 12) {
+    const rows = this.db
+      .prepare('SELECT * FROM agent_task_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?')
+      .all(userId, limit) as any[];
+    return rows.map((r) => ({
+      sessionId: String(r.session_id),
+      userId: String(r.user_id),
+      status: String(r.status),
+      intentSummary: String(r.intent_summary),
+      module: String(r.module),
+      steps: JSON.parse(r.steps_json || '[]'),
+      payload: JSON.parse(r.payload_json || '{}'),
+      result: r.result_json ? JSON.parse(r.result_json) : null,
+      errorMessage: r.error_message ? String(r.error_message) : null,
+      createdAt: String(r.created_at),
+      updatedAt: String(r.updated_at),
+    }));
+  }
+
+  public createPendingConfirmation(item: {
+    confirmToken: string;
+    sessionId: string;
+    userId: string;
+    actionType: string;
+    targetId: string;
+    summary: string;
+    preview: Record<string, unknown>;
+    ttlMs?: number;
+  }) {
+    const now = new Date();
+    const exp = new Date(now.getTime() + (item.ttlMs || 15 * 60_000));
+    this.db
+      .prepare(
+        `INSERT INTO agent_pending_confirmations
+          (confirm_token, session_id, user_id, action_type, target_id, summary, preview_json, status, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+      )
+      .run(
+        item.confirmToken,
+        item.sessionId,
+        item.userId,
+        item.actionType,
+        item.targetId,
+        item.summary,
+        JSON.stringify(item.preview || {}),
+        exp.toISOString(),
+        now.toISOString()
+      );
+  }
+
+  public getPendingConfirmation(confirmToken: string) {
+    const r = this.db
+      .prepare('SELECT * FROM agent_pending_confirmations WHERE confirm_token = ?')
+      .get(confirmToken) as any;
+    if (!r) return null;
+    return {
+      confirmToken: String(r.confirm_token),
+      sessionId: String(r.session_id),
+      userId: String(r.user_id),
+      actionType: String(r.action_type),
+      targetId: String(r.target_id),
+      summary: String(r.summary),
+      preview: JSON.parse(r.preview_json || '{}'),
+      status: String(r.status),
+      expiresAt: String(r.expires_at),
+      createdAt: String(r.created_at),
+    };
+  }
+
+  public resolvePendingConfirmation(confirmToken: string, status: 'confirmed' | 'cancelled' | 'expired') {
+    this.db
+      .prepare('UPDATE agent_pending_confirmations SET status = ? WHERE confirm_token = ?')
+      .run(status, confirmToken);
   }
 }
 

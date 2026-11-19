@@ -194,7 +194,8 @@ export class OpenAiStandardAdapter implements IAiProviderAdapter {
               ? choice.message.content.map((p: any) => p?.text || '').join('')
               : '';
 
-        if (Array.isArray(choice?.message?.tool_calls)) {
+        const hasTools = Array.isArray(choice?.message?.tool_calls) && choice.message.tool_calls.length > 0;
+        if (hasTools) {
           for (const tc of choice.message.tool_calls) {
             yield {
               type: 'tool_call',
@@ -208,6 +209,16 @@ export class OpenAiStandardAdapter implements IAiProviderAdapter {
         }
         if (msgText) {
           yield { type: 'delta', textDelta: msgText };
+        } else if (!hasTools) {
+          yield {
+            type: 'error',
+            error: {
+              category: 'upstream_5xx',
+              retryableBeforeFirstByte: true,
+              rawMessage: 'Empty completion content returned by upstream model.',
+            },
+          };
+          return;
         }
         yield {
           type: 'usage',
@@ -264,6 +275,18 @@ export class OpenAiStandardAdapter implements IAiProviderAdapter {
 
           const choice = parsed?.choices?.[0];
           const delta = choice?.delta;
+          const reasoningDelta =
+            typeof delta?.reasoning === 'string'
+              ? delta.reasoning
+              : typeof delta?.reasoning_content === 'string'
+                ? delta.reasoning_content
+                : '';
+          if (reasoningDelta && !receivedAnyPayload) {
+            // Reasoning models stream thinking chunks before answer tokens: treat as first-byte liveness without emitting raw chain-of-thought
+            receivedAnyPayload = true;
+            if (firstByteTimer) clearTimeout(firstByteTimer);
+          }
+
           const textDelta = typeof delta?.content === 'string' ? delta.content : '';
           if (textDelta) {
             if (!receivedAnyPayload) {
