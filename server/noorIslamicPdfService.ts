@@ -4,6 +4,9 @@ import crypto from 'crypto';
 import type { Express, Request, Response } from 'express';
 import type { store as appStore } from './store.ts';
 import type { Book, User } from '../src/types/index.ts';
+import { oneAiRouter } from './oneAi/router.ts';
+import { aiGateway } from './aiGateway.ts';
+import { getGeminiClient } from './geminiClient.ts';
 
 type DataStore = typeof appStore;
 
@@ -37,13 +40,15 @@ export interface IslamicPdfBookItem {
   fullText?: string;
   language: 'ar' | 'zh' | 'en';
   contentType: Exclude<IslamicContentCategory, 'showall'>;
-  source: 'islamhouse' | 'archive' | 'local_vault' | 'noor_link';
+  source: 'islamhouse' | 'archive' | 'openlibrary' | 'gutenberg' | 'local_vault' | 'noor_link';
   sourceName: string;
   /** Primary PDF URL if available */
   pdfUrl?: string;
   streamUrl?: string;
   downloadUrl?: string;
-  /** All attachments (PDF, DOCX, MP3, MP4, etc.) */
+  /** Optional plain-text / Gutenberg URL for direct full-text download into Bookshelf */
+  textUrl?: string;
+  /** All attachments (PDF, DOCX, EPUB, etc.) */
   attachments: IslamicAttachmentItem[];
   sourcePageUrl: string;
   fileSize?: string;
@@ -61,6 +66,7 @@ const ALLOWED_PDF_HOST_SUFFIXES = [
   'gutenberg.org',
   'wikimedia.org',
   'shamela.ws',
+  'openlibrary.org',
 ];
 
 export function isAllowedPdfRemoteUrl(rawUrl: string): boolean {
@@ -230,7 +236,6 @@ async function fetchIslamHousePage(
         };
       });
 
-    // Skip book rows with zero attachments and no text
     const desc = String(row.description || '').trim();
     const fullText = String(row.full_description || '').trim();
     if (category === 'books' && attachments.length === 0 && !fullText) continue;
@@ -246,12 +251,12 @@ async function fetchIslamHousePage(
 
     const id = `ih_${contentType}_${lang}_${row.id || crypto.createHash('md5').update(title).digest('hex').slice(0, 8)}`;
     const sourceLabelMap: Record<Exclude<IslamicContentCategory, 'showall'>, string> = {
-      books: lang === 'zh' ? 'IslamHouse 伊斯兰官方 PDF 书库' : 'مكتبة دار الإسلام · كتب PDF',
-      quran: lang === 'zh' ? '《古兰经》完整诵读库' : 'المصحف المرتل · تلاوات MP3',
-      audios: lang === 'zh' ? '伊斯兰音频讲座库' : 'الصوتيات الإسلامية · MP3',
-      videos: lang === 'zh' ? '伊斯兰视频讲堂' : 'المرئيات الإسلامية · MP4',
+      books: lang === 'zh' ? 'IslamHouse 伊斯兰书籍库' : 'مكتبة دار الإسلام · PDF',
+      quran: lang === 'zh' ? '《古兰经》完整诵读库' : 'المصحف المرتل',
+      audios: lang === 'zh' ? '伊斯兰音频讲座库' : 'الصوتيات الإسلامية',
+      videos: lang === 'zh' ? '伊斯兰视频讲堂' : 'المرئيات الإسلامية',
       articles: lang === 'zh' ? '伊斯兰精选文章库' : 'المقالات الإسلامية',
-      khotab: lang === 'zh' ? '主麻演讲词库' : 'خطب الجمعة · PDF/DOCX',
+      khotab: lang === 'zh' ? '主麻演讲词库' : 'خطب الجمعة',
       fatwa: lang === 'zh' ? '伊斯兰教法问答' : 'الفتاوى الشرعية',
     };
 
@@ -284,13 +289,15 @@ async function fetchIslamHousePage(
   return { items, totalItems };
 }
 
-async function searchArchiveIslamicPdfs(query: string, limit = 6): Promise<IslamicPdfBookItem[]> {
+/**
+ * Federated Internet Archive Global Books PDF search (Arabic, Islamic, and worldwide open PDFs).
+ * Resolves exact real .pdf filenames from /metadata/{id}/files.
+ */
+async function searchArchiveGlobalPdfBooks(query: string, limit = 8): Promise<IslamicPdfBookItem[]> {
   const q = query.trim();
   if (!q) return [];
   try {
-    const encodedQ = encodeURIComponent(
-      `(${q}) AND mediatype:texts AND format:"Text PDF" AND (language:ara OR language:Arabic OR subject:Islam OR subject:Arabic OR collection:islamic_library OR collection:arabic_books)`
-    );
+    const encodedQ = encodeURIComponent(`(${q}) AND mediatype:texts AND format:"Text PDF"`);
     const searchUrl = `https://archive.org/advancedsearch.php?q=${encodedQ}&fl[]=identifier,title,creator,description,year,language&rows=${Math.min(10, limit)}&output=json`;
     const res = await fetch(searchUrl, {
       headers: { 'User-Agent': 'EarthOne-Library/1.0 (+https://earthone.world)' },
@@ -302,7 +309,7 @@ async function searchArchiveIslamicPdfs(query: string, limit = 6): Promise<Islam
     if (docs.length === 0) return [];
 
     const resolved = await Promise.all(
-      docs.slice(0, 6).map(async (doc): Promise<IslamicPdfBookItem | null> => {
+      docs.slice(0, 7).map(async (doc): Promise<IslamicPdfBookItem | null> => {
         const identifier = String(doc.identifier || '').trim();
         if (!identifier) return null;
         try {
@@ -325,7 +332,7 @@ async function searchArchiveIslamicPdfs(query: string, limit = 6): Promise<Islam
           const title = String(doc.title || identifier).trim();
           const author = Array.isArray(doc.creator)
             ? doc.creator.join(' · ')
-            : String(doc.creator || 'المكتبة التراثية الإسلامية');
+            : String(doc.creator || 'Internet Archive 全球典籍');
           const sizeBytes = Number(pdfFile.size || 0);
           const fileSize =
             sizeBytes > 1024 * 1024
@@ -334,17 +341,25 @@ async function searchArchiveIslamicPdfs(query: string, limit = 6): Promise<Islam
                 ? `${Math.round(sizeBytes / 1024)} KB`
                 : undefined;
 
+          const rawLang = String(Array.isArray(doc.language) ? doc.language[0] : doc.language || '').toLowerCase();
+          const detectedLang: 'ar' | 'zh' | 'en' =
+            /[\u0600-\u06FF]/.test(title) || rawLang.includes('ara')
+              ? 'ar'
+              : /[\u4e00-\u9fff]/.test(title) || rawLang.includes('chi') || rawLang.includes('zh')
+                ? 'zh'
+                : 'en';
+
           const streamUrl = buildStreamUrl(pdfUrl, title, false, 'pdf');
           const downloadUrl = buildStreamUrl(pdfUrl, title, true, 'pdf');
           return {
             id: `ia_pdf_${identifier}`,
             title,
             author,
-            description: String(doc.description || 'كتاب إسلامي وتراثي بصيغة PDF متاح للقراءة والتحميل المباشر.').slice(0, 240),
-            language: 'ar',
+            description: String(doc.description || '全球数字档案库原版 PDF 书籍，支持站内直读、AI 讲解与下载到书架。').slice(0, 240),
+            language: detectedLang,
             contentType: 'books',
             source: 'archive',
-            sourceName: 'Internet Archive · مكتبة التراث PDF',
+            sourceName: 'Internet Archive · 全球原版 PDF',
             pdfUrl,
             streamUrl,
             downloadUrl,
@@ -361,6 +376,63 @@ async function searchArchiveIslamicPdfs(query: string, limit = 6): Promise<Islam
     );
 
     return resolved.filter((x): x is IslamicPdfBookItem => Boolean(x));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Federated Project Gutenberg global full-text classics search (via Gutendex open JSON API).
+ */
+async function searchGutenbergBooks(query: string, limit = 5): Promise<IslamicPdfBookItem[]> {
+  const q = query.trim();
+  if (!q) return [];
+  try {
+    const res = await fetch(`https://gutendex.com/books/?search=${encodeURIComponent(q)}`, {
+      headers: { 'User-Agent': 'EarthOne-Library/1.0' },
+      signal: AbortSignal.timeout(6500),
+    });
+    if (!res.ok) return [];
+    const data: any = await res.json();
+    const rows: any[] = Array.isArray(data?.results) ? data.results.slice(0, limit) : [];
+    const out: IslamicPdfBookItem[] = [];
+    for (const row of rows) {
+      const formats = row?.formats || {};
+      const textUrl: string | undefined =
+        formats['text/plain; charset=utf-8'] ||
+        formats['text/plain; charset=us-ascii'] ||
+        formats['text/plain'];
+      const epubUrl: string | undefined = formats['application/epub+zip'];
+      if (!textUrl && !epubUrl) continue;
+      const title = String(row.title || 'Classic Book').trim();
+      const author = Array.isArray(row.authors) && row.authors[0]?.name ? row.authors[0].name : 'Project Gutenberg';
+      const rawLang = String(row.languages?.[0] || 'en').toLowerCase();
+      const lang: 'ar' | 'zh' | 'en' = rawLang === 'ar' ? 'ar' : rawLang === 'zh' ? 'zh' : 'en';
+      out.push({
+        id: `gut_${row.id}`,
+        title,
+        author,
+        description: `Project Gutenberg 全球公版原著全文，支持一键下载原文到书架并启用 AI 逐页讲解与点词查义。`,
+        language: lang,
+        contentType: 'books',
+        source: 'gutenberg',
+        sourceName: 'Project Gutenberg · 全球公版全文',
+        textUrl,
+        attachments: textUrl
+          ? [
+              {
+                type: 'TXT',
+                url: textUrl,
+                streamUrl: buildStreamUrl(textUrl, title, false, 'txt'),
+                downloadUrl: buildStreamUrl(textUrl, title, true, 'txt'),
+              },
+            ]
+          : [],
+        sourcePageUrl: `https://www.gutenberg.org/ebooks/${row.id}`,
+        coverImage: '/assets/library/cover-little-prince.jpg',
+      });
+    }
+    return out;
   } catch {
     return [];
   }
@@ -400,14 +472,16 @@ export async function queryNoorIslamicPdfs(opts: {
     if (b.externalReadUrl) savedByUrl.set(b.externalReadUrl, b.id);
   }
 
-  // Local Islamic vault books (PDF / Markdown / Saved Islamic content)
   const savedLocalItems: IslamicPdfBookItem[] =
     category === 'books' || category === 'showall'
       ? (opts.store.books || [])
           .filter(
             (b: Book) =>
-              b.category === 'islamic_studies' &&
-              (b.formatType === 'pdf' || b.id.startsWith('book_pdf_') || b.id.startsWith('book_noor_') || b.id.startsWith('book_islamic_'))
+              b.formatType === 'pdf' ||
+              b.id.startsWith('book_pdf_') ||
+              b.id.startsWith('book_noor_') ||
+              b.id.startsWith('book_islamic_') ||
+              b.id.startsWith('book_global_')
           )
           .map((b: Book) => {
             const isLocalPdf = typeof b.externalReadUrl === 'string' && b.externalReadUrl.startsWith('/api/library/local-pdfs/');
@@ -416,11 +490,11 @@ export async function queryNoorIslamicPdfs(opts: {
               id: b.id,
               title: b.title,
               author: b.author,
-              description: b.description || '已下载并保存在 ONE 网站书架的伊斯兰典籍，随时秒开阅读。',
+              description: b.description || '已下载并保存在 ONE 网站书架的原版典籍，随时秒开阅读并支持 AI 讲解。',
               language: (b.language === 'zh' || b.language === 'en' ? b.language : 'ar') as 'ar' | 'zh' | 'en',
               contentType: 'books' as const,
               source: 'local_vault' as const,
-              sourceName: shelfBookIds.has(b.id) ? '已下载到我的书架 · 秒开' : '已保存到本地书库',
+              sourceName: shelfBookIds.has(b.id) ? '已下载到原文书架 · 秒开' : '本地书库原文',
               pdfUrl: isLocalPdf ? b.externalReadUrl : undefined,
               streamUrl: isLocalPdf ? b.externalReadUrl : undefined,
               downloadUrl: dlUrl,
@@ -438,17 +512,18 @@ export async function queryNoorIslamicPdfs(opts: {
   let ihItems: IslamicPdfBookItem[] = [];
   let ihTotal = 0;
   let archiveItems: IslamicPdfBookItem[] = [];
+  let gutenbergItems: IslamicPdfBookItem[] = [];
 
   if (!q) {
     if (langPref === 'all') {
-      const [arRes, zhRes] = await Promise.all([
-        fetchIslamHousePage(category, 'ar', page, Math.ceil(limit * 0.65)).catch(() => ({ items: [], totalItems: 0 })),
-        fetchIslamHousePage(category, 'zh', page, Math.ceil(limit * 0.35)).catch(() => ({ items: [], totalItems: 0 })),
+      const [arRes, zhRes, enRes] = await Promise.all([
+        fetchIslamHousePage(category, 'ar', page, Math.ceil(limit * 0.5)).catch(() => ({ items: [], totalItems: 0 })),
+        fetchIslamHousePage(category, 'zh', page, Math.ceil(limit * 0.25)).catch(() => ({ items: [], totalItems: 0 })),
+        fetchIslamHousePage(category, 'en', page, Math.ceil(limit * 0.25)).catch(() => ({ items: [], totalItems: 0 })),
       ]);
-      ihItems = [...arRes.items, ...zhRes.items];
-      ihTotal = arRes.totalItems + zhRes.totalItems;
+      ihItems = [...arRes.items, ...zhRes.items, ...enRes.items];
+      ihTotal = arRes.totalItems + zhRes.totalItems + enRes.totalItems;
     } else {
-      // Note: some categories like quran/fatwa/khotab have richest catalog in Arabic; if zh/en returns 0, gently fall back to ar
       let res = await fetchIslamHousePage(category, langPref, page, limit).catch(() => ({ items: [], totalItems: 0 }));
       if (res.items.length === 0 && langPref !== 'ar') {
         res = await fetchIslamHousePage(category, 'ar', page, limit).catch(() => ({ items: [], totalItems: 0 }));
@@ -458,16 +533,17 @@ export async function queryNoorIslamicPdfs(opts: {
     }
   } else {
     const qLower = q.toLowerCase();
-    const targetLangs: Array<'ar' | 'zh' | 'en'> = langPref === 'all' ? ['ar', 'zh'] : [langPref];
+    const targetLangs: Array<'ar' | 'zh' | 'en'> = langPref === 'all' ? ['ar', 'zh', 'en'] : [langPref];
 
-    const [ihPages, iaResults] = await Promise.all([
+    const [ihPages, iaResults, gutResults] = await Promise.all([
       Promise.all(
         targetLangs.flatMap((l) => [
           fetchIslamHousePage(category, l, 1, 30).catch(() => ({ items: [], totalItems: 0 })),
           fetchIslamHousePage(category, l, 2, 30).catch(() => ({ items: [], totalItems: 0 })),
         ])
       ),
-      category === 'books' || category === 'showall' ? searchArchiveIslamicPdfs(q, 6) : Promise.resolve([]),
+      category === 'books' || category === 'showall' ? searchArchiveGlobalPdfBooks(q, 8) : Promise.resolve([]),
+      category === 'books' || category === 'showall' ? searchGutenbergBooks(q, 5) : Promise.resolve([]),
     ]);
 
     const pool = ihPages.flatMap((p) => p.items);
@@ -478,7 +554,8 @@ export async function queryNoorIslamicPdfs(opts: {
         b.description.toLowerCase().includes(qLower)
     );
     archiveItems = iaResults;
-    ihTotal = ihItems.length + archiveItems.length;
+    gutenbergItems = gutResults;
+    ihTotal = ihItems.length + archiveItems.length + gutenbergItems.length;
   }
 
   const filteredLocal = q
@@ -490,7 +567,7 @@ export async function queryNoorIslamicPdfs(opts: {
       )
     : savedLocalItems;
 
-  const merged = [...filteredLocal, ...archiveItems, ...ihItems].map((item) => {
+  const merged = [...filteredLocal, ...archiveItems, ...ihItems, ...gutenbergItems].map((item) => {
     const savedId =
       item.savedBookId ||
       (item.sourcePageUrl ? savedByUrl.get(item.sourcePageUrl) : undefined) ||
@@ -505,7 +582,7 @@ export async function queryNoorIslamicPdfs(opts: {
   const seen = new Set<string>();
   const deduped: IslamicPdfBookItem[] = [];
   for (const item of merged) {
-    const key = item.pdfUrl || item.sourcePageUrl || item.id;
+    const key = item.pdfUrl || item.textUrl || item.sourcePageUrl || item.id;
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(item);
@@ -518,11 +595,77 @@ export async function queryNoorIslamicPdfs(opts: {
     category,
     noorBookSearchUrl,
     sources: [
-      { id: 'islamhouse', name: 'IslamHouse 伊斯兰全媒体官方接口', count: ihItems.length, status: 'ok' },
-      { id: 'archive', name: 'Internet Archive 伊斯兰古籍 PDF', count: archiveItems.length, status: 'ok' },
+      { id: 'islamhouse', name: 'IslamHouse 全球伊斯兰书籍 API', count: ihItems.length, status: 'ok' },
+      { id: 'archive', name: 'Internet Archive 全球 PDF 书库', count: archiveItems.length, status: 'ok' },
+      { id: 'gutenberg', name: 'Project Gutenberg 全球原著', count: gutenbergItems.length, status: 'ok' },
       { id: 'local_vault', name: '已下载到我的书架', count: filteredLocal.length, status: 'ok' },
     ],
   };
+}
+
+async function runFastLibraryAiText(
+  req: Request,
+  systemInstruction: string,
+  prompt: string,
+  maxTokens = 768,
+  imageBase64?: string
+): Promise<string> {
+  // If a scanned PDF page canvas image is supplied and text is empty/short, use Gemini Vision directly!
+  if (imageBase64) {
+    const gemini = getGeminiClient();
+    if (gemini) {
+      try {
+        const cleanImg = imageBase64.replace(/^data:image\/[a-z+]+;base64,/i, '').trim();
+        const resp = await gemini.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: `${systemInstruction}\n\n${prompt}` },
+                { inlineData: { mimeType: 'image/jpeg', data: cleanImg } },
+              ],
+            },
+          ],
+        });
+        const text = (resp.text || '').trim();
+        if (text) return text;
+      } catch (err) {
+        console.warn('[LibraryAI Vision] fallback to text engine:', (err as Error)?.message);
+      }
+    }
+  }
+
+  if (oneAiRouter.hasAnyUsableEngine()) {
+    const routed = await oneAiRouter.executeUnifiedTurn({
+      requestId: `libai_${Date.now().toString(36)}`,
+      userId: null,
+      subjectKey: `ip:${req.ip || 'unknown'}`,
+      userTier: 'free',
+      prompt,
+      messages: [
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: prompt },
+      ],
+      mode: 'library-reading',
+      maxTokens,
+      stream: false,
+    });
+    if (routed.success && routed.content.trim()) {
+      return routed.content.trim();
+    }
+  }
+
+  if (aiGateway.hasLiveEngine()) {
+    const res = await aiGateway.generateContent('one-ai', prompt, systemInstruction, undefined, undefined, undefined, {
+      mode: 'library-reading',
+    });
+    if (res.success && res.content.trim()) {
+      return res.content.trim();
+    }
+  }
+
+  throw new Error('AI 讲解引擎暂忙，请稍后重试。');
 }
 
 export function registerNoorIslamicLibraryRoutes(
@@ -536,7 +679,7 @@ export function registerNoorIslamicLibraryRoutes(
     return getSessionUser?.(req)?.id || 'guest';
   };
 
-  // 1. Browse & Search ALL Islamic Content Categories (Books PDF, Quran MP3, Audios, Videos, Articles, Khotab, Fatwa, All)
+  // 1. Global Islamic & World Books Search API (Backend also retains quran/audios/videos/articles/khotab/fatwa for admin/backend use)
   app.get('/api/library/islamic/books', async (req: Request, res: Response) => {
     try {
       const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
@@ -560,12 +703,12 @@ export function registerNoorIslamicLibraryRoutes(
     } catch (err: any) {
       res.status(502).json({
         success: false,
-        error: err?.message || '伊斯兰书库检索失败，请稍后重试。',
+        error: err?.message || '全球书库检索失败，请稍后重试。',
       });
     }
   });
 
-  // 2. CORS-free Same-Origin Streaming & Direct Download Proxy (PDF, MP3, MP4, DOCX, EPUB, MD, TXT)
+  // 2. CORS-free Same-Origin Streaming & Direct Download Proxy
   app.get('/api/library/pdf-stream', async (req: Request, res: Response) => {
     const rawUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
     const wantsDownload = req.query.download === '1' || req.query.download === 'true';
@@ -647,12 +790,12 @@ export function registerNoorIslamicLibraryRoutes(
     }
   });
 
-  // 3. Download PDF OR Any Islamic Content (Article / Quran / Audio / Video / Fatwa / Khotab / Markdown)
-  //    Directly into Website Server Vault AND Automatically Add onto User's Bookshelf ("我的书架")!
+  // 3. Download PDF or Full-Text Book Directly into Website Vault & Automatically Add to "我的书架"
   const handleSaveToBookshelf = async (req: Request, res: Response) => {
     const userId = resolveShelfUserId(req);
     const {
       pdfUrl,
+      textUrl,
       title,
       author,
       description,
@@ -660,17 +803,14 @@ export function registerNoorIslamicLibraryRoutes(
       language,
       sourcePageUrl,
       coverImage,
-      contentType,
-      attachments,
     } = req.body || {};
 
     const cleanTitle = String(title || 'كتاب إسلامي').trim().slice(0, 180);
     const cleanAuthor = String(author || 'علماء التراث الإسلامي').trim().slice(0, 120);
     const cleanLang = language === 'zh' || language === 'en' ? language : 'ar';
 
-    // Path A: Download actual PDF file into /data/pdfs/ and pin onto user's Bookshelf
+    // Path A: Download actual PDF binary into /data/pdfs/ & add to user's Bookshelf
     if (typeof pdfUrl === 'string' && pdfUrl.trim()) {
-      // Already local? Just make sure it's on user's shelf!
       if (pdfUrl.startsWith('/api/library/local-pdfs/')) {
         const existingLocal = store.books.find((b: Book) => b.externalReadUrl === pdfUrl);
         if (existingLocal) {
@@ -706,13 +846,13 @@ export function registerNoorIslamicLibraryRoutes(
         if (ct.includes('text/html') || buf.byteLength < 1024 || !buf.subarray(0, 8).toString('ascii').includes('%PDF')) {
           return res.status(422).json({
             success: false,
-            error: '远程地址未返回标准 PDF 文件（可能受防爬限制），建议下载后通过「导入本地 PDF」加入书架。',
+            error: '远程地址未返回标准 PDF 文件，建议下载后通过「导入本地 PDF」加入书架。',
           });
         }
         if (buf.byteLength > 45 * 1024 * 1024) {
           return res.status(413).json({
             success: false,
-            error: '该 PDF 超过 45MB 书架离线存储上限，您仍可直接在线阅读或下载到本机。',
+            error: '该 PDF 超过 45MB 离线存储上限，您仍可直接在线阅读或下载到本机。',
           });
         }
 
@@ -742,7 +882,7 @@ export function registerNoorIslamicLibraryRoutes(
                 ? coverImage
                 : '/assets/library/cover-arabian-nights.jpg',
             description: String(
-              description || '已直接下载到 ONE 网站书架的伊斯兰 PDF 典籍，随时翻页阅读或导出。'
+              description || '已直接下载到 ONE 网站书架的原版 PDF，支持 AI 逐页讲解与点词查义。'
             ).slice(0, 420),
             readProgress: 0,
             chapters: [],
@@ -766,25 +906,40 @@ export function registerNoorIslamicLibraryRoutes(
       }
     }
 
-    // Path B: Non-PDF Islamic content (Articles, Fatwa, Khotab, Quran MP3, Audios, Videos) -> save structured readable edition directly to Bookshelf!
-    const keySeed = String(sourcePageUrl || cleanTitle);
+    // Path B: Full-text open book (e.g. Gutenberg plain text) -> download & split into readable chapters directly on Bookshelf!
+    let downloadedText = String(fullText || '').trim();
+    if (!downloadedText && typeof textUrl === 'string' && isAllowedPdfRemoteUrl(textUrl)) {
+      try {
+        const txtRes = await fetch(textUrl, {
+          headers: { 'User-Agent': 'EarthOne-Library/1.0' },
+          signal: AbortSignal.timeout(18000),
+        });
+        if (txtRes.ok) {
+          downloadedText = (await txtRes.text()).slice(0, 350_000).trim();
+        }
+      } catch {}
+    }
+
+    const keySeed = String(sourcePageUrl || textUrl || cleanTitle);
     const hash = crypto.createHash('sha1').update(keySeed).digest('hex').slice(0, 12);
-    const bookId = `book_islamic_${hash}`;
+    const bookId = `book_global_${hash}`;
+    const bodyText = downloadedText || String(description || cleanTitle).trim();
 
-    const attLines = Array.isArray(attachments)
-      ? attachments
-          .slice(0, 30)
-          .map((a: any, idx: number) => `${idx + 1}. [${a.type || 'FILE'}] ${a.description || cleanTitle}${a.size ? ` (${a.size})` : ''}\n${a.url || ''}`)
-          .join('\n\n')
-      : '';
-
-    const bodyText = [
-      String(fullText || description || '').trim(),
-      attLines ? `\n\n---\n资源清单 (${String(contentType || 'islamic').toUpperCase()}):\n${attLines}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-      .trim() || `${cleanTitle}\n\n${cleanAuthor}`;
+    // Split long full text cleanly into ~4500-char chapters for smooth Apple Books pagination
+    const chapters: Array<{ id: string; title: string; content: string }> = [];
+    if (bodyText.length > 5000) {
+      const chunkSize = 4800;
+      for (let i = 0; i < Math.min(bodyText.length, 240_000); i += chunkSize) {
+        const idx = chapters.length + 1;
+        chapters.push({
+          id: `ch_${idx}`,
+          title: `第 ${idx} 部分`,
+          content: bodyText.slice(i, i + chunkSize).trim(),
+        });
+      }
+    } else {
+      chapters.push({ id: 'ch_1', title: cleanTitle, content: bodyText });
+    }
 
     let book = store.books.find((b: Book) => b.id === bookId);
     if (!book) {
@@ -792,26 +947,20 @@ export function registerNoorIslamicLibraryRoutes(
         id: bookId,
         title: cleanTitle,
         author: cleanAuthor,
-        category: 'islamic_studies',
+        category: cleanLang === 'ar' ? 'islamic_studies' : 'literature',
         language: cleanLang,
         year: new Date().getFullYear().toString(),
         source: 'Open Access',
-        sourceUrl: typeof sourcePageUrl === 'string' && sourcePageUrl ? sourcePageUrl : 'https://islamhouse.com/',
+        sourceUrl: typeof sourcePageUrl === 'string' && sourcePageUrl ? sourcePageUrl : 'https://www.gutenberg.org/',
         formatType: 'text',
         textAvailability: 'full_text',
         coverImage:
           typeof coverImage === 'string' && coverImage.startsWith('/')
             ? coverImage
             : '/assets/library/cover-arabian-nights.jpg',
-        description: String(description || '已保存到 ONE 网站书架的伊斯兰典籍与音频/文章资料。').slice(0, 420),
+        description: String(description || '已下载到 ONE 网站书架的原著全文，支持 AI 逐页讲解与点词查义。').slice(0, 420),
         readProgress: 0,
-        chapters: [
-          {
-            id: 'ch_main',
-            title: cleanTitle,
-            content: bodyText,
-          },
-        ],
+        chapters,
       };
       store.books.unshift(book);
     }
@@ -823,6 +972,7 @@ export function registerNoorIslamicLibraryRoutes(
       success: true,
       book,
       shelfItem,
+      isTextBook: true,
     });
   };
 
@@ -857,7 +1007,6 @@ export function registerNoorIslamicLibraryRoutes(
         if (!textContent) {
           return res.status(400).json({ success: false, error: '文件内容为空。' });
         }
-        // Split Markdown by headings into neat Apple Books chapters
         const sections = textContent.split(/\n(?=#{1,2}\s+)/).filter((s) => s.trim().length > 0);
         const chapters = sections.slice(0, 60).map((sec, idx) => {
           const firstLine = sec.split('\n')[0].replace(/^#+\s*/, '').trim();
@@ -872,7 +1021,7 @@ export function registerNoorIslamicLibraryRoutes(
         const newBook: Book = {
           id: `book_noor_md_${hash}`,
           title: derivedTitle.slice(0, 180),
-          author: String(author || 'مكتبة النور · Markdown 导入').trim().slice(0, 120),
+          author: String(author || 'مكتبة النور · 原文导入').trim().slice(0, 120),
           category: 'islamic_studies',
           language: cleanLang,
           year: new Date().getFullYear().toString(),
@@ -921,7 +1070,7 @@ export function registerNoorIslamicLibraryRoutes(
         formatType: 'pdf',
         textAvailability: 'full_text',
         coverImage: '/assets/library/cover-arabian-nights.jpg',
-        description: '已导入 ONE 网站书架的 PDF 典籍，随时直接翻页、检索与导出。',
+        description: '已导入 ONE 网站书架的原版 PDF 典籍，支持 AI 逐页讲解与点词查义。',
         readProgress: 0,
         chapters: [],
       };
@@ -944,7 +1093,7 @@ export function registerNoorIslamicLibraryRoutes(
     }
   });
 
-  // 5. Serve Locally Saved Vault PDFs (Inline Reading or Attachment Download)
+  // 5. Serve Locally Saved Vault PDFs
   app.get('/api/library/local-pdfs/:filename', (req: Request, res: Response) => {
     const rawName = String(req.params.filename || '');
     if (!/^[a-zA-Z0-9_-]+\.pdf$/.test(rawName)) {
@@ -962,5 +1111,111 @@ export function registerNoorIslamicLibraryRoutes(
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.setHeader('Content-Disposition', buildContentDisposition(requestedName, wantsDownload, 'pdf'));
     return res.sendFile(filePath);
+  });
+
+  // 6. AI Page Tutor ("读到这一页不会讲，让 AI 分析这一页怎么讲") — supports both PDF text & scanned image pages!
+  app.post('/api/library/ai/explain-page', async (req: Request, res: Response) => {
+    const { title, pageNumber, pageText, pageImageBase64, question, lang } = req.body || {};
+    const cleanText = typeof pageText === 'string' ? pageText.trim().slice(0, 6500) : '';
+    const hasImage = typeof pageImageBase64 === 'string' && pageImageBase64.length > 200;
+
+    if (!cleanText && !hasImage) {
+      return res.status(400).json({ success: false, error: '当前页未提取到可分析的文本或页面图像。' });
+    }
+
+    const replyZh = lang !== 'en';
+    const systemInstruction = replyZh
+      ? '你是博学、温和、表达清晰的资深双语（阿拉伯语/英语/汉语）典籍讲师。用户正在阅读一本书的某一页，可能不知道这一页该怎么理解或怎么讲给别人听。请用清晰、自然、易懂的中文分点讲解：1)「本页核心大意」（用大白话讲明白）；2)「这一页该怎么讲」（帮你梳理讲解逻辑和逐段要点）；3)「重点外语/阿语词句解析」（挑出 3-5 个关键原词，给读音/标音与释义）。如果用户提了具体问题，请优先直接回答该问题。不要输出多余寒暄。'
+      : 'You are an expert bilingual book tutor (Arabic/English/Chinese). Clearly explain the current page so the reader understands it deeply and knows how to explain it to others: 1) Core meaning, 2) How to explain this page step-by-step, 3) Key vocabulary with pronunciation and meaning.';
+
+    const prompt = [
+      `书名：${String(title || '原版书籍').slice(0, 140)}`,
+      pageNumber ? `页码：第 ${pageNumber} 页` : '',
+      question ? `读者追问：${String(question).slice(0, 400)}` : '请帮我分析这一页在讲什么，以及我该怎么把它讲清楚。',
+      cleanText ? `本页原文内容：\n"""\n${cleanText}\n"""` : '（本页为扫描图像页，请直接识读附图中的全部原文并进行精讲）',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    try {
+      const explanation = await runFastLibraryAiText(
+        req,
+        systemInstruction,
+        prompt,
+        1500,
+        cleanText.length < 40 && hasImage ? pageImageBase64 : undefined
+      );
+      return res.json({ success: true, explanation });
+    } catch (err: any) {
+      return res.status(503).json({
+        success: false,
+        error: err?.message || 'AI 本页讲解暂时不可用，请稍后重试。',
+      });
+    }
+  });
+
+  // 7. Instant Tap-Any-Word AI Dictionary Lookup ("点一个不会的单词点开，AI 自动帮你查询这个单词")
+  app.post('/api/library/ai/lookup-word', async (req: Request, res: Response) => {
+    const { word, contextSentence, bookTitle, lang } = req.body || {};
+    const cleanWord = typeof word === 'string' ? word.trim().slice(0, 80) : '';
+    if (!cleanWord) {
+      return res.status(400).json({ success: false, error: '请选择要查询的单词。' });
+    }
+
+    const replyZh = lang !== 'en';
+    const systemInstruction = replyZh
+      ? '你是一部精准、响应极快的词典与阅读助教（精通阿拉伯语、英语、汉语及古典文献词汇）。请仅返回严格 JSON（不要加 markdown 代码块），字段如下：{"word":"原词","reading":"阿语完全标音(Tashkeel)+拉丁读音 或 国际音标/拼音","partOfSpeech":"词性","root":"阿语三母词根或词源（无则留空）","meaning":"最准确的简明中文释义","contextMeaning":"结合当前句子/书页语境的确切意思","example":"简短实用例句及中文翻译"}。'
+      : 'You are a fast, precise multilingual dictionary (Arabic/English/Chinese). Return ONLY strict JSON (no markdown fences): {"word":"...","reading":"...","partOfSpeech":"...","root":"...","meaning":"...","contextMeaning":"...","example":"..."}.';
+
+    const prompt = [
+      `查询单词：${cleanWord}`,
+      bookTitle ? `所在书籍：${String(bookTitle).slice(0, 120)}` : '',
+      contextSentence ? `所在上下文：${String(contextSentence).slice(0, 320)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    try {
+      const raw = await runFastLibraryAiText(req, systemInstruction, prompt, 900);
+      let parsed: Record<string, string> | null = null;
+      try {
+        const cleanedRaw = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        const jsonMatch = cleanedRaw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+      } catch {}
+
+      if (parsed && typeof parsed.meaning === 'string') {
+        return res.json({
+          success: true,
+          entry: {
+            word: parsed.word || cleanWord,
+            reading: parsed.reading || '',
+            partOfSpeech: parsed.partOfSpeech || '',
+            root: parsed.root || '',
+            meaning: parsed.meaning || '',
+            contextMeaning: parsed.contextMeaning || '',
+            example: parsed.example || '',
+          },
+        });
+      }
+
+      return res.json({
+        success: true,
+        entry: {
+          word: cleanWord,
+          reading: '',
+          partOfSpeech: '',
+          root: '',
+          meaning: raw.slice(0, 600),
+          contextMeaning: '',
+          example: '',
+        },
+      });
+    } catch (err: any) {
+      return res.status(503).json({
+        success: false,
+        error: err?.message || 'AI 查词暂时不可用，请稍后重试。',
+      });
+    }
   });
 }

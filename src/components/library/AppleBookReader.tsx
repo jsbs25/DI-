@@ -16,6 +16,10 @@ import {
   StickyNote,
   ExternalLink,
   Check,
+  Languages,
+  Loader2,
+  Send,
+  CheckCircle2,
 } from 'lucide-react';
 import type { Book, BookAnnotation, Language } from '../../types/index.ts';
 import { isRtlLanguage } from './bookEmbedUrl.ts';
@@ -332,6 +336,28 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
   const [aiCitation, setAiCitation] = useState<BookAnnotation['citation'] | null>(null);
   const [statusToast, setStatusToast] = useState<string | null>(null);
 
+  // Full-Page AI Tutor ("这一页怎么讲")
+  const [pageAiOpen, setPageAiOpen] = useState(false);
+  const [pageAiLoading, setPageAiLoading] = useState(false);
+  const [pageAiAnswer, setPageAiAnswer] = useState('');
+  const [pageAiError, setPageAiError] = useState('');
+  const [pageAiQuestion, setPageAiQuestion] = useState('');
+  const [pageAiKey, setPageAiKey] = useState('');
+
+  // Tap-Any-Word AI Dictionary Card ("点一个不会的单词点开自动查")
+  const [lookupWord, setLookupWord] = useState<string | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState('');
+  const [lookupEntry, setLookupEntry] = useState<{
+    word: string;
+    reading: string;
+    partOfSpeech: string;
+    root: string;
+    meaning: string;
+    contextMeaning: string;
+    example: string;
+  } | null>(null);
+
   // Read-Aloud
   const [isSpeaking, setIsSpeaking] = useState(false);
 
@@ -459,7 +485,9 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (e.key === 'Escape') {
-        if (appearanceOpen || drawerOpen || searchOpen || aiOpen || selectedText) {
+        if (lookupWord || pageAiOpen || appearanceOpen || drawerOpen || searchOpen || aiOpen || selectedText) {
+          setLookupWord(null);
+          setPageAiOpen(false);
           setAppearanceOpen(false);
           setDrawerOpen(false);
           setSearchOpen(false);
@@ -484,7 +512,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [appearanceOpen, drawerOpen, searchOpen, aiOpen, selectedText, effectiveLayout, rtl, goNextPage, goPrevPage, onClose]);
+  }, [lookupWord, pageAiOpen, appearanceOpen, drawerOpen, searchOpen, aiOpen, selectedText, effectiveLayout, rtl, goNextPage, goPrevPage, onClose]);
 
   const currentChapterAnnotations = useMemo(
     () => annotations.filter((a) => a.chapterId === activeChapter.id),
@@ -650,6 +678,151 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     }
   };
 
+  const currentVisiblePageText = useMemo(() => {
+    if (effectiveLayout === 'scroll') {
+      return (activeChapter.content || '').slice(0, 5200);
+    }
+    return [...(leftPage?.paragraphs || []), ...(rightPage?.paragraphs || [])].join('\n\n');
+  }, [effectiveLayout, activeChapter.content, leftPage, rightPage]);
+
+  const currentPageKey = `${chapterIndex}_${spreadLeftIdx}`;
+  const isAtEndOfBook =
+    chapterIndex >= chapters.length - 1 &&
+    (effectiveLayout === 'scroll' || spreadLeftIdx + (effectiveLayout === 'spread' ? 2 : 1) >= pages.length);
+
+  const handleExplainCurrentPage = useCallback(
+    async (customQuestion?: string) => {
+      const pageContent = currentVisiblePageText.trim() || activeChapter.title;
+      setPageAiOpen(true);
+      setPageAiLoading(true);
+      setPageAiError('');
+      const q = typeof customQuestion === 'string' ? customQuestion.trim() : '';
+
+      try {
+        const res = await fetch('/api/library/ai/explain-page', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: `${book.title} · ${activeChapter.title}`,
+            pageNumber: spreadLeftIdx + 1,
+            pageText: pageContent,
+            question: q || undefined,
+            lang: isZh ? 'zh' : 'en',
+          }),
+        });
+        const data = await res.json();
+        if (data?.success && data.explanation) {
+          setPageAiAnswer(data.explanation);
+          setPageAiKey(currentPageKey);
+          if (q) setPageAiQuestion('');
+        } else {
+          setPageAiError(data?.error || (isZh ? 'AI 本页讲解暂时不可用，请稍后重试。' : 'Could not explain this page.'));
+        }
+      } catch {
+        setPageAiError(isZh ? '网络波动，请稍后重试。' : 'Network error.');
+      } finally {
+        setPageAiLoading(false);
+      }
+    },
+    [activeChapter.title, book.title, currentPageKey, currentVisiblePageText, isZh, spreadLeftIdx]
+  );
+
+  const handleLookupWord = useCallback(
+    async (rawWord: string, contextSentence?: string) => {
+      const cleaned = rawWord
+        .replace(/^[\s.,;:!?()[\]{}"'«»„“”‘’—–\-_/\\•·،؛؟。，、！？（）【】《》]+/, '')
+        .replace(/[\s.,;:!?()[\]{}"'«»„“”‘’—–\-_/\\•·،؛؟。，、！？（）【】《》]+$/, '')
+        .trim();
+      if (!cleaned) return;
+      setLookupWord(cleaned);
+      setLookupLoading(true);
+      setLookupError('');
+      setLookupEntry(null);
+
+      try {
+        const res = await fetch('/api/library/ai/lookup-word', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            word: cleaned,
+            contextSentence: (contextSentence || currentVisiblePageText).slice(0, 320),
+            bookTitle: book.title,
+            lang: isZh ? 'zh' : 'en',
+          }),
+        });
+        const data = await res.json();
+        if (data?.success && data.entry) {
+          setLookupEntry(data.entry);
+        } else {
+          setLookupError(data?.error || (isZh ? '暂时未能查出该词释义。' : 'Could not look up word.'));
+        }
+      } catch {
+        setLookupError(isZh ? '网络波动，请稍后重试。' : 'Network error.');
+      } finally {
+        setLookupLoading(false);
+      }
+    },
+    [book.title, currentVisiblePageText, isZh]
+  );
+
+  const handleTapWordLookup = useCallback(
+    (e: React.MouseEvent<HTMLElement>) => {
+      const activeSel = window.getSelection()?.toString().trim() || '';
+      if (activeSel.length >= 2) return; // Let drag-selection toolbar handle multi-char selection
+
+      let textNode: Node | null = null;
+      let offset = 0;
+
+      const docAny = document as Document & {
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      };
+
+      if (typeof docAny.caretPositionFromPoint === 'function') {
+        const pos = docAny.caretPositionFromPoint(e.clientX, e.clientY);
+        if (pos) {
+          textNode = pos.offsetNode;
+          offset = pos.offset;
+        }
+      } else if (typeof docAny.caretRangeFromPoint === 'function') {
+        const range = docAny.caretRangeFromPoint(e.clientX, e.clientY);
+        if (range) {
+          textNode = range.startContainer;
+          offset = range.startOffset;
+        }
+      }
+
+      if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return;
+      const content = textNode.textContent || '';
+      if (!content.trim() || offset < 0 || offset > content.length) return;
+
+      const idx = Math.min(offset, Math.max(0, content.length - 1));
+      const ch = content[idx] || '';
+      const wordCharRe = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFFA-Za-z0-9'-]/;
+      const cjkRe = /[\u4e00-\u9fff]/;
+
+      let picked = '';
+      if (wordCharRe.test(ch)) {
+        let start = idx;
+        let end = idx + 1;
+        while (start > 0 && wordCharRe.test(content[start - 1])) start -= 1;
+        while (end < content.length && wordCharRe.test(content[end])) end += 1;
+        picked = content.slice(start, end);
+      } else if (cjkRe.test(ch)) {
+        // Grab a natural 2-char Chinese word around tap
+        const start = idx > 0 && cjkRe.test(content[idx - 1]) && (idx + 1 >= content.length || !cjkRe.test(content[idx + 1])) ? idx - 1 : idx;
+        const end = Math.min(content.length, start + 2);
+        picked = content.slice(start, end).replace(/[^\u4e00-\u9fff]/g, '');
+      }
+
+      if (picked.length >= 1) {
+        const snippet = content.slice(Math.max(0, idx - 80), Math.min(content.length, idx + 120));
+        void handleLookupWord(picked, snippet);
+      }
+    },
+    [handleLookupWord]
+  );
+
   const handleTextSelection = () => {
     const sel = window.getSelection()?.toString().trim() || '';
     if (sel.length >= 2) {
@@ -706,11 +879,12 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         </span>
       </div>
 
-      {/* Main Book Prose */}
+      {/* Main Book Prose (single-click any word for instant AI dictionary lookup) */}
       <div
         onMouseUp={handleTextSelection}
         onTouchEnd={handleTextSelection}
-        className="flex-1 overflow-y-auto pr-1"
+        onClick={handleTapWordLookup}
+        className="flex-1 overflow-y-auto pr-1 cursor-text"
         style={{
           fontFamily: fontMeta.family,
           fontSize: `${prefs.fontSize}px`,
@@ -746,6 +920,30 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             </p>
           ))}
         </div>
+
+        {/* End-of-book return banner in single-page mode on final page of final chapter */}
+        {effectiveLayout === 'single' && chapterIndex >= chapters.length - 1 && page.index >= pages.length - 1 && (
+          <div
+            className="mt-8 rounded-2xl p-5 text-center select-none"
+            style={{ backgroundColor: theme.bg, border: `1px solid ${theme.border}` }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CheckCircle2 className="mx-auto mb-2 h-7 w-7 text-emerald-500" />
+            <div className="text-sm font-semibold">{isZh ? '全书已读完' : 'Finished Reading'}</div>
+            <button
+              type="button"
+              onClick={() => {
+                stopSpiritSpeech();
+                onClose();
+              }}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-xs font-semibold text-white cursor-pointer"
+              style={{ backgroundColor: theme.accent }}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <span>{isZh ? '返回书架' : 'Back to Library'}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Quiet Apple Books Page Folio */}
@@ -798,11 +996,14 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               stopSpiritSpeech();
               onClose();
             }}
-            className="inline-flex h-9 items-center gap-1 rounded-xl px-2.5 text-xs font-medium transition-opacity hover:opacity-75 cursor-pointer"
-            style={{ color: theme.accent }}
+            className="inline-flex h-9 items-center gap-1 rounded-xl px-3 text-xs font-semibold transition-opacity hover:opacity-80 cursor-pointer"
+            style={{
+              backgroundColor: theme.isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)',
+              color: theme.ink,
+            }}
           >
             <ChevronLeft className="h-4 w-4" />
-            <span>{isZh ? '书架' : 'Library'}</span>
+            <span>{isZh ? '返回' : 'Back'}</span>
           </button>
 
           <button
@@ -827,12 +1028,28 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         <div className="min-w-0 flex-1 text-center px-2">
           <div className="truncate text-xs sm:text-[13px] font-semibold tracking-tight">{book.title}</div>
           <div className="truncate text-[10px]" style={{ color: theme.muted }}>
-            {activeChapter.title}
+            {activeChapter.title} · {isZh ? '点任意单词可查词' : 'Tap any word to look up'}
           </div>
         </div>
 
-        {/* Right: Read Aloud, Search, aA Typography, Bookmark Ribbon, Fullscreen */}
+        {/* Right: AI Explain Page, Read Aloud, Search, aA Typography, Bookmark Ribbon, Fullscreen */}
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              if (pageAiOpen && pageAiKey === currentPageKey && pageAiAnswer) {
+                setPageAiOpen(false);
+              } else {
+                void handleExplainCurrentPage();
+              }
+            }}
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white transition hover:bg-emerald-500 cursor-pointer"
+            title={isZh ? 'AI 分析本页大意与讲解思路' : 'AI explain current page'}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>{isZh ? 'AI 讲解本页' : 'AI Explain'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => void handleToggleReadAloud()}
@@ -844,7 +1061,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             title={isSpeaking ? (isZh ? '停止朗读' : 'Stop listening') : isZh ? '真人语音朗读本页' : 'Read aloud'}
           >
             {isSpeaking ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-            <span className="hidden md:inline">{isSpeaking ? (isZh ? '停止' : 'Stop') : isZh ? '朗读' : 'Listen'}</span>
+            <span className="hidden lg:inline">{isSpeaking ? (isZh ? '停止' : 'Stop') : isZh ? '朗读' : 'Listen'}</span>
           </button>
 
           <button
@@ -1366,6 +1583,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               dir={rtl ? 'rtl' : 'ltr'}
               onMouseUp={handleTextSelection}
               onTouchEnd={handleTextSelection}
+              onClick={handleTapWordLookup}
             >
               <header className="mb-8 pb-6" style={{ borderBottom: `1px solid ${theme.border}` }}>
                 <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: theme.muted }}>
@@ -1398,7 +1616,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   ))}
               </div>
 
-              <div className="mt-14 pt-6 flex items-center justify-between text-xs" style={{ borderTop: `1px solid ${theme.border}` }}>
+              <div
+                className="mt-14 pt-6 flex items-center justify-between text-xs"
+                style={{ borderTop: `1px solid ${theme.border}` }}
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
                   type="button"
                   disabled={chapterIndex === 0}
@@ -1412,19 +1634,33 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   <ChevronLeft className="h-4 w-4" />
                   <span>{isZh ? '上一章' : 'Previous'}</span>
                 </button>
-                <button
-                  type="button"
-                  disabled={chapterIndex >= chapters.length - 1}
-                  onClick={() => {
-                    setChapterIndex((c) => Math.min(chapters.length - 1, c + 1));
-                    setPageIndex(0);
-                  }}
-                  className="inline-flex items-center gap-1 rounded-xl px-3 py-2 font-medium disabled:opacity-30 cursor-pointer"
-                  style={{ color: theme.accent }}
-                >
-                  <span>{isZh ? '下一章' : 'Next'}</span>
-                  <ChevronRight className="h-4 w-4" />
-                </button>
+                {chapterIndex >= chapters.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopSpiritSpeech();
+                      onClose();
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 font-semibold text-white cursor-pointer"
+                    style={{ backgroundColor: theme.accent }}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    <span>{isZh ? '全书已读完 · 返回书架' : 'Finished · Back to Library'}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChapterIndex((c) => Math.min(chapters.length - 1, c + 1));
+                      setPageIndex(0);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-xl px-3 py-2 font-medium cursor-pointer"
+                    style={{ color: theme.accent }}
+                  >
+                    <span>{isZh ? '下一章' : 'Next'}</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                )}
               </div>
             </div>
           ) : (
@@ -1486,7 +1722,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                                 ? '全书阅读完毕'
                                 : 'End of Book'}
                           </div>
-                          {chapterIndex < chapters.length - 1 && (
+                          {chapterIndex < chapters.length - 1 ? (
                             <button
                               type="button"
                               onClick={() => {
@@ -1498,6 +1734,19 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                             >
                               <span>{isZh ? '进入下一章' : 'Next Chapter'}</span>
                               <ChevronRight className="h-3.5 w-3.5" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                stopSpiritSpeech();
+                                onClose();
+                              }}
+                              className="mt-4 inline-flex items-center gap-1.5 rounded-full px-5 py-2.5 text-xs font-semibold cursor-pointer"
+                              style={{ backgroundColor: theme.accent, color: '#FFFFFF' }}
+                            >
+                              <ChevronLeft className="h-4 w-4" />
+                              <span>{isZh ? '返回书架' : 'Back to Library'}</span>
                             </button>
                           )}
                         </div>
@@ -1572,7 +1821,16 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 </div>
 
                 {/* Action buttons */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void handleLookupWord(selectedText.slice(0, 60))}
+                    className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-medium cursor-pointer"
+                    style={{ border: `1px solid ${theme.border}` }}
+                  >
+                    <Languages className="h-3.5 w-3.5" />
+                    <span>{isZh ? 'AI 查词' : 'Lookup'}</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setShowNoteComposer((v) => !v)}
@@ -1669,6 +1927,99 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             </div>
           )}
 
+          {/* Tap-Any-Word Floating AI Dictionary Card */}
+          {lookupWord && (
+            <div
+              role="dialog"
+              aria-label="AI 查词卡"
+              className="absolute bottom-5 left-4 right-4 z-50 mx-auto max-w-md rounded-2xl p-4 shadow-2xl sm:left-6 sm:right-auto sm:mx-0 sm:w-[370px]"
+              style={{
+                backgroundColor: theme.popoverBg,
+                border: `1px solid ${theme.border}`,
+                color: theme.ink,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-base font-bold">{lookupEntry?.word || lookupWord}</span>
+                    {lookupEntry?.partOfSpeech && (
+                      <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-300">
+                        {lookupEntry.partOfSpeech}
+                      </span>
+                    )}
+                  </div>
+                  {lookupEntry?.reading && (
+                    <div className="mt-0.5 text-xs font-medium" style={{ color: theme.muted }}>
+                      {lookupEntry.reading}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLookupWord(null)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-lg cursor-pointer opacity-65 hover:opacity-100"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-2.5 text-xs leading-relaxed">
+                {lookupLoading ? (
+                  <div className="flex items-center gap-2 py-3" style={{ color: theme.muted }}>
+                    <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
+                    <span>{isZh ? `AI 正在查询「${lookupWord}」…` : `Looking up "${lookupWord}"…`}</span>
+                  </div>
+                ) : lookupError ? (
+                  <div className="text-rose-500">{lookupError}</div>
+                ) : lookupEntry ? (
+                  <div className="space-y-2">
+                    <div>
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                        {isZh ? '释义：' : 'Meaning: '}
+                      </span>
+                      <span>{lookupEntry.meaning}</span>
+                    </div>
+                    {lookupEntry.root && (
+                      <div className="text-[11px]" style={{ color: theme.muted }}>
+                        <span className="font-semibold">{isZh ? '词根 / 词源：' : 'Root: '}</span>
+                        <span>{lookupEntry.root}</span>
+                      </div>
+                    )}
+                    {lookupEntry.contextMeaning && (
+                      <div
+                        className="rounded-xl p-2 text-[11px]"
+                        style={{ backgroundColor: theme.bg }}
+                      >
+                        <span className="font-semibold">{isZh ? '本页语境：' : 'Context: '}</span>
+                        <span>{lookupEntry.contextMeaning}</span>
+                      </div>
+                    )}
+                    {lookupEntry.example && (
+                      <div className="text-[11px] italic" style={{ color: theme.muted }}>
+                        {isZh ? '例句：' : 'Example: '}
+                        {lookupEntry.example}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-3 flex items-center justify-between pt-2.5 text-[11px]" style={{ borderTop: `1px solid ${theme.border}` }}>
+                <span style={{ color: theme.muted }}>{isZh ? '轻点书中任意单词即查' : 'Tap any word to look up'}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleExplainCurrentPage(`请结合本页讲解词条「${lookupWord}」以及所在段落的含义。`)}
+                  className="inline-flex items-center gap-1 font-semibold text-emerald-600 hover:underline dark:text-emerald-400 cursor-pointer"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  <span>{isZh ? '结合本页精讲' : 'Explain page'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Subtle Toast */}
           {statusToast && (
             <div
@@ -1682,6 +2033,113 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             </div>
           )}
         </main>
+
+        {/* Right-Side AI Page Explanation Panel ("这一页怎么讲") */}
+        {pageAiOpen && (
+          <aside
+            className="absolute inset-y-0 right-0 z-40 flex w-[min(94vw,400px)] flex-col shadow-2xl lg:static lg:w-[390px] lg:shadow-none"
+            style={{
+              backgroundColor: theme.popoverBg,
+              borderLeft: `1px solid ${theme.border}`,
+              color: theme.ink,
+            }}
+          >
+            <div className="flex items-center justify-between gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-emerald-500" />
+                <div>
+                  <div className="text-xs font-semibold">
+                    {isZh ? `AI 精讲本页 · 第 ${spreadLeftIdx + 1} 页` : `AI Page Tutor · P.${spreadLeftIdx + 1}`}
+                  </div>
+                  <div className="text-[10px]" style={{ color: theme.muted }}>
+                    {isZh ? '帮你读懂这一页并梳理怎么讲给别人听' : 'Understand & teach this page'}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                {pageAiKey !== currentPageKey && !pageAiLoading && (
+                  <button
+                    type="button"
+                    onClick={() => void handleExplainCurrentPage()}
+                    className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white cursor-pointer hover:bg-emerald-500"
+                  >
+                    {isZh ? '讲当前页' : 'Explain'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPageAiOpen(false)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg cursor-pointer opacity-70 hover:opacity-100"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3.5 text-xs leading-relaxed">
+              {pageAiLoading ? (
+                <div className="flex flex-col items-center justify-center gap-2.5 py-12 text-center" style={{ color: theme.muted }}>
+                  <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
+                  <div>{isZh ? '正在分析当前页核心大意与讲解思路…' : 'Analyzing current page…'}</div>
+                </div>
+              ) : pageAiError ? (
+                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-rose-500">
+                  <div>{pageAiError}</div>
+                  <button
+                    type="button"
+                    onClick={() => void handleExplainCurrentPage()}
+                    className="mt-2 rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-medium text-white cursor-pointer"
+                  >
+                    {isZh ? '重新分析' : 'Retry'}
+                  </button>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap leading-7">{pageAiAnswer}</div>
+              )}
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!pageAiLoading) void handleExplainCurrentPage(pageAiQuestion);
+              }}
+              className="p-3"
+              style={{ borderTop: `1px solid ${theme.border}` }}
+            >
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {(isZh ? ['用大白话讲这一页', '怎么讲给别人听', '梳理重点词句'] : ['Explain simply', 'How to teach it', 'Key vocabulary']).map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    disabled={pageAiLoading}
+                    onClick={() => void handleExplainCurrentPage(preset)}
+                    className="rounded-lg px-2 py-1 text-[11px] cursor-pointer disabled:opacity-40"
+                    style={{ border: `1px solid ${theme.border}`, color: theme.muted }}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={pageAiQuestion}
+                  onChange={(e) => setPageAiQuestion(e.target.value)}
+                  placeholder={isZh ? '针对本页继续追问 AI…' : 'Ask a follow-up…'}
+                  className="h-9 flex-1 rounded-xl bg-transparent px-3 text-xs focus:outline-none"
+                  style={{ border: `1px solid ${theme.border}`, color: theme.ink }}
+                />
+                <button
+                  type="submit"
+                  disabled={pageAiLoading}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white cursor-pointer hover:bg-emerald-500 disabled:opacity-40"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </form>
+          </aside>
+        )}
       </div>
 
       {/* ================================================================= */}
@@ -1723,18 +2181,32 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               }}
             />
 
-            <button
-              type="button"
-              disabled={chapterIndex >= chapters.length - 1}
-              onClick={() => {
-                setChapterIndex((c) => Math.min(chapters.length - 1, c + 1));
-                setPageIndex(0);
-              }}
-              className="text-[11px] font-medium disabled:opacity-30 cursor-pointer shrink-0"
-              style={{ color: theme.muted }}
-            >
-              {isZh ? '下一章' : 'Next Ch'}
-            </button>
+            {isAtEndOfBook ? (
+              <button
+                type="button"
+                onClick={() => {
+                  stopSpiritSpeech();
+                  onClose();
+                }}
+                className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white cursor-pointer shrink-0 hover:bg-emerald-500"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                <span>{isZh ? '读完返回' : 'Finish'}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={chapterIndex >= chapters.length - 1}
+                onClick={() => {
+                  setChapterIndex((c) => Math.min(chapters.length - 1, c + 1));
+                  setPageIndex(0);
+                }}
+                className="text-[11px] font-medium disabled:opacity-30 cursor-pointer shrink-0"
+                style={{ color: theme.muted }}
+              >
+                {isZh ? '下一章' : 'Next Ch'}
+              </button>
+            )}
           </div>
 
           <div

@@ -1028,7 +1028,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:hidden" aria-label="ONE LIBRARY 导航">
             {[
               { id: 'home', label: '首页' },
-              { id: 'noor', label: 'مكتبة النور · PDF' },
+              { id: 'noor', label: 'مكتبة النور · 全球书库' },
               { id: 'shelf', label: '我的书架' },
               { id: 'admin', label: '管理' }
             ].map(n => (
@@ -1055,7 +1055,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           <nav className="hidden items-center gap-1 rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] p-1 text-xs font-medium md:flex">
             {[
               { id: 'home', label: '首页' },
-              { id: 'noor', label: 'مكتبة النور · 伊斯兰 PDF' },
+              { id: 'noor', label: 'مكتبة النور · 全球书库' },
               { id: 'shelf', label: '我的书架' },
               { id: 'admin', label: '管理' }
             ].map(n => (
@@ -1186,7 +1186,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   </div>
                 </div>
                 <div className="mt-4">
-                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-emerald-300/80">مكتبة النور · 伊斯兰与阿拉伯语 PDF 书库（站内直读 + 下载）</p>
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-emerald-300/80">مكتبة النور · 全球伊斯兰与世界原版书库（搜索 + 下载到原文书架 + AI 讲解）</p>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -1197,7 +1197,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-emerald-400/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25"
                     >
                       <BookOpen className="h-3.5 w-3.5" />
-                      <span>مكتبة النور · 进入 5,099+ 伊斯兰 PDF 书库</span>
+                      <span>مكتبة النور · 进入全球图书搜索</span>
                       <ArrowRight className="h-3.5 w-3.5" />
                     </button>
                     <a href="https://www.noor-book.com/" target="_blank" rel="noopener noreferrer" title="مكتبة النور 官方网站" className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">
@@ -1687,14 +1687,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             <div className="rounded-[28px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] py-20 text-center text-[var(--color-one-text-muted)]">
               <BookMarked className="mx-auto mb-3 h-10 w-10 text-[var(--color-one-text-dim)]" />
               <p className="text-sm font-medium text-white">书架还是空的</p>
-              <p className="mt-1 text-xs">在书籍详情页加入书架，或在「مكتبة النور · 伊斯兰全媒体书库」点击「下载 PDF 到书架」。</p>
+              <p className="mt-1 text-xs">在「مكتبة النور · 全球书库」搜索全球图书，点击「下载到原文书架」即可直接阅读并使用 AI 逐页讲解与点词查义。</p>
               <button
                 type="button"
                 onClick={() => setView('noor')}
                 className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-[#04140e] transition hover:brightness-110"
               >
                 <BookOpen className="h-3.5 w-3.5" />
-                <span>去 مكتبة النور 下载 PDF 到书架</span>
+                <span>去全球书库搜索并下载图书</span>
               </button>
             </div>
           ) : (
@@ -1892,29 +1892,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         </div>
       )}
       {pdfReader && (
-        <div role="dialog" aria-modal="true" aria-label="PDF 在线阅读" className="fixed inset-0 z-50 flex flex-col bg-[#0b0e14]/98 backdrop-blur-2xl">
-          <div className="flex items-center justify-between border-b border-white/10 px-4 py-2.5">
-            <div className="min-w-0">
-              <h2 className="truncate text-sm font-semibold text-white">{pdfReader.title}</h2>
-              <p className="truncate text-[11px] text-slate-400">ONE PDF 阅读器 · 支持翻页、护眼/夜间纸张主题、站内搜索与一键下载</p>
-            </div>
-            <div className="ml-3 flex shrink-0 items-center gap-2">
-              {pdfReader.sourceUrl && (
-                <a href={pdfReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-white/15 px-3 text-[11px] text-slate-300 hover:bg-white/10 hover:text-white">
-                  <ExternalLink className="h-3.5 w-3.5" /> 原始出处
-                </a>
-              )}
-              <button type="button" onClick={() => setPdfReader(null)} aria-label="关闭阅读器" className="cursor-pointer rounded-lg p-2 text-slate-300 hover:bg-white/10 hover:text-white"><X className="h-4 w-4" /></button>
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-4">
-            <PdfDocumentViewer
-              sourceUrl={pdfReader.url}
-              title={pdfReader.title}
-              lang={lang}
-              originPageUrl={pdfReader.sourceUrl}
-            />
-          </div>
+        <div role="dialog" aria-modal="true" aria-label={pdfReader.title} className="fixed inset-0 z-[70] flex flex-col bg-[#0b0e14]">
+          <PdfDocumentViewer
+            sourceUrl={pdfReader.url}
+            title={pdfReader.title}
+            lang={lang}
+            originPageUrl={pdfReader.sourceUrl}
+            onClose={() => setPdfReader(null)}
+          />
         </div>
       )}
     </div>
