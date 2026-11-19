@@ -542,6 +542,11 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     };
   }, [documentProxy, pageNumber, zoom, rotation]);
 
+  const scrollToPdfPage = useCallback((n: number) => {
+    const el = continuousPageRefs.current[n];
+    if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, []);
+
   // In continuous mode, keep active page in view when page changes via controls
   useEffect(() => {
     if (viewMode !== 'continuous') return;
@@ -573,11 +578,6 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pageCount, lookupWord, aiPanelOpen, onClose]);
-
-  const scrollToPdfPage = useCallback((n: number) => {
-    const el = continuousPageRefs.current[n];
-    if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
-  }, []);
 
   const handleJumpPage = (e: React.FormEvent) => {
     e.preventDefault();
