@@ -334,6 +334,9 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
   const [aiCitation, setAiCitation] = useState<BookAnnotation['citation'] | null>(null);
+  const [aiNotice, setAiNotice] = useState<string>('');
+  const [aiCoverage, setAiCoverage] = useState<string>('');
+  const [aiProvider, setAiProvider] = useState<string>('');
   const [statusToast, setStatusToast] = useState<string | null>(null);
 
   // Full-Page AI Tutor ("这一页怎么讲")
@@ -632,6 +635,9 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     setAiLoading(true);
     setAiAnswer(null);
     setAiCitation(null);
+    setAiNotice('');
+    setAiCoverage('');
+    setAiProvider('');
     try {
       const res = await fetch(`/api/library/books/${encodeURIComponent(book.id)}/ai-reading`, {
         method: 'POST',
@@ -648,6 +654,10 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
       if (data?.success && (data.answer || data.message?.content)) {
         setAiAnswer(data.answer || data.message?.content || '');
         setAiCitation(data.citation || null);
+        setAiNotice(typeof data.notice === 'string' ? data.notice : '');
+        setAiCoverage(typeof data.coverage === 'string' ? data.coverage : '');
+        const p = data.provider ? `${data.provider}${data.model ? '/' + data.model : ''}` : '';
+        setAiProvider(p);
       } else {
         setAiAnswer(data?.error || (isZh ? '暂时未能生成 AI 伴读解析，请稍后再试。' : 'Could not generate AI insight right now.'));
       }
@@ -1937,6 +1947,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                     <span className="inline-flex items-center gap-1 font-semibold" style={{ color: theme.accent }}>
                       <Sparkles className="h-3.5 w-3.5" />
                       <span>{isZh ? 'AI 伴读解读' : 'AI Reading Companion'}</span>
+                      {aiProvider ? <span className="ml-1 text-[10px] font-normal opacity-70">· {aiProvider}</span> : null}
                     </span>
                     {aiAnswer && (
                       <button
@@ -1949,21 +1960,26 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                       </button>
                     )}
                   </div>
+                  {(aiCoverage || aiNotice) && (
+                    <div className="mb-2 rounded-lg px-2 py-1.5 text-[10px] leading-relaxed" style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', color: theme.muted }}>
+                      {aiCoverage ? <div><span className="font-medium">{isZh ? '文本范围：' : 'Coverage: '}</span>{aiCoverage === 'full_text' ? (isZh ? '已存全文（本次限所选段及邻近上下文）' : 'Full text (selected passage + nearby context)') : aiCoverage}</div> : null}
+                      {aiNotice ? <div className="mt-0.5">{aiNotice}</div> : null}
+                    </div>
+                  )}
                   {aiLoading ? (
                     <div className="py-2 opacity-75">{isZh ? '正在精读解析这段文字…' : 'Analyzing passage…'}</div>
                   ) : (
                     <div className="whitespace-pre-line">{aiAnswer}</div>
                   )}
-                  {aiCitation?.sourceUrl && (
-                    <a
-                      href={aiCitation.sourceUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-2 inline-flex items-center gap-1 text-[10px] opacity-75 hover:opacity-100"
-                    >
-                      <span>{aiCitation.location}</span>
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
+                  {aiCitation && (
+                    <div className="mt-2 space-y-0.5 text-[10px] opacity-80">
+                      <div>{isZh ? '引用：' : 'Citation: '}{[aiCitation.title, aiCitation.author, aiCitation.version, aiCitation.location].filter(Boolean).join(' · ')}</div>
+                      {aiCitation.sourceUrl && (
+                        <a href={aiCitation.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:opacity-100 underline">
+                          <span>{isZh ? '来源' : 'Source'}</span><ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
                   )}
                 </div>
               )}

@@ -452,7 +452,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   }, [streamUrl, isChinese]);
 
   useEffect(() => {
-    if (!documentProxy) return;
+    if (!documentProxy || viewMode === 'continuous') return;
     let cancelled = false;
     let renderTask: RenderTask | undefined;
 
@@ -540,7 +540,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       cancelled = true;
       renderTask?.cancel();
     };
-  }, [documentProxy, pageNumber, zoom, rotation]);
+  }, [documentProxy, pageNumber, zoom, rotation, viewMode]);
 
   const scrollToPdfPage = useCallback((n: number) => {
     const el = continuousPageRefs.current[n];
