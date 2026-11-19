@@ -62,9 +62,10 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function stripWakePrefix(text: string): string {
+function stripWakePrefix(text: string, customAiName = 'ONE'): string {
+  const safeName = customAiName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return text
-    .replace(/^(?:你好[，,\s]*)?小小(?:同学|精灵|老师)?[，,：:\s]*/i, '')
+    .replace(new RegExp(`^(?:你好[，,\\s]*)?(?:${safeName}|ONE|小小)(?:同学|精灵|老师)?[，,：:\\s]*`, 'i'), '')
     .trim();
 }
 
@@ -469,6 +470,10 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
 
   router.post('/turn', async (req, res) => {
     const rawPrompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    const customAiName =
+      typeof req.body?.aiName === 'string' && req.body.aiName.trim()
+        ? req.body.aiName.trim().slice(0, 24)
+        : 'ONE';
     const lang = req.body?.lang === 'en' ? 'en' : req.body?.lang === 'ar' ? 'ar' : 'zh';
     const isZh = lang === 'zh';
     const attachments = Array.isArray(req.body?.attachments) ? req.body.attachments : [];
@@ -484,7 +489,7 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
       return res.status(429).json({ success: false, error: quota.reason || '配额已达上限，请稍后再试。' });
     }
 
-    const cleanPrompt = stripWakePrefix(rawPrompt) || rawPrompt;
+    const cleanPrompt = stripWakePrefix(rawPrompt, customAiName) || rawPrompt;
     const histArray = normalizeConversationHistory(req.body?.history);
     const sessionId = typeof req.body?.sessionId === 'string' && req.body.sessionId.trim()
       ? req.body.sessionId.trim()
@@ -493,7 +498,7 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
     const steps: AgentStepRecord[] = [
       {
         id: 'step_understand',
-        label: isZh ? 'AI 精灵正在理解需求' : 'Understanding request',
+        label: isZh ? `${customAiName} 正在理解需求` : `${customAiName} is understanding`,
         status: 'completed',
         detail: cleanPrompt.slice(0, 72),
         timestamp: nowIso(),
@@ -752,7 +757,7 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
           userTier: quota.userTier,
           prompt: `用户需求：「${cleanPrompt}」。\n检索到的真实书籍候选：${candidatesSummary}\n请基于以上真实书籍结果（严禁编造不存在的书名），用亲切简洁的中文（2~4句）分析哪本最适合并推荐给用户。`,
           messages: [
-            { role: 'system', content: '你是 EARTH ONE 的 AI 精灵小小，负责依据真实检索结果推荐书籍并打开阅读器。' },
+            { role: 'system', content: `你是 EARTH ONE 的 AI 伙伴「${customAiName}」，负责依据真实检索结果推荐书籍并打开阅读器。不要称呼用户为“小小”。` },
             { role: 'user', content: `用户需求：「${cleanPrompt}」\n真实结果：${candidatesSummary}` },
           ],
           mode: 'agent-book',
@@ -845,7 +850,7 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
         messages: [
           {
             role: 'system',
-            content: '你是 EARTH ONE 语言导师小精灵小小。请用简练友好的中文为学习者给出今日3分钟热身重点（含1个核心词/句和发音提示），并告知已进入学习空间。',
+            content: `你是 EARTH ONE 语言导师「${customAiName}」。请用简练友好的中文为学习者给出今日3分钟热身重点（含1个核心词/句和发音提示），并告知已进入学习空间。不要称呼用户为“小小”。`,
           },
           { role: 'user', content: cleanPrompt },
         ],
@@ -952,7 +957,7 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
         userTier: quota.userTier,
         prompt: cleanPrompt,
         messages: [
-          { role: 'system', content: '你是 EARTH ONE 研究助手小精灵小小。严格根据给出的真实检索摘要总结要点并附上真实来源标题或链接，绝不编造链接。' },
+          { role: 'system', content: `你是 EARTH ONE 研究助手「${customAiName}」。严格根据给出的真实检索摘要总结要点并附上真实来源标题或链接，绝不编造链接。不要称呼用户为“小小”。` },
           { role: 'user', content: `用户问题：${cleanPrompt}\n真实检索信息：${evidencePayload}` },
         ],
         mode: 'research',
@@ -1110,7 +1115,7 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
     const unifiedMessages: UnifiedMessage[] = [
       {
         role: 'system',
-        content: `${ctx.systemPrompt}\n当前你在 EARTH ONE 3D 湖畔凉亭为使用者服务。你是 AI 精灵「小小」，请以温暖自然、清晰务实的语言直接回答；不向普通用户暴露任何底层模型厂商或技术标识。`,
+        content: `${ctx.systemPrompt}\n当前你在 EARTH ONE 3D 湖畔花园与使用者像真人一样自然实时对话。你的名字是「${customAiName}」（切勿把用户叫作小小）。请在回复最开头附带一个情绪标签 [[EMO:calm]]、[[EMO:cheerful]]、[[EMO:affectionate]]、[[EMO:empathetic]]、[[EMO:playful]]、[[EMO:excited]] 或 [[EMO:curious]]（随后接自然温暖的真人化口语内容）；不向普通用户暴露任何底层模型厂商或技术标识。`,
       },
     ];
     for (const h of ctx.mergedHistory) {
@@ -1142,7 +1147,9 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
     });
 
     if (routed.success && routed.content.trim()) {
-      const replyText = stripAiControlTags(routed.content).reply || routed.content.trim();
+      const parsed = stripAiControlTags(routed.content);
+      const replyText = parsed.reply || routed.content.trim();
+      const replyEmotion = parsed.emotion || 'calm';
       persistTurnAndExtractMemories({
         ctx,
         rawUserInput: cleanPrompt,
@@ -1162,7 +1169,7 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
         intentSummary: cleanPrompt.slice(0, 80),
         module: 'assistant',
         steps,
-        result: { reply: replyText },
+        result: { reply: replyText, emotion: replyEmotion },
       });
       return res.json({
         success: true,
@@ -1170,6 +1177,7 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
         module: 'assistant',
         model: 'ONE AI',
         reply: replyText,
+        emotion: replyEmotion,
         steps,
         clientActions: [],
       });

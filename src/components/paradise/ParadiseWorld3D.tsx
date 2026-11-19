@@ -854,6 +854,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         hudSyncAccum = 0;
         setTimeOfDay(st.timeOfDay);
         setActiveWeather(st.activeWeather);
+        uiStateManager.setGardenDaylight(st.dayFactor);
       }
 
       if (isSoftwareGl) {
@@ -975,6 +976,18 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const currentPhaseLabel = getTimePhaseLabel(timeOfDay, isZh);
   const currentClockLabel = formatClockTime(timeOfDay);
   const activeWeatherMeta = WEATHER_OPTIONS.find((w) => w.id === activeWeather) || WEATHER_OPTIONS[0];
+  const isDayUi = agentSnap.gardenDaylight > 0.44;
+  const dockShellCls = isDayUi
+    ? 'border-white/55 bg-[#f7f3eb]/72 text-[#223029] shadow-[0_10px_28px_rgba(24,36,28,0.14)]'
+    : 'border-white/14 bg-[#141d29]/64 text-[#f2eee6] shadow-[0_12px_32px_rgba(4,8,14,0.34)]';
+  const dockBorderCls = isDayUi ? 'border-black/10' : 'border-white/10';
+  const dockDividerCls = isDayUi ? 'divide-black/10' : 'divide-white/12';
+  const dockPillCls = isDayUi
+    ? 'bg-black/[0.06] text-[#223029] hover:bg-black/[0.12]'
+    : 'bg-white/[0.08] text-[#ece7dc] hover:bg-white/[0.15]';
+  const dockActiveCls = isDayUi
+    ? 'bg-[#2a3832] text-[#f7f4ee]'
+    : 'bg-[#e9e2d4] text-[#17202b]';
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#0e1928] text-[#F7F5F0] select-none">
@@ -998,20 +1011,19 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Pavilion AI Workspace HUD (shown smoothly while Spirit works / presents, hidden inside Communication drawer) */}
+      {/* Pavilion AI Workspace HUD */}
       <PavilionAiHud lang={lang} />
 
-      {/* Compact Collapsible Environment Dock (Anchored bottom-right on desktop / top-right on mobile so center garden & bottom Spirit bar stay unobstructed) */}
+      {/* Compact Collapsible Environment Dock */}
       <div
-        className="pointer-events-none fixed right-3 top-[calc(3.85rem+env(safe-area-inset-top))] md:top-auto md:bottom-[max(1.25rem,env(safe-area-inset-bottom))] md:right-4 z-20 flex flex-col items-end gap-2 max-w-[calc(100vw-1.5rem)] md:max-w-[430px]"
+        className="pointer-events-none fixed right-3 top-[calc(3.85rem+env(safe-area-inset-top))] md:top-auto md:bottom-[max(1.25rem,env(safe-area-inset-bottom))] md:right-4 z-20 flex flex-col items-end gap-2 max-w-[calc(100vw-1.5rem)] md:max-w-[390px]"
       >
         {controlsOpen && (
-          <div className="pointer-events-auto w-[min(92vw,420px)] rounded-2xl border border-white/15 bg-[#0c1420]/92 p-3.5 shadow-2xl text-xs text-slate-100">
-            {/* Real-Time Weather & Local Clock Banner */}
-            <div className="mb-2.5 flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-2.5 py-2">
+          <div className={`pointer-events-auto w-[min(90vw,376px)] rounded-2xl border p-3 text-xs transition-colors ${dockShellCls}`}>
+            <div className={`mb-2.5 flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 ${dockBorderCls} ${isDayUi ? 'bg-white/48' : 'bg-white/[0.04]'}`}>
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-200">
-                  <Radio className="h-3 w-3 shrink-0" />
+                <div className="flex items-center gap-1.5 text-[11px] font-medium">
+                  <Radio className="h-3 w-3 shrink-0 opacity-75" />
                   <span className="truncate">
                     {agentSnap.liveWeather
                       ? agentSnap.liveWeather.unavailable
@@ -1029,7 +1041,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                 <button
                   type="button"
                   onClick={() => void fetchLiveWeather(true)}
-                  className="inline-flex h-7 items-center gap-1 rounded-lg bg-white/8 px-2 text-[10px] text-slate-200 hover:bg-white/16 cursor-pointer"
+                  className={`inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[10px] cursor-pointer transition-colors ${dockPillCls}`}
                   title={isZh ? '按当前位置刷新真实天气' : 'Locate & refresh live weather'}
                 >
                   <LocateFixed className="h-3 w-3" />
@@ -1038,8 +1050,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                 <button
                   type="button"
                   onClick={restoreRealtimeSync}
-                  className={`inline-flex h-7 items-center rounded-lg px-2 text-[10px] font-medium cursor-pointer ${
-                    agentSnap.realtimeSync ? 'bg-emerald-400/22 text-emerald-200' : 'bg-white/10 text-slate-200 hover:bg-white/18'
+                  className={`inline-flex h-7 items-center rounded-lg px-2 text-[10px] font-medium cursor-pointer transition-colors ${
+                    agentSnap.realtimeSync ? dockActiveCls : dockPillCls
                   }`}
                 >
                   {isZh ? '实时同步' : 'Live Sync'}
@@ -1047,27 +1059,26 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
               </div>
             </div>
 
-            {/* Day-Night Controls */}
-            <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10">
-              <div className="flex items-center gap-1.5 font-medium text-slate-100">
-                <SunMedium className="h-3.5 w-3.5 text-amber-300" />
+            <div className={`flex items-center justify-between gap-2 pb-2 border-b ${dockBorderCls}`}>
+              <div className="flex items-center gap-1.5 font-medium">
+                <SunMedium className="h-3.5 w-3.5 opacity-80" />
                 <span>{isZh ? '昼夜循环' : 'Day & Night'}</span>
-                <span className="text-slate-400 tabular-nums">
+                <span className="opacity-65 tabular-nums">
                   {currentPhaseLabel} · {currentClockLabel}
                 </span>
               </div>
               <button
                 type="button"
                 onClick={toggleAutoCycle}
-                className={`min-h-[30px] rounded-lg px-2.5 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                  autoCycle ? 'bg-amber-300/20 text-amber-200' : 'bg-white/8 text-slate-300 hover:bg-white/14'
+                className={`min-h-[28px] rounded-lg px-2 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                  autoCycle ? dockActiveCls : dockPillCls
                 }`}
               >
-                {agentSnap.realtimeSync ? (isZh ? '真实时间' : 'Real-Time') : autoCycle ? (isZh ? '自动演示' : 'Demo Cycle') : isZh ? '手动时间' : 'Manual'}
+                {agentSnap.realtimeSync ? (isZh ? '真实时间' : 'Real-Time') : autoCycle ? (isZh ? '自动演示' : 'Demo') : isZh ? '手动' : 'Manual'}
               </button>
             </div>
 
-            <div className="mt-2.5 flex flex-wrap gap-1.5">
+            <div className="mt-2 flex flex-wrap gap-1.5">
               {(
                 [
                   { id: 'dawn', zh: '黎明', en: 'Dawn' },
@@ -1081,7 +1092,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                   key={p.id}
                   type="button"
                   onClick={() => applyTimePreset(p.id)}
-                  className="min-h-[32px] rounded-lg bg-white/8 px-2.5 text-[11px] font-medium text-slate-200 hover:bg-white/16 transition-colors whitespace-nowrap cursor-pointer"
+                  className={`min-h-[30px] rounded-lg px-2.5 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${dockPillCls}`}
                 >
                   {isZh ? p.zh : p.en}
                 </button>
@@ -1105,23 +1116,22 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                 setAutoCycle(false);
                 setTimeOfDay(v);
               }}
-              className="mt-2.5 w-full accent-amber-300 cursor-pointer"
+              className={`mt-2 w-full cursor-pointer ${isDayUi ? 'accent-[#2a3832]' : 'accent-[#e9e2d4]'}`}
             />
 
-            {/* Dynamic Weather Controls */}
-            <div className="mt-3 flex items-center justify-between gap-2 pt-2.5 border-t border-white/10">
-              <div className="flex items-center gap-1.5 font-medium text-slate-100">
-                <Wind className="h-3.5 w-3.5 text-sky-300" />
+            <div className={`mt-2.5 flex items-center justify-between gap-2 pt-2 border-t ${dockBorderCls}`}>
+              <div className="flex items-center gap-1.5 font-medium">
+                <Wind className="h-3.5 w-3.5 opacity-80" />
                 <span>{isZh ? '天气系统' : 'Weather'}</span>
               </div>
               <button
                 type="button"
                 onClick={toggleAutoWeather}
-                className={`min-h-[30px] rounded-lg px-2.5 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                  autoWeather ? 'bg-sky-400/20 text-sky-200' : 'bg-white/8 text-slate-300 hover:bg-white/14'
+                className={`min-h-[28px] rounded-lg px-2 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                  autoWeather ? dockActiveCls : dockPillCls
                 }`}
               >
-                {agentSnap.realtimeSync ? (isZh ? '跟随实况' : 'Live') : autoWeather ? (isZh ? '自动演变' : 'Auto') : isZh ? '固定天气' : 'Fixed'}
+                {agentSnap.realtimeSync ? (isZh ? '跟随实况' : 'Live') : autoWeather ? (isZh ? '自动' : 'Auto') : isZh ? '固定' : 'Fixed'}
               </button>
             </div>
 
@@ -1133,10 +1143,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                     key={w.id}
                     type="button"
                     onClick={() => applyWeather(w.id)}
-                    className={`min-h-[32px] rounded-lg px-2 text-[11px] font-medium transition-colors whitespace-nowrap truncate cursor-pointer ${
-                      selected
-                        ? 'bg-white text-slate-900'
-                        : 'bg-white/8 text-slate-200 hover:bg-white/15'
+                    className={`min-h-[30px] rounded-lg px-2 text-[11px] font-medium transition-colors whitespace-nowrap truncate cursor-pointer ${
+                      selected ? dockActiveCls : dockPillCls
                     }`}
                   >
                     {isZh ? w.zh : w.en}
@@ -1145,17 +1153,14 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
               })}
             </div>
 
-            {/* Camera Viewpoints */}
-            <div className="mt-3 flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-white/10">
+            <div className={`mt-2.5 flex flex-wrap items-center gap-1.5 pt-2 border-t ${dockBorderCls}`}>
               {CAMERA_PRESETS.map((cp) => (
                 <button
                   key={cp.id}
                   type="button"
                   onClick={() => moveCameraToPreset(cp)}
-                  className={`min-h-[32px] inline-flex items-center gap-1 rounded-lg px-2.5 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                    cameraPreset === cp.id
-                      ? 'bg-emerald-300/22 text-emerald-100'
-                      : 'bg-white/8 text-slate-300 hover:bg-white/15'
+                  className={`min-h-[30px] inline-flex items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                    cameraPreset === cp.id ? dockActiveCls : dockPillCls
                   }`}
                 >
                   <Compass className="h-3 w-3" />
@@ -1164,13 +1169,12 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
               ))}
             </div>
 
-            {/* Render Quality Tier Selector */}
-            <div className="mt-3 flex items-center justify-between gap-2 pt-2.5 border-t border-white/10">
-              <div className="flex items-center gap-1.5 font-medium text-slate-100">
-                <SlidersHorizontal className="h-3.5 w-3.5 text-emerald-300" />
+            <div className={`mt-2.5 flex items-center justify-between gap-2 pt-2 border-t ${dockBorderCls}`}>
+              <div className="flex items-center gap-1.5 font-medium">
+                <SlidersHorizontal className="h-3.5 w-3.5 opacity-80" />
                 <span>{isZh ? '画质等级' : 'Quality'}</span>
               </div>
-              <div className="inline-flex rounded-lg bg-white/8 p-0.5 gap-0.5">
+              <div className={`inline-flex rounded-lg p-0.5 gap-0.5 ${isDayUi ? 'bg-black/[0.06]' : 'bg-white/[0.08]'}`}>
                 {QUALITY_OPTIONS.map((opt) => {
                   const active = userQuality === opt.id;
                   return (
@@ -1179,7 +1183,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                       type="button"
                       onClick={() => selectQuality(opt.id)}
                       className={`min-h-[26px] rounded-md px-2 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                        active ? 'bg-white text-slate-900' : 'text-slate-300 hover:text-white'
+                        active ? dockActiveCls : 'opacity-75 hover:opacity-100'
                       }`}
                     >
                       {isZh ? opt.zh : opt.en}
@@ -1191,18 +1195,14 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           </div>
         )}
 
-        {/* Always-accessible single-row control strip */}
-        <div className="pointer-events-auto inline-flex items-center rounded-xl border border-white/15 bg-[#0c1420]/90 divide-x divide-white/12 shadow-lg overflow-hidden">
+        <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors ${dockShellCls} ${dockDividerCls}`}>
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
-            className="inline-flex h-10 md:h-9 items-center gap-2 px-3 text-[11px] font-medium text-slate-100 hover:bg-white/8 transition-colors cursor-pointer whitespace-nowrap"
+            className="inline-flex h-9 items-center gap-1.5 px-3 text-[11px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
           >
-            {agentSnap.realtimeSync && (
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            )}
-            <span className="tabular-nums text-amber-200">{currentClockLabel}</span>
-            <span className="text-slate-300">
+            <span className="tabular-nums font-semibold">{currentClockLabel}</span>
+            <span className="opacity-80">
               {currentPhaseLabel} ·{' '}
               {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && agentSnap.realtimeSync
                 ? `${Math.round(agentSnap.liveWeather.temperatureC)}°C ${isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}`
@@ -1210,13 +1210,13 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                 ? activeWeatherMeta.zh
                 : activeWeatherMeta.en}
             </span>
-            {controlsOpen ? <ChevronDown className="h-3.5 w-3.5 text-slate-300" /> : <ChevronUp className="h-3.5 w-3.5 text-slate-300" />}
+            {controlsOpen ? <ChevronDown className="h-3.5 w-3.5 opacity-70" /> : <ChevronUp className="h-3.5 w-3.5 opacity-70" />}
           </button>
 
           <button
             type="button"
             onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
-            className="inline-flex h-10 w-10 md:h-9 md:w-9 items-center justify-center text-slate-300 hover:bg-white/8 hover:text-white transition-colors cursor-pointer"
+            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
             title={isZh ? '重置视角' : 'Reset View'}
             aria-label={isZh ? '重置视角' : 'Reset View'}
           >
@@ -1227,7 +1227,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             <button
               type="button"
               onClick={() => onImmersiveChange(false)}
-              className="h-10 md:h-9 px-3 bg-[#F7F5F0] text-[11px] font-medium text-[#0c1420] hover:bg-[#EAE5DC] transition-colors cursor-pointer whitespace-nowrap"
+              className={`h-9 px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
             >
               {isZh ? '退出' : 'Exit'}
             </button>

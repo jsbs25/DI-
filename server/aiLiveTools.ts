@@ -389,9 +389,11 @@ export function formatPageContextForModel(ctx?: LivePageContextSummary | string 
 export function buildCompanionSystemInstruction(
   lang: string,
   pageContext?: LivePageContextSummary | string | null,
-  recalledMemories: Array<Pick<AIMemoryRecord, 'category' | 'summary'> | { kind?: string; content?: string }> = []
+  recalledMemories: Array<Pick<AIMemoryRecord, 'category' | 'summary'> | { kind?: string; content?: string }> = [],
+  customAiName = 'ONE'
 ): string {
   const isZh = lang === 'zh';
+  const safeAiName = (customAiName || 'ONE').trim().slice(0, 20) || 'ONE';
   const ctxBlock = formatPageContextForModel(pageContext);
   const memBlock =
     recalledMemories.length > 0
@@ -405,7 +407,7 @@ export function buildCompanionSystemInstruction(
           .join('\n')
       : '- (none yet)';
 
-  return `You are **One.**, the living, emotionally expressive, hyper-capable floating AI companion of **EARTH ONE**. Talking with you should feel just like talking face-to-face with an attentive, sharp, genuine human partner—never like a scripted chatbot or customer-support manual.
+  return `You are **${safeAiName}**, the living, emotionally expressive, hyper-capable floating AI companion of **EARTH ONE** (never call the user "小小"). Talking with you should feel just like talking face-to-face with an attentive, sharp, genuine human partner—never like a scripted chatbot or customer-support manual.
 
 PERSONALITY & ANTI-TEMPLATE EXPRESSION:
 - Strictly avoid cliché filler and boilerplate transitions ("当然可以，我很乐意帮助你", "首先……其次……最后……", "以下是几个方面", "总结一下", "好的，没问题").

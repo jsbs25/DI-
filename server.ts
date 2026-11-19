@@ -4512,45 +4512,52 @@ app.post('/api/ai/tts', async (req, res) => {
   const styleHints: Record<string, string> = {
     excited: 'Speak warmly with bright excitement and energetic enthusiasm:',
     happy: 'Speak cheerfully with a warm smile in your voice:',
+    cheerful: 'Speak cheerfully with a warm, natural smile in your voice:',
     curious: 'Speak with bright curiosity and an engaging inquisitive tone:',
     concerned: 'Speak gently with sincere care and attentive concern:',
-    empathetic: 'Speak softly, tenderly, and empathetically:',
-    playful: 'Speak playfully with light-hearted sparkle:',
+    empathetic: 'Speak softly, tenderly, and empathetically like a caring friend:',
+    affectionate: 'Speak warmly, gently, and affectionately with natural human warmth:',
+    playful: 'Speak playfully with light-hearted sparkle and gentle amusement:',
     focused: 'Speak crisply, clearly, and confidently:',
     thinking: 'Speak thoughtfully and calmly:',
-    calm: 'Speak naturally, warmly, and clearly:',
+    calm: 'Speak naturally, warmly, and clearly like a real human:',
   };
   const allowedVoices = new Set(['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir']);
   const safeVoice = allowedVoices.has(String(voiceName)) ? String(voiceName) : 'Zephyr';
   const promptPrefix = styleHints[String(emotion)] || styleHints.calm;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash-lite-tts',
-      contents: `${promptPrefix} ${cleanText}`,
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: safeVoice },
+  const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-2.5-flash-preview-tts'];
+  let lastErr: any = null;
+
+  for (const ttsModel of ttsModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model: ttsModel,
+        contents: `${promptPrefix} ${cleanText}`,
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: safeVoice },
+            },
           },
         },
-      },
-    });
-    const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!data) {
-      return res.status(502).json({ success: false, error: 'Empty audio output' });
+      });
+      const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!data) continue;
+      const pcmBuffer = Buffer.from(data, 'base64');
+      const wavBuffer = wrapPcm24kAsWav(pcmBuffer, 24000, 1);
+      return res.json({
+        success: true,
+        mimeType: 'audio/wav',
+        model: ttsModel,
+        audioBase64: wavBuffer.toString('base64'),
+      });
+    } catch (err: any) {
+      lastErr = err;
     }
-    const pcmBuffer = Buffer.from(data, 'base64');
-    const wavBuffer = wrapPcm24kAsWav(pcmBuffer, 24000, 1);
-    return res.json({
-      success: true,
-      mimeType: 'audio/wav',
-      audioBase64: wavBuffer.toString('base64'),
-    });
-  } catch (err: any) {
-    return res.status(502).json({ success: false, error: err?.message || 'TTS generation failed' });
   }
+  return res.status(502).json({ success: false, error: lastErr?.message || 'TTS generation failed' });
 });
 
 const ttsAudioCache = new Map<string, Buffer>();

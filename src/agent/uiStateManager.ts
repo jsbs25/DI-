@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { WeatherKind, TimePreset } from '../components/paradise/paradiseEnvironment.ts';
+import type { VoiceEmotion } from '../utils/emotionEngine.ts';
 
 export type SpiritState =
   | 'idle_explore'
@@ -60,32 +61,85 @@ export interface EnvironmentOverrideCommand {
   realtimeSync?: boolean;
 }
 
+export interface AgentChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+const AI_NAME_STORAGE_KEY = 'earth-one-ai-name:v1';
+const VOICE_PREF_KEY = 'earth-one-ai-voice-pref:v2';
+const VOICE_REPLY_KEY = 'earth-one-voice-reply:v1';
+
+function readStoredAiName(): string {
+  try {
+    const saved = localStorage.getItem(AI_NAME_STORAGE_KEY)?.trim();
+    if (saved) return saved.slice(0, 20);
+  } catch {
+    // ignore
+  }
+  return 'ONE';
+}
+
+function readStoredVoiceName(): string {
+  try {
+    const saved = localStorage.getItem(VOICE_PREF_KEY)?.trim();
+    if (saved && ['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir'].includes(saved)) return saved;
+  } catch {
+    // ignore
+  }
+  return 'Zephyr';
+}
+
+function readStoredVoiceReply(): boolean {
+  try {
+    const saved = localStorage.getItem(VOICE_REPLY_KEY);
+    if (saved === 'false') return false;
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
 export interface AgentUiSnapshot {
+  aiName: string;
+  voiceName: string;
+  currentEmotion: VoiceEmotion;
   spiritState: SpiritState;
   pavilionHudOpen: boolean;
   commDrawerOpen: boolean;
   activeTask: AgentTaskView | null;
   pausedTask: AgentTaskView | null;
   pendingConfirmation: AgentConfirmationRequest | null;
+  chatMessages: AgentChatMessage[];
+  gardenDaylight: number;
   realtimeSync: boolean;
   liveWeather: LiveWeatherInfo | null;
   weatherCommand: EnvironmentOverrideCommand | null;
   voiceListening: boolean;
+  voiceReplyEnabled: boolean;
   wakeListening: boolean;
   lastSpokenTranscript: string;
 }
 
 let state: AgentUiSnapshot = {
+  aiName: typeof window !== 'undefined' ? readStoredAiName() : 'ONE',
+  voiceName: typeof window !== 'undefined' ? readStoredVoiceName() : 'Zephyr',
+  currentEmotion: 'calm',
   spiritState: 'idle_explore',
   pavilionHudOpen: false,
   commDrawerOpen: false,
   activeTask: null,
   pausedTask: null,
   pendingConfirmation: null,
+  chatMessages: [],
+  gardenDaylight: 0.72,
   realtimeSync: true,
   liveWeather: null,
   weatherCommand: null,
   voiceListening: false,
+  voiceReplyEnabled: typeof window !== 'undefined' ? readStoredVoiceReply() : true,
   wakeListening: false,
   lastSpokenTranscript: '',
 };
@@ -106,6 +160,44 @@ export const uiStateManager = {
     return () => listeners.delete(listener);
   },
 
+  setAiName(name: string) {
+    const clean = name.trim().slice(0, 20);
+    if (!clean) return;
+    try {
+      localStorage.setItem(AI_NAME_STORAGE_KEY, clean);
+    } catch {
+      // ignore
+    }
+    if (state.aiName === clean) return;
+    state = { ...state, aiName: clean };
+    emit();
+  },
+
+  setGardenDaylight(dayFactor: number) {
+    const clamped = Math.max(0, Math.min(1, dayFactor));
+    if (Math.abs(state.gardenDaylight - clamped) < 0.04) return;
+    state = { ...state, gardenDaylight: clamped };
+    emit();
+  },
+
+  appendChatMessage(role: 'user' | 'assistant', content: string) {
+    const clean = content.trim();
+    if (!clean) return;
+    const msg: AgentChatMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      role,
+      content: clean,
+      timestamp: Date.now(),
+    };
+    state = { ...state, chatMessages: [...state.chatMessages.slice(-24), msg] };
+    emit();
+  },
+
+  clearChatMessages() {
+    state = { ...state, chatMessages: [] };
+    emit();
+  },
+
   setSpiritState(next: SpiritState) {
     if (state.spiritState === next) return;
     state = { ...state, spiritState: next };
@@ -119,7 +211,6 @@ export const uiStateManager = {
 
   setCommDrawerOpen(open: boolean) {
     if (open) {
-      // Entering communication: pause current running/working Spirit task into Rest Cottage
       const shouldPause =
         state.activeTask && (state.activeTask.status === 'running' || state.activeTask.status === 'awaiting_confirmation');
       state = {
@@ -175,7 +266,38 @@ export const uiStateManager = {
     emit();
   },
 
-  setVoiceStatus(patch: { voiceListening?: boolean; wakeListening?: boolean; lastSpokenTranscript?: string }) {
+  setVoiceName(voiceName: string) {
+    const allowed = ['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir'];
+    const clean = allowed.includes(voiceName) ? voiceName : 'Zephyr';
+    try {
+      localStorage.setItem(VOICE_PREF_KEY, clean);
+    } catch {
+      // ignore
+    }
+    if (state.voiceName === clean) return;
+    state = { ...state, voiceName: clean };
+    emit();
+  },
+
+  setEmotion(emotion: VoiceEmotion) {
+    if (state.currentEmotion === emotion) return;
+    state = { ...state, currentEmotion: emotion };
+    emit();
+  },
+
+  setVoiceStatus(patch: {
+    voiceListening?: boolean;
+    voiceReplyEnabled?: boolean;
+    wakeListening?: boolean;
+    lastSpokenTranscript?: string;
+  }) {
+    if (typeof patch.voiceReplyEnabled === 'boolean') {
+      try {
+        localStorage.setItem(VOICE_REPLY_KEY, patch.voiceReplyEnabled ? 'true' : 'false');
+      } catch {
+        // ignore
+      }
+    }
     state = { ...state, ...patch };
     emit();
   },

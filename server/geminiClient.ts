@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import { oneAiDb } from './oneAi/db.ts';
 
 dotenv.config();
 
@@ -8,7 +9,20 @@ let cachedLiveClient: GoogleGenAI | null = null;
 let cachedKey = '';
 
 export function getGeminiApiKey(): string {
-  return (process.env.GEMINI_API_KEY || '').trim();
+  const envKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+  if (envKey && envKey !== 'MY_GEMINI_API_KEY') {
+    return envKey;
+  }
+  try {
+    const dbCreds = oneAiDb.getProviderWithCreds('gemini');
+    const dbKey = (dbCreds?.apiKey || '').trim();
+    if (dbKey && dbKey !== 'MY_GEMINI_API_KEY') {
+      return dbKey;
+    }
+  } catch {
+    // ignore before db ready
+  }
+  return '';
 }
 
 export function getGeminiClient(): GoogleGenAI | null {

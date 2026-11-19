@@ -52,6 +52,7 @@ import {
   writeVoiceListeningMode,
   type VoiceListeningMode,
 } from '../../utils/voiceModeSettings.ts';
+import { uiStateManager, useAgentUiState } from '../../agent/uiStateManager.ts';
 
 export type CompanionEmotion =
   | 'calm'
@@ -302,6 +303,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
 
   const isZh = lang === 'zh';
   const player = useOptionalPlayerContext();
+  const agentSnap = useAgentUiState();
+  const aiName = agentSnap.aiName || 'ONE';
+  const isGardenHome = currentTab === 'globe';
+  const isGardenDay = isGardenHome && agentSnap.gardenDaylight > 0.44;
 
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const [voiceActive, setVoiceActive] = useState(false);
@@ -1224,6 +1229,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
         JSON.stringify({
           type: 'init',
           lang,
+          aiName,
           sessionId: voiceSessionIdRef.current,
           voiceName: voiceNameRef.current,
           profileKey: profileKeyRef.current,
@@ -2216,32 +2222,38 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       )}
 
       {/* Expandable Floating Companion HUD */}
-      {showLauncher && hudOpen && (
+      {(showLauncher || isGardenHome) && hudOpen && (
         <section
           id="one-ai-hud"
-          aria-label="One. Living AI Companion"
-          className={`fixed z-[65] flex flex-col overflow-hidden rounded-2xl border bg-[#0B101D]/95 text-slate-100 shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur-2xl transition-all duration-200 ${
+          aria-label={`${aiName} Living AI Companion`}
+          className={`fixed z-[65] flex flex-col overflow-hidden rounded-2xl border transition-all duration-200 ${
+            isGardenHome
+              ? isGardenDay
+                ? 'border-white/55 bg-[#f7f3eb]/86 text-[#223029] shadow-[0_14px_40px_rgba(24,36,28,0.16)]'
+                : 'border-white/14 bg-[#141d29]/82 text-[#f2eee6] shadow-[0_18px_46px_rgba(4,8,14,0.45)]'
+              : `bg-[#0B101D]/95 text-slate-100 shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur-2xl ${emotionInfo.ringClass}`
+          } ${
             placement === 'center-bottom'
-              ? 'bottom-[calc(8.75rem+env(safe-area-inset-bottom))] md:bottom-[5.25rem] left-1/2 -translate-x-1/2'
+              ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-[4.5rem] left-1/2 -translate-x-1/2'
               : 'bottom-[calc(5.2rem+env(safe-area-inset-bottom))] md:bottom-20 right-3 md:right-6'
-          } w-[calc(100vw-1.5rem)] max-w-[400px] max-h-[68dvh] ${emotionInfo.ringClass}`}
+          } w-[calc(100vw-1.5rem)] max-w-[360px] max-h-[64dvh]`}
         >
           {/* Header with Living Orb + Emotion Status + Controls */}
-          <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3.5 py-2.5">
+          <div className={`flex items-center justify-between gap-2 border-b px-3.5 py-2.5 ${isGardenDay ? 'border-black/10' : 'border-white/10'}`}>
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="relative h-9 w-9 shrink-0 rounded-full border border-white/12 bg-white/[0.04] flex items-center justify-center">
-                <canvas ref={hudOrbCanvasRef} className="h-9 w-9 rounded-full pointer-events-none" />
+              <div className={`relative h-8 w-8 shrink-0 rounded-full border flex items-center justify-center ${isGardenDay ? 'border-black/12 bg-black/[0.04]' : 'border-white/12 bg-white/[0.04]'}`}>
+                <canvas ref={hudOrbCanvasRef} className="h-8 w-8 rounded-full pointer-events-none" />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-white">
-                  <span>One.</span>
-                  <span className="text-slate-500">·</span>
-                  <span className="inline-flex items-center gap-1 font-medium text-slate-200 truncate">
+                <div className={`flex items-center gap-1.5 text-xs font-semibold tracking-wide ${isGardenDay ? 'text-[#1d2a23]' : 'text-white'}`}>
+                  <span>{aiName}</span>
+                  <span className="opacity-45">·</span>
+                  <span className="inline-flex items-center gap-1 font-medium opacity-85 truncate">
                     <EmotionIcon emotion={emotion} />
                     <span>{isZh ? emotionInfo.zh : emotionInfo.en}</span>
                   </span>
                 </div>
-                <div className="text-[11px] text-slate-400 truncate">
+                <div className={`text-[11px] truncate ${isGardenDay ? 'text-[#42554a]' : 'text-slate-400'}`}>
                   {emotionReason ? `${emotionReason} · ${phaseLabel}` : phaseLabel}
                 </div>
               </div>
@@ -2252,7 +2264,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                 type="button"
                 onClick={() => setMutedOutput((v) => !v)}
                 title={mutedOutput ? (isZh ? '取消静音' : 'Unmute AI') : (isZh ? '静音 AI 语音' : 'Mute AI')}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+                className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                  isGardenDay ? 'text-[#394b42] hover:bg-black/[0.06] hover:text-[#18251e]' : 'text-slate-400 hover:bg-white/[0.08] hover:text-white'
+                }`}
               >
                 {mutedOutput ? <VolumeX className="h-4 w-4 text-rose-400" /> : <Volume2 className="h-4 w-4" />}
               </button>
@@ -2260,7 +2274,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                 type="button"
                 onClick={() => setShowVoiceMenu((v) => !v)}
                 title={isZh ? '声线与双工模式设置' : 'Voice & Duplex Settings'}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+                className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                  isGardenDay ? 'text-[#394b42] hover:bg-black/[0.06] hover:text-[#18251e]' : 'text-slate-400 hover:bg-white/[0.08] hover:text-white'
+                }`}
               >
                 <SlidersHorizontal className="h-4 w-4" />
               </button>
@@ -2268,7 +2284,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                 type="button"
                 onClick={() => setHudOpen(false)}
                 title={isZh ? '收起面板' : 'Minimize'}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-white/[0.08] hover:text-white transition-colors cursor-pointer"
+                className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                  isGardenDay ? 'text-[#394b42] hover:bg-black/[0.06] hover:text-[#18251e]' : 'text-slate-400 hover:bg-white/[0.08] hover:text-white'
+                }`}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -2277,9 +2295,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
 
           {/* Voice Timbre + Duplex Mode Drawer */}
           {showVoiceMenu && (
-            <div className="border-b border-white/10 bg-white/[0.03] px-3.5 py-2.5 space-y-2.5">
+            <div className={`border-b px-3.5 py-2.5 space-y-2.5 ${isGardenDay ? 'border-black/10 bg-white/45' : 'border-white/10 bg-white/[0.03]'}`}>
               <div>
-                <div className="text-[11px] font-medium text-slate-400 mb-1.5">
+                <div className={`text-[11px] font-medium mb-1.5 ${isGardenDay ? 'text-[#42554a]' : 'text-slate-400'}`}>
                   {isZh ? '通话与召唤模式' : 'Summon & Listening Mode'}
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -2291,8 +2309,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                     }}
                     className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors cursor-pointer ${
                       listeningMode === 'always-listening'
-                        ? 'border-emerald-400/60 bg-emerald-500/15 text-emerald-200'
-                        : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.06]'
+                        ? isGardenDay
+                          ? 'border-[#2a3832] bg-[#2a3832] text-[#f7f4ee]'
+                          : 'border-white/30 bg-white/15 text-white'
+                        : isGardenDay
+                          ? 'border-black/10 bg-white/55 text-[#223029] hover:bg-white/80'
+                          : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.06]'
                     }`}
                   >
                     {isZh ? '全双工 · 随时打断/召唤' : 'Always-On Duplex'}
@@ -2305,8 +2327,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                     }}
                     className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors cursor-pointer ${
                       listeningMode === 'click-to-speak'
-                        ? 'border-sky-400/60 bg-sky-500/15 text-sky-200'
-                        : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.06]'
+                        ? isGardenDay
+                          ? 'border-[#2a3832] bg-[#2a3832] text-[#f7f4ee]'
+                          : 'border-white/30 bg-white/15 text-white'
+                        : isGardenDay
+                          ? 'border-black/10 bg-white/55 text-[#223029] hover:bg-white/80'
+                          : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.06]'
                     }`}
                   >
                     {isZh ? '手动开关对话' : 'Manual Mic Toggle'}
@@ -2315,8 +2341,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
               </div>
 
               <div>
-                <div className="text-[11px] font-medium text-slate-400 mb-1.5">
-                  {isZh ? '选择 One. 声线（实时切换生效）' : 'Voice Persona'}
+                <div className={`text-[11px] font-medium mb-1.5 ${isGardenDay ? 'text-[#42554a]' : 'text-slate-400'}`}>
+                  {isZh ? `选择 ${aiName} 声线` : 'Voice Persona'}
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
                   {VOICE_OPTIONS.map((v) => (
@@ -2326,9 +2352,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                       onClick={() => {
                         setVoiceName(v.id);
                         voiceNameRef.current = v.id;
-                        try {
-                          localStorage.setItem(VOICE_PREF_KEY, v.id);
-                        } catch {}
+                        uiStateManager.setVoiceName(v.id);
                         setShowVoiceMenu(false);
                         if (voiceActive) {
                           void startLiveVoiceSession();
@@ -2336,8 +2360,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                       }}
                       className={`rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap truncate ${
                         voiceName === v.id
-                          ? 'border-[#E5C17D]/60 bg-[#E5C17D]/15 text-[#F7E5BA]'
-                          : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.06]'
+                          ? isGardenDay
+                            ? 'border-[#2a3832] bg-[#2a3832] text-[#f7f4ee]'
+                            : 'border-[#E5C17D]/60 bg-[#E5C17D]/15 text-[#F7E5BA]'
+                          : isGardenDay
+                            ? 'border-black/10 bg-white/55 text-[#223029] hover:bg-white/80'
+                            : 'border-white/10 bg-white/[0.02] text-slate-300 hover:bg-white/[0.06]'
                       }`}
                     >
                       {isZh ? v.labelZh : v.labelEn}
@@ -2391,13 +2419,13 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
           {/* Conversation & Executed Actions Stream */}
           <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5 min-h-[140px] max-h-[260px]">
             {transcript.length === 0 ? (
-              <div className="space-y-1.5 py-2 text-xs text-slate-300 leading-relaxed">
-                <p className="font-medium text-white">
+              <div className={`space-y-1.5 py-2 text-xs leading-relaxed ${isGardenDay ? 'text-[#2b3b32]' : 'text-slate-300'}`}>
+                <p className={`font-medium ${isGardenDay ? 'text-[#18251e]' : 'text-white'}`}>
                   {isZh
-                    ? '你好，我是 One. — 你的全能情绪伙伴。'
-                    : 'Hi, I am One. — your emotionally aware site companion.'}
+                    ? `你好，我是 ${aiName} — 随时与你实时对话。`
+                    : `Hi, I am ${aiName} — your real-time garden companion.`}
                 </p>
-                <p className="text-slate-400">
+                <p className={isGardenDay ? 'text-[#485a50]' : 'text-slate-400'}>
                   {isZh
                     ? '点击下方麦克风即可像真人一样自然对话：我说话时你随时开口就会立刻停下听你讲；还能记住你的喜好，并直接操控音乐、影院、图书馆、游戏、主题切换和页面上的所有元素。'
                     : 'Tap the mic for natural face-to-face voice chat: speak anytime to interrupt me mid-sentence, and ask me to control music, cinema, books, games, theme, or any control on screen.'}
@@ -2425,13 +2453,17 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                     <div
                       className={`max-w-[88%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
                         isUser
-                          ? 'bg-sky-500/20 border border-sky-400/30 text-sky-50'
-                          : 'bg-white/[0.06] border border-white/10 text-slate-100'
+                          ? isGardenDay
+                            ? 'bg-[#2a3832]/12 border border-[#2a3832]/15 text-[#18251e]'
+                            : 'bg-white/12 border border-white/15 text-white'
+                          : isGardenDay
+                            ? 'bg-white/65 border border-black/8 text-[#1e2c25]'
+                            : 'bg-white/[0.06] border border-white/10 text-slate-100'
                       }`}
                     >
                       <span>{item.text}</span>
                       {item.interrupted && (
-                        <span className="ml-1.5 text-[10px] text-rose-300">
+                        <span className="ml-1.5 text-[10px] opacity-65">
                           {isZh ? '· 已打断' : '· Interrupted'}
                         </span>
                       )}
@@ -2443,8 +2475,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             <div ref={transcriptEndRef} />
           </div>
 
-          {/* Proactive Context-Aware Intent Suggestions */}
-          {proactiveSuggestions.length > 0 && (
+          {!isGardenHome && proactiveSuggestions.length > 0 && (
             <div className="flex items-center gap-1.5 overflow-x-auto border-t border-white/10 px-3 py-2 [scrollbar-width:none]">
               {proactiveSuggestions.map((s) => (
                 <button
@@ -2459,13 +2490,14 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             </div>
           )}
 
-          {/* Input & Voice Toggle Footer */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
               void handleSendText();
             }}
-            className="flex items-center gap-2 border-t border-white/10 bg-white/[0.03] px-3 py-2.5"
+            className={`flex items-center gap-2 border-t px-3 py-2.5 ${
+              isGardenDay ? 'border-black/10 bg-white/45' : 'border-white/10 bg-white/[0.03]'
+            }`}
           >
             <button
               type="button"
@@ -2477,8 +2509,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
               title={voiceActive ? (isZh ? '关闭实时语音' : 'Stop Voice') : (isZh ? '开启全双工实时语音' : 'Start Live Duplex Voice')}
               className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-colors cursor-pointer ${
                 voiceActive
-                  ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
-                  : 'border-white/12 bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] hover:text-white'
+                  ? isGardenDay
+                    ? 'border-[#2a3832] bg-[#2a3832] text-[#f7f4ee]'
+                    : 'border-white/30 bg-white/20 text-white'
+                  : isGardenDay
+                    ? 'border-black/15 bg-white/70 text-[#223029] hover:bg-white'
+                    : 'border-white/12 bg-white/[0.05] text-slate-300 hover:bg-white/[0.1] hover:text-white'
               }`}
             >
               {voiceActive ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
@@ -2493,14 +2529,22 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                   ? '直接说或输入任何指令 / 问题…'
                   : 'Speak or type any command or question…'
               }
-              className="min-w-0 flex-1 h-9 rounded-xl border border-white/12 bg-white/[0.05] px-3 text-xs text-white placeholder:text-slate-400 outline-none focus:border-[#8ECFFF]/60"
+              className={`min-w-0 flex-1 h-9 rounded-xl border px-3 text-xs outline-none ${
+                isGardenDay
+                  ? 'border-black/15 bg-white/75 text-[#1d2a23] placeholder:text-[#4d5f54]/70 focus:border-[#2a3832]'
+                  : 'border-white/12 bg-white/[0.05] text-white placeholder:text-slate-400 focus:border-white/35'
+              }`}
             />
 
             <button
               type="submit"
               disabled={!textInput.trim() || isSendingText}
               aria-label={isZh ? '发送' : 'Send'}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer ${
+                isGardenDay
+                  ? 'bg-[#2a3832] text-[#f7f4ee] hover:bg-[#1e2924]'
+                  : 'bg-[#e9e2d4] text-[#17202b] hover:bg-white'
+              }`}
             >
               <Send className="h-3.5 w-3.5" />
             </button>

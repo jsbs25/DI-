@@ -561,6 +561,7 @@ export default function App() {
       <div className={isMobileSubpage ? 'hidden md:block' : 'block'}>
         <Navbar
           currentTab={currentTab}
+          immersive={immersive}
           onSelectTab={navigateToTab}
           lang={lang}
           onSelectLang={setLang}

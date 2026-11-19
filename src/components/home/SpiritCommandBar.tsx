@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ArrowUp,
   AudioLines,
+  Check,
   ImagePlus,
   Mic,
   MicOff,
   Play,
-  Send,
-  Sparkles,
   X,
 } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
@@ -15,36 +15,44 @@ import { resumePausedSpiritTask, submitSpiritCommand } from '../../agent/agentCl
 
 interface SpiritCommandBarProps {
   lang: Language;
-  onOpenSpaces?: () => void;
 }
 
-const WAKE_WORD_REGEX = /(小小|xiao\s*xiao|hey\s+one|你好\s*one)/i;
-
-export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpenSpaces }) => {
+export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
   const isZh = lang === 'zh';
   const snap = useAgentUiState();
+  const isDay = snap.gardenDaylight > 0.44;
 
   const [input, setInput] = useState('');
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [speechSupported, setSpeechSupported] = useState(false);
   const [voiceNote, setVoiceNote] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(snap.aiName);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const recognitionRef = useRef<any>(null);
-  const wakeRecRef = useRef<any>(null);
-  const wakeEnabledRef = useRef<boolean>(false);
 
   useEffect(() => {
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    setSpeechSupported(Boolean(SpeechRec));
+    setNameDraft(snap.aiName);
+  }, [snap.aiName]);
+
+  useEffect(() => {
     return () => {
       try { recognitionRef.current?.stop(); } catch {}
-      try { wakeRecRef.current?.stop(); } catch {}
     };
   }, []);
 
-  const handleSend = async (overridePrompt?: string) => {
+  const commitAiName = () => {
+    const clean = nameDraft.trim();
+    if (clean) {
+      uiStateManager.setAiName(clean);
+    } else {
+      setNameDraft(snap.aiName);
+    }
+    setEditingName(false);
+  };
+
+  const handleSend = async (overridePrompt?: string, speakReply = false) => {
     const text = (overridePrompt ?? input).trim();
     if ((!text && !imageDataUrl) || submitting) return;
     setSubmitting(true);
@@ -57,18 +65,19 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpen
       await submitSpiritCommand(text || (isZh ? '请分析这张图片' : 'Analyze this image'), {
         lang,
         attachments: attached,
+        speakReply,
       });
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Single-turn voice command dictation
+  // Real-time voice chat dictation + spoken reply
   const toggleMicDictation = () => {
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRec) {
-      setVoiceNote(isZh ? '当前浏览器不支持语音识别，请直接输入指令' : 'Speech recognition unsupported here; type instead');
-      setTimeout(() => setVoiceNote(null), 3500);
+      setVoiceNote(isZh ? '当前浏览器不支持语音识别，请直接打字聊天' : 'Speech recognition unsupported; please type');
+      setTimeout(() => setVoiceNote(null), 3000);
       return;
     }
 
@@ -76,11 +85,6 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpen
       try { recognitionRef.current?.stop(); } catch {}
       uiStateManager.setVoiceStatus({ voiceListening: false });
       return;
-    }
-
-    // Pause wake listener temporarily to avoid mic contention
-    if (wakeRecRef.current) {
-      try { wakeRecRef.current.stop(); } catch {}
     }
 
     uiStateManager.setSpiritState('woken_approaching');
@@ -109,18 +113,18 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpen
     };
     rec.onerror = () => {
       uiStateManager.setVoiceStatus({ voiceListening: false });
-      setVoiceNote(isZh ? '未检测到清晰语音，可直接输入指令' : 'Could not capture voice cleanly');
-      setTimeout(() => setVoiceNote(null), 3000);
+      setVoiceNote(isZh ? '未检测到清晰语音，请再试一次' : 'Voice not captured clearly');
+      setTimeout(() => setVoiceNote(null), 2600);
     };
     rec.onend = () => {
       uiStateManager.setVoiceStatus({ voiceListening: false });
-      const cleaned = finalTranscript.replace(WAKE_WORD_REGEX, '').trim();
+      const safeName = snap.aiName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const cleaned = finalTranscript
+        .replace(new RegExp(`^(?:${safeName}|ONE|hey\\s+one|你好)[,，。!！\\s]*`, 'i'), '')
+        .trim();
       if (cleaned) {
         setInput('');
-        void handleSend(cleaned);
-      }
-      if (wakeEnabledRef.current) {
-        startWakeListener();
+        void handleSend(cleaned, true);
       }
     };
 
@@ -128,72 +132,6 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpen
       rec.start();
     } catch {
       uiStateManager.setVoiceStatus({ voiceListening: false });
-    }
-  };
-
-  // Continuous lightweight wake word listener ("小小")
-  const startWakeListener = () => {
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRec || !wakeEnabledRef.current) return;
-
-    try {
-      const wakeRec = new SpeechRec();
-      wakeRecRef.current = wakeRec;
-      wakeRec.lang = lang === 'en' ? 'en-US' : 'zh-CN';
-      wakeRec.continuous = true;
-      wakeRec.interimResults = true;
-
-      wakeRec.onresult = (event: any) => {
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = String(event.results[i][0]?.transcript || '').trim();
-          if (WAKE_WORD_REGEX.test(transcript)) {
-            uiStateManager.setSpiritState('woken_approaching');
-            uiStateManager.setPavilionHudOpen(true);
-
-            const afterWake = transcript.replace(/^.*?(小小|xiao\s*xiao|hey\s+one|你好\s*one)[,，。!！\s]*/i, '').trim();
-            if (event.results[i].isFinal && afterWake.length >= 2) {
-              void handleSend(afterWake);
-            } else if (!snap.voiceListening) {
-              setVoiceNote(isZh ? '小小已唤醒，请说出需求...' : 'Spirit awake — speak now');
-              setTimeout(() => setVoiceNote(null), 2600);
-            }
-          }
-        }
-      };
-
-      wakeRec.onend = () => {
-        if (wakeEnabledRef.current && !uiStateManager.getSnapshot().voiceListening) {
-          setTimeout(() => {
-            if (wakeEnabledRef.current) startWakeListener();
-          }, 450);
-        }
-      };
-
-      wakeRec.onerror = () => {
-        // Silent recovery or stop if permission denied
-      };
-
-      wakeRec.start();
-      uiStateManager.setVoiceStatus({ wakeListening: true });
-    } catch {
-      uiStateManager.setVoiceStatus({ wakeListening: false });
-    }
-  };
-
-  const toggleWakeMode = () => {
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRec) {
-      setVoiceNote(isZh ? '当前浏览器暂不支持语音唤醒，请点击话筒或输入' : 'Voice wake unavailable in this browser');
-      setTimeout(() => setVoiceNote(null), 3500);
-      return;
-    }
-    if (wakeEnabledRef.current) {
-      wakeEnabledRef.current = false;
-      try { wakeRecRef.current?.stop(); } catch {}
-      uiStateManager.setVoiceStatus({ wakeListening: false });
-    } else {
-      wakeEnabledRef.current = true;
-      startWakeListener();
     }
   };
 
@@ -213,117 +151,116 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpen
     e.target.value = '';
   };
 
-  // Avoid covering the communication drawer if open on mobile
   if (snap.commDrawerOpen) {
     return null;
   }
 
-  const quickChips = isZh
-    ? [
-        { label: '找阿语书', prompt: '小小，帮我找一本适合现在阅读的阿拉伯语书籍' },
-        { label: '今日阿语课', prompt: '小小，我想学习今天的阿拉伯语' },
-        { label: '查实时天气', prompt: '现在外面天气怎么样' },
-        { label: '研究太空望远镜', prompt: '帮我查一下韦伯太空望远镜最新科学进展' },
-      ]
-    : [
-        { label: 'Arabic Book', prompt: 'Find an Arabic book suitable for reading now' },
-        { label: 'Arabic Lesson', prompt: 'Start today Arabic lesson' },
-        { label: 'Live Weather', prompt: 'Check real-time weather right now' },
-        { label: 'Space Research', prompt: 'Search latest James Webb Space Telescope updates' },
-      ];
+  // Garden-matched mist tokens (warm ivory mist by day, serene twilight slate at night — zero harsh black/red/green/blue)
+  const shellCls = isDay
+    ? 'border-white/55 bg-[#f7f3eb]/72 text-[#223029] shadow-[0_10px_30px_rgba(24,36,28,0.14)]'
+    : 'border-white/14 bg-[#141d29]/62 text-[#f2eee6] shadow-[0_12px_34px_rgba(4,8,14,0.36)]';
+
+  const pillBtnCls = isDay
+    ? 'text-[#33443b]/85 hover:bg-black/[0.06] hover:text-[#18241e]'
+    : 'text-[#e5dfd3]/85 hover:bg-white/[0.1] hover:text-white';
+
+  const sendBtnCls = isDay
+    ? 'bg-[#2a3832] text-[#f7f4ee] hover:bg-[#1e2924]'
+    : 'bg-[#e8e1d2] text-[#17202b] hover:bg-white';
 
   return (
     <div
-      className="pointer-events-none fixed bottom-[max(0.95rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 w-[min(94vw,600px)] flex flex-col items-center gap-2"
+      className="pointer-events-none fixed bottom-[max(0.9rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 w-[min(88vw,430px)] flex flex-col items-center gap-1.5"
       data-testid="spirit-command-bar"
     >
-      {/* Resume paused task pill when returning from communication */}
       {snap.pausedTask && (
         <button
           type="button"
           onClick={() => void resumePausedSpiritTask(lang)}
-          className="pointer-events-auto inline-flex items-center gap-2 rounded-xl border border-emerald-400/35 bg-[#0c1420]/92 px-3 py-1.5 text-xs font-medium text-emerald-200 shadow-lg hover:bg-[#111e2e] cursor-pointer"
+          className={`pointer-events-auto inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors cursor-pointer ${shellCls}`}
         >
-          <Play className="h-3.5 w-3.5 text-emerald-400" />
-          <span className="truncate max-w-[260px]">
-            {isZh ? `继续刚才的任务：${snap.pausedTask.prompt}` : `Resume: ${snap.pausedTask.prompt}`}
+          <Play className="h-3 w-3" />
+          <span className="truncate max-w-[240px]">
+            {isZh ? `继续：${snap.pausedTask.prompt}` : `Resume: ${snap.pausedTask.prompt}`}
           </span>
         </button>
       )}
 
       {voiceNote && (
-        <div className="pointer-events-auto rounded-lg border border-amber-300/30 bg-[#0c1420]/94 px-3 py-1 text-[11px] text-amber-200 shadow-lg">
+        <div className={`pointer-events-auto rounded-full border px-3 py-1 text-[11px] ${shellCls}`}>
           {voiceNote}
         </div>
       )}
 
-      {/* Quick Intent Suggestions + Image Preview */}
-      {imageDataUrl ? (
-        <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-white/15 bg-[#0c1420]/92 px-2.5 py-1.5 shadow-lg">
-          <img src={imageDataUrl} alt="Attachment" className="h-9 w-9 rounded-lg object-cover border border-white/15" />
-          <span className="text-[11px] text-slate-200">{isZh ? '已附带图片供 ONE AI 分析' : 'Image attached'}</span>
+      {imageDataUrl && (
+        <div className={`pointer-events-auto flex items-center gap-2 rounded-2xl border px-2.5 py-1.5 ${shellCls}`}>
+          <img src={imageDataUrl} alt="Attachment" className="h-8 w-8 rounded-lg object-cover" />
+          <span className="text-[11px] opacity-85">{isZh ? '已附图片' : 'Attached'}</span>
           <button
             type="button"
             onClick={() => setImageDataUrl(null)}
-            className="rounded-md p-1 text-slate-400 hover:bg-white/10 hover:text-white cursor-pointer"
+            className={`rounded-full p-1 cursor-pointer ${pillBtnCls}`}
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3 w-3" />
           </button>
-        </div>
-      ) : (
-        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5">
-          {quickChips.map((chip) => (
-            <button
-              key={chip.label}
-              type="button"
-              onClick={() => void handleSend(chip.prompt)}
-              className="rounded-lg border border-white/12 bg-[#0c1420]/84 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-[#162234] hover:text-white transition-colors cursor-pointer"
-            >
-              {chip.label}
-            </button>
-          ))}
-          {onOpenSpaces && (
-            <button
-              type="button"
-              onClick={onOpenSpaces}
-              className="rounded-lg border border-amber-300/25 bg-[#0c1420]/84 px-2.5 py-1 text-[11px] font-medium text-amber-200 hover:bg-[#162234] transition-colors cursor-pointer"
-            >
-              {isZh ? '进入星系' : 'Spaces'}
-            </button>
-          )}
         </div>
       )}
 
-      {/* Main Translucent Spirit Bar (No backdrop-blur over WebGL) */}
+      {/* Compact Garden-Blended AI Bar (No backdrop-blur over WebGL, no quick-chip clutter) */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void handleSend();
         }}
-        className="pointer-events-auto flex w-full items-center gap-1.5 rounded-2xl border border-white/16 bg-[#0c1420]/92 p-1.5 shadow-2xl"
+        className={`pointer-events-auto flex w-full items-center gap-1 rounded-full border p-1 transition-colors ${shellCls}`}
       >
-        {/* Wake-word ("小小") button */}
-        <button
-          type="button"
-          onClick={toggleWakeMode}
-          className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-2.5 text-[11px] font-medium transition-colors cursor-pointer ${
-            snap.wakeListening
-              ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
-              : 'bg-white/8 text-slate-200 hover:bg-white/15'
-          }`}
-          title={
-            speechSupported
-              ? isZh
-                ? '开启语音唤醒（说出“小小”即可召唤）'
-                : 'Toggle "Xiao Xiao" voice wake'
-              : isZh
-              ? '当前浏览器不支持持续语音唤醒'
-              : 'Continuous wake unsupported'
-          }
-        >
-          <Sparkles className={`h-3.5 w-3.5 ${snap.wakeListening ? 'text-emerald-300' : 'text-amber-300'}`} />
-          <span className="hidden sm:inline">{snap.wakeListening ? (isZh ? '待唤醒:小小' : 'Wake On') : isZh ? '呼唤小小' : 'Spirit'}</span>
-        </button>
+        {/* Editable Custom AI Name Badge */}
+        {editingName ? (
+          <div className="flex items-center gap-0.5 pl-1.5">
+            <input
+              type="text"
+              value={nameDraft}
+              maxLength={20}
+              autoFocus
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitAiName}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitAiName();
+                } else if (e.key === 'Escape') {
+                  setNameDraft(snap.aiName);
+                  setEditingName(false);
+                }
+              }}
+              className={`h-7 w-20 rounded-full border px-2 text-xs font-medium outline-none ${
+                isDay
+                  ? 'border-black/20 bg-white/80 text-[#1d2924]'
+                  : 'border-white/20 bg-black/25 text-white'
+              }`}
+            />
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={commitAiName}
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-full cursor-pointer ${pillBtnCls}`}
+              title={isZh ? '确认名称' : 'Save AI name'}
+            >
+              <Check className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditingName(true)}
+            className={`inline-flex h-8 max-w-[92px] shrink-0 items-center rounded-full px-2.5 text-xs font-semibold tracking-tight transition-colors cursor-pointer ${
+              isDay ? 'bg-black/[0.06] text-[#1f2e27] hover:bg-black/[0.11]' : 'bg-white/[0.1] text-[#f4f0e8] hover:bg-white/[0.16]'
+            }`}
+            title={isZh ? '点击自定义 AI 名称' : 'Click to rename AI'}
+          >
+            <span className="truncate">{snap.aiName}</span>
+          </button>
+        )}
 
         <input
           type="text"
@@ -337,13 +274,15 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpen
           placeholder={
             snap.voiceListening
               ? isZh
-                ? '正在聆听您的需求...'
+                ? '正在聆听...'
                 : 'Listening...'
               : isZh
-              ? '对小小说话或输入任何需求（找书、学阿语、查资料、改天气）...'
-              : 'Tell Spirit anything (books, Arabic, research, weather)...'
+              ? `与 ${snap.aiName} 实时对话...`
+              : `Chat live with ${snap.aiName}...`
           }
-          className="h-10 min-w-0 flex-1 bg-transparent px-2 text-xs sm:text-sm text-white placeholder:text-slate-400 focus:outline-none"
+          className={`h-8 min-w-0 flex-1 bg-transparent px-2 text-xs sm:text-[13px] focus:outline-none ${
+            isDay ? 'text-[#1c2922] placeholder:text-[#44564c]/70' : 'text-[#f6f3ec] placeholder:text-[#d9d4c7]/60'
+          }`}
         />
 
         <input
@@ -357,41 +296,39 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpen
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/8 text-slate-300 hover:bg-white/15 hover:text-white transition-colors cursor-pointer"
-          title={isZh ? '上传图片提问' : 'Attach image'}
+          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer ${pillBtnCls}`}
+          title={isZh ? '附带图片' : 'Attach image'}
         >
-          <ImagePlus className="h-4 w-4" />
+          <ImagePlus className="h-3.5 w-3.5" />
         </button>
 
         <button
           type="button"
           onClick={toggleMicDictation}
-          className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors cursor-pointer ${
-            snap.voiceListening
-              ? 'bg-rose-500 text-white'
-              : 'bg-white/8 text-slate-200 hover:bg-white/15 hover:text-white'
+          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer ${
+            snap.voiceListening ? sendBtnCls : pillBtnCls
           }`}
-          title={isZh ? '语音输入指令' : 'Voice command'}
+          title={isZh ? '语音对话' : 'Voice chat'}
         >
-          {snap.voiceListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          {snap.voiceListening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
         </button>
 
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('one-open-live-companion'))}
-          className="hidden sm:inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/8 text-sky-300 hover:bg-white/15 hover:text-sky-200 transition-colors cursor-pointer"
-          title={isZh ? '全息实时语音助手' : 'Live Voice Companion'}
+          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer ${pillBtnCls}`}
+          title={isZh ? '实时连续语音对话' : 'Real-Time Live Voice'}
         >
-          <AudioLines className="h-4 w-4" />
+          <AudioLines className="h-3.5 w-3.5" />
         </button>
 
         <button
           type="submit"
           disabled={submitting || (!input.trim() && !imageDataUrl)}
-          className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-[#F7F5F0] px-3.5 text-xs font-semibold text-[#0c1420] hover:bg-[#EAE5DC] disabled:opacity-45 transition-colors cursor-pointer shrink-0"
+          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full disabled:opacity-35 transition-colors cursor-pointer ${sendBtnCls}`}
+          title={isZh ? '发送' : 'Send'}
         >
-          <Send className="h-3.5 w-3.5" />
-          <span className="hidden xs:inline">{submitting ? (isZh ? '调度中' : 'Busy') : isZh ? '指令' : 'Go'}</span>
+          <ArrowUp className="h-3.5 w-3.5" />
         </button>
       </form>
     </div>

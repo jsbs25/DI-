@@ -1,6 +1,12 @@
 import type { Language } from '../types/index.ts';
 import type { WeatherKind, TimePreset } from '../components/paradise/paradiseEnvironment.ts';
 import { uiStateManager, type AgentTaskView } from './uiStateManager.ts';
+import {
+  analyzeDialogueEmotion,
+  buildExpressivePhrases,
+  extractEmotionTag,
+  type VoiceEmotion,
+} from '../utils/emotionEngine.ts';
 
 export interface LearningAgentAction {
   seq: number;
@@ -109,16 +115,223 @@ export function dispatchAgentClientActions(actions: Array<Record<string, unknown
   }
 }
 
+let spiritAudioSeq = 0;
+let activeSpiritAudio: HTMLAudioElement | null = null;
+let activeSpiritObjectUrl: string | null = null;
+
+export function stopSpiritSpeech() {
+  spiritAudioSeq += 1;
+  if (activeSpiritAudio) {
+    try {
+      activeSpiritAudio.pause();
+      activeSpiritAudio.src = '';
+    } catch {
+      // ignore
+    }
+    activeSpiritAudio = null;
+  }
+  if (activeSpiritObjectUrl) {
+    try {
+      URL.revokeObjectURL(activeSpiritObjectUrl);
+    } catch {
+      // ignore
+    }
+    activeSpiritObjectUrl = null;
+  }
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function mapEmotionForTtsApi(e: VoiceEmotion): string {
+  if (e === 'cheerful') return 'happy';
+  if (e === 'affectionate') return 'affectionate';
+  return e;
+}
+
+function normalizeVoiceEmotion(raw?: string | null): VoiceEmotion | null {
+  if (!raw) return null;
+  const s = raw.toLowerCase().trim();
+  if (s === 'happy') return 'cheerful';
+  if (s === 'concerned') return 'empathetic';
+  if (
+    s === 'cheerful' ||
+    s === 'affectionate' ||
+    s === 'empathetic' ||
+    s === 'playful' ||
+    s === 'excited' ||
+    s === 'curious' ||
+    s === 'calm'
+  ) {
+    return s;
+  }
+  return null;
+}
+
+export async function speakSpiritReply(
+  text: string,
+  lang: Language,
+  opts?: { emotion?: string | null; userPrompt?: string; voiceName?: string }
+) {
+  if (typeof window === 'undefined') return;
+  const extracted = extractEmotionTag(text);
+  const clean = extracted.text.replace(/[*_`#>]/g, '').trim();
+  if (!clean) return;
+
+  stopSpiritSpeech();
+  const mySeq = spiritAudioSeq;
+
+  const explicitEmo = normalizeVoiceEmotion(opts?.emotion) || extracted.emotion;
+  const analysis = analyzeDialogueEmotion(opts?.userPrompt || '', clean, explicitEmo);
+  uiStateManager.setEmotion(analysis.emotion);
+
+  const selectedVoice = opts?.voiceName || uiStateManager.getSnapshot().voiceName || 'Zephyr';
+
+  const playAudioAndWait = (audio: HTMLAudioElement, objectUrl?: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      if (mySeq !== spiritAudioSeq) {
+        if (objectUrl) {
+          try {
+            URL.revokeObjectURL(objectUrl);
+          } catch {}
+        }
+        resolve(false);
+        return;
+      }
+      activeSpiritAudio = audio;
+      activeSpiritObjectUrl = objectUrl || null;
+      let settled = false;
+      const done = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        if (activeSpiritAudio === audio) activeSpiritAudio = null;
+        if (objectUrl && activeSpiritObjectUrl === objectUrl) {
+          try {
+            URL.revokeObjectURL(objectUrl);
+          } catch {}
+          activeSpiritObjectUrl = null;
+        }
+        resolve(ok);
+      };
+      audio.onended = () => done(true);
+      audio.onerror = () => done(false);
+      audio.play().catch(() => done(false));
+    });
+
+  // 1. Primary expressive Gemini human TTS (POST /api/ai/tts)
+  try {
+    const res = await fetch('/api/ai/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: clean.slice(0, 560),
+        emotion: mapEmotionForTtsApi(analysis.emotion),
+        voiceName: selectedVoice,
+      }),
+    });
+    if (mySeq !== spiritAudioSeq) return;
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data?.success && data.audioBase64) {
+        const audio = new Audio(`data:audio/wav;base64,${data.audioBase64}`);
+        const played = await playAudioAndWait(audio);
+        if (played) return;
+      }
+    }
+  } catch {
+    // fall through to expressive multi-phrase server TTS
+  }
+
+  if (mySeq !== spiritAudioSeq) return;
+
+  // 2. Expressive multi-phrase server TTS (GET /api/ai/tts) with emotion-matched pacing & pitch
+  const ttsLang = lang === 'en' ? 'en' : 'zh';
+  const phrases = buildExpressivePhrases(clean, analysis, 'audio');
+  const phraseList =
+    phrases.length > 0
+      ? phrases
+      : [
+          {
+            text: clean.slice(0, 220),
+            emotion: analysis.emotion,
+            pitch: analysis.basePitch,
+            rate: analysis.baseRate,
+            baiduSpd: analysis.baiduSpd,
+            audioPlaybackRate: analysis.audioPlaybackRate,
+            pauseAfterMs: 25,
+          },
+        ];
+
+  for (let i = 0; i < phraseList.length; i++) {
+    if (mySeq !== spiritAudioSeq) return;
+    const p = phraseList[i];
+    let phrasePlayed = false;
+
+    try {
+      const getRes = await fetch(
+        `/api/ai/tts?text=${encodeURIComponent(p.text)}&lang=${ttsLang}&spd=${p.baiduSpd}`
+      );
+      if (mySeq !== spiritAudioSeq) return;
+      if (getRes.ok) {
+        const blob = await getRes.blob();
+        if (blob.size > 200) {
+          const objectUrl = URL.createObjectURL(blob);
+          const audio = new Audio(objectUrl);
+          audio.playbackRate = p.audioPlaybackRate;
+          phrasePlayed = await playAudioAndWait(audio, objectUrl);
+        }
+      }
+    } catch {
+      phrasePlayed = false;
+    }
+
+    if (mySeq !== spiritAudioSeq) return;
+
+    // 3. Last-resort local SpeechSynthesis fallback (tuned to emotion rate & pitch)
+    if (!phrasePlayed && 'speechSynthesis' in window) {
+      await new Promise<void>((resolve) => {
+        try {
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(p.text);
+          u.lang = lang === 'en' ? 'en-US' : lang === 'ar' ? 'ar-SA' : 'zh-CN';
+          u.rate = p.rate;
+          u.pitch = p.pitch;
+          u.onend = () => resolve();
+          u.onerror = () => resolve();
+          window.speechSynthesis.speak(u);
+        } catch {
+          resolve();
+        }
+      });
+    }
+
+    if (mySeq !== spiritAudioSeq) return;
+    if (i < phraseList.length - 1 && p.pauseAfterMs > 0) {
+      await new Promise((r) => setTimeout(r, p.pauseAfterMs));
+    }
+  }
+}
+
 export async function submitSpiritCommand(
   prompt: string,
-  opts: { lang: Language; attachments?: Array<{ type: 'image_url'; imageUrl: string }> }
+  opts: { lang: Language; attachments?: Array<{ type: 'image_url'; imageUrl: string }>; speakReply?: boolean }
 ): Promise<AgentTaskView> {
   const cleanPrompt = prompt.trim();
-  const prevTask = uiStateManager.getSnapshot().activeTask;
+  const snap = uiStateManager.getSnapshot();
+  const prevTask = snap.activeTask;
+
+  stopSpiritSpeech();
 
   uiStateManager.setSpiritState('woken_approaching');
   uiStateManager.setPavilionHudOpen(true);
   uiStateManager.setPendingConfirmation(null);
+  if (cleanPrompt) {
+    uiStateManager.appendChatMessage('user', cleanPrompt);
+  }
 
   const runningView: AgentTaskView = {
     sessionId: prevTask?.sessionId,
@@ -128,7 +341,7 @@ export async function submitSpiritCommand(
     steps: [
       {
         id: 'client_send',
-        label: opts.lang === 'zh' ? '正在前往湖畔凉亭调度 ONE AI...' : 'Spirit heading to Pavilion & routing ONE AI...',
+        label: opts.lang === 'zh' ? `${snap.aiName} 正在思考与调度...` : `${snap.aiName} is thinking...`,
         status: 'running',
       },
     ],
@@ -142,20 +355,23 @@ export async function submitSpiritCommand(
       body: JSON.stringify({
         prompt: cleanPrompt,
         lang: opts.lang,
-        history: conversationHistory.slice(-10),
+        aiName: snap.aiName,
+        history: conversationHistory.slice(-12),
         attachments: opts.attachments,
       }),
     });
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok && !data?.reply) {
+      const errMsg = data?.reply || data?.error || '请求未成功完成，请稍后重试。';
+      uiStateManager.appendChatMessage('assistant', errMsg);
       const failView: AgentTaskView = {
         sessionId: data?.sessionId,
         prompt: cleanPrompt,
         module: data?.module || 'assistant',
         status: 'failed',
         error: data?.error || `HTTP ${res.status}`,
-        reply: data?.reply || data?.error || '请求未成功完成，请稍后重试。',
+        reply: errMsg,
         steps: Array.isArray(data?.steps) ? data.steps : runningView.steps,
       };
       uiStateManager.setTask(failView);
@@ -163,13 +379,28 @@ export async function submitSpiritCommand(
       return failView;
     }
 
-    const replyText = String(data.reply || '').trim();
+    const rawReplyText = String(data.reply || '').trim();
+    const parsedReply = extractEmotionTag(rawReplyText);
+    const replyText = parsedReply.text || rawReplyText;
+    const replyEmotion = normalizeVoiceEmotion(data?.emotion) || parsedReply.emotion;
+    const analyzed = analyzeDialogueEmotion(cleanPrompt, replyText, replyEmotion);
+    uiStateManager.setEmotion(analyzed.emotion);
+
     if (cleanPrompt && replyText) {
       conversationHistory = [
         ...conversationHistory.slice(-16),
         { role: 'user', content: cleanPrompt },
         { role: 'assistant', content: replyText },
       ];
+    }
+    if (replyText) {
+      uiStateManager.appendChatMessage('assistant', replyText);
+      if (opts.speakReply || uiStateManager.getSnapshot().voiceReplyEnabled) {
+        void speakSpiritReply(replyText, opts.lang, {
+          emotion: analyzed.emotion,
+          userPrompt: cleanPrompt,
+        });
+      }
     }
 
     if (data.needsConfirmation) {
@@ -209,12 +440,14 @@ export async function submitSpiritCommand(
 
     return doneView;
   } catch (err: any) {
+    const errText = opts.lang === 'zh' ? '网络连接异常，未能送达 AI 中枢。' : 'Network error reaching ONE AI.';
+    uiStateManager.appendChatMessage('assistant', errText);
     const errView: AgentTaskView = {
       prompt: cleanPrompt,
       module: 'assistant',
       status: 'failed',
       error: err?.message || 'Network error',
-      reply: opts.lang === 'zh' ? '网络连接异常，未能送达 AI 中枢。' : 'Network error reaching ONE AI.',
+      reply: errText,
       steps: [],
     };
     uiStateManager.setTask(errView);

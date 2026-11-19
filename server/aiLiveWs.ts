@@ -60,6 +60,7 @@ interface WsIncomingMessage {
   history?: unknown;
   maxTokens?: number;
   lang?: string;
+  aiName?: string;
   voiceName?: string;
   profileKey?: string;
   pageContext?: LivePageContextSummary | string;
@@ -104,6 +105,7 @@ export function attachAiLiveWs(
     let geminiSession: Session | null = null;
     let isClosing = false;
     let latestLang = 'zh';
+    let latestAiName = 'ONE';
     let latestVoice = 'Zephyr';
     let latestContext: LivePageContextSummary | string | null = null;
     let connectingPromise: Promise<Session | null> | null = null;
@@ -417,7 +419,8 @@ export function attachAiLiveWs(
               systemInstruction: buildCompanionSystemInstruction(
                 lang,
                 pageContext,
-                recalledMemories
+                recalledMemories,
+                latestAiName
               ),
             },
             callbacks: {
@@ -728,6 +731,7 @@ export function attachAiLiveWs(
 
       if (msg.type === 'init') {
         if (msg.lang) latestLang = msg.lang;
+        if (typeof msg.aiName === 'string' && msg.aiName.trim()) latestAiName = msg.aiName.trim().slice(0, 20);
         if (msg.voiceName) latestVoice = msg.voiceName;
         if (msg.profileKey && !authUser?.id) urlProfileKey = msg.profileKey.trim().slice(0, 64);
         if (msg.pageContext) latestContext = msg.pageContext;
