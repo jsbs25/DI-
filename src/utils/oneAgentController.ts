@@ -7,6 +7,12 @@ import {
   scrollActiveSurface,
   type LivePageContextSummary,
 } from './pageContextEngine.ts';
+import { uiStateManager } from '../agent/uiStateManager.ts';
+import {
+  generateFreePoolImage,
+  requestInstantSpokenRescue,
+  speakSpiritReply,
+} from '../agent/agentClient.ts';
 
 export interface VenusAgentAction {
   seq: number;
@@ -602,6 +608,90 @@ export async function executeGeminiToolCall(
         };
       }
       return { ok: false, summary: 'Unknown page interaction', response: { ok: false } };
+    }
+
+    case 'start_language_studio': {
+      const allowedLangs = ['en', 'ar', 'ja', 'fr', 'es', 'ko'] as const;
+      const rawLang = typeof args.targetLang === 'string' ? args.targetLang.toLowerCase() : 'en';
+      const targetLang = (allowedLangs.includes(rawLang as any) ? rawLang : 'en') as
+        | 'en'
+        | 'ar'
+        | 'ja'
+        | 'fr'
+        | 'es'
+        | 'ko';
+      const mode = args.mode === 'quiz' ? 'quiz' : 'roleplay';
+      const scenarioId = typeof args.scenarioId === 'string' && args.scenarioId.trim() ? args.scenarioId.trim() : 'cafe';
+      uiStateManager.openLanguageStudio({ targetLang, mode, scenarioId });
+      return {
+        ok: true,
+        summary: isZh
+          ? `已开启${mode === 'quiz' ? '语言智能出题' : '实景口语对话'}教室 (${targetLang.toUpperCase()})`
+          : `Opened Language Studio (${mode}, ${targetLang})`,
+        response: { ok: true, targetLang, mode, scenarioId },
+      };
+    }
+
+    case 'language_rescue_hint': {
+      const allowedLangs = ['en', 'ar', 'ja', 'fr', 'es', 'ko'] as const;
+      const rawLang = typeof args.targetLang === 'string' ? args.targetLang.toLowerCase() : 'en';
+      const targetLang = (allowedLangs.includes(rawLang as any) ? rawLang : 'en') as
+        | 'en'
+        | 'ar'
+        | 'ja'
+        | 'fr'
+        | 'es'
+        | 'ko';
+      const userIntent = typeof args.userIntent === 'string' ? args.userIntent : '';
+      const rescue = await requestInstantSpokenRescue(userIntent || undefined);
+      if (rescue?.expressions?.length) {
+        void speakSpiritReply(rescue.expressions[0].targetText, targetLang);
+        return {
+          ok: true,
+          summary: isZh ? '已在精灵头顶弹出 3 句急救口语示范' : 'Displayed 3 spoken rescue options on Spirit bubble',
+          response: { ok: true, expressions: rescue.expressions },
+        };
+      }
+      return {
+        ok: false,
+        summary: isZh ? '获取口语急救失败' : 'Failed to generate spoken rescue',
+        response: { ok: false, error: 'Rescue generation failed' },
+      };
+    }
+
+    case 'generate_image': {
+      const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
+      if (!prompt) {
+        return {
+          ok: false,
+          summary: isZh ? '缺少画面描述' : 'Missing image prompt',
+          response: { ok: false, error: 'Prompt required' },
+        };
+      }
+      const aspectRatio =
+        args.aspectRatio === '1:1' || args.aspectRatio === '16:9' || args.aspectRatio === '3:4'
+          ? args.aspectRatio
+          : '4:3';
+      const style = typeof args.style === 'string' ? args.style : undefined;
+      try {
+        const img = await generateFreePoolImage(prompt, { aspectRatio, style, mode: 'standalone' });
+        if (img) {
+          return {
+            ok: true,
+            summary: isZh
+              ? `已通过免费额度池生成图片 (${img.providerLabelZh || '免费池'})`
+              : `Generated image via free pool (${img.providerLabelZh || 'Free Pool'})`,
+            response: { ok: true, captionZh: img.captionZh, provider: img.providerLabelZh },
+          };
+        }
+      } catch {
+        // handled below
+      }
+      return {
+        ok: false,
+        summary: isZh ? '免费生图节点暂时繁忙' : 'Free image pool temporarily busy',
+        response: { ok: false, error: 'Image generation failed' },
+      };
     }
 
     default:

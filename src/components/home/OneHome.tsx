@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageCircle } from 'lucide-react';
+import { Compass, MessageCircle } from 'lucide-react';
 import type {
   Conversation,
   CreatorArticle,
@@ -38,6 +38,7 @@ type Props = {
 export const OneHome: React.FC<Props> = ({
   lang,
   conversations,
+  onSelectTab,
   immersive = false,
   onImmersiveChange,
 }) => {
@@ -45,6 +46,10 @@ export const OneHome: React.FC<Props> = ({
   const snap = useAgentUiState();
   const unreadTotal = conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
   const isDay = snap.gardenDaylight > 0.44;
+
+  const entryPillClass = isDay
+    ? 'border-white/60 bg-[#f7f3eb]/72 text-[#1f3028] hover:bg-[#f7f3eb]/94 shadow-[0_8px_22px_rgba(24,36,28,0.12)]'
+    : 'border-[#d6b77f]/20 bg-[#141d29]/66 text-[#f2eee6] hover:bg-[#141d29]/88 shadow-[0_10px_26px_rgba(4,8,14,0.34)]';
 
   return (
     <main className="relative h-[100dvh] w-full overflow-hidden bg-[#0e1928]">
@@ -54,31 +59,40 @@ export const OneHome: React.FC<Props> = ({
         onImmersiveChange={onImmersiveChange}
       />
 
-      {/* Left Communication Entry (seamlessly harmonized with garden day/night tone) */}
+      {/* Left Garden-Harmonized Quick Entries (Chat + Spaces) */}
       {!immersive && !snap.commDrawerOpen && (
-        <button
-          type="button"
-          onClick={() => uiStateManager.setCommDrawerOpen(true)}
-          data-testid="left-comm-entry"
-          className={`pointer-events-auto fixed left-3.5 top-[calc(3.9rem+env(safe-area-inset-top))] md:top-1/2 md:-translate-y-1/2 z-30 inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium transition-colors cursor-pointer ${
-            isDay
-              ? 'border-white/55 bg-[#f7f3eb]/68 text-[#223029] hover:bg-[#f7f3eb]/90 shadow-[0_8px_22px_rgba(24,36,28,0.12)]'
-              : 'border-white/14 bg-[#141d29]/58 text-[#f2eee6] hover:bg-[#141d29]/82 shadow-[0_10px_26px_rgba(4,8,14,0.32)]'
-          }`}
-          title={isZh ? '打开左侧消息与通话抽屉' : 'Open Communication Drawer'}
-        >
-          <MessageCircle className="h-3.5 w-3.5 opacity-80" />
-          <span className="hidden sm:inline">{isZh ? '通信' : 'Chat'}</span>
-          {unreadTotal > 0 && (
-            <span
-              className={`inline-flex min-w-[16px] items-center justify-center rounded-full px-1 py-0.5 text-[10px] font-semibold ${
-                isDay ? 'bg-[#2a3832] text-[#f7f4ee]' : 'bg-[#e8e1d2] text-[#17202b]'
-              }`}
-            >
-              {unreadTotal > 99 ? '99+' : unreadTotal}
-            </span>
-          )}
-        </button>
+        <div className="pointer-events-auto fixed left-3.5 top-[calc(3.9rem+env(safe-area-inset-top))] md:top-1/2 md:-translate-y-1/2 z-30 flex flex-row md:flex-col items-start gap-2">
+          <button
+            type="button"
+            onClick={() => uiStateManager.setCommDrawerOpen(true)}
+            data-testid="left-comm-entry"
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${entryPillClass}`}
+            title={isZh ? '打开左侧消息与通话抽屉' : 'Open Communication Drawer'}
+          >
+            <MessageCircle className="h-3.5 w-3.5 opacity-85" />
+            <span className="hidden sm:inline">{isZh ? '通信' : 'Chat'}</span>
+            {unreadTotal > 0 && (
+              <span
+                className={`inline-flex min-w-[16px] items-center justify-center rounded-full px-1 py-0.5 text-[10px] font-semibold ${
+                  isDay ? 'bg-[#244e41] text-[#f7f4ee]' : 'bg-[#e5d9be] text-[#141e28]'
+                }`}
+              >
+                {unreadTotal > 99 ? '99+' : unreadTotal}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectTab('universe')}
+            data-testid="left-spaces-entry"
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${entryPillClass}`}
+            title={isZh ? '探索全部空间模块' : 'Explore All Spaces'}
+          >
+            <Compass className="h-3.5 w-3.5 opacity-85" />
+            <span className="hidden sm:inline">{isZh ? '空间' : 'Spaces'}</span>
+          </button>
+        </div>
       )}
 
       {/* Compact Garden-Blended Bottom AI Chat & Voice Bar */}
@@ -86,3 +100,4 @@ export const OneHome: React.FC<Props> = ({
     </main>
   );
 };
+

@@ -4,7 +4,7 @@ import { Water } from 'three/examples/jsm/objects/Water.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { ArrowRight, Volume2, VolumeX } from 'lucide-react';
 import type { Language, User } from '../../types/index.ts';
-import { BrandMark } from '../brand/brandLogos.tsx';
+import { ParadiseBrandEmblem } from '../brand/ParadiseBrandEmblem.tsx';
 import {
   detectWebGLSupport,
   isSoftwareRenderer,
@@ -1129,7 +1129,7 @@ export const CinematicIntro: React.FC<CinematicIntroProps> = ({
         </span>
       </div>
 
-      {/* Phase 2: Restrained Brand Reveal */}
+      {/* Phase 2: Harmonized Paradise Brand Crest Reveal (User Logo + ONE ORIGIN Ring) */}
       <div
         className="pointer-events-none fixed inset-0 z-10 flex flex-col items-center justify-center px-6 text-center transition-transform duration-700 ease-out"
         style={{
@@ -1137,14 +1137,18 @@ export const CinematicIntro: React.FC<CinematicIntroProps> = ({
           transform: `translate3d(0, ${(1 - brandOpacity) * 14}px, 0)`,
         }}
       >
-        <div className="mb-5 drop-shadow-[0_12px_36px_rgba(0,0,0,0.45)]">
-          <BrandMark concept="origin-final" mode="dark" lockup="symbol" size={76} />
+        <div className="mb-5 drop-shadow-[0_14px_38px_rgba(0,0,0,0.45)]">
+          <ParadiseBrandEmblem
+            surface="garden-night"
+            variant="medallion"
+            size={88}
+          />
         </div>
         <h1 className="text-[clamp(2.25rem,5vw,3.75rem)] font-semibold tracking-[0.28em] text-[#F7F5F0] drop-shadow-[0_4px_24px_rgba(0,0,0,0.55)]">
           EARTH ONE
         </h1>
-        <p className="mt-3 max-w-xl text-balance text-sm sm:text-base font-normal tracking-[0.12em] text-[#E6E2D8] drop-shadow-[0_2px_12px_rgba(0,0,0,0.65)]">
-          {isZh ? '同一个世界 · 无限可能' : 'One World · Infinite Possibilities'}
+        <p className="mt-3 max-w-xl text-balance text-sm sm:text-base font-normal tracking-[0.14em] text-[#EAE4D7] drop-shadow-[0_2px_12px_rgba(0,0,0,0.65)]">
+          {isZh ? '天堂花园 · 同一个世界，无限可能' : 'Paradise World · One World, Infinite Possibilities'}
         </p>
       </div>
 
@@ -1156,50 +1160,50 @@ export const CinematicIntro: React.FC<CinematicIntroProps> = ({
           transform: `translate3d(0, ${(1 - welcomeOpacity) * 12}px, 0)`,
         }}
       >
-        <p className="text-xs font-medium tracking-[0.22em] text-[#EAD7B2] drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]">
-          {isZh ? '欢迎来到精神花园' : 'PARADISE SANCTUARY'}
+        <p className="text-xs font-medium tracking-[0.22em] text-[#E6CE9E] drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)]">
+          {isZh ? '欢迎来到天堂花园' : 'PARADISE WORLD'}
         </p>
-        <h2 className="mt-2 max-w-2xl text-balance text-[clamp(1.75rem,3.6vw,2.75rem)] font-medium tracking-wide text-white drop-shadow-[0_6px_28px_rgba(0,0,0,0.6)]">
+        <h2 className="mt-2 max-w-2xl text-balance text-[clamp(1.75rem,3.6vw,2.75rem)] font-medium tracking-wide text-[#faf7f0] drop-shadow-[0_6px_28px_rgba(0,0,0,0.6)]">
           {userDisplay
             ? isZh
               ? `欢迎回家，${userDisplay}`
               : `Welcome home, ${userDisplay}`
             : isZh
-              ? '欢迎来到 ONE'
-              : 'Welcome to ONE'}
+              ? '欢迎来到 EARTH ONE'
+              : 'Welcome to EARTH ONE'}
         </h2>
       </div>
 
-      {/* Synchronized English Voice Over Subtitle Line */}
+      {/* Synchronized Voice Over Subtitle Line */}
       {activeCaption && (
         <div className="pointer-events-none fixed inset-x-0 bottom-20 z-20 flex justify-center px-5">
-          <p className="max-w-xl text-balance rounded-xl bg-[#070d18]/72 px-4 py-2 text-center text-xs sm:text-sm leading-relaxed text-[#F7F5F0] shadow-lg">
+          <p className="max-w-xl text-balance rounded-2xl border border-white/14 bg-[#111b26]/78 px-4 py-2 text-center text-xs sm:text-sm leading-relaxed text-[#f7f4ec] shadow-lg">
             {activeCaption}
           </p>
         </div>
       )}
 
-      {/* Clean Single-Row Bottom Action Controls (>= 44px touch targets, no backdrop-blur) */}
+      {/* Clean Single-Row Bottom Action Controls matching Paradise World organic shell */}
       <div className="fixed inset-x-0 bottom-5 z-30 flex items-center justify-between px-5 sm:px-8 pointer-events-none">
         <button
           type="button"
           onClick={toggleSound}
-          className={`pointer-events-auto inline-flex min-h-[44px] items-center gap-2 rounded-xl border px-3.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+          className={`pointer-events-auto inline-flex min-h-[44px] items-center gap-2 rounded-full border px-4 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
             soundEnabled
-              ? 'border-[#C4A876]/60 bg-[#0b1322]/85 text-[#F7F5F0] hover:bg-[#132036]'
-              : 'border-white/20 bg-[#0b1322]/75 text-white/80 hover:bg-[#132036] hover:text-white'
+              ? 'border-[#C4A876]/65 bg-[#121c28]/82 text-[#f7f4ec] hover:bg-[#1a2838]'
+              : 'border-white/20 bg-[#121c28]/72 text-[#e8e2d5]/85 hover:bg-[#1a2838] hover:text-white'
           }`}
           aria-label={soundEnabled ? 'Mute sound' : 'Enable sound and voice over'}
         >
           {soundEnabled ? (
-            <Volume2 className="h-4 w-4 text-[#C4A876]" />
+            <Volume2 className="h-4 w-4 text-[#d6b77f]" />
           ) : (
             <VolumeX className="h-4 w-4" />
           )}
           <span>
             {soundEnabled
               ? isZh
-                ? '语音与环境音开启'
+                ? '语音与花园声景开启'
                 : 'Audio On'
               : isZh
                 ? '开启声景与旁白 (M)'
@@ -1213,9 +1217,9 @@ export const CinematicIntro: React.FC<CinematicIntroProps> = ({
             e.stopPropagation();
             finishCeremony();
           }}
-          className="pointer-events-auto inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-white/25 bg-[#0b1322]/85 px-5 text-xs sm:text-sm font-medium text-[#F7F5F0] hover:border-[#C4A876]/80 hover:bg-[#15243d] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          className="pointer-events-auto inline-flex min-h-[44px] items-center gap-2 rounded-full border border-[#d6b77f]/55 bg-[#f7f3eb]/90 px-5 text-xs sm:text-sm font-semibold text-[#1e2d26] hover:bg-[#ffffff] transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-[0_8px_24px_rgba(4,10,16,0.35)]"
         >
-          <span>{isZh ? '进入 ONE' : 'Enter ONE'}</span>
+          <span>{isZh ? '步入天堂花园' : 'Enter Paradise'}</span>
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

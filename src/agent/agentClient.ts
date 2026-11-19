@@ -7,6 +7,12 @@ import {
   extractEmotionTag,
   type VoiceEmotion,
 } from '../utils/emotionEngine.ts';
+import {
+  playNormalizedArrayBuffer,
+  playNormalizedBase64Audio,
+  stopSteadyVoice,
+  unlockSteadyVoiceAudio,
+} from '../utils/steadyVoicePlayer.ts';
 
 export interface LearningAgentAction {
   seq: number;
@@ -109,6 +115,50 @@ export function dispatchAgentClientActions(actions: Array<Record<string, unknown
           realtimeSync: typeof act.realtimeSync === 'boolean' ? act.realtimeSync : undefined,
         });
         break;
+      case 'open_language_studio': {
+        const targetLang = (typeof act.targetLang === 'string' ? act.targetLang : 'en') as
+          | 'en'
+          | 'ar'
+          | 'ja'
+          | 'fr'
+          | 'es'
+          | 'ko';
+        const mode = act.mode === 'quiz' ? 'quiz' : 'roleplay';
+        uiStateManager.openLanguageStudio({
+          targetLang,
+          mode,
+          scenarioId: typeof act.scenarioId === 'string' ? act.scenarioId : undefined,
+          initialRoleplay: act.initialRoleplay,
+          initialQuiz: act.initialQuiz,
+        });
+        break;
+      }
+      case 'show_rescue_cards':
+        if (Array.isArray(act.expressions)) {
+          uiStateManager.setSpiritBubble({
+            visible: true,
+            isLoading: false,
+            badge: '口语急救卡 · 直接照着说',
+            text: typeof act.coachReplyZh === 'string' ? act.coachReplyZh : '直接选一句点击即可朗读或发送：',
+            rescueCards: act.expressions as any,
+            rescueExpanded: true,
+          });
+        }
+        break;
+      case 'show_generated_image':
+        if (act.image && typeof act.image === 'object') {
+          const img = act.image as any;
+          uiStateManager.setSpiritBubble({
+            visible: true,
+            isLoading: false,
+            badge: img.providerLabelZh || '免费额度画室',
+            text: img.captionZh || '已为你生成画面',
+            generatedImage: img,
+            rescueCards: undefined,
+            rescueExpanded: false,
+          });
+        }
+        break;
       default:
         break;
     }
@@ -116,28 +166,10 @@ export function dispatchAgentClientActions(actions: Array<Record<string, unknown
 }
 
 let spiritAudioSeq = 0;
-let activeSpiritAudio: HTMLAudioElement | null = null;
-let activeSpiritObjectUrl: string | null = null;
 
 export function stopSpiritSpeech() {
   spiritAudioSeq += 1;
-  if (activeSpiritAudio) {
-    try {
-      activeSpiritAudio.pause();
-      activeSpiritAudio.src = '';
-    } catch {
-      // ignore
-    }
-    activeSpiritAudio = null;
-  }
-  if (activeSpiritObjectUrl) {
-    try {
-      URL.revokeObjectURL(activeSpiritObjectUrl);
-    } catch {
-      // ignore
-    }
-    activeSpiritObjectUrl = null;
-  }
+  stopSteadyVoice();
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     try {
       window.speechSynthesis.cancel();
@@ -172,9 +204,28 @@ function normalizeVoiceEmotion(raw?: string | null): VoiceEmotion | null {
   return null;
 }
 
+function mapSpeechLocale(langCode?: string): string {
+  switch ((langCode || '').toLowerCase()) {
+    case 'en':
+      return 'en-US';
+    case 'ar':
+      return 'ar-SA';
+    case 'ja':
+      return 'ja-JP';
+    case 'fr':
+      return 'fr-FR';
+    case 'es':
+      return 'es-ES';
+    case 'ko':
+      return 'ko-KR';
+    default:
+      return 'zh-CN';
+  }
+}
+
 export async function speakSpiritReply(
   text: string,
-  lang: Language,
+  lang: Language | string,
   opts?: { emotion?: string | null; userPrompt?: string; voiceName?: string }
 ) {
   if (typeof window === 'undefined') return;
@@ -188,41 +239,20 @@ export async function speakSpiritReply(
   const explicitEmo = normalizeVoiceEmotion(opts?.emotion) || extracted.emotion;
   const analysis = analyzeDialogueEmotion(opts?.userPrompt || '', clean, explicitEmo);
   uiStateManager.setEmotion(analysis.emotion);
+  if (uiStateManager.getSnapshot().spiritBubble?.visible) {
+    uiStateManager.setSpiritBubble({ speaking: true });
+  }
+
+  const clearSpeakingIfCurrent = () => {
+    if (mySeq === spiritAudioSeq && uiStateManager.getSnapshot().spiritBubble) {
+      uiStateManager.setSpiritBubble({ speaking: false });
+    }
+  };
 
   const selectedVoice = opts?.voiceName || uiStateManager.getSnapshot().voiceName || 'Zephyr';
+  unlockSteadyVoiceAudio();
 
-  const playAudioAndWait = (audio: HTMLAudioElement, objectUrl?: string): Promise<boolean> =>
-    new Promise((resolve) => {
-      if (mySeq !== spiritAudioSeq) {
-        if (objectUrl) {
-          try {
-            URL.revokeObjectURL(objectUrl);
-          } catch {}
-        }
-        resolve(false);
-        return;
-      }
-      activeSpiritAudio = audio;
-      activeSpiritObjectUrl = objectUrl || null;
-      let settled = false;
-      const done = (ok: boolean) => {
-        if (settled) return;
-        settled = true;
-        if (activeSpiritAudio === audio) activeSpiritAudio = null;
-        if (objectUrl && activeSpiritObjectUrl === objectUrl) {
-          try {
-            URL.revokeObjectURL(objectUrl);
-          } catch {}
-          activeSpiritObjectUrl = null;
-        }
-        resolve(ok);
-      };
-      audio.onended = () => done(true);
-      audio.onerror = () => done(false);
-      audio.play().catch(() => done(false));
-    });
-
-  // 1. Primary expressive Gemini human TTS (POST /api/ai/tts)
+  // 1. Primary natural human voice via Gemini TTS (POST /api/ai/tts — server + client loudness-locked)
   try {
     const res = await fetch('/api/ai/tts', {
       method: 'POST',
@@ -237,19 +267,25 @@ export async function speakSpiritReply(
     if (res.ok) {
       const data = await res.json().catch(() => null);
       if (data?.success && data.audioBase64) {
-        const audio = new Audio(`data:audio/wav;base64,${data.audioBase64}`);
-        const played = await playAudioAndWait(audio);
-        if (played) return;
+        const played = await playNormalizedBase64Audio(
+          data.audioBase64,
+          data.mimeType || 'audio/wav',
+          () => mySeq === spiritAudioSeq
+        );
+        if (played) {
+          clearSpeakingIfCurrent();
+          return;
+        }
       }
     }
   } catch {
-    // fall through to expressive multi-phrase server TTS
+    // fall through to secondary normalized server TTS only if Gemini TTS is unavailable
   }
 
   if (mySeq !== spiritAudioSeq) return;
 
-  // 2. Expressive multi-phrase server TTS (GET /api/ai/tts) with emotion-matched pacing & pitch
-  const ttsLang = lang === 'en' ? 'en' : 'zh';
+  // 2. Fallback server TTS (GET /api/ai/tts) routed through the same steady loudness bus (fixed 1.0x pace)
+  const ttsLang = lang === 'en' ? 'en' : lang === 'zh' ? 'zh' : 'en';
   const phrases = buildExpressivePhrases(clean, analysis, 'audio');
   const phraseList =
     phrases.length > 0
@@ -258,11 +294,11 @@ export async function speakSpiritReply(
           {
             text: clean.slice(0, 220),
             emotion: analysis.emotion,
-            pitch: analysis.basePitch,
-            rate: analysis.baseRate,
-            baiduSpd: analysis.baiduSpd,
-            audioPlaybackRate: analysis.audioPlaybackRate,
-            pauseAfterMs: 25,
+            pitch: 1.0,
+            rate: 1.0,
+            baiduSpd: 5,
+            audioPlaybackRate: 1.0,
+            pauseAfterMs: 30,
           },
         ];
 
@@ -273,16 +309,17 @@ export async function speakSpiritReply(
 
     try {
       const getRes = await fetch(
-        `/api/ai/tts?text=${encodeURIComponent(p.text)}&lang=${ttsLang}&spd=${p.baiduSpd}`
+        `/api/ai/tts?text=${encodeURIComponent(p.text)}&lang=${ttsLang}&spd=5`
       );
       if (mySeq !== spiritAudioSeq) return;
       if (getRes.ok) {
-        const blob = await getRes.blob();
-        if (blob.size > 200) {
-          const objectUrl = URL.createObjectURL(blob);
-          const audio = new Audio(objectUrl);
-          audio.playbackRate = p.audioPlaybackRate;
-          phrasePlayed = await playAudioAndWait(audio, objectUrl);
+        const ab = await getRes.arrayBuffer();
+        if (ab.byteLength > 200) {
+          phrasePlayed = await playNormalizedArrayBuffer(
+            ab,
+            'audio/mpeg',
+            () => mySeq === spiritAudioSeq
+          );
         }
       }
     } catch {
@@ -291,15 +328,16 @@ export async function speakSpiritReply(
 
     if (mySeq !== spiritAudioSeq) return;
 
-    // 3. Last-resort local SpeechSynthesis fallback (tuned to emotion rate & pitch)
+    // 3. Last-resort local SpeechSynthesis fallback (steady volume/rate/pitch, never erratic)
     if (!phrasePlayed && 'speechSynthesis' in window) {
       await new Promise<void>((resolve) => {
         try {
           window.speechSynthesis.cancel();
           const u = new SpeechSynthesisUtterance(p.text);
-          u.lang = lang === 'en' ? 'en-US' : lang === 'ar' ? 'ar-SA' : 'zh-CN';
-          u.rate = p.rate;
-          u.pitch = p.pitch;
+          u.lang = mapSpeechLocale(lang);
+          u.volume = 0.85;
+          u.rate = 1.0;
+          u.pitch = 1.0;
           u.onend = () => resolve();
           u.onerror = () => resolve();
           window.speechSynthesis.speak(u);
@@ -310,10 +348,11 @@ export async function speakSpiritReply(
     }
 
     if (mySeq !== spiritAudioSeq) return;
-    if (i < phraseList.length - 1 && p.pauseAfterMs > 0) {
-      await new Promise((r) => setTimeout(r, p.pauseAfterMs));
+    if (i < phraseList.length - 1) {
+      await new Promise((r) => setTimeout(r, 30));
     }
   }
+  clearSpeakingIfCurrent();
 }
 
 export async function submitSpiritCommand(
@@ -325,13 +364,39 @@ export async function submitSpiritCommand(
   const prevTask = snap.activeTask;
 
   stopSpiritSpeech();
+  unlockSteadyVoiceAudio();
+
+  const isImageIntent = /(?:生成|画|创作|配图|插画|image|draw|paint)/i.test(cleanPrompt);
+  const isRescueIntent = /(?:不知道(?:该)?怎么(?:讲|说)|不会说|帮我说|怎么用.*(?:说|讲)|help me say)/i.test(cleanPrompt);
 
   uiStateManager.setSpiritState('woken_approaching');
-  uiStateManager.setPavilionHudOpen(true);
+  uiStateManager.setPavilionHudOpen(false);
   uiStateManager.setPendingConfirmation(null);
   if (cleanPrompt) {
     uiStateManager.appendChatMessage('user', cleanPrompt);
   }
+
+  uiStateManager.setSpiritBubble({
+    visible: true,
+    isLoading: true,
+    loadingLabel: isImageIntent
+      ? opts.lang === 'zh'
+        ? '正在重组免费 AI 额度为你绘制画面...'
+        : 'Generating image from free AI pool...'
+      : isRescueIntent
+        ? opts.lang === 'zh'
+          ? '马上为你准备可直接开口说的表达...'
+          : 'Preparing instant spoken rescue...'
+        : opts.lang === 'zh'
+          ? `${snap.aiName} 正在思考...`
+          : `${snap.aiName} is thinking...`,
+    text: '',
+    translationZh: undefined,
+    phonetic: undefined,
+    generatedImage: null,
+    rescueCards: undefined,
+    rescueExpanded: false,
+  });
 
   const runningView: AgentTaskView = {
     sessionId: prevTask?.sessionId,
@@ -358,6 +423,7 @@ export async function submitSpiritCommand(
         aiName: snap.aiName,
         history: conversationHistory.slice(-12),
         attachments: opts.attachments,
+        activeRoleplayContext: snap.activeRoleplayContext,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -365,6 +431,11 @@ export async function submitSpiritCommand(
     if (!res.ok && !data?.reply) {
       const errMsg = data?.reply || data?.error || '请求未成功完成，请稍后重试。';
       uiStateManager.appendChatMessage('assistant', errMsg);
+      uiStateManager.setSpiritBubble({
+        visible: true,
+        isLoading: false,
+        text: errMsg,
+      });
       const failView: AgentTaskView = {
         sessionId: data?.sessionId,
         prompt: cleanPrompt,
@@ -393,10 +464,42 @@ export async function submitSpiritCommand(
         { role: 'assistant', content: replyText },
       ];
     }
-    if (replyText) {
-      uiStateManager.appendChatMessage('assistant', replyText);
-      if (opts.speakReply || uiStateManager.getSnapshot().voiceReplyEnabled) {
-        void speakSpiritReply(replyText, opts.lang, {
+
+    const speakTargetLang = typeof data.speakLang === 'string' ? data.speakLang : opts.lang;
+    if (replyText || data.generatedImage) {
+      uiStateManager.appendChatMessage('assistant', replyText, {
+        translationZh: typeof data.translationZh === 'string' ? data.translationZh : undefined,
+        phonetic: typeof data.phonetic === 'string' ? data.phonetic : undefined,
+        speakLang: speakTargetLang,
+        rescueCards: Array.isArray(data.rescueCards) ? data.rescueCards : undefined,
+        generatedImage: data.generatedImage || null,
+      });
+
+      uiStateManager.setSpiritBubble({
+        visible: true,
+        isLoading: false,
+        badge:
+          typeof data.languageBadge === 'string'
+            ? data.languageBadge
+            : data.generatedImage?.providerLabelZh
+              ? data.generatedImage.providerLabelZh
+              : Array.isArray(data.rescueCards) && data.rescueCards.length > 0
+                ? '口语救急提示'
+                : undefined,
+        text: replyText,
+        translationZh: typeof data.translationZh === 'string' ? data.translationZh : undefined,
+        phonetic: typeof data.phonetic === 'string' ? data.phonetic : undefined,
+        speakLang: speakTargetLang,
+        rescueCards: Array.isArray(data.rescueCards) ? data.rescueCards : undefined,
+        rescueExpanded: Boolean(data.module === 'language-studio' && isRescueIntent),
+        generatedImage: data.generatedImage || null,
+      });
+
+      if (replyText && (opts.speakReply || uiStateManager.getSnapshot().voiceReplyEnabled)) {
+        const audioLine = typeof data.targetText === 'string' && data.targetText.trim() && data.speakLang
+          ? data.targetText.trim()
+          : replyText;
+        void speakSpiritReply(audioLine, speakTargetLang, {
           emotion: analyzed.emotion,
           userPrompt: cleanPrompt,
         });
@@ -442,6 +545,11 @@ export async function submitSpiritCommand(
   } catch (err: any) {
     const errText = opts.lang === 'zh' ? '网络连接异常，未能送达 AI 中枢。' : 'Network error reaching ONE AI.';
     uiStateManager.appendChatMessage('assistant', errText);
+    uiStateManager.setSpiritBubble({
+      visible: true,
+      isLoading: false,
+      text: errText,
+    });
     const errView: AgentTaskView = {
       prompt: cleanPrompt,
       module: 'assistant',
@@ -454,6 +562,100 @@ export async function submitSpiritCommand(
     uiStateManager.setSpiritState('idle_explore');
     return errView;
   }
+}
+
+export async function requestInstantSpokenRescue(userIntentZh?: string) {
+  const snap = uiStateManager.getSnapshot();
+  const ctx = snap.activeRoleplayContext;
+  const targetLang = ctx?.targetLang || 'en';
+  uiStateManager.setSpiritBubble({
+    visible: true,
+    isLoading: true,
+    loadingLabel: '马上为你准备地道开口示范...',
+  });
+  try {
+    const res = await fetch('/api/learning/language/rescue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetLang,
+        situation: ctx?.scenarioTitle || '日常真实口语对话',
+        lastNpcLine: ctx?.lastNpcLine || snap.spiritBubble?.text || '',
+        userIntentZh: userIntentZh || '我不知道该怎么讲，请立刻给我可以直接开口说的回答',
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.success || !data?.rescue) {
+      throw new Error(data?.error || '口语救急提示获取失败');
+    }
+    uiStateManager.setSpiritBubble({
+      visible: true,
+      isLoading: false,
+      badge: '口语急救卡 · 点一下即可跟读',
+      text: ctx?.lastNpcLine || data.rescue.coachReplyZh,
+      translationZh: ctx?.lastNpcTranslationZh || data.rescue.coachReplyZh,
+      speakLang: targetLang,
+      rescueCards: data.rescue.expressions,
+      rescueExpanded: true,
+    });
+    return data.rescue;
+  } catch (err: any) {
+    uiStateManager.setSpiritBubble({
+      visible: true,
+      isLoading: false,
+      text: err?.message || '口语提示暂时不可用，请重试。',
+    });
+    return null;
+  }
+}
+
+export async function generateFreePoolImage(
+  prompt: string,
+  opts?: {
+    mode?: 'standalone' | 'dialogue_scene';
+    dialogueContext?: string;
+    aspectRatio?: '1:1' | '16:9' | '4:3' | '3:4';
+    style?: string;
+  }
+) {
+  uiStateManager.setSpiritBubble({
+    visible: true,
+    isLoading: true,
+    loadingLabel: '正在调度免费 AI 额度池为你绘制画面...',
+  });
+  const res = await fetch('/api/ai/generate-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt,
+      mode: opts?.mode || 'standalone',
+      dialogueContext: opts?.dialogueContext,
+      aspectRatio: opts?.aspectRatio || '4:3',
+      style: opts?.style,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data?.success || !data?.image) {
+    const errMsg = data?.error || '免费图像池暂时繁忙，请稍后再试。';
+    uiStateManager.setSpiritBubble({
+      visible: true,
+      isLoading: false,
+      text: errMsg,
+    });
+    throw new Error(errMsg);
+  }
+  uiStateManager.appendChatMessage('assistant', `已生成画面：「${data.image.captionZh}」`, {
+    generatedImage: data.image,
+  });
+  uiStateManager.setSpiritBubble({
+    visible: true,
+    isLoading: false,
+    badge: data.image.providerLabelZh || '免费额度画室',
+    text: data.image.captionZh,
+    generatedImage: data.image,
+    rescueExpanded: false,
+  });
+  return data.image;
 }
 
 export async function respondToAgentConfirmation(
@@ -507,7 +709,7 @@ export async function resumePausedSpiritTask(lang: Language) {
   const snap = uiStateManager.getSnapshot();
   const paused = snap.pausedTask;
   uiStateManager.setSpiritState('woken_approaching');
-  uiStateManager.setPavilionHudOpen(true);
+  uiStateManager.setPavilionHudOpen(false);
 
   if (paused?.sessionId) {
     try {

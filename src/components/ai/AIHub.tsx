@@ -4,6 +4,12 @@ import { readAIStream, type AIRecalledMemorySummary } from '../../utils/aiStream
 import { getAiProfileKey } from '../../utils/aiProfile.ts';
 import { loadAIConversationHistory, saveAIConversationHistory } from '../../utils/aiSessionHistory.ts';
 import { analyzeDialogueEmotion, buildExpressivePhrases } from '../../utils/emotionEngine.ts';
+import {
+  playNormalizedArrayBuffer,
+  playNormalizedBase64Audio,
+  stopSteadyVoice,
+  unlockSteadyVoiceAudio,
+} from '../../utils/steadyVoicePlayer.ts';
 import { OneAiAdminConsole } from './OneAiAdminConsole.tsx';
 import {
   Bot,
@@ -260,76 +266,82 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     }
   };
 
-  const hubTtsAudioRef = useRef<HTMLAudioElement | null>(null);
   const hubTtsAbortRef = useRef<AbortController | null>(null);
 
   const speakText = (text: string) => {
+    unlockSteadyVoiceAudio();
     hubTtsAbortRef.current?.abort();
     hubTtsAbortRef.current = new AbortController();
     const signal = hubTtsAbortRef.current.signal;
 
     try {
-      hubTtsAudioRef.current?.pause();
+      stopSteadyVoice();
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     } catch {}
 
     const clean = stripAiTags(text).replace(/<think>[\s\S]*?<\/think>/g, '').trim();
     if (!clean) return;
 
-    const analysis = analyzeDialogueEmotion('', clean);
-    const phrases = buildExpressivePhrases(clean.slice(0, 320), analysis, 'audio');
-    if (phrases.length === 0) return;
+    const spokenText = clean.slice(0, 360);
+    const analysis = analyzeDialogueEmotion('', spokenText);
 
     const playBrowserFallback = () => {
       if (!('speechSynthesis' in window) || signal.aborted) return;
-      const speechPhrases = buildExpressivePhrases(clean.slice(0, 320), analysis, 'speech');
-      let idx = 0;
-      const nextUtt = () => {
-        if (signal.aborted || idx >= speechPhrases.length) return;
-        const p = speechPhrases[idx++];
-        const utt = new SpeechSynthesisUtterance(p.text);
-        utt.lang = isZh ? 'zh-CN' : 'en-US';
-        utt.pitch = p.pitch;
-        utt.rate = p.rate;
-        utt.onend = () => setTimeout(nextUtt, p.pauseAfterMs);
-        window.speechSynthesis.speak(utt);
-      };
-      nextUtt();
+      const utt = new SpeechSynthesisUtterance(spokenText.slice(0, 240));
+      utt.lang = isZh ? 'zh-CN' : 'en-US';
+      utt.volume = 0.85;
+      utt.pitch = 1.0;
+      utt.rate = 1.0;
+      window.speechSynthesis.speak(utt);
     };
 
     void (async () => {
-      if (!hubTtsAudioRef.current) {
-        hubTtsAudioRef.current = new Audio();
+      // 1) Primary: Gemini Human Voice (server RMS-normalized single-WAV + WebAudio steady bus)
+      try {
+        const res = await fetch('/api/ai/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: spokenText,
+            lang: isZh ? 'zh' : 'en',
+            voice: 'Kore',
+          }),
+          signal,
+        });
+        if (res.ok && !signal.aborted) {
+          const data = await res.json();
+          if (data?.audioBase64 && !signal.aborted) {
+            const played = await playNormalizedBase64Audio(
+              data.audioBase64,
+              data.mimeType || 'audio/wav',
+              () => !signal.aborted
+            );
+            if (played) return;
+          }
+        }
+      } catch {
+        if (signal.aborted) return;
       }
-      const el = hubTtsAudioRef.current;
+
+      // 2) Secondary: GET /api/ai/tts routed through the same steady WebAudio bus
+      const phrases = buildExpressivePhrases(spokenText.slice(0, 260), analysis, 'audio');
       for (const p of phrases) {
         if (signal.aborted) return;
         try {
           const r = await fetch(
-            `/api/ai/tts?text=${encodeURIComponent(p.text)}&lang=${isZh ? 'zh' : 'en'}&spd=${p.baiduSpd}&emotion=${p.emotion}`,
+            `/api/ai/tts?text=${encodeURIComponent(p.text)}&lang=${isZh ? 'zh' : 'en'}&spd=5`,
             { signal }
           );
           if (!r.ok) {
             playBrowserFallback();
             return;
           }
-          const blob = await r.blob();
-          const url = URL.createObjectURL(blob);
-          await new Promise<void>((resolve, reject) => {
-            el.src = url;
-            (el as any).preservesPitch = true;
-            (el as any).webkitPreservesPitch = true;
-            el.playbackRate = p.audioPlaybackRate;
-            el.onended = () => {
-              URL.revokeObjectURL(url);
-              setTimeout(resolve, p.pauseAfterMs);
-            };
-            el.onerror = () => {
-              URL.revokeObjectURL(url);
-              reject(new Error('audio err'));
-            };
-            el.play().catch(reject);
-          });
+          const buf = await r.arrayBuffer();
+          await playNormalizedArrayBuffer(
+            buf,
+            r.headers.get('content-type') || 'audio/mpeg',
+            () => !signal.aborted
+          );
         } catch {
           if (!signal.aborted) playBrowserFallback();
           return;

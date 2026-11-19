@@ -14,6 +14,14 @@ import {
   stripAiControlTags,
 } from '../ai/contextOrchestrator.ts';
 import { normalizeConversationHistory } from '../aiConversation.ts';
+import {
+  generateLanguageQuizPack,
+  generateSpokenRescue,
+  normalizeStudyLang,
+  startRoleplaySession,
+  type SupportedStudyLang,
+} from '../languageCoach.ts';
+import { generateAiImage, type ImageAspectRatio } from '../aiImageGenerator.ts';
 
 export interface AgentStepRecord {
   id: string;
@@ -816,83 +824,347 @@ export function createOneAiAgentRouter(deps: OneAiAgentDeps) {
     }
 
     // ------------------------------------------------------------------
-    // 5. Arabic / English Language Learning Engine
+    // 4B. Instant "我不知道该怎么讲 / 怎么说" Spoken Rescue Coach
     // ------------------------------------------------------------------
-    if (
-      !isHypothetical &&
-      /(?:学(?:习)?.*阿拉伯语|阿拉伯语(?:课|字母|练习|学习)|学英语|英语(?:课|口语|引擎)|多邻国|arabic\s*(?:lesson|study|learn)|learn\s*(?:arabic|english))/i.test(
+    const activeRoleplayCtx =
+      req.body?.activeRoleplayContext && typeof req.body.activeRoleplayContext === 'object'
+        ? (req.body.activeRoleplayContext as {
+            targetLang?: string;
+            scenarioTitle?: string;
+            npcRole?: string;
+            lastNpcLine?: string;
+          })
+        : null;
+
+    const isRescueAsk =
+      /(?:我?不知道(?:该)?怎么(?:讲|说|回答|接话|表达)|不会(?:说|讲)|怎么用(?:英语|英文|日语|法语|西班牙语|韩语|阿拉伯语)(?:说|讲)|(?:英语|英文|口语)怎么(?:说|讲)|帮我说|给我(?:口语)?提示|i\s*don'?t\s*know\s*how\s*to\s*say|how\s+do\s+i\s+say|help\s+me\s+say)/i.test(
         cleanPrompt
-      )
-    ) {
-      const isEnglish = /英语|english/i.test(cleanPrompt) && !/阿拉伯语|arabic/i.test(cleanPrompt);
-      const targetTab = isEnglish
-        ? 'english'
-        : /字母|发音|alphabet/i.test(cleanPrompt)
-          ? 'alphabet'
-          : /练习|quiz|test|测试/i.test(cleanPrompt)
-            ? 'practice'
-            : 'alphabet';
+      );
+
+    if (!isHypothetical && isRescueAsk) {
+      const targetLang: SupportedStudyLang = /阿拉伯|arabic/i.test(cleanPrompt)
+        ? 'ar'
+        : /日语|日文|japanese/i.test(cleanPrompt)
+          ? 'ja'
+          : /法语|french/i.test(cleanPrompt)
+            ? 'fr'
+            : /西语|西班牙|spanish/i.test(cleanPrompt)
+              ? 'es'
+              : /韩语|korean/i.test(cleanPrompt)
+                ? 'ko'
+                : activeRoleplayCtx?.targetLang
+                  ? normalizeStudyLang(activeRoleplayCtx.targetLang)
+                  : 'en';
 
       steps.push({
-        id: 'step_lesson_prepare',
-        label: isZh ? (isEnglish ? '准备今日英语学习课程' : '准备今日阿拉伯语课程') : 'Preparing language lesson',
+        id: 'step_lang_rescue',
+        label: isZh ? '正在为你准备地道口语救急句' : 'Preparing spoken rescue phrases',
         status: 'completed',
         timestamp: nowIso(),
       });
 
-      let lessonReply = '';
-      const aiTurn = await oneAiRouter.executeUnifiedTurn({
-        requestId: `ag_lang_${Date.now()}`,
-        userId: authUser?.id || null,
-        subjectKey: quota.subjectKey,
-        userTier: quota.userTier,
-        prompt: cleanPrompt,
-        messages: [
-          {
-            role: 'system',
-            content: `你是 EARTH ONE 语言导师「${customAiName}」。请用简练友好的中文为学习者给出今日3分钟热身重点（含1个核心词/句和发音提示），并告知已进入学习空间。不要称呼用户为“小小”。`,
-          },
-          { role: 'user', content: cleanPrompt },
-        ],
-        mode: 'language-tutor',
-        maxTokens: 480,
-        stream: false,
-      });
-      if (aiTurn.success && aiTurn.content.trim()) {
-        lessonReply = stripAiControlTags(aiTurn.content).reply || aiTurn.content.trim();
-      } else {
-        lessonReply = isEnglish
-          ? '已为你进入今日英语学习空间！建议先跟读 5 分钟高频句型，再完成一组词义挑战。'
-          : '已为你打开阿拉伯语学习环境！今天先从「أ / ب / ت」字母发音与日常问候「السلام عليكم」(As-salāmu ʿalaykum) 开始吧。';
+      try {
+        const rescue = await generateSpokenRescue({
+          targetLang,
+          situation: activeRoleplayCtx?.scenarioTitle || '日常真实口语交流',
+          lastNpcLine: activeRoleplayCtx?.lastNpcLine || '',
+          userIntentZh: cleanPrompt,
+          level: 'intermediate',
+        });
+
+        const top = rescue.expressions[1] || rescue.expressions[0];
+        const replyText = top
+          ? `${rescue.coachReplyZh}\n推荐直接说：「${top.targetText}」（${top.translationZh}）`
+          : rescue.coachReplyZh;
+
+        clientActions.push({
+          type: 'show_rescue_cards',
+          targetLang,
+          coachReplyZh: rescue.coachReplyZh,
+          expressions: rescue.expressions,
+        });
+
+        const resultData = { targetLang, rescue, clientActions };
+        oneAiDb.upsertAgentSession({
+          sessionId,
+          userId: subjectId,
+          status: 'completed',
+          intentSummary: cleanPrompt.slice(0, 80),
+          module: 'language-studio',
+          steps,
+          result: resultData,
+        });
+
+        return res.json({
+          success: true,
+          sessionId,
+          module: 'language-studio',
+          model: 'ONE AI',
+          emotion: 'empathetic',
+          reply: replyText,
+          targetText: top?.targetText || '',
+          translationZh: top?.translationZh || '',
+          phonetic: top?.phonetic || '',
+          rescueCards: rescue.expressions,
+          steps,
+          clientActions,
+          resultData,
+        });
+      } catch (err: any) {
+        return res.status(503).json({
+          success: false,
+          sessionId,
+          module: 'language-studio',
+          error: err?.message || '口语提示暂时不可用',
+          reply: isZh ? '抱歉，刚才生成口语提示时遇到网络波动，请再说一次或点急救按钮。' : 'Sorry, could not fetch spoken rescue hints right now.',
+          steps,
+          clientActions: [],
+        });
       }
+    }
 
-      clientActions.push({
-        type: 'open_language_lesson',
-        language: isEnglish ? 'en' : 'ar',
-        tab: targetTab,
-      });
+    // ------------------------------------------------------------------
+    // 4C. Free-Quota Recomposed AI Image & Dialogue Scene Generation
+    // ------------------------------------------------------------------
+    const isImageGenRequest =
+      /(?:(?:给我|帮我|请|来|再)?(?:生成|画|创作|做|出)(?:一?[张幅个])?.*(?:图|图片|插画|画作|壁纸|配图|照片|头像|风景|漫画)|(?:给我|帮我)画(?:一?[张幅个只条朵座])?|把(?:刚才|这段|当前)?对话(?:变成|画成|生成)(?:一?张)?图|对话配图|(?:generate|create|draw|paint|make)\s+(?:an?\s+)?(?:image|picture|photo|illustration|artwork))/i.test(
+        cleanPrompt
+      );
 
-      const resultData = { language: isEnglish ? 'en' : 'ar', tab: targetTab, clientActions };
-      oneAiDb.upsertAgentSession({
-        sessionId,
-        userId: subjectId,
+    if (!isHypothetical && isImageGenRequest) {
+      const isDialogueScene = /对话|刚才|场景|这段|实景|聊天/i.test(cleanPrompt);
+      const aspectRatio: ImageAspectRatio =
+        /竖屏|竖图|手机壁纸|海报|3:4|9:16/i.test(cleanPrompt)
+          ? '3:4'
+          : /宽屏|横屏|壁纸|电影感|16:9/i.test(cleanPrompt)
+            ? '16:9'
+            : /正方形|头像|1:1/i.test(cleanPrompt)
+              ? '1:1'
+              : '4:3';
+
+      const dialogueContext = histArray
+        .slice(-4)
+        .map((m) => `${m.role === 'user' ? 'User' : customAiName}: ${m.content}`)
+        .join('\n');
+
+      steps.push({
+        id: 'step_free_image_pool',
+        label: isZh ? '正在动态重组免费 AI 额度为你绘制画面' : 'Recomposing free AI image pool',
         status: 'completed',
-        intentSummary: cleanPrompt.slice(0, 80),
-        module: 'arabic-learning',
-        steps,
-        result: resultData,
+        timestamp: nowIso(),
       });
 
-      return res.json({
-        success: true,
-        sessionId,
-        module: 'arabic-learning',
-        model: 'ONE AI',
-        reply: lessonReply,
-        steps,
-        clientActions,
-        resultData,
+      try {
+        const image = await generateAiImage({
+          prompt: cleanPrompt,
+          mode: isDialogueScene ? 'dialogue_scene' : 'standalone',
+          dialogueContext: isDialogueScene ? dialogueContext : undefined,
+          aspectRatio,
+        });
+
+        clientActions.push({
+          type: 'show_generated_image',
+          image,
+        });
+
+        const replyText = isZh
+          ? `已经为你画好了：「${image.captionZh}」（由 ${image.providerLabelZh} 免费额度实时生成，点击可放大或保存）。`
+          : `Here is your generated artwork: "${image.captionZh}" (created via ${image.providerLabelZh}).`;
+
+        const resultData = { image, clientActions };
+        oneAiDb.upsertAgentSession({
+          sessionId,
+          userId: subjectId,
+          status: 'completed',
+          intentSummary: cleanPrompt.slice(0, 80),
+          module: 'image-studio',
+          steps,
+          result: { captionZh: image.captionZh, engine: image.engine, providerLabelZh: image.providerLabelZh },
+        });
+
+        return res.json({
+          success: true,
+          sessionId,
+          module: 'image-studio',
+          model: 'ONE AI',
+          emotion: 'excited',
+          reply: replyText,
+          generatedImage: image,
+          steps,
+          clientActions,
+          resultData,
+        });
+      } catch (err: any) {
+        return res.status(503).json({
+          success: false,
+          sessionId,
+          module: 'image-studio',
+          error: err?.message || '免费图像生成节点暂时繁忙',
+          reply: isZh
+            ? '抱歉，当前免费生图节点暂时繁忙，你可以稍等几秒再让我画一次，或者换个更简洁的描述试试。'
+            : 'The free image generation pool is busy right now. Please try again in a moment.',
+          steps,
+          clientActions: [],
+        });
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // 5. Full Interactive Language Learning Studio (Quiz + Spoken Roleplay)
+    // ------------------------------------------------------------------
+    const isLanguageLearnRequest =
+      /(?:(?:我想|我要|帮我|带我|一起|开始)?学(?:习)?(?:语言|外语|英语|英文|口语|阿拉伯语|日语|法语|西班牙语|韩语)|练(?:习)?(?:英语|英文|口语|对话)|实景对话|口语(?:对话|练习|实景)|给我出(?:一些|很多|几道)?(?:英语|语言|口语)?题|多邻国|(?:learn|study|practice)\s*(?:language|english|arabic|japanese|french|spanish|korean|speaking|roleplay)|english\s*roleplay)/i.test(
+        cleanPrompt
+      );
+
+    if (!isHypothetical && isLanguageLearnRequest) {
+      const targetLang: SupportedStudyLang = /阿拉伯|arabic/i.test(cleanPrompt)
+        ? 'ar'
+        : /日语|日文|japanese/i.test(cleanPrompt)
+          ? 'ja'
+          : /法语|french/i.test(cleanPrompt)
+            ? 'fr'
+            : /西语|西班牙|spanish/i.test(cleanPrompt)
+              ? 'es'
+              : /韩语|korean/i.test(cleanPrompt)
+                ? 'ko'
+                : 'en';
+
+      const wantsQuizFirst =
+        /(?:出题|做题|刷题|测验|测试|考我|考考我|练习题|quiz|test)/i.test(cleanPrompt) &&
+        !/(?:实景|口语对话|角色扮演|roleplay|场景对话)/i.test(cleanPrompt);
+
+      const scenarioId = /机场|海关|值机|airport/i.test(cleanPrompt)
+        ? 'airport'
+        : /酒店|入住|hotel/i.test(cleanPrompt)
+          ? 'hotel'
+          : /餐厅|点菜|点餐|restaurant/i.test(cleanPrompt)
+            ? 'restaurant'
+            : /面试|求职|interview/i.test(cleanPrompt)
+              ? 'interview'
+              : /购物|买东西|问路|shopping/i.test(cleanPrompt)
+                ? 'shopping'
+                : /医院|诊所|看病|药房|clinic/i.test(cleanPrompt)
+                  ? 'clinic'
+                  : /派对|交友|朋友|party|friends/i.test(cleanPrompt)
+                    ? 'friends'
+                    : 'cafe';
+
+      steps.push({
+        id: 'step_lang_studio',
+        label: isZh
+          ? wantsQuizFirst
+            ? '正在为你生成多题型互动闯关题库'
+            : '正在开启实景口语对话与即时救急教练'
+          : 'Launching live language studio',
+        status: 'completed',
+        timestamp: nowIso(),
       });
+
+      try {
+        if (wantsQuizFirst) {
+          const quizPack = await generateLanguageQuizPack({
+            targetLang,
+            level: 'intermediate',
+            topic: cleanPrompt,
+            count: 6,
+          });
+          const firstQ = quizPack.questions[0];
+
+          clientActions.push({
+            type: 'open_language_studio',
+            targetLang,
+            mode: 'quiz',
+            initialQuiz: quizPack,
+          });
+
+          const replyText = isZh
+            ? `太好了！我已经为你出好了 ${quizPack.questions.length} 道「${quizPack.topicTitleZh}」互动练习（含情景选择、填空、听力和开口跟读），也可以随时一键切到实景口语对话！`
+            : `Ready! I created ${quizPack.questions.length} interactive questions on "${quizPack.topicTitleZh}". You can also switch to real-world spoken roleplay anytime!`;
+
+          const resultData = { targetLang, mode: 'quiz', quizPack, clientActions };
+          oneAiDb.upsertAgentSession({
+            sessionId,
+            userId: subjectId,
+            status: 'completed',
+            intentSummary: cleanPrompt.slice(0, 80),
+            module: 'language-studio',
+            steps,
+            result: { targetLang, mode: 'quiz', count: quizPack.questions.length },
+          });
+
+          return res.json({
+            success: true,
+            sessionId,
+            module: 'language-studio',
+            model: 'ONE AI',
+            emotion: 'cheerful',
+            reply: replyText,
+            targetText: firstQ?.targetAudioText || '',
+            translationZh: firstQ?.promptZh || '',
+            phonetic: firstQ?.phonetic || '',
+            steps,
+            clientActions,
+            resultData,
+          });
+        } else {
+          const roleplay = await startRoleplaySession({
+            targetLang,
+            scenarioId,
+            level: 'intermediate',
+          });
+
+          clientActions.push({
+            type: 'open_language_studio',
+            targetLang,
+            mode: 'roleplay',
+            scenarioId,
+            initialRoleplay: roleplay,
+          });
+
+          const replyText = `${roleplay.npcLine}`;
+          const resultData = { targetLang, mode: 'roleplay', roleplay, clientActions };
+          oneAiDb.upsertAgentSession({
+            sessionId,
+            userId: subjectId,
+            status: 'completed',
+            intentSummary: cleanPrompt.slice(0, 80),
+            module: 'language-studio',
+            steps,
+            result: { targetLang, mode: 'roleplay', scenarioTitle: roleplay.scenarioTitle },
+          });
+
+          return res.json({
+            success: true,
+            sessionId,
+            module: 'language-studio',
+            model: 'ONE AI',
+            emotion: roleplay.npcMood || 'cheerful',
+            reply: replyText,
+            targetText: roleplay.npcLine,
+            translationZh: roleplay.npcTranslationZh,
+            phonetic: roleplay.npcPhonetic,
+            rescueCards: roleplay.rescueSuggestions,
+            languageBadge: `实景口语 · ${roleplay.scenarioTitle}`,
+            speakLang: targetLang,
+            steps,
+            clientActions,
+            resultData,
+          });
+        }
+      } catch (err: any) {
+        return res.status(503).json({
+          success: false,
+          sessionId,
+          module: 'language-studio',
+          error: err?.message || '语言学习引擎启动失败',
+          reply: isZh
+            ? '我已为你打开语言学习空间，你可以直接切换英语实景口语或刷题练习。'
+            : 'Opening the language studio for you now.',
+          steps,
+          clientActions: [{ type: 'open_language_studio', targetLang, mode: wantsQuizFirst ? 'quiz' : 'roleplay', scenarioId }],
+        });
+      }
     }
 
     // ------------------------------------------------------------------

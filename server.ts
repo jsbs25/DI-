@@ -58,6 +58,22 @@ import { buildReadingPrompt, resolveReadingEvidence } from './server/libraryRead
 import { EpubArchiveError, fetchAllowedEpubResponse, isSyntacticallyValidEpubCfi, readBoundedEpubArchive } from './server/libraryEpubSecurity.ts';
 import { fetchAndExtract, fetchRawHtml, searchGitHubRepositories, searchGoogleCategory, searchGoogleImages, searchWeb, searchWebProviders, searchZLibraryDiscovery, type JupiterExternalSearchCategory, type SearchResult } from './server/webFetcher.ts';
 import { searchYouTubeVideos } from './server/youtubeSearch.ts';
+import {
+  LANGUAGE_CATALOG,
+  ROLEPLAY_SCENARIOS,
+  continueRoleplayTurn,
+  generateLanguageQuizPack,
+  generateSpokenRescue,
+  normalizeStudyLang,
+  startRoleplaySession,
+  type StudyLevel,
+} from './server/languageCoach.ts';
+import {
+  generateAiImage,
+  getFreeImagePoolStatus,
+  type ImageAspectRatio,
+  type ImageGenMode,
+} from './server/aiImageGenerator.ts';
 import { getLibraryConnector, isLibraryConnectorEnabled, libraryConnectors, RightsCategory, searchLibrary, type LibrarySource } from './server/integrations/libraries/index.ts';
 import { runBookHarvest } from './server/bookHarvester.ts';
 import { crawlOpenBooks } from './server/bookCrawler.ts';
@@ -3976,6 +3992,91 @@ function wrapPcm24kAsWav(pcmBuffer: Buffer, sampleRate = 24000, channels = 1): B
   return Buffer.concat([header, pcmBuffer]);
 }
 
+/**
+ * Unwraps RIFF/WAVE if the TTS model already returned a complete WAV container
+ * (preventing double-WAV header corruption!), then normalizes active-speech RMS
+ * to a fixed conversational loudness (-15.5 dBFS) with smooth soft-limiting and
+ * fade-in/out so AI voice volume never fluctuates ("不忽大忽小").
+ */
+function normalizeTtsAudioToSteadyWav(rawBuf: Buffer, fallbackSampleRate = 24000, fallbackChannels = 1): Buffer {
+  let pcm = rawBuf;
+  let sampleRate = fallbackSampleRate;
+  let channels = fallbackChannels;
+  let bitsPerSample = 16;
+
+  // Detect existing RIFF/WAVE container and extract genuine PCM payload
+  if (
+    rawBuf.length >= 44 &&
+    rawBuf.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    rawBuf.subarray(8, 12).toString('ascii') === 'WAVE'
+  ) {
+    let offset = 12;
+    while (offset + 8 <= rawBuf.length) {
+      const chunkId = rawBuf.subarray(offset, offset + 4).toString('ascii');
+      const chunkSize = rawBuf.readUInt32LE(offset + 4);
+      const dataStart = offset + 8;
+      if (chunkId === 'fmt ' && dataStart + 16 <= rawBuf.length) {
+        channels = rawBuf.readUInt16LE(dataStart + 2) || fallbackChannels;
+        sampleRate = rawBuf.readUInt32LE(dataStart + 4) || fallbackSampleRate;
+        bitsPerSample = rawBuf.readUInt16LE(dataStart + 14) || 16;
+      } else if (chunkId === 'data') {
+        const end = Math.min(rawBuf.length, dataStart + chunkSize);
+        pcm = rawBuf.subarray(dataStart, end);
+        break;
+      }
+      offset = dataStart + chunkSize + (chunkSize % 2);
+    }
+  }
+
+  // Only normalize standard 16-bit PCM; if unusual bit depth, return clean buffer directly
+  if (bitsPerSample !== 16 || pcm.length < 4) {
+    return rawBuf.subarray(0, 4).toString('ascii') === 'RIFF'
+      ? rawBuf
+      : wrapPcm24kAsWav(pcm, sampleRate, channels);
+  }
+
+  const sampleCount = Math.floor(pcm.length / 2);
+  let sumSq = 0;
+  let activeCount = 0;
+  let peak = 0;
+
+  for (let i = 0; i < sampleCount; i++) {
+    const s = pcm.readInt16LE(i * 2) / 32768;
+    const abs = Math.abs(s);
+    if (abs > peak) peak = abs;
+    // Count active speech samples above -42 dBFS (~0.008) so pauses don't skew gain
+    if (abs > 0.008) {
+      sumSq += s * s;
+      activeCount += 1;
+    }
+  }
+
+  const normalizedPcm = Buffer.allocUnsafe(sampleCount * 2);
+  const activeRms = activeCount > 64 ? Math.sqrt(sumSq / activeCount) : 0;
+  // Lock steady target loudness to -15.5 dBFS RMS (~0.168)
+  const targetRms = 0.168;
+  const gain = activeRms > 0.003 ? Math.max(0.35, Math.min(3.2, targetRms / activeRms)) : 1.0;
+  const ceiling = 0.88;
+  const fadeSamples = Math.min(Math.floor(sampleRate * 0.008), Math.floor(sampleCount / 4));
+
+  for (let i = 0; i < sampleCount; i++) {
+    let v = (pcm.readInt16LE(i * 2) / 32768) * gain;
+    const abs = Math.abs(v);
+    if (abs > 0.72) {
+      v = Math.sign(v) * (0.72 + (ceiling - 0.72) * Math.tanh((abs - 0.72) / (ceiling - 0.72)));
+    }
+    if (i < fadeSamples) {
+      v *= i / fadeSamples;
+    } else if (i >= sampleCount - fadeSamples) {
+      v *= (sampleCount - 1 - i) / fadeSamples;
+    }
+    const clamped = Math.max(-0.98, Math.min(0.98, v));
+    normalizedPcm.writeInt16LE(Math.round(clamped * 32767), i * 2);
+  }
+
+  return wrapPcm24kAsWav(normalizedPcm, sampleRate, channels);
+}
+
 const VALID_COMPANION_EMOTIONS = new Set([
   'calm',
   'happy',
@@ -4498,8 +4599,9 @@ app.post(['/api/ai/companion-turn', '/api/one-ai/companion-turn'], async (req, r
   }
 });
 
+const geminiTtsWavCache = new Map<string, { audioBase64: string; model: string }>();
 app.post('/api/ai/tts', async (req, res) => {
-  const { text, emotion = 'calm', voiceName = 'Zephyr' } = req.body || {};
+  const { text, voiceName = 'Zephyr' } = req.body || {};
   const cleanText = typeof text === 'string' ? stripAiControlTags(text).reply.trim().slice(0, 600) : '';
   if (!cleanText) {
     return res.status(400).json({ success: false, error: 'text is required' });
@@ -4509,23 +4611,22 @@ app.post('/api/ai/tts', async (req, res) => {
     return res.status(503).json({ success: false, error: 'GEMINI_API_KEY not configured' });
   }
 
-  const styleHints: Record<string, string> = {
-    excited: 'Speak warmly with bright excitement and energetic enthusiasm:',
-    happy: 'Speak cheerfully with a warm smile in your voice:',
-    cheerful: 'Speak cheerfully with a warm, natural smile in your voice:',
-    curious: 'Speak with bright curiosity and an engaging inquisitive tone:',
-    concerned: 'Speak gently with sincere care and attentive concern:',
-    empathetic: 'Speak softly, tenderly, and empathetically like a caring friend:',
-    affectionate: 'Speak warmly, gently, and affectionately with natural human warmth:',
-    playful: 'Speak playfully with light-hearted sparkle and gentle amusement:',
-    focused: 'Speak crisply, clearly, and confidently:',
-    thinking: 'Speak thoughtfully and calmly:',
-    calm: 'Speak naturally, warmly, and clearly like a real human:',
-  };
   const allowedVoices = new Set(['Zephyr', 'Kore', 'Puck', 'Charon', 'Fenrir']);
   const safeVoice = allowedVoices.has(String(voiceName)) ? String(voiceName) : 'Zephyr';
-  const promptPrefix = styleHints[String(emotion)] || styleHints.calm;
 
+  const cacheKey = `${safeVoice}:${cleanText}`;
+  const cached = geminiTtsWavCache.get(cacheKey);
+  if (cached) {
+    return res.json({
+      success: true,
+      mimeType: 'audio/wav',
+      model: cached.model,
+      audioBase64: cached.audioBase64,
+      cached: true,
+    });
+  }
+
+  // Keep a steady, natural, warm human delivery instruction so volume never swings wildly between whispers and shouts
   const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-2.5-flash-preview-tts'];
   let lastErr: any = null;
 
@@ -4533,7 +4634,7 @@ app.post('/api/ai/tts', async (req, res) => {
     try {
       const response = await ai.models.generateContent({
         model: ttsModel,
-        contents: `${promptPrefix} ${cleanText}`,
+        contents: `Read aloud naturally in a warm, clear human voice at a steady, even conversational volume and pace:\n${cleanText}`,
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
@@ -4543,15 +4644,24 @@ app.post('/api/ai/tts', async (req, res) => {
           },
         },
       });
-      const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      const data = inlineData?.data;
       if (!data) continue;
-      const pcmBuffer = Buffer.from(data, 'base64');
-      const wavBuffer = wrapPcm24kAsWav(pcmBuffer, 24000, 1);
+      const rawBuf = Buffer.from(data, 'base64');
+      const wavBuffer = normalizeTtsAudioToSteadyWav(rawBuf, 24000, 1);
+      const audioBase64 = wavBuffer.toString('base64');
+
+      if (geminiTtsWavCache.size >= 80) {
+        const oldest = geminiTtsWavCache.keys().next().value;
+        if (oldest) geminiTtsWavCache.delete(oldest);
+      }
+      geminiTtsWavCache.set(cacheKey, { audioBase64, model: ttsModel });
+
       return res.json({
         success: true,
         mimeType: 'audio/wav',
         model: ttsModel,
-        audioBase64: wavBuffer.toString('base64'),
+        audioBase64,
       });
     } catch (err: any) {
       lastErr = err;
@@ -6027,6 +6137,139 @@ app.get('/api/learning/english/reading', async (req, res) => {
     return res.json({ success: false, error: 'Article unavailable' });
   } catch {
     return res.json({ success: false, error: 'Reading corpus fetch timeout' });
+  }
+});
+
+// -------------------------------------------------------------
+// 8b2. LIVE LANGUAGE STUDIO (Quiz Pack, Situational Spoken Roleplay, Instant Rescue)
+// -------------------------------------------------------------
+app.get('/api/learning/language/catalog', (_req, res) => {
+  res.json({
+    success: true,
+    languages: LANGUAGE_CATALOG,
+    scenarios: ROLEPLAY_SCENARIOS,
+  });
+});
+
+app.post('/api/learning/language/quiz-pack', async (req, res) => {
+  try {
+    const targetLang = normalizeStudyLang(req.body?.targetLang || req.body?.language || 'en');
+    const level: StudyLevel =
+      req.body?.level === 'beginner' || req.body?.level === 'advanced' ? req.body.level : 'intermediate';
+    const topic = typeof req.body?.topic === 'string' ? req.body.topic.trim().slice(0, 120) : '';
+    const count = Math.max(4, Math.min(8, Number(req.body?.count) || 6));
+    const pack = await generateLanguageQuizPack({ targetLang, level, topic, count });
+    return res.json({ success: true, ...pack });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || '生成题目失败，请稍后重试。',
+    });
+  }
+});
+
+app.post('/api/learning/language/roleplay/start', async (req, res) => {
+  try {
+    const targetLang = normalizeStudyLang(req.body?.targetLang || req.body?.language || 'en');
+    const level: StudyLevel =
+      req.body?.level === 'beginner' || req.body?.level === 'advanced' ? req.body.level : 'intermediate';
+    const scenarioId = typeof req.body?.scenarioId === 'string' ? req.body.scenarioId.trim() : undefined;
+    const customScenario = typeof req.body?.customScenario === 'string' ? req.body.customScenario.trim().slice(0, 160) : undefined;
+    const session = await startRoleplaySession({ targetLang, scenarioId, customScenario, level });
+    return res.json({ success: true, session });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || '启动实景口语对话失败，请稍后重试。',
+    });
+  }
+});
+
+app.post('/api/learning/language/roleplay/turn', async (req, res) => {
+  try {
+    const targetLang = normalizeStudyLang(req.body?.targetLang || req.body?.language || 'en');
+    const level: StudyLevel =
+      req.body?.level === 'beginner' || req.body?.level === 'advanced' ? req.body.level : 'intermediate';
+    const scenarioId = typeof req.body?.scenarioId === 'string' ? req.body.scenarioId.trim() : 'custom';
+    const scenarioTitle = typeof req.body?.scenarioTitle === 'string' ? req.body.scenarioTitle.trim() : '实景口语对话';
+    const npcRole = typeof req.body?.npcRole === 'string' ? req.body.npcRole.trim() : 'Native Speaker';
+    const userMessage = typeof req.body?.userMessage === 'string' ? req.body.userMessage.trim() : '';
+    const history = Array.isArray(req.body?.history) ? req.body.history : [];
+    const missions = Array.isArray(req.body?.missions) ? req.body.missions : [];
+    if (!userMessage) {
+      return res.status(400).json({ success: false, error: '请先输入或说出你的回复内容。' });
+    }
+    const turn = await continueRoleplayTurn({
+      targetLang,
+      scenarioId,
+      scenarioTitle,
+      npcRole,
+      level,
+      history,
+      userMessage,
+      missions,
+    });
+    return res.json({ success: true, turn });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || '实景对话回复生成失败，请稍后重试。',
+    });
+  }
+});
+
+app.post('/api/learning/language/rescue', async (req, res) => {
+  try {
+    const targetLang = normalizeStudyLang(req.body?.targetLang || req.body?.language || 'en');
+    const level: StudyLevel =
+      req.body?.level === 'beginner' || req.body?.level === 'advanced' ? req.body.level : 'intermediate';
+    const situation = typeof req.body?.situation === 'string' ? req.body.situation.trim().slice(0, 180) : undefined;
+    const lastNpcLine = typeof req.body?.lastNpcLine === 'string' ? req.body.lastNpcLine.trim().slice(0, 400) : undefined;
+    const userIntentZh = typeof req.body?.userIntentZh === 'string' ? req.body.userIntentZh.trim().slice(0, 300) : undefined;
+    const rescue = await generateSpokenRescue({ targetLang, situation, lastNpcLine, userIntentZh, level });
+    return res.json({ success: true, rescue });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || '口语急救提示生成失败，请稍后重试。',
+    });
+  }
+});
+
+// -------------------------------------------------------------
+// 8b3. FREE-QUOTA RECOMPOSED AI IMAGE & DIALOGUE ILLUSTRATION POOL
+// -------------------------------------------------------------
+app.get('/api/ai/image-pool/status', (_req, res) => {
+  res.json({
+    success: true,
+    nodes: getFreeImagePoolStatus(),
+  });
+});
+
+app.post('/api/ai/generate-image', async (req, res) => {
+  try {
+    const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim().slice(0, 600) : '';
+    if (!prompt) {
+      return res.status(400).json({ success: false, error: '请描述想生成的画面内容。' });
+    }
+    const aspectRatio: ImageAspectRatio =
+      req.body?.aspectRatio === '1:1' ||
+      req.body?.aspectRatio === '16:9' ||
+      req.body?.aspectRatio === '4:3' ||
+      req.body?.aspectRatio === '3:4'
+        ? req.body.aspectRatio
+        : '4:3';
+    const mode: ImageGenMode = req.body?.mode === 'dialogue_scene' ? 'dialogue_scene' : 'standalone';
+    const dialogueContext = typeof req.body?.dialogueContext === 'string' ? req.body.dialogueContext.slice(0, 800) : undefined;
+    const style = typeof req.body?.style === 'string' ? req.body.style.slice(0, 80) : undefined;
+
+    const image = await generateAiImage({ prompt, mode, dialogueContext, style, aspectRatio });
+    return res.json({ success: true, image });
+  } catch (err: any) {
+    return res.status(503).json({
+      success: false,
+      error: err?.message || '免费图像生成池当前繁忙，请稍后再试。',
+    });
   }
 });
 

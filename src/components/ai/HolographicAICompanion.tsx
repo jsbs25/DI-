@@ -53,6 +53,12 @@ import {
   type VoiceListeningMode,
 } from '../../utils/voiceModeSettings.ts';
 import { uiStateManager, useAgentUiState } from '../../agent/uiStateManager.ts';
+import {
+  playNormalizedArrayBuffer,
+  playNormalizedBase64Audio,
+  stopSteadyVoice,
+  unlockSteadyVoiceAudio,
+} from '../../utils/steadyVoicePlayer.ts';
 
 export type CompanionEmotion =
   | 'calm'
@@ -662,6 +668,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
     const wasSpeaking = phaseRef.current === 'speaking';
     speakSeqRef.current += 1;
     audioClientRef.current?.flushOutput();
+    stopSteadyVoice();
     if (fallbackAudioRef.current) {
       try {
         fallbackAudioRef.current.onended = null;
@@ -797,38 +804,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       pauseMusicForVoice(false);
       setPhase('speaking');
 
-      const playAudioAndWait = (audio: HTMLAudioElement, objectUrl?: string): Promise<boolean> =>
-        new Promise((resolve) => {
-          if (mySeq !== speakSeqRef.current || mutedOutputRef.current) {
-            if (objectUrl) {
-              try {
-                URL.revokeObjectURL(objectUrl);
-              } catch {}
-            }
-            resolve(false);
-            return;
-          }
-          fallbackAudioRef.current = audio;
-          fallbackObjectUrlRef.current = objectUrl || null;
-          let settled = false;
-          const done = (ok: boolean) => {
-            if (settled) return;
-            settled = true;
-            if (fallbackAudioRef.current === audio) fallbackAudioRef.current = null;
-            if (objectUrl && fallbackObjectUrlRef.current === objectUrl) {
-              try {
-                URL.revokeObjectURL(objectUrl);
-              } catch {}
-              fallbackObjectUrlRef.current = null;
-            }
-            resolve(ok);
-          };
-          audio.onended = () => done(true);
-          audio.onerror = () => done(false);
-          audio.play().catch(() => done(false));
-        });
-
-      const speakUttAndWait = (phraseText: string, rate: number, pitch: number): Promise<boolean> =>
+      const speakUttAndWait = (phraseText: string): Promise<boolean> =>
         new Promise((resolve) => {
           if (mySeq !== speakSeqRef.current || mutedOutputRef.current || typeof window === 'undefined' || !('speechSynthesis' in window)) {
             resolve(false);
@@ -838,8 +814,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             window.speechSynthesis.cancel();
             const utt = new SpeechSynthesisUtterance(phraseText);
             utt.lang = isZh ? 'zh-CN' : 'en-US';
-            utt.rate = rate;
-            utt.pitch = pitch;
+            utt.volume = 0.85;
+            utt.rate = 1.0;
+            utt.pitch = 1.0;
             let settled = false;
             const done = (ok: boolean) => {
               if (settled) return;
@@ -863,7 +840,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
         }
       };
 
-      // 1. Primary expressive Gemini TTS (when GEMINI_API_KEY is configured)
+      unlockSteadyVoiceAudio();
+
+      // 1. Primary natural human voice via Gemini TTS (POST /api/ai/tts — steady loudness-locked WAV)
       try {
         const res = await fetch(apiUrl('/api/ai/tts'), {
           method: 'POST',
@@ -878,8 +857,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
         if (res.ok) {
           const data = await res.json();
           if (data?.success && data.audioBase64) {
-            const audio = new Audio(`data:audio/wav;base64,${data.audioBase64}`);
-            const played = await playAudioAndWait(audio);
+            const played = await playNormalizedBase64Audio(
+              data.audioBase64,
+              data.mimeType || 'audio/wav',
+              () => mySeq === speakSeqRef.current && !mutedOutputRef.current
+            );
             if (played) {
               finishAll();
               return;
@@ -887,12 +869,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
           }
         }
       } catch {
-        // fall through to expressive keyless server TTS
+        // fall through to secondary normalized server TTS
       }
 
       if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
 
-      // 2. Expressive multi-phrase server TTS (works without GEMINI_API_KEY, preserving full reply & emotional pacing)
+      // 2. Fallback server TTS (GET /api/ai/tts) routed through steady loudness bus at locked 1.0x rate
       const voiceEmo = mapCompanionToVoiceEmotion(replyEmotion);
       const analysis = analyzeDialogueEmotion('', clean, voiceEmo);
       const phrases = buildExpressivePhrases(clean, analysis, 'audio');
@@ -903,11 +885,11 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
               {
                 text: clean.slice(0, 220),
                 emotion: voiceEmo,
-                pitch: analysis.basePitch,
-                rate: analysis.baseRate,
-                baiduSpd: analysis.baiduSpd,
-                audioPlaybackRate: analysis.audioPlaybackRate,
-                pauseAfterMs: 25,
+                pitch: 1.0,
+                rate: 1.0,
+                baiduSpd: 5,
+                audioPlaybackRate: 1.0,
+                pauseAfterMs: 30,
               },
             ];
 
@@ -917,16 +899,17 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
         let phrasePlayed = false;
 
         try {
-          const ttsUrl = `${apiUrl('/api/ai/tts')}?text=${encodeURIComponent(p.text)}&lang=${isZh ? 'zh' : 'en'}&spd=${p.baiduSpd}`;
+          const ttsUrl = `${apiUrl('/api/ai/tts')}?text=${encodeURIComponent(p.text)}&lang=${isZh ? 'zh' : 'en'}&spd=5`;
           const getRes = await fetch(ttsUrl);
           if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
           if (getRes.ok) {
-            const blob = await getRes.blob();
-            if (blob.size > 200) {
-              const objectUrl = URL.createObjectURL(blob);
-              const audio = new Audio(objectUrl);
-              audio.playbackRate = p.audioPlaybackRate;
-              phrasePlayed = await playAudioAndWait(audio, objectUrl);
+            const ab = await getRes.arrayBuffer();
+            if (ab.byteLength > 200) {
+              phrasePlayed = await playNormalizedArrayBuffer(
+                ab,
+                'audio/mpeg',
+                () => mySeq === speakSeqRef.current && !mutedOutputRef.current
+              );
             }
           }
         } catch {
@@ -936,12 +919,12 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
         if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
 
         if (!phrasePlayed) {
-          await speakUttAndWait(p.text, p.rate, p.pitch);
+          await speakUttAndWait(p.text);
         }
 
         if (mySeq !== speakSeqRef.current || mutedOutputRef.current) return;
-        if (i < phraseList.length - 1 && p.pauseAfterMs > 0) {
-          await new Promise((r) => setTimeout(r, p.pauseAfterMs));
+        if (i < phraseList.length - 1) {
+          await new Promise((r) => setTimeout(r, 30));
         }
       }
 

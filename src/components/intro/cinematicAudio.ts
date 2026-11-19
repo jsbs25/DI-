@@ -6,6 +6,8 @@
  * - Natural English Web Speech API narrator with intelligent voice selection & gain ducking
  */
 
+import { playNormalizedBase64Audio, stopSteadyVoice, unlockSteadyVoiceAudio } from '../../utils/steadyVoicePlayer.ts';
+
 export class CinematicAudioController {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -210,10 +212,13 @@ export class CinematicAudioController {
 
   public setMuted(muted: boolean) {
     this.isMuted = muted;
-    if (muted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {}
+    if (muted) {
+      stopSteadyVoice();
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
+      }
     }
     if (this.ctx && this.masterGain) {
       try {
@@ -227,52 +232,77 @@ export class CinematicAudioController {
     if (this.disposed || this.isMuted || !text.trim() || this.spokenCues.has(cueId)) return;
     this.spokenCues.add(cueId);
 
-    // Subtle harmonic chime cue even if SpeechSynthesis is blocked in sandboxed headless mode
-    this.playSoftChime([587.33, 880.0], 0.045);
+    // Subtle harmonic chime cue
+    this.playSoftChime([587.33, 880.0], 0.04);
 
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    try {
-      const synth = window.speechSynthesis;
-      synth.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US';
-      utterance.rate = 0.9;
-      utterance.pitch = 0.96;
-      utterance.volume = 0.85;
+    const restorePad = () => {
+      if (this.duckTimer !== null) {
+        window.clearTimeout(this.duckTimer);
+        this.duckTimer = null;
+      }
+      if (this.ctx && this.padGain && !this.disposed) {
+        try {
+          this.padGain.gain.setTargetAtTime(0.082, this.ctx.currentTime, 0.45);
+        } catch {}
+      }
+    };
 
-      const voice = this.cachedEnglishVoice || this.resolveEnglishVoice();
-      if (voice) {
-        utterance.voice = voice;
+    const duckPad = () => {
+      if (this.ctx && this.padGain && !this.disposed) {
+        try {
+          this.padGain.gain.setTargetAtTime(0.032, this.ctx.currentTime, 0.2);
+        } catch {}
+      }
+    };
+
+    // Prefer real normalized human voice via /api/ai/tts (steady volume, non-robotic)
+    unlockSteadyVoiceAudio();
+    void (async () => {
+      try {
+        const res = await fetch('/api/ai/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text.trim(), voiceName: 'Kore' }),
+        });
+        if (this.disposed || this.isMuted) return;
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data?.success && data.audioBase64) {
+            duckPad();
+            this.duckTimer = window.setTimeout(restorePad, 8000);
+            const played = await playNormalizedBase64Audio(
+              data.audioBase64,
+              data.mimeType || 'audio/wav',
+              () => !this.disposed && !this.isMuted
+            );
+            restorePad();
+            if (played) return;
+          }
+        }
+      } catch {
+        // fall through gracefully
       }
 
-      const restorePad = () => {
-        if (this.duckTimer !== null) {
-          window.clearTimeout(this.duckTimer);
-          this.duckTimer = null;
-        }
-        if (this.ctx && this.padGain && !this.disposed) {
-          try {
-            this.padGain.gain.setTargetAtTime(0.088, this.ctx.currentTime, 0.45);
-          } catch {}
-        }
-      };
-
-      utterance.onstart = () => {
-        if (this.ctx && this.padGain && !this.disposed) {
-          try {
-            this.padGain.gain.setTargetAtTime(0.036, this.ctx.currentTime, 0.2);
-          } catch {}
-        }
-      };
-      utterance.onend = restorePad;
-      utterance.onerror = restorePad;
-
-      // Safety un-duck timeout if browser fails to fire onend
-      this.duckTimer = window.setTimeout(restorePad, 6500);
-      synth.speak(utterance);
-    } catch {
-      // SpeechSynthesis unavailable or blocked by autoplay policy; captions remain visible
-    }
+      if (this.disposed || this.isMuted || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+      try {
+        const synth = window.speechSynthesis;
+        synth.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'en-US';
+        utterance.rate = 0.96;
+        utterance.pitch = 1.0;
+        utterance.volume = 0.82;
+        const voice = this.cachedEnglishVoice || this.resolveEnglishVoice();
+        if (voice) utterance.voice = voice;
+        utterance.onstart = duckPad;
+        utterance.onend = restorePad;
+        utterance.onerror = restorePad;
+        this.duckTimer = window.setTimeout(restorePad, 6500);
+        synth.speak(utterance);
+      } catch {
+        restorePad();
+      }
+    })();
   }
 
   public playArrivalChime() {
@@ -311,6 +341,7 @@ export class CinematicAudioController {
       this.duckTimer = null;
     }
 
+    stopSteadyVoice();
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.removeEventListener?.('voiceschanged', this.handleVoicesChanged);

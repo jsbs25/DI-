@@ -35,6 +35,7 @@ import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
 import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
+import { ParadiseBrandEmblem } from './components/brand/ParadiseBrandEmblem.tsx';
 import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
 import type { LibraryAgentAction, SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
@@ -556,7 +557,7 @@ export default function App() {
           currentUser={currentUser}
         />
       )}
-      {welcomeToast && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-2xl eo-glass text-sky-700 dark:text-cyan-100 text-xs flex items-center gap-2"><Sparkles className="w-4 h-4 text-sky-500 dark:text-cyan-400" /><span>{welcomeToast}</span></div>}
+      {welcomeToast && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-2xl border border-[#244e41]/18 dark:border-[#d6b77f]/24 bg-[#faf7f0]/92 dark:bg-[#121c27]/92 text-[#1d2e26] dark:text-[#f5f1e8] shadow-lg text-xs flex items-center gap-2"><Sparkles className="w-4 h-4 text-[#247864] dark:text-[#d6b77f]" /><span>{welcomeToast}</span></div>}
 
       <div className={isMobileSubpage ? 'hidden md:block' : 'block'}>
         <Navbar
@@ -586,27 +587,27 @@ export default function App() {
       {isMobileSubpage && currentTab !== 'chat' && (
         <header
           style={{ paddingTop: 'env(safe-area-inset-top)' }}
-          className="fixed inset-x-0 top-0 z-[55] md:hidden border-b border-slate-200/80 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/95 backdrop-blur-xl shadow-xs"
+          className="fixed inset-x-0 top-0 z-[55] md:hidden border-b border-[#244e41]/12 dark:border-[#d6b77f]/15 bg-[#faf7f0]/95 dark:bg-[#111b26]/95 backdrop-blur-xl shadow-xs"
         >
           <div className="flex h-[52px] items-center justify-between px-3 gap-2">
             <button
               type="button"
               onClick={goBack}
-              className="inline-flex items-center gap-1 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.06] px-2.5 py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-white/12 active:scale-[0.98] transition shrink-0"
+              className="inline-flex items-center gap-1 rounded-xl border border-[#244e41]/14 dark:border-[#d6b77f]/18 bg-[#efe9dc]/80 dark:bg-white/[0.06] px-2.5 py-1.5 text-xs font-semibold text-[#1d2e26] dark:text-[#f5f1e8] hover:bg-[#e5decb] dark:hover:bg-white/12 active:scale-[0.98] transition shrink-0"
               aria-label={lang === 'ar' ? 'رجوع' : lang === 'en' ? 'Back' : '返回'}
             >
               <ChevronLeft className="w-4 h-4" />
               <span>{lang === 'ar' ? 'رجوع' : lang === 'en' ? 'Back' : '返回'}</span>
             </button>
             <div className="min-w-0 flex-1 text-center">
-              <span className="text-sm font-semibold text-slate-900 dark:text-white truncate block">{mobileSubpageTitle}</span>
+              <span className="text-sm font-semibold text-[#1d2e26] dark:text-[#f5f1e8] truncate block">{mobileSubpageTitle}</span>
             </div>
             <button
               type="button"
               onClick={() => navigateToTab('globe')}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.06] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/12 shrink-0"
-              title={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到首页'}
-              aria-label={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到首页'}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[#244e41]/14 dark:border-[#d6b77f]/18 bg-[#efe9dc]/80 dark:bg-white/[0.06] text-[#355246] dark:text-[#d6b77f] hover:bg-[#e5decb] dark:hover:bg-white/12 shrink-0"
+              title={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到天堂花园'}
+              aria-label={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到天堂花园'}
             >
               <Home className="w-4 h-4" />
             </button>
@@ -669,7 +670,7 @@ export default function App() {
           drawerMode={currentTab === 'globe' && agentSnap.commDrawerOpen}
           workspaceClassName={
             currentTab === 'globe' && agentSnap.commDrawerOpen
-              ? 'fixed inset-y-0 left-0 z-[58] w-full max-w-[460px] pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)] shadow-2xl border-r border-slate-200 dark:border-white/15 bg-white dark:bg-[#0f172a] flex flex-col min-h-0'
+              ? 'fixed inset-y-0 left-0 z-[58] w-full max-w-[460px] pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)] shadow-2xl border-r border-[#244e41]/14 dark:border-[#d6b77f]/16 bg-[#faf7f0] dark:bg-[#111b26] flex flex-col min-h-0'
               : 'h-full w-full max-w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-16 md:pl-[5.5rem] md:pb-0 flex flex-col min-h-0'
           }
           quickAction={messengerQuickAction}
@@ -845,10 +846,13 @@ export default function App() {
       />
 
       {!isSpaceExperience && (
-        <footer className="w-full border-t border-slate-200 dark:border-white/10 bg-white/80 dark:bg-[#101a2e]/80 py-5 px-4 text-xs text-slate-500 dark:text-slate-400 md:pl-24">
+        <footer className="w-full border-t border-[#244e41]/12 dark:border-[#d6b77f]/14 bg-[#faf7f0]/88 dark:bg-[#111b26]/88 py-5 px-4 text-xs text-[#5d7066] dark:text-[#96a6ae] md:pl-24">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2"><img src="/earth-one-icon.png" alt="ONE" className="w-5 h-5 rounded-md object-cover ring-1 ring-slate-900/10 dark:ring-white/15" /><span className="font-semibold text-slate-800 dark:text-slate-100 tracking-wide">ONE</span></div>
-            <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400"><span>{t.motto}</span><span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><ShieldCheck className="w-3.5 h-3.5" /><span>{t.locationPrivate}</span></span></div>
+            <div className="flex items-center gap-2.5">
+              <ParadiseBrandEmblem variant="medallion" size={24} surface={theme === 'dark' ? 'dark' : 'light'} />
+              <span className="font-semibold text-[#1d2e26] dark:text-[#f5f1e8] tracking-[0.14em]">EARTH ONE</span>
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-[#5d7066] dark:text-[#96a6ae]"><span>{t.motto}</span><span className="flex items-center gap-1 text-[#247864] dark:text-[#d6b77f]"><ShieldCheck className="w-3.5 h-3.5" /><span>{t.locationPrivate}</span></span></div>
           </div>
         </footer>
       )}

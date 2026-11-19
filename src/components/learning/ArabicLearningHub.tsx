@@ -41,6 +41,7 @@ import {
 } from './islamicLibraryData.ts';
 import { EnglishLearningSection } from './EnglishLearningSection.tsx';
 import { DuolingoImmersionPlatform } from './DuolingoImmersionPlatform.tsx';
+import { LiveLanguageStudio } from './LiveLanguageStudio.tsx';
 import type { LearningAgentAction } from '../../agent/agentClient.ts';
 
 const STORAGE_KEY = 'earth_one_arabic_learning_v1';
@@ -352,7 +353,7 @@ interface ArabicLearningHubProps {
   quickAction?: LearningAgentAction | null;
 }
 
-type MainTab = 'duolingo_platform' | 'english_engine' | 'letters' | 'islamic_library';
+type MainTab = 'live_studio' | 'duolingo_platform' | 'english_engine' | 'letters' | 'islamic_library';
 type View = 'home' | 'alphabet' | 'practice';
 
 function readSavedProgress(): ArabicStudyState {
@@ -368,8 +369,8 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
   const t = COPY[lang] || COPY.en;
   const isRtl = lang === 'ar';
 
-  // Navigation state — default to Duolingo Multi-Language Immersion Platform
-  const [mainTab, setMainTab] = useState<MainTab>('duolingo_platform');
+  // Navigation state — default to Live AI Situational Spoken Roleplay & Quiz Studio
+  const [mainTab, setMainTab] = useState<MainTab>('live_studio');
   const [study, setStudy] = useState<ArabicStudyState>(readSavedProgress);
   const [view, setView] = useState<View>('home');
   const [selectedLetterId, setSelectedLetterId] = useState<string>(ARABIC_LETTERS[0].id);
@@ -640,6 +641,28 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:pb-0">
             <button
               type="button"
+              onClick={() => setMainTab('live_studio')}
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                mainTab === 'live_studio'
+                  ? ''
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
+              }`}
+              style={
+                mainTab === 'live_studio'
+                  ? {
+                      background: 'rgba(215, 182, 118, 0.16)',
+                      border: '1px solid rgba(215, 182, 118, 0.38)',
+                      color: 'var(--color-one-gold)'
+                    }
+                  : { border: '1px solid transparent' }
+              }
+            >
+              <Sparkles className="h-4 w-4" />
+              <span>{lang === 'zh' ? 'AI 实景口语与出题' : 'Live Spoken Roleplay & Quiz'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setMainTab('duolingo_platform')}
               className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
                 mainTab === 'duolingo_platform'
@@ -734,7 +757,12 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, onOp
           </div>
         </div>
 
-        {/* TAB 0: DUOLINGO MULTI-LANGUAGE IMMERSION PLATFORM */}
+        {/* TAB 0: AI LIVE SPOKEN ROLEPLAY, MULTI-QUESTION QUIZ & FREE-QUOTA IMAGE STUDIO */}
+        {mainTab === 'live_studio' && (
+          <LiveLanguageStudio lang={lang} variant="embedded" initialTargetLang="en" initialMode="roleplay" />
+        )}
+
+        {/* TAB 1: DUOLINGO MULTI-LANGUAGE IMMERSION PLATFORM */}
         {mainTab === 'duolingo_platform' && (
           <DuolingoImmersionPlatform
             lang={lang}

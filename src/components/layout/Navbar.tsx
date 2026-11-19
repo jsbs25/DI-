@@ -3,6 +3,8 @@ import type { User, Language, KnowledgeNode, Book, Community, Post } from '../..
 import { translations } from '../../i18n/translations.ts';
 import { Search, Command as CommandIcon, User as UserIcon, MapPin, ShieldCheck, Eye, EyeOff, LogOut, X, ChevronDown, Sparkles, Compass, BookOpen, Users2, Network, Sun, Moon, BatteryCharging, BatteryFull, BatteryLow, BatteryMedium } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton.tsx';
+import { ParadiseBrandEmblem } from '../brand/ParadiseBrandEmblem.tsx';
+import { useAgentUiState } from '../../agent/uiStateManager.ts';
 
 interface NavbarProps {
   currentTab: string;
@@ -49,6 +51,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   searchQuery, onSearchChange, onOpenBook, onOpenKnowledge, onReplayIntro, onOpenCommand
 }) => {
   const isGardenHome = currentTab === 'globe';
+  const agentSnap = useAgentUiState();
+  const isGardenDay = agentSnap.gardenDaylight > 0.44;
   const t = translations[lang] || translations.zh;
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -155,11 +159,15 @@ export const Navbar: React.FC<NavbarProps> = ({
     return null;
   }
 
+  const gardenSurfacePill = isGardenDay
+    ? 'border-white/60 bg-[#faf6ee]/74 text-[#1f2e27] hover:bg-[#faf6ee]/92 shadow-[0_6px_18px_rgba(24,36,28,0.10)]'
+    : 'border-white/16 bg-[#131d29]/64 text-[#f5f1e8] hover:bg-[#131d29]/86 shadow-[0_8px_22px_rgba(4,8,14,0.32)]';
+
   return (
     <header
       className={`pointer-events-none fixed inset-x-0 top-0 z-[55] ${
         isGardenHome
-          ? 'bg-gradient-to-b from-black/28 via-black/10 to-transparent px-4 pt-[max(0.7rem,env(safe-area-inset-top))] pb-3 sm:px-6'
+          ? 'px-3.5 pt-[max(0.65rem,env(safe-area-inset-top))] pb-2 sm:px-5'
           : 'px-3 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.75rem,env(safe-area-inset-top))]'
       }`}
     >
@@ -167,26 +175,32 @@ export const Navbar: React.FC<NavbarProps> = ({
         className={
           isGardenHome
             ? 'pointer-events-auto mx-auto flex min-h-10 w-full max-w-[1380px] items-center justify-between gap-3'
-            : 'pointer-events-auto mx-auto flex min-h-12 w-full max-w-[1280px] items-center justify-between gap-2 rounded-2xl border border-slate-900/10 dark:border-white/[0.14] bg-white/80 dark:bg-[#0B0D14]/76 backdrop-blur-2xl saturate-150 px-2.5 py-1 sm:px-3.5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] dark:shadow-[0_14px_38px_rgba(0,0,0,0.45)]'
+            : 'pointer-events-auto mx-auto flex min-h-12 w-full max-w-[1280px] items-center justify-between gap-2 rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#faf7f0]/88 dark:bg-[#111b26]/86 backdrop-blur-2xl saturate-150 px-2.5 py-1 sm:px-3.5 shadow-[0_8px_28px_rgba(24,36,28,0.10)] dark:shadow-[0_14px_38px_rgba(0,0,0,0.45)]'
         }
       >
-        {/* Left: Brand + Quick Spaces Launcher */}
+        {/* Left: Unified Paradise Brand Emblem + Quick Spaces Launcher */}
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={() => onSelectTab('home')}
-            className={`flex items-center gap-2 transition-opacity hover:opacity-85 cursor-pointer ${
+            className={`flex items-center gap-2 transition-all cursor-pointer ${
               isGardenHome
-                ? 'h-9 px-0.5 text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.45)]'
-                : 'min-h-[40px] rounded-xl px-1.5 hover:bg-slate-900/[0.05] dark:hover:bg-white/[0.08]'
+                ? `h-9 rounded-full border pl-1 pr-3 ${gardenSurfacePill}`
+                : 'min-h-[40px] rounded-xl px-1.5 hover:bg-[#23362c]/[0.05] dark:hover:bg-white/[0.08]'
             }`}
           >
-            <div className={`relative h-7 w-7 shrink-0 overflow-hidden rounded-full ${isGardenHome ? 'ring-1 ring-white/30' : 'rounded-[8px] ring-1 ring-slate-900/12 dark:ring-[#C4A876]/35 bg-[#08090C]'}`}>
-              <img src="/earth-one-icon.png" alt="ONE" className="h-full w-full object-cover" />
-            </div>
+            <ParadiseBrandEmblem
+              surface={isGardenHome ? (isGardenDay ? 'garden-day' : 'garden-night') : (theme === 'dark' ? 'dark' : 'light')}
+              variant="medallion"
+              size={isGardenHome ? 30 : 32}
+            />
             <span
               className={`hidden whitespace-nowrap text-[12px] font-semibold tracking-[0.2em] md:inline ${
-                isGardenHome ? 'text-white/95' : 'text-slate-900 dark:text-[#F7F5F0]'
+                isGardenHome
+                  ? isGardenDay
+                    ? 'text-[#1c2c24]'
+                    : 'text-[#f7f4ec]'
+                  : 'text-[#1c2c24] dark:text-[#F7F5F0]'
               }`}
             >
               EARTH ONE
@@ -198,12 +212,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={onOpenCommand}
               className={
                 isGardenHome
-                  ? 'hidden sm:inline-flex h-8 items-center gap-1 rounded-full border border-white/22 bg-white/12 px-2.5 text-[11px] font-medium text-white/95 hover:bg-white/22 transition-colors cursor-pointer'
-                  : 'hidden sm:inline-flex h-8 items-center gap-1 rounded-xl border border-slate-900/10 dark:border-white/[0.12] bg-slate-900/[0.04] dark:bg-white/[0.05] px-2.5 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-900/[0.08] dark:hover:bg-white/[0.1] transition-colors cursor-pointer'
+                  ? `hidden sm:inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium transition-colors cursor-pointer ${gardenSurfacePill}`
+                  : 'hidden sm:inline-flex h-8 items-center gap-1 rounded-xl border border-[#23362c]/12 dark:border-white/[0.12] bg-[#23362c]/[0.04] dark:bg-white/[0.05] px-2.5 text-[11px] font-medium text-[#273a30] dark:text-[#e9e3d6] hover:bg-[#23362c]/[0.08] dark:hover:bg-white/[0.1] transition-colors cursor-pointer'
               }
               title={lang === 'zh' ? '全部空间与功能 (⌘K)' : 'All Spaces (⌘K)'}
             >
-              <Compass className={`h-3.5 w-3.5 ${isGardenHome ? 'text-white/85' : 'text-[#247864] dark:text-[#C4A876]'}`} />
+              <Compass className={`h-3.5 w-3.5 ${isGardenHome ? (isGardenDay ? 'text-[#247864]' : 'text-[#d6b77f]') : 'text-[#247864] dark:text-[#C4A876]'}`} />
               <span>{lang === 'zh' ? '空间' : 'Spaces'}</span>
             </button>
           )}
@@ -214,11 +228,23 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div
             className={
               isGardenHome
-                ? 'flex h-8 min-w-0 flex-1 items-center rounded-full border border-white/22 bg-white/14 px-3 transition-colors focus-within:border-white/45 focus-within:bg-white/24 shadow-[0_2px_12px_rgba(0,0,0,0.12)]'
-                : 'flex h-9 min-w-0 flex-1 items-center rounded-xl border border-slate-900/10 dark:border-white/[0.12] bg-slate-900/[0.04] dark:bg-white/[0.06] px-2.5 transition-colors focus-within:border-[#247864]/60 dark:focus-within:border-[#C4A876]/55 focus-within:bg-white dark:focus-within:bg-white/[0.1]'
+                ? `flex h-9 min-w-0 flex-1 items-center rounded-full border px-3 transition-colors ${
+                    isGardenDay
+                      ? 'border-white/60 bg-[#faf6ee]/74 focus-within:bg-[#faf6ee]/95 focus-within:border-[#247864]/45 shadow-[0_6px_18px_rgba(24,36,28,0.10)]'
+                      : 'border-white/16 bg-[#131d29]/64 focus-within:bg-[#131d29]/88 focus-within:border-[#d6b77f]/50 shadow-[0_8px_22px_rgba(4,8,14,0.32)]'
+                  }`
+                : 'flex h-9 min-w-0 flex-1 items-center rounded-xl border border-[#23362c]/12 dark:border-white/[0.12] bg-white/75 dark:bg-white/[0.06] px-2.5 transition-colors focus-within:border-[#247864]/60 dark:focus-within:border-[#C4A876]/55 focus-within:bg-white dark:focus-within:bg-white/[0.1]'
             }
           >
-            <Search className={`h-3.5 w-3.5 shrink-0 ${isGardenHome ? 'text-white/85' : 'text-slate-500 dark:text-[#98A1AE]'}`} />
+            <Search
+              className={`h-3.5 w-3.5 shrink-0 ${
+                isGardenHome
+                  ? isGardenDay
+                    ? 'text-[#395044]'
+                    : 'text-[#ded8cb]/80'
+                  : 'text-[#52685d] dark:text-[#98A1AE]'
+              }`}
+            />
             <input
               value={searchQuery}
               onChange={e => onSearchChange(e.target.value)}
@@ -226,14 +252,29 @@ export const Navbar: React.FC<NavbarProps> = ({
               placeholder={t.globalSearch || (lang === 'zh' ? '搜索…' : 'Search…')}
               className={
                 isGardenHome
-                  ? 'ml-2 min-w-0 flex-1 bg-transparent text-xs text-white placeholder:text-white/75 outline-none'
-                  : 'ml-2 min-w-0 flex-1 bg-transparent text-[13px] text-slate-900 dark:text-slate-100 placeholder:text-slate-500 dark:placeholder:text-[#8E98A6] outline-none'
+                  ? isGardenDay
+                    ? 'ml-2 min-w-0 flex-1 bg-transparent text-xs text-[#1c2b24] placeholder:text-[#4e6459]/75 outline-none'
+                    : 'ml-2 min-w-0 flex-1 bg-transparent text-xs text-[#f6f3ec] placeholder:text-[#d8d2c5]/65 outline-none'
+                  : 'ml-2 min-w-0 flex-1 bg-transparent text-[13px] text-[#1c2b24] dark:text-slate-100 placeholder:text-[#5c7166] dark:placeholder:text-[#8E98A6] outline-none'
               }
             />
             {searchQuery ? (
-              <button type="button" onClick={closeGlobalSearch} aria-label="Clear search" className={`rounded p-1 ${isGardenHome ? 'text-white/80 hover:text-white' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}><X className="h-3.5 w-3.5" /></button>
+              <button
+                type="button"
+                onClick={closeGlobalSearch}
+                aria-label="Clear search"
+                className={`rounded p-1 ${
+                  isGardenHome
+                    ? isGardenDay
+                      ? 'text-[#395044] hover:text-[#16221c]'
+                      : 'text-white/80 hover:text-white'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             ) : !isGardenHome && onOpenCommand ? (
-              <button type="button" onClick={onOpenCommand} title={lang === 'zh' ? '命令中心 (⌘K)' : 'Command (⌘K)'} className="hidden md:inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:text-[#98A1AE] hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-slate-100 transition-colors">
+              <button type="button" onClick={onOpenCommand} title={lang === 'zh' ? '命令中心 (⌘K)' : 'Command (⌘K)'} className="hidden md:inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-[#52685d] dark:text-[#98A1AE] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.08] hover:text-[#1c2b24] dark:hover:text-slate-100 transition-colors">
                 <CommandIcon className="h-2.5 w-2.5" /><span>K</span>
               </button>
             ) : null}
@@ -326,17 +367,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => { setLangMenuOpen(v => !v); setUserDropdownOpen(false); }}
               className={
                 isGardenHome
-                  ? 'flex h-8 items-center gap-0.5 rounded-full px-2 text-[11px] font-medium text-white/90 hover:bg-white/14 transition-colors cursor-pointer'
-                  : 'flex h-10 items-center gap-0.5 rounded-xl px-2 text-[11px] font-medium text-slate-600 dark:text-[#B9C1CD] transition-colors hover:bg-slate-900/[0.06] dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-white cursor-pointer'
+                  ? `flex h-9 items-center gap-0.5 rounded-full border px-2.5 text-[11px] font-medium transition-colors cursor-pointer ${gardenSurfacePill}`
+                  : 'flex h-10 items-center gap-0.5 rounded-xl px-2 text-[11px] font-medium text-[#465b50] dark:text-[#B9C1CD] transition-colors hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.08] hover:text-[#1c2b24] dark:hover:text-white cursor-pointer'
               }
             >
               <span className="uppercase">{lang}</span>
-              <ChevronDown className={`h-3 w-3 ${isGardenHome ? 'text-white/75' : 'text-slate-400'}`} />
+              <ChevronDown className={`h-3 w-3 ${isGardenHome ? (isGardenDay ? 'text-[#395044]' : 'text-white/75') : 'text-slate-400'}`} />
             </button>
             {langMenuOpen && (
-              <div role="menu" className="absolute right-0 mt-2 w-40 rounded-2xl border border-slate-200 dark:border-white/[0.14] bg-white/96 dark:bg-[#0B0D14]/96 py-1.5 shadow-2xl">
+              <div role="menu" className="absolute right-0 mt-2 w-40 rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#faf7f0]/96 dark:bg-[#111b26]/96 py-1.5 shadow-2xl">
                 {languages.map(l => (
-                  <button key={l.code} type="button" onClick={() => { onSelectLang(l.code); setLangMenuOpen(false); }} className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs ${lang === l.code ? 'text-[#247864] dark:text-[#C4A876] font-semibold' : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]'}`}><span>{l.flag}</span><span>{l.label}</span></button>
+                  <button key={l.code} type="button" onClick={() => { onSelectLang(l.code); setLangMenuOpen(false); }} className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs ${lang === l.code ? 'text-[#247864] dark:text-[#d6b77f] font-semibold' : 'text-[#24362d] dark:text-[#ebe5d8] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06]'}`}><span>{l.flag}</span><span>{l.label}</span></button>
                 ))}
               </div>
             )}
@@ -351,8 +392,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => { setUserDropdownOpen(v => !v); setLangMenuOpen(false); }}
                 className={
                   isGardenHome
-                    ? 'flex h-9 w-9 items-center justify-center rounded-full border border-white/35 bg-white/16 p-0.5 transition hover:border-white/70 cursor-pointer shadow-[0_2px_12px_rgba(0,0,0,0.2)]'
-                    : 'flex h-10 items-center gap-2 rounded-full border border-slate-900/12 dark:border-white/[0.14] bg-slate-900/[0.04] dark:bg-white/[0.07] p-1 sm:pr-2.5 transition hover:border-[#247864]/50 dark:hover:border-[#C4A876]/60 cursor-pointer'
+                    ? `flex h-9 w-9 items-center justify-center rounded-full border p-0.5 transition cursor-pointer ${gardenSurfacePill}`
+                    : 'flex h-10 items-center gap-2 rounded-full border border-[#23362c]/12 dark:border-white/[0.14] bg-[#23362c]/[0.04] dark:bg-white/[0.07] p-1 sm:pr-2.5 transition hover:border-[#247864]/50 dark:hover:border-[#C4A876]/60 cursor-pointer'
                 }
                 title={currentUser.displayName}
               >
@@ -361,7 +402,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
                 {!isGardenHome && (
                   <>
-                    <span className="hidden sm:inline max-w-[92px] truncate text-xs font-medium text-slate-900 dark:text-[#F7F5F0]">
+                    <span className="hidden sm:inline max-w-[92px] truncate text-xs font-medium text-[#1c2b24] dark:text-[#F7F5F0]">
                       {currentUser.displayName}
                     </span>
                     <ChevronDown className="hidden md:inline h-3 w-3 text-slate-400" />
@@ -369,27 +410,27 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </button>
               {userDropdownOpen && (
-                <div role="menu" className="absolute right-0 mt-2 w-60 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-slate-200 dark:border-white/[0.14] bg-white/96 dark:bg-[#0B0D14]/96 py-2 text-xs shadow-2xl">
-                  <div className="mb-1 flex items-center gap-2.5 border-b border-slate-200 dark:border-white/[0.1] px-3.5 py-2.5">
+                <div role="menu" className="absolute right-0 mt-2 w-60 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#faf7f0]/96 dark:bg-[#111b26]/96 py-2 text-xs shadow-2xl">
+                  <div className="mb-1 flex items-center gap-2.5 border-b border-[#23362c]/10 dark:border-white/[0.1] px-3.5 py-2.5">
                     <img src={currentUser.avatar} alt={currentUser.displayName} className="h-9 w-9 rounded-full object-cover shrink-0" />
                     <div className="min-w-0">
-                      <span className="block font-semibold text-slate-900 dark:text-white truncate">{currentUser.displayName}</span>
-                      <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">@{currentUser.username}</span>
+                      <span className="block font-semibold text-[#1c2b24] dark:text-white truncate">{currentUser.displayName}</span>
+                      <span className="block text-[11px] text-[#556b5f] dark:text-[#b7b0a2] truncate">@{currentUser.username}</span>
                     </div>
                   </div>
                   <PWAInstallButton lang={lang} variant="menu-item" onActionDone={() => setUserDropdownOpen(false)} />
                   {isGardenHome && onToggleTheme && (
-                    <button type="button" onClick={() => { onToggleTheme(); setUserDropdownOpen(false); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]">
-                      {theme === 'dark' ? <Sun className="h-4 w-4 text-[#C4A876]" /> : <Moon className="h-4 w-4" />}
+                    <button type="button" onClick={() => { onToggleTheme(); setUserDropdownOpen(false); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[#24362d] dark:text-[#ebe5d8] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06]">
+                      {theme === 'dark' ? <Sun className="h-4 w-4 text-[#d6b77f]" /> : <Moon className="h-4 w-4 text-[#247864]" />}
                       <span>{theme === 'dark' ? (lang === 'zh' ? '切换明亮模式' : 'Light mode') : (lang === 'zh' ? '切换深色模式' : 'Dark mode')}</span>
                     </button>
                   )}
-                  <button type="button" onClick={() => { setUserDropdownOpen(false); onOpenProfile(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]"><UserIcon className="h-4 w-4" /><span>{t.myProfile || 'Profile'}</span></button>
-                  <button type="button" onClick={() => { setUserDropdownOpen(false); onOpenOnboarding(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]"><MapPin className="h-4 w-4" /><span>{t.editGlobeBeacon || 'Beacon'}</span></button>
-                  <button type="button" onClick={() => { setUserDropdownOpen(false); onToggleLocationPrivacy(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]">{currentUser.location?.isPublic ? <Eye className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> : <EyeOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />}<span>{currentUser.location?.isPublic ? t.locationPublic : t.locationPrivate}</span></button>
-                  {onReplayIntro && <button type="button" onClick={() => { setUserDropdownOpen(false); onReplayIntro(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]"><Sparkles className="h-4 w-4" /><span>{lang === 'zh' ? '重播开场动画' : 'Replay intro'}</span></button>}
-                  <button type="button" onClick={() => { setUserDropdownOpen(false); onOpenSecurity?.(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06]"><ShieldCheck className="h-4 w-4" /><span>{lang === 'zh' ? '账户与安全' : 'Account & Security'}</span></button>
-                  <button type="button" onClick={() => { setUserDropdownOpen(false); onLogout(); }} className="mt-1 flex w-full items-center gap-2.5 border-t border-slate-200 dark:border-white/[0.1] px-3.5 py-2.5 text-red-600 dark:text-red-400 hover:bg-slate-100 dark:hover:bg-white/[0.06]"><LogOut className="h-4 w-4" /><span>{t.logOut || 'Log out'}</span></button>
+                  <button type="button" onClick={() => { setUserDropdownOpen(false); onOpenProfile(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[#24362d] dark:text-[#ebe5d8] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06]"><UserIcon className="h-4 w-4" /><span>{t.myProfile || 'Profile'}</span></button>
+                  <button type="button" onClick={() => { setUserDropdownOpen(false); onOpenOnboarding(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[#24362d] dark:text-[#ebe5d8] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06]"><MapPin className="h-4 w-4" /><span>{t.editGlobeBeacon || 'Beacon'}</span></button>
+                  <button type="button" onClick={() => { setUserDropdownOpen(false); onToggleLocationPrivacy(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[#24362d] dark:text-[#ebe5d8] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06]">{currentUser.location?.isPublic ? <Eye className="h-4 w-4 text-[#247864] dark:text-emerald-400" /> : <EyeOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />}<span>{currentUser.location?.isPublic ? t.locationPublic : t.locationPrivate}</span></button>
+                  {onReplayIntro && <button type="button" onClick={() => { setUserDropdownOpen(false); onReplayIntro(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[#24362d] dark:text-[#ebe5d8] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06]"><Sparkles className="h-4 w-4" /><span>{lang === 'zh' ? '重播开场仪式' : 'Replay intro'}</span></button>}
+                  <button type="button" onClick={() => { setUserDropdownOpen(false); onOpenSecurity?.(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[#24362d] dark:text-[#ebe5d8] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06]"><ShieldCheck className="h-4 w-4" /><span>{lang === 'zh' ? '账户与安全' : 'Account & Security'}</span></button>
+                  <button type="button" onClick={() => { setUserDropdownOpen(false); onLogout(); }} className="mt-1 flex w-full items-center gap-2.5 border-t border-[#23362c]/10 dark:border-white/[0.1] px-3.5 py-2.5 text-rose-600 dark:text-rose-400 hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06]"><LogOut className="h-4 w-4" /><span>{t.logOut || 'Log out'}</span></button>
                 </div>
               )}
             </div>
@@ -399,8 +440,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={onOpenAuth}
               className={
                 isGardenHome
-                  ? 'h-8 whitespace-nowrap rounded-full border border-white/30 bg-white/16 px-3 text-xs font-medium text-white hover:bg-white/26 transition-colors cursor-pointer'
-                  : 'h-9 whitespace-nowrap rounded-full bg-[#08090C] dark:bg-[#F7F5F0] px-3.5 text-xs font-semibold text-[#F7F5F0] dark:text-[#08090C] transition-colors hover:bg-slate-800 dark:hover:bg-[#E7E2D8] cursor-pointer'
+                  ? `h-9 whitespace-nowrap rounded-full border px-3.5 text-xs font-medium transition-colors cursor-pointer ${gardenSurfacePill}`
+                  : 'h-9 whitespace-nowrap rounded-full bg-[#244e41] dark:bg-[#e5d9be] px-3.5 text-xs font-semibold text-[#faf7f0] dark:text-[#152028] transition-colors hover:bg-[#1c3e33] dark:hover:bg-[#f2e8d2] cursor-pointer'
               }
             >
               {t.signIn || 'Sign in'}

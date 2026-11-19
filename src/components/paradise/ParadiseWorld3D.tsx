@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { ChevronDown, ChevronUp, Compass, LocateFixed, Radio, RotateCcw, SlidersHorizontal, SunMedium, Wind } from 'lucide-react';
+import { ChevronDown, ChevronUp, Compass, Download, LocateFixed, Radio, RotateCcw, SlidersHorizontal, SunMedium, Wind, X } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
 import { uiStateManager, useAgentUiState } from '../../agent/uiStateManager.ts';
 import {
@@ -33,7 +33,8 @@ import { createParadiseWeatherFX } from './paradiseWeatherFX.ts';
 import { createParadisePostPipeline, type ParadisePostPipeline } from './paradisePost.ts';
 import { createParadiseSpirit } from './paradiseSpirit.ts';
 import { createParadiseCat } from './paradiseCat.ts';
-import { PavilionAiHud } from './PavilionAiHud.tsx';
+import { SpiritSpeechBubble, triggerImageDownload } from './SpiritSpeechBubble.tsx';
+import { LiveLanguageStudio } from '../learning/LiveLanguageStudio.tsx';
 
 type CameraPresetId = 'overlook' | 'bridge' | 'blossoms' | 'pavilion';
 
@@ -109,6 +110,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   realtimeSyncRef.current = agentSnap.realtimeSync;
   const spiritStateRef = useRef(agentSnap.spiritState);
   spiritStateRef.current = agentSnap.spiritState;
+  const spiritBubbleRef = useRef<HTMLDivElement | null>(null);
   const lastHandledEnvSeqRef = useRef<number>(0);
 
   const persistedRef = useRef<{
@@ -493,11 +495,21 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           weatherFX.emitPetalBurst(cat.group.position);
           return;
         }
-        // Clicked Spirit or Waterside Pavilion: wake Spirit & open Pavilion HUD
-        uiStateManager.setPavilionHudOpen(true);
+        // Clicked Spirit or Waterside Pavilion: wake Spirit & speak ONLY inside the overhead bubble (no duplicate HUD!)
+        uiStateManager.setPavilionHudOpen(false);
         if (spiritStateRef.current === 'idle_explore' || spiritStateRef.current === 'sleeping_in_house' || spiritStateRef.current === 'returning_to_rest') {
           uiStateManager.setSpiritState('woken_approaching');
         }
+        const aiName = uiStateManager.getSnapshot().aiName;
+        uiStateManager.setSpiritBubble({
+          visible: true,
+          isLoading: false,
+          badge: lang === 'zh' ? '花径伴侣' : 'Garden Companion',
+          text:
+            lang === 'zh'
+              ? `我在呢！你可以直接打字，或点下方「实时语音」跟我一对一聊天、练英语口语，或者让我帮你画图。`
+              : `I'm right here! Type below or tap Live Voice to talk with ${aiName}, practice speaking, or paint an image.`,
+        });
         weatherFX.emitPetalBurst(spirit.spiritPos);
         return;
       }
@@ -804,6 +816,28 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
       controls.update();
 
+      // Project 3D Spirit head position to 2D viewport for the live overhead speech bubble (0 React re-renders/frame)
+      const bubbleEl = spiritBubbleRef.current;
+      if (bubbleEl) {
+        spirit.getHeadWorldPosition(tmpKeyWorld);
+        tmpKeyWorld.project(camera);
+        const rect = container.getBoundingClientRect();
+        const vw = rect.width || window.innerWidth;
+        const vh = rect.height || window.innerHeight;
+        let sx = (tmpKeyWorld.x * 0.5 + 0.5) * vw + rect.left;
+        let sy = (-tmpKeyWorld.y * 0.5 + 0.5) * vh + rect.top;
+        // If Spirit is momentarily behind the camera, anchor cleanly in upper-left safe zone
+        if (tmpKeyWorld.z > 1) {
+          sx = rect.left + Math.min(vw * 0.36, 260);
+          sy = rect.top + Math.max(190, vh * 0.42);
+        } else {
+          const padX = Math.min(185, vw * 0.42);
+          sx = Math.max(rect.left + padX, Math.min(rect.left + vw - padX, sx));
+          sy = Math.max(rect.top + 165, Math.min(rect.top + vh - 115, sy));
+        }
+        bubbleEl.style.transform = `translate3d(${Math.round(sx)}px, ${Math.round(sy)}px, 0)`;
+      }
+
       // Persist state continuously in case quality tier is switched seamlessly
       persistedRef.current.hasCam = true;
       persistedRef.current.camPos.copy(camera.position);
@@ -1011,8 +1045,55 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Pavilion AI Workspace HUD */}
-      <PavilionAiHud lang={lang} />
+      {/* 3D-Tracked Overhead Speech Bubble directly above the Spirit's head */}
+      <SpiritSpeechBubble lang={lang} containerRef={spiritBubbleRef} />
+
+      {/* Interactive Language Learning & Free-Quota Image Studio Drawer */}
+      <LiveLanguageStudio lang={lang} variant="garden-drawer" />
+
+      {/* Full-Screen Generated Image Lightbox */}
+      {agentSnap.imageLightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => uiStateManager.setImageLightbox(null)}
+        >
+          <div
+            className="relative max-h-[90vh] max-w-[92vw] overflow-hidden rounded-2xl border border-white/15 bg-[#121a26] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={agentSnap.imageLightbox.imageUrl}
+              alt={agentSnap.imageLightbox.captionZh}
+              className="max-h-[76vh] max-w-[88vw] object-contain"
+            />
+            <div className="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-2.5 text-xs text-[#f4f0e8]">
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{agentSnap.imageLightbox.captionZh}</div>
+                <div className="text-[11px] opacity-65 truncate">
+                  {agentSnap.imageLightbox.providerLabelZh || 'ONE AI 免费额度重组画室'}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => agentSnap.imageLightbox && triggerImageDownload(agentSnap.imageLightbox)}
+                  className="inline-flex items-center gap-1 rounded-lg bg-[#e9e1d0] px-3 py-1.5 font-medium text-[#141e2b] cursor-pointer hover:bg-white"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>{isZh ? '下载图片' : 'Download'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => uiStateManager.setImageLightbox(null)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white cursor-pointer hover:bg-white/20"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Compact Collapsible Environment Dock */}
       <div

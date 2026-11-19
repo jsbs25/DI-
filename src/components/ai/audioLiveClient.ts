@@ -94,10 +94,19 @@ export class AudioLiveClient {
       const Ctx = window.AudioContext || (window as any).webkitAudioContext;
       this.outputCtx = new Ctx({ sampleRate: 24000 });
       this.outputGain = this.outputCtx.createGain();
-      this.outputGain.gain.value = 1.0;
+      this.outputGain.gain.value = 0.88;
+
+      const compressor = this.outputCtx.createDynamicsCompressor();
+      compressor.threshold.value = -18;
+      compressor.knee.value = 12;
+      compressor.ratio.value = 6;
+      compressor.attack.value = 0.004;
+      compressor.release.value = 0.12;
+
       this.outputAnalyser = this.outputCtx.createAnalyser();
       this.outputAnalyser.fftSize = 64;
-      this.outputGain.connect(this.outputAnalyser);
+      this.outputGain.connect(compressor);
+      compressor.connect(this.outputAnalyser);
       this.outputAnalyser.connect(this.outputCtx.destination);
       this.analyserData = new Uint8Array(this.outputAnalyser.frequencyBinCount);
       this.nextStartTime = this.outputCtx.currentTime;

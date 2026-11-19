@@ -323,6 +323,71 @@ export const AI_COMPANION_TOOLS: FunctionDeclaration[] = [
       required: ['query'],
     },
   },
+  {
+    name: 'start_language_studio',
+    description:
+      'Launch the interactive Language Learning Studio with real-world situational spoken roleplay (English, Arabic, Japanese, French, Spanish, Korean) or multi-question interactive quizzes right inside the 3D Paradise World.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        targetLang: {
+          type: Type.STRING,
+          description: 'Target language code: en, ar, ja, fr, es, or ko.',
+        },
+        mode: {
+          type: Type.STRING,
+          description: 'Either roleplay (实景口语对话) or quiz (出题刷题).',
+        },
+        scenarioId: {
+          type: Type.STRING,
+          description: 'Optional preset scenario: cafe, airport, hotel, restaurant, interview, shopping, clinic, friends.',
+        },
+      },
+      required: ['targetLang', 'mode'],
+    },
+  },
+  {
+    name: 'language_rescue_hint',
+    description:
+      'When the user says "我不知道该怎么讲" or asks how to express something in a foreign language, immediately display 3 graded ready-to-speak phrases with pronunciation and Chinese meanings above the 3D Spirit.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        targetLang: {
+          type: Type.STRING,
+          description: 'Target language code: en, ar, ja, fr, es, or ko.',
+        },
+        userIntentZh: {
+          type: Type.STRING,
+          description: 'What the learner wants to say or asks help with.',
+        },
+      },
+      required: ['userIntentZh'],
+    },
+  },
+  {
+    name: 'generate_image',
+    description:
+      'Generate a bespoke image or dialogue scene illustration immediately using EARTH ONE free-quota recomposed AI image pool and display it above the 3D Spirit.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        prompt: {
+          type: Type.STRING,
+          description: 'Visual description of the image or scene to generate.',
+        },
+        mode: {
+          type: Type.STRING,
+          description: 'Either standalone or dialogue_scene.',
+        },
+        aspectRatio: {
+          type: Type.STRING,
+          description: 'Optional aspect ratio: 4:3, 1:1, 16:9, or 3:4.',
+        },
+      },
+      required: ['prompt'],
+    },
+  },
 ];
 
 export interface LivePageContextSummary {

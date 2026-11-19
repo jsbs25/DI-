@@ -61,10 +61,74 @@ export interface EnvironmentOverrideCommand {
   realtimeSync?: boolean;
 }
 
+export interface SpokenRescueCard {
+  level: 'simple' | 'natural' | 'native';
+  labelZh: string;
+  targetText: string;
+  translationZh: string;
+  phonetic: string;
+  chunkGuide: string;
+}
+
+export interface GeneratedImagePayload {
+  imageUrl: string;
+  mimeType: string;
+  prompt: string;
+  enhancedPrompt?: string;
+  captionZh: string;
+  aspectRatio?: string;
+  mode?: 'standalone' | 'dialogue_scene';
+  engine?: string;
+  providerLabelZh?: string;
+  promptDirectorLabelZh?: string;
+  freePoolChain?: string[];
+  failoverCount?: number;
+  createdAt?: string;
+}
+
+export interface SpiritBubbleState {
+  visible: boolean;
+  isLoading?: boolean;
+  loadingLabel?: string;
+  speaking?: boolean;
+  badge?: string;
+  text: string;
+  translationZh?: string;
+  phonetic?: string;
+  speakLang?: string;
+  rescueCards?: SpokenRescueCard[];
+  rescueExpanded?: boolean;
+  generatedImage?: GeneratedImagePayload | null;
+  updatedAt: number;
+}
+
+export interface ActiveRoleplayContext {
+  targetLang: 'en' | 'ar' | 'ja' | 'fr' | 'es' | 'ko';
+  scenarioId: string;
+  scenarioTitle: string;
+  npcRole: string;
+  lastNpcLine: string;
+  lastNpcTranslationZh?: string;
+}
+
+export interface LanguageStudioConfig {
+  seq: number;
+  targetLang: 'en' | 'ar' | 'ja' | 'fr' | 'es' | 'ko';
+  mode: 'roleplay' | 'quiz' | 'image_pool';
+  scenarioId?: string;
+  initialRoleplay?: any;
+  initialQuiz?: any;
+}
+
 export interface AgentChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  translationZh?: string;
+  phonetic?: string;
+  speakLang?: string;
+  rescueCards?: SpokenRescueCard[];
+  generatedImage?: GeneratedImagePayload | null;
   timestamp: number;
 }
 
@@ -113,6 +177,11 @@ export interface AgentUiSnapshot {
   pausedTask: AgentTaskView | null;
   pendingConfirmation: AgentConfirmationRequest | null;
   chatMessages: AgentChatMessage[];
+  spiritBubble: SpiritBubbleState | null;
+  languageStudioOpen: boolean;
+  languageStudioConfig: LanguageStudioConfig | null;
+  activeRoleplayContext: ActiveRoleplayContext | null;
+  imageLightbox: GeneratedImagePayload | null;
   gardenDaylight: number;
   realtimeSync: boolean;
   liveWeather: LiveWeatherInfo | null;
@@ -121,6 +190,8 @@ export interface AgentUiSnapshot {
   voiceReplyEnabled: boolean;
   wakeListening: boolean;
   lastSpokenTranscript: string;
+  liveVoiceActive: boolean;
+  liveVoicePhase: 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking';
 }
 
 let state: AgentUiSnapshot = {
@@ -134,6 +205,11 @@ let state: AgentUiSnapshot = {
   pausedTask: null,
   pendingConfirmation: null,
   chatMessages: [],
+  spiritBubble: null,
+  languageStudioOpen: false,
+  languageStudioConfig: null,
+  activeRoleplayContext: null,
+  imageLightbox: null,
   gardenDaylight: 0.72,
   realtimeSync: true,
   liveWeather: null,
@@ -142,6 +218,8 @@ let state: AgentUiSnapshot = {
   voiceReplyEnabled: typeof window !== 'undefined' ? readStoredVoiceReply() : true,
   wakeListening: false,
   lastSpokenTranscript: '',
+  liveVoiceActive: false,
+  liveVoicePhase: 'idle',
 };
 
 const listeners = new Set<() => void>();
@@ -180,13 +258,28 @@ export const uiStateManager = {
     emit();
   },
 
-  appendChatMessage(role: 'user' | 'assistant', content: string) {
+  appendChatMessage(
+    role: 'user' | 'assistant',
+    content: string,
+    extra?: {
+      translationZh?: string;
+      phonetic?: string;
+      speakLang?: string;
+      rescueCards?: SpokenRescueCard[];
+      generatedImage?: GeneratedImagePayload | null;
+    }
+  ) {
     const clean = content.trim();
-    if (!clean) return;
+    if (!clean && !extra?.generatedImage) return;
     const msg: AgentChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       role,
       content: clean,
+      translationZh: extra?.translationZh,
+      phonetic: extra?.phonetic,
+      speakLang: extra?.speakLang,
+      rescueCards: extra?.rescueCards,
+      generatedImage: extra?.generatedImage,
       timestamp: Date.now(),
     };
     state = { ...state, chatMessages: [...state.chatMessages.slice(-24), msg] };
@@ -195,6 +288,67 @@ export const uiStateManager = {
 
   clearChatMessages() {
     state = { ...state, chatMessages: [] };
+    emit();
+  },
+
+  setSpiritBubble(patch: Partial<SpiritBubbleState> | null) {
+    if (!patch) {
+      state = { ...state, spiritBubble: null };
+      emit();
+      return;
+    }
+    const prev = state.spiritBubble;
+    state = {
+      ...state,
+      spiritBubble: {
+        visible: true,
+        text: prev?.text || '',
+        ...prev,
+        ...patch,
+        updatedAt: Date.now(),
+      },
+    };
+    emit();
+  },
+
+  hideSpiritBubble() {
+    if (!state.spiritBubble) return;
+    state = { ...state, spiritBubble: { ...state.spiritBubble, visible: false } };
+    emit();
+  },
+
+  openLanguageStudio(config?: Partial<Omit<LanguageStudioConfig, 'seq'>>) {
+    const prev = state.languageStudioConfig;
+    state = {
+      ...state,
+      languageStudioOpen: true,
+      pavilionHudOpen: false,
+      spiritState: 'working_in_pavilion',
+      languageStudioConfig: {
+        seq: Date.now(),
+        targetLang: config?.targetLang || prev?.targetLang || 'en',
+        mode: config?.mode || prev?.mode || 'roleplay',
+        scenarioId: config?.scenarioId ?? prev?.scenarioId ?? 'cafe',
+        initialRoleplay: config?.initialRoleplay,
+        initialQuiz: config?.initialQuiz,
+      },
+    };
+    emit();
+  },
+
+  closeLanguageStudio() {
+    if (!state.languageStudioOpen) return;
+    state = { ...state, languageStudioOpen: false };
+    emit();
+  },
+
+  setActiveRoleplayContext(ctx: ActiveRoleplayContext | null) {
+    state = { ...state, activeRoleplayContext: ctx };
+    emit();
+  },
+
+  setImageLightbox(img: GeneratedImagePayload | null) {
+    state = { ...state, imageLightbox: img };
     emit();
   },
 
@@ -298,6 +452,14 @@ export const uiStateManager = {
         // ignore
       }
     }
+    state = { ...state, ...patch };
+    emit();
+  },
+
+  setLiveVoiceStatus(patch: {
+    liveVoiceActive?: boolean;
+    liveVoicePhase?: 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking';
+  }) {
     state = { ...state, ...patch };
     emit();
   },

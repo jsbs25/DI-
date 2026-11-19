@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { Language, User } from '../../types/index.ts';
 import { Eye, EyeOff, Loader2, Moon, Sun } from 'lucide-react';
 import { PWAInstallButton } from '../layout/PWAInstallButton.tsx';
-import { BrandMark } from '../brand/brandLogos.tsx';
+import { ParadiseBrandEmblem } from '../brand/ParadiseBrandEmblem.tsx';
+import { unlockSteadyVoiceAudio } from '../../utils/steadyVoicePlayer.ts';
 
 interface LoginPageProps {
   lang: Language;
@@ -53,28 +54,77 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
     resize();
     window.addEventListener('resize', resize);
 
-    const flakes = Array.from({ length: 26 }, (_, i) => ({
+    // Organic garden petals, warm pollen motes (day) or serene fireflies (night)
+    const flakes = Array.from({ length: 34 }, (_, i) => ({
       x: Math.random() * window.innerWidth,
       y: Math.random() * window.innerHeight,
-      vx: 0.25 + Math.random() * 0.45,
-      vy: 0.35 + Math.random() * 0.55,
+      vx: 0.18 + Math.random() * 0.36,
+      vy: i % 4 === 0 ? -0.14 - Math.random() * 0.2 : 0.28 + Math.random() * 0.44,
       rot: Math.random() * Math.PI * 2,
-      vRot: (Math.random() - 0.5) * 0.025,
-      size: 4 + Math.random() * 5,
-      isGinkgo: i % 3 === 0,
+      vRot: (Math.random() - 0.5) * 0.02,
+      size: i % 4 === 0 ? 2.2 + Math.random() * 2.2 : 4 + Math.random() * 4.5,
+      kind: i % 4 === 0 ? 'mote' : i % 3 === 0 ? 'ginkgo' : 'petal',
       phase: Math.random() * Math.PI * 2,
     }));
 
+    let t = 0;
     const draw = () => {
       if (disposed) return;
+      t += 0.016;
       const w = window.innerWidth;
       const h = window.innerHeight;
       ctx.clearRect(0, 0, w, h);
 
+      // Soft layered horizon garden hills silhouette so entry seamlessly previews Paradise World
+      const drawHill = (yRatio: number, amp: number, freq: number, phase: number, fill: string) => {
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        for (let x = 0; x <= w; x += 28) {
+          const y =
+            h * yRatio +
+            Math.sin(x * freq + phase) * amp +
+            Math.cos(x * freq * 0.52 + phase * 0.7) * (amp * 0.45);
+          ctx.lineTo(x, y);
+        }
+        ctx.lineTo(w, h);
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+      };
+
+      if (theme === 'dark') {
+        drawHill(0.76, 26, 0.0024, 0.4, 'rgba(20, 42, 40, 0.42)');
+        drawHill(0.84, 20, 0.0032, 2.1, 'rgba(15, 31, 34, 0.62)');
+        drawHill(0.92, 14, 0.0044, 4.0, 'rgba(11, 22, 28, 0.82)');
+      } else {
+        drawHill(0.77, 26, 0.0024, 0.4, 'rgba(136, 174, 148, 0.24)');
+        drawHill(0.85, 20, 0.0032, 2.1, 'rgba(98, 142, 118, 0.26)');
+        drawHill(0.92, 14, 0.0044, 4.0, 'rgba(56, 102, 82, 0.28)');
+      }
+
       for (const f of flakes) {
-        f.x += f.vx + Math.sin(f.phase + f.y * 0.012) * 0.35;
+        f.x += f.vx + Math.sin(f.phase + t * 1.1) * 0.28;
         f.y += f.vy;
         f.rot += f.vRot;
+        if (f.kind === 'mote') {
+          if (f.y < -20) {
+            f.y = h + 16;
+            f.x = Math.random() * w;
+          }
+          if (f.x > w + 20) f.x = -12;
+          const pulse = 0.45 + 0.55 * Math.sin(t * 2.4 + f.phase);
+          ctx.save();
+          ctx.fillStyle =
+            theme === 'dark'
+              ? `rgba(232, 208, 134, ${0.55 * pulse})`
+              : `rgba(196, 168, 118, ${0.48 * pulse})`;
+          ctx.beginPath();
+          ctx.arc(f.x, f.y, f.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          continue;
+        }
+
         if (f.y > h + 20 || f.x > w + 24) {
           f.x = Math.random() * w - 40;
           f.y = -18;
@@ -82,20 +132,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
         ctx.save();
         ctx.translate(f.x, f.y);
         ctx.rotate(f.rot);
-        ctx.fillStyle = f.isGinkgo
-          ? theme === 'dark'
-            ? 'rgba(245, 200, 76, 0.38)'
-            : 'rgba(214, 154, 24, 0.34)'
-          : theme === 'dark'
-            ? 'rgba(252, 207, 224, 0.42)'
-            : 'rgba(232, 134, 168, 0.36)';
+        ctx.fillStyle =
+          f.kind === 'ginkgo'
+            ? theme === 'dark'
+              ? 'rgba(216, 184, 112, 0.34)'
+              : 'rgba(196, 152, 62, 0.32)'
+            : theme === 'dark'
+              ? 'rgba(244, 208, 218, 0.32)'
+              : 'rgba(232, 164, 182, 0.36)';
         ctx.beginPath();
-        if (f.isGinkgo) {
+        if (f.kind === 'ginkgo') {
           ctx.moveTo(0, f.size * 0.3);
           ctx.quadraticCurveTo(-f.size, -f.size * 0.6, 0, -f.size * 0.9);
           ctx.quadraticCurveTo(f.size, -f.size * 0.6, 0, f.size * 0.3);
         } else {
-          ctx.ellipse(0, 0, f.size * 0.52, f.size * 0.85, 0, 0, Math.PI * 2);
+          ctx.ellipse(0, 0, f.size * 0.5, f.size * 0.85, 0, 0, Math.PI * 2);
         }
         ctx.fill();
         ctx.restore();
@@ -112,12 +163,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
   }, [theme]);
 
   const completeWithTransition = (user: User, token: string, isNewRegistration: boolean) => {
+    unlockSteadyVoiceAudio();
     setIsTransitioning(true);
     const delay =
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
         ? 60
-        : 480;
+        : 460;
     window.setTimeout(() => {
       onAuthSuccess(user, token, isNewRegistration);
     }, delay);
@@ -139,6 +191,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loading || isTransitioning) return;
+    unlockSteadyVoiceAudio();
     setErrorMsg(null);
     setInfoMsg(null);
 
@@ -204,68 +257,122 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
     }
   };
 
+  const isDark = theme === 'dark';
+
   return (
     <div
-      className={`relative min-h-[100dvh] overflow-hidden bg-gradient-to-br from-[#eef4fc] via-[#f9fbff] to-[#f4ece3] dark:from-[#0f1b33] dark:via-[#121f38] dark:to-[#1d2236] text-slate-900 dark:text-slate-100 flex items-center justify-center px-4 py-6 transition-all duration-500 ease-out ${
-        isTransitioning ? 'opacity-0 scale-[1.015] pointer-events-none' : 'opacity-100 scale-100'
-      }`}
+      className={`relative min-h-[100dvh] overflow-hidden flex items-center justify-center px-4 py-8 transition-all duration-500 ease-out ${
+        isDark
+          ? 'bg-gradient-to-b from-[#0e1722] via-[#13212e] to-[#162728] text-[#f3efe6]'
+          : 'bg-gradient-to-b from-[#f3efe5] via-[#eef3ec] to-[#e9e3d4] text-[#1d2b24]'
+      } ${isTransitioning ? 'opacity-0 scale-[1.015] pointer-events-none' : 'opacity-100 scale-100'}`}
       dir={lang === 'ar' ? 'rtl' : 'ltr'}
     >
+      {/* Subtle sunlit/moonlit upper glow matching Paradise World sky */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[48vh]"
+        style={{
+          background: isDark
+            ? 'radial-gradient(ellipse 68% 58% at 50% 8%, rgba(214,183,127,0.14), rgba(46,139,116,0.06) 52%, transparent 78%)'
+            : 'radial-gradient(ellipse 68% 58% at 50% 6%, rgba(255,244,218,0.85), rgba(196,168,118,0.14) 55%, transparent 80%)',
+        }}
+      />
+
       <canvas
         ref={bgCanvasRef}
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 w-full h-full z-0"
       />
-      <div className="relative z-10 w-full max-w-[420px]">
-        <div className="mb-6">
-          <div className="flex items-center justify-between gap-3 mb-5">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 overflow-hidden rounded-[10px] border border-slate-900/10 dark:border-white/15 bg-slate-900 shadow-sm">
-                <img src="/earth-one-icon.png" alt="ONE" className="h-full w-full object-cover" />
-              </div>
-              <span className="text-sm font-semibold tracking-[0.18em] text-slate-900 dark:text-slate-100">ONE</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {onToggleTheme && (
-                <button
-                  type="button"
-                  onClick={onToggleTheme}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 dark:border-white/15 bg-white/80 dark:bg-white/[0.06] text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-white/[0.12]"
-                  title={theme === 'dark' ? L('切换明亮模式', 'Light mode') : L('切换深空模式', 'Dark mode')}
-                >
-                  {theme === 'dark' ? <Sun className="h-4 w-4 text-amber-300" /> : <Moon className="h-4 w-4 text-sky-700" />}
-                </button>
-              )}
-              <PWAInstallButton lang={lang} compact={true} />
-            </div>
-          </div>
-          <h1 className="text-[26px] leading-tight font-semibold text-slate-900 dark:text-white tracking-tight">
-            {mode === 'login' ? L('欢迎回来', 'Welcome back', 'مرحبًا بعودتك') : L('加入 ONE', 'Join ONE', 'انضم إلى ONE')}
-          </h1>
-          <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+
+      {/* Minimal Top-Right Utility Controls */}
+      <div className="fixed right-4 top-[max(1rem,env(safe-area-inset-top))] z-20 flex items-center gap-2">
+        {onToggleTheme && (
+          <button
+            type="button"
+            onClick={onToggleTheme}
+            className={`inline-flex h-9 w-9 items-center justify-center rounded-full border transition-colors cursor-pointer ${
+              isDark
+                ? 'border-white/15 bg-[#131d29]/80 text-[#d6b77f] hover:bg-[#1a2736]'
+                : 'border-[#24382e]/12 bg-[#faf7f0]/88 text-[#2a3f34] hover:bg-white'
+            }`}
+            title={isDark ? L('切换白昼花园', 'Daylight Garden') : L('切换月夜花园', 'Moonlit Garden')}
+          >
+            {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+        )}
+        <PWAInstallButton lang={lang} compact={true} />
+      </div>
+
+      <div className="relative z-10 w-full max-w-[430px]">
+        {/* Unified Paradise Brand Crest (User Logo + ONE ORIGIN Botanical Ring) */}
+        <div className="mb-6 flex flex-col items-center text-center">
+          <ParadiseBrandEmblem
+            surface={isDark ? 'garden-night' : 'garden-day'}
+            variant="crest"
+            size={72}
+            subtitle={L('天堂花园 · 同一个世界', 'Paradise World · One World')}
+          />
+          <h1 className="mt-5 text-[24px] leading-tight font-semibold tracking-tight text-balance">
             {mode === 'login'
-              ? L('使用你的账号登录，继续探索同一个地球。', 'Sign in to continue your journey on one Earth.', 'سجّل الدخول لمتابعة رحلتك على أرض واحدة.')
-              : L('创建你的账号，进入统一的 ONE 世界。', 'Create your account and enter the world of ONE.', 'أنشئ حسابك وادخل عالم ONE.')}
+              ? L('步入你的天堂花园', 'Step into Paradise World', 'ادخل عالم الجنة')
+              : L('开启你的 EARTH ONE 旅程', 'Begin your EARTH ONE journey', 'ابدأ رحلتك في EARTH ONE')}
+          </h1>
+          <p className={`mt-1.5 text-[13px] leading-relaxed ${isDark ? 'text-[#d4cec0]/75' : 'text-[#485d52]'}`}>
+            {mode === 'login'
+              ? L('登录账号，与花园精灵一同探索语言、音乐、知识与世界。', 'Sign in to explore languages, music, knowledge, and the living garden.', 'سجّل الدخول لاستكشاف الحديقة الحية.')
+              : L('创建专属身份，接入实时昼夜花园与全域空间。', 'Create your sanctuary identity across the living world.', 'أنشئ هويتك في عالم ONE.')}
           </p>
         </div>
 
-        <div className="rounded-[24px] border border-slate-200/90 dark:border-white/15 bg-white/95 dark:bg-[#162238]/92 backdrop-blur-xl p-6 sm:p-7 shadow-[0_20px_60px_rgba(15,23,42,0.08)] dark:shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
-          <div className="flex items-center gap-6 border-b border-slate-200 dark:border-white/10 mb-6">
-            <button type="button" onClick={() => switchMode('login')} className={`pb-3 text-sm font-medium transition-colors ${mode === 'login' ? 'text-slate-900 dark:text-white border-b-2 border-sky-600 dark:border-sky-400 -mb-px' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+        {/* Garden-Matched Parchment / Twilight Sanctuary Card */}
+        <div
+          className={`rounded-[26px] border p-6 sm:p-7 transition-colors ${
+            isDark
+              ? 'border-white/14 bg-[#121c27]/90 shadow-[0_24px_64px_rgba(4,9,16,0.48)]'
+              : 'border-[#23362c]/12 bg-[#faf7f0]/92 shadow-[0_20px_54px_rgba(26,42,34,0.12)]'
+          }`}
+        >
+          <div className={`flex items-center gap-6 border-b mb-5 ${isDark ? 'border-white/10' : 'border-[#23362c]/10'}`}>
+            <button
+              type="button"
+              onClick={() => switchMode('login')}
+              className={`pb-3 text-sm font-medium transition-colors cursor-pointer ${
+                mode === 'login'
+                  ? isDark
+                    ? 'text-[#f7f4ec] border-b-2 border-[#d6b77f] -mb-px'
+                    : 'text-[#1c2d25] border-b-2 border-[#247864] -mb-px'
+                  : isDark
+                    ? 'text-[#c9c2b4]/65 hover:text-[#f7f4ec]'
+                    : 'text-[#556b5f] hover:text-[#1c2d25]'
+              }`}
+            >
               {L('登录', 'Sign in', 'تسجيل الدخول')}
             </button>
-            <button type="button" onClick={() => switchMode('register')} className={`pb-3 text-sm font-medium transition-colors ${mode === 'register' ? 'text-slate-900 dark:text-white border-b-2 border-sky-600 dark:border-sky-400 -mb-px' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'}`}>
+            <button
+              type="button"
+              onClick={() => switchMode('register')}
+              className={`pb-3 text-sm font-medium transition-colors cursor-pointer ${
+                mode === 'register'
+                  ? isDark
+                    ? 'text-[#f7f4ec] border-b-2 border-[#d6b77f] -mb-px'
+                    : 'text-[#1c2d25] border-b-2 border-[#247864] -mb-px'
+                  : isDark
+                    ? 'text-[#c9c2b4]/65 hover:text-[#f7f4ec]'
+                    : 'text-[#556b5f] hover:text-[#1c2d25]'
+              }`}
+            >
               {L('注册', 'Create account', 'إنشاء حساب')}
             </button>
           </div>
 
           {errorMsg && (
-            <div className="mb-4 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-3.5 py-2.5 text-sm text-red-700 dark:text-red-200">
+            <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-700 dark:text-rose-200">
               {errorMsg}
             </div>
           )}
           {infoMsg && (
-            <div className="mb-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 px-3.5 py-2.5 text-sm text-slate-700 dark:text-slate-200">
+            <div className="mb-4 rounded-xl border border-[#247864]/30 bg-[#247864]/10 px-3.5 py-2.5 text-xs text-[#1f5c4d] dark:text-[#9de0cc]">
               {infoMsg}
             </div>
           )}
@@ -274,18 +381,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
             {mode === 'login' ? (
               <>
                 <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{L('邮箱或用户名', 'Email or username', 'البريد الإلكتروني أو اسم المستخدم')}</span>
+                  <span className={`text-xs font-medium ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
+                    {L('邮箱或用户名', 'Email or username', 'البريد الإلكتروني أو اسم المستخدم')}
+                  </span>
                   <input
                     autoComplete="username"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
                     disabled={loading}
-                    className="w-full h-11 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#0f1829] px-3.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:bg-white dark:focus:bg-[#131e33] disabled:opacity-50"
+                    className={`w-full h-11 rounded-xl border px-3.5 text-sm outline-none transition disabled:opacity-50 ${
+                      isDark
+                        ? 'border-white/14 bg-[#0d1520] text-[#f5f1e8] placeholder:text-[#a8a296]/55 focus:border-[#d6b77f]/65'
+                        : 'border-[#23362c]/14 bg-white/85 text-[#1b2b24] placeholder:text-[#6b7d73]/70 focus:border-[#247864]'
+                    }`}
                     placeholder={L('you@example.com 或 username', 'you@example.com or username', 'you@example.com أو اسم المستخدم')}
                   />
                 </label>
                 <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{L('密码', 'Password', 'كلمة المرور')}</span>
+                  <span className={`text-xs font-medium ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
+                    {L('密码', 'Password', 'كلمة المرور')}
+                  </span>
                   <div className="relative">
                     <input
                       type={showLoginPassword ? 'text' : 'password'}
@@ -293,10 +408,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
                       value={loginPassword}
                       onChange={(e) => setLoginPassword(e.target.value)}
                       disabled={loading}
-                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#0f1829] px-3.5 pr-11 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:bg-white dark:focus:bg-[#131e33] disabled:opacity-50"
+                      className={`w-full h-11 rounded-xl border px-3.5 pr-11 text-sm outline-none transition disabled:opacity-50 ${
+                        isDark
+                          ? 'border-white/14 bg-[#0d1520] text-[#f5f1e8] placeholder:text-[#a8a296]/55 focus:border-[#d6b77f]/65'
+                          : 'border-[#23362c]/14 bg-white/85 text-[#1b2b24] placeholder:text-[#6b7d73]/70 focus:border-[#247864]'
+                      }`}
                       placeholder={L('输入密码', 'Enter your password', 'أدخل كلمة المرور')}
                     />
-                    <button type="button" onClick={() => setShowLoginPassword(v => !v)} tabIndex={-1} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" aria-label={showLoginPassword ? 'Hide password' : 'Show password'}>
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword((v) => !v)}
+                      tabIndex={-1}
+                      className={`absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer ${
+                        isDark ? 'text-[#b5afa2] hover:text-white' : 'text-[#5c7166] hover:text-[#1b2b24]'
+                      }`}
+                      aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                    >
                       {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
@@ -305,32 +432,45 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
             ) : (
               <>
                 <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{L('用户名', 'Username', 'اسم المستخدم')}</span>
+                  <span className={`text-xs font-medium ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
+                    {L('用户名', 'Username', 'اسم المستخدم')}
+                  </span>
                   <input
                     autoComplete="username"
                     value={username}
                     onChange={(e) => setUsername(sanitizeUsernameInput(e.target.value))}
                     disabled={loading}
                     maxLength={40}
-                    className="w-full h-11 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#0f1829] px-3.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:bg-white dark:focus:bg-[#131e33] disabled:opacity-50"
+                    className={`w-full h-11 rounded-xl border px-3.5 text-sm outline-none transition disabled:opacity-50 ${
+                      isDark
+                        ? 'border-white/14 bg-[#0d1520] text-[#f5f1e8] placeholder:text-[#a8a296]/55 focus:border-[#d6b77f]/65'
+                        : 'border-[#23362c]/14 bg-white/85 text-[#1b2b24] placeholder:text-[#6b7d73]/70 focus:border-[#247864]'
+                    }`}
                     placeholder={L('请输入用户名', 'Enter username', 'أدخل اسم المستخدم')}
                   />
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">{L('1-40 个字符', '1-40 characters', '1-40 حرفًا')}</span>
                 </label>
                 <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{L('邮箱', 'Email', 'البريد الإلكتروني')}</span>
+                  <span className={`text-xs font-medium ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
+                    {L('邮箱', 'Email', 'البريد الإلكتروني')}
+                  </span>
                   <input
                     type="email"
                     autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     disabled={loading}
-                    className="w-full h-11 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#0f1829] px-3.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:bg-white dark:focus:bg-[#131e33] disabled:opacity-50"
+                    className={`w-full h-11 rounded-xl border px-3.5 text-sm outline-none transition disabled:opacity-50 ${
+                      isDark
+                        ? 'border-white/14 bg-[#0d1520] text-[#f5f1e8] placeholder:text-[#a8a296]/55 focus:border-[#d6b77f]/65'
+                        : 'border-[#23362c]/14 bg-white/85 text-[#1b2b24] placeholder:text-[#6b7d73]/70 focus:border-[#247864]'
+                    }`}
                     placeholder="you@example.com"
                   />
                 </label>
                 <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{L('密码', 'Password', 'كلمة المرور')}</span>
+                  <span className={`text-xs font-medium ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
+                    {L('密码', 'Password', 'كلمة المرور')}
+                  </span>
                   <div className="relative">
                     <input
                       type={showRegisterPassword ? 'text' : 'password'}
@@ -338,17 +478,30 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
                       value={registerPassword}
                       onChange={(e) => setRegisterPassword(e.target.value)}
                       disabled={loading}
-                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#0f1829] px-3.5 pr-11 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:bg-white dark:focus:bg-[#131e33] disabled:opacity-50"
+                      className={`w-full h-11 rounded-xl border px-3.5 pr-11 text-sm outline-none transition disabled:opacity-50 ${
+                        isDark
+                          ? 'border-white/14 bg-[#0d1520] text-[#f5f1e8] placeholder:text-[#a8a296]/55 focus:border-[#d6b77f]/65'
+                          : 'border-[#23362c]/14 bg-white/85 text-[#1b2b24] placeholder:text-[#6b7d73]/70 focus:border-[#247864]'
+                      }`}
                       placeholder={L('至少 6 个字符', 'At least 6 characters', '6 أحرف على الأقل')}
                     />
-                    <button type="button" onClick={() => setShowRegisterPassword(v => !v)} tabIndex={-1} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" aria-label={showRegisterPassword ? 'Hide password' : 'Show password'}>
+                    <button
+                      type="button"
+                      onClick={() => setShowRegisterPassword((v) => !v)}
+                      tabIndex={-1}
+                      className={`absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer ${
+                        isDark ? 'text-[#b5afa2] hover:text-white' : 'text-[#5c7166] hover:text-[#1b2b24]'
+                      }`}
+                      aria-label={showRegisterPassword ? 'Hide password' : 'Show password'}
+                    >
                       {showRegisterPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">{L('密码长度至少 6 位。', 'Use at least 6 characters.', 'استخدم 6 أحرف على الأقل.')}</span>
                 </label>
                 <label className="block space-y-1.5">
-                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{L('确认密码', 'Confirm password', 'تأكيد كلمة المرور')}</span>
+                  <span className={`text-xs font-medium ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
+                    {L('确认密码', 'Confirm password', 'تأكيد كلمة المرور')}
+                  </span>
                   <div className="relative">
                     <input
                       type={showConfirmPassword ? 'text' : 'password'}
@@ -356,10 +509,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       disabled={loading}
-                      className="w-full h-11 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-[#0f1829] px-3.5 pr-11 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none transition focus:border-sky-500 focus:bg-white dark:focus:bg-[#131e33] disabled:opacity-50"
+                      className={`w-full h-11 rounded-xl border px-3.5 pr-11 text-sm outline-none transition disabled:opacity-50 ${
+                        isDark
+                          ? 'border-white/14 bg-[#0d1520] text-[#f5f1e8] placeholder:text-[#a8a296]/55 focus:border-[#d6b77f]/65'
+                          : 'border-[#23362c]/14 bg-white/85 text-[#1b2b24] placeholder:text-[#6b7d73]/70 focus:border-[#247864]'
+                      }`}
                       placeholder={L('再次输入密码', 'Re-enter password', 'أعد إدخال كلمة المرور')}
                     />
-                    <button type="button" onClick={() => setShowConfirmPassword(v => !v)} tabIndex={-1} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}>
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((v) => !v)}
+                      tabIndex={-1}
+                      className={`absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer ${
+                        isDark ? 'text-[#b5afa2] hover:text-white' : 'text-[#5c7166] hover:text-[#1b2b24]'
+                      }`}
+                      aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                    >
                       {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
@@ -370,27 +535,45 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
             <button
               type="submit"
               disabled={loading || isTransitioning}
-              className="w-full h-11 mt-2 rounded-xl bg-sky-600 text-white text-sm font-semibold hover:bg-sky-500 shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+              className={`w-full h-11 mt-2 rounded-full text-sm font-semibold shadow-sm transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 ${
+                isDark
+                  ? 'bg-[#e5d9be] text-[#152028] hover:bg-[#f2e8d2]'
+                  : 'bg-[#244e41] text-[#faf7f0] hover:bg-[#1c3e33]'
+              }`}
             >
               {(loading || isTransitioning) && <Loader2 className="w-4 h-4 animate-spin" />}
               {isTransitioning
-                ? L('开启世界…', 'Awakening world…', 'تفعيل العالم…')
+                ? L('正在开启天堂花园…', 'Awakening Paradise World…', 'جارٍ فتح العالم…')
                 : loading
                   ? L('处理中…', 'Please wait…', 'يرجى الانتظار…')
-                  : (mode === 'login' ? L('登录', 'Sign in', 'تسجيل الدخول') : L('创建账号', 'Create account', 'إنشاء حساب'))}
+                  : mode === 'login'
+                    ? L('进入天堂花园', 'Enter Paradise World', 'تسجيل الدخول')
+                    : L('创建账号并进入', 'Create account', 'إنشاء حساب')}
             </button>
           </form>
 
-          <div className="mt-5 text-sm text-slate-500 dark:text-slate-400">
+          <div className={`mt-5 text-center text-xs ${isDark ? 'text-[#c9c2b4]/75' : 'text-[#52675c]'}`}>
             {mode === 'login' ? (
               <span>
                 {L('还没有账号？', "Don't have an account?", 'ليس لديك حساب؟')}{' '}
-                <button type="button" onClick={() => switchMode('register')} className="text-sky-600 dark:text-sky-300 hover:underline font-medium">{L('注册', 'Create one', 'أنشئ حسابًا')}</button>
+                <button
+                  type="button"
+                  onClick={() => switchMode('register')}
+                  className={`font-medium hover:underline cursor-pointer ${isDark ? 'text-[#d6b77f]' : 'text-[#247864]'}`}
+                >
+                  {L('立即注册', 'Create one', 'أنشئ حسابًا')}
+                </button>
               </span>
             ) : (
               <span>
                 {L('已有账号？', 'Already have an account?', 'لديك حساب بالفعل؟')}{' '}
-                <button type="button" onClick={() => switchMode('login')} className="text-sky-600 dark:text-sky-300 hover:underline font-medium">{L('登录', 'Sign in', 'تسجيل الدخول')}</button>
+                <button
+                  type="button"
+                  onClick={() => switchMode('login')}
+                  className={`font-medium hover:underline cursor-pointer ${isDark ? 'text-[#d6b77f]' : 'text-[#247864]'}`}
+                >
+                  {L('返回登录', 'Sign in', 'تسجيل الدخول')}
+                </button>
               </span>
             )}
           </div>
@@ -401,10 +584,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
             <button
               type="button"
               onClick={onOpenBrand}
-              className="inline-flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+              className={`inline-flex items-center gap-2 text-xs transition-colors cursor-pointer ${
+                isDark ? 'text-[#c8c0b0]/75 hover:text-[#f7f4ec]' : 'text-[#4e6458] hover:text-[#1b2b24]'
+              }`}
             >
-              <BrandMark concept="origin-final" mode={theme === 'dark' ? 'dark' : 'light'} lockup="symbol" size={16} />
-              <span>{L('浏览「独一 ONE」品牌系统', 'Explore ONE Brand System')}</span>
+              <ParadiseBrandEmblem surface={isDark ? 'garden-night' : 'garden-day'} variant="medallion" size={20} />
+              <span>{L('探索「独一 EARTH ONE」品牌视觉系统', 'Explore EARTH ONE Brand System')}</span>
             </button>
           </div>
         )}

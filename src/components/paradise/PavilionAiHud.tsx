@@ -1,8 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AudioLines,
+  BookOpen,
   Check,
+  Download,
+  Image as ImageIcon,
   Loader2,
+  Maximize2,
   Pause,
   Pencil,
   Play,
@@ -19,10 +23,12 @@ import {
   pauseActiveSpiritTask,
   respondToAgentConfirmation,
   resumePausedSpiritTask,
+  speakSpiritReply,
   stopSpiritSpeech,
   submitSpiritCommand,
 } from '../../agent/agentClient.ts';
 import { analyzeDialogueEmotion } from '../../utils/emotionEngine.ts';
+import { triggerImageDownload } from './SpiritSpeechBubble.tsx';
 
 const SPIRIT_VOICE_OPTIONS = [
   { id: 'Zephyr', labelZh: 'Zephyr · 清澈灵动', labelEn: 'Zephyr' },
@@ -210,6 +216,22 @@ export const PavilionAiHud: React.FC<PavilionAiHudProps> = ({ lang }) => {
           </button>
           <button
             type="button"
+            onClick={() => uiStateManager.openLanguageStudio({ targetLang: 'en', mode: 'roleplay' })}
+            className={`inline-flex h-6 w-6 items-center justify-center rounded-lg transition-colors cursor-pointer ${subtleBtnCls}`}
+            title={isZh ? '打开实景口语与刷题教室' : 'Open Language Studio'}
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => uiStateManager.openLanguageStudio({ targetLang: 'en', mode: 'image_pool' })}
+            className={`inline-flex h-6 w-6 items-center justify-center rounded-lg transition-colors cursor-pointer ${subtleBtnCls}`}
+            title={isZh ? '打开免费额度生图画室' : 'Open Free AI Art Studio'}
+          >
+            <ImageIcon className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
             onClick={() => window.dispatchEvent(new CustomEvent('one-open-live-companion'))}
             className={`inline-flex h-6 w-6 items-center justify-center rounded-lg transition-colors cursor-pointer ${subtleBtnCls}`}
             title={isZh ? '实时连续语音对话' : 'Real-Time Live Voice'}
@@ -287,7 +309,66 @@ export const PavilionAiHud: React.FC<PavilionAiHudProps> = ({ lang }) => {
                 m.role === 'user' ? `ml-6 ${userBubbleCls}` : `mr-3 ${aiBubbleCls}`
               }`}
             >
-              {m.content}
+              <div>{m.content}</div>
+              {m.translationZh && (
+                <div className="mt-1 text-[11px] opacity-75">{m.translationZh}</div>
+              )}
+              {m.generatedImage && (
+                <div className="mt-2 overflow-hidden rounded-lg border border-black/10">
+                  <button
+                    type="button"
+                    onClick={() => uiStateManager.setImageLightbox(m.generatedImage || null)}
+                    className="block w-full cursor-pointer"
+                  >
+                    <img
+                      src={m.generatedImage.imageUrl}
+                      alt={m.generatedImage.captionZh}
+                      className="max-h-40 w-full object-cover"
+                    />
+                  </button>
+                  <div className="flex items-center justify-between gap-1 px-2 py-1 text-[10px]">
+                    <span className="truncate opacity-70">{m.generatedImage.providerLabelZh || '免费额度画室'}</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => uiStateManager.setImageLightbox(m.generatedImage || null)}
+                        className="p-0.5 opacity-80 hover:opacity-100 cursor-pointer"
+                        title="放大"
+                      >
+                        <Maximize2 className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => m.generatedImage && triggerImageDownload(m.generatedImage)}
+                        className="p-0.5 opacity-80 hover:opacity-100 cursor-pointer"
+                        title="保存"
+                      >
+                        <Download className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {m.rescueCards && m.rescueCards.length > 0 && (
+                <div className="mt-1.5 space-y-1">
+                  {m.rescueCards.map((rc, i) => (
+                    <div key={i} className="flex items-center justify-between gap-1 rounded-lg border border-black/10 px-2 py-1 text-[11px]">
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{rc.targetText}</div>
+                        <div className="text-[10px] opacity-70 truncate">{rc.translationZh}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void speakSpiritReply(rc.targetText, m.speakLang || 'en')}
+                        className="p-1 opacity-75 hover:opacity-100 cursor-pointer shrink-0"
+                        title="听示范发音"
+                      >
+                        <Volume2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))
         )}
