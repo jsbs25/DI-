@@ -173,6 +173,134 @@ function extractPageVocabulary(pageText: string): string[] {
   return result;
 }
 
+interface ContinuousPdfPageProps {
+  pdf: PDFDocumentProxy;
+  pageNum: number;
+  zoom: number;
+  rotation: number;
+  theme: typeof PDF_THEMES.light;
+  isActive: boolean;
+  isChinese: boolean;
+  registerRef: (el: HTMLDivElement | null) => void;
+  registerCanvas: (canvas: HTMLCanvasElement | null) => void;
+  onActivate: () => void;
+  onTextExtracted: (text: string, spans: OverlayTextSpan[]) => void;
+  onLookupWord: (word: string, context?: string) => void;
+}
+
+const ContinuousPdfPage: React.FC<ContinuousPdfPageProps> = ({
+  pdf, pageNum, zoom, rotation, theme, isActive, isChinese,
+  registerRef, registerCanvas, onActivate, onTextExtracted, onLookupWord,
+}) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [dims, setDims] = useState({ w: 0, h: 0 });
+  const [spans, setSpans] = useState<OverlayTextSpan[]>([]);
+
+  useEffect(() => {
+    registerRef(containerRef.current);
+    return () => registerRef(null);
+  }, [registerRef, pageNum]);
+
+  useEffect(() => {
+    if (isActive) registerCanvas(canvasRef.current);
+  }, [isActive, registerCanvas, dims.w, dims.h]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let renderTask: RenderTask | undefined;
+    pdf.getPage(pageNum).then(async (page) => {
+      if (cancelled) return;
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const cssViewport = page.getViewport({ scale: zoom, rotation });
+      const hiDpiViewport = page.getViewport({ scale: zoom * dpr, rotation });
+      const cssW = Math.ceil(cssViewport.width);
+      const cssH = Math.ceil(cssViewport.height);
+      canvas.width = Math.ceil(hiDpiViewport.width);
+      canvas.height = Math.ceil(hiDpiViewport.height);
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+      setDims({ w: cssW, h: cssH });
+      renderTask = page.render({ canvas, canvasContext: ctx, viewport: hiDpiViewport });
+      await renderTask.promise.catch(() => {});
+      try {
+        const textContent = await page.getTextContent();
+        if (cancelled) return;
+        const out: OverlayTextSpan[] = [];
+        const parts: string[] = [];
+        textContent.items.forEach((rawItem, idx) => {
+          if (!('str' in rawItem)) return;
+          const text = rawItem.str;
+          if (!text || !text.trim()) return;
+          parts.push(text);
+          try {
+            const tx = Util.transform(cssViewport.transform, rawItem.transform);
+            const fontSize = Math.max(9, Math.min(64, Math.hypot(tx[2], tx[3]) || Math.hypot(tx[0], tx[1]) || 12));
+            const left = tx[4];
+            const top = tx[5] - fontSize * 0.88;
+            const width = Math.max(10, (rawItem.width || 0) * cssViewport.scale);
+            const height = fontSize * 1.18;
+            if (Number.isFinite(left) && Number.isFinite(top)) {
+              out.push({ id: `p${pageNum}_${idx}`, text, left, top, width, height, fontSize });
+            }
+          } catch {}
+        });
+        setSpans(out);
+        if (isActive) onTextExtracted(parts.join(' ').replace(/\s+/g, ' ').trim(), out);
+      } catch {
+        if (isActive) onTextExtracted('', []);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; renderTask?.cancel(); };
+  }, [pdf, pageNum, zoom, rotation, isActive, onTextExtracted]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver((entries) => {
+      const e = entries[0];
+      if (e && e.isIntersecting && e.intersectionRatio >= 0.45) onActivate();
+    }, { threshold: [0.45, 0.6, 0.8] });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [onActivate]);
+
+  return (
+    <div ref={containerRef} data-pdf-page={pageNum} className="relative shrink-0">
+      <div className="mb-1 text-center text-[10px]" style={{ color: isActive ? '#10B981' : 'inherit', opacity: isActive ? 1 : 0.5 }}>P.{pageNum}</div>
+      <div className="relative mx-auto" style={dims.w > 0 ? { width: dims.w, height: dims.h } : undefined}>
+        <canvas
+          ref={canvasRef}
+          aria-label={`PDF page ${pageNum}`}
+          className={`block rounded-lg shadow-[0_14px_42px_rgba(0,0,0,0.22)] transition-all ${isActive ? 'ring-2 ring-emerald-500/40' : ''}`}
+          style={theme.canvasFilter ? { filter: theme.canvasFilter } : undefined}
+        />
+        {isActive && spans.length > 0 && dims.w > 0 && (
+          <div className="absolute inset-0 overflow-hidden rounded-lg" style={{ width: dims.w, height: dims.h }}>
+            {spans.map((span) => {
+              const tokens = splitTokensForClick(span.text);
+              return (
+                <div key={span.id} style={{ position: 'absolute', left: `${span.left}px`, top: `${span.top}px`, minWidth: `${span.width}px`, height: `${span.height}px`, fontSize: `${span.fontSize}px`, lineHeight: 1.05, whiteSpace: 'pre' }}>
+                  {tokens.map((tok, i) => {
+                    const clean = cleanWordToken(tok);
+                    if (!clean) return <span key={i} className="text-transparent select-none">{tok}</span>;
+                    return (
+                      <button key={i} type="button" onClick={(e) => { e.stopPropagation(); void onLookupWord(clean, span.text); }} title={isChinese ? `点击让 AI 查询「${clean}」` : `Look up "${clean}"`} className="inline cursor-pointer rounded-[3px] text-transparent transition-colors hover:bg-emerald-400/28 focus:bg-emerald-400/32 focus:outline-none" style={{ fontSize: 'inherit', lineHeight: 'inherit', padding: 0, margin: 0, border: 'none' }}>{tok}</button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   sourceUrl,
   title,
@@ -186,6 +314,8 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const continuousActiveCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const continuousPageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [documentProxy, setDocumentProxy] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(Math.max(1, Math.floor(initialState?.page || 1)));
   const [pageInput, setPageInput] = useState(String(Math.max(1, Math.floor(initialState?.page || 1))));
@@ -412,6 +542,13 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     };
   }, [documentProxy, pageNumber, zoom, rotation]);
 
+  // In continuous mode, keep active page in view when page changes via controls
+  useEffect(() => {
+    if (viewMode !== 'continuous') return;
+    const t = setTimeout(() => scrollToPdfPage(pageNumber), 0);
+    return () => clearTimeout(t);
+  }, [viewMode, pageNumber, scrollToPdfPage]);
+
   // Keyboard navigation + Escape close
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -437,10 +574,16 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pageCount, lookupWord, aiPanelOpen, onClose]);
 
+  const scrollToPdfPage = useCallback((n: number) => {
+    const el = continuousPageRefs.current[n];
+    if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, []);
+
   const handleJumpPage = (e: React.FormEvent) => {
     e.preventDefault();
     const target = Math.max(1, Math.min(pageCount || 1, Number.parseInt(pageInput, 10) || 1));
     setPageNumber(target);
+    if (viewMode === 'continuous') setTimeout(() => scrollToPdfPage(target), 0);
   };
 
   const runLibraryAiAction = useCallback(
@@ -454,8 +597,9 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       let pageImageBase64: string | undefined;
       const ocrHint = /ocr|识别|识文|扫描/i.test(q || '');
       const needsVision = action === 'ocr' || ocrHint || currentPageText.trim().length < 40;
-      if (needsVision && canvasRef.current && canvasRef.current.width > 0) {
-        try { pageImageBase64 = canvasRef.current.toDataURL('image/jpeg', 0.72); } catch {}
+      const visionCanvas = viewMode === 'continuous' ? continuousActiveCanvasRef.current : canvasRef.current;
+      if (needsVision && visionCanvas && visionCanvas.width > 0) {
+        try { pageImageBase64 = visionCanvas.toDataURL('image/jpeg', 0.72); } catch {}
       }
       setAiUsedVision(Boolean(needsVision && pageImageBase64));
 
@@ -1060,107 +1204,143 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       {/* Main Stage: PDF Canvas (+ Interactive Tap-Word Layer) + Optional Right-Side AI Tutor Panel */}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* Scrollable PDF Viewport */}
-        <div className="flex min-h-0 flex-1 flex-col items-center overflow-auto p-4 sm:p-6">
-          <div
-            className="relative shrink-0"
-            style={canvasDims.width > 0 ? { width: canvasDims.width, height: canvasDims.height } : undefined}
-          >
-            <canvas
-              ref={canvasRef}
-              aria-label={title}
-              className="mx-auto block rounded-lg shadow-[0_14px_42px_rgba(0,0,0,0.22)] transition-all"
-              style={theme.canvasFilter ? { filter: theme.canvasFilter } : undefined}
-            />
-
-            {/* Transparent Interactive Word Layer directly over PDF text */}
-            {overlaySpans.length > 0 && canvasDims.width > 0 && (
-              <div
-                aria-label="可点击查词文本层"
-                className="absolute inset-0 overflow-hidden rounded-lg"
-                style={{ width: canvasDims.width, height: canvasDims.height }}
-              >
-                {overlaySpans.map((span) => {
-                  const tokens = splitTokensForClick(span.text);
-                  return (
-                    <div
-                      key={span.id}
-                      style={{
-                        position: 'absolute',
-                        left: `${span.left}px`,
-                        top: `${span.top}px`,
-                        minWidth: `${span.width}px`,
-                        height: `${span.height}px`,
-                        fontSize: `${span.fontSize}px`,
-                        lineHeight: 1.05,
-                        whiteSpace: 'pre',
-                      }}
-                    >
-                      {tokens.map((tok, i) => {
-                        const clean = cleanWordToken(tok);
-                        if (!clean) {
-                          return (
-                            <span key={i} className="text-transparent select-none">
-                              {tok}
-                            </span>
-                          );
-                        }
-                        return (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void handleLookupWord(clean, span.text);
-                            }}
-                            title={isChinese ? `点击让 AI 查询「${clean}」` : `Look up "${clean}"`}
-                            className="inline cursor-pointer rounded-[3px] text-transparent transition-colors hover:bg-emerald-400/28 focus:bg-emerald-400/32 focus:outline-none"
-                            style={{ fontSize: 'inherit', lineHeight: 'inherit', padding: 0, margin: 0, border: 'none' }}
-                          >
-                            {tok}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* End-of-Book Completion Card with Prominent Return Button */}
-          {isLastPage && (
-            <div
-              className="mt-6 w-full max-w-xl rounded-2xl border p-5 text-center shadow-lg"
-              style={{ backgroundColor: theme.panelBg, borderColor: theme.border }}
-            >
-              <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
-              <div className="text-sm font-semibold">
-                {isChinese ? `全书共 ${pageCount} 页已读完` : `Finished all ${pageCount} pages`}
-              </div>
-              <p className="mt-1 text-xs" style={{ color: theme.muted }}>
-                {isChinese ? `《${title}》阅读进度已到达尾页，你可以随时返回书架或重温本书。` : `You have reached the end of "${title}".`}
-              </p>
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
-                {onClose && (
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                    <span>{isChinese ? '读完 · 返回书架' : 'Done · Back to Library'}</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setPageNumber(1)}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-xs font-medium transition hover:opacity-80"
-                  style={{ borderColor: theme.border, color: theme.ink }}
-                >
-                  <span>{isChinese ? '回到第 1 页' : 'Back to Page 1'}</span>
-                </button>
-              </div>
+        <div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col items-center overflow-auto p-4 sm:p-6">
+          {viewMode === 'continuous' && documentProxy && pageCount > 0 ? (
+            <div className="flex w-full max-w-full flex-col items-center gap-5">
+              {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
+                <ContinuousPdfPage
+                  key={n}
+                  pdf={documentProxy}
+                  pageNum={n}
+                  zoom={zoom}
+                  rotation={rotation}
+                  theme={theme}
+                  isActive={n === pageNumber}
+                  isChinese={isChinese}
+                  registerRef={(el) => { continuousPageRefs.current[n] = el; }}
+                  registerCanvas={(canvas) => { if (n === pageNumber) continuousActiveCanvasRef.current = canvas; }}
+                  onActivate={() => setPageNumber(n)}
+                  onTextExtracted={(text, spans) => {
+                    if (n === pageNumber) {
+                      setCurrentPageText(text);
+                      setOverlaySpans(spans);
+                    }
+                  }}
+                  onLookupWord={handleLookupWord}
+                />
+              ))}
+              {isLastPage && (
+                <div className="mt-2 w-full max-w-xl rounded-2xl border p-5 text-center shadow-lg" style={{ backgroundColor: theme.panelBg, borderColor: theme.border }}>
+                  <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
+                  <div className="text-sm font-semibold">{isChinese ? `全书共 ${pageCount} 页已读完` : `Finished all ${pageCount} pages`}</div>
+                  <p className="mt-1 text-xs" style={{ color: theme.muted }}>{isChinese ? `《${title}》阅读进度已到达尾页。` : `You have reached the end of "${title}".`}</p>
+                  {onClose && <button type="button" onClick={onClose} className="mt-3 inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500"><ArrowLeft className="h-4 w-4" /><span>{isChinese ? '读完 · 返回书架' : 'Done · Back to Library'}</span></button>}
+                </div>
+              )}
             </div>
+          ) : (
+            <>
+              <div
+                className="relative shrink-0"
+                style={canvasDims.width > 0 ? { width: canvasDims.width, height: canvasDims.height } : undefined}
+              >
+                <canvas
+                  ref={canvasRef}
+                  aria-label={title}
+                  className="mx-auto block rounded-lg shadow-[0_14px_42px_rgba(0,0,0,0.22)] transition-all"
+                  style={theme.canvasFilter ? { filter: theme.canvasFilter } : undefined}
+                />
+
+                {/* Transparent Interactive Word Layer directly over PDF text */}
+                {overlaySpans.length > 0 && canvasDims.width > 0 && (
+                  <div
+                    aria-label="可点击查词文本层"
+                    className="absolute inset-0 overflow-hidden rounded-lg"
+                    style={{ width: canvasDims.width, height: canvasDims.height }}
+                  >
+                    {overlaySpans.map((span) => {
+                      const tokens = splitTokensForClick(span.text);
+                      return (
+                        <div
+                          key={span.id}
+                          style={{
+                            position: 'absolute',
+                            left: `${span.left}px`,
+                            top: `${span.top}px`,
+                            minWidth: `${span.width}px`,
+                            height: `${span.height}px`,
+                            fontSize: `${span.fontSize}px`,
+                            lineHeight: 1.05,
+                            whiteSpace: 'pre',
+                          }}
+                        >
+                          {tokens.map((tok, i) => {
+                            const clean = cleanWordToken(tok);
+                            if (!clean) {
+                              return (
+                                <span key={i} className="text-transparent select-none">
+                                  {tok}
+                                </span>
+                              );
+                            }
+                            return (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleLookupWord(clean, span.text);
+                                }}
+                                title={isChinese ? `点击让 AI 查询「${clean}」` : `Look up "${clean}"`}
+                                className="inline cursor-pointer rounded-[3px] text-transparent transition-colors hover:bg-emerald-400/28 focus:bg-emerald-400/32 focus:outline-none"
+                                style={{ fontSize: 'inherit', lineHeight: 'inherit', padding: 0, margin: 0, border: 'none' }}
+                              >
+                                {tok}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {isLastPage && (
+                <div
+                  className="mt-6 w-full max-w-xl rounded-2xl border p-5 text-center shadow-lg"
+                  style={{ backgroundColor: theme.panelBg, borderColor: theme.border }}
+                >
+                  <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
+                  <div className="text-sm font-semibold">
+                    {isChinese ? `全书共 ${pageCount} 页已读完` : `Finished all ${pageCount} pages`}
+                  </div>
+                  <p className="mt-1 text-xs" style={{ color: theme.muted }}>
+                    {isChinese ? `《${title}》阅读进度已到达尾页，你可以随时返回书架或重温本书。` : `You have reached the end of "${title}".`}
+                  </p>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
+                    {onClose && (
+                      <button
+                        type="button"
+                        onClick={onClose}
+                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        <span>{isChinese ? '读完 · 返回书架' : 'Done · Back to Library'}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setPageNumber(1)}
+                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-xs font-medium transition hover:opacity-80"
+                      style={{ borderColor: theme.border, color: theme.ink }}
+                    >
+                      <span>{isChinese ? '回到第 1 页' : 'Back to Page 1'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
