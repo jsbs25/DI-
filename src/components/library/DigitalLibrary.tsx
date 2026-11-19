@@ -1687,20 +1687,57 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             <div className="rounded-[28px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] py-20 text-center text-[var(--color-one-text-muted)]">
               <BookMarked className="mx-auto mb-3 h-10 w-10 text-[var(--color-one-text-dim)]" />
               <p className="text-sm font-medium text-white">书架还是空的</p>
-              <p className="mt-1 text-xs">在书籍详情页点击「加入书架」即可收藏。</p>
+              <p className="mt-1 text-xs">在书籍详情页加入书架，或在「مكتبة النور · 伊斯兰全媒体书库」点击「下载 PDF 到书架」。</p>
+              <button
+                type="button"
+                onClick={() => setView('noor')}
+                className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-[#04140e] transition hover:brightness-110"
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                <span>去 مكتبة النور 下载 PDF 到书架</span>
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 sm:gap-5">
-              {shelfBooks.map(item => (
-                <div key={item.id} className="relative">
-                  <BookCard book={item.book} onClick={() => openShelfBook(item.book)} />
-                  {item.progress > 0 && (
-                    <div className="pointer-events-none absolute inset-x-2 bottom-[3.25rem] h-1 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/10">
-                      <div className="h-full rounded-full bg-[var(--color-one-accent)]" style={{ width: `${item.progress}%` }} />
+              {shelfBooks.map(item => {
+                const localPdf = getBookPdfUrl(item.book as any);
+                return (
+                  <div key={item.id} className="relative flex flex-col">
+                    <div className="relative">
+                      <BookCard book={item.book} onClick={() => openShelfBook(item.book)} />
+                      {localPdf && (
+                        <span className="pointer-events-none absolute right-2 top-2 rounded-lg border border-emerald-400/40 bg-[#051a14]/85 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-200 backdrop-blur-sm">
+                          PDF 已存
+                        </span>
+                      )}
+                      {item.progress > 0 && (
+                        <div className="pointer-events-none absolute inset-x-2 bottom-[3.25rem] h-1 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/10">
+                          <div className="h-full rounded-full bg-[var(--color-one-accent)]" style={{ width: `${item.progress}%` }} />
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+                    {localPdf && (
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openShelfBook(item.book)}
+                          className="flex-1 cursor-pointer rounded-lg bg-emerald-500/18 px-2 py-1 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/28"
+                        >
+                          阅读 PDF
+                        </button>
+                        <a
+                          href={localPdf.includes('?') ? `${localPdf}&download=1` : `${localPdf}?download=1&filename=${encodeURIComponent(item.book.title)}`}
+                          download
+                          className="rounded-lg border border-white/12 px-2 py-1 text-[11px] text-slate-300 transition hover:bg-white/10 hover:text-white"
+                          title="下载到本地设备"
+                        >
+                          下载
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1714,9 +1751,26 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           lang={lang}
           initialQuery={noorInitialQuery}
           onBack={() => setView('home')}
+          onGoToShelf={() => setView('shelf')}
           onOpenPdf={(payload) => setPdfReader(payload)}
-          onBookSaved={(savedBook) => {
+          onOpenBook={(book) => { void openReader(book); }}
+          onBookSavedToShelf={(savedBook, shelfItem) => {
             setBooks((prev) => (prev.some((b) => b.id === savedBook.id) ? prev : [savedBook, ...prev]));
+            setShelf((prev) => {
+              const entry: BookShelfItem & { book: Book } = {
+                id: shelfItem?.id || `shelf_${savedBook.id}`,
+                userId: shelfItem?.userId || currentUser?.id || 'guest',
+                bookId: savedBook.id,
+                status: shelfItem?.status || 'reading',
+                progress: shelfItem?.progress || 0,
+                savedAt: shelfItem?.savedAt || new Date().toISOString(),
+                updatedAt: shelfItem?.updatedAt || new Date().toISOString(),
+                book: savedBook,
+              };
+              return prev.some((i) => i.bookId === savedBook.id)
+                ? prev.map((i) => (i.bookId === savedBook.id ? entry : i))
+                : [entry, ...prev];
+            });
           }}
         />
       )}

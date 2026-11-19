@@ -96,9 +96,13 @@ export function isProbablyPdfUrl(url?: string): boolean {
 }
 
 export function getBookPdfUrl(book: EmbeddableBookRef & { formatType?: string }): string | null {
-  const candidates = [book.textUrl, book.externalReadUrl, book.sourceUrl];
+  const candidates = [book.externalReadUrl, book.textUrl, book.sourceUrl];
   for (const c of candidates) {
-    if (isProbablyPdfUrl(c)) return safeHttps(c!);
+    if (!c) continue;
+    if (c.startsWith('/api/library/local-pdfs/') || c.startsWith('/api/library/pdf-stream')) {
+      return c;
+    }
+    if (isProbablyPdfUrl(c)) return safeHttps(c);
   }
   return null;
 }

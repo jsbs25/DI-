@@ -5199,9 +5199,8 @@ app.delete('/api/library/books/:id', (req, res) => {
 // Personal bookshelf (authenticated, per-user ownership)
 // -------------------------------------------------------------
 app.get('/api/library/shelf', (req, res) => {
-  const user = requireSessionUser(req, res);
-  if (!user) return;
-  const items = store.getBookShelf(user.id);
+  const userId = getSessionUser(req)?.id || 'guest';
+  const items = store.getBookShelf(userId);
   const books = items
     .map(item => {
       const book = store.books.find(b => b.id === item.bookId);
@@ -5212,26 +5211,23 @@ app.get('/api/library/shelf', (req, res) => {
 });
 
 app.post('/api/library/shelf', (req, res) => {
-  const user = requireSessionUser(req, res);
-  if (!user) return;
+  const userId = getSessionUser(req)?.id || 'guest';
   const { bookId, status } = req.body;
   if (!bookId) return res.status(400).json({ success: false, error: 'bookId required' });
-  const item = store.addToBookShelf(user.id, bookId, status || 'want_to_read');
+  const item = store.addToBookShelf(userId, bookId, status || 'want_to_read');
   res.json({ success: true, item });
 });
 
 app.delete('/api/library/shelf/:bookId', (req, res) => {
-  const user = requireSessionUser(req, res);
-  if (!user) return;
-  const removed = store.removeFromBookShelf(user.id, req.params.bookId);
+  const userId = getSessionUser(req)?.id || 'guest';
+  const removed = store.removeFromBookShelf(userId, req.params.bookId);
   res.json({ success: removed });
 });
 
 app.post('/api/library/shelf/:bookId/progress', (req, res) => {
-  const user = requireSessionUser(req, res);
-  if (!user) return;
+  const userId = getSessionUser(req)?.id || 'guest';
   const { progress } = req.body;
-  const item = store.updateBookShelfProgress(user.id, req.params.bookId, Number(progress) || 0);
+  const item = store.updateBookShelfProgress(userId, req.params.bookId, Number(progress) || 0);
   res.json({ success: !!item, item });
 });
 
@@ -5430,9 +5426,9 @@ app.delete('/api/library/books/:id/annotations/:annotationId', (req, res) => {
   res.json({ success: true });
 });
 
-// Mount Noor / Islamic PDF Library APIs (IslamHouse 5,099+ PDFs, Archive.org resolver,
-// CORS-free streaming & download proxy, and local PDF vault + Noor Book upload)
-registerNoorIslamicLibraryRoutes(app, store);
+// Mount Noor / Islamic Multi-Format Library APIs (IslamHouse 12,724+ Books/Quran/Audios/Videos/Articles/Khotab/Fatwa,
+// Archive.org resolver, CORS-free streaming & download proxy, and direct download-to-bookshelf vault)
+registerNoorIslamicLibraryRoutes(app, store, getSessionUser);
 
 // -------------------------------------------------------------
 // 9. WEB CRAWLER & CONTENT INGESTION (CHAPTER 6)
