@@ -49,6 +49,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
   const [error, setError] = useState<string | null>(null);
   const [showToc, setShowToc] = useState(false);
   const [fontSize, setFontSize] = useState(100);
+  const [readerTheme, setReaderTheme] = useState<'light' | 'sepia' | 'dark'>('light');
   const [progress, setProgress] = useState(0);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -75,6 +76,11 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
     if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
     progressTimerRef.current = setTimeout(flushProgress, 600);
   };
+
+  useEffect(() => {
+    if (!rendition) return;
+    try { rendition.themes.select(readerTheme); } catch {}
+  }, [rendition, readerTheme]);
 
   const closeReader = () => {
     flushProgress();
@@ -150,6 +156,14 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
           spread: 'none',
           flow: 'paginated'
         });
+        try {
+          rend.themes.register('light', { body: { background: '#f5f1e8', color: '#1f2937', 'line-height': '1.85' } });
+          rend.themes.register('sepia', { body: { background: '#efe4cc', color: '#3b2f1d', 'line-height': '1.85' } });
+          rend.themes.register('dark', { body: { background: '#111827', color: '#e5e7eb', 'line-height': '1.85' } });
+          rend.themes.select('light');
+          rend.themes.fontSize('100%');
+          if (isRtl && typeof (rend as any).direction === 'function') (rend as any).direction('rtl');
+        } catch {}
 
         const loaded = await bookObj.ready;
         if (cancelled) return;
@@ -243,21 +257,23 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
         return;
       }
       const endpoint = action === 'explain' ? '/api/library/ai/explain-page' : `/api/library-ai/${action}`;
+      const ui = /^(en|ar)/i.test(book.language || '') ? (book.language as string).slice(0, 2).toLowerCase() : 'zh';
       const body: any = {
         bookId: book.id,
         title: book.title,
         bookTitle: book.title,
+        author: book.author,
         chapterTitle: 'EPUB 当前视图',
         pageText: contextText,
         selectedText: contextText,
         surroundingContext: contextText,
         language: book.language,
-        lang: 'zh',
-        uiLanguage: 'zh',
+        lang: ui,
+        uiLanguage: ui,
         question: aiQuestion || undefined,
       };
-      if (action === 'translate') body.targetLanguage = 'zh';
-      if (action === 'ask') body.question = aiQuestion || '请结合当前可见内容进行说明。';
+      if (action === 'translate') body.targetLanguage = ui === 'ar' ? 'ar' : ui === 'en' ? 'en' : 'zh';
+      if (action === 'ask') body.question = aiQuestion || (ui === 'en' ? 'Explain the visible content in context.' : ui === 'ar' ? 'اشرح المحتوى الظاهر في سياقه.' : '请结合当前可见内容进行说明。');
       const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body) });
       const data = await res.json();
       if (data?.success) {
@@ -302,6 +318,16 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
           <div className="flex items-center justify-between sm:justify-end gap-1.5">
             <button type="button" onClick={() => adjustFont(-10)} aria-label="缩小字体" className="min-h-11 min-w-11 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs text-slate-200 cursor-pointer transition">A-</button>
             <button type="button" onClick={() => adjustFont(10)} aria-label="增大字体" className="min-h-11 min-w-11 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs text-slate-200 cursor-pointer transition">A+</button>
+            <select
+              value={readerTheme}
+              onChange={(e) => setReaderTheme(e.target.value as 'light' | 'sepia' | 'dark')}
+              aria-label="阅读主题"
+              className="h-11 rounded-xl border border-white/10 bg-white/5 px-2 text-xs text-slate-200 cursor-pointer"
+            >
+              <option value="light">浅色</option>
+              <option value="sepia">护眼</option>
+              <option value="dark">深色</option>
+            </select>
             <button type="button" onClick={() => setShowToc(!showToc)} aria-label={showToc ? '关闭目录' : '打开目录'} aria-expanded={showToc} aria-controls="epub-reader-toc" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-100 cursor-pointer transition">
               <Menu className="w-4 h-4" />
             </button>
@@ -355,7 +381,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
           </aside>
         )}
 
-        <div className="flex-1 bg-[#f5f1e8] flex items-center justify-center relative" dir={isRtl ? 'rtl' : 'ltr'} lang={book.language || undefined}>
+        <div className={`flex-1 flex items-center justify-center relative ${readerTheme === 'dark' ? 'bg-[#111827]' : readerTheme === 'sepia' ? 'bg-[#efe4cc]' : 'bg-[#f5f1e8]'}`} dir={isRtl ? 'rtl' : 'ltr'} lang={book.language || undefined}>
           {loading && (
               <div role="status" aria-live="polite" className="text-slate-600 text-sm flex items-center space-x-2">
               <BookOpen className="w-5 h-5 animate-pulse" />
