@@ -10,10 +10,13 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  Bookmark,
+  BookmarkCheck,
   CheckCircle2,
   Download,
   ExternalLink,
   Languages,
+  List,
   Loader2,
   Minus,
   Moon,
@@ -23,7 +26,9 @@ import {
   Search,
   Send,
   Sparkles,
+  StickyNote,
   Sun,
+  Trash2,
   X,
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
@@ -214,6 +219,11 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   const [aiUsedVision, setAiUsedVision] = useState(false);
   const [aiProviderInfo, setAiProviderInfo] = useState<string>('');
 
+  // Page bookmarks/notes (library annotations)
+  const [annotations, setAnnotations] = useState<any[]>([]);
+  const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
+
   // Tap-Any-Word AI Dictionary Popover
   const [lookupWord, setLookupWord] = useState<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
@@ -232,6 +242,17 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   useEffect(() => {
     setPageInput(String(pageNumber));
   }, [pageNumber]);
+
+  // Load annotations for this book (bookmarks/notes per page)
+  useEffect(() => {
+    if (!bookId) { setAnnotations([]); return; }
+    let cancelled = false;
+    fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(data => { if (!cancelled && data?.success && Array.isArray(data.annotations)) setAnnotations(data.annotations); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [bookId]);
 
   // Persist PDF reading state (page/zoom/theme/viewMode/rotation/progress) for resume
   useEffect(() => {
@@ -600,6 +621,74 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     }
   };
 
+  const pageChapterId = useMemo(() => `pdf_page_${pageNumber}`, [pageNumber]);
+  const pageBookmark = useMemo(
+    () => annotations.find((a) => a.bookId === bookId && a.chapterId === pageChapterId && (a.kind === 'bookmark' || String(a.selectedText || '').startsWith('书签'))),
+    [annotations, bookId, pageChapterId]
+  );
+  const pageNotes = useMemo(
+    () => annotations.filter((a) => a.bookId === bookId && (a.chapterId === pageChapterId || a.pageIndex === pageNumber) && a.kind !== 'bookmark'),
+    [annotations, bookId, pageChapterId, pageNumber]
+  );
+
+  const togglePageBookmark = useCallback(async () => {
+    if (!bookId) return;
+    if (pageBookmark) {
+      try {
+        await fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations/${encodeURIComponent(pageBookmark.id)}`, { method: 'DELETE', credentials: 'include' });
+      } catch {}
+      setAnnotations((prev) => prev.filter((a) => a.id !== pageBookmark.id));
+      return;
+    }
+    try {
+      const res = await fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          chapterId: pageChapterId,
+          selectedText: isChinese ? `书签：第 ${pageNumber} 页` : `Bookmark: Page ${pageNumber}`,
+          note: (currentPageText || '').slice(0, 80),
+          kind: 'bookmark',
+          pageIndex: pageNumber,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success && data.annotation) setAnnotations((prev) => [data.annotation, ...prev]);
+    } catch {}
+  }, [bookId, currentPageText, isChinese, pageBookmark, pageChapterId, pageNumber]);
+
+  const savePageNote = useCallback(async () => {
+    if (!bookId || !noteDraft.trim()) return;
+    try {
+      const res = await fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          chapterId: pageChapterId,
+          selectedText: (currentPageText || title).slice(0, 120),
+          note: noteDraft.trim(),
+          aiExplanation: aiExplanation || undefined,
+          kind: 'note',
+          pageIndex: pageNumber,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success && data.annotation) {
+        setAnnotations((prev) => [data.annotation, ...prev]);
+        setNoteDraft('');
+      }
+    } catch {}
+  }, [aiExplanation, bookId, currentPageText, isChinese, noteDraft, pageChapterId, pageNumber, title]);
+
+  const deleteAnnotation = useCallback(async (id: string) => {
+    if (!bookId) return;
+    try { await fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include' }); } catch {}
+    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+  }, [bookId]);
+
+
   return (
     <section
       aria-label={isChinese ? 'ONE 智能 PDF 阅读器' : 'PDF Document Reader'}
@@ -727,6 +816,30 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
             <Languages className="h-3.5 w-3.5" />
             <span>{isChinese ? '点词查义' : 'Lookup Word'}</span>
           </button>
+          {bookId && (
+            <>
+              <button
+                type="button"
+                onClick={() => void togglePageBookmark()}
+                title={isChinese ? (pageBookmark ? '移除书签' : '添加本页书签') : (pageBookmark ? 'Remove bookmark' : 'Bookmark page')}
+                className="inline-flex h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85"
+                style={{ borderColor: pageBookmark ? '#F59E0B' : theme.border, color: pageBookmark ? '#D97706' : theme.ink, backgroundColor: pageBookmark ? 'rgba(245,158,11,0.12)' : 'transparent' }}
+              >
+                {pageBookmark ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
+                <span className="hidden sm:inline">{isChinese ? '书签' : 'Mark'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnnotationsOpen((v) => !v)}
+                title={isChinese ? '笔记与书签' : 'Notes & bookmarks'}
+                className="inline-flex h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85"
+                style={{ borderColor: annotationsOpen ? '#10B981' : theme.border, color: annotationsOpen ? '#059669' : theme.ink, backgroundColor: annotationsOpen ? 'rgba(16,185,129,0.12)' : 'transparent' }}
+              >
+                <StickyNote className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{isChinese ? '笔记' : 'Notes'}</span>
+              </button>
+            </>
+          )}
 
           <div
             className="hidden items-center rounded-xl border p-0.5 sm:inline-flex"
@@ -1197,6 +1310,52 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                 </button>
               </div>
             </form>
+          </aside>
+        )}
+
+        {/* Bookmarks & Notes Panel (library persistence) */}
+        {annotationsOpen && bookId && (
+          <aside className="absolute inset-y-0 left-0 z-30 flex w-[min(92vw,320px)] flex-col border-r shadow-2xl lg:static lg:w-[300px] lg:shadow-none" style={{ backgroundColor: theme.panelBg, borderColor: theme.border }}>
+            <div className="flex items-center justify-between border-b px-3 py-2.5" style={{ borderColor: theme.border }}>
+              <div className="flex items-center gap-1.5 text-xs font-semibold"><StickyNote className="h-3.5 w-3.5 text-emerald-500" /><span>{isChinese ? '笔记与书签' : 'Notes & Bookmarks'}</span></div>
+              <button type="button" onClick={() => setAnnotationsOpen(false)} className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg opacity-70 hover:opacity-100"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="border-b p-3 space-y-2" style={{ borderColor: theme.border }}>
+              <textarea
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                placeholder={isChinese ? `为第 ${pageNumber} 页添加笔记…` : `Add a note for page ${pageNumber}…`}
+                className="h-20 w-full resize-none rounded-xl border bg-transparent p-2 text-xs focus:outline-none"
+                style={{ borderColor: theme.border, color: theme.ink }}
+              />
+              <div className="flex gap-1.5">
+                <button type="button" onClick={() => void togglePageBookmark()} className="inline-flex cursor-pointer items-center gap-1 rounded-lg border px-2 py-1 text-[11px]" style={{ borderColor: theme.border }}>
+                  {pageBookmark ? <BookmarkCheck className="h-3 w-3 text-amber-500" /> : <Bookmark className="h-3 w-3" />} {pageBookmark ? (isChinese ? '已加书签' : 'Bookmarked') : (isChinese ? '加书签' : 'Bookmark')}
+                </button>
+                <button type="button" onClick={() => void savePageNote()} disabled={!noteDraft.trim()} className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-40">
+                  {isChinese ? '保存笔记' : 'Save note'}
+                </button>
+              </div>
+              <div className="text-[10px]" style={{ color: theme.muted }}>{isChinese ? `本页书签/笔记：${(pageBookmark ? 1 : 0) + pageNotes.length} 条` : `This page: ${(pageBookmark ? 1 : 0) + pageNotes.length}`}</div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+              {annotations.filter(a => a.bookId === bookId).length === 0 ? (
+                <div className="p-3 text-center text-[11px]" style={{ color: theme.muted }}>{isChinese ? '暂无笔记或书签' : 'No notes or bookmarks yet'}</div>
+              ) : (
+                annotations.filter(a => a.bookId === bookId).map((a) => (
+                  <div key={a.id} className="rounded-xl border p-2 text-[11px]" style={{ borderColor: theme.border }}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{a.kind === 'bookmark' || String(a.selectedText||'').startsWith('书签') ? '🔖 ' : '📝 '}{a.selectedText || (isChinese ? '笔记' : 'Note')}</div>
+                        {a.note && <div className="mt-0.5 whitespace-pre-wrap" style={{ color: theme.muted }}>{a.note}</div>}
+                        {typeof a.pageIndex === 'number' && <button type="button" onClick={() => setPageNumber(a.pageIndex)} className="mt-1 cursor-pointer text-emerald-600 hover:underline">P.{a.pageIndex}</button>}
+                      </div>
+                      <button type="button" onClick={() => void deleteAnnotation(a.id)} className="shrink-0 cursor-pointer opacity-60 hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </aside>
         )}
 
