@@ -144,7 +144,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [crawlResults, setCrawlResults] = useState<any[]>([]);
   const [crawlSources, setCrawlSources] = useState<any[]>([]);
   const [crawlReader, setCrawlReader] = useState<any | null>(null);
-  const [pdfReader, setPdfReader] = useState<{ url: string; title: string; sourceUrl?: string } | null>(null);
+  const [pdfReader, setPdfReader] = useState<{ url: string; title: string; sourceUrl?: string; bookId?: string; contentLanguage?: string; initialState?: { page?: number; zoom?: number; theme?: 'light' | 'paper' | 'dark'; viewMode?: 'single' | 'continuous'; rotation?: number } } | null>(null);
   const [webReader, setWebReader] = useState<{ url: string; title: string; sourceUrl?: string; label: string } | null>(null);
   const [readerNotice, setReaderNotice] = useState<string | null>(null);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
@@ -571,7 +571,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const openExternalReadable = (ref: any) => {
     setReaderNotice(null);
     const pdf = getBookPdfUrl(ref);
-    if (pdf) { setPdfReader({ url: pdf, title: ref.title || 'PDF', sourceUrl: ref.sourceUrl || ref.externalReadUrl || pdf }); return; }
+    if (pdf) { setPdfReader({ url: pdf, title: ref.title || 'PDF', sourceUrl: ref.sourceUrl || ref.externalReadUrl || pdf, bookId: (ref as any)?.id, contentLanguage: (ref as any)?.language }); return; }
     const embed = getBookEmbedUrl(ref);
     if (embed) { setWebReader({ url: embed.url, title: ref.title || '在线阅读', sourceUrl: ref.sourceUrl || ref.externalReadUrl, label: embed.label }); return; }
     const reason = getOnlineReaderReason(ref);
@@ -609,8 +609,23 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
     const pdf = getBookPdfUrl(book as any) || (book.formatType === 'pdf' ? (book as any).textUrl || book.externalReadUrl : null);
     if (pdf) {
-      setPdfReader({ url: pdf, title: book.title, sourceUrl: book.sourceUrl || book.externalReadUrl || pdf });
-      await ensureShelfForReading(book);
+      let shelfItem = shelf.find(item => item.bookId === book.id);
+      if (!shelfItem) shelfItem = await ensureShelfForReading(book) || undefined;
+      const st = shelfItem?.lastReadPdfState || {};
+      setPdfReader({
+        url: pdf,
+        title: book.title,
+        sourceUrl: book.sourceUrl || book.externalReadUrl || pdf,
+        bookId: book.id,
+        contentLanguage: book.language,
+        initialState: {
+          page: shelfItem?.lastReadPdfPage || st.page,
+          zoom: st.zoom,
+          theme: st.theme,
+          viewMode: st.viewMode,
+          rotation: st.rotation,
+        },
+      });
       return;
     }
     if (book.chapters && book.chapters.length > 0 && book.chapters.some(ch => ch.content && ch.content.trim().length > 0)) {
@@ -1289,7 +1304,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                               type="button"
                               onClick={() => {
                                 const pdf = getBookPdfUrl(r);
-                                if (pdf) { setPdfReader({ url: pdf, title: r.title, sourceUrl: r.sourceUrl }); return; }
+                                if (pdf) { setPdfReader({ url: pdf, title: r.title, sourceUrl: r.sourceUrl, contentLanguage: r.language }); return; }
                                 if (embedInfo) { setWebReader({ url: embedInfo.url, title: r.title, sourceUrl: r.sourceUrl, label: embedInfo.label }); return; }
                                 if (r.canImport) { void handleIngestCrawledBook(r); return; }
                                 setReaderNotice(getOnlineReaderReason(r));
@@ -1898,6 +1913,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             title={pdfReader.title}
             lang={lang}
             originPageUrl={pdfReader.sourceUrl}
+            bookId={pdfReader.bookId}
+            contentLanguage={pdfReader.contentLanguage}
+            initialState={pdfReader.initialState}
             onClose={() => setPdfReader(null)}
           />
         </div>

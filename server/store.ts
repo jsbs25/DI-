@@ -2464,6 +2464,34 @@ class DataStore {
     return item;
   }
 
+  updateBookShelfPdfReadingState(
+    userId: string,
+    bookId: string,
+    state: { page?: number; zoom?: number; theme?: 'light' | 'paper' | 'dark'; viewMode?: 'single' | 'continuous'; rotation?: number },
+    progress: number
+  ): BookShelfItem | null {
+    const item = this.bookShelf.find(s => s.userId === userId && s.bookId === bookId);
+    if (!item) return null;
+    const prev = item.lastReadPdfState || {};
+    const page = typeof state.page === 'number' && Number.isFinite(state.page) ? Math.max(1, Math.floor(state.page)) : prev.page;
+    const zoom = typeof state.zoom === 'number' && Number.isFinite(state.zoom) ? Math.max(0.5, Math.min(3, state.zoom)) : prev.zoom;
+    const theme = state.theme && ['light', 'paper', 'dark'].includes(state.theme) ? state.theme : prev.theme;
+    const viewMode = state.viewMode && ['single', 'continuous'].includes(state.viewMode) ? state.viewMode : prev.viewMode;
+    const rotationRaw = typeof state.rotation === 'number' && Number.isFinite(state.rotation) ? state.rotation : prev.rotation;
+    const rotation = typeof rotationRaw === 'number' ? ((Math.round(rotationRaw / 90) * 90) % 360 + 360) % 360 : undefined;
+    item.lastReadPdfState = { page, zoom, theme, viewMode, rotation };
+    if (typeof page === 'number') item.lastReadPdfPage = page;
+    item.progress = Math.min(100, Math.max(0, progress));
+    item.updatedAt = new Date().toISOString();
+    if (item.progress >= 100 && item.status !== 'finished') {
+      item.status = 'finished';
+    } else if (item.progress > 0 && item.status === 'want_to_read') {
+      item.status = 'reading';
+    }
+    this.saveToDisk();
+    return item;
+  }
+
   addAnnotation(
     bookId: string,
     chapterId: string,

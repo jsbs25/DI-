@@ -127,6 +127,7 @@ import {
   type IslamicLibrarySource
 } from './server/islamicLibraryCrawler.ts';
 import { registerNoorIslamicLibraryRoutes } from './server/noorIslamicPdfService.ts';
+import { getGeminiStatus, libraryAiAnalyze, libraryAiAsk, libraryAiDictionary, libraryAiExplain, libraryAiOcr, libraryAiSummarize, libraryAiTranslate } from './server/libraryAiService.ts';
 
 dotenv.config();
 
@@ -5269,6 +5270,27 @@ app.post('/api/library/shelf/:bookId/epub-reading-state', (req, res) => {
   res.json({ success: true, item });
 });
 
+app.post('/api/library/shelf/:bookId/pdf-reading-state', (req, res) => {
+  const user = getSessionUser(req);
+  if (!user) return res.status(401).json({ success: false, error: 'Unauthorized.' });
+  const book = store.books.find(b => b.id === req.params.bookId);
+  if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
+  const progress = Number(req.body.progress);
+  if (!Number.isFinite(progress) || progress < 0 || progress > 100) {
+    return res.status(400).json({ success: false, error: 'A valid reading progress percentage is required' });
+  }
+  const state = {
+    page: req.body.page,
+    zoom: req.body.zoom,
+    theme: req.body.theme,
+    viewMode: req.body.viewMode,
+    rotation: req.body.rotation,
+  };
+  const item = store.updateBookShelfPdfReadingState(user.id, book.id, state, progress);
+  if (!item) return res.status(404).json({ success: false, error: 'Book is not on this user’s bookshelf' });
+  res.json({ success: true, item });
+});
+
 app.get('/api/library/books', (req, res) => {
   const { category, search } = req.query;
   let books = store.books;
@@ -5425,6 +5447,28 @@ app.delete('/api/library/books/:id/annotations/:annotationId', (req, res) => {
   if (!removed) return res.status(404).json({ success: false, error: 'Annotation not found' });
   res.json({ success: true });
 });
+
+// Unified Library AI Service (Gemini-backed, with transparent fallback/error reporting)
+app.get('/api/library-ai/status', (_req, res) => {
+  res.json({ success: true, ...getGeminiStatus() });
+});
+const libraryAiHandler = (action: 'explain'|'translate'|'dictionary'|'analyze'|'summarize'|'ask'|'ocr', fn: any) => async (req: any, res: any) => {
+  try {
+    const ctx = req.body && typeof req.body === 'object' ? req.body : {};
+    const result = await fn(ctx, req);
+    const status = result.success ? 200 : (result.errorCode === 'GEMINI_UNAVAILABLE' || result.errorCode === 'NO_AI_ENGINE' ? 503 : 500);
+    res.status(status).json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, action, error: err?.message || 'Library AI request failed' });
+  }
+};
+app.post('/api/library-ai/explain', libraryAiHandler('explain', libraryAiExplain));
+app.post('/api/library-ai/translate', libraryAiHandler('translate', libraryAiTranslate));
+app.post('/api/library-ai/dictionary', libraryAiHandler('dictionary', libraryAiDictionary));
+app.post('/api/library-ai/analyze', libraryAiHandler('analyze', libraryAiAnalyze));
+app.post('/api/library-ai/summarize', libraryAiHandler('summarize', libraryAiSummarize));
+app.post('/api/library-ai/ask', libraryAiHandler('ask', libraryAiAsk));
+app.post('/api/library-ai/ocr', libraryAiHandler('ocr', libraryAiOcr));
 
 // Mount Noor / Islamic Multi-Format Library APIs (IslamHouse 12,724+ Books/Quran/Audios/Videos/Articles/Khotab/Fatwa,
 // Archive.org resolver, CORS-free streaming & download proxy, and direct download-to-bookshelf vault)

@@ -7,6 +7,7 @@ import type { Book, User } from '../src/types/index.ts';
 import { oneAiRouter } from './oneAi/router.ts';
 import { aiGateway } from './aiGateway.ts';
 import { getGeminiClient } from './geminiClient.ts';
+import { libraryAiDictionary, libraryAiExplain } from './libraryAiService.ts';
 
 type DataStore = typeof appStore;
 
@@ -636,6 +637,7 @@ async function runFastLibraryAiText(
     }
   }
 
+  let lastError = '';
   if (oneAiRouter.hasAnyUsableEngine()) {
     const routed = await oneAiRouter.executeUnifiedTurn({
       requestId: `libai_${Date.now().toString(36)}`,
@@ -654,6 +656,7 @@ async function runFastLibraryAiText(
     if (routed.success && routed.content.trim()) {
       return routed.content.trim();
     }
+    lastError = routed.errorMessage || '';
   }
 
   if (aiGateway.hasLiveEngine()) {
@@ -663,9 +666,10 @@ async function runFastLibraryAiText(
     if (res.success && res.content.trim()) {
       return res.content.trim();
     }
+    lastError = res.errorMessage || lastError;
   }
 
-  throw new Error('AI 讲解引擎暂忙，请稍后重试。');
+  throw new Error(lastError || 'AI 讲解引擎暂忙，请稍后重试。');
 }
 
 export function registerNoorIslamicLibraryRoutes(
@@ -1113,109 +1117,94 @@ export function registerNoorIslamicLibraryRoutes(
     return res.sendFile(filePath);
   });
 
-  // 6. AI Page Tutor ("读到这一页不会讲，让 AI 分析这一页怎么讲") — supports both PDF text & scanned image pages!
+  // 6. AI Page Tutor — context-aware via unified Library AI Service (Gemini-backed, supports text & scanned image pages)
   app.post('/api/library/ai/explain-page', async (req: Request, res: Response) => {
-    const { title, pageNumber, pageText, pageImageBase64, question, lang } = req.body || {};
-    const cleanText = typeof pageText === 'string' ? pageText.trim().slice(0, 6500) : '';
+    const { title, pageNumber, pageText, pageImageBase64, question, lang, bookId, chapterTitle, language: contentLanguage, surroundingContext, selectedText, totalPages } = req.body || {};
+    const cleanText = typeof pageText === 'string' ? pageText.trim().slice(0, 7000) : '';
     const hasImage = typeof pageImageBase64 === 'string' && pageImageBase64.length > 200;
 
-    if (!cleanText && !hasImage) {
+    if (!cleanText && !hasImage && !String(selectedText || '').trim()) {
       return res.status(400).json({ success: false, error: '当前页未提取到可分析的文本或页面图像。' });
     }
 
-    const replyZh = lang !== 'en';
-    const systemInstruction = replyZh
-      ? '你是博学、温和、表达清晰的资深双语（阿拉伯语/英语/汉语）典籍讲师。用户正在阅读一本书的某一页，可能不知道这一页该怎么理解或怎么讲给别人听。请用清晰、自然、易懂的中文分点讲解：1)「本页核心大意」（用大白话讲明白）；2)「这一页该怎么讲」（帮你梳理讲解逻辑和逐段要点）；3)「重点外语/阿语词句解析」（挑出 3-5 个关键原词，给读音/标音与释义）。如果用户提了具体问题，请优先直接回答该问题。不要输出多余寒暄。'
-      : 'You are an expert bilingual book tutor (Arabic/English/Chinese). Clearly explain the current page so the reader understands it deeply and knows how to explain it to others: 1) Core meaning, 2) How to explain this page step-by-step, 3) Key vocabulary with pronunciation and meaning.';
-
-    const prompt = [
-      `书名：${String(title || '原版书籍').slice(0, 140)}`,
-      pageNumber ? `页码：第 ${pageNumber} 页` : '',
-      question ? `读者追问：${String(question).slice(0, 400)}` : '请帮我分析这一页在讲什么，以及我该怎么把它讲清楚。',
-      cleanText ? `本页原文内容：\n"""\n${cleanText}\n"""` : '（本页为扫描图像页，请直接识读附图中的全部原文并进行精讲）',
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-
     try {
-      const explanation = await runFastLibraryAiText(
-        req,
-        systemInstruction,
-        prompt,
-        1500,
-        cleanText.length < 40 && hasImage ? pageImageBase64 : undefined
-      );
-      return res.json({ success: true, explanation });
+      const result = await libraryAiExplain({
+        bookId: typeof bookId === 'string' ? bookId : undefined,
+        bookTitle: typeof title === 'string' ? title : undefined,
+        chapterTitle: typeof chapterTitle === 'string' ? chapterTitle : undefined,
+        pageNumber: typeof pageNumber === 'number' ? pageNumber : (Number(pageNumber) || undefined),
+        totalPages: typeof totalPages === 'number' ? totalPages : undefined,
+        language: typeof contentLanguage === 'string' ? contentLanguage : undefined,
+        pageText: cleanText || undefined,
+        selectedText: typeof selectedText === 'string' ? selectedText : undefined,
+        surroundingContext: typeof surroundingContext === 'string' ? surroundingContext : undefined,
+        question: typeof question === 'string' ? question : undefined,
+        pageImageBase64: hasImage ? pageImageBase64 : undefined,
+        uiLanguage: lang === 'en' ? 'en' : (lang === 'ar' ? 'ar' : 'zh'),
+      }, req);
+      if (!result.success) {
+        return res.status(result.errorCode === 'GEMINI_UNAVAILABLE' || result.errorCode === 'NO_AI_ENGINE' ? 503 : 500).json({
+          success: false,
+          error: result.error || 'AI 本页讲解暂时不可用，请稍后重试。',
+          provider: result.provider,
+          model: result.model,
+          contextUsed: result.contextUsed,
+        });
+      }
+      return res.json({ success: true, explanation: result.content, provider: result.provider, model: result.model, contextUsed: result.contextUsed });
     } catch (err: any) {
-      return res.status(503).json({
-        success: false,
-        error: err?.message || 'AI 本页讲解暂时不可用，请稍后重试。',
-      });
+      return res.status(503).json({ success: false, error: err?.message || 'AI 本页讲解暂时不可用，请稍后重试。' });
     }
   });
 
-  // 7. Instant Tap-Any-Word AI Dictionary Lookup ("点一个不会的单词点开，AI 自动帮你查询这个单词")
+  // 7. Context-aware dictionary lookup via unified Library AI Service (Gemini-backed, Arabic/context-specialized)
   app.post('/api/library/ai/lookup-word', async (req: Request, res: Response) => {
-    const { word, contextSentence, bookTitle, lang } = req.body || {};
-    const cleanWord = typeof word === 'string' ? word.trim().slice(0, 80) : '';
+    const { word, contextSentence, bookTitle, lang, bookId, chapterTitle, pageNumber, language: contentLanguage, pageText } = req.body || {};
+    const cleanWord = typeof word === 'string' ? word.trim().slice(0, 100) : '';
     if (!cleanWord) {
       return res.status(400).json({ success: false, error: '请选择要查询的单词。' });
     }
 
-    const replyZh = lang !== 'en';
-    const systemInstruction = replyZh
-      ? '你是一部精准、响应极快的词典与阅读助教（精通阿拉伯语、英语、汉语及古典文献词汇）。请仅返回严格 JSON（不要加 markdown 代码块），字段如下：{"word":"原词","reading":"阿语完全标音(Tashkeel)+拉丁读音 或 国际音标/拼音","partOfSpeech":"词性","root":"阿语三母词根或词源（无则留空）","meaning":"最准确的简明中文释义","contextMeaning":"结合当前句子/书页语境的确切意思","example":"简短实用例句及中文翻译"}。'
-      : 'You are a fast, precise multilingual dictionary (Arabic/English/Chinese). Return ONLY strict JSON (no markdown fences): {"word":"...","reading":"...","partOfSpeech":"...","root":"...","meaning":"...","contextMeaning":"...","example":"..."}.';
-
-    const prompt = [
-      `查询单词：${cleanWord}`,
-      bookTitle ? `所在书籍：${String(bookTitle).slice(0, 120)}` : '',
-      contextSentence ? `所在上下文：${String(contextSentence).slice(0, 320)}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-
     try {
-      const raw = await runFastLibraryAiText(req, systemInstruction, prompt, 900);
-      let parsed: Record<string, string> | null = null;
-      try {
-        const cleanedRaw = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-        const jsonMatch = cleanedRaw.match(/\{[\s\S]*\}/);
-        if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
-      } catch {}
+      const result = await libraryAiDictionary({
+        bookId: typeof bookId === 'string' ? bookId : undefined,
+        bookTitle: typeof bookTitle === 'string' ? bookTitle : undefined,
+        chapterTitle: typeof chapterTitle === 'string' ? chapterTitle : undefined,
+        pageNumber: typeof pageNumber === 'number' ? pageNumber : undefined,
+        language: typeof contentLanguage === 'string' ? contentLanguage : undefined,
+        selectedText: cleanWord,
+        surroundingContext: typeof contextSentence === 'string' ? contextSentence : undefined,
+        pageText: typeof pageText === 'string' ? pageText : undefined,
+        question: cleanWord,
+        uiLanguage: lang === 'en' ? 'en' : (lang === 'ar' ? 'ar' : 'zh'),
+      }, req);
 
-      if (parsed && typeof parsed.meaning === 'string') {
-        return res.json({
-          success: true,
-          entry: {
-            word: parsed.word || cleanWord,
-            reading: parsed.reading || '',
-            partOfSpeech: parsed.partOfSpeech || '',
-            root: parsed.root || '',
-            meaning: parsed.meaning || '',
-            contextMeaning: parsed.contextMeaning || '',
-            example: parsed.example || '',
-          },
+      if (!result.success) {
+        return res.status(result.errorCode === 'GEMINI_UNAVAILABLE' || result.errorCode === 'NO_AI_ENGINE' ? 503 : 500).json({
+          success: false,
+          error: result.error || 'AI 查词暂时不可用，请稍后重试。',
+          provider: result.provider,
+          model: result.model,
         });
       }
 
-      return res.json({
-        success: true,
-        entry: {
-          word: cleanWord,
-          reading: '',
-          partOfSpeech: '',
-          root: '',
-          meaning: raw.slice(0, 600),
-          contextMeaning: '',
-          example: '',
-        },
-      });
+      const d = (result.data || {}) as Record<string, any>;
+      const entry = {
+        word: String(d.word || cleanWord),
+        reading: String(d.reading || ''),
+        partOfSpeech: String(d.partOfSpeech || ''),
+        root: String(d.root || ''),
+        meaning: String(d.meaning || d.basicMeaning || d.zh || d.contextMeaning || (result.content || '').slice(0, 800)),
+        contextMeaning: String(d.contextMeaning || ''),
+        example: String(d.example || ''),
+        zh: String(d.zh || ''),
+        en: String(d.en || ''),
+        forms: String(d.forms || ''),
+        notes: String(d.notes || ''),
+      };
+      return res.json({ success: true, entry, raw: result.content, provider: result.provider, model: result.model, contextUsed: result.contextUsed });
     } catch (err: any) {
-      return res.status(503).json({
-        success: false,
-        error: err?.message || 'AI 查词暂时不可用，请稍后重试。',
-      });
+      return res.status(503).json({ success: false, error: err?.message || 'AI 查词暂时不可用，请稍后重试。' });
     }
   });
 }

@@ -103,6 +103,20 @@ export interface PdfDocumentViewerProps {
   lang: Language;
   /** Optional original external source URL (e.g. IslamHouse / Archive / Noor page). */
   originPageUrl?: string;
+  /** Library book id for progress/reading-state persistence. */
+  bookId?: string;
+  /** Book content language (ar/zh/en) for AI context and RTL hints. */
+  contentLanguage?: string;
+  /** Optional chapter/section label for AI context. */
+  chapterTitle?: string;
+  /** Resume state from shelf. */
+  initialState?: {
+    page?: number;
+    zoom?: number;
+    theme?: PdfThemeId;
+    viewMode?: 'single' | 'continuous';
+    rotation?: number;
+  };
   /** Callback to return to Bookshelf / Library. */
   onClose?: () => void;
 }
@@ -157,19 +171,27 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   title,
   lang,
   originPageUrl,
+  bookId,
+  contentLanguage,
+  chapterTitle,
+  initialState,
   onClose,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [documentProxy, setDocumentProxy] = useState<PDFDocumentProxy | null>(null);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageInput, setPageInput] = useState('1');
+  const [pageNumber, setPageNumber] = useState(Math.max(1, Math.floor(initialState?.page || 1)));
+  const [pageInput, setPageInput] = useState(String(Math.max(1, Math.floor(initialState?.page || 1))));
   const [pageCount, setPageCount] = useState(0);
-  const [zoom, setZoom] = useState(1.2);
-  const [themeId, setThemeId] = useState<PdfThemeId>('paper');
+  const [zoom, setZoom] = useState(typeof initialState?.zoom === 'number' ? Math.max(0.65, Math.min(2.6, initialState.zoom)) : 1.2);
+  const [themeId, setThemeId] = useState<PdfThemeId>(initialState?.theme || 'paper');
+  const [viewMode, setViewMode] = useState<'single' | 'continuous'>(initialState?.viewMode || 'single');
+  const [rotation, setRotation] = useState<number>(((Math.round((initialState?.rotation || 0) / 90) * 90) % 360 + 360) % 360);
   const [searchText, setSearchText] = useState('');
   const [matchingPages, setMatchingPages] = useState<number[]>([]);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Interactive PDF text layer for tap-any-word lookup + page text extraction
   const [canvasDims, setCanvasDims] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -180,12 +202,15 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
 
   // AI Page Explanation Drawer
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiAction, setAiAction] = useState<'explain' | 'translate' | 'summarize' | 'ask'>('explain');
+  const [aiTargetLang, setAiTargetLang] = useState<'zh' | 'en' | 'ar'>('zh');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiExplanation, setAiExplanation] = useState('');
   const [aiExplainedPage, setAiExplainedPage] = useState<number | null>(null);
   const [aiError, setAiError] = useState('');
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiUsedVision, setAiUsedVision] = useState(false);
+  const [aiProviderInfo, setAiProviderInfo] = useState<string>('');
 
   // Tap-Any-Word AI Dictionary Popover
   const [lookupWord, setLookupWord] = useState<string | null>(null);
@@ -194,6 +219,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   const [lookupError, setLookupError] = useState('');
 
   const isChinese = lang === 'zh';
+  const effectiveContentLang = contentLanguage || (title.match(/[\u0600-\u06FF]/) ? 'ar' : undefined);
   const streamUrl = resolveProxyPdfUrl(sourceUrl, title, false);
   const downloadUrl = resolveProxyPdfUrl(sourceUrl, title, true);
   const theme = PDF_THEMES[themeId];
@@ -204,6 +230,24 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   useEffect(() => {
     setPageInput(String(pageNumber));
   }, [pageNumber]);
+
+  // Persist PDF reading state (page/zoom/theme/viewMode/rotation/progress) for resume
+  useEffect(() => {
+    if (!bookId || !pageCount) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const progress = Math.min(100, Math.max(0, Math.round((pageNumber / pageCount) * 100)));
+      fetch(`/api/library/shelf/${encodeURIComponent(bookId)}/pdf-reading-state`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ progress, page: pageNumber, zoom, theme: themeId, viewMode, rotation }),
+      }).catch(() => {});
+    }, 700);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [bookId, pageNumber, pageCount, zoom, themeId, viewMode, rotation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -232,6 +276,9 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
         if (cancelled) return;
         setDocumentProxy(pdf);
         setPageCount(pdf.numPages);
+        const initPage = Math.max(1, Math.min(pdf.numPages, Math.floor(initialState?.page || 1)));
+        setPageNumber(initPage);
+        setPageInput(String(initPage));
         setStatus('');
       })
       .catch((reason) => {
@@ -265,8 +312,8 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
         if (!canvas || !context) return;
 
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const cssViewport = page.getViewport({ scale: zoom });
-        const hiDpiViewport = page.getViewport({ scale: zoom * dpr });
+        const cssViewport = page.getViewport({ scale: zoom, rotation });
+        const hiDpiViewport = page.getViewport({ scale: zoom * dpr, rotation });
 
         const cssW = Math.ceil(cssViewport.width);
         const cssH = Math.ceil(cssViewport.height);
@@ -340,7 +387,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       cancelled = true;
       renderTask?.cancel();
     };
-  }, [documentProxy, pageNumber, zoom]);
+  }, [documentProxy, pageNumber, zoom, rotation]);
 
   // Keyboard navigation + Escape close
   useEffect(() => {
@@ -373,53 +420,81 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     setPageNumber(target);
   };
 
-  const handleExplainCurrentPage = useCallback(
-    async (customQuestion?: string) => {
+  const runLibraryAiAction = useCallback(
+    async (action: 'explain' | 'translate' | 'summarize' | 'ask', customQuestion?: string) => {
       setAiPanelOpen(true);
+      setAiAction(action);
       setAiLoading(true);
       setAiError('');
+      setAiProviderInfo('');
       const q = typeof customQuestion === 'string' ? customQuestion.trim() : '';
-
-      // Capture canvas snapshot if page text is scarce (e.g. scanned Arabic book PDFs!)
       let pageImageBase64: string | undefined;
       const needsVision = currentPageText.trim().length < 40;
       if (needsVision && canvasRef.current && canvasRef.current.width > 0) {
-        try {
-          pageImageBase64 = canvasRef.current.toDataURL('image/jpeg', 0.72);
-        } catch {
-          pageImageBase64 = undefined;
-        }
+        try { pageImageBase64 = canvasRef.current.toDataURL('image/jpeg', 0.72); } catch {}
       }
       setAiUsedVision(Boolean(needsVision && pageImageBase64));
 
+      const endpoint = action === 'explain' ? '/api/library/ai/explain-page' : `/api/library-ai/${action}`;
       try {
-        const res = await fetch('/api/library/ai/explain-page', {
+        const body: Record<string, unknown> = {
+          bookId,
+          title,
+          bookTitle: title,
+          chapterTitle,
+          pageNumber,
+          totalPages: pageCount,
+          pageText: currentPageText,
+          language: effectiveContentLang,
+          lang: isChinese ? 'zh' : 'en',
+          uiLanguage: isChinese ? 'zh' : 'en',
+        };
+        if (action === 'explain') {
+          body.question = q || undefined;
+          body.pageImageBase64 = pageImageBase64;
+        } else if (action === 'translate') {
+          body.selectedText = currentPageText || undefined;
+          body.pageImageBase64 = pageImageBase64;
+          body.targetLanguage = aiTargetLang;
+          body.question = q || undefined;
+        } else if (action === 'summarize') {
+          body.selectedText = currentPageText || undefined;
+          body.pageImageBase64 = pageImageBase64;
+          body.question = q || undefined;
+        } else if (action === 'ask') {
+          body.question = q || aiQuestion || (isChinese ? '请结合当前页内容回答。' : 'Answer based on this page.');
+          body.pageImageBase64 = pageImageBase64;
+          body.surroundingContext = currentPageText;
+        }
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title,
-            pageNumber,
-            pageText: currentPageText,
-            pageImageBase64,
-            question: q || undefined,
-            lang: isChinese ? 'zh' : 'en',
-          }),
+          credentials: 'include',
+          body: JSON.stringify(body),
         });
         const data = await res.json();
-        if (data?.success && data.explanation) {
-          setAiExplanation(data.explanation);
+        if (data?.success) {
+          const textOut = data.explanation || data.content || (typeof data.data?.text === 'string' ? data.data.text : '') || '';
+          setAiExplanation(textOut || (isChinese ? 'AI 已完成分析，但未返回可显示文本。' : 'No displayable text returned.'));
           setAiExplainedPage(pageNumber);
+          const p = data.provider ? ` · ${data.provider}${data.model ? '/' + data.model : ''}` : '';
+          setAiProviderInfo(p);
           if (q) setAiQuestion('');
         } else {
-          setAiError(data?.error || (isChinese ? 'AI 本页讲解暂时不可用，请稍后重试。' : 'AI explanation failed.'));
+          setAiError(data?.error || (isChinese ? 'AI 处理失败，请稍后重试。' : 'AI request failed.'));
         }
       } catch {
-        setAiError(isChinese ? '网络波动，请稍后重试 AI 讲解。' : 'Network error, please retry.');
+        setAiError(isChinese ? '网络波动，请稍后重试。' : 'Network error, please retry.');
       } finally {
         setAiLoading(false);
       }
     },
-    [currentPageText, isChinese, pageNumber, title]
+    [aiQuestion, aiTargetLang, bookId, chapterTitle, currentPageText, effectiveContentLang, isChinese, pageCount, pageNumber, title]
+  );
+
+  const handleExplainCurrentPage = useCallback(
+    async (customQuestion?: string) => runLibraryAiAction('explain', customQuestion),
+    [runLibraryAiAction]
   );
 
   const handleLookupWord = useCallback(
@@ -437,8 +512,13 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             word: cleaned,
-            contextSentence: (contextSentence || currentPageText).slice(0, 320),
+            contextSentence: (contextSentence || currentPageText).slice(0, 400),
             bookTitle: title,
+            bookId,
+            chapterTitle,
+            pageNumber,
+            pageText: currentPageText.slice(0, 1200),
+            language: effectiveContentLang,
             lang: isChinese ? 'zh' : 'en',
           }),
         });
@@ -454,7 +534,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
         setLookupLoading(false);
       }
     },
-    [currentPageText, isChinese, title]
+    [bookId, chapterTitle, currentPageText, effectiveContentLang, isChinese, pageNumber, title]
   );
 
   const handleSearch = async (event: React.FormEvent) => {
@@ -578,16 +658,32 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
           <button
             type="button"
             onClick={() => {
-              if (aiPanelOpen && aiExplainedPage === pageNumber && aiExplanation) {
+              if (aiPanelOpen && aiAction === 'explain' && aiExplainedPage === pageNumber && aiExplanation) {
                 setAiPanelOpen(false);
               } else {
-                void handleExplainCurrentPage();
+                void runLibraryAiAction('explain');
               }
             }}
             className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500"
           >
             <Sparkles className="h-3.5 w-3.5" />
-            <span>{isChinese ? 'AI 讲解本页' : 'AI Explain Page'}</span>
+            <span>{isChinese ? 'AI 讲解' : 'AI Explain'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void runLibraryAiAction('translate')}
+            className="hidden h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85 sm:inline-flex"
+            style={{ borderColor: theme.border }}
+          >
+            <span>{isChinese ? '翻译' : 'Translate'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void runLibraryAiAction('summarize')}
+            className="hidden h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85 md:inline-flex"
+            style={{ borderColor: theme.border }}
+          >
+            <span>{isChinese ? '总结' : 'Summary'}</span>
           </button>
 
           <button
@@ -907,33 +1003,21 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                 <Sparkles className="h-4 w-4 text-emerald-500" />
                 <div>
                   <div className="text-xs font-semibold">
-                    {isChinese ? `AI 精讲 · 第 ${pageNumber} 页` : `AI Tutor · Page ${pageNumber}`}
+                    {isChinese ? `AI 阅读助手 · 第 ${pageNumber} 页` : `AI Reading Assistant · Page ${pageNumber}`}
+                    <span className="ml-1 font-normal opacity-70">{aiProviderInfo}</span>
                   </div>
                   <div className="text-[10px]" style={{ color: theme.muted }}>
                     {aiUsedVision
-                      ? isChinese
-                        ? '已自动识读扫描页图像进行讲解'
-                        : 'Analyzed scanned page image'
-                      : isChinese
-                        ? '帮你读懂本页并梳理怎么讲给别人听'
-                        : 'Page breakdown & teaching guide'}
+                      ? (isChinese ? '已识读扫描页图像（视觉/OCR 辅助）' : 'Scanned page analyzed with vision/OCR aid')
+                      : (isChinese ? '基于当前书籍与本页上下文作答，不脱离原文' : 'Grounded in current book/page context')}
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                {aiExplainedPage !== pageNumber && !aiLoading && (
-                  <button
-                    type="button"
-                    onClick={() => void handleExplainCurrentPage()}
-                    className="cursor-pointer rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-emerald-500"
-                  >
-                    {isChinese ? `讲第 ${pageNumber} 页` : `Explain P.${pageNumber}`}
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => setAiPanelOpen(false)}
-                  aria-label="关闭 AI 讲解"
+                  aria-label={isChinese ? '关闭 AI 助手' : 'Close AI assistant'}
                   className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg opacity-70 hover:opacity-100"
                 >
                   <X className="h-4 w-4" />
@@ -941,6 +1025,36 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
               </div>
             </div>
 
+            <div className="border-b px-4 py-2 flex flex-wrap gap-1.5" style={{ borderColor: theme.border }}>
+              {([
+                { id: 'explain' as const, zh: '讲解', en: 'Explain' },
+                { id: 'translate' as const, zh: '翻译', en: 'Translate' },
+                { id: 'summarize' as const, zh: '总结', en: 'Summary' },
+                { id: 'ask' as const, zh: '问答', en: 'Ask' },
+              ]).map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => void runLibraryAiAction(a.id)}
+                  className="cursor-pointer rounded-lg px-2.5 py-1 text-[11px] font-medium transition"
+                  style={{ border: `1px solid ${aiAction === a.id ? '#10B981' : theme.border}`, color: aiAction === a.id ? '#059669' : theme.muted, backgroundColor: aiAction === a.id ? 'rgba(16,185,129,0.12)' : 'transparent' }}
+                >
+                  {isChinese ? a.zh : a.en}
+                </button>
+              ))}
+              {aiAction === 'translate' && (
+                <select
+                  value={aiTargetLang}
+                  onChange={(e) => setAiTargetLang(e.target.value as 'zh' | 'en' | 'ar')}
+                  className="ml-auto h-7 rounded-lg border bg-transparent px-2 text-[11px]"
+                  style={{ borderColor: theme.border, color: theme.ink }}
+                >
+                  <option value="zh">译为中文</option>
+                  <option value="en">Translate to English</option>
+                  <option value="ar">ترجمة إلى العربية</option>
+                </select>
+              )}
+            </div>
             <div className="flex-1 overflow-y-auto px-4 py-3.5 text-xs leading-relaxed">
               {aiLoading ? (
                 <div className="flex flex-col items-center justify-center gap-2.5 py-12 text-center" style={{ color: theme.muted }}>
@@ -952,7 +1066,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                   <div>{aiError}</div>
                   <button
                     type="button"
-                    onClick={() => void handleExplainCurrentPage()}
+                    onClick={() => void runLibraryAiAction(aiAction)}
                     className="mt-2 cursor-pointer rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-medium text-white"
                   >
                     {isChinese ? '重新分析' : 'Retry'}
@@ -971,7 +1085,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!aiLoading) void handleExplainCurrentPage(aiQuestion);
+                if (!aiLoading) void runLibraryAiAction(aiQuestion.trim() ? 'ask' : aiAction, aiQuestion);
               }}
               className="border-t p-3"
               style={{ borderColor: theme.border }}
@@ -985,7 +1099,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                     key={preset}
                     type="button"
                     disabled={aiLoading}
-                    onClick={() => void handleExplainCurrentPage(preset)}
+                    onClick={() => void runLibraryAiAction(aiQuestion ? 'ask' : 'explain', preset)}
                     className="cursor-pointer rounded-lg border px-2 py-1 text-[11px] transition hover:border-emerald-500 disabled:opacity-40"
                     style={{ borderColor: theme.border, color: theme.muted }}
                   >
@@ -1101,11 +1215,11 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
               </span>
               <button
                 type="button"
-                onClick={() => void handleExplainCurrentPage(`请结合本页重点讲解单词「${lookupWord}」以及它所在这段话的含义。`)}
+                onClick={() => void runLibraryAiAction('explain', `请结合本页上下文讲解词语「${lookupWord}」在本书当前句子/段落中的具体含义（不要只给脱离上下文的词典释义），并说明词根/词性/用法（如可确认）。`)}
                 className="inline-flex cursor-pointer items-center gap-1 font-semibold text-emerald-600 hover:underline dark:text-emerald-400"
               >
                 <Sparkles className="h-3 w-3" />
-                <span>{isChinese ? '结合本页精讲' : 'Explain in page'}</span>
+                <span>{isChinese ? '结合本页语境精讲' : 'Explain in context'}</span>
               </button>
             </div>
           </div>

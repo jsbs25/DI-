@@ -376,6 +376,16 @@ export interface BookShelfItem {
   lastReadChapterId?: string;
   /** EPUB CFI location used to resume an EPUB for this user. */
   lastReadEpubCfi?: string;
+  /** PDF resume state (1-based page number). */
+  lastReadPdfPage?: number;
+  /** Persisted PDF reader preferences for resume experience. */
+  lastReadPdfState?: {
+    page?: number;
+    zoom?: number;
+    theme?: 'light' | 'paper' | 'dark';
+    viewMode?: 'single' | 'continuous';
+    rotation?: number;
+  };
   savedAt: string;
   updatedAt: string;
 }
