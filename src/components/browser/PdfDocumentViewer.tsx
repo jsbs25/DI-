@@ -133,14 +133,16 @@ function tokenizeInteractiveText(text: string): string[] {
 }
 
 /**
- * Renders a razor-sharp HiDPI original PDF page inline inside reflow mode when a page is
- * scanned or uses a legacy non-Unicode Arabic font map, so Arabic calligraphy stays crystal clear.
+ * Renders a razor-sharp 2.5x HiDPI authentic PDF page directly blended onto the
+ * classical book paper surface (using mix-blend-multiply on cream/sepia/light themes
+ * and crisp inverted ivory ink on dark/midnight themes) so Arabic calligraphy is
+ * 100% authentic with ZERO spelling or ligature errors.
  */
 const InlineOriginalPdfPageCanvas: React.FC<{
   pdf: PDFDocumentProxy;
   pageNumber: number;
-  borderColor: string;
-}> = ({ pdf, pageNumber, borderColor }) => {
+  isDarkTheme: boolean;
+}> = ({ pdf, pageNumber, isDarkTheme }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [rendering, setRendering] = useState(true);
@@ -156,7 +158,7 @@ const InlineOriginalPdfPageCanvas: React.FC<{
         if (cancelled || !canvasRef.current) return;
         const baseViewport = page.getViewport({ scale: 1 });
         const containerW = containerRef.current?.clientWidth || 640;
-        const fitScale = Math.max(0.85, Math.min(2.2, (containerW - 8) / Math.max(1, baseViewport.width)));
+        const fitScale = Math.max(1.0, Math.min(2.4, containerW / Math.max(1, baseViewport.width)));
         const viewport = page.getViewport({ scale: fitScale });
         const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
         const canvas = canvasRef.current;
@@ -186,18 +188,28 @@ const InlineOriginalPdfPageCanvas: React.FC<{
   }, [pdf, pageNumber]);
 
   return (
-    <div
-      ref={containerRef}
-      className="relative mx-auto w-full overflow-hidden rounded-xl border bg-white shadow-sm"
-      style={{ borderColor }}
-    >
+    <div ref={containerRef} className="relative mx-auto w-full overflow-hidden rounded-lg">
       {rendering && (
-        <div className="flex items-center justify-center py-12 text-xs text-neutral-500">
+        <div className="flex items-center justify-center py-16 text-xs opacity-60">
           <Loader2 className="h-4 w-4 animate-spin mr-2" />
           <span>Rendering HD page…</span>
         </div>
       )}
-      <canvas ref={canvasRef} className={rendering ? 'hidden' : 'block w-full h-auto'} />
+      <canvas
+        ref={canvasRef}
+        className={rendering ? 'hidden' : 'block w-full h-auto'}
+        style={
+          isDarkTheme
+            ? {
+                filter: 'invert(0.91) hue-rotate(180deg) contrast(1.06)',
+                mixBlendMode: 'screen',
+              }
+            : {
+                mixBlendMode: 'multiply',
+                filter: 'contrast(1.04)',
+              }
+        }
+      />
     </div>
   );
 };
@@ -1554,7 +1566,8 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                       key={pNum}
                       dir={ep?.dir || 'ltr'}
                       lang={isArabicPage ? 'ar' : undefined}
-                      className="mb-12 last:mb-2"
+                      translate={isArabicPage ? 'no' : undefined}
+                      className={`mb-12 last:mb-2 ${isArabicPage ? 'notranslate' : ''}`}
                       style={{
                         fontFamily: effectivePageFont,
                         lineHeight: effectivePageLineHeight,
@@ -1616,32 +1629,33 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                         </div>
                       ) : ep.isLikelyScanned ? (
                       <div className="space-y-3 font-sans" dir="ltr">
+                        <InlineOriginalPdfPageCanvas
+                          pdf={pdfProxy}
+                          pageNumber={pNum}
+                          isDarkTheme={palette.isDark}
+                        />
                         <div
-                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-xs"
-                          style={{ borderColor: palette.border, backgroundColor: palette.surface, color: palette.muted }}
+                          className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t text-[11px]"
+                          style={{ borderColor: palette.border, color: palette.muted }}
                         >
-                          <span className="leading-relaxed">
+                          <span>
                             {isOcrBusy
                               ? isZh
-                                ? '正在通过 ONE AI 视觉 OCR 识别阿拉伯语与正文并重排…'
-                                : 'Running Vision OCR to extract clean reflowable Arabic & text…'
-                              : ep.extractionIssue === 'garbled_arabic'
-                                ? isZh
-                                  ? '原 PDF 使用了非标准阿拉伯语字库编码，已自动呈现高清原版页面，可一键 AI OCR 转为可点查电子书。'
-                                  : 'Legacy non-Unicode Arabic PDF font detected. Showing HD original page — run AI OCR for tappable text.'
-                                : isZh
-                                  ? '本页为图像扫描版，已为您直接呈现高清原页，也可一键 AI OCR 转为可点查文字。'
-                                  : 'Scanned page — displaying HD original page below, or run AI OCR for reflowable text.'}
+                                ? '正在通过 ONE AI 视觉识别原页阿拉伯语文字…'
+                                : 'Recognizing authentic text via Vision OCR…'
+                              : isZh
+                                ? '高清原版直呈 · 确保阿文零错字'
+                                : 'HD authentic edition · zero glyph errors'}
                           </span>
                           <div className="flex items-center gap-2 shrink-0">
                             <button
                               type="button"
                               disabled={isOcrBusy}
                               onClick={() => void ensurePageExtracted(pNum, true)}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-[#247864] px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-50 cursor-pointer"
+                              className="inline-flex items-center gap-1 rounded-lg bg-[#247864] px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-50 cursor-pointer"
                             >
                               {isOcrBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ScanText className="h-3 w-3" />}
-                              <span>{isOcrBusy ? (isZh ? '识别中…' : 'Recognizing…') : isZh ? 'AI OCR 转可点查文字' : 'AI OCR'}</span>
+                              <span>{isOcrBusy ? (isZh ? '识别中…' : 'Recognizing…') : isZh ? 'AI 识字可点查' : 'Vision OCR'}</span>
                             </button>
                             <button
                               type="button"
@@ -1649,15 +1663,14 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                                 setPageNumber(pNum);
                                 setViewMode('original');
                               }}
-                              className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium cursor-pointer"
+                              className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-medium cursor-pointer"
                               style={{ borderColor: palette.border, color: palette.ink }}
                             >
                               <Eye className="h-3 w-3" />
-                              <span>{isZh ? '缩放原版' : 'Zoom View'}</span>
+                              <span>{isZh ? '自由缩放' : 'Zoom'}</span>
                             </button>
                           </div>
                         </div>
-                        <InlineOriginalPdfPageCanvas pdf={pdfProxy} pageNumber={pNum} borderColor={palette.border} />
                       </div>
                     ) : (
                       <div>

@@ -7,6 +7,7 @@ import {
   isArabicCombiningMark,
   isArabicHeavyText,
   normalizeArabicProse,
+  repairUnambiguousArabicLigatures,
 } from './arabicTextNormalize.ts';
 
 export type EbookBlockKind = 'h1' | 'h2' | 'paragraph' | 'footnote' | 'table';
@@ -408,7 +409,8 @@ export async function extractStructuredPdfPage(
 
   const plainText = blocks.map((b) => b.text).join('\n\n').trim();
   const nonSpaceChars = plainText.replace(/\s+/g, '').length;
-  const hasBrokenArabic = detectBrokenArabicEncoding(plainText);
+  const hasBrokenArabic =
+    detectBrokenArabicEncoding(plainText) || detectBrokenArabicEncoding(pageRawLinesSample);
   const isScanned = nonSpaceChars < 30;
 
   return {
@@ -434,7 +436,9 @@ export async function extractPdfToc(pdf: PDFDocumentProxy): Promise<PdfTocItem[]
       for (const node of nodes) {
         if (items.length >= 160) return;
         const rawTitle = String(node?.title || '').trim();
-        const title = containsArabic(rawTitle) ? normalizeArabicProse(rawTitle) : rawTitle;
+        const title = containsArabic(rawTitle)
+          ? repairUnambiguousArabicLigatures(normalizeArabicProse(rawTitle))
+          : rawTitle;
         let pageNumber = 1;
         try {
           let dest = node.dest;

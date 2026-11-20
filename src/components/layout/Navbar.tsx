@@ -122,27 +122,27 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const surfaceChip = isGardenHome
     ? isGardenDay
-      ? 'border-white/60 bg-[#faf6ee]/82 text-[#1f2e27] hover:bg-[#faf6ee]/95 shadow-[0_6px_18px_rgba(24,36,28,0.10)] backdrop-blur-xl'
-      : 'border-white/16 bg-[#131d29]/68 text-[#f5f1e8] hover:bg-[#131d29]/88 shadow-[0_8px_22px_rgba(4,8,14,0.32)] backdrop-blur-xl'
-    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#faf7f0]/90 dark:bg-[#111b26]/88 text-[#1c2b24] dark:text-[#f5f1e8] hover:bg-white dark:hover:bg-[#182534] shadow-[0_6px_20px_rgba(24,36,28,0.07)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.36)] backdrop-blur-xl';
+      ? 'border-white/75 bg-[#fcfaf5]/84 text-[#1b2b23] hover:bg-[#fcfaf5]/96 shadow-[0_8px_24px_rgba(20,34,27,0.12)] backdrop-blur-2xl ring-1 ring-inset ring-white/55'
+      : 'border-white/16 bg-[#101924]/74 text-[#f5f1e8] hover:bg-[#101924]/90 shadow-[0_10px_28px_rgba(2,6,12,0.40)] backdrop-blur-2xl ring-1 ring-inset ring-white/[0.06]'
+    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/92 dark:bg-[#101924]/90 text-[#1b2b23] dark:text-[#f5f1e8] hover:bg-white dark:hover:bg-[#182534] shadow-[0_6px_20px_rgba(20,34,27,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.38)] backdrop-blur-2xl ring-1 ring-inset ring-white/50 dark:ring-white/[0.05]';
 
   const dockShell = isGardenHome
     ? isGardenDay
-      ? 'border-white/65 bg-[#faf6ee]/86 text-[#1f2e27] shadow-[0_10px_32px_rgba(24,36,28,0.14)] backdrop-blur-2xl'
-      : 'border-white/16 bg-[#111b26]/78 text-[#f4f0e8] shadow-[0_14px_38px_rgba(4,8,14,0.45)] backdrop-blur-2xl'
-    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#faf7f0]/94 dark:bg-[#111b26]/92 text-[#1c2b24] dark:text-[#f4f0e8] shadow-[0_12px_34px_rgba(24,36,28,0.12)] dark:shadow-[0_16px_42px_rgba(0,0,0,0.48)] backdrop-blur-2xl';
+      ? 'border-white/75 bg-[#fcfaf5]/86 text-[#1b2b23] shadow-[0_14px_38px_rgba(20,34,27,0.16),0_2px_8px_rgba(20,34,27,0.06)] backdrop-blur-2xl ring-1 ring-inset ring-white/60'
+      : 'border-white/16 bg-[#0f1722]/80 text-[#f5f1e8] shadow-[0_18px_46px_rgba(2,6,12,0.52)] backdrop-blur-2xl ring-1 ring-inset ring-white/[0.07]'
+    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/94 dark:bg-[#0f1722]/92 text-[#1b2b23] dark:text-[#f5f1e8] shadow-[0_14px_36px_rgba(20,34,27,0.12)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.50)] backdrop-blur-2xl ring-1 ring-inset ring-white/60 dark:ring-white/[0.06]';
 
   return (
     <>
       {/* Minimal Top Floating Corners: Brand Home Return (Left) + Theme/Lang/Profile (Right) */}
-      <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-3 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.65rem,env(safe-area-inset-top))]">
+      <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-3 pt-[max(0.55rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.7rem,env(safe-area-inset-top))]">
         <div className="mx-auto flex w-full max-w-[1380px] items-center justify-between gap-2">
           {/* Top-Left: Compact Brand Home Button */}
           <button
             type="button"
             onClick={() => onSelectTab('globe')}
             title={lang === 'zh' ? '返回 EARTH ONE 首页' : 'Return to EARTH ONE Home'}
-            className={`pointer-events-auto flex h-9 items-center gap-2 rounded-full border pl-1 pr-2.5 sm:pr-3 transition-all cursor-pointer shrink-0 ${surfaceChip}`}
+            className={`pointer-events-auto flex h-9 items-center gap-2 rounded-full border pl-1 pr-3 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
           >
             <ParadiseBrandEmblem
               surface={isGardenHome ? (isGardenDay ? 'garden-day' : 'garden-night') : theme === 'dark' ? 'dark' : 'light'}
@@ -162,7 +162,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={onToggleTheme}
                 title={theme === 'dark' ? (lang === 'zh' ? '切换明亮模式' : 'Switch to Light mode') : (lang === 'zh' ? '切换深色模式' : 'Switch to Dark mode')}
                 aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors cursor-pointer ${surfaceChip}`}
+                className={`flex h-9 w-9 items-center justify-center rounded-full border transition-all active:scale-[0.96] cursor-pointer ${surfaceChip}`}
               >
                 {theme === 'dark' ? <Sun className="h-4 w-4 text-[#d6b77f]" /> : <Moon className="h-4 w-4 text-[#247864]" />}
               </button>
@@ -174,13 +174,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                 aria-expanded={langMenuOpen}
                 aria-haspopup="menu"
                 onClick={() => { setLangMenuOpen(v => !v); setUserDropdownOpen(false); }}
-                className={`flex h-9 items-center gap-0.5 rounded-full border px-2.5 text-[11px] font-medium transition-colors cursor-pointer ${surfaceChip}`}
+                className={`flex h-9 items-center gap-0.5 rounded-full border px-2.5 text-[11px] font-medium transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
               >
                 <span className="uppercase">{lang}</span>
                 <ChevronDown className="h-3 w-3 opacity-70" />
               </button>
               {langMenuOpen && (
-                <div role="menu" className="absolute right-0 mt-2 w-40 rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#faf7f0]/96 dark:bg-[#111b26]/96 py-1.5 shadow-2xl">
+                <div role="menu" className="absolute right-0 mt-2 w-40 rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/96 dark:bg-[#111b26]/96 py-1.5 shadow-2xl backdrop-blur-2xl">
                   {languages.map(l => (
                     <button
                       key={l.code}
@@ -207,7 +207,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   aria-expanded={userDropdownOpen}
                   aria-haspopup="menu"
                   onClick={() => { setUserDropdownOpen(v => !v); setLangMenuOpen(false); }}
-                  className={`flex h-9 items-center gap-2 rounded-full border p-0.5 sm:pr-2.5 transition cursor-pointer ${surfaceChip}`}
+                  className={`flex h-9 items-center gap-2 rounded-full border p-0.5 sm:pr-2.5 transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
                   title={currentUser.displayName}
                 >
                   <span className="relative h-7 w-7 shrink-0">
@@ -219,7 +219,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <ChevronDown className="hidden md:inline h-3 w-3 opacity-65" />
                 </button>
                 {userDropdownOpen && (
-                  <div role="menu" className="absolute right-0 mt-2 w-60 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#faf7f0]/96 dark:bg-[#111b26]/96 py-2 text-xs shadow-2xl">
+                  <div role="menu" className="absolute right-0 mt-2 w-60 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/96 dark:bg-[#111b26]/96 py-2 text-xs shadow-2xl backdrop-blur-2xl">
                     <div className="mb-1 flex items-center gap-2.5 border-b border-[#23362c]/10 dark:border-white/[0.1] px-3.5 py-2.5">
                       <img src={currentUser.avatar} alt={currentUser.displayName} className="h-9 w-9 rounded-full object-cover shrink-0" />
                       <div className="min-w-0">
@@ -276,39 +276,52 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* Unified Bottom Floating Navigation Dock — Thumb-Ergonomic on Mobile, Refined Dock on Desktop */}
+      {/* Unified Apple-Grade Floating Glass Navigation Dock */}
       {!hideBottomNav && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[55] flex justify-center px-2.5 pb-[max(0.55rem,env(safe-area-inset-bottom))] pt-1">
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[55] flex justify-center px-3 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-1">
           <nav
             aria-label={lang === 'zh' ? '底部主导航' : 'Bottom Primary Navigation'}
-            className={`pointer-events-auto grid w-full max-w-[560px] grid-cols-5 items-center gap-0.5 rounded-[22px] border p-1 transition-all sm:w-auto sm:inline-flex sm:gap-1 sm:rounded-full sm:px-1.5 sm:py-1.5 ${dockShell}`}
+            className={`pointer-events-auto grid w-full max-w-[440px] grid-cols-5 items-center gap-1 rounded-[26px] border p-1.5 transition-all sm:w-auto sm:max-w-none sm:inline-flex sm:gap-1 sm:rounded-full sm:p-1.5 ${dockShell}`}
           >
             {BOTTOM_PORTALS.map((item) => {
               const Icon = item.icon;
               const active = currentTab === item.id;
+              const isCenterAi = item.id === 'aihub';
               const fullLabel = lang === 'ar' ? item.labelAr : lang === 'en' ? item.labelEn : item.labelZh;
               const compactLabel = lang === 'zh' ? item.shortZh : fullLabel;
+
+              const activeTabCls = isGardenHome
+                ? isGardenDay
+                  ? 'bg-[#1d352c] text-[#faf7f0] shadow-[0_4px_12px_rgba(20,38,30,0.24)]'
+                  : 'bg-[#ede3ce] text-[#131d27] shadow-[0_4px_14px_rgba(0,0,0,0.28)]'
+                : 'bg-[#1f6250] text-[#faf7f0] dark:bg-[#ede3ce] dark:text-[#131d27] shadow-[0_4px_12px_rgba(20,56,45,0.20)]';
+
+              const inactiveTabCls = isGardenHome
+                ? isGardenDay
+                  ? isCenterAi
+                    ? 'bg-black/[0.045] text-[#1b2e26] hover:bg-black/[0.08]'
+                    : 'text-[#2b3f36]/90 hover:bg-black/[0.055] hover:text-[#14221c]'
+                  : isCenterAi
+                    ? 'bg-white/[0.08] text-[#f6f1e6] hover:bg-white/[0.14]'
+                    : 'text-[#e8e2d5]/85 hover:bg-white/[0.09] hover:text-white'
+                : isCenterAi
+                  ? 'bg-[#1f6250]/[0.08] text-[#1c4b3d] dark:bg-white/[0.09] dark:text-[#efe7d6] hover:bg-[#1f6250]/[0.14] dark:hover:bg-white/[0.15]'
+                  : 'text-[#31453b]/90 dark:text-[#d8d3c8]/88 hover:bg-black/[0.05] dark:hover:bg-white/[0.08] hover:text-[#16241d] dark:hover:text-white';
+
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => onSelectTab(item.id)}
                   aria-current={active ? 'page' : undefined}
-                  className={`flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-[16px] px-1.5 py-1 text-[10px] font-medium whitespace-nowrap transition-all cursor-pointer sm:min-h-[38px] sm:flex-row sm:gap-1.5 sm:rounded-full sm:px-3.5 sm:text-[12px] ${
-                    active
-                      ? isGardenHome
-                        ? isGardenDay
-                          ? 'bg-[#21332b] text-[#faf7f0] shadow-xs'
-                          : 'bg-[#ebe2cf] text-[#141e28] shadow-xs'
-                        : 'bg-[#247864] text-[#faf7f0] dark:bg-[#e8dec9] dark:text-[#141d28] shadow-xs'
-                      : isGardenHome
-                      ? isGardenDay
-                        ? 'text-[#283c33] hover:bg-black/[0.06]'
-                        : 'text-[#e8e2d5]/90 hover:bg-white/[0.10]'
-                      : 'text-[#31453b] dark:text-[#d8d3c8] hover:bg-black/[0.05] dark:hover:bg-white/[0.08]'
+                  className={`group flex min-h-[48px] flex-col items-center justify-center gap-1 rounded-[20px] px-1.5 py-1.5 text-[10.5px] font-medium tracking-[0.015em] whitespace-nowrap transition-all duration-200 active:scale-[0.96] cursor-pointer sm:min-h-[40px] sm:flex-row sm:gap-2 sm:rounded-full sm:px-4 sm:py-1.5 sm:text-[12.5px] ${
+                    active ? activeTabCls : inactiveTabCls
                   }`}
                 >
-                  <Icon className="h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4" />
+                  <Icon
+                    className="h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:scale-[1.06] sm:h-[16px] sm:w-[16px]"
+                    strokeWidth={active ? 2.15 : 1.75}
+                  />
                   <span className="hidden sm:inline">{fullLabel}</span>
                   <span className="sm:hidden leading-none">{compactLabel}</span>
                 </button>

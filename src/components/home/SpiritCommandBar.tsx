@@ -167,7 +167,7 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpen
 
   return (
     <div
-      className="pointer-events-none fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] sm:bottom-[calc(5.05rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 w-[min(92vw,456px)] flex flex-col items-center gap-2"
+      className="pointer-events-none fixed bottom-[calc(5.15rem+env(safe-area-inset-bottom))] sm:bottom-[calc(5.1rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 w-[min(92vw,440px)] flex flex-col items-center gap-2"
       data-testid="spirit-command-bar"
     >
       {/* 1. Unified Frosted-Glass AI Response / Voice / Confirmation Sheet */}

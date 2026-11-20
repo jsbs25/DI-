@@ -1077,9 +1077,10 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
 
   const renderPageColumn = (page: PaginatedPage, pageNumLabel: number, runningHeader: string) => (
     <div
-      className="flex h-full flex-col justify-between px-6 py-7 sm:px-11 sm:py-9 lg:px-12 lg:py-10"
+      className={`flex h-full flex-col justify-between px-6 py-7 sm:px-11 sm:py-9 lg:px-12 lg:py-10 ${rtl ? 'notranslate' : ''}`}
       dir={rtl ? 'rtl' : 'ltr'}
       lang={rtl ? 'ar' : book.language || undefined}
+      translate={rtl ? 'no' : undefined}
     >
       {/* Classical 3-column Sepia Running Header matching physical book spread */}
       <div

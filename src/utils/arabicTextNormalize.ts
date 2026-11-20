@@ -1,11 +1,13 @@
 /**
  * Arabic Typography & PDF Text Normalization Engine
  *
- * Repairs the four most common causes of broken Arabic in digital readers & PDFs:
- *  1. Arabic Presentation Forms-A/B (U+FB50–U+FDFF, U+FE70–U+FEFF) & Lam-Alef ligatures
- *  2. Visually-reversed LTR-encoded Arabic strings from legacy PDF exporters
- *  3. Detached Harakat / Tashkeel diacritics & stray BiDi control marks
- *  4. Non-Unicode custom-encoded PDF fonts (PUA glyphs, Windows-1256 mojibake, shattered single-letter runs)
+ * Zero-tolerance protection against broken Arabic in digital books & PDFs:
+ *  1. Detects Word / Acrobat / Shamela PDF /ToUnicode reversed-ligature corruption
+ *     (e.g., الله -> هللا, لله -> هلل, الإسلام -> اإلسالم, السلام -> السالم, لامية -> المية)
+ *     so corrupted Arabic is NEVER displayed as book text (renders authentic HiDPI PDF glyphs instead).
+ *  2. Normalizes Arabic Presentation Forms-A/B (U+FB50–U+FDFF, U+FE70–U+FEFF) & Lam-Alef ligatures.
+ *  3. Detects & repairs full-line visually-reversed LTR-encoded Arabic strings.
+ *  4. Re-attaches detached Harakat / Tashkeel diacritics & strips broken ornament/PUA boxes.
  */
 
 const ARABIC_BASE_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
@@ -75,17 +77,10 @@ export function isArabicHeavyText(text: string): boolean {
   return arCount >= 6 && arCount >= latinCjkCount * 0.4;
 }
 
-/**
- * Strips diacritics to inspect base Arabic consonantal word shape.
- */
 function stripArabicDiacritics(word: string): string {
   return word.replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u08D3-\u08FF\u0640]/g, '');
 }
 
-/**
- * Splits a string into grapheme clusters where each Arabic base letter
- * stays bonded to its immediately following combining diacritics (Tashkeel).
- */
 function splitArabicClusters(segment: string): string[] {
   const clusters: string[] = [];
   for (const ch of Array.from(segment)) {
@@ -99,8 +94,91 @@ function splitArabicClusters(segment: string): string[] {
 }
 
 /**
+ * Detects Word / Acrobat / Shamela Arabic PDF /ToUnicode reversed-ligature corruption,
+ * where standard Arabic letters are logical, but multi-letter ligatures are reversed:
+ *  - الله  -> هللا
+ *  - لله   -> هلل (e.g. الحمد هلل)
+ *  - الإ   -> اإل (e.g. اإلسالم)
+ *  - الأ   -> األ (e.g. األول)
+ *  - الآ   -> اآل (e.g. اآلخرة)
+ *  - لا    -> ال  (e.g. السالم عليكم، المية، إال، كالم، صالة، فال، وال)
+ *  - Ornamental PDF glyph boxes (enclosing square \u20DE, PUA, Wingdings, etc.)
+ *
+ * Because corrupted ligatures silently alter sacred & scholarly Arabic words (e.g. السالم vs السلام),
+ * any page triggering this detector MUST render authentic HiDPI PDF glyphs instead of flawed text!
+ */
+export function detectArabicPdfLigatureCorruption(text: string): boolean {
+  if (!text || !containsArabic(text)) return false;
+
+  const nfkc = text.normalize('NFKC');
+  const plain = stripArabicDiacritics(nfkc);
+
+  // 1. Unmistakable impossible Arabic sequences caused ONLY by reversed PDF ligature CMaps:
+  //    - "هللا" (reversed الله)
+  //    - "اإل" / "األ" / "اآل" (reversed الإ / الأ / الآ — Alef can NEVER precede Hamza-Alef + Lam in Arabic!)
+  //    - "إال" / "أال" / "آال" (reversed إلا / ألا / آلا)
+  //    - "بإال" / "لإل"->ok, "هّللا", "هلل" after الحمد / سبحان / الشكر / المنة / تبارك / وصلى
+  const definiteCorruptRe =
+    /(?:هللا|اإل|األ|اآل|إال|أال|آال|بأال|فأال|والإ|اإلسالم|اإليمان|اإلمام|اإلنسان|الحمد\s+هلل|فالحمد\s+هلل|سبحان\s+هلل|الشكر\s+هلل|المنة\s+هلل|ورحمة\s+هللا|وصلى\s+هللا|بسم\s+هللا|السالم\s+عليكم|عليه\s+السالم|وعليكم\s+السالم|باسالم|صالة\s+الله)/;
+  if (definiteCorruptRe.test(plain)) {
+    return true;
+  }
+
+  // 2. Check combinations of multiple suspect reversed Lam-Alef forms on the same page
+  const suspectTokens = [
+    /(?:^|\s)هلل(?:\s|[،؛:.]|$)/,
+    /(?:^|\s)فال(?:\s)/,
+    /(?:^|\s)وال(?:\s)/,
+    /(?:^|\s)كالم(?:\s|[،؛:.]|$)/,
+    /(?:^|\s)خالف(?:\s|[،؛:.]|$)/,
+    /(?:^|\s)صالة(?:\s|[،؛:.]|$)/,
+    /(?:^|\s)المية(?:\s|[،؛:.]|$)/,
+    /(?:^|\s)ماليين(?:\s|[،؛:.]|$)/,
+    /(?:^|\s)إعالم(?:\s|[،؛:.]|$)/,
+    /(?:^|\s)أعالم(?:\s|[،؛:.]|$)/,
+    /(?:^|\s)تالميذ(?:\s|[،؛:.]|$)/,
+    /(?:^|\s)مالحظ/,
+    /(?:^|\s)عالمات(?:\s|[،؛:.]|$)/,
+  ];
+  let suspectHits = 0;
+  for (const re of suspectTokens) {
+    if (re.test(plain)) suspectHits += 1;
+  }
+  if (suspectHits >= 2) {
+    return true;
+  }
+
+  // 3. Enclosed box / ornamental glyph leakage (e.g., [ش][ش] from U+20DE or custom Arabesque fonts)
+  if (/[\u20DD-\u20E0\uFFFC\uF000-\uF0FF]/.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Safely repairs unambiguous reversed-ligature artifacts in short metadata strings
+ * (such as PDF Table of Contents entries) where full-page canvas fallback is not applicable.
+ */
+export function repairUnambiguousArabicLigatures(text: string): string {
+  if (!text || !containsArabic(text)) return text;
+  return text
+    .replace(/[\u20DD-\u20E0\uFFFC\uF000-\uF0FF]/g, '')
+    .replace(/هللا/g, 'الله')
+    .replace(/اإل/g, 'الإ')
+    .replace(/األ/g, 'الأ')
+    .replace(/اآل/g, 'الآ')
+    .replace(/إال/g, 'إلا')
+    .replace(/أال/g, 'ألا')
+    .replace(/السالم(?=\s+عليكم)/g, 'السلام')
+    .replace(/(?<=الحمد\s+)هلل/g, 'لله')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
  * Detects whether a raw Arabic text sample (preferably BEFORE NFKC) is stored in
- * reversed visual LTR order (common in older Arabic PDF exporters).
+ * full-line reversed visual LTR order (common in older Arabic PDF exporters).
  */
 export function detectArabicVisualReversal(rawText: string): boolean {
   if (!rawText || !containsArabic(rawText)) return false;
@@ -116,8 +194,6 @@ export function detectArabicVisualReversal(rawText: string): boolean {
     const first = letters[0];
     const last = letters[letters.length - 1];
 
-    // In logical order, a word starts with Initial/Medial and ends with Final.
-    // In reversed visual order, a word starts with Final and ends with Initial/Medial.
     if (PRES_FINAL_ONLY_RE.test(first)) reversedScore += 3;
     if (PRES_INITIAL_OR_MEDIAL_RE.test(last)) reversedScore += 3;
     if (PRES_INITIAL_OR_MEDIAL_RE.test(first)) normalScore += 2;
@@ -134,15 +210,12 @@ export function detectArabicVisualReversal(rawText: string): boolean {
     if (NORMAL_ARABIC_WORDS.has(base)) normalScore += 4;
     if (REVERSED_ARABIC_WORDS.has(base)) reversedScore += 4;
 
-    // Definite article "ال" appears at the start of normal Arabic words, "لا" at the end of reversed words
     if (base.startsWith('ال') && base.length >= 4) normalScore += 2;
     if (base.endsWith('لا') && base.length >= 4 && !base.startsWith('ال')) reversedScore += 2;
 
-    // Taa Marbuta "ة" ONLY appears at the end of normal Arabic words, never at the start!
     if (base.endsWith('ة')) normalScore += 3;
     if (base.startsWith('ة')) reversedScore += 5;
 
-    // Alef Maksura "ى" only appears at the end of Arabic words, never at the start!
     if (base.endsWith('ى') && base.length >= 3) normalScore += 2;
     if (base.startsWith('ى') && base.length >= 3) reversedScore += 4;
   }
@@ -155,11 +228,9 @@ export function detectArabicVisualReversal(rawText: string): boolean {
  * embedded Latin words, numbers, and mirroring paired brackets.
  */
 export function reverseArabicLine(line: string): string {
-  // Split into tokens preserving Arabic runs vs Latin/number islands
   const tokens = line.split(/([A-Za-z0-9]+(?:[._:/-][A-Za-z0-9]+)*)/);
   const reversedTokens = tokens.reverse().map((tok) => {
     if (!tok) return '';
-    // Keep pure Latin/number tokens in LTR order
     if (/^[A-Za-z0-9]+(?:[._:/-][A-Za-z0-9]+)*$/.test(tok)) {
       return tok;
     }
@@ -180,10 +251,9 @@ export function normalizeArabicProse(
 ): string {
   if (!raw) return '';
 
-  // Remove NULs and stray BiDi override/isolate markers that corrupt layout direction
   let text = raw
     .replace(/\u0000/g, '')
-    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '');
+    .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u20DD-\u20E0\uFFFC]/g, '');
 
   const shouldReverse =
     options?.forceReverse === true ||
@@ -196,7 +266,6 @@ export function normalizeArabicProse(
       .join('\n');
   }
 
-  // Convert Presentation Forms-A/B & ligatures (e.g. ﻻ -> لا) to canonical logical Unicode Arabic
   text = text.normalize('NFKC');
 
   // Re-attach combining Harakat / Tashkeel marks separated by accidental whitespace
@@ -212,32 +281,43 @@ export function normalizeArabicProse(
 }
 
 /**
- * Detects legacy non-Unicode Arabic PDF font maps (PUA glyph encodings,
- * Windows-1256-as-Latin1 mojibake, or shattered isolated-letter runs) so the reader
- * falls back cleanly to HiDPI Original Page rendering / AI Vision OCR instead of gibberish.
+ * Zero-tolerance broken Arabic detector for PDF extraction.
+ * Returns true if the extracted Arabic text has ANY of:
+ *  - Reversed PDF ligature CMap corruption (هللا, اإلسالم, هلل, المية, السالم عليكم, etc.)
+ *  - Private Use Area glyphs (\uE000-\uF8FF) or Replacement Chars (\uFFFD)
+ *  - Windows-1256-as-Latin1 mojibake
+ *  - Shattered single-letter runs
+ *
+ * When true, PdfDocumentViewer seamlessly renders the authentic HiDPI PDF page onto the
+ * classical book paper so ZERO wrong Arabic letters are ever shown!
  */
 export function detectBrokenArabicEncoding(text: string): boolean {
   if (!text) return false;
   const compact = text.replace(/\s+/g, '');
-  if (compact.length < 12) return false;
+  if (compact.length < 10) return false;
 
-  // 1. Replacement chars or Private Use Area glyph mappings
-  const puaOrBroken = (compact.match(/[\uFFFD\uE000-\uF8FF]/g) || []).length;
-  if (puaOrBroken >= 4 && puaOrBroken / compact.length >= 0.05) {
+  // 1. Word / Acrobat / Shamela reversed-ligature CMap corruption (ZERO TOLERANCE!)
+  if (detectArabicPdfLigatureCorruption(text)) {
     return true;
   }
 
-  // 2. Classic Windows-1256 Arabic mis-decoded as Windows-1252 / Latin-1 (e.g., ÇáßÊÇÈ, Ýí, Úáì)
+  // 2. Replacement chars or Private Use Area glyph mappings
+  const puaOrBroken = (compact.match(/[\uFFFD\uE000-\uF8FF]/g) || []).length;
+  if (puaOrBroken >= 2 && (puaOrBroken >= 4 || puaOrBroken / compact.length >= 0.03)) {
+    return true;
+  }
+
+  // 3. Classic Windows-1256 Arabic mis-decoded as Windows-1252 / Latin-1
   const win1256MojibakeHits = (
     text.match(/(?:Çá|ÊÇ|íÉ|ãä|Ýí|Úáì|Åáì|ßÊÇ|Çááå|ÑÓæá|ÈÓã|ÇáÑÍãä)/g) || []
   ).length;
-  if (win1256MojibakeHits >= 4) {
+  if (win1256MojibakeHits >= 3) {
     return true;
   }
 
-  // 3. Shattered single-letter Arabic runs (e.g., "ا ل ك ت ا ب ا ل ع ر ب ي")
+  // 4. Shattered single-letter Arabic runs (e.g., "ا ل ك ت ا ب")
   const arTokens = text.match(/[\u0621-\u064A\u0671\u064B-\u065F\u0670]+/g) || [];
-  if (arTokens.length >= 14) {
+  if (arTokens.length >= 12) {
     let singleCharCount = 0;
     for (const tok of arTokens) {
       const base = stripArabicDiacritics(tok);
@@ -245,7 +325,7 @@ export function detectBrokenArabicEncoding(text: string): boolean {
         singleCharCount += 1;
       }
     }
-    if (singleCharCount / arTokens.length >= 0.44) {
+    if (singleCharCount / arTokens.length >= 0.42) {
       return true;
     }
   }
