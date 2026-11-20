@@ -252,6 +252,8 @@ export default function App() {
   }, []);
 
   const isViewportWorkspace = ['chat', 'browser'].includes(currentTab);
+  // Independent communication domain active when chat/communications UI is in focus
+  const commsActive = currentTab === 'chat';
   const isSpaceExperience = isViewportWorkspace || ['globe', 'aihub', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'arabic-learning', 'knowledge', 'network', 'settings', 'profile', 'call'].includes(currentTab);
   useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
   useEffect(() => { initWebVitalsMonitor(); }, []);
@@ -642,6 +644,7 @@ export default function App() {
             onOpenCallCenter={handleOpenCallCenterFromHome}
             immersive={immersive}
             onImmersiveChange={setImmersive}
+            commsActive={commsActive}
           />
         )}
 
