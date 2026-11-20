@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { ChevronDown, ChevronUp, Compass, Download, LocateFixed, Radio, RotateCcw, SlidersHorizontal, SunMedium, Wind, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Compass, Download, Loader2, LocateFixed, MapPin, Radio, RotateCcw, Search, SlidersHorizontal, SunMedium, Wind, X } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
 import { uiStateManager, useAgentUiState } from '../../agent/uiStateManager.ts';
 import {
@@ -141,34 +141,106 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     targetLook: new THREE.Vector3(2.5, 1.4, -2.5),
   });
 
-  // Real-time external weather fetcher (Open-Meteo via /api/environment/weather)
-  const fetchLiveWeather = async (useGeoPrompt = false) => {
+  const [locating, setLocating] = useState(false);
+  const [locateNotice, setLocateNotice] = useState<string | null>(null);
+  const [cityQuery, setCityQuery] = useState('');
+  const [liveClockNow, setLiveClockNow] = useState<Date>(() => new Date());
+
+  // Live 1-second wall-clock ticker for crisp standard top-center desktop time
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLiveClockNow(new Date());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // Real-time external weather & standard location fetcher (GPS -> saved -> IP -> IANA timezone)
+  const fetchLiveWeather = async (useGeoPrompt = false, customCity?: string) => {
+    const WEATHER_LOC_KEY = 'earthone_live_location_v2';
+    setLocateNotice(null);
+    if (useGeoPrompt) setLocating(true);
+
     try {
-      let query = '';
-      if (useGeoPrompt && typeof navigator !== 'undefined' && navigator.geolocation) {
+      const tz = (() => {
+        try {
+          return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+        } catch {
+          return '';
+        }
+      })();
+      const params = new URLSearchParams();
+      params.set('lang', isZh ? 'zh' : 'en');
+      if (tz) params.set('tz', tz);
+
+      if (customCity && customCity.trim()) {
+        params.set('city', customCity.trim());
+        try {
+          localStorage.setItem(WEATHER_LOC_KEY, JSON.stringify({ city: customCity.trim(), updatedAt: Date.now() }));
+        } catch {}
+      } else if (useGeoPrompt && typeof navigator !== 'undefined' && navigator.geolocation) {
         try {
           const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 6000 })
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 12000,
+              maximumAge: 30000,
+            })
           );
-          query = `?lat=${pos.coords.latitude.toFixed(4)}&lon=${pos.coords.longitude.toFixed(4)}`;
-        } catch {
-          query = '';
+          const latStr = pos.coords.latitude.toFixed(5);
+          const lonStr = pos.coords.longitude.toFixed(5);
+          params.set('lat', latStr);
+          params.set('lon', lonStr);
+          try {
+            localStorage.setItem(WEATHER_LOC_KEY, JSON.stringify({ lat: latStr, lon: lonStr, updatedAt: Date.now() }));
+          } catch {}
+        } catch (geoErr: any) {
+          setLocateNotice(
+            isZh
+              ? '浏览器未授予 GPS 权限，已按网络与时区自动定位，也可手动输入城市。'
+              : 'GPS permission unavailable; using automatic IP/timezone location or search a city below.'
+          );
         }
-      } else if (typeof navigator !== 'undefined' && navigator.permissions && navigator.geolocation) {
-        try {
-          const perm = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
-          if (perm.state === 'granted') {
-            const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
-              navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4500 })
-            );
-            query = `?lat=${pos.coords.latitude.toFixed(4)}&lon=${pos.coords.longitude.toFixed(4)}`;
+      } else {
+        // 1) Try already-granted high-accuracy GPS silently
+        let gotGps = false;
+        if (typeof navigator !== 'undefined' && navigator.permissions && navigator.geolocation) {
+          try {
+            const perm = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+            if (perm.state === 'granted') {
+              const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+                navigator.geolocation.getCurrentPosition(resolve, reject, {
+                  enableHighAccuracy: true,
+                  timeout: 8000,
+                  maximumAge: 60000,
+                })
+              );
+              params.set('lat', pos.coords.latitude.toFixed(5));
+              params.set('lon', pos.coords.longitude.toFixed(5));
+              gotGps = true;
+            }
+          } catch {
+            // silent fallback
           }
-        } catch {
-          // silent non-granted fallback
+        }
+        // 2) Otherwise honor previously saved user location (city or GPS)
+        if (!gotGps) {
+          try {
+            const rawSaved = localStorage.getItem(WEATHER_LOC_KEY);
+            if (rawSaved) {
+              const saved = JSON.parse(rawSaved);
+              if (saved?.city) params.set('city', String(saved.city));
+              else if (saved?.lat && saved?.lon) {
+                params.set('lat', String(saved.lat));
+                params.set('lon', String(saved.lon));
+              }
+            }
+          } catch {
+            // ignore storage errors
+          }
         }
       }
 
-      const res = await fetch(`/api/environment/weather${query}`);
+      const res = await fetch(`/api/environment/weather?${params.toString()}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         uiStateManager.setLiveWeather({
@@ -209,6 +281,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         unavailable: true,
         error: err?.message || 'Network error',
       });
+    } finally {
+      if (useGeoPrompt) setLocating(false);
     }
   };
 
@@ -1178,42 +1252,70 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Quiet Top-Left Environment Pill tucked neatly beneath EARTH ONE logo (zero header overlap) */}
+      {/* Top-Center Desktop Clock, Standard Location & Live Weather Pill */}
       <div
-        className="pointer-events-none fixed left-3 sm:left-5 top-[calc(3.45rem+env(safe-area-inset-top))] sm:top-[calc(3.65rem+env(safe-area-inset-top))] z-[42] flex flex-col items-start gap-2 max-w-[calc(100vw-1.5rem)]"
+        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.35rem+env(safe-area-inset-top))] sm:top-[max(0.7rem,env(safe-area-inset-top))] z-[56] flex flex-col items-center gap-2 max-w-[calc(100vw-1.5rem)]"
       >
-        <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/50' : 'ring-white/[0.06]'} ${dockShellCls} ${dockDividerCls}`}>
+        <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/55' : 'ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
-            className="inline-flex h-8 items-center gap-1.5 px-2.5 text-[11px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
-            title={isZh ? '昼夜光影与实时天气设置' : 'Daylight, weather & camera presets'}
+            className="inline-flex h-9 items-center gap-2 px-3.5 text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
+            title={isZh ? '实时时间、精准定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
           >
-            <span className="tabular-nums font-semibold">{currentClockLabel}</span>
-            <span className="opacity-80">
-              ·{' '}
-              {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && agentSnap.realtimeSync
-                ? `${Math.round(agentSnap.liveWeather.temperatureC)}°C ${isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}`
-                : `${currentPhaseLabel} · ${isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}`}
+            <span className="tabular-nums text-[13px] font-semibold tracking-tight">
+              {agentSnap.realtimeSync
+                ? `${String(liveClockNow.getHours()).padStart(2, '0')}:${String(liveClockNow.getMinutes()).padStart(2, '0')}`
+                : currentClockLabel}
             </span>
-            {controlsOpen ? <ChevronUp className="h-3 w-3 opacity-65" /> : <ChevronDown className="h-3 w-3 opacity-65" />}
+            <span className="opacity-35">·</span>
+            <span className="inline-flex items-center gap-1 max-w-[130px] sm:max-w-[180px] truncate opacity-90">
+              <MapPin className="h-3 w-3 shrink-0 opacity-75" />
+              <span className="truncate">
+                {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable
+                  ? agentSnap.liveWeather.locationName
+                  : isZh
+                    ? '定位中…'
+                    : 'Locating…'}
+              </span>
+            </span>
+            {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && (
+              <>
+                <span className="hidden xs:inline opacity-35">·</span>
+                <span className="hidden xs:inline opacity-85">
+                  {Math.round(agentSnap.liveWeather.temperatureC)}°C {isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}
+                </span>
+              </>
+            )}
+            {controlsOpen ? <ChevronUp className="h-3 w-3 opacity-65 shrink-0" /> : <ChevronDown className="h-3 w-3 opacity-65 shrink-0" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void fetchLiveWeather(true)}
+            disabled={locating}
+            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
+            title={isZh ? '高精度 GPS 重新定位' : 'Refresh precise GPS location'}
+            aria-label={isZh ? '高精度定位' : 'Locate'}
+          >
+            {locating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="h-3.5 w-3.5" />}
           </button>
 
           <button
             type="button"
             onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
-            className="inline-flex h-8 w-8 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
+            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
             title={isZh ? '重置视角' : 'Reset View'}
             aria-label={isZh ? '重置视角' : 'Reset View'}
           >
-            <RotateCcw className="h-3 w-3" />
+            <RotateCcw className="h-3.5 w-3.5" />
           </button>
 
           {immersive && onImmersiveChange && (
             <button
               type="button"
               onClick={() => onImmersiveChange(false)}
-              className={`h-8 px-2.5 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
+              className={`h-9 px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
             >
               {isZh ? '退出' : 'Exit'}
             </button>
@@ -1221,45 +1323,94 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
 
         {controlsOpen && (
-          <div className={`pointer-events-auto w-[min(92vw,364px)] rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-2xl ${dockShellCls}`}>
+          <div className={`pointer-events-auto w-[min(92vw,372px)] rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-2xl ${dockShellCls}`}>
 
-            <div className={`mb-2.5 flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 ${dockBorderCls} ${isDayUi ? 'bg-white/48' : 'bg-white/[0.04]'}`}>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-[11px] font-medium">
-                  <Radio className="h-3 w-3 shrink-0 opacity-75" />
-                  <span className="truncate">
-                    {agentSnap.liveWeather
-                      ? agentSnap.liveWeather.unavailable
-                        ? isZh
-                          ? '实时气象服务暂不可用'
-                          : 'Live weather unavailable'
-                        : `${agentSnap.liveWeather.locationName} · ${Math.round(agentSnap.liveWeather.temperatureC)}°C · ${isZh ? agentSnap.liveWeather.conditionZh : agentSnap.liveWeather.conditionEn}`
-                      : isZh
-                        ? '正在同步真实天气...'
-                        : 'Syncing live weather...'}
-                  </span>
+            <div className={`mb-2.5 space-y-2 rounded-xl border px-2.5 py-2 ${dockBorderCls} ${isDayUi ? 'bg-white/48' : 'bg-white/[0.04]'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium">
+                    <Radio className="h-3 w-3 shrink-0 opacity-75" />
+                    <span className="truncate">
+                      {agentSnap.liveWeather
+                        ? agentSnap.liveWeather.unavailable
+                          ? isZh
+                            ? '实时气象服务暂不可用'
+                            : 'Live weather unavailable'
+                          : `${agentSnap.liveWeather.locationName} · ${Math.round(agentSnap.liveWeather.temperatureC)}°C · ${isZh ? agentSnap.liveWeather.conditionZh : agentSnap.liveWeather.conditionEn}`
+                        : isZh
+                          ? '正在同步真实天气...'
+                          : 'Syncing live weather...'}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-[10px] opacity-65 tabular-nums">
+                    {liveClockNow.toLocaleDateString(isZh ? 'zh-CN' : 'en-US', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      weekday: 'short',
+                    })}
+                    {agentSnap.liveWeather?.locationSource === 'gps'
+                      ? isZh ? ' · GPS 精确定位' : ' · GPS Precise'
+                      : agentSnap.liveWeather?.locationSource === 'city'
+                        ? isZh ? ' · 指定城市' : ' · Selected City'
+                        : agentSnap.liveWeather?.locationSource === 'ip'
+                          ? isZh ? ' · 网络自动定位' : ' · IP Auto-Locate'
+                          : isZh ? ' · 时区自动定位' : ' · Timezone Locate'}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    disabled={locating}
+                    onClick={() => void fetchLiveWeather(true)}
+                    className={`inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[10px] cursor-pointer transition-colors disabled:opacity-50 ${dockPillCls}`}
+                    title={isZh ? '按当前位置刷新真实天气' : 'Locate & refresh live weather'}
+                  >
+                    {locating ? <Loader2 className="h-3 w-3 animate-spin" /> : <LocateFixed className="h-3 w-3" />}
+                    <span>{isZh ? '精准定位' : 'GPS'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={restoreRealtimeSync}
+                    className={`inline-flex h-7 items-center rounded-lg px-2 text-[10px] font-medium cursor-pointer transition-colors ${
+                      agentSnap.realtimeSync ? dockActiveCls : dockPillCls
+                    }`}
+                  >
+                    {isZh ? '实时同步' : 'Live'}
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
+
+              {/* Manual Standard City Pinpoint Input */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const q = cityQuery.trim();
+                  if (!q) return;
+                  void fetchLiveWeather(false, q);
+                  setCityQuery('');
+                }}
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  type="text"
+                  value={cityQuery}
+                  onChange={(e) => setCityQuery(e.target.value)}
+                  placeholder={isZh ? '输入城市名校准定位（如：上海、西安、安曼、利雅得）' : 'Search city (e.g. Shanghai, Amman, London)'}
+                  className={`h-7 flex-1 rounded-lg border bg-transparent px-2.5 text-[11px] focus:outline-none ${dockBorderCls}`}
+                />
                 <button
-                  type="button"
-                  onClick={() => void fetchLiveWeather(true)}
-                  className={`inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[10px] cursor-pointer transition-colors ${dockPillCls}`}
-                  title={isZh ? '按当前位置刷新真实天气' : 'Locate & refresh live weather'}
+                  type="submit"
+                  className={`inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[10px] font-medium cursor-pointer transition-colors ${dockPillCls}`}
                 >
-                  <LocateFixed className="h-3 w-3" />
-                  <span>{isZh ? '定位' : 'Locate'}</span>
+                  <Search className="h-3 w-3" />
+                  <span>{isZh ? '切换' : 'Set'}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={restoreRealtimeSync}
-                  className={`inline-flex h-7 items-center rounded-lg px-2 text-[10px] font-medium cursor-pointer transition-colors ${
-                    agentSnap.realtimeSync ? dockActiveCls : dockPillCls
-                  }`}
-                >
-                  {isZh ? '实时同步' : 'Live Sync'}
-                </button>
-              </div>
+              </form>
+
+              {locateNotice && (
+                <div className="text-[10px] opacity-75 leading-relaxed">{locateNotice}</div>
+              )}
             </div>
 
             <div className={`flex items-center justify-between gap-2 pb-2 border-b ${dockBorderCls}`}>

@@ -146,18 +146,21 @@ const InlineOriginalPdfPageCanvas: React.FC<{
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [rendering, setRendering] = useState(true);
+  const [renderFailed, setRenderFailed] = useState(false);
+  const [retrySeq, setRetrySeq] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     let renderTask: RenderTask | undefined;
     setRendering(true);
+    setRenderFailed(false);
 
     pdf
       .getPage(pageNumber)
       .then((page) => {
         if (cancelled || !canvasRef.current) return;
         const baseViewport = page.getViewport({ scale: 1 });
-        const containerW = containerRef.current?.clientWidth || 640;
+        const containerW = Math.max(320, containerRef.current?.clientWidth || 640);
         const fitScale = Math.max(1.0, Math.min(2.4, containerW / Math.max(1, baseViewport.width)));
         const viewport = page.getViewport({ scale: fitScale });
         const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
@@ -177,27 +180,42 @@ const InlineOriginalPdfPageCanvas: React.FC<{
           if (!cancelled) setRendering(false);
         });
       })
-      .catch(() => {
-        if (!cancelled) setRendering(false);
+      .catch((err) => {
+        if (cancelled) return;
+        if (err?.name === 'RenderingCancelledException') return;
+        setRenderFailed(true);
+        setRendering(false);
       });
 
     return () => {
       cancelled = true;
       renderTask?.cancel();
     };
-  }, [pdf, pageNumber]);
+  }, [pdf, pageNumber, retrySeq]);
 
   return (
-    <div ref={containerRef} className="relative mx-auto w-full overflow-hidden rounded-lg">
+    <div ref={containerRef} className="relative mx-auto w-full min-h-[260px] overflow-hidden rounded-lg">
       {rendering && (
-        <div className="flex items-center justify-center py-16 text-xs opacity-60">
+        <div className="flex items-center justify-center py-20 text-xs opacity-65">
           <Loader2 className="h-4 w-4 animate-spin mr-2" />
-          <span>Rendering HD page…</span>
+          <span>正在高清渲染第 {pageNumber} 页…</span>
+        </div>
+      )}
+      {renderFailed && !rendering && (
+        <div className="flex flex-col items-center justify-center gap-2 py-16 text-xs opacity-75">
+          <span>第 {pageNumber} 页渲染受网络波动影响</span>
+          <button
+            type="button"
+            onClick={() => setRetrySeq((s) => s + 1)}
+            className="rounded-lg border px-3 py-1 text-[11px] font-medium cursor-pointer hover:opacity-80"
+          >
+            重新加载本页
+          </button>
         </div>
       )}
       <canvas
         ref={canvasRef}
-        className={rendering ? 'hidden' : 'block w-full h-auto'}
+        className={rendering || renderFailed ? 'hidden' : 'block w-full h-auto'}
         style={
           isDarkTheme
             ? {
@@ -299,6 +317,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   const [vocabLoading, setVocabLoading] = useState(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
 
   const updatePrefs = useCallback((patch: Partial<ReaderPreferences>) => {
     setPrefs((prev) => {
@@ -361,6 +380,9 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       url: streamUrl,
       withCredentials: false,
       cMapPacked: true,
+      rangeChunkSize: 65536,
+      disableAutoFetch: true,
+      disableStream: false,
     });
 
     task.promise
@@ -471,10 +493,8 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
           const res = await extractStructuredPdfPage(pdfProxy, p);
           if (cancelled) break;
           setExtractedPages((prev) => (prev[p] ? prev : { ...prev, [p]: res }));
-          // Auto-OCR the first visible scanned page so user immediately sees reflowable prose
-          if (p === pageNumber && res.isLikelyScanned) {
-            void ensurePageExtracted(p, true);
-          }
+          // Keep HD paper-blended original canvas immediate for garbled Arabic or scanned PDFs;
+          // Vision OCR remains one-tap opt-in via "AI 识字可点查" so zero quota errors interrupt reading.
         }
       }
     })();
@@ -483,6 +503,27 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       cancelled = true;
     };
   }, [pdfProxy, pageNumber, scrollWindowEnd, prefs.layoutMode, viewMode]);
+
+  // Auto-load next pages seamlessly as user scrolls down in continuous scroll mode
+  useEffect(() => {
+    if (viewMode !== 'reflow' || prefs.layoutMode !== 'scroll' || !pdfProxy || scrollWindowEnd >= pageCount) {
+      return;
+    }
+    const sentinel = loadMoreSentinelRef.current;
+    const root = scrollContainerRef.current;
+    if (!sentinel || !root || typeof IntersectionObserver === 'undefined') return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setScrollWindowEnd((prev) => Math.min(pageCount, prev + 3));
+        }
+      },
+      { root, rootMargin: '500px 0px' }
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [viewMode, prefs.layoutMode, pdfProxy, scrollWindowEnd, pageCount]);
 
   // Background whole-book text indexing for Whole-Book Context AI Q&A & Book Summary
   useEffect(() => {
@@ -1832,20 +1873,19 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                 );
               })}
 
-              {/* Continuous Scroll Load Next Pages */}
+              {/* Continuous Scroll Auto-Load Sentinel + Manual Load Next Pages */}
               {prefs.layoutMode === 'scroll' && scrollWindowEnd < pageCount && (
-                <div className="pt-2 pb-6 text-center">
+                <div ref={loadMoreSentinelRef} className="pt-2 pb-6 text-center">
                   <button
                     type="button"
                     onClick={() => {
                       const nextEnd = Math.min(pageCount, scrollWindowEnd + 4);
                       setScrollWindowEnd(nextEnd);
-                      setPageNumber(Math.min(pageCount, scrollWindowEnd + 1));
                     }}
                     className="inline-flex items-center gap-2 rounded-full border px-5 py-2 text-xs font-medium transition hover:opacity-80 cursor-pointer"
                     style={{ borderColor: palette.border, backgroundColor: palette.surface }}
                   >
-                    <span>{isZh ? `继续阅读下几页（剩余 ${pageCount - scrollWindowEnd} 页）` : `Load next pages (${pageCount - scrollWindowEnd} left)`}</span>
+                    <span>{isZh ? `继续加载下几页（剩余 ${pageCount - scrollWindowEnd} 页）` : `Load next pages (${pageCount - scrollWindowEnd} left)`}</span>
                   </button>
                 </div>
               )}

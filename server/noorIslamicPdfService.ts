@@ -360,12 +360,46 @@ async function searchArchiveGlobalPdfBooks(query: string, limit = 8): Promise<Is
           if (!metaRes.ok) return null;
           const meta: any = await metaRes.json();
           const files: any[] = Array.isArray(meta?.result) ? meta.result : [];
-          const pdfFile = files.find(
+          const allPdfs = files.filter(
             (f) =>
               typeof f?.name === 'string' &&
               /\.pdf$/i.test(f.name) &&
-              !/encrypted/i.test(String(f.format || ''))
+              !/encrypted/i.test(String(f.format || '')) &&
+              Number(f.size || 0) > 20 * 1024
           );
+          if (allPdfs.length === 0) return null;
+
+          // Exclude 1-page cover sheets (Waqfeya / Arabic Archive.org convention: 00_xxx.pdf, 000.pdf, cover.pdf, ghilaf.pdf)
+          const isCoverLike = (name: string): boolean => {
+            const base = name.split('/').pop() || name;
+            return (
+              /^0{2,}[_\-.\s]/i.test(base) ||
+              /^0+\.pdf$/i.test(base) ||
+              /(^|[_\-.\s])(cover|ghilaf|front|titlepage|wagheha|fihris_00|00_cover)([_\-.\s.]|$)/i.test(base)
+            );
+          };
+
+          const maxPdfSize = Math.max(...allPdfs.map((f) => Number(f.size || 0)));
+          const contentPdfs = allPdfs.filter((f) => {
+            if (isCoverLike(String(f.name || ''))) return false;
+            // If multi-PDF archive has real volumes (> 2.5MB) and tiny stub files (< 1.4MB), skip tiny stubs
+            if (maxPdfSize > 2.5 * 1024 * 1024 && Number(f.size || 0) < 1.4 * 1024 * 1024) return false;
+            return true;
+          });
+
+          const candidates = contentPdfs.length > 0 ? contentPdfs : allPdfs;
+          // Prefer primary readable edition (avoid duplicate *_text.pdf OCR bloat if clean primary PDF exists)
+          const nonDupText = candidates.filter((f) => !/_text\.pdf$/i.test(String(f.name || '')));
+          const pool = nonDupText.length > 0 ? nonDupText : candidates;
+          pool.sort((a, b) =>
+            String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' })
+          );
+
+          // Pick Volume 1 (or the largest single-volume file when filenames aren't numbered volumes)
+          const hasNumberedVolumes = pool.length > 1 && pool.some((f) => /^(0?1|vol|juz|part|p0?1)[_\-.\s]/i.test(String(f.name || '').split('/').pop() || ''));
+          const pdfFile = hasNumberedVolumes
+            ? pool[0]
+            : [...pool].sort((a, b) => Number(b.size || 0) - Number(a.size || 0))[0];
           if (!pdfFile) return null;
 
           const pdfUrl = `https://archive.org/download/${encodeURIComponent(identifier)}/${encodeURIComponent(pdfFile.name)}`;
@@ -373,13 +407,13 @@ async function searchArchiveGlobalPdfBooks(query: string, limit = 8): Promise<Is
           const author = Array.isArray(doc.creator)
             ? doc.creator.join(' · ')
             : String(doc.creator || 'Internet Archive 全球典籍');
-          const sizeBytes = Number(pdfFile.size || 0);
-          const fileSize =
-            sizeBytes > 1024 * 1024
-              ? `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
-              : sizeBytes > 1024
-                ? `${Math.round(sizeBytes / 1024)} KB`
+          const formatBytes = (bytes: number) =>
+            bytes > 1024 * 1024
+              ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+              : bytes > 1024
+                ? `${Math.round(bytes / 1024)} KB`
                 : undefined;
+          const fileSize = formatBytes(Number(pdfFile.size || 0));
 
           const rawLang = String(Array.isArray(doc.language) ? doc.language[0] : doc.language || '').toLowerCase();
           const detectedLang: 'ar' | 'zh' | 'en' =
@@ -391,6 +425,17 @@ async function searchArchiveGlobalPdfBooks(query: string, limit = 8): Promise<Is
 
           const streamUrl = buildStreamUrl(pdfUrl, title, false, 'pdf');
           const downloadUrl = buildStreamUrl(pdfUrl, title, true, 'pdf');
+          const attachments = pool.slice(0, 12).map((pf, idx) => {
+            const u = `https://archive.org/download/${encodeURIComponent(identifier)}/${encodeURIComponent(pf.name)}`;
+            const volTitle = pool.length > 1 ? `${title} (卷 ${idx + 1})` : title;
+            return {
+              type: pool.length > 1 ? `PDF · 卷 ${idx + 1}` : 'PDF',
+              url: u,
+              streamUrl: buildStreamUrl(u, volTitle, false, 'pdf'),
+              downloadUrl: buildStreamUrl(u, volTitle, true, 'pdf'),
+              size: formatBytes(Number(pf.size || 0)),
+            };
+          });
           return {
             id: `ia_pdf_${identifier}`,
             title,
@@ -399,11 +444,11 @@ async function searchArchiveGlobalPdfBooks(query: string, limit = 8): Promise<Is
             language: detectedLang,
             contentType: 'books',
             source: 'archive',
-            sourceName: 'Internet Archive · 全球原版 PDF',
+            sourceName: pool.length > 1 ? `Internet Archive · 共 ${pool.length} 卷原版 PDF` : 'Internet Archive · 全球原版 PDF',
             pdfUrl,
             streamUrl,
             downloadUrl,
-            attachments: [{ type: 'PDF', url: pdfUrl, streamUrl, downloadUrl, size: fileSize }],
+            attachments,
             sourcePageUrl: `https://archive.org/details/${encodeURIComponent(identifier)}`,
             fileSize,
             coverImage: `https://archive.org/services/img/${encodeURIComponent(identifier)}`,
@@ -673,6 +718,55 @@ export function registerNoorIslamicLibraryRoutes(
 ): void {
   fs.mkdirSync(PDF_VAULT_DIR, { recursive: true });
 
+  // Non-blocking startup self-healer: upgrade any previously saved 1-page Archive.org cover PDF (e.g. 00_98991.pdf)
+  // to the real multi-hundred-page Volume 1 PDF stream so users never hit a 1-page stub.
+  void (async () => {
+    let changed = false;
+    for (const book of store.books) {
+      if (book.formatType !== 'pdf') continue;
+      const src = String(book.sourceUrl || '');
+      const iaMatch = src.match(/archive\.org\/details\/([^/?#]+)/i);
+      const localMatch = String(book.externalReadUrl || '').match(/^\/api\/library\/local-pdfs\/([a-zA-Z0-9_-]+\.pdf)$/);
+      if (!iaMatch || !localMatch) continue;
+      const localPath = path.join(PDF_VAULT_DIR, localMatch[1]);
+      try {
+        const stat = fs.existsSync(localPath) ? fs.statSync(localPath) : null;
+        if (stat && stat.size > 1.5 * 1024 * 1024) continue; // already a full multi-page book
+        const iaId = decodeURIComponent(iaMatch[1]);
+        const metaRes = await fetch(`https://archive.org/metadata/${encodeURIComponent(iaId)}/files`, {
+          headers: { 'User-Agent': 'EarthOne-Library/1.0' },
+          signal: AbortSignal.timeout(7000),
+        });
+        if (!metaRes.ok) continue;
+        const meta: any = await metaRes.json();
+        const files: any[] = Array.isArray(meta?.result) ? meta.result : [];
+        const pdfs = files.filter(
+          (f) => typeof f?.name === 'string' && /\.pdf$/i.test(f.name) && !/encrypted/i.test(String(f.format || '')) && Number(f.size || 0) > 20 * 1024
+        );
+        const maxSz = Math.max(0, ...pdfs.map((f) => Number(f.size || 0)));
+        const realPdfs = pdfs.filter((f) => {
+          const base = String(f.name).split('/').pop() || '';
+          if (/^0{2,}[_\-.\s]|^0+\.pdf$|cover|ghilaf|front/i.test(base)) return false;
+          if (maxSz > 2.5 * 1024 * 1024 && Number(f.size || 0) < 1.4 * 1024 * 1024) return false;
+          return true;
+        });
+        const nonText = realPdfs.filter((f) => !/_text\.pdf$/i.test(String(f.name)));
+        const pool = nonText.length > 0 ? nonText : realPdfs;
+        pool.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+        if (pool[0]) {
+          const realUrl = `https://archive.org/download/${encodeURIComponent(iaId)}/${encodeURIComponent(pool[0].name)}`;
+          book.externalReadUrl = buildStreamUrl(realUrl, book.title, false, 'pdf');
+          changed = true;
+        }
+      } catch {
+        // non-fatal startup check
+      }
+    }
+    if (changed) {
+      store.saveToDisk();
+    }
+  })();
+
   const resolveShelfUserId = (req: Request): string => {
     return getSessionUser?.(req)?.id || 'guest';
   };
@@ -809,26 +903,66 @@ export function registerNoorIslamicLibraryRoutes(
 
     // Path A: Download actual PDF binary into /data/pdfs/ & add to user's Bookshelf
     if (typeof pdfUrl === 'string' && pdfUrl.trim()) {
-      if (pdfUrl.startsWith('/api/library/local-pdfs/')) {
-        const existingLocal = store.books.find((b: Book) => b.externalReadUrl === pdfUrl);
+      let effectivePdfUrl = pdfUrl.trim();
+      // Auto-upgrade Archive.org 1-page cover sheets (e.g. /download/{id}/00_98991.pdf) to real Volume 1 content PDF
+      const iaMatch =
+        effectivePdfUrl.match(/archive\.org\/download\/([^/?#]+)\/([^/?#]+\.pdf)/i) ||
+        String(sourcePageUrl || '').match(/archive\.org\/details\/([^/?#]+)/i);
+      if (iaMatch) {
+        const iaId = decodeURIComponent(iaMatch[1]);
+        const currentFile = iaMatch[2] ? decodeURIComponent(iaMatch[2]) : '';
+        if (!currentFile || /^0{2,}[_\-.\s]/i.test(currentFile) || /cover|ghilaf/i.test(currentFile)) {
+          try {
+            const metaRes = await fetch(`https://archive.org/metadata/${encodeURIComponent(iaId)}/files`, {
+              headers: { 'User-Agent': 'EarthOne-Library/1.0' },
+              signal: AbortSignal.timeout(6000),
+            });
+            if (metaRes.ok) {
+              const meta: any = await metaRes.json();
+              const files: any[] = Array.isArray(meta?.result) ? meta.result : [];
+              const pdfs = files.filter(
+                (f) => typeof f?.name === 'string' && /\.pdf$/i.test(f.name) && !/encrypted/i.test(String(f.format || '')) && Number(f.size || 0) > 20 * 1024
+              );
+              const maxSz = Math.max(0, ...pdfs.map((f) => Number(f.size || 0)));
+              const realPdfs = pdfs.filter((f) => {
+                const base = String(f.name).split('/').pop() || '';
+                if (/^0{2,}[_\-.\s]|^0+\.pdf$|cover|ghilaf|front/i.test(base)) return false;
+                if (maxSz > 2.5 * 1024 * 1024 && Number(f.size || 0) < 1.4 * 1024 * 1024) return false;
+                return true;
+              });
+              const nonText = realPdfs.filter((f) => !/_text\.pdf$/i.test(String(f.name)));
+              const chosenPool = nonText.length > 0 ? nonText : realPdfs;
+              chosenPool.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+              if (chosenPool[0]) {
+                effectivePdfUrl = `https://archive.org/download/${encodeURIComponent(iaId)}/${encodeURIComponent(chosenPool[0].name)}`;
+              }
+            }
+          } catch {
+            // keep original url if metadata lookup fails
+          }
+        }
+      }
+
+      if (effectivePdfUrl.startsWith('/api/library/local-pdfs/')) {
+        const existingLocal = store.books.find((b: Book) => b.externalReadUrl === effectivePdfUrl);
         if (existingLocal) {
           const shelfItem = store.addToBookShelf(userId, existingLocal.id, 'reading');
           return res.json({
             success: true,
             book: existingLocal,
             shelfItem,
-            localPdfUrl: pdfUrl,
-            downloadUrl: `${pdfUrl}?download=1&filename=${encodeURIComponent(existingLocal.title)}`,
+            localPdfUrl: effectivePdfUrl,
+            downloadUrl: `${effectivePdfUrl}?download=1&filename=${encodeURIComponent(existingLocal.title)}`,
           });
         }
       }
 
-      if (!isAllowedPdfRemoteUrl(pdfUrl)) {
+      if (!isAllowedPdfRemoteUrl(effectivePdfUrl)) {
         return res.status(400).json({ success: false, error: '无效或不受信任的 PDF 下载地址。' });
       }
 
       try {
-        const upstream = await fetch(pdfUrl, {
+        const upstream = await fetch(effectivePdfUrl, {
           headers: {
             'User-Agent': 'EarthOne-Library/1.0 (+https://earthone.world)',
             Accept: 'application/pdf,*/*',
@@ -848,20 +982,52 @@ export function registerNoorIslamicLibraryRoutes(
           });
         }
         if (buf.byteLength > 45 * 1024 * 1024) {
-          return res.status(413).json({
-            success: false,
-            error: '该 PDF 超过 45MB 离线存储上限，您仍可直接在线阅读或下载到本机。',
+          // For very large multi-hundred-page books (>45MB), link directly via range-streaming proxy instead of failing!
+          const hash = crypto.createHash('sha1').update(effectivePdfUrl).digest('hex').slice(0, 12);
+          const streamUrl = buildStreamUrl(effectivePdfUrl, cleanTitle, false, 'pdf');
+          let book = store.books.find((b: Book) => b.externalReadUrl === streamUrl || b.sourceUrl === (sourcePageUrl || effectivePdfUrl));
+          if (!book) {
+            book = {
+              id: `book_pdf_${hash}`,
+              title: cleanTitle,
+              author: cleanAuthor,
+              category: 'islamic_studies',
+              language: cleanLang,
+              year: new Date().getFullYear().toString(),
+              source: 'Open Access',
+              sourceUrl: typeof sourcePageUrl === 'string' && sourcePageUrl ? sourcePageUrl : effectivePdfUrl,
+              externalReadUrl: streamUrl,
+              formatType: 'pdf',
+              textAvailability: 'full_text',
+              coverImage: typeof coverImage === 'string' && coverImage.startsWith('/') ? coverImage : '/assets/library/cover-arabian-nights.jpg',
+              description: String(description || '已加入 ONE 书架的高清流式原版 PDF 书籍，支持秒开翻页与 AI 伴读。').slice(0, 420),
+              readProgress: 0,
+              chapters: [],
+            };
+            store.books.unshift(book);
+          }
+          const shelfItem = store.addToBookShelf(userId, book.id, 'reading');
+          store.saveToDisk();
+          return res.json({
+            success: true,
+            book,
+            shelfItem,
+            localPdfUrl: streamUrl,
+            downloadUrl: buildStreamUrl(effectivePdfUrl, book.title, true, 'pdf'),
           });
         }
 
-        const hash = crypto.createHash('sha1').update(pdfUrl).digest('hex').slice(0, 12);
+        const hash = crypto.createHash('sha1').update(effectivePdfUrl).digest('hex').slice(0, 12);
         const filename = `islamic_${hash}.pdf`;
         fs.writeFileSync(path.join(PDF_VAULT_DIR, filename), buf);
 
         const localUrl = `/api/library/local-pdfs/${filename}`;
         let book = store.books.find(
-          (b: Book) => b.externalReadUrl === localUrl || b.sourceUrl === (sourcePageUrl || pdfUrl)
+          (b: Book) => b.externalReadUrl === localUrl || b.sourceUrl === (sourcePageUrl || effectivePdfUrl)
         );
+        if (book) {
+          book.externalReadUrl = localUrl;
+        }
         if (!book) {
           book = {
             id: `book_pdf_${hash}`,
@@ -871,7 +1037,7 @@ export function registerNoorIslamicLibraryRoutes(
             language: cleanLang,
             year: new Date().getFullYear().toString(),
             source: 'Open Access',
-            sourceUrl: typeof sourcePageUrl === 'string' && sourcePageUrl ? sourcePageUrl : pdfUrl,
+            sourceUrl: typeof sourcePageUrl === 'string' && sourcePageUrl ? sourcePageUrl : effectivePdfUrl,
             externalReadUrl: localUrl,
             formatType: 'pdf',
             textAvailability: 'full_text',

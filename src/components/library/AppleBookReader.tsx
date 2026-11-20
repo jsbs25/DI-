@@ -243,12 +243,44 @@ function paginateChapter(
     return units;
   };
 
+  // Split overly long single paragraphs at sentence boundaries so no single page ever overflows or gets stuck at 1 page
+  const normalizedParagraphs: string[] = [];
+  for (const para of rawParagraphs) {
+    if (measureUnits(para) <= maxUnits * 0.92) {
+      normalizedParagraphs.push(para);
+      continue;
+    }
+    const sentences = para
+      .split(/(?<=[。！？.!؟؛\n])\s*/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (sentences.length <= 1) {
+      // Hard chunk very long unbroken text safely
+      const chunkLen = Math.max(140, Math.round(maxUnits * 0.62));
+      for (let i = 0; i < para.length; i += chunkLen) {
+        normalizedParagraphs.push(para.slice(i, i + chunkLen));
+      }
+      continue;
+    }
+    let buf = '';
+    for (const sent of sentences) {
+      const candidate = buf ? `${buf} ${sent}` : sent;
+      if (buf && measureUnits(candidate) > maxUnits * 0.85) {
+        normalizedParagraphs.push(buf);
+        buf = sent;
+      } else {
+        buf = candidate;
+      }
+    }
+    if (buf) normalizedParagraphs.push(buf);
+  }
+
   const pages: PaginatedPage[] = [];
   let current: string[] = [];
   let used = 0;
   let isFirst = true;
 
-  for (const para of rawParagraphs) {
+  for (const para of normalizedParagraphs) {
     const cap = isFirst ? Math.round(maxUnits * 0.78) : maxUnits;
     const cost = measureUnits(para);
 
@@ -479,11 +511,26 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     };
   }, [book.id]);
 
-  // Paginate current chapter
-  const pages = useMemo(
-    () => paginateChapter(activeChapter.content || '', prefs.fontSize, prefs.lineHeight, effectiveLayout === 'spread'),
-    [activeChapter.content, prefs.fontSize, prefs.lineHeight, effectiveLayout]
+  // Paginate ALL chapters into a unified whole-book page map so readers never get stuck at "1 / 1" on short chapters
+  const allChaptersPages = useMemo(
+    () =>
+      chapters.map((ch) =>
+        paginateChapter(ch.content || '', prefs.fontSize, prefs.lineHeight, effectiveLayout === 'spread')
+      ),
+    [chapters, prefs.fontSize, prefs.lineHeight, effectiveLayout]
   );
+
+  const flatBookPages = useMemo(() => {
+    const flat: Array<{ chapterIndex: number; pageIndex: number }> = [];
+    allChaptersPages.forEach((chPages, cIdx) => {
+      chPages.forEach((_, pIdx) => {
+        flat.push({ chapterIndex: cIdx, pageIndex: pIdx });
+      });
+    });
+    return flat.length > 0 ? flat : [{ chapterIndex: 0, pageIndex: 0 }];
+  }, [allChaptersPages]);
+
+  const pages = allChaptersPages[chapterIndex] || [{ index: 0, isChapterStart: true, paragraphs: [''] }];
 
   // Clamp page index when chapter or font changes
   useEffect(() => {
@@ -498,12 +545,29 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
   const leftPage = pages[spreadLeftIdx] || pages[0];
   const rightPage = spreadRightIdx >= 0 && spreadRightIdx < pages.length ? pages[spreadRightIdx] : null;
 
+  const globalPageIndex = useMemo(() => {
+    const idx = flatBookPages.findIndex(
+      (entry) => entry.chapterIndex === chapterIndex && entry.pageIndex === spreadLeftIdx
+    );
+    return idx >= 0 ? idx : 0;
+  }, [flatBookPages, chapterIndex, spreadLeftIdx]);
+
+  const jumpToGlobalPage = useCallback(
+    (gIdx: number) => {
+      const clamped = Math.max(0, Math.min(flatBookPages.length - 1, gIdx));
+      const target = flatBookPages[clamped];
+      if (!target) return;
+      setChapterIndex(target.chapterIndex);
+      setPageIndex(target.pageIndex);
+    },
+    [flatBookPages]
+  );
+
   // Overall reading progress percentage across book
   const progressPercent = useMemo(() => {
-    const chFraction = (pageIndex + 1) / Math.max(1, pages.length);
-    const total = ((chapterIndex + chFraction) / Math.max(1, chapters.length)) * 100;
+    const total = ((globalPageIndex + 1) / Math.max(1, flatBookPages.length)) * 100;
     return Math.min(100, Math.max(1, Math.round(total)));
-  }, [chapterIndex, pageIndex, pages.length, chapters.length]);
+  }, [globalPageIndex, flatBookPages.length]);
 
   const minutesLeftInChapter = useMemo(() => {
     const remainingPages = Math.max(0, pages.length - (effectiveLayout === 'spread' ? spreadLeftIdx + 2 : pageIndex + 1));
@@ -561,10 +625,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     if (spreadLeftIdx - step >= 0) {
       setPageIndex(spreadLeftIdx - step);
     } else if (chapterIndex > 0) {
+      const prevChPages = allChaptersPages[chapterIndex - 1] || [];
       setChapterIndex((c) => c - 1);
-      setPageIndex(0);
+      setPageIndex(Math.max(0, prevChPages.length - 1));
     }
-  }, [effectiveLayout, spreadLeftIdx, chapterIndex]);
+  }, [effectiveLayout, spreadLeftIdx, chapterIndex, allChaptersPages]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -2014,8 +2079,8 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 }}
               >
                 {/* Primary Page (Left in LTR, Right in RTL Arabic open book) */}
-                <div className="h-full min-h-0 overflow-hidden">
-                  {renderPageColumn(leftPage, spreadLeftIdx + 1, book.title)}
+                <div className="h-full min-h-0 overflow-y-auto">
+                  {renderPageColumn(leftPage, globalPageIndex + 1, book.title)}
                 </div>
 
                 {/* Center Spine Shadow + Next Page in Two-Page Spread */}
@@ -2031,11 +2096,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                       }}
                     />
                     <div
-                      className="h-full min-h-0 overflow-hidden"
+                      className="h-full min-h-0 overflow-y-auto"
                       style={rtl ? { borderRight: `1px solid ${theme.border}` } : { borderLeft: `1px solid ${theme.border}` }}
                     >
                       {rightPage ? (
-                        renderPageColumn(rightPage, spreadRightIdx + 1, activeChapter.title)
+                        renderPageColumn(rightPage, globalPageIndex + 2, activeChapter.title)
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center px-10 text-center select-none" style={{ color: theme.muted }}>
                           <BookOpen className="h-7 w-7 mb-3 opacity-35" />
@@ -2553,30 +2618,36 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         style={{
           backgroundColor: theme.chromeBg,
           borderTop: `1px solid ${theme.border}`,
+          paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))',
         }}
       >
         <div className="mx-auto flex max-w-[1060px] flex-col gap-1.5">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
-              disabled={chapterIndex === 0}
+              disabled={effectiveLayout === 'scroll' ? chapterIndex === 0 : globalPageIndex <= 0}
               onClick={() => {
-                setChapterIndex((c) => Math.max(0, c - 1));
-                setPageIndex(0);
+                if (effectiveLayout === 'scroll') {
+                  setChapterIndex((c) => Math.max(0, c - 1));
+                  setPageIndex(0);
+                } else {
+                  goPrevPage();
+                }
               }}
-              className="text-[11px] font-medium disabled:opacity-30 cursor-pointer shrink-0"
-              style={{ color: theme.muted }}
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium disabled:opacity-30 cursor-pointer shrink-0 transition hover:opacity-80"
+              style={{ color: theme.ink }}
             >
-              {isZh ? '上一章' : 'Prev Ch'}
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <span>{effectiveLayout === 'scroll' ? (isZh ? '上一章' : 'Prev Ch') : isZh ? '上一页' : 'Prev'}</span>
             </button>
 
             <input
               type="range"
               min={0}
-              max={Math.max(0, pages.length - 1)}
-              value={Math.min(pageIndex, Math.max(0, pages.length - 1))}
-              onChange={(e) => setPageIndex(Number(e.target.value))}
-              aria-label={isZh ? '本章翻页进度条' : 'Chapter page scrubber'}
+              max={Math.max(0, flatBookPages.length - 1)}
+              value={Math.min(globalPageIndex, Math.max(0, flatBookPages.length - 1))}
+              onChange={(e) => jumpToGlobalPage(Number(e.target.value))}
+              aria-label={isZh ? '全书翻页进度条' : 'Book page scrubber'}
               className="h-1 flex-1 cursor-pointer appearance-none rounded-full"
               style={{
                 accentColor: theme.accent,
@@ -2599,15 +2670,20 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             ) : (
               <button
                 type="button"
-                disabled={chapterIndex >= chapters.length - 1}
+                disabled={effectiveLayout === 'scroll' ? chapterIndex >= chapters.length - 1 : globalPageIndex >= flatBookPages.length - 1}
                 onClick={() => {
-                  setChapterIndex((c) => Math.min(chapters.length - 1, c + 1));
-                  setPageIndex(0);
+                  if (effectiveLayout === 'scroll') {
+                    setChapterIndex((c) => Math.min(chapters.length - 1, c + 1));
+                    setPageIndex(0);
+                  } else {
+                    goNextPage();
+                  }
                 }}
-                className="text-[11px] font-medium disabled:opacity-30 cursor-pointer shrink-0"
-                style={{ color: theme.muted }}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium disabled:opacity-30 cursor-pointer shrink-0 transition hover:opacity-80"
+                style={{ color: theme.ink }}
               >
-                {isZh ? '下一章' : 'Next Ch'}
+                <span>{effectiveLayout === 'scroll' ? (isZh ? '下一章' : 'Next Ch') : isZh ? '下一页' : 'Next'}</span>
+                <ChevronRight className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -2622,10 +2698,10 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   ? `第 ${chapterIndex + 1} / ${chapters.length} 章`
                   : `Chapter ${chapterIndex + 1} of ${chapters.length}`
                 : isZh
-                  ? `本章第 ${spreadLeftIdx + 1}${rightPage ? `–${spreadRightIdx + 1}` : ''} / ${pages.length} 页`
-                  : `Page ${spreadLeftIdx + 1}${rightPage ? `–${spreadRightIdx + 1}` : ''} of ${pages.length}`}
+                  ? `全书第 ${globalPageIndex + 1}${rightPage ? `–${Math.min(flatBookPages.length, globalPageIndex + 2)}` : ''} / ${flatBookPages.length} 页 · 第 ${chapterIndex + 1}/${chapters.length} 章`
+                  : `Page ${globalPageIndex + 1}${rightPage ? `–${Math.min(flatBookPages.length, globalPageIndex + 2)}` : ''} of ${flatBookPages.length} · Ch ${chapterIndex + 1}/${chapters.length}`}
             </span>
-            <span>
+            <span className="hidden sm:inline">
               {isZh ? `本章约剩 ${minutesLeftInChapter} 分钟` : `~${minutesLeftInChapter} min left in chapter`}
             </span>
             <span className="font-mono">{progressPercent}%</span>

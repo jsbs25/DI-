@@ -43,6 +43,8 @@ export interface AgentConfirmationRequest {
 
 export interface LiveWeatherInfo {
   locationName: string;
+  locationSource?: 'gps' | 'ip' | 'timezone' | 'city' | 'default';
+  timezone?: string;
   temperatureC: number;
   humidityPct: number;
   windSpeedKmh: number;
