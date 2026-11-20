@@ -41,6 +41,7 @@ export const OneAiAdminConsole: React.FC<OneAiAdminConsoleProps> = ({ isZh, onCl
 
   const [catalogFilter, setCatalogFilter] = useState<string>('all');
   const [discovering, setDiscovering] = useState(false);
+  const [autoActivating, setAutoActivating] = useState(false);
   const [busyEndpointId, setBusyEndpointId] = useState<string | null>(null);
 
   // Provider edit form
@@ -130,10 +131,43 @@ export const OneAiAdminConsole: React.FC<OneAiAdminConsoleProps> = ({ isZh, onCl
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data?.error || '保存失败');
       setEditingProvider(null);
-      notify(isZh ? `已加密更新 ${editingProvider.name} 配置与预算硬锁` : `Updated ${editingProvider.name}`);
+      const act = data?.activation;
+      const actNote = act
+        ? isZh
+          ? `；已自动探测 ${act.probed} 个引擎并成功上线 ${act.activated} 个`
+          : `; auto-probed ${act.probed}, activated ${act.activated}`
+        : '';
+      notify(
+        isZh
+          ? `已加密更新 ${editingProvider.name} 配置与预算硬锁${actNote}`
+          : `Updated ${editingProvider.name}${actNote}`
+      );
       await loadAll();
     } catch (err: any) {
       notify(err?.message || '更新失败');
+    }
+  };
+
+  const handleAutoActivate = async (providerId?: string) => {
+    setAutoActivating(true);
+    try {
+      const res = await fetch('/api/admin/ai/auto-activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(providerId ? { providerId } : {}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data?.error || '自动激活失败');
+      notify(
+        isZh
+          ? `自动探测完成：实测 ${data.probed} 个，新激活上线 ${data.activated} 个，已在线 ${data.alreadyApproved} 个${data.failed ? `（${data.failed} 个暂不可用已跳过）` : ''}`
+          : `Auto-activate: probed ${data.probed}, activated ${data.activated}, already approved ${data.alreadyApproved}`
+      );
+      await loadAll();
+    } catch (err: any) {
+      notify(err?.message || '自动探测激活失败');
+    } finally {
+      setAutoActivating(false);
     }
   };
 
@@ -452,6 +486,29 @@ export const OneAiAdminConsole: React.FC<OneAiAdminConsoleProps> = ({ isZh, onCl
 
           {tab === 'providers' && (
             <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-4 py-3 text-xs">
+                <div className="space-y-0.5">
+                  <div className="font-semibold text-emerald-700 dark:text-emerald-300">
+                    {isZh ? '免密免费池 + 已配密钥通道一键实测激活' : 'One-Click Live Probe & Auto-Activation'}
+                  </div>
+                  <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                    {isZh
+                      ? '自动拉取最新目录并对所有就绪引擎（Kilo 免密免费池与已填 Key 平台）发起真实推理探针，实测通过即自动批准上线。'
+                      : 'Discovers latest catalogs, runs real inference probes across ready providers, and promotes passing endpoints.'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={autoActivating}
+                  onClick={() => void handleAutoActivate()}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  <Activity className={`h-3.5 w-3.5 ${autoActivating ? 'animate-pulse' : ''}`} />
+                  {autoActivating
+                    ? isZh ? '正在真实探针并激活...' : 'Probing & Activating...'
+                    : isZh ? '一键探测并激活全部就绪引擎' : 'Auto-Probe & Activate All'}
+                </button>
+              </div>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 {providers.map((p) => (
                   <div key={p.id} className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] p-4">
@@ -639,15 +696,28 @@ export const OneAiAdminConsole: React.FC<OneAiAdminConsoleProps> = ({ isZh, onCl
                     </button>
                   ))}
                 </div>
-                <button
-                  type="button"
-                  disabled={discovering}
-                  onClick={() => void handleDiscoverNow()}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-sky-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${discovering ? 'animate-spin' : ''}`} />
-                  {discovering ? '正在拉取 OpenRouter / Kilo / 直连目录...' : '立即执行全球模型发现'}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={autoActivating}
+                    onClick={() => void handleAutoActivate()}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    <Activity className={`h-3.5 w-3.5 ${autoActivating ? 'animate-pulse' : ''}`} />
+                    {autoActivating
+                      ? isZh ? '正在真实探针并激活...' : 'Activating...'
+                      : isZh ? '一键探测并激活全部就绪引擎' : 'Auto-Probe & Activate'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={discovering}
+                    onClick={() => void handleDiscoverNow()}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-sky-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${discovering ? 'animate-spin' : ''}`} />
+                    {discovering ? '正在拉取 OpenRouter / Kilo / 直连目录...' : '立即执行全球模型发现'}
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-3">

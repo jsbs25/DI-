@@ -16,7 +16,7 @@ import { createOneAiAdminRouter } from './server/oneAi/adminRoutes.ts';
 import { createOneAiAgentRouter } from './server/oneAi/agentOrchestrator.ts';
 import { handleEnvironmentWeatherRoute } from './server/environmentWeather.ts';
 import { oneAiDb } from './server/oneAi/db.ts';
-import { runGlobalModelDiscovery } from './server/oneAi/discovery.ts';
+import { autoActivateReadyEndpoints, runGlobalModelDiscovery } from './server/oneAi/discovery.ts';
 import { oneAiRouter } from './server/oneAi/router.ts';
 import {
   acquireStreamLock,
@@ -6777,6 +6777,29 @@ async function startServer() {
 
   // Start Discovery background maintenance daemon
   startDiscoveryScheduler();
+
+  // Automated ONE AI model discovery & real-probe activation daemon (15s after boot + every 12h)
+  if (process.env.EARTH_ONE_SKIP_AI_DISCOVERY !== 'true') {
+    const runAiDiscoveryAndActivation = async () => {
+      try {
+        const res = await autoActivateReadyEndpoints(undefined, 'system_boot');
+        console.log(
+          `[ONE AI] Auto-activation complete: probed=${res.probed}, activated=${res.activated}, alreadyApproved=${res.alreadyApproved}, failed=${res.failed}`
+        );
+      } catch (err) {
+        console.warn('[ONE AI] Auto-activation background error:', err);
+      }
+    };
+    const startupTimer = setTimeout(() => {
+      void runAiDiscoveryAndActivation();
+    }, 15_000);
+    startupTimer.unref?.();
+
+    const aiDiscoveryInterval = setInterval(() => {
+      void runAiDiscoveryAndActivation();
+    }, 12 * 60 * 60 * 1000);
+    aiDiscoveryInterval.unref?.();
+  }
 
   // Periodic missed-call / stale-ringing cleanup sweep (every 30s)
   const callSweepInterval = setInterval(() => {

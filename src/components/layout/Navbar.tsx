@@ -17,6 +17,10 @@ import {
   MessageCircle,
   Music2,
   Bot,
+  BatteryCharging,
+  BatteryFull,
+  BatteryMedium,
+  BatteryLow,
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton.tsx';
 import { ParadiseBrandEmblem } from '../brand/ParadiseBrandEmblem.tsx';
@@ -78,9 +82,59 @@ export const Navbar: React.FC<NavbarProps> = ({
   const t = translations[lang] || translations.zh;
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [batteryState, setBatteryState] = useState<{ level: number; charging: boolean } | null>(null);
 
   const langMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const nav = navigator as Navigator & {
+      getBattery?: () => Promise<{
+        level: number;
+        charging: boolean;
+        addEventListener: (type: string, listener: () => void) => void;
+        removeEventListener: (type: string, listener: () => void) => void;
+      }>;
+    };
+    if (typeof nav?.getBattery !== 'function') return;
+
+    let cancelled = false;
+    let batteryObj: {
+      level: number;
+      charging: boolean;
+      addEventListener: (type: string, listener: () => void) => void;
+      removeEventListener: (type: string, listener: () => void) => void;
+    } | null = null;
+
+    const updateBattery = () => {
+      if (!batteryObj || cancelled) return;
+      setBatteryState({
+        level: Math.round(batteryObj.level * 100),
+        charging: Boolean(batteryObj.charging),
+      });
+    };
+
+    nav
+      .getBattery()
+      .then((bat) => {
+        if (cancelled) return;
+        batteryObj = bat;
+        updateBattery();
+        bat.addEventListener('levelchange', updateBattery);
+        bat.addEventListener('chargingchange', updateBattery);
+      })
+      .catch(() => {
+        // Ignore if blocked by browser policy
+      });
+
+    return () => {
+      cancelled = true;
+      if (batteryObj) {
+        batteryObj.removeEventListener('levelchange', updateBattery);
+        batteryObj.removeEventListener('chargingchange', updateBattery);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
@@ -156,6 +210,33 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Top-Right: Minimal Utilities & Profile Avatar */}
           <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
+            {batteryState && (
+              <div
+                title={
+                  batteryState.charging
+                    ? lang === 'zh'
+                      ? `正在充电 · ${batteryState.level}%`
+                      : `Charging · ${batteryState.level}%`
+                    : lang === 'zh'
+                      ? `设备电量 ${batteryState.level}%`
+                      : `Battery ${batteryState.level}%`
+                }
+                aria-label={`Battery ${batteryState.level}%${batteryState.charging ? ' charging' : ''}`}
+                className={`flex h-9 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium tabular-nums transition-all ${surfaceChip}`}
+              >
+                {batteryState.charging ? (
+                  <BatteryCharging className="h-4 w-4 text-emerald-500 dark:text-emerald-400" />
+                ) : batteryState.level >= 70 ? (
+                  <BatteryFull className="h-4 w-4 text-[#247864] dark:text-[#d6b77f]" />
+                ) : batteryState.level >= 25 ? (
+                  <BatteryMedium className="h-4 w-4 opacity-80" />
+                ) : (
+                  <BatteryLow className="h-4 w-4 text-rose-500 dark:text-rose-400" />
+                )}
+                <span className="hidden xs:inline sm:inline">{batteryState.level}%</span>
+              </div>
+            )}
+
             {onToggleTheme && (
               <button
                 type="button"

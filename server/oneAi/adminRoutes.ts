@@ -4,7 +4,7 @@ import type { AiTaskType, ApprovalStatus } from './types.ts';
 import { oneAiDb } from './db.ts';
 import { validateExternalAiBaseUrl } from './crypto.ts';
 import { isOneAiAdmin, requireAdminMiddleware } from './quotaAndSecurity.ts';
-import { probeAndVerifyEndpoint, runGlobalModelDiscovery } from './discovery.ts';
+import { autoActivateReadyEndpoints, probeAndVerifyEndpoint, runGlobalModelDiscovery } from './discovery.ts';
 import { runObjectiveBenchmark } from './evaluator.ts';
 import { oneAiRouter } from './router.ts';
 
@@ -138,14 +138,17 @@ export function createOneAiAdminRouter(resolveSessionUser: (req: express.Request
         hasApiKey: p.hasApiKey,
         apiKeyMask: p.apiKeyMask,
         readiness,
+        freeTierSummary: m.freeTier,
+        zdrNote: m.privacy,
+        envVarNames: m.envVars,
         ...m,
       };
     });
 
-    res.json({ success: true, guide });
+    res.json({ success: true, guides: guide, guide });
   });
 
-  router.post('/providers', (req, res) => {
+  router.post('/providers', async (req, res) => {
     const admin: User = (req as any).__oneAiAdmin;
     const {
       id,
@@ -195,7 +198,28 @@ export function createOneAiAdminRouter(resolveSessionUser: (req: express.Request
       status,
     });
 
-    res.json({ success: true, providers: oneAiDb.listProviders() });
+    let activationSummary = null;
+    if ((typeof apiKey === 'string' && apiKey.trim() !== '') || cleanId === 'kilo') {
+      activationSummary = await autoActivateReadyEndpoints(cleanId, admin.id).catch(() => null);
+    }
+
+    res.json({ success: true, providers: oneAiDb.listProviders(), activation: activationSummary });
+  });
+
+  router.post('/auto-activate', async (req, res) => {
+    const admin: User = (req as any).__oneAiAdmin;
+    const providerId = req.body?.providerId ? String(req.body.providerId).trim().toLowerCase() : undefined;
+    try {
+      const summary = await autoActivateReadyEndpoints(providerId, admin.id);
+      oneAiDb.recordAdminAudit(admin.id, 'auto_activate_endpoints', providerId || 'all_ready', {
+        probed: summary.probed,
+        activated: summary.activated,
+        failed: summary.failed,
+      });
+      res.json({ success: true, ...summary });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Auto-activation failed' });
+    }
   });
 
   router.get('/catalog', (req, res) => {

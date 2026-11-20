@@ -211,19 +211,25 @@ function ingestDiscoveredModels(rows: DiscoveredRawModel[]): number {
   return newCount;
 }
 
-export async function runGlobalModelDiscovery(): Promise<{
+export async function runGlobalModelDiscovery(targetProviderId?: string): Promise<{
   totalFetched: number;
   totalNew: number;
   sources: Array<{ source: string; fetched: number; newAdded: number; ok: boolean; error?: string }>;
 }> {
-  const sourcesSpec: Array<{ name: string; fn: () => Promise<DiscoveredRawModel[]> }> = [
-    { name: 'openrouter_catalog', fn: fetchOpenRouterCatalog },
-    { name: 'kilo_gateway_catalog', fn: fetchKiloCatalog },
-    { name: 'groq_direct', fn: () => fetchDirectProviderCatalog('groq') },
-    { name: 'cerebras_direct', fn: () => fetchDirectProviderCatalog('cerebras') },
-    { name: 'gemini_direct', fn: () => fetchDirectProviderCatalog('gemini') },
-    { name: 'deepseek_direct', fn: () => fetchDirectProviderCatalog('deepseek') },
+  const allSources: Array<{ providerId: string; name: string; fn: () => Promise<DiscoveredRawModel[]> }> = [
+    { providerId: 'openrouter', name: 'openrouter_catalog', fn: fetchOpenRouterCatalog },
+    { providerId: 'kilo', name: 'kilo_gateway_catalog', fn: fetchKiloCatalog },
+    { providerId: 'groq', name: 'groq_direct', fn: () => fetchDirectProviderCatalog('groq') },
+    { providerId: 'cerebras', name: 'cerebras_direct', fn: () => fetchDirectProviderCatalog('cerebras') },
+    { providerId: 'gemini', name: 'gemini_direct', fn: () => fetchDirectProviderCatalog('gemini') },
+    { providerId: 'deepseek', name: 'deepseek_direct', fn: () => fetchDirectProviderCatalog('deepseek') },
+    { providerId: 'qwen', name: 'qwen_direct', fn: () => fetchDirectProviderCatalog('qwen') },
+    { providerId: 'zhipu', name: 'zhipu_direct', fn: () => fetchDirectProviderCatalog('zhipu') },
+    { providerId: 'huggingface', name: 'huggingface_direct', fn: () => fetchDirectProviderCatalog('huggingface') },
   ];
+  const sourcesSpec = targetProviderId
+    ? allSources.filter((s) => s.providerId === targetProviderId)
+    : allSources;
 
   let totalFetched = 0;
   let totalNew = 0;
@@ -321,7 +327,7 @@ export async function probeAndVerifyEndpoint(endpointId: string, adminUserId: st
       upstreamModelId: endpoint.upstreamModelId,
       baseUrl: provider.baseUrl,
       messages: [{ role: 'user', content: 'Reply with exact word: READY' }],
-      maxTokens: 64,
+      maxTokens: 256,
       temperature: 0,
       stream: true,
       privacyMode: endpoint.mayTrainOnPrompts ? 'standard' : 'no_training',
@@ -367,4 +373,105 @@ export async function probeAndVerifyEndpoint(endpointId: string, adminUserId: st
     sampleOutput: sampleOutput.trim().slice(0, 80),
     stepsPassed,
   };
+}
+
+const EXCLUDED_AUTO_PROBE_RE = /tts|image|transcribe|lyria|banana|robotics|computer-use|deep-research|embedding|whisper|moderation|realtime|audio-preview/i;
+
+/**
+ * Automatically discover, run real live HTTP probes, and promote working endpoints
+ * for any ready provider (keyed BYOK providers + keyless Kilo :free pool).
+ * Only endpoints that genuinely pass live inference are promoted to 'approved'.
+ */
+export async function autoActivateReadyEndpoints(
+  targetProviderId?: string,
+  adminUserId: string | null = 'auto_probe_verifier'
+): Promise<{
+  probed: number;
+  activated: number;
+  alreadyApproved: number;
+  failed: number;
+  details: Array<{ endpointId: string; providerId: string; modelId: string; ok: boolean; ttftMs: number; error?: string }>;
+}> {
+  await runGlobalModelDiscovery(targetProviderId).catch(() => {});
+
+  const allEndpoints = oneAiDb.listEndpoints();
+  const providerCache = new Map<string, ReturnType<typeof oneAiDb.getProviderWithCreds>>();
+  const getProv = (pid: string) => {
+    if (!providerCache.has(pid)) providerCache.set(pid, oneAiDb.getProviderWithCreds(pid));
+    return providerCache.get(pid);
+  };
+
+  let alreadyApproved = 0;
+  const candidatesByProvider = new Map<string, ModelEndpointRecord[]>();
+
+  for (const ep of allEndpoints) {
+    if (targetProviderId && ep.providerId !== targetProviderId) continue;
+    if (!ep.enabled || ep.approvalStatus === 'rejected' || ep.approvalStatus === 'retired') continue;
+
+    const prov = getProv(ep.providerId);
+    if (!prov || prov.status !== 'active') continue;
+    const isUsable = prov.hasApiKey || (prov.id === 'kilo' && ep.isFreeTier);
+    if (!isUsable) continue;
+
+    if (ep.approvalStatus === 'approved') {
+      alreadyApproved += 1;
+      continue;
+    }
+
+    if (EXCLUDED_AUTO_PROBE_RE.test(ep.upstreamModelId)) continue;
+    // On openrouter without paid preference, focus on :free models during auto-promotion
+    if (prov.id === 'openrouter' && !ep.isFreeTier && prov.billingMode === 'free_only') continue;
+
+    const list = candidatesByProvider.get(ep.providerId) || [];
+    list.push(ep);
+    candidatesByProvider.set(ep.providerId, list);
+  }
+
+  const probeQueue: ModelEndpointRecord[] = [];
+  for (const [pid, list] of candidatesByProvider.entries()) {
+    list.sort((a, b) => {
+      if (a.isFreeTier !== b.isFreeTier) return a.isFreeTier ? -1 : 1;
+      const aFlagship = /(flash|pro|hydrogen|nemotron|ernie|deepseek|qwen|llama-3\.3|glm-4-flash|north-mini-code|auto\/free)/i.test(a.upstreamModelId) ? 1 : 0;
+      const bFlagship = /(flash|pro|hydrogen|nemotron|ernie|deepseek|qwen|llama-3\.3|glm-4-flash|north-mini-code|auto\/free)/i.test(b.upstreamModelId) ? 1 : 0;
+      if (aFlagship !== bFlagship) return bFlagship - aFlagship;
+      return b.qualityScore - a.qualityScore;
+    });
+    const cap = pid === 'kilo' ? 8 : 5;
+    probeQueue.push(...list.slice(0, cap));
+  }
+
+  let probed = 0;
+  let activated = 0;
+  let failed = 0;
+  const details: Array<{ endpointId: string; providerId: string; modelId: string; ok: boolean; ttftMs: number; error?: string }> = [];
+
+  const concurrency = 3;
+  for (let i = 0; i < probeQueue.length; i += concurrency) {
+    const batch = probeQueue.slice(i, i + concurrency);
+    const results = await Promise.all(
+      batch.map(async (ep) => {
+        const res = await probeAndVerifyEndpoint(ep.endpointId, adminUserId);
+        return { ep, res };
+      })
+    );
+    for (const { ep, res } of results) {
+      probed += 1;
+      if (res.ok) {
+        oneAiDb.updateEndpointApproval(ep.endpointId, 'approved', adminUserId, true);
+        activated += 1;
+      } else {
+        failed += 1;
+      }
+      details.push({
+        endpointId: ep.endpointId,
+        providerId: ep.providerId,
+        modelId: ep.upstreamModelId,
+        ok: res.ok,
+        ttftMs: res.ttftMs,
+        error: res.error,
+      });
+    }
+  }
+
+  return { probed, activated, alreadyApproved, failed, details };
 }
