@@ -165,7 +165,9 @@ export function repairUnambiguousArabicLigatures(text: string): string {
   return text
     .replace(/[\u20DD-\u20E0\uFFFC\uF000-\uF0FF]/g, '')
     .replace(/هللا/g, 'الله')
+    .replace(/اإلسالم/g, 'الإسلام')
     .replace(/اإل/g, 'الإ')
+    .replace(/الإسالم/g, 'الإسلام')
     .replace(/األ/g, 'الأ')
     .replace(/اآل/g, 'الآ')
     .replace(/إال/g, 'إلا')
