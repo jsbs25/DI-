@@ -1,138 +1,103 @@
-# EARTH ONE（地球一号 · 一个世界，无限可能）
+# EARTH ONE（地球一号）
 
-> **THE NEXT GENERATION GLOBAL DIGITAL WORLD**
-> **ONE EARTH. ONE WORLD. ONE HUMANITY.**
-
-**EARTH ONE** 是一个融合了 **PARADISE WORLD 动态 3D 天堂花园世界、全双工自然情感 AI 伴侣、统一音乐空间（Venus）、全球即时通讯与音视频通话、数字图书馆、视频门户、多语言学习中心、跨端 PWA 与 Electron 桌面浏览外壳** 的全栈数字世界平台。
-
----
-
-## ✨ 核心功能体系
-
-### 1. PARADISE WORLD — 动态 3D 天堂花园主视觉（`ParadiseWorld3D`）
-- **实时立体生态空间**：由前景花海草坪、中景溪流拱桥与水畔观景亭台、后景瀑布岩壁与远景群山林带构成完整纵深，支持鼠标/触屏交互（拨动花草、点击水面泛起涟漪、点击花丛触发飘瓣）与多视角平滑切换。
-- **连续动态昼夜循环**：支持自动流转与手动预设（`黎明 / 白天 / 黄昏 / 傍晚 / 夜晚`），实时演算太阳/月亮轨迹、星空、动态云层、水面日月高光反射与亭台夜灯。
-- **11 种动态天气系统**：覆盖`晴天、阴天、微风、大风、小雨、大雨、暴风雨（闪电光影）、晨雾、薄雾、雨后、彩虹`，同步驱动风力植物摆动、斜风细雨、地面湿润反光、花叶水珠、谷地雾气与雨后彩虹。
-- **自然生物生态与全端自适应**：白天呈现蝴蝶采蜜与飞鸟盘旋，夜晚呈现萤火虫微光漫游，湖中锦鲤游曳；自动识别 MacBook Air M2、桌面端、iPad、折叠屏与手机性能并动态调节植被、粒子、阴影与分辨率。
-- **3D 数字地球与太阳系探索**：支持在导航中进入 3D 地理地球（`DigitalGlobe`）、太阳系天体探索（`UniverseEngine`）与月球观测站。
-
-### 2. 全双工自然情感 AI 系统（`One.` 悬浮伴侣 & `AIHub`）
-- **自然拟人化对话引擎**：基于多轮上下文管理与反机械化系统提示词，支持口语、错别字与上下文承接理解，按问题复杂度动态调整简答或深析。
-- **长期记忆系统**：持久化记录用户长期目标、习惯与偏好，按需唤醒历史上下文并避免错误信息污染。
-- **单一自然甜美声线与连续语音交互**：内置语速优化、唤醒与打断处理（Barge-in）、实时流式输出（DeepSeek + Gemini 双通道路由与 WebSocket 实时音频通信）。
-- **悬浮一体音乐联动**：主界面悬浮 AI 球（`One.`）与音乐播放器无缝融合——说话时自动暂停音乐，结束回复后自动恢复续播。
-
-### 3. Venus 统一音乐空间 & 媒体中心
-- **Venus Music Space（ONE Music）**：沉浸式音乐播放空间、持久化播放列表与跨模块统一音频会话管理；集成 YouTube（Data API / InnerTube / oEmbed 直链解析）与 Bilibili 多源实时检索，支持 `自动 / YouTube / B站` 音源切换、IFrame API 播放状态联动及嵌入受限自动切歌容错。
-- **数字图书馆（`DigitalLibrary`）**：支持 EPUB 与 PDF 在线阅读器、AI 伴读分析、安全沙箱解析与多来源图书检索。
-- **全球视频与发现中心（`VideoPortal` / `JupiterSearch`）**：视频流浏览、跨源发现引擎与知识图谱检索。
-
-### 4. 全球即时通讯与音视频通话（`GlobalMessenger`）
-- **实时聊天与 AI 多语互译**：1 对 1 私聊、公共频道、国家群组、引用回复、已读回执及中文 / 英文 / 阿拉伯语（完整 RTL 排版）/ 西班牙语 / 法语 / 俄语实时互译。
-- **清晰语音消息**：高质量 WAV 语音录制与倍速播放控件。
-- **LiveKit / WebRTC 音视频通话**：支持语音/视频通话、屏幕共享、断线自动重连、TURN/STUN 中继保底与桌面通知推送。
-
-### 5. 多语言学习与娱乐中心
-- **语言学习工作区**：沉浸式多语练习平台（`DuolingoImmersionPlatform`）与阿拉伯语 28 字母间隔重复记忆系统（`ArabicLearningHub`）。
-- **全球游戏中心（`GameCenter`）**：在线国际象棋、五子棋与知识挑战。
-
-### 6. 跨端支持（Web · 手机 PWA · Electron 桌面端）
-- **手机端 PWA 安装与独立子界面**：支持“添加到主屏幕”及桌面快捷方式直接跳转对应独立全屏界面，内置返回导航。
-- **Electron 桌面外壳（`electron/`）**：支持 `WebContentsView` 隔离浏览器会话及代理配置；`native/` 与 `deploy/` 包含 iOS / Android WireGuard 与 LiveKit / Coturn / Caddy 部署模板。
+<p align="center">
+  <strong>Global Digital Sanctuary · World Library · Language Center · Global Messenger · Music Space · ONE AI</strong><br/>
+  一个融合 3D 实时生态主世界、全球典籍数字图书馆、多语言学习中心、高清音视频通讯、统一音乐空间与智能悬浮 AI 伴侣的全栈数字世界平台。
+</p>
 
 ---
 
-## 📂 项目结构概览
+## 核心空间模块
+
+| 模块 | 说明 |
+| :--- | :--- |
+| **3D 天堂花园主世界（Home）** | 原生 Three.js 实时 3D 生态空间，支持 24 小时真实时钟光影同步、11 种实时气象演算、顶部居中实时时钟与高精度 GPS/逆地理编码定位、蝴蝶精灵与多视角漫游。 |
+| **全球数字图书馆（Library）** | 统一书库检索（IslamHouse / Internet Archive / Project Gutenberg / Wikisource / 本地导入），内置多卷原版 PDF 高清流式阅读器（完整 JBIG2 / OpenJPEG WASM 解码、阿语原版零错字渲染、全书分页与翻页、点词权威查义、AI 精讲与生词本）。 |
+| **语言学习中心（Language）** | 专注多语言沉浸式学习，涵盖阿拉伯语 28 字母与声调、剑桥/权威词典接口、AI 场景口语陪练、实时发音测评与间隔重复记忆。 |
+| **全球通讯中心（Messages）** | WebSocket 实时消息、断线自动重连、多语实时互译（含完整阿拉伯语 RTL 排版）、高清 WAV 语音消息与 LiveKit / WebRTC 音视频通话。 |
+| **统一音乐空间（Music）** | 沉浸式跨模块音乐播放内核，支持多音源检索、持久歌单与 AI 语音自动避让（说话暂停、结束续播）。 |
+| **ONE AI 悬浮伴侣 & 独立工作台** | 主界面纯净悬浮 AI 球（可拖拽、零遮挡、无多余输入框），一键唤醒实时语音或进入纯净 ONE AI 独立界面；支持多模型智能路由与自动容错。 |
+
+---
+
+## 技术架构
+
+- **前端**：React 19 · TypeScript · Vite 8 · Tailwind CSS v4 · Three.js · `pdfjs-dist` v6（WASM JBIG2 / OpenJPEG / CMap）· `epubjs` · PWA
+- **后端**：Node.js · Express · WebSocket（`ws`）· LiveKit Server SDK · Open-Meteo 实时气象与标准逆地理编码服务 · 统一 AI 多模型路由网关
+- **跨端适配**：iPhone / Android 移动浏览器（含安全区适配）、iPad / 平板、macOS / Windows 桌面端、PWA 独立安装及 `electron/` 桌面外壳
+
+---
+
+## 目录结构
 
 ```text
 .
 ├── server.ts                  # Express + Vite/Dist + WebSocket 全栈服务入口
-├── server/                    # 后端模块：AI 网关、DeepSeek/Gemini 路由、通讯信令、爬虫与存储
+├── server/
+│   ├── ai/                    # 统一 AI 内核、意图解析、记忆存储与上下文编排
+│   ├── oneAi/                 # 多模型发现、路由网关与配额安全控制
+│   ├── environmentWeather.ts  # 实时气象、高精度 GPS 逆地理编码与时区定位
+│   ├── noorIslamicPdfService.ts # 全球典籍检索、多卷 PDF 精选、流式代理与书架存储
+│   ├── languageCoach.ts       # 语言学习中心 AI 陪练、测验与权威查词
+│   ├── media/                 # Venus 音乐多源解析与媒体服务
+│   └── store.ts               # 核心数据持久化存储
 ├── src/
-│   ├── App.tsx                # 应用主路由、导航与全局状态编排
+│   ├── App.tsx                # 统一状态管理、路由与悬浮 AI 编排
 │   ├── components/
-│   │   ├── ai/                # HolographicAICompanion (One.) 与 AIHub
-│   │   ├── auth/              # 登录、注册与引导流程（支持中文及多语言用户名）
-│   │   ├── brand/             # 品牌视觉与 Home 3D 中央入口 (ProductCulture3D)
-│   │   ├── chat/              # 全球实时通讯、语音消息与 LiveKit 通话中心
-│   │   ├── globe/             # 3D 数字地球与地理节点交互
-│   │   ├── home/              # 主页入口容器 (OneHome)
-│   │   ├── paradise/          # PARADISE WORLD 3D 天堂花园（地形/水体/植被/生态/昼夜与天气）
-│   │   ├── learning/          # 多语沉浸学习与阿拉伯语学习中心
-│   │   ├── library/           # 数字图书馆与 EPUB/PDF 阅读器
-│   │   ├── network/           # ONE Network 网络与代理中心
-│   │   ├── spatial/           # 宇宙背景引擎与硬件分级 WebGL 能力工具
-│   │   └── video/             # 视频门户与流媒体视图
-│   ├── music/                 # 统一音乐播放器内核与上下文 (PlayerContext)
-│   ├── universe/              # 太阳系引擎、Venus 音乐空间与月球观测站
-│   └── utils/                 # 语音录制、情感分析、流式读取等工具
-├── electron/                  # Electron 桌面外壳主进程与预加载桥接
-├── deploy/                    # LiveKit / Coturn / Caddy 生产部署配置模板
-├── native/                    # iOS / Android 原生网络扩展集成清单
-├── scripts/                   # 自动化回归与完整性验证脚本
-├── vite.config.ts             # Vite 8 + Tailwind v4 + PWA 配置
-├── Dockerfile                 # 容器化构建配置
-└── THIRD_PARTY_LICENSES.md    # 第三方开源组件与许可声明
+│   │   ├── layout/            # 顶部极简栏与底部悬浮玻璃导航坞（Navbar）
+│   │   ├── paradise/          # 3D 天堂花园、顶部居中时钟定位与气象引擎
+│   │   ├── library/           # 全球数字图书馆与 Apple Books 风格全书阅读器
+│   │   ├── browser/           # 高清 PDF 流式电子书阅读器（WASM 解码 + AI 伴读）
+│   │   ├── learning/          # 多语言学习中心与阿拉伯语学习模块
+│   │   ├── chat/              # 实时即时通讯、语音消息与音视频通话
+│   │   └── ai/                # 悬浮全息 AI 球（One.）与 ONE AI 独立界面
+│   ├── music/                 # 统一音乐播放内核（PlayerContext）
+│   └── utils/                 # 阿语字形校验、PDF 重排提取、阅读偏好与音频引擎
+├── electron/                  # Electron 桌面外壳
+├── deploy/                    # LiveKit / Coturn / Caddy 生产部署模板
+├── native/                    # iOS / Android 原生扩展清单
+└── scripts/                   # 自动化验证与回归测试脚本
 ```
 
 ---
 
-## 🚀 本地开发与生产部署
+## 快速开始
 
-### 本地开发
+### 1. 安装依赖与配置环境
+
 ```bash
-# 1. 安装依赖
 npm install
-
-# 2. 配置环境变量（参考 .env.example）
 cp .env.example .env
+```
 
-# 3. 启动全栈开发服务器（默认监听 http://0.0.0.0:3000）
+按需在 `.env` 中配置以下变量（详见 `.env.example`）：
+- `GEMINI_API_KEY`：Gemini 模型与实时语音服务密钥
+- `DEEPSEEK_API_KEY`：DeepSeek 对话与翻译密钥（可选）
+- `PORT`：服务监听端口（默认 `3000`）
+
+### 2. 本地开发
+
+```bash
 npm run dev
 ```
 
-### 生产构建与启动
+服务启动后访问：`http://localhost:3000`
+
+### 3. 质量检查与生产部署
+
 ```bash
-# 1. 类型检查
+# TypeScript 类型检查
 npm run lint
 
-# 2. 打包前端产物到 dist/（含 PWA Service Worker）
+# 构建前端产物（dist/）
 npm run build
 
-# 3. 以生产模式启动全栈服务（NODE_ENV=production 将自动托管 dist/ 与所有 API/WebSocket）
+# 生产模式运行（托管 dist/ 与全量 API / WebSocket / PDF WASM 资源）
 NODE_ENV=production npm start
 ```
 
-> **环境变量说明**（见 `.env.example`）：
-> - `DEEPSEEK_API_KEY`：DeepSeek 模型核心密钥（用于日常智能对话、翻译与记忆总结）
-> - `GEMINI_API_KEY`：Google Gemini 模型与 Live 实时语音密钥（可选，未配置时自动降级兼容）
-> - `PORT`：服务监听端口（默认 `3000`）
-
-### 常用校验脚本
-```bash
-# 类型校验
-npm run lint
-
-# 完整后端/领域逻辑测试
-npx tsx scripts/test_earth_one.ts
-
-# AI 接口与流式响应回归测试
-npx tsx scripts/test_ai_api.ts
-npx tsx scripts/test_ai_stream.ts
-```
-
 ---
 
-## 🛠️ 技术栈
+## 开源许可与致谢
 
-- **前端**：React 19 · TypeScript · Vite 8 · Tailwind CSS v4 · `vite-plugin-pwa` · Three.js · Lucide Icons
-- **后端**：Node.js · Express · `tsx` · WebSocket (`ws`) · LiveKit Server SDK
-- **AI 引擎**：DeepSeek API + `@google/genai` (Gemini Live / Text / Audio)
-- **3D 渲染**：Three.js (`EffectComposer`、自定义 GLSL 着色器、球面大气散射与多深度宇宙粒子)
-- **实时通讯**：WebSocket + LiveKit / WebRTC (`STUN/TURN`)
-
----
-
-## 📄 开源许可声明
-
-项目使用的开源组件与协议声明详见 [THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md)。
+第三方开源依赖与许可声明见 [`THIRD_PARTY_LICENSES.md`](./THIRD_PARTY_LICENSES.md)。

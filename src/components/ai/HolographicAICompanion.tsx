@@ -1529,10 +1529,10 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
     const minX = vw >= 768 ? 82 : 10;
     const maxX = Math.max(minX, vw - ORB_SIZE - 10);
     const minY = 66;
-    const maxY = Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 86 : 18));
+    const maxY = Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 92 : 82));
     const defaultPos = {
       x: Math.max(minX, vw - ORB_SIZE - (vw < 768 ? 14 : 22)),
-      y: Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 90 : 22)),
+      y: Math.max(minY, vh - ORB_SIZE - (vw < 768 ? 96 : 86)),
     };
     try {
       const saved = localStorage.getItem(POS_KEY);

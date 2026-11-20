@@ -6526,12 +6526,32 @@ async function startServer() {
     }
   });
 
+  // Serve pdfjs-dist v6 WASM decoders (JBIG2 / OpenJPEG / QCMS), CMaps, standard fonts & ICC profiles
+  // so Archive.org scanned Arabic & multi-language PDFs decode crisply on iOS Safari, Android & Desktop.
+  const pdfjsRoot = path.resolve(process.cwd(), 'node_modules/pdfjs-dist');
+  for (const sub of ['wasm', 'cmaps', 'standard_fonts', 'iccs']) {
+    const dir = path.join(pdfjsRoot, sub);
+    if (fs.existsSync(dir)) {
+      app.use(
+        `/pdfjs-assets/${sub}`,
+        express.static(dir, {
+          maxAge: '1d',
+          setHeaders: (res, filePath) => {
+            if (filePath.endsWith('.wasm')) {
+              res.setHeader('Content-Type', 'application/wasm');
+            }
+          },
+        })
+      );
+    }
+  }
+
   const isProd = process.env.NODE_ENV === 'production' || process.env.EARTH_ONE_SERVE_DIST === 'true';
   if (isProd) {
     const distDir = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distDir));
-    // SPA fallback for client routes (do not intercept API or websocket upgrade paths)
-    app.get(/^(?!\/api|\/ws).*/, (req, res, next) => {
+    // SPA fallback for client routes (do not intercept API, websocket, or pdfjs asset paths)
+    app.get(/^(?!\/api|\/ws|\/pdfjs-assets).*/, (req, res, next) => {
       if (req.method !== 'GET') return next();
       const indexPath = path.join(distDir, 'index.html');
       if (fs.existsSync(indexPath)) return res.sendFile(indexPath);

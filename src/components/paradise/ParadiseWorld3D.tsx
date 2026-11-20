@@ -1254,7 +1254,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
       {/* Top-Center Desktop Clock, Standard Location & Live Weather Pill */}
       <div
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.35rem+env(safe-area-inset-top))] sm:top-[max(0.7rem,env(safe-area-inset-top))] z-[56] flex flex-col items-center gap-2 max-w-[calc(100vw-1.5rem)]"
+        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.45rem+env(safe-area-inset-top))] sm:top-[max(0.65rem,env(safe-area-inset-top))] z-[56] flex flex-col items-center gap-2 max-w-[calc(100vw-1.5rem)]"
       >
         <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/55' : 'ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
           <button

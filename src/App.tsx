@@ -765,8 +765,8 @@ export default function App() {
         isAuthenticated={true}
         userName={currentUser.displayName || currentUser.username}
         userCity={currentUser.location?.cityName}
-        showLauncher={currentTab !== 'globe' && currentTab !== 'aihub' && !immersive && !(isNarrowViewport && currentTab === 'chat' && mobileChatOpen)}
-        placement={currentTab === 'globe' ? 'center-bottom' : 'corner'}
+        showLauncher={currentTab !== 'aihub' && !immersive && !(isNarrowViewport && currentTab === 'chat' && mobileChatOpen)}
+        placement="corner"
         onFlyTo={(lat, lng) => {
           setFocusCoordinates({ lat, lng, timestamp: Date.now() });
           navigateToTab('globe');

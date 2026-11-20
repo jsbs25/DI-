@@ -135,8 +135,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <>
       {/* Minimal Top Floating Corners: Brand Home Return (Left) + Theme/Lang/Profile (Right) */}
-      <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-3 pt-[max(0.55rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.7rem,env(safe-area-inset-top))]">
-        <div className="mx-auto flex w-full max-w-[1380px] items-center justify-between gap-2">
+      <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-3 pt-[max(0.65rem,env(safe-area-inset-top))] sm:px-5">
+        <div className="mx-auto flex h-9 w-full max-w-[1380px] items-center justify-between gap-2">
           {/* Top-Left: Compact Brand Home Button */}
           <button
             type="button"
@@ -276,12 +276,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* Unified Apple-Grade Floating Glass Navigation Dock */}
+      {/* Unified Apple-Grade Symmetrical Floating Glass Bottom Navigation Dock */}
       {!hideBottomNav && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[55] flex justify-center px-3 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-1">
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[55] flex justify-center px-3 pb-[max(0.7rem,env(safe-area-inset-bottom))] pt-1">
           <nav
             aria-label={lang === 'zh' ? '底部主导航' : 'Bottom Primary Navigation'}
-            className={`pointer-events-auto grid w-full max-w-[440px] grid-cols-5 items-center gap-1 rounded-[26px] border p-1.5 transition-all sm:w-auto sm:max-w-none sm:inline-flex sm:gap-1 sm:rounded-full sm:p-1.5 ${dockShell}`}
+            className={`pointer-events-auto grid w-full max-w-[420px] grid-cols-5 items-center gap-1 rounded-[24px] border p-1.5 transition-all sm:w-auto sm:min-w-[540px] sm:max-w-[600px] sm:gap-1.5 sm:rounded-full sm:p-1.5 ${dockShell}`}
           >
             {BOTTOM_PORTALS.map((item) => {
               const Icon = item.icon;

@@ -10,7 +10,6 @@ import type {
   VideoItem,
 } from '../../types/index.ts';
 import { ParadiseWorld3D } from '../paradise/ParadiseWorld3D.tsx';
-import { SpiritCommandBar } from './SpiritCommandBar.tsx';
 
 type Props = {
   lang: Language;
@@ -35,7 +34,6 @@ type Props = {
 
 export const OneHome: React.FC<Props> = ({
   lang,
-  onSelectTab,
   immersive = false,
   onImmersiveChange,
 }) => {
@@ -46,9 +44,6 @@ export const OneHome: React.FC<Props> = ({
         immersive={immersive}
         onImmersiveChange={onImmersiveChange}
       />
-
-      {/* Compact Home AI Bar positioned cleanly above the bottom navigation dock */}
-      {!immersive && <SpiritCommandBar lang={lang} onOpenFullAi={() => onSelectTab('aihub')} />}
     </main>
   );
 };

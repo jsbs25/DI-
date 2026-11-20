@@ -160,22 +160,26 @@ const InlineOriginalPdfPageCanvas: React.FC<{
       .then((page) => {
         if (cancelled || !canvasRef.current) return;
         const baseViewport = page.getViewport({ scale: 1 });
-        const containerW = Math.max(320, containerRef.current?.clientWidth || 640);
-        const fitScale = Math.max(1.0, Math.min(2.4, containerW / Math.max(1, baseViewport.width)));
+        const containerW = Math.max(320, Math.min(820, containerRef.current?.clientWidth || 640));
+        const fitScale = Math.max(1.0, Math.min(2.2, containerW / Math.max(1, baseViewport.width)));
         const viewport = page.getViewport({ scale: fitScale });
-        const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+        // Cap DPR to 2.0 so tall scanned pages stay well within iOS Safari's canvas pixel memory limit
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { alpha: false });
         if (!ctx) return;
 
-        canvas.width = Math.floor(viewport.width * dpr);
-        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
+        canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
         canvas.style.width = '100%';
         canvas.style.height = 'auto';
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, viewport.width, viewport.height);
-        renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = '#FCF9F2';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
+        renderTask = page.render({ canvas, canvasContext: ctx, viewport, transform });
         return renderTask.promise.then(() => {
           if (!cancelled) setRendering(false);
         });
@@ -215,16 +219,14 @@ const InlineOriginalPdfPageCanvas: React.FC<{
       )}
       <canvas
         ref={canvasRef}
-        className={rendering || renderFailed ? 'hidden' : 'block w-full h-auto'}
+        className={rendering || renderFailed ? 'hidden' : 'block w-full h-auto rounded-md'}
         style={
           isDarkTheme
             ? {
-                filter: 'invert(0.91) hue-rotate(180deg) contrast(1.06)',
-                mixBlendMode: 'screen',
+                filter: 'invert(0.9) hue-rotate(180deg) contrast(1.06)',
               }
             : {
-                mixBlendMode: 'multiply',
-                filter: 'contrast(1.04)',
+                filter: 'sepia(0.08) contrast(1.04)',
               }
         }
       />
@@ -379,7 +381,11 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     const task = getDocument({
       url: streamUrl,
       withCredentials: false,
+      cMapUrl: '/pdfjs-assets/cmaps/',
       cMapPacked: true,
+      standardFontDataUrl: '/pdfjs-assets/standard_fonts/',
+      wasmUrl: '/pdfjs-assets/wasm/',
+      iccUrl: '/pdfjs-assets/iccs/',
       rangeChunkSize: 65536,
       disableAutoFetch: true,
       disableStream: false,
@@ -577,18 +583,21 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       .then((page) => {
         if (cancelled || !canvasRef.current) return;
         const viewport = page.getViewport({ scale: originalZoom });
-        const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { alpha: false });
         if (!ctx) return;
-        canvas.width = Math.floor(viewport.width * dpr);
-        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
+        canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
         canvas.style.width = `${Math.floor(viewport.width)}px`;
         canvas.style.height = `${Math.floor(viewport.height)}px`;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, viewport.width, viewport.height);
-        renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
+        renderTask = page.render({ canvas, canvasContext: ctx, viewport, transform });
         return renderTask.promise;
       })
       .catch(() => {});

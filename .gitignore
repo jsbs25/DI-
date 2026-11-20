@@ -19,4 +19,6 @@ dev-dist/
 .aistudio/
 data/pdfs/
 data/vocabulary_bank.json
+public/assets/aistudio/
+
 
