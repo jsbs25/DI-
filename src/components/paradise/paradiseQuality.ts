@@ -114,6 +114,7 @@ export function detectParadiseQuality(
 
     case 'low':
       // Crisp mobile / phone calibration: Retina-aware DPR + real soft shadows
+      // Bloom/god-rays disabled on phones to prevent white glow washout on small screens
       return {
         tier,
         isSoftwareGl: false,
@@ -123,7 +124,7 @@ export function detectParadiseQuality(
         antialias: true,
         enableShadows: true,
         shadowMapSize: 1024,
-        enableBloom: !reducedMotion,
+        enableBloom: false,
         enableGodRays: false,
         enableDOF: false,
         terrainSegments: 124,
@@ -150,7 +151,8 @@ export function detectParadiseQuality(
       };
 
     case 'medium':
-      // Crisp tablet / iPad calibration: 1.85 DPR + 2048 shadows + bloom & god-rays
+      // Crisp tablet / iPad calibration: 1.85 DPR + 2048 shadows
+      // Bloom/god-rays disabled on tablets to prevent white glow washout on mobile-class screens
       return {
         tier,
         isSoftwareGl: false,
@@ -160,8 +162,8 @@ export function detectParadiseQuality(
         antialias: true,
         enableShadows: true,
         shadowMapSize: 2048,
-        enableBloom: !reducedMotion,
-        enableGodRays: !reducedMotion,
+        enableBloom: false,
+        enableGodRays: false,
         enableDOF: false,
         terrainSegments: 156,
         waterTextureSize: 512,
