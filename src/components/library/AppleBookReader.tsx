@@ -21,7 +21,7 @@ import {
   Send,
   CheckCircle2,
 } from 'lucide-react';
-import type { Book, BookAnnotation, Language } from '../../types/index.ts';
+import type { Book, BookAnnotation, BookChapterOutline, BookSegmentItem, Language } from '../../types/index.ts';
 import { isRtlLanguage } from './bookEmbedUrl.ts';
 import { speakSpiritReply, stopSpiritSpeech } from '../../agent/agentClient.ts';
 
@@ -365,13 +365,36 @@ function renderParagraphWithHighlights(
   );
 }
 
+export interface ReadingProgressDetail {
+  pageNumber?: number;
+  totalPages?: number;
+  scrollRatio?: number;
+  segmentIndex?: number;
+  keepalive?: boolean;
+}
+
 export interface AppleBookReaderProps {
   book: Book;
   lang: Language;
   initialChapterIndex?: number;
+  initialSegmentIndex?: number;
+  initialScrollRatio?: number;
+  initialPageNumber?: number;
   initialAnnotations?: BookAnnotation[];
+  segmentOutline?: BookChapterOutline[];
+  initialSegments?: BookSegmentItem[];
+  totalSegments?: number;
+  onLoadSegments?: (
+    offset: number,
+    limit: number
+  ) => Promise<{ segments: BookSegmentItem[]; totalSegments: number; hasMore: boolean } | null>;
   onClose: () => void;
-  onSaveProgress: (progressPercent: number, chapterId?: string, chapterTitle?: string) => void;
+  onSaveProgress: (
+    progressPercent: number,
+    chapterId?: string,
+    chapterTitle?: string,
+    detail?: ReadingProgressDetail
+  ) => void;
   onAnnotationsChange?: (annotations: BookAnnotation[]) => void;
 }
 
@@ -379,7 +402,14 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
   book,
   lang,
   initialChapterIndex = 0,
+  initialSegmentIndex,
+  initialScrollRatio,
+  initialPageNumber,
   initialAnnotations = [],
+  segmentOutline,
+  initialSegments,
+  totalSegments: totalSegmentsProp,
+  onLoadSegments,
   onClose,
   onSaveProgress,
   onAnnotationsChange,
@@ -387,9 +417,14 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
   const isZh = lang === 'zh';
   const [prefs, setPrefs] = useState<AppleReaderPrefs>(loadPrefs);
   const [chapterIndex, setChapterIndex] = useState<number>(
-    Math.min(Math.max(0, initialChapterIndex), Math.max(0, (book.chapters?.length || 1) - 1))
+    Math.min(
+      Math.max(0, initialChapterIndex),
+      Math.max(0, ((segmentOutline?.length || book.chapters?.length || 1) - 1))
+    )
   );
-  const [pageIndex, setPageIndex] = useState<number>(0);
+  const [pageIndex, setPageIndex] = useState<number>(
+    typeof initialPageNumber === 'number' && initialPageNumber > 0 ? Math.max(0, initialPageNumber - 1) : 0
+  );
   const [isDesktopWide, setIsDesktopWide] = useState<boolean>(
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
@@ -455,8 +490,205 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const touchStartXRef = useRef<number | null>(null);
 
-  const chapters = book.chapters && book.chapters.length > 0 ? book.chapters : [{ id: 'ch1', title: book.title, content: book.description || '' }];
+  // ---- Segmented Loading & Virtual Scrolling State ----
+  const [segmentsByIndex, setSegmentsByIndex] = useState<Record<number, BookSegmentItem>>(() => {
+    const map: Record<number, BookSegmentItem> = {};
+    if (Array.isArray(initialSegments) && initialSegments.length > 0) {
+      for (const seg of initialSegments) {
+        map[seg.index] = seg;
+      }
+    }
+    return map;
+  });
+  const [knownTotalSegments, setKnownTotalSegments] = useState<number>(() =>
+    typeof totalSegmentsProp === 'number' && totalSegmentsProp > 0
+      ? totalSegmentsProp
+      : Array.isArray(initialSegments)
+        ? initialSegments.length
+        : 0
+  );
+  const [loadingSegmentChunks, setLoadingSegmentChunks] = useState<boolean>(false);
+  const [activeSegmentIndex, setActiveSegmentIndex] = useState<number>(
+    typeof initialSegmentIndex === 'number' && initialSegmentIndex >= 0 ? initialSegmentIndex : 0
+  );
+  const [scrollRatioState, setScrollRatioState] = useState<number>(
+    typeof initialScrollRatio === 'number' && Number.isFinite(initialScrollRatio)
+      ? Math.min(1, Math.max(0, initialScrollRatio))
+      : 0
+  );
+  const [syncState, setSyncState] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  const inFlightChunkStartsRef = useRef<Set<number>>(new Set());
+  const virtualScrollRef = useRef<HTMLDivElement | null>(null);
+  const segmentHeightsRef = useRef<Map<number, number>>(new Map());
+  const [virtualScrollTop, setVirtualScrollTop] = useState(0);
+  const [virtualViewportHeight, setVirtualViewportHeight] = useState(640);
+  const [heightCacheVersion, setHeightCacheVersion] = useState(0);
+  const restoredInitialScrollRef = useRef(false);
+
+  // Build local fallback segments from book.chapters when server segments were not provided
+  const fallbackLocalSegments = useMemo(() => {
+    if (onLoadSegments && ((segmentOutline && segmentOutline.length > 0) || knownTotalSegments > 0)) {
+      return null;
+    }
+    const rawChapters =
+      book.chapters && book.chapters.length > 0
+        ? book.chapters
+        : [{ id: 'ch1', title: book.title, content: book.description || '' }];
+    const items: BookSegmentItem[] = [];
+    const outlineList: BookChapterOutline[] = [];
+    rawChapters.forEach((ch, cIdx) => {
+      const startSegmentIndex = items.length;
+      const paras = (ch.content || '')
+        .replace(/\r\n/g, '\n')
+        .split(/\n{2,}/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const list = paras.length > 0 ? paras : [''];
+      list.forEach((pText, pIdx) => {
+        const idx = items.length;
+        items.push({
+          index: idx,
+          id: `${ch.id}_seg_${pIdx}`,
+          chapterIndex: cIdx,
+          chapterId: ch.id,
+          chapterTitle: ch.title,
+          paragraphIndex: pIdx,
+          isChapterStart: pIdx === 0,
+          text: pText,
+        });
+      });
+      outlineList.push({
+        id: ch.id,
+        title: ch.title,
+        index: cIdx,
+        charCount: (ch.content || '').length,
+        segmentCount: items.length - startSegmentIndex,
+        startSegmentIndex,
+      });
+    });
+    return { items, outlineList };
+  }, [book.chapters, book.title, book.description, onLoadSegments, segmentOutline, knownTotalSegments]);
+
+  const effectiveOutline: BookChapterOutline[] = useMemo(() => {
+    if (segmentOutline && segmentOutline.length > 0) return segmentOutline;
+    if (fallbackLocalSegments) return fallbackLocalSegments.outlineList;
+    return (book.chapters || []).map((ch, idx) => ({
+      id: ch.id,
+      title: ch.title,
+      index: idx,
+      charCount: (ch.content || '').length,
+      segmentCount: 1,
+      startSegmentIndex: idx,
+    }));
+  }, [segmentOutline, fallbackLocalSegments, book.chapters]);
+
+  const totalSegmentCount = useMemo(() => {
+    if (fallbackLocalSegments) return Math.max(1, fallbackLocalSegments.items.length);
+    if (knownTotalSegments > 0) return knownTotalSegments;
+    const outlineSum = effectiveOutline.reduce((acc, ch) => acc + Math.max(1, ch.segmentCount), 0);
+    return Math.max(1, outlineSum);
+  }, [fallbackLocalSegments, knownTotalSegments, effectiveOutline]);
+
+  const getSegmentAt = useCallback(
+    (index: number): BookSegmentItem | undefined => {
+      if (fallbackLocalSegments) return fallbackLocalSegments.items[index];
+      return segmentsByIndex[index];
+    },
+    [fallbackLocalSegments, segmentsByIndex]
+  );
+
+  // Hydrate chapters from fetched segments so paged / spread / TOC / AI always see loaded text
+  const chapters = useMemo(() => {
+    const baseChapters =
+      book.chapters && book.chapters.length > 0
+        ? book.chapters
+        : effectiveOutline.map((o) => ({ id: o.id, title: o.title, content: '' }));
+
+    if (!onLoadSegments || Object.keys(segmentsByIndex).length === 0) {
+      return baseChapters.length > 0 ? baseChapters : [{ id: 'ch1', title: book.title, content: book.description || '' }];
+    }
+
+    const byChapter = new Map<number, BookSegmentItem[]>();
+    Object.values(segmentsByIndex).forEach((seg) => {
+      const arr = byChapter.get(seg.chapterIndex) || [];
+      arr.push(seg);
+      byChapter.set(seg.chapterIndex, arr);
+    });
+
+    return baseChapters.map((ch, idx) => {
+      if (ch.content && ch.content.trim().length > 0) return ch;
+      const segs = byChapter.get(idx);
+      if (!segs || segs.length === 0) return ch;
+      segs.sort((a, b) => a.index - b.index);
+      return {
+        ...ch,
+        content: segs.map((s) => s.text).filter(Boolean).join('\n\n'),
+      };
+    });
+  }, [book.chapters, book.title, book.description, effectiveOutline, onLoadSegments, segmentsByIndex]);
+
   const activeChapter = chapters[chapterIndex] || chapters[0];
+
+  // Segmented chunk loader (requests chunks of 40 segments cleanly with de-duplication)
+  const requestSegmentsAround = useCallback(
+    async (startIndex: number, limit = 40) => {
+      if (!onLoadSegments || fallbackLocalSegments) return;
+      const clampedStart = Math.max(0, Math.min(Math.max(0, totalSegmentCount - 1), startIndex));
+      const alignedStart = Math.floor(clampedStart / 40) * 40;
+      const endCheck = Math.min(totalSegmentCount, alignedStart + limit);
+
+      // Skip if every segment in this window is already cached
+      let missingAny = false;
+      for (let i = alignedStart; i < endCheck; i++) {
+        if (!segmentsByIndex[i]) {
+          missingAny = true;
+          break;
+        }
+      }
+      if (!missingAny || inFlightChunkStartsRef.current.has(alignedStart)) return;
+
+      inFlightChunkStartsRef.current.add(alignedStart);
+      setLoadingSegmentChunks(true);
+      try {
+        const res = await onLoadSegments(alignedStart, limit);
+        if (res && Array.isArray(res.segments) && res.segments.length > 0) {
+          setSegmentsByIndex((prev) => {
+            const next = { ...prev };
+            for (const s of res.segments) {
+              next[s.index] = s;
+            }
+            return next;
+          });
+          if (typeof res.totalSegments === 'number' && res.totalSegments > 0) {
+            setKnownTotalSegments(res.totalSegments);
+          }
+        }
+      } finally {
+        inFlightChunkStartsRef.current.delete(alignedStart);
+        if (inFlightChunkStartsRef.current.size === 0) {
+          setLoadingSegmentChunks(false);
+        }
+      }
+    },
+    [onLoadSegments, fallbackLocalSegments, totalSegmentCount, segmentsByIndex]
+  );
+
+  // Ensure active chapter segments are loaded in paged/spread mode as well
+  useEffect(() => {
+    if (!onLoadSegments || fallbackLocalSegments) return;
+    const outlineEntry = effectiveOutline[chapterIndex];
+    if (!outlineEntry) return;
+    const ch = chapters[chapterIndex];
+    if (!ch?.content?.trim()) {
+      void requestSegmentsAround(outlineEntry.startSegmentIndex, Math.max(40, outlineEntry.segmentCount));
+    }
+    // Prefetch upcoming chapter smoothly in the background
+    const nextOutline = effectiveOutline[chapterIndex + 1];
+    if (nextOutline && !segmentsByIndex[nextOutline.startSegmentIndex]) {
+      void requestSegmentsAround(nextOutline.startSegmentIndex, 40);
+    }
+  }, [chapterIndex, chapters, effectiveOutline, onLoadSegments, fallbackLocalSegments, requestSegmentsAround, segmentsByIndex]);
   const baseTheme = THEME_TOKENS[prefs.theme];
   const theme = useMemo(() => {
     const resolvedBg = prefs.theme === 'custom' ? prefs.customBgColor : baseTheme.bg;
@@ -563,11 +795,263 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     [flatBookPages]
   );
 
-  // Overall reading progress percentage across book
+  // ---- Virtual Scroll Height Layout & Window Calculation ----
+  const estimatedSegmentHeight = useMemo(() => {
+    const baseFont = rtl ? Math.max(prefs.fontSize + 4, 22) : prefs.fontSize;
+    const baseLine = rtl ? Math.max(prefs.lineHeight, 2.3) : prefs.lineHeight;
+    return Math.round(baseFont * baseLine * 3.1 + prefs.paragraphSpacing + 18);
+  }, [rtl, prefs.fontSize, prefs.lineHeight, prefs.paragraphSpacing]);
+
+  // Reset cached measurements whenever typography or width changes
+  useEffect(() => {
+    segmentHeightsRef.current.clear();
+    setHeightCacheVersion((v) => v + 1);
+  }, [prefs.fontSize, prefs.lineHeight, prefs.paragraphSpacing, prefs.maxWidth, prefs.pageMargin, prefs.font]);
+
+  const virtualLayout = useMemo(() => {
+    // Depend on heightCacheVersion so prefix sums refresh as items report measured heights
+    void heightCacheVersion;
+    const offsets = new Float64Array(totalSegmentCount + 1);
+    let y = 0;
+    for (let i = 0; i < totalSegmentCount; i++) {
+      offsets[i] = y;
+      const measured = segmentHeightsRef.current.get(i);
+      if (measured !== undefined) {
+        y += measured;
+      } else {
+        const seg = getSegmentAt(i);
+        const charLen = seg?.text?.length || 140;
+        const linesEst = Math.max(1, Math.ceil(charLen / Math.max(20, Math.floor(prefs.maxWidth / (prefs.fontSize * 0.92)))));
+        const headerExtra = seg?.isChapterStart ? 116 : 0;
+        const baseFont = rtl ? Math.max(prefs.fontSize + 4, 22) : prefs.fontSize;
+        const baseLine = rtl ? Math.max(prefs.lineHeight, 2.3) : prefs.lineHeight;
+        y += Math.max(48, Math.round(linesEst * baseFont * baseLine + prefs.paragraphSpacing + headerExtra));
+      }
+    }
+    offsets[totalSegmentCount] = y;
+    return { offsets, totalHeight: y };
+  }, [
+    totalSegmentCount,
+    heightCacheVersion,
+    getSegmentAt,
+    estimatedSegmentHeight,
+    prefs.maxWidth,
+    prefs.fontSize,
+    prefs.lineHeight,
+    prefs.paragraphSpacing,
+    rtl,
+  ]);
+
+  const findSegmentIndexForScrollTop = useCallback(
+    (scrollTop: number): number => {
+      const { offsets } = virtualLayout;
+      let lo = 0;
+      let hi = Math.max(0, totalSegmentCount - 1);
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (offsets[mid] <= scrollTop) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return lo;
+    },
+    [virtualLayout, totalSegmentCount]
+  );
+
+  const virtualWindow = useMemo(() => {
+    const startIdx = findSegmentIndexForScrollTop(Math.max(0, virtualScrollTop));
+    const endY = virtualScrollTop + Math.max(360, virtualViewportHeight);
+    let endIdx = startIdx;
+    while (endIdx < totalSegmentCount - 1 && virtualLayout.offsets[endIdx] < endY) {
+      endIdx++;
+    }
+    const overscanAbove = 6;
+    const overscanBelow = 8;
+    const renderStart = Math.max(0, startIdx - overscanAbove);
+    const renderEnd = Math.min(totalSegmentCount - 1, endIdx + overscanBelow);
+    const topSpacerHeight = virtualLayout.offsets[renderStart] || 0;
+    const bottomSpacerHeight = Math.max(
+      0,
+      virtualLayout.totalHeight - (virtualLayout.offsets[renderEnd + 1] ?? virtualLayout.totalHeight)
+    );
+    return {
+      visibleStart: startIdx,
+      visibleEnd: endIdx,
+      renderStart,
+      renderEnd,
+      topSpacerHeight,
+      bottomSpacerHeight,
+    };
+  }, [findSegmentIndexForScrollTop, virtualScrollTop, virtualViewportHeight, totalSegmentCount, virtualLayout]);
+
+  // Trigger segmented prefetch whenever virtual viewport nears unloaded segments
+  useEffect(() => {
+    if (effectiveLayout !== 'scroll' || !onLoadSegments || fallbackLocalSegments) return;
+    const checkStart = Math.max(0, virtualWindow.renderStart);
+    const checkEnd = Math.min(totalSegmentCount - 1, virtualWindow.renderEnd + 16);
+    for (let i = checkStart; i <= checkEnd; i += 10) {
+      if (!segmentsByIndex[i]) {
+        void requestSegmentsAround(i, 40);
+        break;
+      }
+    }
+    if (!segmentsByIndex[checkEnd]) {
+      void requestSegmentsAround(checkEnd, 40);
+    }
+  }, [
+    effectiveLayout,
+    onLoadSegments,
+    fallbackLocalSegments,
+    virtualWindow.renderStart,
+    virtualWindow.renderEnd,
+    totalSegmentCount,
+    segmentsByIndex,
+    requestSegmentsAround,
+  ]);
+
+  // Measure virtual scroll viewport resize
+  useEffect(() => {
+    if (effectiveLayout !== 'scroll') return;
+    const el = virtualScrollRef.current;
+    if (!el) return;
+    const updateSize = () => setVirtualViewportHeight(el.clientHeight || 640);
+    updateSize();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [effectiveLayout]);
+
+  // Jump cleanly to any segment index in virtual scroll mode
+  const scrollToSegmentIndex = useCallback(
+    (targetIdx: number, behavior: ScrollBehavior = 'auto') => {
+      const clamped = Math.max(0, Math.min(totalSegmentCount - 1, targetIdx));
+      setActiveSegmentIndex(clamped);
+      const seg = getSegmentAt(clamped);
+      if (seg) {
+        setChapterIndex(seg.chapterIndex);
+      } else {
+        const matchOutline = effectiveOutline.find(
+          (o) => clamped >= o.startSegmentIndex && clamped < o.startSegmentIndex + Math.max(1, o.segmentCount)
+        );
+        if (matchOutline) setChapterIndex(matchOutline.index);
+        void requestSegmentsAround(clamped, 40);
+      }
+      const el = virtualScrollRef.current;
+      if (el) {
+        const y = virtualLayout.offsets[clamped] || 0;
+        el.scrollTo({ top: y, behavior });
+        setVirtualScrollTop(y);
+      }
+    },
+    [totalSegmentCount, getSegmentAt, effectiveOutline, requestSegmentsAround, virtualLayout.offsets]
+  );
+
+  const jumpToChapter = useCallback(
+    (targetChapterIdx: number) => {
+      const clamped = Math.max(0, Math.min(chapters.length - 1, targetChapterIdx));
+      setChapterIndex(clamped);
+      setPageIndex(0);
+      const outlineEntry = effectiveOutline[clamped];
+      if (outlineEntry) {
+        void requestSegmentsAround(outlineEntry.startSegmentIndex, Math.max(40, outlineEntry.segmentCount));
+        if (effectiveLayout === 'scroll') {
+          window.requestAnimationFrame(() => {
+            scrollToSegmentIndex(outlineEntry.startSegmentIndex, 'smooth');
+          });
+        }
+      }
+    },
+    [chapters.length, effectiveOutline, requestSegmentsAround, effectiveLayout, scrollToSegmentIndex]
+  );
+
+  // Restore exact saved segment/scroll position once when entering virtual scroll mode
+  useEffect(() => {
+    if (effectiveLayout !== 'scroll' || restoredInitialScrollRef.current) return;
+    const el = virtualScrollRef.current;
+    if (!el) return;
+    restoredInitialScrollRef.current = true;
+
+    let targetSeg = 0;
+    if (typeof initialSegmentIndex === 'number' && initialSegmentIndex > 0) {
+      targetSeg = Math.min(totalSegmentCount - 1, initialSegmentIndex);
+    } else if (initialChapterIndex > 0 && effectiveOutline[initialChapterIndex]) {
+      targetSeg = effectiveOutline[initialChapterIndex].startSegmentIndex;
+    } else if (typeof initialScrollRatio === 'number' && initialScrollRatio > 0.01) {
+      targetSeg = Math.min(totalSegmentCount - 1, Math.floor(initialScrollRatio * totalSegmentCount));
+    }
+
+    if (targetSeg > 0) {
+      void requestSegmentsAround(targetSeg, 40);
+      window.requestAnimationFrame(() => {
+        const y = virtualLayout.offsets[targetSeg] || 0;
+        el.scrollTo({ top: y, behavior: 'auto' });
+        setVirtualScrollTop(y);
+        setActiveSegmentIndex(targetSeg);
+      });
+    }
+  }, [
+    effectiveLayout,
+    initialSegmentIndex,
+    initialChapterIndex,
+    initialScrollRatio,
+    totalSegmentCount,
+    effectiveOutline,
+    requestSegmentsAround,
+    virtualLayout.offsets,
+  ]);
+
+  const handleVirtualScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const target = e.currentTarget;
+      const top = target.scrollTop;
+      const maxScroll = Math.max(1, target.scrollHeight - target.clientHeight);
+      const ratio = Math.min(1, Math.max(0, top / maxScroll));
+      setVirtualScrollTop(top);
+      setScrollRatioState(ratio);
+
+      const visIdx = findSegmentIndexForScrollTop(top + 24);
+      setActiveSegmentIndex(visIdx);
+      const seg = getSegmentAt(visIdx);
+      if (seg && seg.chapterIndex !== chapterIndex) {
+        setChapterIndex(seg.chapterIndex);
+      } else if (!seg) {
+        const outlineMatch = effectiveOutline.find(
+          (o) => visIdx >= o.startSegmentIndex && visIdx < o.startSegmentIndex + Math.max(1, o.segmentCount)
+        );
+        if (outlineMatch && outlineMatch.index !== chapterIndex) {
+          setChapterIndex(outlineMatch.index);
+        }
+      }
+    },
+    [findSegmentIndexForScrollTop, getSegmentAt, chapterIndex, effectiveOutline]
+  );
+
+  const measureSegmentNode = useCallback((index: number, node: HTMLElement | null) => {
+    if (!node) return;
+    const h = Math.ceil(node.getBoundingClientRect().height);
+    if (h > 0) {
+      const prev = segmentHeightsRef.current.get(index);
+      if (prev === undefined || Math.abs(prev - h) > 3) {
+        segmentHeightsRef.current.set(index, h);
+        setHeightCacheVersion((v) => v + 1);
+      }
+    }
+  }, []);
+
+  // Overall reading progress percentage across entire book (works accurately in BOTH scroll & paged modes)
   const progressPercent = useMemo(() => {
+    if (effectiveLayout === 'scroll') {
+      if (totalSegmentCount <= 1) return Math.max(1, Math.round(scrollRatioState * 100));
+      const segPct = ((activeSegmentIndex + 1) / totalSegmentCount) * 100;
+      const combined = Math.max(segPct, scrollRatioState * 100);
+      return Math.min(100, Math.max(1, Math.round(combined)));
+    }
     const total = ((globalPageIndex + 1) / Math.max(1, flatBookPages.length)) * 100;
     return Math.min(100, Math.max(1, Math.round(total)));
-  }, [globalPageIndex, flatBookPages.length]);
+  }, [effectiveLayout, totalSegmentCount, activeSegmentIndex, scrollRatioState, globalPageIndex, flatBookPages.length]);
 
   const minutesLeftInChapter = useMemo(() => {
     const remainingPages = Math.max(0, pages.length - (effectiveLayout === 'spread' ? spreadLeftIdx + 2 : pageIndex + 1));
@@ -577,24 +1061,99 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     return Math.max(1, Math.ceil(remainingChars / 380));
   }, [pages, pageIndex, spreadLeftIdx, effectiveLayout]);
 
-  // Debounced automatic progress persistence to backend + local reading history
+  // Keep latest progress payload in a ref so pagehide/visibilitychange/unmount always flush exact position
+  const latestProgressPayloadRef = useRef({
+    progressPercent: 1,
+    chapterId: activeChapter?.id || '',
+    chapterTitle: activeChapter?.title || '',
+    pageNumber: 1,
+    totalPages: 1,
+    scrollRatio: 0,
+    segmentIndex: 0,
+  });
+
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      onSaveProgress(progressPercent, activeChapter.id, activeChapter.title);
+    latestProgressPayloadRef.current = {
+      progressPercent,
+      chapterId: activeChapter?.id || '',
+      chapterTitle: activeChapter?.title || '',
+      pageNumber: effectiveLayout === 'scroll' ? chapterIndex + 1 : globalPageIndex + 1,
+      totalPages: effectiveLayout === 'scroll' ? chapters.length : flatBookPages.length,
+      scrollRatio: effectiveLayout === 'scroll' ? scrollRatioState : Math.max(0, Math.min(1, progressPercent / 100)),
+      segmentIndex: activeSegmentIndex,
+    };
+  }, [
+    progressPercent,
+    activeChapter?.id,
+    activeChapter?.title,
+    effectiveLayout,
+    chapterIndex,
+    globalPageIndex,
+    chapters.length,
+    flatBookPages.length,
+    scrollRatioState,
+    activeSegmentIndex,
+  ]);
+
+  const flushProgressToServer = useCallback(
+    (keepalive = false) => {
+      const p = latestProgressPayloadRef.current;
+      onSaveProgress(p.progressPercent, p.chapterId, p.chapterTitle, {
+        pageNumber: p.pageNumber,
+        totalPages: p.totalPages,
+        scrollRatio: p.scrollRatio,
+        segmentIndex: p.segmentIndex,
+        keepalive,
+      });
       const existing = loadBookProgress(book.id);
       saveBookProgress({
         bookKey: book.id,
         title: book.title,
-        pageNumber: chapterIndex + 1,
-        totalPages: chapters.length,
-        scrollRatio: Math.max(0, Math.min(1, progressPercent / 100)),
-        progressPct: progressPercent,
+        pageNumber: p.pageNumber,
+        totalPages: p.totalPages,
+        scrollRatio: p.scrollRatio,
+        progressPct: p.progressPercent,
         bookmarks: existing?.bookmarks || [],
         updatedAt: new Date().toISOString(),
       });
-    }, 800);
+    },
+    [onSaveProgress, book.id, book.title]
+  );
+
+  // Debounced automatic progress persistence to server + local history
+  useEffect(() => {
+    setSyncState('saving');
+    const timer = window.setTimeout(() => {
+      flushProgressToServer(false);
+      setSyncState('saved');
+    }, 900);
     return () => clearTimeout(timer);
-  }, [progressPercent, activeChapter.id, activeChapter.title, book.id, book.title, chapterIndex, chapters.length]);
+  }, [
+    progressPercent,
+    activeChapter?.id,
+    activeSegmentIndex,
+    globalPageIndex,
+    flushProgressToServer,
+  ]);
+
+  // Guaranteed flush on pagehide, tab hidden, or reader unmount
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushProgressToServer(true);
+      }
+    };
+    const onPageHide = () => {
+      flushProgressToServer(true);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+      flushProgressToServer(true);
+    };
+  }, [flushProgressToServer]);
 
   // Stop voice on unmount
   useEffect(() => {
@@ -1797,8 +2356,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                       key={ch.id}
                       type="button"
                       onClick={() => {
-                        setChapterIndex(idx);
-                        setPageIndex(0);
+                        jumpToChapter(idx);
                         setDrawerOpen(false);
                       }}
                       className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-xs transition-colors cursor-pointer"
@@ -1930,6 +2488,8 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         >
           {effectiveLayout === 'scroll' ? (
             <div
+              ref={virtualScrollRef}
+              onScroll={handleVirtualScroll}
               className="h-full w-full overflow-y-auto overflow-x-hidden rounded-2xl py-8 sm:py-12 shadow-sm"
               style={{
                 maxWidth: `${prefs.maxWidth}px`,
@@ -1943,18 +2503,9 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               onTouchEnd={handleTextSelection}
               onClick={handleTapWordLookup}
             >
-              <header className="mb-8 pb-6" style={{ borderBottom: `1px solid ${theme.border}` }}>
-                <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: theme.muted }}>
-                  {isZh ? `第 ${chapterIndex + 1} 章 / 共 ${chapters.length} 章` : `Chapter ${chapterIndex + 1} of ${chapters.length}`}
-                </div>
-                <h1 className="mt-1.5 text-2xl sm:text-3xl font-semibold tracking-tight">{activeChapter.title}</h1>
-              </header>
-
+              {/* Virtualized Whole-Book Continuous Segment Stream */}
               <div
                 style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: `${prefs.paragraphSpacing}px`,
                   fontFamily:
                     rtl && prefs.font !== 'amiri' && prefs.font !== 'naskh'
                       ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
@@ -1968,85 +2519,141 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   color: theme.ink,
                 }}
               >
-                {activeChapter.content
-                  .split(/\n{2,}/)
-                  .map((p) => p.trim())
-                  .filter(Boolean)
-                  .map((rawPara, idx) => {
+                {virtualWindow.topSpacerHeight > 0 && (
+                  <div style={{ height: `${virtualWindow.topSpacerHeight}px` }} aria-hidden="true" />
+                )}
+
+                {Array.from(
+                  { length: Math.max(0, virtualWindow.renderEnd - virtualWindow.renderStart + 1) },
+                  (_, offset) => {
+                    const segIdx = virtualWindow.renderStart + offset;
+                    const seg = getSegmentAt(segIdx);
+                    if (!seg) {
+                      return (
+                        <div
+                          key={`seg_loading_${segIdx}`}
+                          ref={(node) => measureSegmentNode(segIdx, node)}
+                          className="py-4"
+                          style={{ paddingBottom: `${prefs.paragraphSpacing}px` }}
+                        >
+                          <div className="space-y-2.5 animate-pulse opacity-40">
+                            <div className="h-4 w-11/12 rounded" style={{ backgroundColor: theme.border }} />
+                            <div className="h-4 w-4/5 rounded" style={{ backgroundColor: theme.border }} />
+                            <div className="h-4 w-3/4 rounded" style={{ backgroundColor: theme.border }} />
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const rawPara = seg.text;
                     const para = rtl || containsArabic(rawPara) ? normalizeArabicProse(rawPara) : rawPara;
                     const paraIsArabic = rtl || isArabicHeavyText(para);
+                    const segChapterAnnotations = annotations.filter((a) => a.chapterId === seg.chapterId);
+
                     return (
-                      <p
-                        key={idx}
-                        dir={paraIsArabic ? 'rtl' : 'ltr'}
-                        lang={paraIsArabic ? 'ar' : undefined}
-                        className={`${
-                          prefs.textAlign === 'justify'
-                            ? 'text-justify'
-                            : paraIsArabic
-                              ? 'text-right'
-                              : 'text-left'
-                        } break-words`}
-                        style={{
-                          textIndent:
-                            !paraIsArabic && !para.startsWith('"') && !para.startsWith('【') && !/^[A-Za-z]/.test(para)
-                              ? '2em'
-                              : undefined,
-                          unicodeBidi: paraIsArabic ? 'plaintext' : undefined,
-                          fontFeatureSettings: paraIsArabic ? '"liga" 1, "calt" 1, "mark" 1, "mkmk" 1' : undefined,
-                        }}
+                      <div
+                        key={seg.id}
+                        data-segment-index={segIdx}
+                        ref={(node) => measureSegmentNode(segIdx, node)}
+                        style={{ paddingBottom: `${prefs.paragraphSpacing}px` }}
                       >
-                        {renderParagraphWithHighlights(para, currentChapterAnnotations, theme.isDark)}
-                      </p>
+                        {seg.isChapterStart && (
+                          <header
+                            className={`${segIdx > 0 ? 'mt-8 pt-8' : ''} mb-6 pb-5`}
+                            style={{
+                              borderTop: segIdx > 0 ? `1px dashed ${theme.border}` : undefined,
+                              borderBottom: `1px solid ${theme.border}`,
+                            }}
+                          >
+                            <div className="text-[11px] uppercase tracking-[0.16em] font-sans" style={{ color: theme.muted }}>
+                              {isZh
+                                ? `第 ${seg.chapterIndex + 1} 章 / 共 ${chapters.length} 章`
+                                : `Chapter ${seg.chapterIndex + 1} of ${chapters.length}`}
+                            </div>
+                            <h1 className="mt-1.5 text-2xl sm:text-3xl font-semibold tracking-tight">{seg.chapterTitle}</h1>
+                          </header>
+                        )}
+                        {para ? (
+                          <p
+                            dir={paraIsArabic ? 'rtl' : 'ltr'}
+                            lang={paraIsArabic ? 'ar' : undefined}
+                            className={`${
+                              prefs.textAlign === 'justify'
+                                ? 'text-justify'
+                                : paraIsArabic
+                                  ? 'text-right'
+                                  : 'text-left'
+                            } break-words`}
+                            style={{
+                              textIndent:
+                                !paraIsArabic && !para.startsWith('"') && !para.startsWith('【') && !/^[A-Za-z]/.test(para)
+                                  ? '2em'
+                                  : undefined,
+                              unicodeBidi: paraIsArabic ? 'plaintext' : undefined,
+                              fontFeatureSettings: paraIsArabic ? '"liga" 1, "calt" 1, "mark" 1, "mkmk" 1' : undefined,
+                            }}
+                          >
+                            {renderParagraphWithHighlights(para, segChapterAnnotations, theme.isDark)}
+                          </p>
+                        ) : null}
+                      </div>
                     );
-                  })}
+                  }
+                )}
+
+                {virtualWindow.bottomSpacerHeight > 0 && (
+                  <div style={{ height: `${virtualWindow.bottomSpacerHeight}px` }} aria-hidden="true" />
+                )}
               </div>
 
+              {loadingSegmentChunks && (
+                <div
+                  className="mt-4 flex items-center justify-center gap-2 py-2 text-xs font-sans"
+                  style={{ color: theme.muted }}
+                >
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>{isZh ? '正在分段加载后续章节…' : 'Loading next segments…'}</span>
+                </div>
+              )}
+
               <div
-                className="mt-14 pt-6 flex items-center justify-between text-xs"
+                className="mt-10 pt-6 flex items-center justify-between text-xs font-sans"
                 style={{ borderTop: `1px solid ${theme.border}` }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
                   type="button"
                   disabled={chapterIndex === 0}
-                  onClick={() => {
-                    setChapterIndex((c) => Math.max(0, c - 1));
-                    setPageIndex(0);
-                  }}
+                  onClick={() => jumpToChapter(chapterIndex - 1)}
                   className="inline-flex items-center gap-1 rounded-xl px-3 py-2 font-medium disabled:opacity-30 cursor-pointer"
                   style={{ color: theme.accent }}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   <span>{isZh ? '上一章' : 'Previous'}</span>
                 </button>
-                {chapterIndex >= chapters.length - 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      stopSpiritSpeech();
-                      onClose();
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 font-semibold text-white cursor-pointer"
-                    style={{ backgroundColor: theme.accent }}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    <span>{isZh ? '全书已读完 · 返回书架' : 'Finished · Back to Library'}</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setChapterIndex((c) => Math.min(chapters.length - 1, c + 1));
-                      setPageIndex(0);
-                    }}
-                    className="inline-flex items-center gap-1 rounded-xl px-3 py-2 font-medium cursor-pointer"
-                    style={{ color: theme.accent }}
-                  >
-                    <span>{isZh ? '下一章' : 'Next'}</span>
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    flushProgressToServer(true);
+                    stopSpiritSpeech();
+                    onClose();
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full px-5 py-2 font-semibold text-white cursor-pointer"
+                  style={{ backgroundColor: theme.accent }}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  <span>{isZh ? '保存进度并返回书架' : 'Save & Back to Library'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={chapterIndex >= chapters.length - 1}
+                  onClick={() => jumpToChapter(chapterIndex + 1)}
+                  className="inline-flex items-center gap-1 rounded-xl px-3 py-2 font-medium disabled:opacity-30 cursor-pointer"
+                  style={{ color: theme.accent }}
+                >
+                  <span>{isZh ? '下一章' : 'Next'}</span>
+                  <ChevronRight className="h-4 w-4" />
+                </button>
               </div>
             </div>
           ) : (
@@ -2628,8 +3235,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               disabled={effectiveLayout === 'scroll' ? chapterIndex === 0 : globalPageIndex <= 0}
               onClick={() => {
                 if (effectiveLayout === 'scroll') {
-                  setChapterIndex((c) => Math.max(0, c - 1));
-                  setPageIndex(0);
+                  jumpToChapter(chapterIndex - 1);
                 } else {
                   goPrevPage();
                 }
@@ -2644,10 +3250,25 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             <input
               type="range"
               min={0}
-              max={Math.max(0, flatBookPages.length - 1)}
-              value={Math.min(globalPageIndex, Math.max(0, flatBookPages.length - 1))}
-              onChange={(e) => jumpToGlobalPage(Number(e.target.value))}
-              aria-label={isZh ? '全书翻页进度条' : 'Book page scrubber'}
+              max={
+                effectiveLayout === 'scroll'
+                  ? Math.max(0, totalSegmentCount - 1)
+                  : Math.max(0, flatBookPages.length - 1)
+              }
+              value={
+                effectiveLayout === 'scroll'
+                  ? Math.min(activeSegmentIndex, Math.max(0, totalSegmentCount - 1))
+                  : Math.min(globalPageIndex, Math.max(0, flatBookPages.length - 1))
+              }
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                if (effectiveLayout === 'scroll') {
+                  scrollToSegmentIndex(val, 'auto');
+                } else {
+                  jumpToGlobalPage(val);
+                }
+              }}
+              aria-label={isZh ? '全书阅读进度条' : 'Book reading scrubber'}
               className="h-1 flex-1 cursor-pointer appearance-none rounded-full"
               style={{
                 accentColor: theme.accent,
@@ -2659,6 +3280,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  flushProgressToServer(true);
                   stopSpiritSpeech();
                   onClose();
                 }}
@@ -2673,8 +3295,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 disabled={effectiveLayout === 'scroll' ? chapterIndex >= chapters.length - 1 : globalPageIndex >= flatBookPages.length - 1}
                 onClick={() => {
                   if (effectiveLayout === 'scroll') {
-                    setChapterIndex((c) => Math.min(chapters.length - 1, c + 1));
-                    setPageIndex(0);
+                    jumpToChapter(chapterIndex + 1);
                   } else {
                     goNextPage();
                   }
@@ -2695,14 +3316,24 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             <span>
               {effectiveLayout === 'scroll'
                 ? isZh
-                  ? `第 ${chapterIndex + 1} / ${chapters.length} 章`
-                  : `Chapter ${chapterIndex + 1} of ${chapters.length}`
+                  ? `第 ${chapterIndex + 1} / ${chapters.length} 章 · 第 ${activeSegmentIndex + 1}/${totalSegmentCount} 段`
+                  : `Ch ${chapterIndex + 1}/${chapters.length} · Seg ${activeSegmentIndex + 1}/${totalSegmentCount}`
                 : isZh
                   ? `全书第 ${globalPageIndex + 1}${rightPage ? `–${Math.min(flatBookPages.length, globalPageIndex + 2)}` : ''} / ${flatBookPages.length} 页 · 第 ${chapterIndex + 1}/${chapters.length} 章`
                   : `Page ${globalPageIndex + 1}${rightPage ? `–${Math.min(flatBookPages.length, globalPageIndex + 2)}` : ''} of ${flatBookPages.length} · Ch ${chapterIndex + 1}/${chapters.length}`}
             </span>
             <span className="hidden sm:inline">
-              {isZh ? `本章约剩 ${minutesLeftInChapter} 分钟` : `~${minutesLeftInChapter} min left in chapter`}
+              {syncState === 'saving'
+                ? isZh
+                  ? '进度同步中…'
+                  : 'Syncing progress…'
+                : syncState === 'saved'
+                  ? isZh
+                    ? '进度已自动保存'
+                    : 'Progress synced'
+                  : isZh
+                    ? `本章约剩 ${minutesLeftInChapter} 分钟`
+                    : `~${minutesLeftInChapter} min left`}
             </span>
             <span className="font-mono">{progressPercent}%</span>
           </div>

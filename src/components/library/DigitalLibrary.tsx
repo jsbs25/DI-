@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   BookOpen,
   Search,
@@ -30,9 +30,9 @@ import {
   Loader2,
   Trash2,
 } from 'lucide-react';
-import { Book, Chapter, BookAnnotation, BookShelfItem, BookshelfStatus, Language } from '../../types/index.ts';
+import { Book, Chapter, BookAnnotation, BookChapterOutline, BookSegmentItem, BookShelfItem, BookshelfStatus, Language } from '../../types/index.ts';
 import { EpubReader } from './EpubReader.tsx';
-import { AppleBookReader } from './AppleBookReader.tsx';
+import { AppleBookReader, type ReadingProgressDetail } from './AppleBookReader.tsx';
 import { PdfDocumentViewer } from '../browser/PdfDocumentViewer.tsx';
 import { getBookEmbedUrl, getBookPdfUrl, isRtlLanguage } from './bookEmbedUrl.ts';
 import { AdminLibrary } from './AdminLibrary.tsx';
@@ -181,7 +181,13 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [crawlResults, setCrawlResults] = useState<any[]>([]);
   const [crawlSources, setCrawlSources] = useState<any[]>([]);
   const [crawlReader, setCrawlReader] = useState<any | null>(null);
-  const [pdfReader, setPdfReader] = useState<{ url: string; title: string; sourceUrl?: string } | null>(null);
+  const [pdfReader, setPdfReader] = useState<{
+    url: string;
+    title: string;
+    sourceUrl?: string;
+    bookId?: string;
+    initialPage?: number;
+  } | null>(null);
   const [webReader, setWebReader] = useState<{ url: string; title: string; sourceUrl?: string; label: string } | null>(null);
   const [readerNotice, setReaderNotice] = useState<string | null>(null);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
@@ -200,6 +206,15 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [readingBook, setReadingBook] = useState<Book | null>(null);
   const [readingEpub, setReadingEpub] = useState<Book | null>(null);
   const [activeChapterIndex, setActiveChapterIndex] = useState(0);
+  const [segmentedReaderMeta, setSegmentedReaderMeta] = useState<{
+    bookId: string;
+    outline: BookChapterOutline[];
+    initialSegments: BookSegmentItem[];
+    totalSegments: number;
+    initialSegmentIndex?: number;
+    initialScrollRatio?: number;
+    initialPageNumber?: number;
+  } | null>(null);
   const [fontSize, setFontSize] = useState<number>(18);
   const [lineHeight, setLineHeight] = useState<number>(1.9);
   const [readerTheme, setReaderTheme] = useState<'dark' | 'sepia' | 'light' | 'focus'>('dark');
@@ -598,7 +613,13 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         );
         if (openAfterSave) {
           if (data.localPdfUrl || item.pdfUrl) {
-            setPdfReader({ url: data.localPdfUrl || item.pdfUrl, title: savedBook.title, sourceUrl: item.sourcePageUrl });
+            setPdfReader({
+              url: data.localPdfUrl || item.pdfUrl,
+              title: savedBook.title,
+              sourceUrl: item.sourcePageUrl,
+              bookId: savedBook.id,
+              initialPage: data.shelfItem?.lastReadPage,
+            });
           } else {
             await openReader(savedBook);
           }
@@ -718,8 +739,39 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     return null;
   };
 
+  // Segmented chunk loader for AppleBookReader virtual scrolling
+  const fetchBookSegmentsChunk = useCallback(async (bookId: string, offset: number, limit = 40) => {
+    try {
+      const res = await fetch(
+        `/api/library/books/${encodeURIComponent(bookId)}/segments?offset=${Math.max(0, offset)}&limit=${Math.max(1, limit)}`,
+        { headers: libraryAuthHeaders() }
+      );
+      const data = await res.json();
+      if (!data?.success || !Array.isArray(data.segments)) return null;
+      return {
+        segments: data.segments as BookSegmentItem[],
+        totalSegments: Number(data.totalSegments) || data.segments.length,
+        hasMore: Boolean(data.hasMore),
+      };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const fetchServerReadingProgress = useCallback(async (bookId: string): Promise<BookShelfItem | null> => {
+    try {
+      const res = await fetch(`/api/library/books/${encodeURIComponent(bookId)}/reading-progress`, {
+        headers: libraryAuthHeaders(),
+      });
+      const data = await res.json();
+      return data?.success && data.item ? (data.item as BookShelfItem) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const openReader = async (book: Book) => {
-    // EPUB books use the epub.js reader; text books use the chapter reader
+    // EPUB books use the epub.js reader; PDF books use PdfDocumentViewer; text books use segmented AppleBookReader
     if (book.epubUrl) {
       setReadingEpub(book);
       await ensureShelfForReading(book);
@@ -727,21 +779,112 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
     const pdf = getBookPdfUrl(book as any) || (book.formatType === 'pdf' ? (book as any).textUrl || book.externalReadUrl : null);
     if (pdf) {
-      setPdfReader({ url: pdf, title: book.title, sourceUrl: book.sourceUrl || book.externalReadUrl || pdf });
+      const shelfItem = shelf.find(item => item.bookId === book.id) || (await fetchServerReadingProgress(book.id)) || undefined;
+      setPdfReader({
+        url: pdf,
+        title: book.title,
+        sourceUrl: book.sourceUrl || book.externalReadUrl || pdf,
+        bookId: book.id,
+        initialPage: shelfItem?.lastReadPage,
+      });
       await ensureShelfForReading(book);
       return;
     }
-    if (book.chapters && book.chapters.length > 0 && book.chapters.some(ch => ch.content && ch.content.trim().length > 0)) {
+
+    // Attempt fast segmented initial load from server first (returns outline + first 40 segments + server reading progress)
+    let targetBook = book;
+    let segOutline: BookChapterOutline[] = [];
+    let segInitial: BookSegmentItem[] = [];
+    let segTotal = 0;
+    let serverProgress: BookShelfItem | null = null;
+
+    try {
+      const segRes = await fetch(
+        `/api/library/books/${encodeURIComponent(book.id)}/segments?offset=0&limit=40&includeMeta=1`,
+        { headers: libraryAuthHeaders() }
+      );
+      if (segRes.ok) {
+        const segData = await segRes.json();
+        if (segData?.success && Array.isArray(segData.outline) && segData.outline.length > 0 && Number(segData.totalSegments) > 0) {
+          segOutline = segData.outline;
+          segInitial = Array.isArray(segData.segments) ? segData.segments : [];
+          segTotal = Number(segData.totalSegments) || segInitial.length;
+          if (segData.readingProgress) serverProgress = segData.readingProgress;
+          if (Array.isArray(segData.annotations)) setAnnotations(segData.annotations);
+
+          // If user previously read deeper into the book, prefetch that exact segment window immediately
+          const savedSegIdx = typeof serverProgress?.lastReadSegmentIndex === 'number' ? serverProgress.lastReadSegmentIndex : 0;
+          const savedChIdx = serverProgress?.lastReadChapterId
+            ? segOutline.findIndex((o) => o.id === serverProgress!.lastReadChapterId)
+            : -1;
+          const resumeSegStart = savedSegIdx > 0
+            ? Math.floor(savedSegIdx / 40) * 40
+            : savedChIdx > 0 && segOutline[savedChIdx]
+              ? Math.floor(segOutline[savedChIdx].startSegmentIndex / 40) * 40
+              : 0;
+          if (resumeSegStart > 0) {
+            const resumeChunk = await fetchBookSegmentsChunk(book.id, resumeSegStart, 40);
+            if (resumeChunk?.segments?.length) {
+              const seen = new Set(segInitial.map((s) => s.index));
+              for (const s of resumeChunk.segments) {
+                if (!seen.has(s.index)) segInitial.push(s);
+              }
+            }
+          }
+
+          // Ensure targetBook has chapter skeletons matching the full outline
+          const baseMeta = (segData.bookMeta as Book | undefined) || book;
+          const byChapter = new Map<number, BookSegmentItem[]>();
+          segInitial.forEach((s) => {
+            const arr = byChapter.get(s.chapterIndex) || [];
+            arr.push(s);
+            byChapter.set(s.chapterIndex, arr);
+          });
+          const hydratedChapters: Chapter[] = segOutline.map((o) => {
+            const existing = book.chapters?.find((c) => c.id === o.id);
+            if (existing?.content?.trim()) return existing;
+            const segs = (byChapter.get(o.index) || []).sort((a, b) => a.index - b.index);
+            return {
+              id: o.id,
+              title: o.title,
+              content: segs.map((s) => s.text).filter(Boolean).join('\n\n'),
+            };
+          });
+          targetBook = { ...baseMeta, chapters: hydratedChapters };
+        }
+      }
+    } catch {
+      // Fall back cleanly to full book object if already loaded
+    }
+
+    const hasReadableText =
+      segTotal > 0 ||
+      (targetBook.chapters && targetBook.chapters.length > 0 && targetBook.chapters.some(ch => ch.content && ch.content.trim().length > 0));
+
+    if (hasReadableText) {
       readerReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      let shelfItem = shelf.find(item => item.bookId === book.id);
-      if (!shelfItem) shelfItem = await ensureShelfForReading(book) || undefined;
+      let shelfItem = serverProgress || shelf.find(item => item.bookId === targetBook.id);
+      if (!shelfItem) shelfItem = await ensureShelfForReading(targetBook) || undefined;
       const savedChapterIndex = shelfItem?.lastReadChapterId
-        ? book.chapters.findIndex(chapter => chapter.id === shelfItem.lastReadChapterId)
+        ? targetBook.chapters.findIndex(chapter => chapter.id === shelfItem!.lastReadChapterId)
         : -1;
       const legacyProgressIndex = shelfItem?.progress
-        ? Math.min(book.chapters.length - 1, Math.max(0, Math.round((shelfItem.progress / 100) * book.chapters.length) - 1))
+        ? Math.min(targetBook.chapters.length - 1, Math.max(0, Math.round((shelfItem.progress / 100) * targetBook.chapters.length) - 1))
         : 0;
-      setReadingBook(book);
+      setSegmentedReaderMeta(
+        segOutline.length > 0
+          ? {
+              bookId: targetBook.id,
+              outline: segOutline,
+              initialSegments: segInitial,
+              totalSegments: segTotal,
+              initialSegmentIndex: shelfItem?.lastReadSegmentIndex,
+              initialScrollRatio: shelfItem?.lastReadScrollRatio,
+              initialPageNumber: shelfItem?.lastReadPage,
+            }
+          : null
+      );
+      setReadingBook(targetBook);
       setActiveChapterIndex(savedChapterIndex >= 0 ? savedChapterIndex : legacyProgressIndex);
       setAiExplanation(null);
       setAiCitation(null);
@@ -762,7 +905,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   // (with chapter bodies) before showing the detail view or opening the reader.
   const loadFullBook = async (bookId: string): Promise<Book | null> => {
     try {
-      const res = await fetch(`/api/library/books/${bookId}`);
+      const res = await fetch(`/api/library/books/${bookId}`, { headers: libraryAuthHeaders() });
       const data = await res.json();
       if (!data.success || !data.book) return null;
       setAnnotations(Array.isArray(data.annotations) ? data.annotations : []);
@@ -780,13 +923,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   };
 
   const openShelfBook = async (book: Book) => {
-    const full = await loadFullBook(book.id);
-    await openReader(full || book);
+    // Segmented openReader fetches outline + first window directly without waiting for full book download
+    await openReader(book);
   };
 
   const closeReader = () => {
     stopSpeaking();
     setReadingBook(null);
+    setSegmentedReaderMeta(null);
     setIsAnnotationDrawerOpen(false);
   };
 
@@ -1059,32 +1203,88 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
   };
 
-  useEffect(() => {
-    if (!readingBook || !shelf.some(item => item.bookId === readingBook.id)) return;
-    void saveShelfReadingState(readingBook, activeChapterIndex);
-  }, [readingBook, activeChapterIndex, shelf.some(item => item.bookId === readingBook?.id)]);
-
-  const saveProgress = async (progress: number) => {
-    if (!readingBook || savingProgressRef.current) return;
-    savingProgressRef.current = true;
-    const chapter = readingBook.chapters[activeChapterIndex];
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    try {
-      if (chapter) {
-        await saveShelfReadingState(readingBook, activeChapterIndex, progress);
-      }
-      await fetch(`/api/library/books/${readingBook.id}/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ progress }),
-        signal: controller.signal
+  // Unified server-side reading progress persistence (works for authenticated users & guests, text & PDF books)
+  const saveReadingProgressToServer = useCallback(
+    async (
+      bookId: string,
+      payload: {
+        progress: number;
+        chapterId?: string;
+        pageNumber?: number;
+        totalPages?: number;
+        scrollRatio?: number;
+        segmentIndex?: number;
+        keepalive?: boolean;
+      },
+      bookRefFallback?: Book
+    ) => {
+      if (!bookId) return;
+      const bodyStr = JSON.stringify({
+        progress: payload.progress,
+        chapterId: payload.chapterId,
+        pageNumber: payload.pageNumber,
+        totalPages: payload.totalPages,
+        scrollRatio: payload.scrollRatio,
+        segmentIndex: payload.segmentIndex,
       });
-    } catch (e) {
-      console.error(e);
+
+      try {
+        const res = await fetch(`/api/library/books/${encodeURIComponent(bookId)}/reading-progress`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
+          body: bodyStr,
+          keepalive: Boolean(payload.keepalive),
+        });
+        if (!payload.keepalive && res.ok) {
+          const data = await res.json();
+          if (data?.success && data.item && mountedRef.current) {
+            setShelf(prev => {
+              const existingBook =
+                prev.find(i => i.bookId === bookId)?.book ||
+                bookRefFallback ||
+                books.find(b => b.id === bookId);
+              if (!existingBook) return prev;
+              const entry = { ...data.item, book: existingBook };
+              return prev.some(i => i.bookId === bookId)
+                ? prev.map(i => (i.bookId === bookId ? entry : i))
+                : [entry, ...prev];
+            });
+          }
+        }
+      } catch (e) {
+        if (!payload.keepalive) console.error(e);
+      }
+    },
+    [books]
+  );
+
+  const saveProgress = async (
+    progress: number,
+    chapterIdOverride?: string,
+    detail?: ReadingProgressDetail
+  ) => {
+    if (!readingBook) return;
+    if (!detail?.keepalive && savingProgressRef.current) return;
+    if (!detail?.keepalive) savingProgressRef.current = true;
+    const chapter = chapterIdOverride
+      ? readingBook.chapters.find(c => c.id === chapterIdOverride) || readingBook.chapters[activeChapterIndex]
+      : readingBook.chapters[activeChapterIndex];
+    try {
+      await saveReadingProgressToServer(
+        readingBook.id,
+        {
+          progress,
+          chapterId: chapterIdOverride || chapter?.id,
+          pageNumber: detail?.pageNumber,
+          totalPages: detail?.totalPages,
+          scrollRatio: detail?.scrollRatio,
+          segmentIndex: detail?.segmentIndex,
+          keepalive: detail?.keepalive,
+        },
+        readingBook
+      );
     } finally {
-      clearTimeout(timeout);
-      savingProgressRef.current = false;
+      if (!detail?.keepalive) savingProgressRef.current = false;
     }
   };
 
@@ -1895,17 +2095,36 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           book={readingBook}
           lang={lang}
           initialChapterIndex={activeChapterIndex}
+          initialSegmentIndex={
+            segmentedReaderMeta?.bookId === readingBook.id ? segmentedReaderMeta.initialSegmentIndex : undefined
+          }
+          initialScrollRatio={
+            segmentedReaderMeta?.bookId === readingBook.id ? segmentedReaderMeta.initialScrollRatio : undefined
+          }
+          initialPageNumber={
+            segmentedReaderMeta?.bookId === readingBook.id ? segmentedReaderMeta.initialPageNumber : undefined
+          }
+          segmentOutline={
+            segmentedReaderMeta?.bookId === readingBook.id ? segmentedReaderMeta.outline : undefined
+          }
+          initialSegments={
+            segmentedReaderMeta?.bookId === readingBook.id ? segmentedReaderMeta.initialSegments : undefined
+          }
+          totalSegments={
+            segmentedReaderMeta?.bookId === readingBook.id ? segmentedReaderMeta.totalSegments : undefined
+          }
+          onLoadSegments={(offset, limit) => fetchBookSegmentsChunk(readingBook.id, offset, limit)}
           initialAnnotations={annotations}
           onClose={() => {
             closeReader();
             refreshRecentHistory();
           }}
-          onSaveProgress={(progress, chapterId) => {
+          onSaveProgress={(progress, chapterId, _chapterTitle, detail) => {
             if (chapterId) {
               const idx = readingBook.chapters.findIndex((c) => c.id === chapterId);
               if (idx >= 0 && idx !== activeChapterIndex) setActiveChapterIndex(idx);
             }
-            void saveProgress(progress);
+            void saveProgress(progress, chapterId, detail);
           }}
           onAnnotationsChange={setAnnotations}
         />
@@ -1990,7 +2209,22 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             sourceUrl={pdfReader.url}
             title={pdfReader.title}
             lang={lang}
+            bookId={pdfReader.bookId}
+            initialPage={pdfReader.initialPage}
             originPageUrl={pdfReader.sourceUrl}
+            onServerSaveProgress={
+              pdfReader.bookId
+                ? (payload) => {
+                    void saveReadingProgressToServer(pdfReader.bookId!, {
+                      progress: payload.progress,
+                      pageNumber: payload.pageNumber,
+                      totalPages: payload.totalPages,
+                      scrollRatio: payload.scrollRatio,
+                      keepalive: payload.keepalive,
+                    });
+                  }
+                : undefined
+            }
             onClose={() => {
               setPdfReader(null);
               refreshRecentHistory();

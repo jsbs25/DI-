@@ -98,8 +98,20 @@ export interface PdfDocumentViewerProps {
   sourceUrl: string;
   title: string;
   lang: Language;
+  /** Optional library book ID for server-side reading progress persistence. */
+  bookId?: string;
+  /** Optional server-restored initial page number (1-indexed). */
+  initialPage?: number;
   /** Optional original external source URL (e.g. IslamHouse / Archive / Noor page). */
   originPageUrl?: string;
+  /** Optional callback to persist PDF reading progress to the server. */
+  onServerSaveProgress?: (payload: {
+    pageNumber: number;
+    totalPages: number;
+    progress: number;
+    scrollRatio: number;
+    keepalive?: boolean;
+  }) => void;
   /** Callback to return to Bookshelf / Library. */
   onClose?: () => void;
 }
@@ -238,13 +250,16 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   sourceUrl,
   title,
   lang,
+  bookId,
+  initialPage,
   originPageUrl,
+  onServerSaveProgress,
   onClose,
 }) => {
   const isZh = lang === 'zh';
   const streamUrl = resolveProxyPdfUrl(sourceUrl, title, false);
   const downloadUrl = resolveProxyPdfUrl(sourceUrl, title, true);
-  const bookKey = useMemo(() => `pdf:${sourceUrl || title}`, [sourceUrl, title]);
+  const bookKey = useMemo(() => (bookId ? `book:${bookId}` : `pdf:${sourceUrl || title}`), [bookId, sourceUrl, title]);
 
   // Core PDF state
   const [pdfProxy, setPdfProxy] = useState<PDFDocumentProxy | null>(null);
@@ -329,36 +344,95 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     });
   }, []);
 
-  // Load saved progress & bookmarks for this book
+  // Virtual scroll state for large multi-hundred-page PDFs
+  const measuredPageHeightsRef = useRef<Map<number, number>>(new Map());
+  const [pdfVirtualScrollTop, setPdfVirtualScrollTop] = useState(0);
+  const [pdfViewportHeight, setPdfViewportHeight] = useState(720);
+  const [pdfHeightVersion, setPdfHeightVersion] = useState(0);
+  const restoredPdfScrollRef = useRef(false);
+  const latestPdfProgressRef = useRef({
+    pageNumber: 1,
+    totalPages: 0,
+    progress: 0,
+    scrollRatio: 0,
+  });
+
+  // Load saved progress & bookmarks for this book (preferring server-saved initialPage when present)
   useEffect(() => {
     const saved = loadBookProgress(bookKey);
-    if (saved) {
-      setPageNumber(Math.max(1, saved.pageNumber || 1));
-      setScrollWindowEnd(Math.max(3, (saved.pageNumber || 1) + 2));
-      setBookmarks(Array.isArray(saved.bookmarks) ? saved.bookmarks : []);
-    } else {
-      setPageNumber(1);
-      setScrollWindowEnd(3);
-      setBookmarks([]);
-    }
-  }, [bookKey]);
+    const preferredPage =
+      typeof initialPage === 'number' && initialPage >= 1
+        ? initialPage
+        : saved?.pageNumber && saved.pageNumber >= 1
+          ? saved.pageNumber
+          : 1;
+    setPageNumber(preferredPage);
+    setScrollWindowEnd(Math.max(3, preferredPage + 2));
+    setBookmarks(Array.isArray(saved?.bookmarks) ? saved.bookmarks : []);
+    restoredPdfScrollRef.current = false;
+  }, [bookKey, initialPage]);
 
-  // Persist reading progress whenever page or bookmarks change
+  // Persist reading progress to localStorage + server (debounced) whenever page or bookmarks change
   useEffect(() => {
     if (pageCount <= 0) return;
     setPageJumpInput(String(pageNumber));
+    const scrollRatio = pageNumber / Math.max(1, pageCount);
+    const progressPct = Math.min(100, Math.max(1, Math.round(scrollRatio * 100)));
+    latestPdfProgressRef.current = {
+      pageNumber,
+      totalPages: pageCount,
+      progress: progressPct,
+      scrollRatio,
+    };
     saveBookProgress({
       bookKey,
       title,
       sourceUrl,
       pageNumber,
       totalPages: pageCount,
-      scrollRatio: pageNumber / Math.max(1, pageCount),
-      progressPct: Math.min(100, Math.round((pageNumber / Math.max(1, pageCount)) * 100)),
+      scrollRatio,
+      progressPct,
       bookmarks,
       updatedAt: new Date().toISOString(),
     });
-  }, [bookKey, title, sourceUrl, pageNumber, pageCount, bookmarks]);
+    if (!onServerSaveProgress) return;
+    const timer = window.setTimeout(() => {
+      onServerSaveProgress({
+        pageNumber,
+        totalPages: pageCount,
+        progress: progressPct,
+        scrollRatio,
+        keepalive: false,
+      });
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [bookKey, title, sourceUrl, pageNumber, pageCount, bookmarks, onServerSaveProgress]);
+
+  // Guaranteed server flush on pagehide / visibilitychange / unmount
+  useEffect(() => {
+    if (!onServerSaveProgress) return;
+    const flush = () => {
+      const p = latestPdfProgressRef.current;
+      if (p.totalPages <= 0) return;
+      onServerSaveProgress({
+        pageNumber: p.pageNumber,
+        totalPages: p.totalPages,
+        progress: p.progress,
+        scrollRatio: p.scrollRatio,
+        keepalive: true,
+      });
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, [onServerSaveProgress]);
 
   // Load PDF document via pdfjs-dist
   useEffect(() => {
@@ -477,6 +551,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   );
 
   // Extract active window of pages whenever pdfProxy / pageNumber / layout changes
+  // Extract structured pages strictly for the active virtual window (segmented on-demand loading)
   useEffect(() => {
     if (!pdfProxy || viewMode !== 'reflow') return;
     let cancelled = false;
@@ -486,8 +561,8 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       pagesToLoad.push(pageNumber);
       if (pageNumber + 1 <= pdfProxy.numPages) pagesToLoad.push(pageNumber + 1);
     } else {
-      const start = Math.max(1, pageNumber);
-      const end = Math.min(pdfProxy.numPages, Math.max(scrollWindowEnd, start + 2));
+      const start = Math.max(1, pageNumber - 1);
+      const end = Math.min(pdfProxy.numPages, pageNumber + 2);
       for (let p = start; p <= end; p++) pagesToLoad.push(p);
     }
 
@@ -499,8 +574,6 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
           const res = await extractStructuredPdfPage(pdfProxy, p);
           if (cancelled) break;
           setExtractedPages((prev) => (prev[p] ? prev : { ...prev, [p]: res }));
-          // Keep HD paper-blended original canvas immediate for garbled Arabic or scanned PDFs;
-          // Vision OCR remains one-tap opt-in via "AI 识字可点查" so zero quota errors interrupt reading.
         }
       }
     })();
@@ -508,7 +581,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [pdfProxy, pageNumber, scrollWindowEnd, prefs.layoutMode, viewMode]);
+  }, [pdfProxy, pageNumber, prefs.layoutMode, viewMode]);
 
   // Auto-load next pages seamlessly as user scrolls down in continuous scroll mode
   useEffect(() => {
@@ -919,29 +992,155 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     });
   }, [pageNumber, extractedPages]);
 
+  // ---- Virtual Scroll Layout across ALL PDF Pages (1..pageCount) ----
+  const DEFAULT_PDF_PAGE_HEIGHT = 860;
+
+  const pdfVirtualLayout = useMemo(() => {
+    void pdfHeightVersion;
+    const count = Math.max(0, pageCount);
+    const offsets = new Float64Array(count + 1);
+    let y = 0;
+    for (let i = 0; i < count; i++) {
+      offsets[i] = y;
+      const measured = measuredPageHeightsRef.current.get(i + 1);
+      y += measured ?? DEFAULT_PDF_PAGE_HEIGHT;
+    }
+    offsets[count] = y;
+    return { offsets, totalHeight: y };
+  }, [pageCount, pdfHeightVersion]);
+
+  const findPdfPageForScrollTop = useCallback(
+    (scrollTop: number): number => {
+      if (pageCount <= 0) return 1;
+      const { offsets } = pdfVirtualLayout;
+      let lo = 0;
+      let hi = pageCount - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (offsets[mid] <= scrollTop) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return lo + 1;
+    },
+    [pdfVirtualLayout, pageCount]
+  );
+
+  const pdfVirtualWindow = useMemo(() => {
+    if (pageCount <= 0 || prefs.layoutMode !== 'scroll') {
+      return {
+        renderStart: pageNumber,
+        renderEnd: pageNumber,
+        topSpacerHeight: 0,
+        bottomSpacerHeight: 0,
+      };
+    }
+    const anchorPage = findPdfPageForScrollTop(Math.max(0, pdfVirtualScrollTop));
+    const endY = pdfVirtualScrollTop + Math.max(420, pdfViewportHeight);
+    let endPage = anchorPage;
+    while (endPage < pageCount && pdfVirtualLayout.offsets[endPage - 1] < endY) {
+      endPage++;
+    }
+    const renderStart = Math.max(1, anchorPage - 1);
+    const renderEnd = Math.min(pageCount, Math.max(endPage + 1, anchorPage + 2));
+    const topSpacerHeight = pdfVirtualLayout.offsets[renderStart - 1] || 0;
+    const bottomSpacerHeight = Math.max(
+      0,
+      pdfVirtualLayout.totalHeight - (pdfVirtualLayout.offsets[renderEnd] ?? pdfVirtualLayout.totalHeight)
+    );
+    return {
+      renderStart,
+      renderEnd,
+      topSpacerHeight,
+      bottomSpacerHeight,
+    };
+  }, [pageCount, prefs.layoutMode, pageNumber, findPdfPageForScrollTop, pdfVirtualScrollTop, pdfViewportHeight, pdfVirtualLayout]);
+
+  // Track viewport resize for PDF virtual scroll container
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const updateSize = () => setPdfViewportHeight(el.clientHeight || 720);
+    updateSize();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [viewMode, prefs.layoutMode]);
+
+  // Restore saved initial page offset once PDF pageCount is ready in scroll mode
+  useEffect(() => {
+    if (pageCount <= 0 || prefs.layoutMode !== 'scroll' || viewMode !== 'reflow' || restoredPdfScrollRef.current) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    restoredPdfScrollRef.current = true;
+    const targetPage = Math.max(1, Math.min(pageCount, pageNumber));
+    if (targetPage > 1) {
+      const y = pdfVirtualLayout.offsets[targetPage - 1] || 0;
+      window.requestAnimationFrame(() => {
+        el.scrollTo({ top: y, behavior: 'auto' });
+        setPdfVirtualScrollTop(y);
+      });
+    }
+  }, [pageCount, prefs.layoutMode, viewMode, pageNumber, pdfVirtualLayout.offsets]);
+
+  const handlePdfVirtualScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      if (prefs.layoutMode !== 'scroll' || viewMode !== 'reflow' || pageCount <= 0) return;
+      const top = e.currentTarget.scrollTop;
+      setPdfVirtualScrollTop(top);
+      const visiblePage = findPdfPageForScrollTop(top + 120);
+      if (visiblePage !== pageNumber) {
+        setPageNumber(visiblePage);
+      }
+    },
+    [prefs.layoutMode, viewMode, pageCount, findPdfPageForScrollTop, pageNumber]
+  );
+
+  const measurePdfPageSection = useCallback((pNum: number, node: HTMLElement | null) => {
+    if (!node) return;
+    const h = Math.ceil(node.getBoundingClientRect().height + 48);
+    if (h > 120) {
+      const prev = measuredPageHeightsRef.current.get(pNum);
+      if (prev === undefined || Math.abs(prev - h) > 12) {
+        measuredPageHeightsRef.current.set(pNum, h);
+        setPdfHeightVersion((v) => v + 1);
+      }
+    }
+  }, []);
+
   const jumpToPage = useCallback(
     (target: number) => {
       const clamped = Math.max(1, Math.min(Math.max(1, pageCount), target));
       setPageNumber(clamped);
       setScrollWindowEnd((prev) => Math.max(prev, clamped + 2));
       if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        if (prefs.layoutMode === 'scroll' && viewMode === 'reflow') {
+          const y = pdfVirtualLayout.offsets[clamped - 1] || 0;
+          scrollContainerRef.current.scrollTo({ top: y, behavior: 'auto' });
+          setPdfVirtualScrollTop(y);
+        } else {
+          scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+        }
       }
     },
-    [pageCount]
+    [pageCount, prefs.layoutMode, viewMode, pdfVirtualLayout.offsets]
   );
 
   const visiblePageNumbers = useMemo(() => {
     if (pageCount <= 0) return [];
     if (prefs.layoutMode === 'paged') return [pageNumber];
-    const end = Math.min(pageCount, Math.max(scrollWindowEnd, pageNumber + 2));
     const list: number[] = [];
-    for (let p = pageNumber; p <= end; p++) list.push(p);
+    for (let p = pdfVirtualWindow.renderStart; p <= pdfVirtualWindow.renderEnd; p++) {
+      list.push(p);
+    }
     return list;
-  }, [pageCount, pageNumber, scrollWindowEnd, prefs.layoutMode]);
+  }, [pageCount, pageNumber, prefs.layoutMode, pdfVirtualWindow.renderStart, pdfVirtualWindow.renderEnd]);
 
   const progressPct = pageCount > 0 ? Math.min(100, Math.round((pageNumber / pageCount) * 100)) : 0;
-  const isLastPage = pageCount > 0 && (prefs.layoutMode === 'paged' ? pageNumber >= pageCount : scrollWindowEnd >= pageCount);
+  const isLastPage = pageCount > 0 && pageNumber >= pageCount;
 
   return (
     <div
@@ -1503,7 +1702,8 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
         {/* Primary Reading Canvas */}
         <div
           ref={scrollContainerRef}
-          className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden scroll-smooth"
+          onScroll={handlePdfVirtualScroll}
+          className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden"
           onMouseUp={handleProseMouseUp}
           onTouchEnd={handleProseMouseUp}
         >
@@ -1585,7 +1785,12 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                   </header>
                 )}
 
-                {/* Render Reflowable Structured Pages */}
+                {/* Virtual Scroll Top Spacer */}
+                {prefs.layoutMode === 'scroll' && pdfVirtualWindow.topSpacerHeight > 0 && (
+                  <div style={{ height: `${pdfVirtualWindow.topSpacerHeight}px` }} aria-hidden="true" />
+                )}
+
+                {/* Render Virtualized Reflowable Structured Pages */}
                 {visiblePageNumbers.map((pNum) => {
                   const ep = extractedPages[pNum];
                   const isOcrBusy = ocrLoadingPage === pNum;
@@ -1614,6 +1819,9 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                   return (
                     <section
                       key={pNum}
+                      ref={(node) => {
+                        if (prefs.layoutMode === 'scroll') measurePdfPageSection(pNum, node);
+                      }}
                       dir={ep?.dir || 'ltr'}
                       lang={isArabicPage ? 'ar' : undefined}
                       translate={isArabicPage ? 'no' : undefined}
@@ -1882,15 +2090,17 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                 );
               })}
 
-              {/* Continuous Scroll Auto-Load Sentinel + Manual Load Next Pages */}
-              {prefs.layoutMode === 'scroll' && scrollWindowEnd < pageCount && (
+              {/* Virtual Scroll Bottom Spacer */}
+              {prefs.layoutMode === 'scroll' && pdfVirtualWindow.bottomSpacerHeight > 0 && (
+                <div style={{ height: `${pdfVirtualWindow.bottomSpacerHeight}px` }} aria-hidden="true" />
+              )}
+
+              {/* Continuous Scroll Next-Page Quick Helper */}
+              {prefs.layoutMode === 'scroll' && pageNumber < pageCount && (
                 <div ref={loadMoreSentinelRef} className="pt-2 pb-6 text-center">
                   <button
                     type="button"
-                    onClick={() => {
-                      const nextEnd = Math.min(pageCount, scrollWindowEnd + 4);
-                      setScrollWindowEnd(nextEnd);
-                    }}
+                    onClick={() => jumpToPage(Math.min(pageCount, pageNumber + 1))}
                     className="inline-flex items-center gap-2 rounded-full border px-5 py-2 text-xs font-medium transition hover:opacity-80 cursor-pointer"
                     style={{ borderColor: palette.border, backgroundColor: palette.surface }}
                   >

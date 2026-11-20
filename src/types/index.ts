@@ -366,6 +366,26 @@ export interface Book {
 
 export type BookshelfStatus = 'reading' | 'finished' | 'want_to_read' | 'favorite';
 
+export interface BookChapterOutline {
+  id: string;
+  title: string;
+  index: number;
+  charCount: number;
+  segmentCount: number;
+  startSegmentIndex: number;
+}
+
+export interface BookSegmentItem {
+  index: number;
+  id: string;
+  chapterIndex: number;
+  chapterId: string;
+  chapterTitle: string;
+  paragraphIndex: number;
+  isChapterStart: boolean;
+  text: string;
+}
+
 export interface BookShelfItem {
   id: string;
   userId: string;
@@ -374,6 +394,14 @@ export interface BookShelfItem {
   progress: number; // 0-100
   /** Stable chapter identifier used to resume a text book for this user. */
   lastReadChapterId?: string;
+  /** Last read page number (1-indexed) for PDF or paginated books. */
+  lastReadPage?: number;
+  /** Total pages recorded when saving progress. */
+  totalPages?: number;
+  /** Fine-grained vertical scroll ratio (0-1) within the book or chapter. */
+  lastReadScrollRatio?: number;
+  /** Fine-grained segment index for virtualized segmented text reading. */
+  lastReadSegmentIndex?: number;
   /** EPUB CFI location used to resume an EPUB for this user. */
   lastReadEpubCfi?: string;
   savedAt: string;

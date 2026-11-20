@@ -5470,11 +5470,194 @@ app.get('/api/library/books', (req, res) => {
   res.json({ success: true, books: books.map(stripBookContent) });
 });
 
+function splitParagraphForVirtualSegments(text: string, maxChars = 900): string[] {
+  const cleaned = String(text || '').trim();
+  if (!cleaned) return [];
+  if (cleaned.length <= maxChars) return [cleaned];
+
+  const pieces: string[] = [];
+  let cursor = 0;
+  while (cursor < cleaned.length) {
+    if (cleaned.length - cursor <= maxChars) {
+      const tail = cleaned.slice(cursor).trim();
+      if (tail) pieces.push(tail);
+      break;
+    }
+    const windowStr = cleaned.slice(cursor, cursor + maxChars);
+    let cut = -1;
+    for (let i = windowStr.length - 1; i >= Math.floor(maxChars * 0.45); i--) {
+      const ch = windowStr[i];
+      if ('。！？；.!?\n،؛؟'.includes(ch)) {
+        cut = i + 1;
+        break;
+      }
+    }
+    if (cut === -1) {
+      const lastSpace = windowStr.lastIndexOf(' ');
+      cut = lastSpace > Math.floor(maxChars * 0.5) ? lastSpace + 1 : maxChars;
+    }
+    const chunk = cleaned.slice(cursor, cursor + cut).trim();
+    if (chunk) pieces.push(chunk);
+    cursor += cut;
+  }
+  return pieces.length > 0 ? pieces : [cleaned];
+}
+
+function buildBookSegments(book: any) {
+  const chapters = Array.isArray(book.chapters) ? book.chapters : [];
+  const outline: Array<{
+    id: string;
+    title: string;
+    index: number;
+    charCount: number;
+    segmentCount: number;
+    startSegmentIndex: number;
+  }> = [];
+  const segments: Array<{
+    index: number;
+    id: string;
+    chapterIndex: number;
+    chapterId: string;
+    chapterTitle: string;
+    paragraphIndex: number;
+    isChapterStart: boolean;
+    text: string;
+  }> = [];
+
+  chapters.forEach((ch: any, chapterIndex: number) => {
+    const startSegmentIndex = segments.length;
+    const rawContent = String(ch?.content || '').replace(/\r\n/g, '\n').trim();
+    const rawParagraphs = rawContent
+      ? rawContent
+          .split(/\n{2,}/)
+          .map((p: string) => p.trim())
+          .filter(Boolean)
+      : [];
+
+    const expandedParagraphs: string[] = [];
+    for (const para of rawParagraphs) {
+      if (para.length > 900) {
+        expandedParagraphs.push(...splitParagraphForVirtualSegments(para, 820));
+      } else {
+        expandedParagraphs.push(para);
+      }
+    }
+
+    if (expandedParagraphs.length === 0) {
+      expandedParagraphs.push('');
+    }
+
+    expandedParagraphs.forEach((paraText, paragraphIndex) => {
+      const idx = segments.length;
+      segments.push({
+        index: idx,
+        id: `${ch.id || `ch_${chapterIndex}`}_seg_${paragraphIndex}`,
+        chapterIndex,
+        chapterId: ch.id || `ch_${chapterIndex}`,
+        chapterTitle: ch.title || `第 ${chapterIndex + 1} 章`,
+        paragraphIndex,
+        isChapterStart: paragraphIndex === 0,
+        text: paraText,
+      });
+    });
+
+    outline.push({
+      id: ch.id || `ch_${chapterIndex}`,
+      title: ch.title || `第 ${chapterIndex + 1} 章`,
+      index: chapterIndex,
+      charCount: rawContent.length,
+      segmentCount: segments.length - startSegmentIndex,
+      startSegmentIndex,
+    });
+  });
+
+  return { outline, segments };
+}
+
+app.get('/api/library/books/:id/segments', (req, res) => {
+  const book = store.books.find(b => b.id === req.params.id);
+  if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
+
+  const userId = getSessionUser(req)?.id || 'guest';
+  const { outline, segments } = buildBookSegments(book);
+  const totalSegments = segments.length;
+
+  let offset = Math.max(0, Number.parseInt(String(req.query.offset ?? '0'), 10) || 0);
+  if (req.query.chapterIndex !== undefined) {
+    const chIdx = Math.max(0, Math.min(outline.length - 1, Number.parseInt(String(req.query.chapterIndex), 10) || 0));
+    if (outline[chIdx]) {
+      offset = outline[chIdx].startSegmentIndex;
+    }
+  }
+
+  const rawLimit = Number.parseInt(String(req.query.limit ?? '40'), 10);
+  const limit = Math.min(120, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 40));
+  const clampedOffset = Math.min(offset, Math.max(0, totalSegments));
+  const slice = segments.slice(clampedOffset, clampedOffset + limit);
+  const nextOffset = clampedOffset + slice.length;
+  const hasMore = nextOffset < totalSegments;
+
+  const readingProgress = store.getBookShelfItem(userId, book.id) || null;
+  const annotations = clampedOffset === 0 || req.query.includeMeta === '1'
+    ? store.getAnnotations(book.id, getSessionUser(req)?.id)
+    : undefined;
+
+  res.json({
+    success: true,
+    bookId: book.id,
+    bookMeta: clampedOffset === 0 || req.query.includeMeta === '1' ? stripBookContent(book) : undefined,
+    outline,
+    segments: slice,
+    offset: clampedOffset,
+    limit,
+    totalSegments,
+    totalChapters: outline.length,
+    hasMore,
+    nextOffset,
+    readingProgress,
+    ...(annotations ? { annotations } : {}),
+  });
+});
+
+app.get('/api/library/books/:id/reading-progress', (req, res) => {
+  const userId = getSessionUser(req)?.id || 'guest';
+  const bookId = req.params.id;
+  const item = store.getBookShelfItem(userId, bookId) || null;
+  const book = store.books.find(b => b.id === bookId);
+  res.json({
+    success: true,
+    item,
+    bookProgress: item?.progress ?? book?.readProgress ?? 0,
+  });
+});
+
+app.post('/api/library/books/:id/reading-progress', (req, res) => {
+  const userId = getSessionUser(req)?.id || 'guest';
+  const bookId = req.params.id;
+  const body = (req.body && typeof req.body === 'object') ? req.body : {};
+  const progress = Number(body.progress);
+  if (!Number.isFinite(progress)) {
+    return res.status(400).json({ success: false, error: 'A valid reading progress percentage is required' });
+  }
+  const item = store.saveBookReadingProgress(userId, bookId, {
+    progress,
+    chapterId: typeof body.chapterId === 'string' ? body.chapterId : undefined,
+    pageNumber: body.pageNumber !== undefined ? Number(body.pageNumber) : undefined,
+    totalPages: body.totalPages !== undefined ? Number(body.totalPages) : undefined,
+    scrollRatio: body.scrollRatio !== undefined ? Number(body.scrollRatio) : undefined,
+    segmentIndex: body.segmentIndex !== undefined ? Number(body.segmentIndex) : undefined,
+    cfi: typeof body.cfi === 'string' ? body.cfi : undefined,
+  });
+  res.json({ success: true, item });
+});
+
 app.get('/api/library/books/:id', (req, res) => {
   const book = store.books.find(b => b.id === req.params.id);
   if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
   const annotations = store.getAnnotations(book.id, getSessionUser(req)?.id);
-  res.json({ success: true, book, annotations });
+  const userId = getSessionUser(req)?.id || 'guest';
+  const readingProgress = store.getBookShelfItem(userId, book.id) || null;
+  res.json({ success: true, book, annotations, readingProgress });
 });
 
 // Grounded reading uses only server-stored, source-verified text. Client-supplied

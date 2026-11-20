@@ -2449,6 +2449,75 @@ class DataStore {
     return item;
   }
 
+  getBookShelfItem(userId: string, bookId: string): BookShelfItem | undefined {
+    return this.bookShelf.find(s => s.userId === userId && s.bookId === bookId);
+  }
+
+  saveBookReadingProgress(
+    userId: string,
+    bookId: string,
+    payload: {
+      progress: number;
+      chapterId?: string;
+      pageNumber?: number;
+      totalPages?: number;
+      scrollRatio?: number;
+      segmentIndex?: number;
+      cfi?: string;
+    }
+  ): BookShelfItem {
+    const now = new Date().toISOString();
+    let item = this.bookShelf.find(s => s.userId === userId && s.bookId === bookId);
+    const clampedProgress = Math.min(100, Math.max(0, Math.round(Number(payload.progress) || 0)));
+    if (!item) {
+      item = {
+        id: `shelf_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        userId,
+        bookId,
+        status: clampedProgress >= 99 ? 'finished' : 'reading',
+        progress: clampedProgress,
+        savedAt: now,
+        updatedAt: now,
+      };
+      this.bookShelf.push(item);
+    }
+
+    item.progress = clampedProgress;
+    if (typeof payload.chapterId === 'string' && payload.chapterId.trim()) {
+      item.lastReadChapterId = payload.chapterId.trim();
+    }
+    if (typeof payload.pageNumber === 'number' && Number.isFinite(payload.pageNumber) && payload.pageNumber >= 1) {
+      item.lastReadPage = Math.floor(payload.pageNumber);
+    }
+    if (typeof payload.totalPages === 'number' && Number.isFinite(payload.totalPages) && payload.totalPages >= 1) {
+      item.totalPages = Math.floor(payload.totalPages);
+    }
+    if (typeof payload.scrollRatio === 'number' && Number.isFinite(payload.scrollRatio)) {
+      item.lastReadScrollRatio = Math.min(1, Math.max(0, payload.scrollRatio));
+    }
+    if (typeof payload.segmentIndex === 'number' && Number.isFinite(payload.segmentIndex) && payload.segmentIndex >= 0) {
+      item.lastReadSegmentIndex = Math.floor(payload.segmentIndex);
+    }
+    if (typeof payload.cfi === 'string' && payload.cfi.trim()) {
+      item.lastReadEpubCfi = payload.cfi.trim();
+    }
+    item.updatedAt = now;
+
+    if (item.progress >= 99 && item.status !== 'finished') {
+      item.status = 'finished';
+    } else if (item.progress > 0 && item.status === 'want_to_read') {
+      item.status = 'reading';
+    }
+
+    const book = this.books.find(b => b.id === bookId);
+    if (book) {
+      book.readProgress = clampedProgress;
+    }
+
+    this.saveToDisk();
+    return item;
+  }
+
   updateBookShelfEpubReadingState(userId: string, bookId: string, cfi: string, progress: number): BookShelfItem | null {
     const item = this.bookShelf.find(s => s.userId === userId && s.bookId === bookId);
     if (!item) return null;
