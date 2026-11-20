@@ -144,6 +144,8 @@ export default function App() {
   }, []);
 
   const isViewportWorkspace = ['universe', 'chat', 'browser', 'aihub'].includes(currentTab);
+  // Independent communication domain active when chat/communications UI is in focus
+  const commsActive = currentTab === 'chat';
   const isSpaceExperience = isViewportWorkspace || ['globe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge', 'network', 'settings', 'profile', 'call'].includes(currentTab);
   useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
 
@@ -317,6 +319,7 @@ export default function App() {
             onOpenCallCenter={handleOpenCallCenterFromHome}
             immersive={immersive}
             onImmersiveChange={setImmersive}
+            commsActive={commsActive}
           />
         )}
 
@@ -406,7 +409,7 @@ export default function App() {
         {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[58px] md:pt-16 md:pl-[5.5rem] pb-[calc(9.5rem+env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><BrandIdentitySystem lang={lang} onBackToGlobe={() => setCurrentTab('globe')} /></div>}
       </main>
 
-      <AppDock currentTab={currentTab} lang={lang} hidden={(currentTab === 'globe' && immersive) || (isMobileKeyboardOpen && isViewportWorkspace)} onSelectTab={handleSelectTab} />
+      <AppDock currentTab={currentTab} lang={lang} hidden={currentTab === 'globe' || (isMobileKeyboardOpen && isViewportWorkspace)} onSelectTab={handleSelectTab} />
 
       {!isSpaceExperience && <div className="md:pl-[5.5rem] pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-0"><LuxuryAdBanner lang={lang} /></div>}
 

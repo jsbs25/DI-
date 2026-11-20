@@ -9,7 +9,7 @@ import type {
   User,
   VideoItem,
 } from '../../types/index.ts';
-import { ProductCulture3D } from '../brand/ProductCulture3D.tsx';
+import { LivingGarden } from '../../world/LivingGarden.tsx';
 
 type Props = {
   lang: Language;
@@ -30,21 +30,17 @@ type Props = {
   onOpenCallCenter?: () => void;
   immersive?: boolean;
   onImmersiveChange?: (v: boolean) => void;
+  commsActive?: boolean;
 };
 
-export const OneHome: React.FC<Props> = ({
-  lang,
-  immersive = false,
-  onImmersiveChange,
-}) => {
+export const OneHome: React.FC<Props> = ({ lang, onSelectTab, immersive = false, commsActive = false }) => {
   return (
-    <main className="relative h-[100dvh] w-full overflow-hidden bg-[#020307]">
-      <ProductCulture3D
-        lang={lang}
-        shiftRightOnDesktop={false}
-        immersive={immersive}
-        onImmersiveChange={onImmersiveChange}
-      />
-    </main>
+    <LivingGarden
+      lang={lang}
+      currentTab="globe"
+      commsActive={commsActive}
+      onSelectTab={onSelectTab}
+      immersive={immersive}
+    />
   );
 };
