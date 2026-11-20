@@ -13,7 +13,7 @@ export interface UnifiedAiRequest {
   attachments?: Array<{ imageUrl: string; mimeType?: string }>;
   maxTokens?: number;
   temperature?: number;
-  /** 'fast' uses ThinkingLevel.LOW for <2s interactive replies; 'deep' uses MEDIUM for scholarly explanations */
+  /** 'fast' optimizes for low latency; 'deep' allocates deeper reasoning */
   speed?: 'fast' | 'deep';
   mode?: string;
   subjectKey?: string;
@@ -29,8 +29,49 @@ export interface UnifiedAiResponse {
   errorMessage?: string;
 }
 
-const UNIFIED_FAST_MODEL = 'gemini-4-hydrogen';
-const UNIFIED_FALLBACK_MODEL = 'gemini-2.5-flash';
+export const UNIFIED_PRIMARY_MODEL = 'gemini-4-hydrogen';
+export const UNIFIED_LITE_MODEL = 'gemini-3.1-flash-lite';
+
+// In-memory per-model cooldowns so 429 RESOURCE_EXHAUSTED or 404 NOT_FOUND models
+// are skipped gracefully instead of spamming upstream errors on every turn.
+const modelCooldownUntil = new Map<string, number>();
+
+export function isGeminiModelInCooldown(model: string): boolean {
+  const until = modelCooldownUntil.get(model);
+  if (!until) return false;
+  if (Date.now() >= until) {
+    modelCooldownUntil.delete(model);
+    return false;
+  }
+  return true;
+}
+
+export function recordGeminiModelFailure(model: string, err: any): { isQuotaError: boolean; isNotFound: boolean } {
+  const msg = String(err?.message || err || '');
+  const status = Number(err?.status || err?.code || 0);
+  const isQuotaError =
+    status === 429 ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('"code":429') ||
+    msg.toLowerCase().includes('quota exceeded');
+  const isNotFound =
+    status === 404 ||
+    msg.includes('NOT_FOUND') ||
+    msg.includes('"code":404') ||
+    msg.includes('is no longer available');
+
+  if (isQuotaError) {
+    // Parse retryDelay if provided, capped between 60s and 20m so key upgrades recover quickly
+    const retryMatch = msg.match(/"retryDelay"\s*:\s*"(\d+)s"/i);
+    const parsedSec = retryMatch ? Number(retryMatch[1]) : 900;
+    const cooldownMs = Math.min(20 * 60 * 1000, Math.max(60 * 1000, parsedSec * 1000));
+    modelCooldownUntil.set(model, Date.now() + cooldownMs);
+  } else if (isNotFound) {
+    modelCooldownUntil.set(model, Date.now() + 60 * 60 * 1000);
+  }
+
+  return { isQuotaError, isNotFound };
+}
 
 export function hasUnifiedLiveEngine(): boolean {
   return Boolean(getGeminiApiKey()) || oneAiRouter.hasAnyUsableEngine() || aiGateway.hasLiveEngine();
@@ -83,20 +124,56 @@ function buildGeminiContents(req: UnifiedAiRequest): Array<{ role: 'user' | 'mod
   return contents;
 }
 
+function buildModelConfig(model: string, req: UnifiedAiRequest, maxOutputTokens: number): Record<string, any> {
+  const isGemini4 = model.startsWith('gemini-4-');
+  const config: Record<string, any> = {
+    maxOutputTokens,
+  };
+  if (req.systemInstruction) {
+    config.systemInstruction = req.systemInstruction;
+  }
+
+  if (isGemini4) {
+    // Gemini 4 models do NOT support ThinkingLevel.MINIMAL or deprecated sampling params (temperature/topP/topK)
+    config.thinkingConfig = {
+      thinkingLevel: req.speed === 'deep' ? ThinkingLevel.MEDIUM : ThinkingLevel.LOW,
+    };
+  } else {
+    // gemini-3.1-flash-lite supports ThinkingLevel.MINIMAL for ultra-fast responses
+    config.thinkingConfig = {
+      thinkingLevel: req.speed === 'deep' ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL,
+    };
+    if (typeof req.temperature === 'number') {
+      config.temperature = req.temperature;
+    }
+  }
+
+  return config;
+}
+
 /**
  * EARTH ONE Unified AI Core.
  * Powers Home Spirit, World Library Reader, Search, Browser, and General Chat
- * with one consistent identity, shared speed profile, and resilient failover.
+ * with one consistent identity, valid Gemini 3.1/4 model configs, and quota-aware failover.
  */
 export async function runUnifiedAiTurn(req: UnifiedAiRequest): Promise<UnifiedAiResponse> {
   const gemini = getGeminiClient();
-  const thinkingLevel = req.speed === 'deep' ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL;
   const maxOutputTokens = req.maxTokens ?? (req.speed === 'deep' ? 1800 : 900);
   const perAttemptTimeoutMs = req.speed === 'deep' ? 24_000 : 14_000;
+  let sawQuotaExhausted = false;
 
   if (gemini) {
     const contents = buildGeminiContents(req);
-    const modelsToTry = [UNIFIED_FAST_MODEL, UNIFIED_FALLBACK_MODEL];
+    // Prefer gemini-3.1-flash-lite first for fast interactive/dictionary requests to preserve
+    // gemini-4-hydrogen's stricter free-tier daily quota, and use gemini-4-hydrogen first for deep/general tasks.
+    const preferredOrder =
+      req.speed === 'fast'
+        ? [UNIFIED_LITE_MODEL, UNIFIED_PRIMARY_MODEL]
+        : [UNIFIED_PRIMARY_MODEL, UNIFIED_LITE_MODEL];
+
+    const availableModels = preferredOrder.filter((m) => !isGeminiModelInCooldown(m));
+    const modelsToTry = availableModels.length > 0 ? availableModels : [UNIFIED_LITE_MODEL];
+
     for (const model of modelsToTry) {
       if (req.signal?.aborted) {
         const abortErr = new Error('Aborted');
@@ -104,16 +181,7 @@ export async function runUnifiedAiTurn(req: UnifiedAiRequest): Promise<UnifiedAi
         throw abortErr;
       }
       try {
-        const config: Record<string, any> = {
-          maxOutputTokens,
-          temperature: req.temperature ?? (req.speed === 'deep' ? 0.55 : 0.45),
-        };
-        if (req.systemInstruction) {
-          config.systemInstruction = req.systemInstruction;
-        }
-        if (model === UNIFIED_FAST_MODEL) {
-          config.thinkingConfig = { thinkingLevel };
-        }
+        const config = buildModelConfig(model, req, maxOutputTokens);
 
         const withTimeout = <T,>(promise: Promise<T>): Promise<T> =>
           new Promise<T>((resolve, reject) => {
@@ -178,7 +246,9 @@ export async function runUnifiedAiTurn(req: UnifiedAiRequest): Promise<UnifiedAi
         }
       } catch (err: any) {
         if (err?.name === 'AbortError' || req.signal?.aborted) throw err;
-        console.warn(`[UnifiedAI:${model}] failover:`, err?.message || err);
+        const { isQuotaError } = recordGeminiModelFailure(model, err);
+        if (isQuotaError) sawQuotaExhausted = true;
+        console.warn(`[UnifiedAI:${model}] failover (${isQuotaError ? 'quota-cooldown' : 'error'}):`, err?.message || err);
       }
     }
   }
@@ -245,6 +315,8 @@ export async function runUnifiedAiTurn(req: UnifiedAiRequest): Promise<UnifiedAi
     content: '',
     tokens: 0,
     modelLabel: 'ONE AI',
-    errorMessage: 'ONE AI 核心暂忙，请稍后重试。',
+    errorMessage: sawQuotaExhausted
+      ? '当前 Gemini API 配额已达上限，请稍后再试或在 Settings > Secrets 中配置支持计费的 API Key 以提升配额。'
+      : 'ONE AI 核心暂忙，请稍后重试。',
   };
 }

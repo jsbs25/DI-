@@ -684,12 +684,11 @@ async function generateStructuredJson<T>(opts: {
     );
 
   if (ai) {
-    // Launch BOTH ultra-fast models in parallel at t=0ms — fastest responder wins immediately!
-    const raced = await raceFirstValid([
-      callGemini('gemini-3.1-flash-lite'),
-      callGemini('gemini-4-hydrogen'),
-    ]);
-    if (raced) return raced;
+    // Use gemini-3.1-flash-lite first for fast structured JSON without burning gemini-4-hydrogen daily quota
+    const lite = await callGemini('gemini-3.1-flash-lite');
+    if (lite) return lite;
+    const primary = await callGemini('gemini-4-hydrogen');
+    if (primary) return primary;
     const routed = await routerRunner();
     if (routed) return routed;
   } else {

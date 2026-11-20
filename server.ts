@@ -29,7 +29,14 @@ import {
 } from './server/oneAi/quotaAndSecurity.ts';
 import type { PrivacyMode, UnifiedContentPart, UnifiedMessage } from './server/oneAi/types.ts';
 import { getGeminiClient } from './server/geminiClient.ts';
-import { hasUnifiedLiveEngine, runUnifiedAiTurn } from './server/ai/unifiedAiCore.ts';
+import {
+  hasUnifiedLiveEngine,
+  isGeminiModelInCooldown,
+  recordGeminiModelFailure,
+  runUnifiedAiTurn,
+  UNIFIED_LITE_MODEL,
+  UNIFIED_PRIMARY_MODEL,
+} from './server/ai/unifiedAiCore.ts';
 import {
   AI_COMPANION_TOOLS,
   buildCompanionSystemInstruction,
@@ -4548,35 +4555,53 @@ app.post(['/api/ai/companion-turn', '/api/one-ai/companion-turn'], async (req, r
         { role: 'user', parts: [{ text: cleanPrompt }] },
       ];
 
-      const callModel = (modelName: string) =>
-        Promise.race([
+      const callModel = (modelName: string) => {
+        const isGemini4 = modelName.startsWith('gemini-4-');
+        const cfg: Record<string, any> = {
+          systemInstruction: buildCompanionSystemInstruction(
+            lang,
+            (pageContext && typeof pageContext === 'object' ? pageContext : null) as LivePageContextSummary | null,
+            ctx.recalledMemories
+          ),
+          thinkingConfig: {
+            thinkingLevel: isGemini4 ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL,
+          },
+          tools: [{ functionDeclarations: AI_COMPANION_TOOLS }],
+          maxOutputTokens: 512,
+        };
+        if (!isGemini4) {
+          cfg.temperature = ctx.intent.complexity === 'deep' ? 0.68 : 0.75;
+        }
+        return Promise.race([
           ai.models.generateContent({
             model: modelName,
             contents,
-            config: {
-              systemInstruction: buildCompanionSystemInstruction(
-                lang,
-                (pageContext && typeof pageContext === 'object' ? pageContext : null) as LivePageContextSummary | null,
-                ctx.recalledMemories
-              ),
-              thinkingConfig: modelName.includes('hydrogen') ? { thinkingLevel: ThinkingLevel.LOW } : undefined,
-              tools: [{ functionDeclarations: AI_COMPANION_TOOLS }],
-              temperature: ctx.intent.complexity === 'deep' ? 0.68 : 0.75,
-              maxOutputTokens: 512,
-            },
+            config: cfg,
           }),
           new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error(`${modelName} timeout`)), 7500)
           ),
         ]);
+      };
 
-      let activeModel = 'gemini-4-hydrogen';
-      let response;
-      try {
-        response = await callModel('gemini-4-hydrogen');
-      } catch {
-        activeModel = 'gemini-2.5-flash';
-        response = await callModel('gemini-2.5-flash');
+      const companionCandidates = isGeminiModelInCooldown(UNIFIED_PRIMARY_MODEL)
+        ? [UNIFIED_LITE_MODEL]
+        : [UNIFIED_LITE_MODEL, UNIFIED_PRIMARY_MODEL];
+      let activeModel = companionCandidates[0];
+      let response: any = null;
+      let lastCompanionErr: any = null;
+      for (const candidate of companionCandidates) {
+        try {
+          activeModel = candidate;
+          response = await callModel(candidate);
+          break;
+        } catch (err: any) {
+          recordGeminiModelFailure(candidate, err);
+          lastCompanionErr = err;
+        }
+      }
+      if (!response) {
+        throw lastCompanionErr || new Error('Companion model unavailable');
       }
 
       const rawCalls = response.functionCalls || [];
@@ -4793,7 +4818,7 @@ app.post('/api/ai/tts', async (req, res) => {
   }
 
   // Keep a steady, natural, warm human delivery instruction so volume never swings wildly between whispers and shouts
-  const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-2.5-flash-preview-tts'];
+  const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
   let lastErr: any = null;
 
   for (const ttsModel of ttsModels) {

@@ -519,8 +519,10 @@ async function generateSceneBlueprintFast(params: {
       3200
     );
 
-  const raced = await raceFirstValid([callModel('gemini-3.1-flash-lite'), callModel('gemini-4-hydrogen')]);
-  return raced || fallback;
+  const lite = await callModel('gemini-3.1-flash-lite');
+  if (lite) return lite;
+  const primary = await callModel('gemini-4-hydrogen');
+  return primary || fallback;
 }
 
 /**
