@@ -143,7 +143,7 @@ export const PavilionAiHud: React.FC<PavilionAiHudProps> = ({ lang }) => {
 
   return (
     <div
-      className={`pointer-events-auto fixed right-3.5 top-[calc(3.85rem+env(safe-area-inset-top))] z-30 w-[min(86vw,312px)] rounded-2xl border p-3 transition-colors ${cardCls}`}
+      className={`pointer-events-auto fixed left-1/2 -translate-x-1/2 lg:left-auto lg:translate-x-0 lg:right-3.5 top-[calc(6.55rem+env(safe-area-inset-top))] lg:top-[calc(3.85rem+env(safe-area-inset-top))] z-30 w-[min(92vw,328px)] max-h-[calc(100dvh-13.5rem)] overflow-y-auto overscroll-contain rounded-2xl border p-3 transition-colors ${cardCls}`}
       data-testid="pavilion-ai-hud"
     >
       <div className={`flex items-center justify-between gap-1.5 border-b pb-2 ${isDay ? 'border-black/8' : 'border-white/10'}`}>

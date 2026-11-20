@@ -233,7 +233,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ) : (
                   <BatteryLow className="h-4 w-4 text-rose-500 dark:text-rose-400" />
                 )}
-                <span className="hidden xs:inline sm:inline">{batteryState.level}%</span>
+                <span className="hidden md:inline">{batteryState.level}%</span>
               </div>
             )}
 
@@ -249,19 +249,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            <div ref={langMenuRef} className="relative hidden sm:block">
+            <div ref={langMenuRef} className="relative">
               <button
                 type="button"
                 aria-expanded={langMenuOpen}
                 aria-haspopup="menu"
                 onClick={() => { setLangMenuOpen(v => !v); setUserDropdownOpen(false); }}
-                className={`flex h-9 items-center gap-0.5 rounded-full border px-2.5 text-[11px] font-medium transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
+                className={`flex h-9 items-center gap-0.5 rounded-full border px-2 sm:px-2.5 text-[11px] font-medium transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
               >
                 <span className="uppercase">{lang}</span>
                 <ChevronDown className="h-3 w-3 opacity-70" />
               </button>
               {langMenuOpen && (
-                <div role="menu" className="absolute right-0 mt-2 w-40 rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/96 dark:bg-[#111b26]/96 py-1.5 shadow-2xl backdrop-blur-2xl">
+                <div role="menu" className="absolute right-0 z-[60] mt-2 w-40 rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/96 dark:bg-[#111b26]/96 py-1.5 shadow-2xl backdrop-blur-2xl">
                   {languages.map(l => (
                     <button
                       key={l.code}

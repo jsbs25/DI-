@@ -53,6 +53,19 @@ const CAMERA_PRESETS: CameraPreset[] = [
   { id: 'pavilion', zh: '亭台', en: 'Pavilion', pos: [3.2, 4.2, 5.2], target: [12.8, 2.6, -7.8] },
 ];
 
+function getResponsiveCameraConfig(aspect: number): { fov: number; distScale: number } {
+  if (aspect < 0.72) {
+    // Portrait phone
+    return { fov: 52, distScale: 1.24 };
+  }
+  if (aspect < 1.05) {
+    // Portrait / square tablet (e.g. iPad portrait)
+    return { fov: 46, distScale: 1.12 };
+  }
+  // Landscape tablet / desktop
+  return { fov: 40, distScale: 1.0 };
+}
+
 const QUALITY_OPTIONS: Array<{ id: UserQualityChoice; zh: string; en: string }> = [
   { id: 'auto', zh: '自动', en: 'Auto' },
   { id: 'high', zh: '高', en: 'High' },
@@ -459,13 +472,16 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     scene.background = new THREE.Color(0xbce0f7);
 
     const aspect = width / height;
-    const camera = new THREE.PerspectiveCamera(aspect < 0.78 ? 50 : 42, aspect, 0.2, 260);
-    const portraitZScale = aspect < 0.78 ? 1.18 : 1.0;
+    const camCfg = getResponsiveCameraConfig(aspect);
+    const camera = new THREE.PerspectiveCamera(camCfg.fov, aspect, 0.2, 260);
 
     if (persistedRef.current.hasCam) {
       camera.position.copy(persistedRef.current.camPos);
     } else {
-      camera.position.set(-4.5 * portraitZScale, 8.2, 23.5 * portraitZScale);
+      const baseTarget = new THREE.Vector3(2.5, 1.4, -2.5);
+      const basePos = new THREE.Vector3(-4.5, 8.2, 23.5);
+      basePos.sub(baseTarget).multiplyScalar(camCfg.distScale).add(baseTarget);
+      camera.position.copy(basePos);
     }
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -474,8 +490,13 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     controls.enablePan = true;
     controls.panSpeed = 0.65;
     controls.rotateSpeed = 0.72;
-    controls.minDistance = 7.5;
-    controls.maxDistance = 42.0;
+    controls.zoomSpeed = 0.85;
+    controls.touches = {
+      ONE: THREE.TOUCH.ROTATE,
+      TWO: THREE.TOUCH.DOLLY_PAN,
+    };
+    controls.minDistance = 5.5;
+    controls.maxDistance = 44.0;
     controls.minPolarAngle = Math.PI * 0.14;
     controls.maxPolarAngle = Math.PI * 0.465;
     if (persistedRef.current.hasCam) {
@@ -518,19 +539,21 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
     const sunLight = new THREE.DirectionalLight(0xfff5de, 1.85);
     sunLight.position.set(16, 26, -12);
+    sunLight.target.position.set(1.5, 0, -2.5);
+    scene.add(sunLight.target);
     sunLight.castShadow = quality.enableShadows;
     if (quality.enableShadows) {
       sunLight.shadow.mapSize.width = quality.shadowMapSize;
       sunLight.shadow.mapSize.height = quality.shadowMapSize;
       sunLight.shadow.camera.near = 2;
-      sunLight.shadow.camera.far = 96;
-      const d = 32;
+      sunLight.shadow.camera.far = 88;
+      const d = 22;
       sunLight.shadow.camera.left = -d;
       sunLight.shadow.camera.right = d;
       sunLight.shadow.camera.top = d;
       sunLight.shadow.camera.bottom = -d;
-      sunLight.shadow.bias = -0.0005;
-      sunLight.shadow.normalBias = 0.025;
+      sunLight.shadow.bias = -0.00035;
+      sunLight.shadow.normalBias = 0.018;
     }
     scene.add(sunLight);
 
@@ -701,8 +724,9 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       const w = Math.max(300, container.clientWidth || 640);
       const h = Math.max(300, container.clientHeight || 480);
       const nextAspect = w / h;
+      const nextCamCfg = getResponsiveCameraConfig(nextAspect);
       camera.aspect = nextAspect;
-      camera.fov = nextAspect < 0.78 ? 50 : 42;
+      camera.fov = nextCamCfg.fov;
       camera.updateProjectionMatrix();
       renderer.setPixelRatio(activePixelRatio);
       renderer.setSize(w, h, false);
@@ -836,7 +860,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       // Sync Sun / Moon key light & Hemisphere ambient
       const useMoon = st.sunElevation < -0.02;
       const activeKeyDir = useMoon ? st.moonDir : st.sunDir;
-      sunLight.position.copy(activeKeyDir).multiplyScalar(42);
+      sunLight.position.copy(activeKeyDir).multiplyScalar(42).add(sunLight.target.position);
       if (sunLight.position.y < 6) sunLight.position.y = 6;
       sunLight.color.copy(st.sunLightColor);
 
@@ -978,16 +1002,19 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         const rect = container.getBoundingClientRect();
         const vw = rect.width || window.innerWidth;
         const vh = rect.height || window.innerHeight;
+        const isCompact = vw < 1024;
+        const topSafe = isCompact ? 132 : 112;
+        const bottomSafe = isCompact ? 124 : 110;
         let sx = (tmpKeyWorld.x * 0.5 + 0.5) * vw + rect.left;
         let sy = (-tmpKeyWorld.y * 0.5 + 0.5) * vh + rect.top;
         // If Spirit is momentarily behind the camera, anchor cleanly in upper-left safe zone
         if (tmpKeyWorld.z > 1) {
-          sx = rect.left + Math.min(vw * 0.36, 260);
-          sy = rect.top + Math.max(190, vh * 0.42);
+          sx = rect.left + Math.min(vw * 0.36, 240);
+          sy = rect.top + Math.max(topSafe + 30, vh * 0.42);
         } else {
-          const padX = Math.min(185, vw * 0.42);
+          const padX = Math.min(isCompact ? 155 : 185, vw * 0.43);
           sx = Math.max(rect.left + padX, Math.min(rect.left + vw - padX, sx));
-          sy = Math.max(rect.top + 165, Math.min(rect.top + vh - 115, sy));
+          sy = Math.max(rect.top + topSafe, Math.min(rect.top + vh - bottomSafe, sy));
         }
         bubbleEl.style.transform = `translate3d(${Math.round(sx)}px, ${Math.round(sy)}px, 0)`;
       }
@@ -1153,8 +1180,14 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
   const moveCameraToPreset = (preset: CameraPreset) => {
     setCameraPreset(preset.id);
-    cameraMoveRef.current.targetPos.set(...preset.pos);
-    cameraMoveRef.current.targetLook.set(...preset.target);
+    const el = stageRef.current;
+    const aspect = el && el.clientHeight > 0 ? el.clientWidth / el.clientHeight : window.innerWidth / Math.max(1, window.innerHeight);
+    const { distScale } = getResponsiveCameraConfig(aspect);
+    const look = new THREE.Vector3(...preset.target);
+    const pos = new THREE.Vector3(...preset.pos);
+    pos.sub(look).multiplyScalar(distScale).add(look);
+    cameraMoveRef.current.targetPos.copy(pos);
+    cameraMoveRef.current.targetLook.copy(look);
     cameraMoveRef.current.active = true;
   };
 
@@ -1252,24 +1285,24 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Top-Center Desktop Clock, Standard Location & Live Weather Pill */}
+      {/* Top-Center Desktop / Tablet / Phone Clock, Standard Location & Live Weather Pill */}
       <div
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.45rem+env(safe-area-inset-top))] sm:top-[max(0.65rem,env(safe-area-inset-top))] z-[56] flex flex-col items-center gap-2 max-w-[calc(100vw-1.5rem)]"
+        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.45rem+env(safe-area-inset-top))] lg:top-[max(0.65rem,env(safe-area-inset-top))] z-[56] flex flex-col items-center gap-2 max-w-[calc(100vw-1rem)]"
       >
         <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/55' : 'ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
-            className="inline-flex h-9 items-center gap-2 px-3.5 text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
+            className="inline-flex h-8 sm:h-9 items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 text-[11px] sm:text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
             title={isZh ? '实时时间、精准定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
           >
-            <span className="tabular-nums text-[13px] font-semibold tracking-tight">
+            <span className="tabular-nums text-[12px] sm:text-[13px] font-semibold tracking-tight">
               {agentSnap.realtimeSync
                 ? `${String(liveClockNow.getHours()).padStart(2, '0')}:${String(liveClockNow.getMinutes()).padStart(2, '0')}`
                 : currentClockLabel}
             </span>
             <span className="opacity-35">·</span>
-            <span className="inline-flex items-center gap-1 max-w-[130px] sm:max-w-[180px] truncate opacity-90">
+            <span className="inline-flex items-center gap-1 max-w-[96px] xs:max-w-[130px] sm:max-w-[180px] truncate opacity-90">
               <MapPin className="h-3 w-3 shrink-0 opacity-75" />
               <span className="truncate">
                 {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable
@@ -1294,7 +1327,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             type="button"
             onClick={() => void fetchLiveWeather(true)}
             disabled={locating}
-            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
+            className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
             title={isZh ? '高精度 GPS 重新定位' : 'Refresh precise GPS location'}
             aria-label={isZh ? '高精度定位' : 'Locate'}
           >
@@ -1304,7 +1337,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           <button
             type="button"
             onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
-            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
+            className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
             title={isZh ? '重置视角' : 'Reset View'}
             aria-label={isZh ? '重置视角' : 'Reset View'}
           >
@@ -1315,7 +1348,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             <button
               type="button"
               onClick={() => onImmersiveChange(false)}
-              className={`h-9 px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
+              className={`h-8 sm:h-9 px-2.5 sm:px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
             >
               {isZh ? '退出' : 'Exit'}
             </button>
@@ -1323,7 +1356,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
 
         {controlsOpen && (
-          <div className={`pointer-events-auto w-[min(92vw,372px)] rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-2xl ${dockShellCls}`}>
+          <div className={`pointer-events-auto w-[min(92vw,372px)] max-h-[calc(100dvh-11.5rem)] overflow-y-auto overscroll-contain rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-2xl ${dockShellCls}`}>
 
             <div className={`mb-2.5 space-y-2 rounded-xl border px-2.5 py-2 ${dockBorderCls} ${isDayUi ? 'bg-white/48' : 'bg-white/[0.04]'}`}>
               <div className="flex items-center justify-between gap-2">

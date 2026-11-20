@@ -215,7 +215,16 @@ export function createParadiseWeatherFX(
         resting: false,
         restTimer: 0,
       };
-      spawnInCanopy(particle, sources, true);
+      if (i < 2) {
+        // Only 1-2 petals/leaves begin airborne; others wait quietly before occasionally drifting
+        spawnInCanopy(particle, sources, true);
+      } else {
+        particle.pos.set(0, -60, 0);
+        particle.vel.set(0, 0, 0);
+        particle.scale = 0.001;
+        particle.resting = true;
+        particle.restTimer = 2.5 + i * 2.8 + Math.random() * 4.5;
+      }
       list.push(particle);
       tmpColor.setHex(palette[i % palette.length]);
       mesh.setColorAt(i, tmpColor);
@@ -230,23 +239,23 @@ export function createParadiseWeatherFX(
   let burstCursorP = 0;
   let burstCursorG = 0;
   const emitPetalBurst = (worldPos: THREE.Vector3) => {
-    const burstAmt = Math.min(24, petalCount);
+    const burstAmt = Math.min(4, petalCount);
     for (let k = 0; k < burstAmt; k++) {
       const p = petals[burstCursorP];
       burstCursorP = (burstCursorP + 1) % petalCount;
       const ang = Math.random() * Math.PI * 2;
-      const spd = 1.2 + Math.random() * 2.8;
+      const spd = 1.0 + Math.random() * 2.0;
       p.pos.set(
-        worldPos.x + (Math.random() - 0.5) * 1.4,
-        Math.max(0.45, worldPos.y + 0.35 + Math.random() * 0.8),
-        worldPos.z + (Math.random() - 0.5) * 1.4
+        worldPos.x + (Math.random() - 0.5) * 1.2,
+        Math.max(0.45, worldPos.y + 0.35 + Math.random() * 0.7),
+        worldPos.z + (Math.random() - 0.5) * 1.2
       );
-      p.vel.set(Math.cos(ang) * spd, 1.6 + Math.random() * 2.2, Math.sin(ang) * spd);
+      p.vel.set(Math.cos(ang) * spd, 1.3 + Math.random() * 1.8, Math.sin(ang) * spd);
       p.scale = p.baseScale;
       p.resting = false;
       p.burst = true;
     }
-    const burstG = Math.min(18, ginkgoCount);
+    const burstG = Math.min(3, ginkgoCount);
     for (let k = 0; k < burstG; k++) {
       const g = ginkgoLeaves[burstCursorG];
       burstCursorG = (burstCursorG + 1) % ginkgoCount;
@@ -336,14 +345,24 @@ export function createParadiseWeatherFX(
 
       if (p.resting) {
         p.restTimer -= dt;
-        // Settle softly flat against terrain or drift gently on lake surface
-        p.rot.x = THREE.MathUtils.damp(p.rot.x, -Math.PI * 0.5, 6, dt);
-        p.rot.z = THREE.MathUtils.damp(p.rot.z, 0, 6, dt);
-        if (p.pos.y <= 0.08) {
-          p.pos.x += (0.12 + windStrength * 0.22) * dt;
+        if (p.pos.y > -20) {
+          // Settle softly flat against terrain or drift gently on lake surface
+          p.rot.x = THREE.MathUtils.damp(p.rot.x, -Math.PI * 0.5, 6, dt);
+          p.rot.z = THREE.MathUtils.damp(p.rot.z, 0, 6, dt);
+          if (p.pos.y <= 0.08) {
+            p.pos.x += (0.12 + windStrength * 0.22) * dt;
+          }
+          // Stay visible briefly on ground (~2s), then hide cleanly while waiting for next gentle drift
+          if (p.restTimer > 5.0) {
+            const fadeOut = THREE.MathUtils.clamp((p.restTimer - 5.0) / 0.8, 0.001, 1.0);
+            p.scale = p.baseScale * fadeOut;
+          } else {
+            p.pos.set(0, -60, 0);
+            p.scale = 0.001;
+          }
+        } else {
+          p.scale = 0.001;
         }
-        const fadeOut = THREE.MathUtils.clamp(p.restTimer / 0.55, 0.01, 1.0);
-        p.scale = p.baseScale * fadeOut;
 
         if (p.restTimer <= 0) {
           spawnInCanopy(p, sources, false);
@@ -408,9 +427,13 @@ export function createParadiseWeatherFX(
         if (p.pos.y <= floorY) {
           p.pos.y = floorY;
           p.resting = true;
-          p.restTimer = 1.1 + Math.random() * 1.4;
+          // 1.5-2.0s visible on ground, then 5-8s quiet pause before next occasional leaf
+          p.restTimer = 6.5 + Math.random() * 6.5;
         } else if (Math.abs(p.pos.x) > 35 || p.pos.z < -30 || p.pos.z > 35) {
-          spawnInCanopy(p, sources, false);
+          p.pos.set(0, -60, 0);
+          p.scale = 0.001;
+          p.resting = true;
+          p.restTimer = 4.5 + Math.random() * 6.0;
         }
       }
 
@@ -469,9 +492,9 @@ export function createParadiseWeatherFX(
       rainMesh.visible = false;
     }
 
-    // 2. Aerodynamic Sakura Petals & Golden Ginkgo Leaves
-    const rainSuppress = 1 - rainIntensity * 0.35;
-    const activeFrac = THREE.MathUtils.clamp((0.66 + windStrength * 0.34) * rainSuppress, 0.35, 1.0);
+    // 2. Occasional Sparse Sakura Petals & Golden Ginkgo Leaves (1-2 at a time)
+    const rainSuppress = 1 - rainIntensity * 0.45;
+    const activeFrac = THREE.MathUtils.clamp((0.4 + windStrength * 0.35) * rainSuppress, 0.25, 0.75);
     stepLeafLayer(
       petals,
       petalMesh,

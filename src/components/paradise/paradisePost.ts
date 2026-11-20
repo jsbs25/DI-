@@ -33,10 +33,11 @@ const VolumetricAndDOFShader = {
     uLightScreenPos: { value: new THREE.Vector2(0.65, 0.72) },
     uGodRayIntensity: { value: 0.25 },
     uGodRayColor: { value: new THREE.Color(0xffdfa8) },
-    uDofIntensity: { value: 0.42 },
+    uDofIntensity: { value: 0.14 },
     uFocusDist: { value: 24.0 },
     uCameraNear: { value: 0.2 },
     uCameraFar: { value: 260.0 },
+    uClarity: { value: 0.22 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -58,13 +59,8 @@ const VolumetricAndDOFShader = {
     uniform float uFocusDist;
     uniform float uCameraNear;
     uniform float uCameraFar;
+    uniform float uClarity;
     varying vec2 vUv;
-
-    float sampleLinearDist(vec2 uv) {
-      float rawD = texture2D(tDepth, clamp(uv, 0.001, 0.999)).x;
-      float viewZ = perspectiveDepthToViewZ(rawD, uCameraNear, uCameraFar);
-      return -viewZ;
-    }
 
     float igNoise(vec2 p) {
       vec3 magic = vec3(0.06711056, 0.00583715, 52.9829189);
@@ -74,21 +70,34 @@ const VolumetricAndDOFShader = {
     void main() {
       vec4 base = texture2D(tDiffuse, vUv);
       vec3 col = base.rgb;
+      vec2 invRes = 1.0 / max(vec2(1.0), uResolution);
 
-      // 1. Natural Optical Depth of Field (subtle bokeh focused cleanly on target distance)
+      // 0. Luma-preserving micro-contrast clarity (crisp HD foliage, tiles & bark without ringing halos)
+      if (uClarity > 0.01) {
+        vec3 nSum =
+          texture2D(tDiffuse, clamp(vUv + vec2(invRes.x, 0.0), 0.001, 0.999)).rgb +
+          texture2D(tDiffuse, clamp(vUv - vec2(invRes.x, 0.0), 0.001, 0.999)).rgb +
+          texture2D(tDiffuse, clamp(vUv + vec2(0.0, invRes.y), 0.001, 0.999)).rgb +
+          texture2D(tDiffuse, clamp(vUv - vec2(0.0, invRes.y), 0.001, 0.999)).rgb;
+        vec3 blurCenter = nSum * 0.25;
+        float lumaBase = dot(col, vec3(0.299, 0.587, 0.114));
+        float lumaBlur = dot(blurCenter, vec3(0.299, 0.587, 0.114));
+        float detail = clamp((lumaBase - lumaBlur) * uClarity, -0.07, 0.07);
+        col = max(vec3(0.0), col + detail);
+      }
+
+      // 1. Subtle Optical Depth of Field (keeps mid-ground trees & architecture razor sharp)
       if (uHasDepth > 0.5 && uDofIntensity > 0.01) {
         float centerRaw = texture2D(tDepth, vUv).x;
         float centerDist = -perspectiveDepthToViewZ(centerRaw, uCameraNear, uCameraFar);
         float isSky = step(0.9985, centerRaw);
 
-        // Gentle asymmetric focus curve: crisp across subject plane, soft foreground/background depth
-        float focusSpan = max(10.0, uFocusDist * 0.72);
-        float coc = clamp(abs(centerDist - uFocusDist) / focusSpan - 0.14, 0.0, 1.0);
-        // Keep distant valley horizon clouds readable rather than soupy
-        coc = mix(coc, min(coc, 0.38), isSky) * uDofIntensity;
+        float focusSpan = max(16.0, uFocusDist * 0.95);
+        float coc = clamp(abs(centerDist - uFocusDist) / focusSpan - 0.24, 0.0, 1.0);
+        coc = mix(coc, min(coc, 0.25), isSky) * uDofIntensity;
 
-        if (coc > 0.025) {
-          vec2 texel = (1.0 / max(vec2(1.0), uResolution)) * (1.2 + coc * 4.2);
+        if (coc > 0.03) {
+          vec2 texel = invRes * (1.0 + coc * 2.8);
           vec2 taps[8];
           taps[0] = vec2(-0.707, -0.707);
           taps[1] = vec2( 0.707, -0.707);
@@ -105,13 +114,12 @@ const VolumetricAndDOFShader = {
             vec2 suv = clamp(vUv + taps[i] * texel, 0.002, 0.998);
             float sRaw = texture2D(tDepth, suv).x;
             float sDist = -perspectiveDepthToViewZ(sRaw, uCameraNear, uCameraFar);
-            // Prevent blurred background from bleeding into crisp foreground objects
-            float sCoc = clamp(abs(sDist - uFocusDist) / focusSpan - 0.14, 0.0, 1.0);
+            float sCoc = clamp(abs(sDist - uFocusDist) / focusSpan - 0.24, 0.0, 1.0);
             float w = (sDist >= centerDist - 1.2) ? 1.0 : smoothstep(0.05, 0.35, sCoc);
             blurAccum += texture2D(tDiffuse, suv).rgb * w;
             weightSum += w;
           }
-          col = mix(col, blurAccum / weightSum, clamp(coc * 1.15, 0.0, 0.72));
+          col = mix(col, blurAccum / weightSum, clamp(coc * 0.85, 0.0, 0.45));
         }
       }
 
@@ -130,7 +138,6 @@ const VolumetricAndDOFShader = {
             sampleUv -= stepUv;
             vec2 clampedUv = clamp(sampleUv, 0.002, 0.998);
             float d = texture2D(tDepth, clampedUv).x;
-            // Sky & atmospheric mist gaps transmit light shafts; solid tree trunks/hills occlude
             float skyTransmission = smoothstep(0.992, 0.9992, d);
             float sampleLuma = dot(texture2D(tDiffuse, clampedUv).rgb, vec3(0.299, 0.587, 0.114));
             rayAccum += skyTransmission * min(1.8, sampleLuma) * illuminationDecay;
@@ -142,9 +149,9 @@ const VolumetricAndDOFShader = {
         }
       }
 
-      // 3. Subtle optical lens vignette (never washes sky or tints pink)
+      // 3. Subtle optical lens vignette
       vec2 vDist = (vUv - 0.5) * vec2(1.05, 0.92);
-      float vig = 1.0 - smoothstep(0.45, 0.95, dot(vDist, vDist)) * 0.12;
+      float vig = 1.0 - smoothstep(0.48, 0.98, dot(vDist, vDist)) * 0.10;
       col *= vig;
 
       gl_FragColor = vec4(col, base.a);
@@ -189,7 +196,7 @@ export function createParadisePostPipeline(
   volDofPass.enabled = initial.enableGodRays || initial.enableDOF;
   composer.addPass(volDofPass);
 
-  const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.15, 0.34, 0.9);
+  const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.11, 0.28, 0.93);
   bloomPass.enabled = initial.enableBloom;
   composer.addPass(bloomPass);
 
@@ -209,7 +216,7 @@ export function createParadisePostPipeline(
     }
     if (typeof opts.enableDOF === 'boolean') {
       dofOn = opts.enableDOF;
-      volDofPass.uniforms.uDofIntensity.value = dofOn ? 0.42 : 0;
+      volDofPass.uniforms.uDofIntensity.value = dofOn ? 0.14 : 0;
     }
     if (opts.sunScreenPos) {
       (volDofPass.uniforms.uLightScreenPos.value as THREE.Vector2).copy(opts.sunScreenPos);
@@ -229,7 +236,7 @@ export function createParadisePostPipeline(
     if (typeof opts.cameraFar === 'number') {
       volDofPass.uniforms.uCameraFar.value = opts.cameraFar;
     }
-    volDofPass.enabled = godRaysOn || dofOn;
+    volDofPass.enabled = true;
   };
 
   const setSize = (w: number, h: number, pr: number) => {

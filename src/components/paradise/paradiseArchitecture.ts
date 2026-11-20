@@ -19,7 +19,7 @@ export interface ParadiseArchitectureHandle {
 
 /**
  * Builds an authentic Chinese/Kyoto concave curved pavilion roof (飞檐翘角)
- * with upturned diagonal hip corners, eaves thickness skirt, and cylindrical tile UVs.
+ * with upturned diagonal hip corners and cylindrical tile UVs.
  */
 function createSweepingPagodaRoofGeo(
   halfSpan: number,
@@ -33,8 +33,6 @@ function createSweepingPagodaRoofGeo(
   const indices: number[] = [];
 
   const evalRoofPoint = (quadrant: number, u: number, r: number): [number, number, number] => {
-    // u in [-1, 1] along edge, r in [0, 1] from apex to eave rim
-    // Map square coordinates onto quadrant rotated by quadrant * 90 deg
     const sx = u * r * halfSpan;
     const sz = r * halfSpan;
     const ang = quadrant * (Math.PI / 2);
@@ -43,7 +41,6 @@ function createSweepingPagodaRoofGeo(
     const x = sx * cosA - sz * sinA;
     const z = sx * sinA + sz * cosA;
 
-    // Catenary sag along roof slope + sweeping upturned corner eaves (飞檐)
     const sag = Math.pow(1 - r, 1.48) * height;
     const cornerFactor = Math.pow(Math.abs(u), 2.1) * Math.pow(r, 2.05);
     const edgeDroop = Math.sin(r * Math.PI) * 0.08 * (1 - Math.abs(u));
@@ -61,7 +58,7 @@ function createSweepingPagodaRoofGeo(
         const u = (iu / edgeSteps) * 2 - 1;
         const [x, y, z] = evalRoofPoint(q, u, r);
         positions.push(x, y, z);
-        uvs.push((u * 0.5 + 0.5) * r * 2.2, r * 2.4);
+        uvs.push((u * 0.5 + 0.5) * r * 2.4, r * 2.6);
       }
     }
 
@@ -85,7 +82,7 @@ function createSweepingPagodaRoofGeo(
 }
 
 /**
- * Builds curved hip ridge beams (垂脊) curving from apex out to upturned roof corners
+ * Builds curved hip ridge beams (垂脊) curving from apex out to upturned roof corners.
  */
 function createHipRidgeGeo(
   halfSpan: number,
@@ -106,6 +103,111 @@ function createHipRidgeGeo(
   }
   const curve = new THREE.CatmullRomCurve3(pts);
   return new THREE.TubeGeometry(curve, 18, radius, 8, false);
+}
+
+/**
+ * Builds a single concave catenary gable roof slope (悬山卷棚坡面) with solid thickness
+ * and crisp cylindrical roof tile UVs.
+ */
+function createCurvedGableRoofSlopeGeo(
+  halfWidth: number,
+  ridgeHeight: number,
+  eaveDrop: number,
+  lengthZ: number,
+  thickness = 0.075,
+  stepsX = 14,
+  stepsZ = 10
+): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  const evalSlopeY = (t: number) => {
+    // t in [0, 1] from ridge center (0) to outer eave tip (1)
+    // Concave catenary East-Asian curve with slight upturned eave lip at tip
+    const baseSlope = Math.pow(1 - t, 1.38) * ridgeHeight - t * eaveDrop;
+    const eaveTurn = Math.pow(t, 4.2) * 0.11;
+    return baseSlope + eaveTurn;
+  };
+
+  // Top tiled surface + underside soffit surface
+  const buildSheet = (yOffset: number, flipWinding: boolean) => {
+    const baseVertex = positions.length / 3;
+    const cols = stepsZ + 1;
+    for (let ix = 0; ix <= stepsX; ix++) {
+      const t = ix / stepsX;
+      const x = t * halfWidth;
+      const y = evalSlopeY(t) + yOffset;
+      for (let iz = 0; iz <= stepsZ; iz++) {
+        const uz = iz / stepsZ;
+        const z = (uz - 0.5) * lengthZ;
+        positions.push(x, y, z);
+        uvs.push(uz * 3.4, t * 2.2);
+      }
+    }
+    for (let ix = 0; ix < stepsX; ix++) {
+      for (let iz = 0; iz < stepsZ; iz++) {
+        const a = baseVertex + ix * cols + iz;
+        const b = a + 1;
+        const c = a + cols;
+        const d = c + 1;
+        if (flipWinding) {
+          indices.push(a, b, c, b, d, c);
+        } else {
+          indices.push(a, c, b, b, c, d);
+        }
+      }
+    }
+  };
+
+  buildSheet(0, false);
+  buildSheet(-thickness, true);
+
+  // Outer eave rim fascia closing the edge
+  const fasciaBase = positions.length / 3;
+  const eaveY = evalSlopeY(1);
+  for (let iz = 0; iz <= stepsZ; iz++) {
+    const uz = iz / stepsZ;
+    const z = (uz - 0.5) * lengthZ;
+    positions.push(halfWidth, eaveY, z);
+    uvs.push(uz * 3.4, 0.95);
+    positions.push(halfWidth, eaveY - thickness, z);
+    uvs.push(uz * 3.4, 1.0);
+  }
+  for (let iz = 0; iz < stepsZ; iz++) {
+    const a = fasciaBase + iz * 2;
+    const b = a + 1;
+    const c = a + 2;
+    const d = a + 3;
+    indices.push(a, b, c, b, d, c);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Builds a triangular plastered gable wall (山花墙) that cleanly fills the upper roof triangle.
+ */
+function createGableTriangleGeo(halfWidth: number, peakHeight: number, thickness: number): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  shape.moveTo(-halfWidth, 0);
+  shape.lineTo(halfWidth, 0);
+  shape.lineTo(0, peakHeight);
+  shape.closePath();
+
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: thickness,
+    bevelEnabled: false,
+    steps: 1,
+  });
+  geo.translate(0, 0, -thickness * 0.5);
+  geo.computeVertexNormals();
+  return geo;
 }
 
 export function createParadiseArchitecture(
@@ -130,66 +232,98 @@ export function createParadiseArchitecture(
     return m;
   };
 
-  // Distinct PBR material library (roughness separation >= 0.25 across adjacent elements)
+  // Distinct high-definition PBR material library
   const graniteMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x8e8980,
+      color: 0x918c83,
       roughness: 0.88,
       metalness: 0.04,
       map: textures.rockColorMap,
       normalMap: textures.rockNormalMap,
-      normalScale: new THREE.Vector2(0.7, 0.7),
+      normalScale: new THREE.Vector2(0.85, 0.85),
     })
   );
 
   const plinthStoneMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x9c968b,
-      roughness: 0.84,
-      metalness: 0.05,
+      color: 0xa49e93,
+      roughness: 0.82,
+      metalness: 0.04,
       map: textures.terrainDetail,
+      normalMap: textures.rockNormalMap,
+      normalScale: new THREE.Vector2(0.45, 0.45),
     })
   );
 
   const rosewoodMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x52281d,
+      color: 0x4f261b,
       roughness: 0.44,
-      metalness: 0.06,
-      map: textures.barkMap,
+      metalness: 0.05,
+      map: textures.sakuraBarkMap,
+      normalMap: textures.barkNormalMap,
+      normalScale: new THREE.Vector2(0.55, 0.55),
     })
   );
 
   const cedarDeckMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x765037,
-      roughness: 0.68,
+      color: 0x8d6344,
+      roughness: 0.64,
+      metalness: 0.02,
+      map: textures.timberPlankMap,
+      normalMap: textures.barkNormalMap,
+      normalScale: new THREE.Vector2(0.42, 0.42),
+    })
+  );
+
+  const charredCedarMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x332721,
+      roughness: 0.72,
       metalness: 0.03,
-      map: textures.barkMap,
+      map: textures.timberPlankMap,
+      normalMap: textures.barkNormalMap,
+      normalScale: new THREE.Vector2(0.65, 0.65),
+    })
+  );
+
+  const plasterWallMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xf1e9da,
+      roughness: 0.88,
+      metalness: 0.01,
+      map: textures.plasterWallMap,
+      normalMap: textures.rockNormalMap,
+      normalScale: new THREE.Vector2(0.22, 0.22),
     })
   );
 
   const ceramicTileMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x3a434e,
-      roughness: 0.46,
+      color: 0x434d59,
+      roughness: 0.44,
       metalness: 0.16,
       map: textures.slateRoofMap,
+      normalMap: textures.slateNormalMap,
+      normalScale: new THREE.Vector2(0.95, 0.95),
       side: THREE.DoubleSide,
     })
   );
 
   const ridgeStoneMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x2a313a,
-      roughness: 0.52,
-      metalness: 0.12,
+      color: 0x2c343e,
+      roughness: 0.48,
+      metalness: 0.14,
+      normalMap: textures.slateNormalMap,
+      normalScale: new THREE.Vector2(0.4, 0.4),
     })
   );
 
   const bronzeMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0xa68548,
+      color: 0xb08d4c,
       roughness: 0.26,
       metalness: 0.88,
     })
@@ -215,40 +349,40 @@ export function createParadiseArchitecture(
   pav.rotation.y = -0.58; // face lake & arched bridge gracefully
 
   // Lower carved stone terrace plinth (seats cleanly below terrain)
-  const lowerPlinth = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(5.2, 0.56, 5.2)), graniteMat);
+  const lowerPlinth = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(5.26, 0.58, 5.26)), graniteMat);
   lowerPlinth.position.y = -0.02;
   lowerPlinth.castShadow = quality.enableShadows;
   lowerPlinth.receiveShadow = quality.enableShadows;
   pav.add(lowerPlinth);
 
   // Recessed upper stone podium molding (须弥座台基)
-  const upperPlinth = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.6, 0.34, 4.6)), plinthStoneMat);
+  const upperPlinth = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.64, 0.34, 4.64)), plinthStoneMat);
   upperPlinth.position.y = 0.42;
   upperPlinth.castShadow = quality.enableShadows;
   upperPlinth.receiveShadow = quality.enableShadows;
   pav.add(upperPlinth);
 
-  // Beveled dark cedar floor deck
-  const deck = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.24, 0.12, 4.24)), cedarDeckMat);
+  // Grooved cedar plank floor deck + edge trim
+  const deck = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.26, 0.12, 4.26)), cedarDeckMat);
   deck.position.y = 0.64;
   deck.receiveShadow = quality.enableShadows;
   pav.add(deck);
 
   // 3 Wide carved granite entrance steps facing garden path + side cheek curbs
   for (let s = 0; s < 3; s++) {
-    const step = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.05, 0.16, 0.44)), plinthStoneMat);
+    const step = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.08, 0.16, 0.44)), plinthStoneMat);
     step.position.set(0, 0.48 - s * 0.16, 2.48 + s * 0.42);
     step.receiveShadow = quality.enableShadows;
     pav.add(step);
   }
-  for (const side of [-1.1, 1.1]) {
-    const cheek = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.16, 0.42, 1.35)), graniteMat);
+  for (const side of [-1.12, 1.12]) {
+    const cheek = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.17, 0.42, 1.36)), graniteMat);
     cheek.position.set(side, 0.32, 2.86);
     cheek.rotation.x = 0.34;
     pav.add(cheek);
   }
 
-  // Carved stone drum column bases (LatheGeometry 柱础) + 8 Rosewood Pillars (main 4 + outer corner porch posts)
+  // Carved stone drum column bases (LatheGeometry 柱础) + 4 Rosewood Pillars
   const drumProfile = [
     new THREE.Vector2(0.0, 0.0),
     new THREE.Vector2(0.24, 0.0),
@@ -259,7 +393,7 @@ export function createParadiseArchitecture(
     new THREE.Vector2(0.0, 0.19),
   ];
   const drumGeo = trackGeo(new THREE.LatheGeometry(drumProfile, 16));
-  const pillarGeo = trackGeo(new THREE.CylinderGeometry(0.115, 0.135, 2.75, 14));
+  const pillarGeo = trackGeo(new THREE.CylinderGeometry(0.115, 0.138, 2.76, 16));
 
   const mainCols: Array<[number, number]> = [
     [-1.68, -1.68],
@@ -278,7 +412,7 @@ export function createParadiseArchitecture(
     pav.add(col);
   }
 
-  // Carved lakeside balustrade benches (美人靠) along West, North, and East bays (front South bay open for steps)
+  // Carved lakeside balustrade benches (美人靠) along West, North, and East bays
   const railBarGeo = trackGeo(new THREE.BoxGeometry(3.26, 0.09, 0.13));
   const seatPlankGeo = trackGeo(new THREE.BoxGeometry(3.06, 0.08, 0.46));
   const spindleGeo = trackGeo(new THREE.CylinderGeometry(0.025, 0.025, 0.46, 6));
@@ -309,34 +443,57 @@ export function createParadiseArchitecture(
   addBayBalustrade(Math.PI / 2);
   addBayBalustrade(-Math.PI / 2);
 
-  // Upper eave tie-beams (额枋) + decorative bracket blocks (斗拱) + radiating rafters (飞椽)
-  const beamXGeo = trackGeo(new THREE.BoxGeometry(3.88, 0.18, 0.16));
-  const beamZGeo = trackGeo(new THREE.BoxGeometry(0.16, 0.18, 3.88));
-  const bracketGeo = trackGeo(new THREE.BoxGeometry(0.32, 0.12, 0.32));
+  // Upper eave tie-beams (额枋), stepped Dougong brackets (斗拱) & carved arch braces (雀替)
+  const beamXGeo = trackGeo(new THREE.BoxGeometry(3.92, 0.18, 0.16));
+  const beamZGeo = trackGeo(new THREE.BoxGeometry(0.16, 0.18, 3.92));
+  const lowerBeamXGeo = trackGeo(new THREE.BoxGeometry(3.46, 0.1, 0.11));
+  const lowerBeamZGeo = trackGeo(new THREE.BoxGeometry(0.11, 0.1, 3.46));
+  const bracketBaseGeo = trackGeo(new THREE.BoxGeometry(0.28, 0.1, 0.28));
+  const bracketTopGeo = trackGeo(new THREE.BoxGeometry(0.42, 0.11, 0.42));
+  const corbelGeo = trackGeo(new THREE.BoxGeometry(0.32, 0.18, 0.08));
+
   for (const z of [-1.68, 1.68]) {
     const b = new THREE.Mesh(beamXGeo, rosewoodMat);
     b.position.set(0, 3.44, z);
     pav.add(b);
+    const lb = new THREE.Mesh(lowerBeamXGeo, cedarDeckMat);
+    lb.position.set(0, 3.16, z);
+    pav.add(lb);
   }
   for (const x of [-1.68, 1.68]) {
     const b = new THREE.Mesh(beamZGeo, rosewoodMat);
     b.position.set(x, 3.44, 0);
     pav.add(b);
+    const lb = new THREE.Mesh(lowerBeamZGeo, cedarDeckMat);
+    lb.position.set(x, 3.16, 0);
+    pav.add(lb);
   }
   for (const [cx, cz] of mainCols) {
-    const br = new THREE.Mesh(bracketGeo, rosewoodMat);
-    br.position.set(cx, 3.58, cz);
-    pav.add(br);
+    const br1 = new THREE.Mesh(bracketBaseGeo, rosewoodMat);
+    br1.position.set(cx, 3.55, cz);
+    pav.add(br1);
+    const br2 = new THREE.Mesh(bracketTopGeo, bronzeMat);
+    br2.position.set(cx, 3.63, cz);
+    pav.add(br2);
+
+    // Carved corner braces along both tie-beam axes
+    const c1 = new THREE.Mesh(corbelGeo, cedarDeckMat);
+    c1.position.set(cx - Math.sign(cx) * 0.24, 3.28, cz);
+    pav.add(c1);
+    const c2 = new THREE.Mesh(corbelGeo, cedarDeckMat);
+    c2.position.set(cx, 3.28, cz - Math.sign(cz) * 0.24);
+    c2.rotation.y = Math.PI / 2;
+    pav.add(c2);
   }
 
   // Radiating wooden eave rafters beneath lower roof
-  const rafterGeo = trackGeo(new THREE.BoxGeometry(0.055, 0.06, 1.75));
+  const rafterGeo = trackGeo(new THREE.BoxGeometry(0.055, 0.06, 1.78));
   for (let side = 0; side < 4; side++) {
     for (let r = -4; r <= 4; r++) {
       const rafter = new THREE.Mesh(rafterGeo, cedarDeckMat);
       const ang = side * (Math.PI / 2);
       const localX = r * 0.44;
-      const localZ = 2.02;
+      const localZ = 2.04;
       rafter.position.set(
         localX * Math.cos(ang) - localZ * Math.sin(ang),
         3.56,
@@ -348,18 +505,18 @@ export function createParadiseArchitecture(
     }
   }
 
-  // Lower sweeping concave roof (飞檐翘角) + 4 diagonal curved ridge beams
-  const lowerRoofSpan = 2.86;
+  // Lower sweeping concave roof (飞檐翘角) + 4 diagonal curved ridge beams + eave-edge wadang tile discs
+  const lowerRoofSpan = 2.88;
   const lowerRoofHeight = 1.24;
-  const lowerRoofLift = 0.44;
-  const lowerRoofGeo = trackGeo(createSweepingPagodaRoofGeo(lowerRoofSpan, lowerRoofHeight, lowerRoofLift, 16, 18));
+  const lowerRoofLift = 0.46;
+  const lowerRoofGeo = trackGeo(createSweepingPagodaRoofGeo(lowerRoofSpan, lowerRoofHeight, lowerRoofLift, 18, 20));
   const lowerRoof = new THREE.Mesh(lowerRoofGeo, ceramicTileMat);
   lowerRoof.position.y = 3.5;
   lowerRoof.castShadow = quality.enableShadows;
   lowerRoof.receiveShadow = quality.enableShadows;
   pav.add(lowerRoof);
 
-  const lowerRidgeGeo = trackGeo(createHipRidgeGeo(lowerRoofSpan, lowerRoofHeight, lowerRoofLift, 0.055));
+  const lowerRidgeGeo = trackGeo(createHipRidgeGeo(lowerRoofSpan, lowerRoofHeight, lowerRoofLift, 0.056));
   for (let q = 0; q < 4; q++) {
     const ridge = new THREE.Mesh(lowerRidgeGeo, ridgeStoneMat);
     ridge.position.y = 3.5;
@@ -367,27 +524,76 @@ export function createParadiseArchitecture(
     pav.add(ridge);
   }
 
-  // Clerestory wooden collar screen (重檐腰部) between lower & upper tier
-  const clerestory = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.78, 0.56, 1.78)), rosewoodMat);
-  clerestory.position.y = 4.46;
-  pav.add(clerestory);
+  // Sculpted eave-end circular Wadang (瓦当) tile caps along lower roof eaves
+  const wadangGeo = trackGeo(new THREE.CylinderGeometry(0.052, 0.052, 0.05, 8));
+  wadangGeo.rotateX(Math.PI / 2);
+  for (let q = 0; q < 4; q++) {
+    const ang = q * (Math.PI / 2);
+    const cosA = Math.cos(ang);
+    const sinA = Math.sin(ang);
+    for (let k = -9; k <= 9; k++) {
+      const u = k / 9.5;
+      const sx = u * lowerRoofSpan;
+      const sz = lowerRoofSpan;
+      const yLift = Math.pow(Math.abs(u), 2.1) * lowerRoofLift;
+      const cap = new THREE.Mesh(wadangGeo, ridgeStoneMat);
+      cap.position.set(sx * cosA - sz * sinA, 3.49 + yLift, sx * sinA + sz * cosA);
+      cap.rotation.y = ang;
+      pav.add(cap);
+    }
+  }
 
-  // Upper sweeping concave roof (重檐顶) + 4 upper hip ridges
-  const upperRoofSpan = 1.65;
-  const upperRoofHeight = 0.92;
-  const upperRoofLift = 0.34;
-  const upperRoofGeo = trackGeo(createSweepingPagodaRoofGeo(upperRoofSpan, upperRoofHeight, upperRoofLift, 14, 14));
+  // Architectural 8-post carved clerestory collar drum (重檐镂空腰阁) between lower & upper tiers
+  const clerestoryGroup = new THREE.Group();
+  clerestoryGroup.position.y = 4.46;
+  const clerestoryCore = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.56, 0.46, 1.56)), plasterWallMat);
+  clerestoryGroup.add(clerestoryCore);
+  const clPostGeo = trackGeo(new THREE.BoxGeometry(0.11, 0.56, 0.11));
+  for (const px of [-0.84, 0, 0.84]) {
+    for (const pz of [-0.84, 0, 0.84]) {
+      if (px === 0 && pz === 0) continue;
+      const cp = new THREE.Mesh(clPostGeo, rosewoodMat);
+      cp.position.set(px, 0, pz);
+      clerestoryGroup.add(cp);
+    }
+  }
+  const clRing = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.84, 0.11, 1.84)), rosewoodMat);
+  clRing.position.y = 0.24;
+  clerestoryGroup.add(clRing);
+  pav.add(clerestoryGroup);
+
+  // Upper sweeping concave roof (重檐顶) + 4 upper hip ridges + upper wadang caps
+  const upperRoofSpan = 1.68;
+  const upperRoofHeight = 0.94;
+  const upperRoofLift = 0.36;
+  const upperRoofGeo = trackGeo(createSweepingPagodaRoofGeo(upperRoofSpan, upperRoofHeight, upperRoofLift, 14, 16));
   const upperRoof = new THREE.Mesh(upperRoofGeo, ceramicTileMat);
-  upperRoof.position.y = 4.62;
+  upperRoof.position.y = 4.64;
   upperRoof.castShadow = quality.enableShadows;
   pav.add(upperRoof);
 
-  const upperRidgeGeo = trackGeo(createHipRidgeGeo(upperRoofSpan, upperRoofHeight, upperRoofLift, 0.042));
+  const upperRidgeGeo = trackGeo(createHipRidgeGeo(upperRoofSpan, upperRoofHeight, upperRoofLift, 0.044));
   for (let q = 0; q < 4; q++) {
     const ridge = new THREE.Mesh(upperRidgeGeo, ridgeStoneMat);
-    ridge.position.y = 4.62;
+    ridge.position.y = 4.64;
     ridge.rotation.y = q * (Math.PI / 2);
     pav.add(ridge);
+  }
+
+  for (let q = 0; q < 4; q++) {
+    const ang = q * (Math.PI / 2);
+    const cosA = Math.cos(ang);
+    const sinA = Math.sin(ang);
+    for (let k = -5; k <= 5; k++) {
+      const u = k / 5.5;
+      const sx = u * upperRoofSpan;
+      const sz = upperRoofSpan;
+      const yLift = Math.pow(Math.abs(u), 2.1) * upperRoofLift;
+      const cap = new THREE.Mesh(wadangGeo, ridgeStoneMat);
+      cap.position.set(sx * cosA - sz * sinA, 4.63 + yLift, sx * sinA + sz * cosA);
+      cap.rotation.y = ang;
+      pav.add(cap);
+    }
   }
 
   // Multi-part turned bronze lotus finial (宝顶 LatheGeometry)
@@ -400,10 +606,10 @@ export function createParadiseArchitecture(
     new THREE.Vector2(0.07, 0.32),
     new THREE.Vector2(0.09, 0.4),
     new THREE.Vector2(0.025, 0.58),
-    new THREE.Vector2(0.0, 0.7),
+    new THREE.Vector2(0.0, 0.72),
   ];
   const finial = new THREE.Mesh(trackGeo(new THREE.LatheGeometry(finialProfile, 16)), bronzeMat);
-  finial.position.y = 5.46;
+  finial.position.y = 5.5;
   pav.add(finial);
 
   // Hanging Silk-Paper & Bronze Palace Lantern inside pavilion
@@ -444,7 +650,6 @@ export function createParadiseArchitecture(
   const postGeo = trackGeo(new THREE.CylinderGeometry(0.055, 0.072, 0.94, 10));
   const capGeo = trackGeo(new THREE.SphereGeometry(0.085, 10, 8));
 
-  // Stone bridge abutments seated deep into both stream banks
   for (const endZ of [-span * 0.52, span * 0.52]) {
     const abutment = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.75, 1.35, 1.25)), graniteMat);
     abutment.position.set(0, -0.35, endZ);
@@ -480,7 +685,6 @@ export function createParadiseArchitecture(
     }
   }
 
-  // Curved structural arch stringers & curved timber handrails
   for (const side of [-1.02, 1.02]) {
     const railPts: THREE.Vector3[] = [];
     const archPts: THREE.Vector3[] = [];
@@ -539,8 +743,8 @@ export function createParadiseArchitecture(
     group.add(lg);
   };
 
-  buildStoneLantern(-4.2, -4.1); // South bridge approach
-  buildStoneLantern(8.8, -8.2);  // Pavilion garden turn
+  buildStoneLantern(-4.2, -4.1);
+  buildStoneLantern(8.8, -8.2);
 
   // =========================================================================
   // 4. Stratified Granite Shoreline & Waterfall Cliff Boulders
@@ -569,7 +773,6 @@ export function createParadiseArchitecture(
       const vx = rp.getX(i);
       const vy = rp.getY(i);
       const vz = rp.getZ(i);
-      // Angular granite strata ridges
       const strata =
         1 +
         0.16 * Math.sin(vx * 3.1 + idx) +
@@ -613,7 +816,7 @@ export function createParadiseArchitecture(
   }
 
   // =========================================================================
-  // 5. Spirit Rest Cottage (精灵休息木屋) at (-11.4, y, 5.8)
+  // 5. Realistic East-Asian Spirit Rest Cottage (江南白墙黛瓦木屋) at (-11.4, y, 5.8)
   // =========================================================================
   const restHouseGroup = new THREE.Group();
   const rhX = -11.4;
@@ -621,15 +824,6 @@ export function createParadiseArchitecture(
   const rhBaseY = terrainHeightAt(rhX, rhZ);
   restHouseGroup.position.set(rhX, rhBaseY, rhZ);
   restHouseGroup.rotation.y = 0.72; // face southeast toward meadow, bridge & pavilion
-
-  const plasterWallMat = trackMat(
-    new THREE.MeshStandardMaterial({
-      color: 0xece3d2,
-      roughness: 0.86,
-      metalness: 0.02,
-      map: textures.terrainDetail,
-    })
-  );
 
   const restWindowMat = new THREE.MeshStandardMaterial({
     color: 0xffe4b3,
@@ -640,97 +834,286 @@ export function createParadiseArchitecture(
   });
   materials.push(restWindowMat);
 
-  // Granite stone foundation & timber veranda deck
-  const rhStoneBase = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.75, 0.36, 3.35)), graniteMat);
-  rhStoneBase.position.y = 0.08;
-  rhStoneBase.castShadow = quality.enableShadows;
-  rhStoneBase.receiveShadow = quality.enableShadows;
-  restHouseGroup.add(rhStoneBase);
+  // 5a. Ashlar stone terrace plinth + upper stone coping rim + entry steps
+  const rhStoneSubBase = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.06, 0.42, 3.82)), graniteMat);
+  rhStoneSubBase.position.set(0, 0.02, 0.08);
+  rhStoneSubBase.castShadow = quality.enableShadows;
+  rhStoneSubBase.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rhStoneSubBase);
 
-  const rhVeranda = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.45, 0.12, 3.15)), cedarDeckMat);
-  rhVeranda.position.y = 0.3;
+  const rhStoneCoping = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.84, 0.12, 3.62)), plinthStoneMat);
+  rhStoneCoping.position.set(0, 0.24, 0.08);
+  rhStoneCoping.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rhStoneCoping);
+
+  // Grooved cedar veranda deck (缘侧)
+  const rhVeranda = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.64, 0.11, 3.44)), cedarDeckMat);
+  rhVeranda.position.set(0, 0.34, 0.08);
   rhVeranda.receiveShadow = quality.enableShadows;
   restHouseGroup.add(rhVeranda);
 
-  // Two cozy veranda entry steps
+  // Entry stone stairs + side stone cheek curbs
   for (let s = 0; s < 2; s++) {
-    const step = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.26, 0.12, 0.32)), plinthStoneMat);
-    step.position.set(0, 0.22 - s * 0.12, 1.66 + s * 0.28);
+    const step = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.34, 0.12, 0.34)), plinthStoneMat);
+    step.position.set(0, 0.24 - s * 0.12, 1.92 + s * 0.3);
     step.receiveShadow = quality.enableShadows;
     restHouseGroup.add(step);
   }
+  for (const side of [-0.74, 0.74]) {
+    const cheek = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.12, 0.26, 0.72)), graniteMat);
+    cheek.position.set(side, 0.16, 2.04);
+    cheek.rotation.x = 0.28;
+    restHouseGroup.add(cheek);
+  }
 
-  // Timber corner posts & roof framing
-  const rhPostGeo = trackGeo(new THREE.BoxGeometry(0.14, 1.95, 0.14));
+  // Front porch timber balustrades flanking the central entry + side veranda rails
+  const rhRailPostGeo = trackGeo(new THREE.BoxGeometry(0.09, 0.64, 0.09));
+  const rhFrontRailGeo = trackGeo(new THREE.BoxGeometry(0.92, 0.065, 0.08));
+  const rhSideRailGeo = trackGeo(new THREE.BoxGeometry(0.08, 0.065, 0.74));
+  const rhBalusterGeo = trackGeo(new THREE.BoxGeometry(0.036, 0.44, 0.036));
+
+  for (const side of [-1, 1]) {
+    // Front flanking balustrade (leaves central 1.1m opening clear for steps)
+    const frontRailTop = new THREE.Mesh(rhFrontRailGeo, rosewoodMat);
+    frontRailTop.position.set(side * 1.16, 0.94, 1.66);
+    restHouseGroup.add(frontRailTop);
+    const frontRailBot = new THREE.Mesh(rhFrontRailGeo, rosewoodMat);
+    frontRailBot.position.set(side * 1.16, 0.54, 1.66);
+    restHouseGroup.add(frontRailBot);
+
+    const innerNewel = new THREE.Mesh(rhRailPostGeo, rosewoodMat);
+    innerNewel.position.set(side * 0.68, 0.72, 1.66);
+    restHouseGroup.add(innerNewel);
+    const innerCap = new THREE.Mesh(trackGeo(new THREE.SphereGeometry(0.055, 8, 8)), bronzeMat);
+    innerCap.position.set(side * 0.68, 1.07, 1.66);
+    restHouseGroup.add(innerCap);
+
+    for (let k = 0; k < 3; k++) {
+      const bal = new THREE.Mesh(rhBalusterGeo, cedarDeckMat);
+      bal.position.set(side * (0.88 + k * 0.24), 0.74, 1.66);
+      restHouseGroup.add(bal);
+    }
+
+    // Side veranda porch rail from front post to main cottage wall
+    const sideRailTop = new THREE.Mesh(rhSideRailGeo, rosewoodMat);
+    sideRailTop.position.set(side * 1.62, 0.94, 1.24);
+    restHouseGroup.add(sideRailTop);
+    const sideRailBot = new THREE.Mesh(rhSideRailGeo, rosewoodMat);
+    sideRailBot.position.set(side * 1.62, 0.54, 1.24);
+    restHouseGroup.add(sideRailBot);
+  }
+
+  // 5b. Load-bearing Rosewood Post & Beam Frame + Stone Column Plinths
+  const rhMainPostGeo = trackGeo(new THREE.BoxGeometry(0.145, 2.02, 0.145));
+  const rhColDrumGeo = trackGeo(new THREE.CylinderGeometry(0.11, 0.13, 0.1, 12));
   const rhCols: Array<[number, number]> = [
-    [-1.42, -1.2],
-    [1.42, -1.2],
-    [-1.42, 0.76],
-    [1.42, 0.76],
-    [-1.42, 1.36],
-    [1.42, 1.36],
+    [-1.58, -1.44],
+    [1.58, -1.44],
+    [-1.58, 0.84],
+    [1.58, 0.84],
+    [-1.62, 1.66],
+    [1.62, 1.66],
   ];
   for (const [cx, cz] of rhCols) {
-    const col = new THREE.Mesh(rhPostGeo, rosewoodMat);
-    col.position.set(cx, 1.32, cz);
+    const drum = new THREE.Mesh(rhColDrumGeo, plinthStoneMat);
+    drum.position.set(cx, 0.44, cz);
+    restHouseGroup.add(drum);
+
+    const col = new THREE.Mesh(rhMainPostGeo, rosewoodMat);
+    col.position.set(cx, 1.46, cz);
     col.castShadow = quality.enableShadows;
     restHouseGroup.add(col);
   }
 
-  // Warm plaster cottage enclosure (rear half enclosed, front porch open)
-  const rhMainBody = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.74, 1.84, 1.88)), plasterWallMat);
-  rhMainBody.position.set(0, 1.28, -0.22);
-  rhMainBody.castShadow = quality.enableShadows;
-  rhMainBody.receiveShadow = quality.enableShadows;
-  restHouseGroup.add(rhMainBody);
-
-  // Wooden door frame & recessed warm shoji doorway
-  const doorFrame = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.96, 1.46, 0.12)), rosewoodMat);
-  doorFrame.position.set(0, 1.09, 0.72);
-  restHouseGroup.add(doorFrame);
-
-  const doorGlow = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.76, 1.32)), restWindowMat);
-  doorGlow.position.set(0, 1.06, 0.785);
-  restHouseGroup.add(doorGlow);
-
-  // Side lattice shoji windows
-  for (const side of [-1, 1]) {
-    const winFrame = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.08, 0.74, 0.92)), rosewoodMat);
-    winFrame.position.set(side * 1.38, 1.34, -0.22);
-    restHouseGroup.add(winFrame);
-
-    const winPane = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.78, 0.58)), restWindowMat);
-    winPane.position.set(side * 1.425, 1.34, -0.22);
-    winPane.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
-    restHouseGroup.add(winPane);
+  // Horizontal sill beams, lintel tie-beams, and eave wall plates
+  const rhEavePlateZ = trackGeo(new THREE.BoxGeometry(0.13, 0.14, 3.24));
+  const rhCrossBeamX = trackGeo(new THREE.BoxGeometry(3.32, 0.15, 0.13));
+  for (const side of [-1.58, 1.58]) {
+    const plate = new THREE.Mesh(rhEavePlateZ, rosewoodMat);
+    plate.position.set(side, 2.48, 0.11);
+    restHouseGroup.add(plate);
+  }
+  for (const bz of [-1.44, 0.84, 1.66]) {
+    const beam = new THREE.Mesh(rhCrossBeamX, rosewoodMat);
+    beam.position.set(0, 2.44, bz);
+    restHouseGroup.add(beam);
   }
 
-  // Sweeping traditional pitched cottage roof with gentle eaves overhang
-  const rhRoofLeft = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.42, 0.11, 3.62)), ceramicTileMat);
-  rhRoofLeft.position.set(-0.98, 2.58, 0.14);
-  rhRoofLeft.rotation.z = 0.44;
-  rhRoofLeft.castShadow = quality.enableShadows;
-  rhRoofLeft.receiveShadow = quality.enableShadows;
-  restHouseGroup.add(rhRoofLeft);
+  // 5c. Enclosed Cottage Body: Charred-Cedar Wainscoting + Lime Plaster Upper Walls + Closed Gable Triangles
+  const rhWainscot = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.16, 0.56, 2.28)), charredCedarMat);
+  rhWainscot.position.set(0, 0.67, -0.3);
+  rhWainscot.castShadow = quality.enableShadows;
+  rhWainscot.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rhWainscot);
 
-  const rhRoofRight = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.42, 0.11, 3.62)), ceramicTileMat);
-  rhRoofRight.position.set(0.98, 2.58, 0.14);
-  rhRoofRight.rotation.z = -0.44;
-  rhRoofRight.castShadow = quality.enableShadows;
-  rhRoofRight.receiveShadow = quality.enableShadows;
-  restHouseGroup.add(rhRoofRight);
+  const rhUpperPlaster = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.08, 1.46, 2.22)), plasterWallMat);
+  rhUpperPlaster.position.set(0, 1.68, -0.3);
+  rhUpperPlaster.castShadow = quality.enableShadows;
+  rhUpperPlaster.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rhUpperPlaster);
 
-  const rhRidgeBeam = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.18, 0.18, 3.74)), ridgeStoneMat);
-  rhRidgeBeam.position.set(0, 3.09, 0.14);
+  // Horizontal mid-wall waist beam separating cedar wainscoting & white plaster
+  const rhWaistBeam = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.22, 0.08, 2.34)), rosewoodMat);
+  rhWaistBeam.position.set(0, 0.96, -0.3);
+  restHouseGroup.add(rhWaistBeam);
+
+  // Closed triangular gable end walls (front & rear) sealing the catenary gable roof cleanly!
+  const gableWidthHalf = 1.56;
+  const gablePeakHeight = 1.06;
+  const gableWallGeo = trackGeo(createGableTriangleGeo(gableWidthHalf, gablePeakHeight, 0.14));
+  for (const gz of [-1.41, 0.81]) {
+    const gable = new THREE.Mesh(gableWallGeo, plasterWallMat);
+    gable.position.set(0, 2.4, gz);
+    gable.castShadow = quality.enableShadows;
+    restHouseGroup.add(gable);
+  }
+  // Open front porch gable king-post truss (人字梁 + 瓜柱) so looking up under porch roof reveals real joinery
+  const porchTrussPost = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.11, 0.96, 0.11)), rosewoodMat);
+  porchTrussPost.position.set(0, 2.92, 1.66);
+  restHouseGroup.add(porchTrussPost);
+  const porchPendant = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.04, 0.075, 0.28, 8)), bronzeMat);
+  porchPendant.position.set(0, 2.28, 1.68);
+  restHouseGroup.add(porchPendant);
+
+  // 5d. Authentic 3D Shoji Sliding Doorway with Kumiko Lattice Muntins
+  const doorRecessX = 1.04;
+  const doorHeight = 1.56;
+  const doorFrameOuter = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.18, doorHeight + 0.08, 0.11)), rosewoodMat);
+  doorFrameOuter.position.set(0, 0.4 + doorHeight * 0.5, 0.81);
+  restHouseGroup.add(doorFrameOuter);
+
+  const doorGlowPlane = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(doorRecessX - 0.04, doorHeight - 0.06)), restWindowMat);
+  doorGlowPlane.position.set(0, 0.4 + doorHeight * 0.5, 0.87);
+  restHouseGroup.add(doorGlowPlane);
+
+  // 3D Vertical & horizontal kumiko shoji bars in front of the glowing rice-paper plane
+  const vMuntinGeo = trackGeo(new THREE.BoxGeometry(0.024, doorHeight - 0.06, 0.026));
+  const hMuntinGeo = trackGeo(new THREE.BoxGeometry(doorRecessX - 0.04, 0.022, 0.026));
+  for (const mx of [-0.26, 0, 0.26]) {
+    const bar = new THREE.Mesh(vMuntinGeo, mx === 0 ? rosewoodMat : cedarDeckMat);
+    bar.position.set(mx, 0.4 + doorHeight * 0.5, 0.882);
+    restHouseGroup.add(bar);
+  }
+  for (let row = 0; row < 5; row++) {
+    const bar = new THREE.Mesh(hMuntinGeo, cedarDeckMat);
+    bar.position.set(0, 0.62 + row * 0.26, 0.882);
+    restHouseGroup.add(bar);
+  }
+  // Wooden lower kick-panel on shoji doors
+  const doorKickPanel = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(doorRecessX - 0.04, 0.28, 0.03)), charredCedarMat);
+  doorKickPanel.position.set(0, 0.54, 0.88);
+  restHouseGroup.add(doorKickPanel);
+
+  // 5e. Side Kumiko Shoji Windows (Left & Right walls) with sills, lintels & 3D lattice bars
+  const winW = 1.06;
+  const winH = 0.84;
+  const sideWinFrameGeo = trackGeo(new THREE.BoxGeometry(0.11, winH + 0.08, winW + 0.1));
+  const sideWinSillGeo = trackGeo(new THREE.BoxGeometry(0.16, 0.06, winW + 0.18));
+  const sideWinPaneGeo = trackGeo(new THREE.PlaneGeometry(winW - 0.06, winH - 0.06));
+  const sideWinVBarGeo = trackGeo(new THREE.BoxGeometry(0.024, winH - 0.06, 0.024));
+  const sideWinHBarGeo = trackGeo(new THREE.BoxGeometry(0.024, 0.022, winW - 0.06));
+
+  for (const side of [-1, 1]) {
+    const wallX = side * 1.545;
+    const wFrame = new THREE.Mesh(sideWinFrameGeo, rosewoodMat);
+    wFrame.position.set(wallX, 1.48, -0.3);
+    restHouseGroup.add(wFrame);
+
+    const wSill = new THREE.Mesh(sideWinSillGeo, cedarDeckMat);
+    wSill.position.set(side * 1.57, 1.04, -0.3);
+    restHouseGroup.add(wSill);
+
+    const wPane = new THREE.Mesh(sideWinPaneGeo, restWindowMat);
+    wPane.position.set(side * 1.605, 1.48, -0.3);
+    wPane.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+    restHouseGroup.add(wPane);
+
+    for (const wz of [-0.62, -0.3, 0.02]) {
+      const vb = new THREE.Mesh(sideWinVBarGeo, cedarDeckMat);
+      vb.position.set(side * 1.615, 1.48, wz);
+      restHouseGroup.add(vb);
+    }
+    for (const wy of [1.26, 1.48, 1.7]) {
+      const hb = new THREE.Mesh(sideWinHBarGeo, cedarDeckMat);
+      hb.position.set(side * 1.615, wy, -0.3);
+      restHouseGroup.add(hb);
+    }
+  }
+
+  // 5f. Sweeping Concave Catenary Tile Roof (江南卷棚黛瓦坡屋顶) + Exposed Eave Rafters + Ridge Finials
+  const roofHalfW = 2.38;
+  const roofRidgeH = 1.08;
+  const roofEaveDrop = 0.08;
+  const roofLenZ = 4.18;
+  const slopeGeo = trackGeo(createCurvedGableRoofSlopeGeo(roofHalfW, roofRidgeH, roofEaveDrop, roofLenZ, 0.075, 14, 12));
+
+  const rightSlope = new THREE.Mesh(slopeGeo, ceramicTileMat);
+  rightSlope.position.set(0, 2.46, 0.12);
+  rightSlope.castShadow = quality.enableShadows;
+  rightSlope.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(rightSlope);
+
+  const leftSlope = new THREE.Mesh(slopeGeo, ceramicTileMat);
+  leftSlope.position.set(0, 2.46, 0.12);
+  leftSlope.scale.x = -1;
+  leftSlope.castShadow = quality.enableShadows;
+  leftSlope.receiveShadow = quality.enableShadows;
+  restHouseGroup.add(leftSlope);
+
+  // Sculpted ridge beam (正脊) + upturned gable ridge finials (吻兽脊端)
+  const rhRidgeBeam = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.18, 0.17, roofLenZ + 0.12)), ridgeStoneMat);
+  rhRidgeBeam.position.set(0, 2.46 + roofRidgeH + 0.05, 0.12);
   restHouseGroup.add(rhRidgeBeam);
 
-  // Porch hanging lantern & cozy interior hearth light
-  const rhPorchLantern = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.1, 0.08, 0.24, 8)), restWindowMat);
-  rhPorchLantern.position.set(0.76, 1.98, 1.24);
+  const finialHornGeo = trackGeo(new THREE.BoxGeometry(0.15, 0.24, 0.16));
+  for (const fz of [0.12 - roofLenZ * 0.5, 0.12 + roofLenZ * 0.5]) {
+    const horn = new THREE.Mesh(finialHornGeo, ridgeStoneMat);
+    horn.position.set(0, 2.46 + roofRidgeH + 0.16, fz);
+    horn.rotation.x = Math.sign(fz - 0.12) * -0.22;
+    restHouseGroup.add(horn);
+  }
+
+  // Exposed under-eave cedar rafters (椽子) along both left & right eaves
+  const rhRafterGeo = trackGeo(new THREE.BoxGeometry(2.38, 0.052, 0.052));
+  for (let r = -5; r <= 5; r++) {
+    const rz = 0.12 + r * 0.37;
+    const rr = new THREE.Mesh(rhRafterGeo, cedarDeckMat);
+    rr.position.set(1.14, 2.86, rz);
+    rr.rotation.z = -0.44;
+    restHouseGroup.add(rr);
+
+    const lr = new THREE.Mesh(rhRafterGeo, cedarDeckMat);
+    lr.position.set(-1.14, 2.86, rz);
+    lr.rotation.z = 0.44;
+    restHouseGroup.add(lr);
+  }
+
+  // Eave-edge circular Wadang tile caps lining both left & right roof eaves
+  for (const side of [-1, 1]) {
+    for (let r = -6; r <= 6; r++) {
+      const cap = new THREE.Mesh(wadangGeo, ridgeStoneMat);
+      cap.position.set(side * (roofHalfW - 0.02), 2.46 - roofEaveDrop + 0.09, 0.12 + r * 0.32);
+      cap.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2;
+      restHouseGroup.add(cap);
+    }
+  }
+
+  // 5g. Cantilevered Porch Lantern Bracket & Bronze-Capped Paper Lantern + Hearth Light
+  const bracketArm = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.055, 0.055, 0.46)), rosewoodMat);
+  bracketArm.position.set(0.84, 2.26, 1.54);
+  restHouseGroup.add(bracketArm);
+  const rhLanternCord = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.01, 0.01, 0.24, 6)), bronzeMat);
+  rhLanternCord.position.set(0.84, 2.13, 1.66);
+  restHouseGroup.add(rhLanternCord);
+  const rhLanternCap = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.06, 0.12, 0.06, 8)), bronzeMat);
+  rhLanternCap.position.set(0.84, 2.02, 1.66);
+  restHouseGroup.add(rhLanternCap);
+  const rhPorchLantern = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.095, 0.08, 0.22, 8)), restWindowMat);
+  rhPorchLantern.position.set(0.84, 1.88, 1.66);
   restHouseGroup.add(rhPorchLantern);
 
-  const restHouseLight = new THREE.PointLight(0xffb463, 0.25, 9, 1.6);
-  restHouseLight.position.set(0, 1.35, 1.15);
+  const restHouseLight = new THREE.PointLight(0xffb463, 0.25, 10, 1.6);
+  restHouseLight.position.set(0, 1.35, 1.35);
   restHouseGroup.add(restHouseLight);
 
   group.add(restHouseGroup);

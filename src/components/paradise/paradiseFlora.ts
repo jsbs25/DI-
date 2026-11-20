@@ -75,7 +75,7 @@ function sphericalizeCanopyNormals(geo: THREE.BufferGeometry, upBias = 0.28): vo
 interface TreePrototypeData {
   barkGeo: THREE.BufferGeometry;
   leafGeo: THREE.BufferGeometry;
-  barkMat: THREE.Material;
+  barkMat?: THREE.Material;
   canopyCenterY: number;
   canopyRadius: number;
 }
@@ -90,78 +90,369 @@ function measureCanopyBounds(leafGeo: THREE.BufferGeometry): { centerY: number; 
   return { centerY, radius };
 }
 
-function buildSakuraPrototype(seed: number, scale: number): TreePrototypeData {
-  const tree = new Tree();
-  tree.loadPreset('Oak Medium');
-  tree.options.seed = seed;
-  tree.options.bark.type = 'birch';
-  tree.options.bark.tint = 0x62433d;
-  tree.options.bark.textureScale = { x: 1, y: 8 };
-  tree.options.branch.levels = 3;
-  tree.options.branch.length = { 0: 26, 1: 14.5, 2: 11.5, 3: 7.2 };
-  tree.options.branch.radius = { 0: 1.45, 1: 0.72, 2: 0.42, 3: 0.22 };
-  tree.options.branch.angle = { 1: 52, 2: 48, 3: 38 };
-  tree.options.branch.children = { 0: 6, 1: 4, 2: 3 };
-  tree.options.branch.gnarliness = { 0: 0.08, 1: 0.16, 2: 0.18, 3: 0.12 };
-  tree.options.branch.start = { 1: 0.38, 2: 0.2, 3: 0.15 };
-  tree.options.branch.force = { direction: { x: 0, y: 1, z: 0 }, strength: 0.008 };
-  tree.options.leaves.count = 14;
-  tree.options.leaves.size = 4.45;
-  tree.options.leaves.sizeVariance = 0.6;
-  tree.options.leaves.start = 0.14;
-  tree.options.leaves.billboard = 'double';
-  tree.generate();
+/**
+ * Generates an organic tapered cylindrical limb mesh along a CatmullRom spline,
+ * optionally including natural root-buttress flutes at the trunk base (t < 0.24).
+ */
+function buildTaperedLimbGeo(
+  points: THREE.Vector3[],
+  rStart: number,
+  rEnd: number,
+  tubularSegs: number,
+  radialSegs: number,
+  rootFlutes = 0,
+  uvTileY = 2.0
+): THREE.BufferGeometry {
+  const curve = new THREE.CatmullRomCurve3(points);
+  const frames = curve.computeFrenetFrames(tubularSegs, false);
 
-  const barkGeo = tree.branchesMesh.geometry.clone();
-  barkGeo.scale(scale, scale, scale);
-  const leafGeo = tree.leavesMesh.geometry.clone();
-  leafGeo.scale(scale, scale, scale);
-  sphericalizeCanopyNormals(leafGeo, 0.32);
-  const { centerY, radius } = measureCanopyBounds(leafGeo);
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
 
-  const barkMat = tree.branchesMesh.material as THREE.Material;
-  tree.leavesMesh.geometry.dispose();
-  (tree.leavesMesh.material as THREE.Material).dispose();
-  tree.branchesMesh.geometry.dispose();
+  const pt = new THREE.Vector3();
+  const nVec = new THREE.Vector3();
+  const vPos = new THREE.Vector3();
 
-  return { barkGeo, leafGeo, barkMat, canopyCenterY: centerY, canopyRadius: radius };
+  for (let i = 0; i <= tubularSegs; i++) {
+    const t = i / tubularSegs;
+    curve.getPointAt(t, pt);
+    const N = frames.normals[i];
+    const B = frames.binormals[i];
+
+    // Smooth taper + basal root flare at trunk base
+    const baseFlare = rootFlutes > 0 ? Math.pow(Math.max(0, 1 - t / 0.24), 2.1) * 0.55 : 0;
+    const baseR = THREE.MathUtils.lerp(rStart, rEnd, Math.pow(t, 0.86)) * (1 + baseFlare);
+
+    for (let j = 0; j <= radialSegs; j++) {
+      const u = j / radialSegs;
+      const theta = u * Math.PI * 2;
+      const cosT = Math.cos(theta);
+      const sinT = Math.sin(theta);
+
+      // Organic root buttress lobes near ground level
+      const flute =
+        rootFlutes > 0
+          ? 1 +
+            Math.pow(Math.max(0, 1 - t / 0.24), 1.8) *
+              0.28 *
+              Math.cos(theta * rootFlutes + t * 2.2)
+          : 1;
+
+      const r = baseR * flute;
+      nVec
+        .set(0, 0, 0)
+        .addScaledVector(N, cosT)
+        .addScaledVector(B, sinT)
+        .normalize();
+
+      vPos.copy(pt).addScaledVector(nVec, r);
+      positions.push(vPos.x, vPos.y, vPos.z);
+      normals.push(nVec.x, nVec.y, nVec.z);
+      uvs.push(u, t * uvTileY);
+    }
+  }
+
+  const stride = radialSegs + 1;
+  for (let i = 0; i < tubularSegs; i++) {
+    for (let j = 0; j < radialSegs; j++) {
+      const a = i * stride + j;
+      const b = (i + 1) * stride + j;
+      const c = (i + 1) * stride + (j + 1);
+      const d = i * stride + (j + 1);
+      indices.push(a, b, d, b, c, d);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  return geo;
 }
 
-function buildGinkgoPrototype(seed: number, scale: number): TreePrototypeData {
-  const tree = new Tree();
-  tree.loadPreset('Ash Medium');
-  tree.options.seed = seed;
-  tree.options.bark.type = 'oak';
-  tree.options.bark.tint = 0x877766;
-  tree.options.bark.textureScale = { x: 1, y: 10 };
-  tree.options.branch.levels = 3;
-  tree.options.branch.length = { 0: 32, 1: 13.5, 2: 10.5, 3: 6.8 };
-  tree.options.branch.radius = { 0: 1.32, 1: 0.66, 2: 0.38, 3: 0.2 };
-  tree.options.branch.angle = { 1: 42, 2: 44, 3: 32 };
-  tree.options.branch.children = { 0: 6, 1: 4, 2: 3 };
-  tree.options.branch.gnarliness = { 0: 0.04, 1: 0.1, 2: 0.14, 3: 0.1 };
-  tree.options.branch.start = { 1: 0.42, 2: 0.18, 3: 0.15 };
-  tree.options.branch.force = { direction: { x: 0, y: 1, z: 0 }, strength: 0.018 };
-  tree.options.leaves.count = 15;
-  tree.options.leaves.size = 4.15;
-  tree.options.leaves.sizeVariance = 0.58;
-  tree.options.leaves.start = 0.15;
-  tree.options.leaves.billboard = 'double';
-  tree.generate();
+/**
+ * Builds a compact 3D cupped 3-plane botanical spray rosette (never a flat square card)
+ * with gently arched silhouettes and radial AO vertex shading.
+ */
+function createCuppedSprayRosette(
+  size: number,
+  center: THREE.Vector3,
+  crownCenter: THREE.Vector3,
+  crownRadius: number,
+  rand: () => number
+): THREE.BufferGeometry {
+  const planes: THREE.BufferGeometry[] = [];
+  const angles: Array<[number, number, number]> = [
+    [(rand() - 0.5) * 0.55, rand() * Math.PI, (rand() - 0.5) * 0.45],
+    [0.35 + (rand() - 0.5) * 0.45, Math.PI / 3 + rand() * 0.4, (rand() - 0.5) * 0.45],
+    [-0.32 + (rand() - 0.5) * 0.45, (2 * Math.PI) / 3 + rand() * 0.4, (rand() - 0.5) * 0.45],
+  ];
 
-  const barkGeo = tree.branchesMesh.geometry.clone();
-  barkGeo.scale(scale, scale, scale);
-  const leafGeo = tree.leavesMesh.geometry.clone();
-  leafGeo.scale(scale, scale, scale);
+  const distFromCore = center.distanceTo(crownCenter);
+  const aoFactor = THREE.MathUtils.clamp(0.68 + (distFromCore / Math.max(1.2, crownRadius)) * 0.36, 0.65, 1.04);
+
+  for (const [rx, ry, rz] of angles) {
+    const p = new THREE.PlaneGeometry(size, size, 2, 2);
+    const pos = p.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const px = pos.getX(i);
+      const py = pos.getY(i);
+      const r2 = (px * px + py * py) / (size * size * 0.25);
+      // Gentle dome cup so clusters read volumetrically from every camera angle
+      pos.setZ(i, (0.14 - r2 * 0.26) * size);
+    }
+    p.rotateX(rx);
+    p.rotateY(ry);
+    p.rotateZ(rz);
+    p.translate(center.x, center.y, center.z);
+
+    // Bake soft interior-to-exterior botanical occlusion into vertex colors
+    const colors = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const vy = pos.getY(i);
+      const sunLift = THREE.MathUtils.clamp(0.86 + (vy - center.y) * 0.16, 0.72, 1.06);
+      const shade = aoFactor * sunLift;
+      colors[i * 3] = shade;
+      colors[i * 3 + 1] = shade;
+      colors[i * 3 + 2] = shade;
+    }
+    p.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    planes.push(p);
+  }
+
+  const merged = mergeGeometries(planes, false);
+  planes.forEach((pl) => pl.dispose());
+  return merged;
+}
+
+/**
+ * Generates an authentic multi-level *Prunus serrulata* Sakura tree:
+ * flared root buttresses, sinuous mahogany trunk, wide spreading arched boughs,
+ * fine dark twigs, and dense volumetric blossom rosettes anchored strictly at twig tips.
+ */
+function buildSakuraPrototype(seed: number, scale: number): TreePrototypeData {
+  const rand = seededRand(seed);
+  const branchGeos: THREE.BufferGeometry[] = [];
+  const twigTips: Array<{ pos: THREE.Vector3; size: number }> = [];
+
+  // Level 0: Flared gnarly trunk with gentle natural lean
+  const trunkH = (2.25 + rand() * 0.45) * scale * 5.2;
+  const leanX = (rand() - 0.5) * 0.55;
+  const leanZ = (rand() - 0.5) * 0.55;
+  const trunkPts = [
+    new THREE.Vector3(0, -0.15, 0),
+    new THREE.Vector3(leanX * 0.35, trunkH * 0.34, leanZ * 0.35),
+    new THREE.Vector3(leanX * 0.75, trunkH * 0.68, leanZ * 0.75),
+    new THREE.Vector3(leanX, trunkH, leanZ),
+  ];
+  const trunkTop = trunkPts[3];
+  const trunkR = 0.24 * scale * 5.2;
+  branchGeos.push(buildTaperedLimbGeo(trunkPts, trunkR, trunkR * 0.52, 9, 9, 5, 2.5));
+
+  // Level 1: 4-5 wide spreading primary cherry limbs radiating in vase silhouette
+  const primaryCount = 5;
+  const baseYaw = rand() * Math.PI * 2;
+  for (let i = 0; i < primaryCount; i++) {
+    const yaw = baseYaw + (i / primaryCount) * Math.PI * 2 + (rand() - 0.5) * 0.38;
+    const elev = 0.48 + rand() * 0.38; // spreading outward & upward
+    const len = (2.15 + rand() * 0.65) * scale * 5.2;
+    const attachT = 0.72 + (i % 2) * 0.12 + rand() * 0.14;
+    const startPos = new THREE.Vector3().lerpVectors(trunkPts[1], trunkTop, attachT);
+
+    const dirX = Math.cos(yaw);
+    const dirZ = Math.sin(yaw);
+    const pMid = new THREE.Vector3(
+      startPos.x + dirX * len * 0.52,
+      startPos.y + elev * len * 0.65,
+      startPos.z + dirZ * len * 0.52
+    );
+    const pEnd = new THREE.Vector3(
+      startPos.x + dirX * len,
+      startPos.y + elev * len * 0.96 - 0.14, // subtle graceful cherry bough arch
+      startPos.z + dirZ * len
+    );
+    const r1 = trunkR * (0.44 - (i % 2) * 0.05);
+    branchGeos.push(buildTaperedLimbGeo([startPos, pMid, pEnd], r1, r1 * 0.44, 6, 7, 0, 1.8));
+
+    // Level 2: 3 spreading secondary branches per primary limb
+    for (let j = 0; j < 3; j++) {
+      const subT = 0.42 + (j / 2) * 0.55;
+      const subOrigin = new THREE.Vector3().lerpVectors(pMid, pEnd, subT);
+      const subYaw = yaw + (j - 1) * 0.62 + (rand() - 0.5) * 0.25;
+      const subLen = (1.25 + rand() * 0.45) * scale * 5.2;
+      const subElev = 0.22 + rand() * 0.38;
+      const sMid = new THREE.Vector3(
+        subOrigin.x + Math.cos(subYaw) * subLen * 0.54,
+        subOrigin.y + subElev * subLen * 0.65,
+        subOrigin.z + Math.sin(subYaw) * subLen * 0.54
+      );
+      const sEnd = new THREE.Vector3(
+        subOrigin.x + Math.cos(subYaw) * subLen,
+        subOrigin.y + subElev * subLen * 0.85 - 0.1,
+        subOrigin.z + Math.sin(subYaw) * subLen
+      );
+      const r2 = r1 * 0.48;
+      branchGeos.push(buildTaperedLimbGeo([subOrigin, sMid, sEnd], r2, r2 * 0.36, 5, 5, 0, 1.2));
+
+      // Level 3: Fine terminal twigs & blossom rosette anchors
+      for (let k = 0; k < 3; k++) {
+        const twigT = 0.45 + (k / 2) * 0.55;
+        const twOrigin = new THREE.Vector3().lerpVectors(sMid, sEnd, twigT);
+        const twYaw = subYaw + (k - 1) * 0.68 + (rand() - 0.5) * 0.35;
+        const twLen = (0.65 + rand() * 0.32) * scale * 5.2;
+        const twEnd = new THREE.Vector3(
+          twOrigin.x + Math.cos(twYaw) * twLen,
+          twOrigin.y + (0.08 + rand() * 0.34) * twLen - 0.08,
+          twOrigin.z + Math.sin(twYaw) * twLen
+        );
+        branchGeos.push(buildTaperedLimbGeo([twOrigin, twEnd], r2 * 0.42, r2 * 0.16, 3, 4, 0, 0.8));
+        twigTips.push({ pos: twEnd, size: (1.28 + rand() * 0.42) * scale * 5.2 });
+        if (k === 1) {
+          twigTips.push({
+            pos: new THREE.Vector3().lerpVectors(twOrigin, twEnd, 0.45),
+            size: (1.1 + rand() * 0.3) * scale * 5.2,
+          });
+        }
+      }
+    }
+  }
+
+  // Crown apex shoot
+  const topEnd = new THREE.Vector3(leanX * 1.1, trunkH + 1.65 * scale * 5.2, leanZ * 1.1);
+  branchGeos.push(buildTaperedLimbGeo([trunkTop, topEnd], trunkR * 0.36, trunkR * 0.14, 4, 6, 0, 1.2));
+  for (let c = 0; c < 4; c++) {
+    const a = (c * Math.PI) / 2 + rand() * 0.5;
+    twigTips.push({
+      pos: new THREE.Vector3(
+        topEnd.x + Math.cos(a) * 0.65 * scale * 5.2,
+        topEnd.y + (rand() - 0.3) * 0.45 * scale * 5.2,
+        topEnd.z + Math.sin(a) * 0.65 * scale * 5.2
+      ),
+      size: (1.35 + rand() * 0.35) * scale * 5.2,
+    });
+  }
+
+  const barkGeo = mergeGeometries(branchGeos, false);
+  branchGeos.forEach((g) => g.dispose());
+
+  // Compute crown centroid for spherical normal & AO shading
+  const crownCenter = new THREE.Vector3();
+  twigTips.forEach((t) => crownCenter.add(t.pos));
+  crownCenter.divideScalar(Math.max(1, twigTips.length));
+  let maxDist = 1.5;
+  for (const t of twigTips) maxDist = Math.max(maxDist, t.pos.distanceTo(crownCenter));
+
+  const leafGeos = twigTips.map((t) => createCuppedSprayRosette(t.size, t.pos, crownCenter, maxDist, rand));
+  const leafGeo = mergeGeometries(leafGeos, false);
+  leafGeos.forEach((g) => g.dispose());
   sphericalizeCanopyNormals(leafGeo, 0.35);
+
   const { centerY, radius } = measureCanopyBounds(leafGeo);
+  return { barkGeo, leafGeo, canopyCenterY: centerY, canopyRadius: radius };
+}
 
-  const barkMat = tree.branchesMesh.material as THREE.Material;
-  tree.leavesMesh.geometry.dispose();
-  (tree.leavesMesh.material as THREE.Material).dispose();
-  tree.branchesMesh.geometry.dispose();
+/**
+ * Generates an authentic tall pyramidal *Ginkgo biloba* tree:
+ * deep root-buttressed straight trunk, ascending limbs in layered tiers,
+ * and dense golden fan-shaped leaf rosettes.
+ */
+function buildGinkgoPrototype(seed: number, scale: number): TreePrototypeData {
+  const rand = seededRand(seed);
+  const branchGeos: THREE.BufferGeometry[] = [];
+  const twigTips: Array<{ pos: THREE.Vector3; size: number }> = [];
 
-  return { barkGeo, leafGeo, barkMat, canopyCenterY: centerY, canopyRadius: radius };
+  const totalH = (6.3 + rand() * 0.9) * scale * 5.1;
+  const swayX = (rand() - 0.5) * 0.32;
+  const swayZ = (rand() - 0.5) * 0.32;
+  const trunkPts = [
+    new THREE.Vector3(0, -0.15, 0),
+    new THREE.Vector3(swayX * 0.3, totalH * 0.28, swayZ * 0.3),
+    new THREE.Vector3(swayX * 0.85, totalH * 0.62, swayZ * 0.85),
+    new THREE.Vector3(swayX * 0.5, totalH * 0.92, swayZ * 0.5),
+  ];
+  const trunkR = 0.22 * scale * 5.1;
+  branchGeos.push(buildTaperedLimbGeo(trunkPts, trunkR, trunkR * 0.16, 11, 9, 5, 3.5));
+
+  const trunkCurve = new THREE.CatmullRomCurve3(trunkPts);
+  const tierCount = 4;
+  const baseYaw = rand() * Math.PI * 2;
+
+  for (let tier = 0; tier < tierCount; tier++) {
+    const tierFrac = 0.34 + (tier / (tierCount - 1)) * 0.56;
+    const limbsInTier = tier === 0 ? 4 : tier === 1 ? 4 : tier === 2 ? 4 : 3;
+    const tierRadiusScale = 1.08 - tier * 0.21;
+
+    for (let i = 0; i < limbsInTier; i++) {
+      const yaw = baseYaw + tier * 0.72 + (i / limbsInTier) * Math.PI * 2 + (rand() - 0.5) * 0.35;
+      const origin = trunkCurve.getPointAt(Math.min(0.96, tierFrac + (rand() - 0.5) * 0.04));
+      const len = (1.85 + rand() * 0.45) * tierRadiusScale * scale * 5.1;
+      const elev = 0.58 + tier * 0.12 + rand() * 0.18; // ascending classic ginkgo angles
+
+      const dirX = Math.cos(yaw);
+      const dirZ = Math.sin(yaw);
+      const pMid = new THREE.Vector3(
+        origin.x + dirX * len * 0.52,
+        origin.y + elev * len * 0.52,
+        origin.z + dirZ * len * 0.52
+      );
+      const pEnd = new THREE.Vector3(
+        origin.x + dirX * len,
+        origin.y + elev * len * 0.92,
+        origin.z + dirZ * len
+      );
+      const r1 = trunkR * (0.4 - tier * 0.06);
+      branchGeos.push(buildTaperedLimbGeo([origin, pMid, pEnd], r1, r1 * 0.32, 5, 6, 0, 1.5));
+
+      // Secondary spur branches
+      for (let j = 0; j < 2; j++) {
+        const subOrigin = new THREE.Vector3().lerpVectors(pMid, pEnd, 0.45 + j * 0.45);
+        const subYaw = yaw + (j === 0 ? -0.58 : 0.58) + (rand() - 0.5) * 0.25;
+        const subLen = (0.85 + rand() * 0.35) * tierRadiusScale * scale * 5.1;
+        const subEnd = new THREE.Vector3(
+          subOrigin.x + Math.cos(subYaw) * subLen,
+          subOrigin.y + (0.42 + rand() * 0.24) * subLen,
+          subOrigin.z + Math.sin(subYaw) * subLen
+        );
+        branchGeos.push(buildTaperedLimbGeo([subOrigin, subEnd], r1 * 0.45, r1 * 0.15, 3, 4, 0, 0.9));
+        twigTips.push({ pos: subEnd, size: (1.22 + rand() * 0.36) * scale * 5.1 });
+      }
+      twigTips.push({ pos: pEnd, size: (1.28 + rand() * 0.35) * scale * 5.1 });
+    }
+  }
+
+  // Crown spire tip
+  const crownPeak = trunkCurve.getPointAt(1.0);
+  for (let k = 0; k < 3; k++) {
+    const a = (k * Math.PI * 2) / 3 + rand() * 0.4;
+    twigTips.push({
+      pos: new THREE.Vector3(
+        crownPeak.x + Math.cos(a) * 0.35 * scale * 5.1,
+        crownPeak.y + (0.25 + rand() * 0.35) * scale * 5.1,
+        crownPeak.z + Math.sin(a) * 0.35 * scale * 5.1
+      ),
+      size: (1.18 + rand() * 0.25) * scale * 5.1,
+    });
+  }
+
+  const barkGeo = mergeGeometries(branchGeos, false);
+  branchGeos.forEach((g) => g.dispose());
+
+  const crownCenter = new THREE.Vector3();
+  twigTips.forEach((t) => crownCenter.add(t.pos));
+  crownCenter.divideScalar(Math.max(1, twigTips.length));
+  let maxDist = 1.5;
+  for (const t of twigTips) maxDist = Math.max(maxDist, t.pos.distanceTo(crownCenter));
+
+  const leafGeos = twigTips.map((t) => createCuppedSprayRosette(t.size, t.pos, crownCenter, maxDist, rand));
+  const leafGeo = mergeGeometries(leafGeos, false);
+  leafGeos.forEach((g) => g.dispose());
+  sphericalizeCanopyNormals(leafGeo, 0.38);
+
+  const { centerY, radius } = measureCanopyBounds(leafGeo);
+  return { barkGeo, leafGeo, canopyCenterY: centerY, canopyRadius: radius };
 }
 
 function buildPinePrototype(seed: number, scale: number): TreePrototypeData {
@@ -169,7 +460,7 @@ function buildPinePrototype(seed: number, scale: number): TreePrototypeData {
   tree.loadPreset('Pine Medium');
   tree.options.seed = seed;
   tree.options.leaves.count = 16;
-  tree.options.leaves.size = 3.6;
+  tree.options.leaves.size = 3.4;
   tree.options.leaves.billboard = 'double';
   tree.generate();
 
@@ -215,7 +506,7 @@ function createShrubClusterGeo(): THREE.BufferGeometry {
 }
 
 /**
- * Builds a crossed 2-card botanical flower clump geometry (replaces flat cone blooms!)
+ * Builds a crossed 2-card botanical flower clump geometry
  */
 function createCrossWildflowerGeo(): THREE.BufferGeometry {
   const p1 = new THREE.PlaneGeometry(0.32, 0.42);
@@ -321,7 +612,6 @@ export function createParadiseFlora(
           #endif
           float hWeight = clamp(position.y * ${cfg.heightFactor.toFixed(3)}, 0.0, 2.2);
           float hBend = hWeight * hWeight;
-          // Traveling spatial wind front + local canopy flutter
           float gustFront = sin(phase - uTime * (0.45 + uWindStrength * 0.65)) * 0.6
                           + cos(phase * 1.4 - uTime * 0.9) * 0.4;
           float gust = gustFront * 0.55
@@ -379,50 +669,72 @@ export function createParadiseFlora(
   };
 
   // =========================================================================
-  // 1. Procedural EZ-Tree Sakura (4 seeded trees), Golden Ginkgo (3 trees) & Pines
+  // 1. Authentic Botanical Sakura & Ginkgo Trees + Background Alpine Pines
   // =========================================================================
+  const sakuraBarkMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      map: textures.sakuraBarkMap,
+      normalMap: textures.barkNormalMap,
+      normalScale: new THREE.Vector2(0.75, 0.75),
+      roughness: 0.72,
+      metalness: 0.03,
+    })
+  );
+
+  const ginkgoBarkMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      map: textures.ginkgoBarkMap,
+      normalMap: textures.barkNormalMap,
+      normalScale: new THREE.Vector2(1.05, 1.05),
+      roughness: 0.88,
+      metalness: 0.02,
+    })
+  );
+
   const sakuraLeafMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.sakuraClusterMap,
       color: 0xffffff,
-      alphaTest: 0.34,
+      vertexColors: true,
+      alphaTest: 0.36,
       side: THREE.DoubleSide,
       roughness: 0.62,
       metalness: 0.01,
     })
   );
   applyBotanicalWind(sakuraLeafMat, {
-    freq: 1.18,
-    amp: 0.11,
+    freq: 1.15,
+    amp: 0.09,
     heightFactor: 0.18,
-    translucencyColor: '0.15, 0.10, 0.12',
+    translucencyColor: '0.14, 0.09, 0.11',
     nightBloomGlow: true,
-    cacheKey: 'paradise-ez-sakura-v2',
+    cacheKey: 'paradise-botanical-sakura-v3',
   });
 
   const ginkgoLeafMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.ginkgoClusterMap,
       color: 0xffffff,
-      alphaTest: 0.34,
+      vertexColors: true,
+      alphaTest: 0.36,
       side: THREE.DoubleSide,
       roughness: 0.54,
       metalness: 0.02,
     })
   );
   applyBotanicalWind(ginkgoLeafMat, {
-    freq: 1.05,
-    amp: 0.1,
-    heightFactor: 0.16,
-    translucencyColor: '0.18, 0.14, 0.04',
-    cacheKey: 'paradise-ez-ginkgo-v2',
+    freq: 1.02,
+    amp: 0.085,
+    heightFactor: 0.15,
+    translucencyColor: '0.17, 0.13, 0.03',
+    cacheKey: 'paradise-botanical-ginkgo-v3',
   });
 
   const pineLeafMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.pineClusterMap,
       color: 0xffffff,
-      alphaTest: 0.34,
+      alphaTest: 0.36,
       side: THREE.DoubleSide,
       roughness: 0.82,
       metalness: 0.01,
@@ -430,20 +742,20 @@ export function createParadiseFlora(
   );
   applyBotanicalWind(pineLeafMat, {
     freq: 0.72,
-    amp: 0.07,
+    amp: 0.06,
     heightFactor: 0.12,
-    cacheKey: 'paradise-ez-pine-v2',
+    cacheKey: 'paradise-ez-pine-v3',
   });
 
   const sakuraProtos = [
-    buildSakuraPrototype(1107, 0.185),
-    buildSakuraPrototype(2419, 0.175),
-    buildSakuraPrototype(3871, 0.195),
-    buildSakuraPrototype(4603, 0.18),
+    buildSakuraPrototype(1107, 0.195),
+    buildSakuraPrototype(2419, 0.185),
+    buildSakuraPrototype(3871, 0.21),
+    buildSakuraPrototype(4603, 0.19),
   ];
   const ginkgoProtos = [
     buildGinkgoPrototype(5103, 0.195),
-    buildGinkgoPrototype(6427, 0.21),
+    buildGinkgoPrototype(6427, 0.215),
     buildGinkgoPrototype(7789, 0.185),
   ];
   const pineProtos = [
@@ -454,7 +766,7 @@ export function createParadiseFlora(
   for (const p of [...sakuraProtos, ...ginkgoProtos, ...pineProtos]) {
     trackGeo(p.barkGeo);
     trackGeo(p.leafGeo);
-    trackMat(p.barkMat);
+    if (p.barkMat) trackMat(p.barkMat);
   }
 
   interface PlacementItem {
@@ -469,14 +781,14 @@ export function createParadiseFlora(
   const isClearTreeSite = (x: number, z: number, minPathDist = 0.55): boolean => {
     const h = terrainHeightAt(x, z);
     if (h < 0.24) return false;
-    if (lakeSignedDist(x, z) < 1.3) return false;
+    if (lakeSignedDist(x, z) < 1.35) return false;
     const st = streamDistanceAndFlow(x, z);
     if (st.dist < st.width * 1.45) return false;
     if (gardenPathFactor(x, z) > minPathDist) return false;
     // Keep pavilion, bridge plazas, and Spirit Rest Cottage clear
-    if (Math.hypot(x - 12.8, z + 7.8) < 5.0) return false;
+    if (Math.hypot(x - 12.8, z + 7.8) < 5.2) return false;
     if (Math.hypot(x + 6.4, z + 8.4) < 5.0) return false;
-    if (Math.hypot(x + 11.4, z - 5.8) < 4.5) return false;
+    if (Math.hypot(x + 11.4, z - 5.8) < 4.9) return false;
     // Keep panoramic Overlook camera sightline corridor [-4.5, 23.5] -> [2.5, -1.5] open
     const camX = -4.5;
     const camZ = 23.5;
@@ -522,12 +834,12 @@ export function createParadiseFlora(
   const ginkgoBuckets: PlacementItem[][] = ginkgoProtos.map(() => []);
   const pineBuckets: PlacementItem[][] = pineProtos.map(() => []);
 
-  const sakuraTints = [0xffffff, 0xffeef3, 0xffd7e3, 0xf8c3d4];
+  const sakuraTints = [0xffffff, 0xfff0f4, 0xffe0ea, 0xfbd0df];
   const ginkgoTints = [0xffffff, 0xffe992, 0xffd456, 0xf5be3c];
   const pineTints = [0xffffff, 0xe8f3e4, 0xd8ead6];
 
   const placedTreeCoords: Array<[number, number]> = [];
-  const hasRoomFromNeighbors = (x: number, z: number, minGap = 3.2) =>
+  const hasRoomFromNeighbors = (x: number, z: number, minGap = 3.25) =>
     placedTreeCoords.every(([px, pz]) => Math.hypot(x - px, z - pz) >= minGap);
 
   for (let i = 0; i < heroSakuraCoords.length && i < quality.sakuraTreeCount; i++) {
@@ -536,7 +848,7 @@ export function createParadiseFlora(
     placedTreeCoords.push([x, z]);
     sakuraBuckets[i % sakuraProtos.length].push({
       x,
-      y: terrainHeightAt(x, z) - 0.12,
+      y: terrainHeightAt(x, z) - 0.1,
       z,
       rotY: rand() * Math.PI * 2,
       scale: sc * (0.94 + rand() * 0.14),
@@ -552,17 +864,17 @@ export function createParadiseFlora(
     const x = Math.cos(angle) * dist + 4.5;
     const z = Math.sin(angle) * dist - 2.0;
     if (x < -12 && rand() > 0.25) continue;
-    if (!isClearTreeSite(x, z) || !hasRoomFromNeighbors(x, z, 3.35)) continue;
+    if (!isClearTreeSite(x, z) || !hasRoomFromNeighbors(x, z, 3.45)) continue;
     const h = terrainHeightAt(x, z);
     if (h > 10.5) continue;
     placedTreeCoords.push([x, z]);
     const idx = Math.floor(rand() * sakuraProtos.length);
     sakuraBuckets[idx].push({
       x,
-      y: h - 0.14,
+      y: h - 0.1,
       z,
       rotY: rand() * Math.PI * 2,
-      scale: 0.85 + rand() * 0.42,
+      scale: 0.86 + rand() * 0.4,
       colorHex: sakuraTints[Math.floor(rand() * sakuraTints.length)],
     });
   }
@@ -573,7 +885,7 @@ export function createParadiseFlora(
     placedTreeCoords.push([x, z]);
     ginkgoBuckets[i % ginkgoProtos.length].push({
       x,
-      y: terrainHeightAt(x, z) - 0.12,
+      y: terrainHeightAt(x, z) - 0.1,
       z,
       rotY: rand() * Math.PI * 2,
       scale: sc * (0.94 + rand() * 0.15),
@@ -587,17 +899,17 @@ export function createParadiseFlora(
     const x = -38 + rand() * 58;
     const z = -34 + rand() * 62;
     if (x > 6 && z > -6 && rand() > 0.24) continue;
-    if (!isClearTreeSite(x, z) || !hasRoomFromNeighbors(x, z, 3.45)) continue;
+    if (!isClearTreeSite(x, z) || !hasRoomFromNeighbors(x, z, 3.5)) continue;
     const h = terrainHeightAt(x, z);
     if (h > 11.5) continue;
     placedTreeCoords.push([x, z]);
     const idx = Math.floor(rand() * ginkgoProtos.length);
     ginkgoBuckets[idx].push({
       x,
-      y: h - 0.14,
+      y: h - 0.1,
       z,
       rotY: rand() * Math.PI * 2,
-      scale: 0.86 + rand() * 0.45,
+      scale: 0.86 + rand() * 0.44,
       colorHex: ginkgoTints[Math.floor(rand() * ginkgoTints.length)],
     });
   }
@@ -632,14 +944,16 @@ export function createParadiseFlora(
     protos: TreePrototypeData[],
     buckets: PlacementItem[][],
     leafMat: THREE.MeshStandardMaterial,
+    sharedBarkMat?: THREE.Material,
     canopyKind?: 'sakura' | 'ginkgo'
   ) => {
     for (let i = 0; i < protos.length; i++) {
       const items = buckets[i];
       if (items.length === 0) continue;
       const proto = protos[i];
+      const activeBarkMat = sharedBarkMat || proto.barkMat!;
 
-      const barkMesh = new THREE.InstancedMesh(proto.barkGeo, proto.barkMat, items.length);
+      const barkMesh = new THREE.InstancedMesh(proto.barkGeo, activeBarkMat, items.length);
       barkMesh.castShadow = quality.enableShadows;
       barkMesh.receiveShadow = quality.enableShadows;
 
@@ -679,8 +993,8 @@ export function createParadiseFlora(
     }
   };
 
-  emitInstancedTrees(sakuraProtos, sakuraBuckets, sakuraLeafMat, 'sakura');
-  emitInstancedTrees(ginkgoProtos, ginkgoBuckets, ginkgoLeafMat, 'ginkgo');
+  emitInstancedTrees(sakuraProtos, sakuraBuckets, sakuraLeafMat, sakuraBarkMat, 'sakura');
+  emitInstancedTrees(ginkgoProtos, ginkgoBuckets, ginkgoLeafMat, ginkgoBarkMat, 'ginkgo');
   emitInstancedTrees(pineProtos, pineBuckets, pineLeafMat);
 
   // =========================================================================
@@ -719,7 +1033,7 @@ export function createParadiseFlora(
     if (sample.height < 0.2 || sample.height > 4.6 || sample.pathWeight > 0.38) continue;
     if (Math.hypot(x - 12.8, z + 7.8) < 3.6) continue;
     if (Math.hypot(x + 6.4, z + 8.4) < 3.4) continue;
-    if (Math.hypot(x + 11.4, z - 5.8) < 3.4) continue;
+    if (Math.hypot(x + 11.4, z - 5.8) < 3.7) continue;
 
     dummy.position.set(x, sample.height - 0.06, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
@@ -770,7 +1084,6 @@ export function createParadiseFlora(
     cacheKey: 'paradise-grass-wind-v2',
   });
 
-  // Short-to-mid lush meadow blades
   const bladeGeo = buildCurvedGrassGeo(0.088, 0.56);
   const grassMesh = new THREE.InstancedMesh(bladeGeo, grassMat, quality.grassCount);
   grassMesh.receiveShadow = quality.enableShadows;
@@ -784,7 +1097,7 @@ export function createParadiseFlora(
     const z = (rand() - 0.5) * 58;
     const sample = sampleTerrainBiome(x, z);
     if (sample.height < 0.16 || sample.height > 7.0 || sample.pathWeight > 0.34) continue;
-    if (Math.hypot(x + 11.4, z - 5.8) < 2.95) continue;
+    if (Math.hypot(x + 11.4, z - 5.8) < 3.25) continue;
 
     dummy.position.set(x, sample.height - 0.03, z);
     dummy.rotation.set((rand() - 0.5) * 0.16, rand() * Math.PI * 2, (rand() - 0.5) * 0.16);
@@ -807,7 +1120,6 @@ export function createParadiseFlora(
   grassMesh.computeBoundingSphere();
   group.add(grassMesh);
 
-  // Tall lakeside & bank ornamental grasses
   const tallBladeGeo = buildCurvedGrassGeo(0.095, 1.08);
   const tallGrassMesh = new THREE.InstancedMesh(tallBladeGeo, grassMat, quality.tallGrassCount);
   tallGrassMesh.receiveShadow = quality.enableShadows;
@@ -819,7 +1131,7 @@ export function createParadiseFlora(
     const z = -22 + rand() * 44;
     const sample = sampleTerrainBiome(x, z);
     if (sample.height < 0.06 || sample.height > 2.4 || sample.pathWeight > 0.28) continue;
-    if (Math.hypot(x + 11.4, z - 5.8) < 3.1) continue;
+    if (Math.hypot(x + 11.4, z - 5.8) < 3.35) continue;
 
     dummy.position.set(x, sample.height - 0.04, z);
     dummy.rotation.set((rand() - 0.5) * 0.18, rand() * Math.PI * 2, (rand() - 0.5) * 0.18);
@@ -838,7 +1150,7 @@ export function createParadiseFlora(
   group.add(tallGrassMesh);
 
   // =========================================================================
-  // 4. Multi-Petal Botanical Wildflowers (Crossed textured cards + Butterfly Anchors)
+  // 4. Multi-Petal Botanical Wildflowers
   // =========================================================================
   const flowerSpots: THREE.Vector3[] = [];
   const flowerGeo = trackGeo(createCrossWildflowerGeo());
@@ -936,7 +1248,6 @@ export function createParadiseFlora(
   reedMesh.computeBoundingSphere();
   group.add(reedMesh);
 
-  // Floating Lily Pads & Sculpted Multi-Petal Lotus Blooms
   const padGeo = trackGeo(new THREE.CylinderGeometry(0.32, 0.32, 0.02, 12, 1, false, 0.15, Math.PI * 1.85));
   const padMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x3b6e38, roughness: 0.48, metalness: 0.04 }));
   const lotusGeo = trackGeo(createSculptedLotusGeo());
@@ -984,8 +1295,8 @@ export function createParadiseFlora(
   lotusMesh.computeBoundingSphere();
   group.add(padMesh, lotusMesh);
 
-  // Floating fallen Sakura Petals & Golden Ginkgo Leaves resting on water surface
-  const waterPetalGeo = trackGeo(new THREE.PlaneGeometry(0.16, 0.16));
+  // Subtle scattered floating Sakura Petals & Golden Ginkgo Leaves resting on water surface
+  const waterPetalGeo = trackGeo(new THREE.PlaneGeometry(0.15, 0.15));
   waterPetalGeo.rotateX(-Math.PI / 2);
   const waterPetalMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -1021,7 +1332,7 @@ export function createParadiseFlora(
     if (h > -0.14) continue;
     dummy.position.set(x, 0.018, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
-    dummy.scale.setScalar(0.75 + rand() * 0.75);
+    dummy.scale.setScalar(0.75 + rand() * 0.7);
     dummy.updateMatrix();
     if (x < -1 && fg < floatGinkgos.count) {
       floatGinkgos.setMatrixAt(fg++, dummy.matrix);
