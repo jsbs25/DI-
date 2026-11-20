@@ -1206,8 +1206,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const activeWeatherMeta = WEATHER_OPTIONS.find((w) => w.id === activeWeather) || WEATHER_OPTIONS[0];
   const isDayUi = agentSnap.gardenDaylight > 0.44;
   const dockShellCls = isDayUi
-    ? 'border-white/55 bg-[#f7f3eb]/72 text-[#223029] shadow-[0_10px_28px_rgba(24,36,28,0.14)]'
-    : 'border-white/14 bg-[#141d29]/64 text-[#f2eee6] shadow-[0_12px_32px_rgba(4,8,14,0.34)]';
+    ? 'border-white/35 sm:border-white/55 bg-[#f7f3eb]/62 sm:bg-[#f7f3eb]/72 text-[#223029] shadow-[0_4px_12px_rgba(24,36,28,0.08)] sm:shadow-[0_10px_28px_rgba(24,36,28,0.14)]'
+    : 'border-white/10 sm:border-white/14 bg-[#141d29]/68 sm:bg-[#141d29]/64 text-[#f2eee6] shadow-[0_6px_14px_rgba(4,8,14,0.18)] sm:shadow-[0_12px_32px_rgba(4,8,14,0.34)]';
   const dockBorderCls = isDayUi ? 'border-black/10' : 'border-white/10';
   const dockDividerCls = isDayUi ? 'divide-black/10' : 'divide-white/12';
   const dockPillCls = isDayUi
@@ -1286,15 +1286,15 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Top-Center Clock, Location & Live Weather Pill — below navbar on mobile/tablet to avoid crowding */}
+      {/* Top-Center Clock, Location & Live Weather Pill — below navbar on mobile/tablet to avoid covering header/scene */}
       <div
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.2rem+env(safe-area-inset-top))] lg:top-[max(0.65rem,env(safe-area-inset-top))] z-[54] flex flex-col items-center gap-2 max-w-[calc(100vw-1.25rem)] sm:max-w-[calc(100vw-2rem)] lg:max-w-[calc(100vw-22rem)]"
+        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.4rem+env(safe-area-inset-top))] lg:top-[max(0.65rem,env(safe-area-inset-top))] z-[54] flex flex-col items-center gap-2 max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-3rem)] lg:max-w-[calc(100vw-22rem)]"
       >
-        <div className={`pointer-events-auto inline-flex h-9 items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/55' : 'ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
+        <div className={`pointer-events-auto inline-flex h-8 sm:h-9 items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-md sm:backdrop-blur-xl lg:backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/30 sm:ring-white/55' : 'ring-white/[0.05] sm:ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
-            className="inline-flex h-9 items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 text-[11px] sm:text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
+            className="inline-flex h-8 sm:h-9 items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 text-[11px] sm:text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
             title={isZh ? '实时时间、精准定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
           >
             <span className="tabular-nums text-[12px] sm:text-[13px] font-semibold tracking-tight leading-none">
@@ -1328,7 +1328,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             type="button"
             onClick={() => void fetchLiveWeather(true)}
             disabled={locating}
-            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
+            className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
             title={isZh ? '高精度 GPS 重新定位' : 'Refresh precise GPS location'}
             aria-label={isZh ? '高精度定位' : 'Locate'}
           >
@@ -1338,7 +1338,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           <button
             type="button"
             onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
-            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
+            className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
             title={isZh ? '重置视角' : 'Reset View'}
             aria-label={isZh ? '重置视角' : 'Reset View'}
           >
@@ -1349,7 +1349,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             <button
               type="button"
               onClick={() => onImmersiveChange(false)}
-              className={`h-9 px-2.5 sm:px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
+              className={`h-8 sm:h-9 px-2.5 sm:px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
             >
               {isZh ? '退出' : 'Exit'}
             </button>
@@ -1357,7 +1357,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
 
         {controlsOpen && (
-          <div className={`pointer-events-auto w-[min(92vw,372px)] max-h-[calc(100dvh-11.5rem)] overflow-y-auto overscroll-contain rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-2xl ${dockShellCls}`}>
+          <div className={`pointer-events-auto w-[min(92vw,372px)] max-h-[calc(100dvh-11.5rem)] overflow-y-auto overscroll-contain rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-xl sm:backdrop-blur-2xl ${dockShellCls}`}>
 
             <div className={`mb-2.5 space-y-2 rounded-xl border px-2.5 py-2 ${dockBorderCls} ${isDayUi ? 'bg-white/48' : 'bg-white/[0.04]'}`}>
               <div className="flex items-center justify-between gap-2">

@@ -724,6 +724,38 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [prefs.layoutMode, viewMode, pageCount]);
 
+  // Swipe to turn pages on mobile/tablet (paged reflow and original views)
+  const pageTouchStartXRef = useRef<number | null>(null);
+  const pageTouchStartYRef = useRef<number | null>(null);
+
+  const handlePageTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (settingsOpen || tocOpen || aiDrawerOpen || wordCard) return;
+    if (!(prefs.layoutMode === 'paged' || viewMode === 'original')) return;
+    const t = e.touches[0];
+    if (!t) return;
+    pageTouchStartXRef.current = t.clientX;
+    pageTouchStartYRef.current = t.clientY;
+  }, [aiDrawerOpen, prefs.layoutMode, settingsOpen, tocOpen, viewMode, wordCard]);
+
+  const handlePageTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (settingsOpen || tocOpen || aiDrawerOpen || wordCard) return;
+    if (!(prefs.layoutMode === 'paged' || viewMode === 'original')) return;
+    const startX = pageTouchStartXRef.current;
+    const startY = pageTouchStartYRef.current;
+    pageTouchStartXRef.current = null;
+    pageTouchStartYRef.current = null;
+    if (startX == null || startY == null) return;
+    const t = e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+    setPageNumber((p) => {
+      if (dx < 0) return Math.min(Math.max(1, pageCount), p + 1);
+      return Math.max(1, p - 1);
+    });
+  }, [aiDrawerOpen, pageCount, prefs.layoutMode, settingsOpen, tocOpen, viewMode, wordCard]);
+
   // Listen for text selection inside reflowable prose
   const handleProseMouseUp = useCallback(() => {
     const sel = window.getSelection();
@@ -1704,8 +1736,15 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
           ref={scrollContainerRef}
           onScroll={handlePdfVirtualScroll}
           className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden"
+          style={{ touchAction: (prefs.layoutMode === 'paged' || viewMode === 'original') ? 'pan-y' : undefined }}
           onMouseUp={handleProseMouseUp}
-          onTouchEnd={handleProseMouseUp}
+          onTouchStart={(e) => {
+            handlePageTouchStart(e);
+          }}
+          onTouchEnd={(e) => {
+            handleProseMouseUp();
+            handlePageTouchEnd(e);
+          }}
         >
           {status && !error && (
             <div className="flex flex-col items-center justify-center py-24 gap-3 text-sm" style={{ color: palette.muted }}>

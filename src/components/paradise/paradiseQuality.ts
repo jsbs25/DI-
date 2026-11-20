@@ -191,6 +191,7 @@ export function detectParadiseQuality(
     case 'high':
     default:
       // High-definition desktop Retina calibration (up to 2.0x DPR + 2048 tight shadows)
+      // Bloom/god-rays disabled on touch devices (phones/tablets/foldables) to prevent white glow washout
       return {
         tier,
         isSoftwareGl: false,
@@ -200,8 +201,8 @@ export function detectParadiseQuality(
         antialias: true,
         enableShadows: true,
         shadowMapSize: 2048,
-        enableBloom: !reducedMotion,
-        enableGodRays: !reducedMotion,
+        enableBloom: !reducedMotion && !isTouch,
+        enableGodRays: !reducedMotion && !isTouch,
         enableDOF: !reducedMotion,
         terrainSegments: 196,
         waterTextureSize: 1024,
