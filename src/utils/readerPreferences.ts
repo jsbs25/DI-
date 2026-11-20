@@ -161,7 +161,7 @@ export const DEFAULT_READER_PREFS: ReaderPreferences = {
   marginMode: 'standard',
   widthMode: 'standard',
   align: 'justify',
-  layoutMode: 'scroll',
+  layoutMode: 'paged',
 };
 
 const PREFS_KEY = 'earth_one_reader_prefs:v2';

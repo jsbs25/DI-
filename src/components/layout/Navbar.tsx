@@ -189,14 +189,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <>
       {/* Minimal Top Floating Corners: Brand Home Return (Left) + Theme/Lang/Profile (Right) */}
-      <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-3 pt-[max(0.65rem,env(safe-area-inset-top))] sm:px-5">
-        <div className="mx-auto flex h-9 w-full max-w-[1380px] items-center justify-between gap-2">
+      <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-2.5 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.65rem,env(safe-area-inset-top))]">
+        <div className="mx-auto flex h-8 sm:h-9 w-full max-w-[1380px] items-center justify-between gap-1.5 sm:gap-2">
           {/* Top-Left: Compact Brand Home Button */}
           <button
             type="button"
             onClick={() => onSelectTab('globe')}
             title={lang === 'zh' ? '返回 EARTH ONE 首页' : 'Return to EARTH ONE Home'}
-            className={`pointer-events-auto flex h-9 items-center gap-1 sm:gap-1.5 rounded-full border pl-0.5 pr-1 sm:pr-2 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
+            className={`pointer-events-auto flex h-8 w-8 sm:h-9 sm:w-auto items-center justify-center sm:justify-start gap-1 sm:gap-1.5 rounded-full border p-0.5 sm:pl-0.5 sm:pr-2 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
           >
             <ParadiseBrandEmblem
               surface={isGardenHome ? (isGardenDay ? 'garden-day' : 'garden-night') : theme === 'dark' ? 'dark' : 'light'}
@@ -209,7 +209,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           {/* Top-Right: Minimal Utilities & Profile Avatar */}
-          <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
+          <div className="pointer-events-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
             {batteryState && (
               <div
                 title={
@@ -222,7 +222,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       : `Battery ${batteryState.level}%`
                 }
                 aria-label={`Battery ${batteryState.level}%${batteryState.charging ? ' charging' : ''}`}
-                className={`flex h-9 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium tabular-nums transition-all ${surfaceChip}`}
+                className={`hidden sm:flex h-9 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium tabular-nums transition-all ${surfaceChip}`}
               >
                 {batteryState.charging ? (
                   <BatteryCharging className="h-4 w-4 text-emerald-500 dark:text-emerald-400" />
@@ -243,7 +243,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={onToggleTheme}
                 title={theme === 'dark' ? (lang === 'zh' ? '切换明亮模式' : 'Switch to Light mode') : (lang === 'zh' ? '切换深色模式' : 'Switch to Dark mode')}
                 aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                className={`flex h-9 w-9 items-center justify-center rounded-full border transition-all active:scale-[0.96] cursor-pointer ${surfaceChip}`}
+                className={`flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full border transition-all active:scale-[0.96] cursor-pointer ${surfaceChip}`}
               >
                 {theme === 'dark' ? <Sun className="h-4 w-4 text-[#d6b77f]" /> : <Moon className="h-4 w-4 text-[#247864]" />}
               </button>
@@ -255,7 +255,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 aria-expanded={langMenuOpen}
                 aria-haspopup="menu"
                 onClick={() => { setLangMenuOpen(v => !v); setUserDropdownOpen(false); }}
-                className={`flex h-9 items-center gap-0.5 rounded-full border px-2 sm:px-2.5 text-[11px] font-medium transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
+                className={`flex h-8 sm:h-9 items-center gap-0.5 rounded-full border px-2 sm:px-2.5 text-[10px] sm:text-[11px] font-medium transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
               >
                 <span className="uppercase">{lang}</span>
                 <ChevronDown className="h-3 w-3 opacity-70" />
@@ -288,10 +288,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                   aria-expanded={userDropdownOpen}
                   aria-haspopup="menu"
                   onClick={() => { setUserDropdownOpen(v => !v); setLangMenuOpen(false); }}
-                  className={`flex h-9 items-center gap-2 rounded-full border p-0.5 sm:pr-2.5 transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
+                  className={`flex h-8 sm:h-9 items-center gap-2 rounded-full border p-0.5 sm:pr-2.5 transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
                   title={currentUser.displayName}
                 >
-                  <span className="relative h-7 w-7 shrink-0">
+                  <span className="relative h-6 w-6 sm:h-7 sm:w-7 shrink-0">
                     <img src={currentUser.avatar} alt={currentUser.displayName} className="h-full w-full rounded-full object-cover" />
                   </span>
                   <span className="hidden md:inline max-w-[84px] truncate text-xs font-medium">
@@ -348,7 +348,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={onOpenAuth}
-                className="h-9 whitespace-nowrap rounded-full bg-[#244e41] dark:bg-[#e5d9be] px-3.5 text-xs font-semibold text-[#faf7f0] dark:text-[#152028] transition-colors hover:bg-[#1c3e33] dark:hover:bg-[#f2e8d2] cursor-pointer"
+                className="h-8 sm:h-9 whitespace-nowrap rounded-full bg-[#244e41] dark:bg-[#e5d9be] px-3 sm:px-3.5 text-[11px] sm:text-xs font-semibold text-[#faf7f0] dark:text-[#152028] transition-colors hover:bg-[#1c3e33] dark:hover:bg-[#f2e8d2] cursor-pointer"
               >
                 {t.signIn || 'Sign in'}
               </button>

@@ -2148,6 +2148,44 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                 </div>
               )}
 
+              {/* Page-by-page navigation (book-style, ideal for tablet/pen reading) */}
+              {prefs.layoutMode === 'paged' && pageCount > 1 && (
+                <nav
+                  className="sticky bottom-0 mt-8 -mx-1 flex items-center justify-between gap-3 border-t px-1 pt-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur-md"
+                  style={{ borderColor: palette.border, backgroundColor: palette.paper }}
+                  aria-label={isZh ? '翻页导航' : 'Page navigation'}
+                >
+                  <button
+                    type="button"
+                    onClick={() => jumpToPage(pageNumber - 1)}
+                    disabled={pageNumber <= 1}
+                    className="inline-flex h-10 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-full border px-4 text-sm font-medium transition disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+                    style={{ borderColor: palette.border, backgroundColor: palette.surface, color: palette.ink }}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    <span>{isZh ? '上一页' : 'Prev'}</span>
+                  </button>
+                  <div className="flex flex-col items-center min-w-0">
+                    <span className="text-xs font-medium tabular-nums" style={{ color: palette.ink }}>
+                      {pageNumber} / {pageCount}
+                    </span>
+                    <span className="text-[10px] tabular-nums" style={{ color: palette.muted }}>
+                      {progressPct}%
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => jumpToPage(Math.min(pageCount, pageNumber + 1))}
+                    disabled={pageNumber >= pageCount}
+                    className="inline-flex h-10 min-w-[5.5rem] items-center justify-center gap-1.5 rounded-full border px-4 text-sm font-medium transition disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+                    style={{ borderColor: palette.border, backgroundColor: palette.surface, color: palette.ink }}
+                  >
+                    <span>{isZh ? '下一页' : 'Next'}</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                </nav>
+              )}
+
               {/* End-of-Book Completion Card with Return Button */}
               {isLastPage && onClose && (
                 <div

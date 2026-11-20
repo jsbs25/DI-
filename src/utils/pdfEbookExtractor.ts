@@ -48,6 +48,51 @@ function isCjkChar(ch: string): boolean {
 }
 
 /**
+ * Detects text-layer extraction that is structurally present but unreadable due to
+ * broken PDF /ToUnicode / CMap mappings (common with externally imported Arabic PDFs
+ * that render as random Latin letters, digits, or symbols). In that case we must
+ * render the authentic PDF page canvas instead of showing corrupted reflow text.
+ */
+function detectGarbledPdfTextExtraction(text: string, rawItemCount: number): boolean {
+  if (!text) return false;
+  const compact = text.replace(/\s+/g, '');
+  if (compact.length < 40) return false;
+
+  const letters = (text.match(/\p{L}/gu) || []).length;
+  const marks = (text.match(/\p{M}/gu) || []).length;
+  const digits = (text.match(/\p{N}/gu) || []).length;
+  const total = compact.length;
+  const letterish = letters + marks;
+
+  // Very low proportion of letters vs digits/symbols => typical broken cmap garbage
+  if (letterish < total * 0.38 && total > 60) {
+    return true;
+  }
+
+  // Many tiny tokens (single chars) with few real words => glyph-id-like noise
+  const tokens = text.split(/\s+/).filter(Boolean);
+  if (tokens.length >= 18) {
+    const singleCharTokens = tokens.filter((t) => Array.from(t).length === 1).length;
+    const shortTokens = tokens.filter((t) => Array.from(t).length <= 2).length;
+    if (singleCharTokens / tokens.length > 0.5) return true;
+    if (shortTokens / tokens.length > 0.72 && letterish < total * 0.55) return true;
+  }
+
+  // PDF had many text items but produced mostly numbers/punctuation noise
+  if (rawItemCount >= 20 && digits > letterish * 1.2 && letterish < total * 0.5) {
+    return true;
+  }
+
+  // Excessive replacement/control-like artifacts missed by other checks
+  const weird = (text.match(/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]/g) || []).length;
+  if (weird >= 3 && weird / Math.max(1, total) > 0.02) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Geometry-aware line joiner: uses actual horizontal PDF point gaps so adjacent
  * Arabic glyph runs (e.g., separate PDF text operators forming one cursive word
  * or diacritic mark) concatenate WITHOUT inserting spurious spaces.
@@ -412,14 +457,19 @@ export async function extractStructuredPdfPage(
   const hasBrokenArabic =
     detectBrokenArabicEncoding(plainText) || detectBrokenArabicEncoding(pageRawLinesSample);
   const isScanned = nonSpaceChars < 30;
+  const isGarbledExtraction =
+    !isScanned &&
+    !hasBrokenArabic &&
+    detectGarbledPdfTextExtraction(plainText, rawItems.length);
+  const unreadableExtraction = hasBrokenArabic || isGarbledExtraction;
 
   return {
     pageNumber,
     dir: isRtl ? 'rtl' : 'ltr',
-    blocks: hasBrokenArabic ? [] : blocks,
-    plainText: hasBrokenArabic ? '' : plainText,
-    isLikelyScanned: isScanned || hasBrokenArabic,
-    extractionIssue: hasBrokenArabic ? 'garbled_arabic' : isScanned ? 'scanned' : undefined,
+    blocks: unreadableExtraction ? [] : blocks,
+    plainText: unreadableExtraction ? '' : plainText,
+    isLikelyScanned: isScanned || unreadableExtraction,
+    extractionIssue: unreadableExtraction ? 'garbled_arabic' : isScanned ? 'scanned' : undefined,
   };
 }
 

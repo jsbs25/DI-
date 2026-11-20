@@ -2129,12 +2129,13 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 sm:gap-5">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 sm:gap-5 items-stretch">
               {shelfBooks.map((item) => {
                 const localPdf = getBookPdfUrl(item.book as any);
+                const isAr = containsArabic(item.book.title) || containsArabic(item.book.author || '') || item.book.language === 'ar';
                 return (
-                  <div key={item.id} className="relative flex flex-col">
-                    <div className="relative">
+                  <div key={item.id} className="relative flex h-full min-w-0 flex-col">
+                    <div className="relative min-w-0">
                       <BookCard book={item.book} onClick={() => openShelfBook(item.book)} />
                       {item.progress > 0 && (
                         <div className="pointer-events-none absolute inset-x-2 bottom-[3.25rem] h-1 overflow-hidden rounded-full bg-black/30">
@@ -2142,7 +2143,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                         </div>
                       )}
                     </div>
-                    {localPdf && (
+                    {localPdf ? (
                       <div className="mt-2 flex items-center gap-1.5">
                         <button
                           type="button"
@@ -2160,6 +2161,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                           下载
                         </a>
                       </div>
+                    ) : (
+                      <div className="mt-2 h-[30px]" aria-hidden />
+                    )}
+                    {isAr && (
+                      <div className="sr-only" dir="rtl" lang="ar">{item.book.title}</div>
                     )}
                   </div>
                 );
@@ -2394,9 +2400,9 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
       type="button"
       onClick={onClick}
       aria-label={`打开《${book.title}》详情`}
-      className="group flex w-full cursor-pointer flex-col rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-one-accent)]"
+      className="group flex h-full w-full cursor-pointer flex-col rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-one-accent)]"
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] shadow-xs transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-[var(--color-one-border-strong)] group-hover:shadow-md">
+      <div className="relative aspect-[2/3] w-full shrink-0 overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] shadow-xs transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-[var(--color-one-border-strong)] group-hover:shadow-md">
         <img
           src={book.coverImage || '/assets/library/cover-little-prince.jpg'}
           alt=""
@@ -2407,7 +2413,7 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
       <h3
         dir={isArTitle ? 'rtl' : 'auto'}
         lang={isArTitle ? 'ar' : undefined}
-        className={`mt-2.5 line-clamp-2 w-full font-medium text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)] ${
+        className={`mt-2.5 line-clamp-2 min-h-[3.6rem] w-full font-medium text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)] ${
           isArTitle ? 'font-arabic-book text-right text-[15px] leading-[1.85]' : 'text-[13px] leading-snug'
         }`}
       >
@@ -2416,11 +2422,11 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
       <p
         dir={isArAuthor ? 'rtl' : 'auto'}
         lang={isArAuthor ? 'ar' : undefined}
-        className={`mt-0.5 line-clamp-1 w-full text-[var(--color-one-text-muted)] ${
+        className={`mt-0.5 line-clamp-1 min-h-[1.4rem] w-full text-[var(--color-one-text-muted)] ${
           isArAuthor ? 'font-arabic-ui text-right text-xs leading-[1.7]' : 'text-[11px]'
         }`}
       >
-        {book.author}
+        {book.author || '\u00A0'}
       </p>
     </button>
   );

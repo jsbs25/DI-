@@ -1286,37 +1286,36 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Top-Center Clock, Location & Live Weather Pill — below navbar on mobile/tablet to avoid covering header/scene */}
+      {/* Top-Center Clock, Location & Live Weather Pill — compact, below navbar on mobile/tablet */}
       <div
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.4rem+env(safe-area-inset-top))] lg:top-[max(0.65rem,env(safe-area-inset-top))] z-[54] flex flex-col items-center gap-2 max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-3rem)] lg:max-w-[calc(100vw-22rem)]"
+        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.4rem+env(safe-area-inset-top))] sm:top-[calc(3.25rem+env(safe-area-inset-top))] lg:top-[max(0.65rem,env(safe-area-inset-top))] z-[54] flex flex-col items-center gap-2 max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)] lg:max-w-[calc(100vw-22rem)]"
       >
-        <div className={`pointer-events-auto inline-flex h-8 sm:h-9 items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-md sm:backdrop-blur-xl lg:backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/30 sm:ring-white/55' : 'ring-white/[0.05] sm:ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
+        <div className={`pointer-events-auto inline-flex h-8 sm:h-9 max-w-full items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-md sm:backdrop-blur-xl lg:backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/30 sm:ring-white/55' : 'ring-white/[0.05] sm:ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
-            className="inline-flex h-8 sm:h-9 items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 text-[11px] sm:text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
-            title={isZh ? '实时时间、精准定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
+            className="inline-flex h-8 sm:h-9 min-w-0 max-w-full items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 text-[11px] sm:text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
+            title={isZh ? '实时时间、定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
           >
-            <span className="tabular-nums text-[12px] sm:text-[13px] font-semibold tracking-tight leading-none">
+            <span className="tabular-nums text-[11px] sm:text-[13px] font-semibold tracking-tight leading-none shrink-0">
               {agentSnap.realtimeSync
                 ? `${String(liveClockNow.getHours()).padStart(2, '0')}:${String(liveClockNow.getMinutes()).padStart(2, '0')}`
                 : currentClockLabel}
             </span>
-            <span className="opacity-35 leading-none">·</span>
-            <span className="inline-flex items-center gap-1 max-w-[88px] xs:max-w-[120px] sm:max-w-[180px] truncate opacity-90">
-              <MapPin className="h-3 w-3 shrink-0 opacity-75" />
+            <span className="opacity-35 leading-none shrink-0">·</span>
+            <span className="inline-flex items-center min-w-0 max-w-[7rem] sm:max-w-[11rem] lg:max-w-[180px] truncate opacity-90">
               <span className="truncate leading-none">
                 {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable
                   ? agentSnap.liveWeather.locationName
                   : isZh
-                    ? '定位中…'
-                    : 'Locating…'}
+                    ? '定位中'
+                    : 'Locating'}
               </span>
             </span>
             {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && (
               <>
-                <span className="hidden xs:inline opacity-35 leading-none">·</span>
-                <span className="hidden xs:inline opacity-85 leading-none">
+                <span className="hidden sm:inline opacity-35 leading-none shrink-0">·</span>
+                <span className="hidden sm:inline opacity-85 leading-none shrink-0">
                   {Math.round(agentSnap.liveWeather.temperatureC)}°C {isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}
                 </span>
               </>
@@ -1328,7 +1327,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             type="button"
             onClick={() => void fetchLiveWeather(true)}
             disabled={locating}
-            className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
+            className="hidden sm:inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
             title={isZh ? '高精度 GPS 重新定位' : 'Refresh precise GPS location'}
             aria-label={isZh ? '高精度定位' : 'Locate'}
           >
@@ -1338,7 +1337,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           <button
             type="button"
             onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
-            className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
+            className="hidden sm:inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
             title={isZh ? '重置视角' : 'Reset View'}
             aria-label={isZh ? '重置视角' : 'Reset View'}
           >
@@ -1349,7 +1348,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             <button
               type="button"
               onClick={() => onImmersiveChange(false)}
-              className={`h-8 sm:h-9 px-2.5 sm:px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
+              className={`h-8 sm:h-9 px-2 sm:px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
             >
               {isZh ? '退出' : 'Exit'}
             </button>
