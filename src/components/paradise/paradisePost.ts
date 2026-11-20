@@ -37,7 +37,7 @@ const VolumetricAndDOFShader = {
     uFocusDist: { value: 24.0 },
     uCameraNear: { value: 0.2 },
     uCameraFar: { value: 260.0 },
-    uClarity: { value: 0.22 },
+    uClarity: { value: 0.28 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -193,7 +193,8 @@ export function createParadisePostPipeline(
   const volDofPass = new ShaderPass(VolumetricAndDOFShader);
   volDofPass.uniforms.uHasDepth.value = supportsDepthTex ? 1.0 : 0.0;
   volDofPass.uniforms.uResolution.value.set(rtWidth, rtHeight);
-  volDofPass.enabled = initial.enableGodRays || initial.enableDOF;
+  volDofPass.uniforms.uDofIntensity.value = initial.enableDOF ? 0.14 : 0;
+  volDofPass.enabled = true;
   composer.addPass(volDofPass);
 
   const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.11, 0.28, 0.93);

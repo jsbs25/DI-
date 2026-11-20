@@ -196,14 +196,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="button"
             onClick={() => onSelectTab('globe')}
             title={lang === 'zh' ? '返回 EARTH ONE 首页' : 'Return to EARTH ONE Home'}
-            className={`pointer-events-auto flex h-9 items-center gap-2 rounded-full border pl-1 pr-3 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
+            className={`pointer-events-auto flex h-9 items-center gap-1 sm:gap-1.5 rounded-full border pl-0.5 pr-1 sm:pr-2 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
           >
             <ParadiseBrandEmblem
               surface={isGardenHome ? (isGardenDay ? 'garden-day' : 'garden-night') : theme === 'dark' ? 'dark' : 'light'}
               variant="medallion"
-              size={27}
+              size={20}
             />
-            <span className="whitespace-nowrap text-[11px] font-semibold tracking-[0.18em]">
+            <span className="hidden md:inline whitespace-nowrap text-[10px] font-semibold tracking-[0.16em]">
               EARTH ONE
             </span>
           </button>

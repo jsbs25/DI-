@@ -584,8 +584,9 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     scene.add(weatherFX.group);
 
     // 4. Volumetric God-Rays + Depth-Aware DOF + Subtle Bloom Post-Processing
+    // Always create on hardware GL for clarity pass (crisp detail on mobile/tablet even without bloom/rays)
     let postPipeline: ParadisePostPipeline | null = null;
-    if (quality.enableBloom || quality.enableGodRays || quality.enableDOF) {
+    if (!quality.isSoftwareGl) {
       postPipeline = createParadisePostPipeline(
         renderer,
         scene,
@@ -1285,9 +1286,9 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Top-Center Clock, Location & Live Weather Pill — aligned with top navbar/logo row */}
+      {/* Top-Center Clock, Location & Live Weather Pill — below navbar on mobile/tablet to avoid crowding */}
       <div
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[max(0.65rem,env(safe-area-inset-top))] z-[54] flex flex-col items-center gap-2 max-w-[calc(100vw-8.5rem)] sm:max-w-[calc(100vw-13rem)] lg:max-w-[calc(100vw-22rem)]"
+        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.2rem+env(safe-area-inset-top))] lg:top-[max(0.65rem,env(safe-area-inset-top))] z-[54] flex flex-col items-center gap-2 max-w-[calc(100vw-1.25rem)] sm:max-w-[calc(100vw-2rem)] lg:max-w-[calc(100vw-22rem)]"
       >
         <div className={`pointer-events-auto inline-flex h-9 items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/55' : 'ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
           <button
