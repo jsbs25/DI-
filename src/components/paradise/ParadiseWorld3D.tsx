@@ -34,6 +34,7 @@ import { createParadisePostPipeline, type ParadisePostPipeline } from './paradis
 import { createParadiseSpirit } from './paradiseSpirit.ts';
 import { createParadiseCat } from './paradiseCat.ts';
 import { SpiritSpeechBubble, triggerImageDownload } from './SpiritSpeechBubble.tsx';
+import { HDParadiseSanctuary, computeSanctuaryLighting } from './HDParadiseSanctuary.tsx';
 import { LiveLanguageStudio } from '../learning/LiveLanguageStudio.tsx';
 
 type CameraPresetId = 'overlook' | 'bridge' | 'blossoms' | 'pavilion';
@@ -61,6 +62,8 @@ const QUALITY_OPTIONS: Array<{ id: UserQualityChoice; zh: string; en: string }> 
 ];
 
 const QUALITY_STORAGE_KEY = 'earthone_paradise_quality_v1';
+const SCENE_MODE_STORAGE_KEY = 'earthone_garden_scene_mode_v1';
+type GardenSceneMode = 'hd' | '3d';
 
 function computeLocalWallTimeFraction(): number {
   const now = new Date();
@@ -75,6 +78,16 @@ function readStoredQuality(): UserQualityChoice {
     // ignore storage access issues
   }
   return 'auto';
+}
+
+function readStoredSceneMode(): GardenSceneMode {
+  try {
+    const v = localStorage.getItem(SCENE_MODE_STORAGE_KEY);
+    if (v === '3d' || v === 'hd') return v;
+  } catch {
+    // ignore
+  }
+  return 'hd';
 }
 
 interface ParadiseWorld3DProps {
@@ -95,6 +108,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const [webglReady, setWebglReady] = useState<boolean>(() => detectWebGLSupport());
   const [contextLost, setContextLost] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [sceneMode, setSceneMode] = useState<GardenSceneMode>(() => readStoredSceneMode());
 
   // Synced display HUD state (throttled updates so React never churns every animation frame)
   const [autoCycle, setAutoCycle] = useState(false);
@@ -103,6 +117,15 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const [activeWeather, setActiveWeather] = useState<WeatherKind>('clear');
   const [cameraPreset, setCameraPreset] = useState<CameraPresetId>('overlook');
   const [userQuality, setUserQuality] = useState<UserQualityChoice>(() => readStoredQuality());
+
+  const selectSceneMode = (next: GardenSceneMode) => {
+    setSceneMode(next);
+    try {
+      localStorage.setItem(SCENE_MODE_STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  };
 
   // Mutable engine command refs shared with WebGL animation loop
   const envRef = useRef<ParadiseEnvironmentEngine | null>(null);
@@ -187,10 +210,12 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       }
 
       uiStateManager.setLiveWeather(data);
-      if (realtimeSyncRef.current && envRef.current && data?.mappedWeather) {
-        envRef.current.autoWeather = false;
-        envRef.current.targetWeather = data.mappedWeather as WeatherKind;
-        if (data.mappedWeather === 'thunderstorm') envRef.current.triggerLightning();
+      if (realtimeSyncRef.current && data?.mappedWeather) {
+        if (envRef.current) {
+          envRef.current.autoWeather = false;
+          envRef.current.targetWeather = data.mappedWeather as WeatherKind;
+          if (data.mappedWeather === 'thunderstorm') envRef.current.triggerLightning();
+        }
         setAutoWeather(false);
         setActiveWeather(data.mappedWeather as WeatherKind);
       }
@@ -240,20 +265,43 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       return;
     }
 
-    if (cmd.weatherPreset && engine) {
-      engine.autoWeather = false;
-      engine.targetWeather = cmd.weatherPreset;
-      if (cmd.weatherPreset === 'thunderstorm') engine.triggerLightning();
+    if (cmd.weatherPreset) {
+      if (engine) {
+        engine.autoWeather = false;
+        engine.targetWeather = cmd.weatherPreset;
+        if (cmd.weatherPreset === 'thunderstorm') engine.triggerLightning();
+      }
       setAutoWeather(false);
       setActiveWeather(cmd.weatherPreset);
     }
-    if (cmd.timePreset && engine) {
-      engine.autoCycle = false;
-      engine.setTimePreset(cmd.timePreset);
+    if (cmd.timePreset) {
+      if (engine) {
+        engine.autoCycle = false;
+        engine.setTimePreset(cmd.timePreset);
+      }
       setAutoCycle(false);
       setTimeOfDay(TIME_PRESET_VALUES[cmd.timePreset]);
     }
   }, [agentSnap.weatherCommand]);
+
+  // Keep lighting luminance & wall-clock / demo cycle synced seamlessly in HD Photorealistic mode
+  useEffect(() => {
+    if (sceneMode !== 'hd') return;
+    const { daylight } = computeSanctuaryLighting(timeOfDay);
+    uiStateManager.setGardenDaylight(daylight);
+  }, [sceneMode, timeOfDay]);
+
+  useEffect(() => {
+    if (sceneMode !== 'hd') return;
+    const interval = window.setInterval(() => {
+      if (realtimeSyncRef.current) {
+        setTimeOfDay(computeLocalWallTimeFraction());
+      } else if (autoCycle) {
+        setTimeOfDay((t) => (t + 0.004) % 1);
+      }
+    }, autoCycle ? 120 : 30000);
+    return () => window.clearInterval(interval);
+  }, [sceneMode, autoCycle]);
 
   // Subtle, quiet feature-reminder whispers from the butterfly while idling
   useEffect(() => {
@@ -330,7 +378,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   }, [lang]);
 
   useEffect(() => {
-    if (!webglReady) return;
+    if (sceneMode !== '3d' || !webglReady) return;
     const container = stageRef.current;
     if (!container) return;
 
@@ -1008,14 +1056,15 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       renderer?.dispose();
       envRef.current = null;
     };
-  }, [webglReady, userQuality]);
+  }, [sceneMode, webglReady, userQuality]);
 
   const applyTimePreset = (preset: TimePreset) => {
     const engine = envRef.current;
     uiStateManager.setRealtimeSync(false);
-    if (!engine) return;
-    engine.autoCycle = false;
-    engine.setTimePreset(preset);
+    if (engine) {
+      engine.autoCycle = false;
+      engine.setTimePreset(preset);
+    }
     setAutoCycle(false);
     setTimeOfDay(TIME_PRESET_VALUES[preset]);
   };
@@ -1023,18 +1072,21 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const toggleAutoCycle = () => {
     const engine = envRef.current;
     uiStateManager.setRealtimeSync(false);
-    if (!engine) return;
-    engine.autoCycle = !engine.autoCycle;
-    setAutoCycle(engine.autoCycle);
+    const next = !autoCycle;
+    if (engine) {
+      engine.autoCycle = next;
+    }
+    setAutoCycle(next);
   };
 
   const applyWeather = (w: WeatherKind) => {
     const engine = envRef.current;
     uiStateManager.setRealtimeSync(false);
-    if (!engine) return;
-    engine.autoWeather = false;
-    engine.targetWeather = w;
-    if (w === 'thunderstorm') engine.triggerLightning();
+    if (engine) {
+      engine.autoWeather = false;
+      engine.targetWeather = w;
+      if (w === 'thunderstorm') engine.triggerLightning();
+    }
     setAutoWeather(false);
     setActiveWeather(w);
   };
@@ -1042,9 +1094,11 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const toggleAutoWeather = () => {
     const engine = envRef.current;
     uiStateManager.setRealtimeSync(false);
-    if (!engine) return;
-    engine.autoWeather = !engine.autoWeather;
-    setAutoWeather(engine.autoWeather);
+    const next = !autoWeather;
+    if (engine) {
+      engine.autoWeather = next;
+    }
+    setAutoWeather(next);
   };
 
   const restoreRealtimeSync = () => {
@@ -1098,29 +1152,31 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     : 'bg-[#e9e2d4] text-[#17202b]';
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#0e1928] text-[#F7F5F0] select-none">
-      {webglReady && !contextLost ? (
+    <div className="relative h-full w-full overflow-hidden bg-[#0c141d] text-[#F7F5F0] select-none">
+      {sceneMode === 'hd' ? (
+        <HDParadiseSanctuary
+          timeOfDay={timeOfDay}
+          weather={activeWeather}
+          musicPlaying={agentSnap.musicPlaying}
+          aiActive={Boolean(agentSnap.spiritBubble?.isLoading || agentSnap.liveVoiceActive)}
+        />
+      ) : webglReady && !contextLost ? (
         <div
           ref={stageRef}
           className="absolute inset-0 h-full w-full cursor-grab active:cursor-grabbing"
           aria-label="PARADISE WORLD 3D Garden Sanctuary"
         />
       ) : (
-        <div
-          className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center"
-          style={{
-            background: 'linear-gradient(180deg, #2b4c6f 0%, #5b89a6 45%, #2f4f38 100%)',
-          }}
-        >
-          <p className="text-lg font-semibold tracking-tight text-white">PARADISE WORLD</p>
-          <p className="mt-1.5 text-xs text-white/80">
-            {isZh ? '3D 天堂花园实时渲染环境（需要启用 WebGL 渲染支持）' : 'Interactive 3D Paradise Garden (WebGL required)'}
-          </p>
-        </div>
+        <HDParadiseSanctuary
+          timeOfDay={timeOfDay}
+          weather={activeWeather}
+          musicPlaying={agentSnap.musicPlaying}
+          aiActive={Boolean(agentSnap.spiritBubble?.isLoading || agentSnap.liveVoiceActive)}
+        />
       )}
 
-      {/* 3D-Tracked Overhead Speech Bubble directly above the Spirit's head */}
-      <SpiritSpeechBubble lang={lang} containerRef={spiritBubbleRef} />
+      {/* 3D-Tracked Overhead Speech Bubble only in 3D Orbit mode; HD mode renders unified inline sheet */}
+      {sceneMode === '3d' && <SpiritSpeechBubble lang={lang} containerRef={spiritBubbleRef} />}
 
       {/* Interactive Language Learning & Free-Quota Image Studio Drawer */}
       <LiveLanguageStudio lang={lang} variant="garden-drawer" />
@@ -1169,12 +1225,77 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Compact Collapsible Environment Dock */}
+      {/* Quiet Top-Center Environment Trigger & Refined Frosted Popover */}
       <div
-        className="pointer-events-none fixed right-3 top-[calc(3.85rem+env(safe-area-inset-top))] md:top-auto md:bottom-[max(1.25rem,env(safe-area-inset-bottom))] md:right-4 z-20 flex flex-col items-end gap-2 max-w-[calc(100vw-1.5rem)] md:max-w-[390px]"
+        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[max(0.5rem,env(safe-area-inset-top))] sm:top-[max(0.65rem,env(safe-area-inset-top))] z-[54] flex flex-col items-center gap-2 max-w-[calc(100vw-1.5rem)]"
       >
+        <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-xl ${dockShellCls} ${dockDividerCls}`}>
+          <button
+            type="button"
+            onClick={() => setControlsOpen((o) => !o)}
+            className="inline-flex h-9 items-center gap-1.5 px-3 text-[11px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
+            title={isZh ? '花园实景与天时气候设置' : 'Sanctuary vista, lighting & weather'}
+          >
+            <span className="tabular-nums font-semibold">{currentClockLabel}</span>
+            <span className="opacity-80 hidden xs:inline sm:inline">
+              ·{' '}
+              {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && agentSnap.realtimeSync
+                ? `${Math.round(agentSnap.liveWeather.temperatureC)}°C ${isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}`
+                : `${currentPhaseLabel} · ${isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}`}
+            </span>
+            {controlsOpen ? <ChevronUp className="h-3.5 w-3.5 opacity-65" /> : <ChevronDown className="h-3.5 w-3.5 opacity-65" />}
+          </button>
+
+          {sceneMode === '3d' && (
+            <button
+              type="button"
+              onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
+              className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
+              title={isZh ? '重置视角' : 'Reset View'}
+              aria-label={isZh ? '重置视角' : 'Reset View'}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+          )}
+
+          {immersive && onImmersiveChange && (
+            <button
+              type="button"
+              onClick={() => onImmersiveChange(false)}
+              className={`h-9 px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
+            >
+              {isZh ? '退出' : 'Exit'}
+            </button>
+          )}
+        </div>
+
         {controlsOpen && (
-          <div className={`pointer-events-auto w-[min(90vw,376px)] rounded-2xl border p-3 text-xs transition-colors ${dockShellCls}`}>
+          <div className={`pointer-events-auto w-[min(92vw,376px)] rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-2xl ${dockShellCls}`}>
+            {/* HD Photorealistic vs Interactive 3D Mode Switch */}
+            <div className={`mb-3 flex items-center justify-between gap-2 pb-2.5 border-b ${dockBorderCls}`}>
+              <span className="font-medium opacity-90">{isZh ? '花园画面' : 'Garden View'}</span>
+              <div className={`inline-flex rounded-full p-0.5 gap-0.5 ${isDayUi ? 'bg-black/[0.06]' : 'bg-white/[0.08]'}`}>
+                <button
+                  type="button"
+                  onClick={() => selectSceneMode('hd')}
+                  className={`h-7 rounded-full px-3 text-[11px] font-medium transition-colors cursor-pointer ${
+                    sceneMode === 'hd' ? dockActiveCls : 'opacity-75 hover:opacity-100'
+                  }`}
+                >
+                  {isZh ? '超清实景' : 'HD Vista'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => selectSceneMode('3d')}
+                  className={`h-7 rounded-full px-3 text-[11px] font-medium transition-colors cursor-pointer ${
+                    sceneMode === '3d' ? dockActiveCls : 'opacity-75 hover:opacity-100'
+                  }`}
+                >
+                  {isZh ? '3D 漫游' : '3D Orbit'}
+                </button>
+              </div>
+            </div>
+
             <div className={`mb-2.5 flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 ${dockBorderCls} ${isDayUi ? 'bg-white/48' : 'bg-white/[0.04]'}`}>
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-[11px] font-medium">
@@ -1187,8 +1308,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                           : 'Live weather unavailable'
                         : `${agentSnap.liveWeather.locationName} · ${Math.round(agentSnap.liveWeather.temperatureC)}°C · ${isZh ? agentSnap.liveWeather.conditionZh : agentSnap.liveWeather.conditionEn}`
                       : isZh
-                      ? '正在同步真实天气...'
-                      : 'Syncing live weather...'}
+                        ? '正在同步真实天气...'
+                        : 'Syncing live weather...'}
                   </span>
                 </div>
               </div>
@@ -1217,7 +1338,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             <div className={`flex items-center justify-between gap-2 pb-2 border-b ${dockBorderCls}`}>
               <div className="flex items-center gap-1.5 font-medium">
                 <SunMedium className="h-3.5 w-3.5 opacity-80" />
-                <span>{isZh ? '昼夜循环' : 'Day & Night'}</span>
+                <span>{isZh ? '昼夜光影' : 'Day & Night'}</span>
                 <span className="opacity-65 tabular-nums">
                   {currentPhaseLabel} · {currentClockLabel}
                 </span>
@@ -1308,86 +1429,51 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
               })}
             </div>
 
-            <div className={`mt-2.5 flex flex-wrap items-center gap-1.5 pt-2 border-t ${dockBorderCls}`}>
-              {CAMERA_PRESETS.map((cp) => (
-                <button
-                  key={cp.id}
-                  type="button"
-                  onClick={() => moveCameraToPreset(cp)}
-                  className={`min-h-[30px] inline-flex items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                    cameraPreset === cp.id ? dockActiveCls : dockPillCls
-                  }`}
-                >
-                  <Compass className="h-3 w-3" />
-                  <span>{isZh ? cp.zh : cp.en}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className={`mt-2.5 flex items-center justify-between gap-2 pt-2 border-t ${dockBorderCls}`}>
-              <div className="flex items-center gap-1.5 font-medium">
-                <SlidersHorizontal className="h-3.5 w-3.5 opacity-80" />
-                <span>{isZh ? '画质等级' : 'Quality'}</span>
-              </div>
-              <div className={`inline-flex rounded-lg p-0.5 gap-0.5 ${isDayUi ? 'bg-black/[0.06]' : 'bg-white/[0.08]'}`}>
-                {QUALITY_OPTIONS.map((opt) => {
-                  const active = userQuality === opt.id;
-                  return (
+            {sceneMode === '3d' && (
+              <>
+                <div className={`mt-2.5 flex flex-wrap items-center gap-1.5 pt-2 border-t ${dockBorderCls}`}>
+                  {CAMERA_PRESETS.map((cp) => (
                     <button
-                      key={opt.id}
+                      key={cp.id}
                       type="button"
-                      onClick={() => selectQuality(opt.id)}
-                      className={`min-h-[26px] rounded-md px-2 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
-                        active ? dockActiveCls : 'opacity-75 hover:opacity-100'
+                      onClick={() => moveCameraToPreset(cp)}
+                      className={`min-h-[30px] inline-flex items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                        cameraPreset === cp.id ? dockActiveCls : dockPillCls
                       }`}
                     >
-                      {isZh ? opt.zh : opt.en}
+                      <Compass className="h-3 w-3" />
+                      <span>{isZh ? cp.zh : cp.en}</span>
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                  ))}
+                </div>
+
+                <div className={`mt-2.5 flex items-center justify-between gap-2 pt-2 border-t ${dockBorderCls}`}>
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <SlidersHorizontal className="h-3.5 w-3.5 opacity-80" />
+                    <span>{isZh ? '3D 画质' : '3D Quality'}</span>
+                  </div>
+                  <div className={`inline-flex rounded-lg p-0.5 gap-0.5 ${isDayUi ? 'bg-black/[0.06]' : 'bg-white/[0.08]'}`}>
+                    {QUALITY_OPTIONS.map((opt) => {
+                      const active = userQuality === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => selectQuality(opt.id)}
+                          className={`min-h-[26px] rounded-md px-2 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                            active ? dockActiveCls : 'opacity-75 hover:opacity-100'
+                          }`}
+                        >
+                          {isZh ? opt.zh : opt.en}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
-
-        <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors ${dockShellCls} ${dockDividerCls}`}>
-          <button
-            type="button"
-            onClick={() => setControlsOpen((o) => !o)}
-            className="inline-flex h-9 items-center gap-1.5 px-3 text-[11px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
-          >
-            <span className="tabular-nums font-semibold">{currentClockLabel}</span>
-            <span className="opacity-80">
-              {currentPhaseLabel} ·{' '}
-              {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && agentSnap.realtimeSync
-                ? `${Math.round(agentSnap.liveWeather.temperatureC)}°C ${isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}`
-                : isZh
-                ? activeWeatherMeta.zh
-                : activeWeatherMeta.en}
-            </span>
-            {controlsOpen ? <ChevronDown className="h-3.5 w-3.5 opacity-70" /> : <ChevronUp className="h-3.5 w-3.5 opacity-70" />}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
-            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
-            title={isZh ? '重置视角' : 'Reset View'}
-            aria-label={isZh ? '重置视角' : 'Reset View'}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
-
-          {immersive && onImmersiveChange && (
-            <button
-              type="button"
-              onClick={() => onImmersiveChange(false)}
-              className={`h-9 px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
-            >
-              {isZh ? '退出' : 'Exit'}
-            </button>
-          )}
-        </div>
       </div>
     </div>
   );

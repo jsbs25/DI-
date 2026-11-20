@@ -26,6 +26,7 @@ import { isRtlLanguage } from './bookEmbedUrl.ts';
 import { speakSpiritReply, stopSpiritSpeech } from '../../agent/agentClient.ts';
 
 import { loadBookProgress, saveBookProgress, TEXT_COLOR_PRESETS } from '../../utils/readerPreferences.ts';
+import { containsArabic, isArabicHeavyText, normalizeArabicProse } from '../../utils/arabicTextNormalize.ts';
 
 export type AppleThemeId = 'original' | 'quiet' | 'paper' | 'calm' | 'midnight' | 'custom';
 export type AppleFontId = 'serif' | 'sans' | 'kai' | 'georgia' | 'amiri' | 'naskh';
@@ -437,7 +438,13 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     };
   }, [baseTheme, prefs.theme, prefs.customBgColor, prefs.customTextColor]);
   const fontMeta = FONT_STACKS[prefs.font];
-  const rtl = isRtlLanguage(book.language);
+  const rtl = useMemo(
+    () =>
+      isRtlLanguage(book.language) ||
+      isArabicHeavyText(activeChapter.content || '') ||
+      isArabicHeavyText(book.title || ''),
+    [activeChapter.content, book.language, book.title]
+  );
 
   const effectiveLayout: AppleLayoutMode =
     prefs.layout === 'spread' && !isDesktopWide ? 'single' : prefs.layout;
@@ -1072,7 +1079,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     <div
       className="flex h-full flex-col justify-between px-6 py-7 sm:px-11 sm:py-9 lg:px-12 lg:py-10"
       dir={rtl ? 'rtl' : 'ltr'}
-      lang={book.language || undefined}
+      lang={rtl ? 'ar' : book.language || undefined}
     >
       {/* Classical 3-column Sepia Running Header matching physical book spread */}
       <div
@@ -1098,8 +1105,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
               : fontMeta.family,
           fontSize: `${rtl ? Math.max(prefs.fontSize + 4, 22) : prefs.fontSize}px`,
-          lineHeight: rtl ? Math.max(prefs.lineHeight, 2.25) : prefs.lineHeight,
-          wordSpacing: rtl ? '0.06em' : undefined,
+          lineHeight: rtl ? Math.max(prefs.lineHeight, 2.3) : prefs.lineHeight,
+          wordSpacing: rtl ? '0.05em' : undefined,
+          letterSpacing: rtl ? '0' : undefined,
+          fontFeatureSettings: rtl ? '"liga" 1, "calt" 1, "mark" 1, "mkmk" 1' : undefined,
+          unicodeBidi: rtl ? 'plaintext' : undefined,
           color: theme.ink,
         }}
       >
@@ -1115,21 +1125,40 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               className="text-2xl sm:text-[26px] font-semibold tracking-tight leading-snug"
               style={{ color: theme.ink }}
             >
-              {activeChapter.title}
+              {containsArabic(activeChapter.title) ? normalizeArabicProse(activeChapter.title) : activeChapter.title}
             </h1>
           </header>
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: `${prefs.paragraphSpacing}px` }}>
-          {page.paragraphs.map((para, idx) => (
-            <p
-              key={`${activeChapter.id}_${page.index}_${idx}`}
-              className={prefs.textAlign === 'justify' ? 'text-justify tracking-[0.01em] break-words' : 'text-left tracking-[0.01em] break-words'}
-              style={{ textIndent: !rtl && !para.startsWith('"') && !para.startsWith('【') && !/^[A-Za-z]/.test(para) ? '2em' : undefined }}
-            >
-              {renderParagraphWithHighlights(para, currentChapterAnnotations, theme.isDark)}
-            </p>
-          ))}
+          {page.paragraphs.map((rawPara, idx) => {
+            const para = rtl || containsArabic(rawPara) ? normalizeArabicProse(rawPara) : rawPara;
+            const paraIsArabic = rtl || isArabicHeavyText(para);
+            return (
+              <p
+                key={`${activeChapter.id}_${page.index}_${idx}`}
+                dir={paraIsArabic ? 'rtl' : 'ltr'}
+                lang={paraIsArabic ? 'ar' : undefined}
+                className={`${
+                  prefs.textAlign === 'justify'
+                    ? 'text-justify'
+                    : paraIsArabic
+                      ? 'text-right'
+                      : 'text-left'
+                } ${paraIsArabic ? '' : 'tracking-[0.01em]'} break-words`}
+                style={{
+                  textIndent:
+                    !paraIsArabic && !para.startsWith('"') && !para.startsWith('【') && !/^[A-Za-z]/.test(para)
+                      ? '2em'
+                      : undefined,
+                  unicodeBidi: paraIsArabic ? 'plaintext' : undefined,
+                  fontFeatureSettings: paraIsArabic ? '"liga" 1, "calt" 1, "mark" 1, "mkmk" 1' : undefined,
+                }}
+              >
+                {renderParagraphWithHighlights(para, currentChapterAnnotations, theme.isDark)}
+              </p>
+            );
+          })}
         </div>
 
         {/* End-of-book return banner in single-page mode on final page of final chapter */}
@@ -1860,9 +1889,16 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   display: 'flex',
                   flexDirection: 'column',
                   gap: `${prefs.paragraphSpacing}px`,
-                  fontFamily: fontMeta.family,
-                  fontSize: `${prefs.fontSize}px`,
-                  lineHeight: prefs.lineHeight,
+                  fontFamily:
+                    rtl && prefs.font !== 'amiri' && prefs.font !== 'naskh'
+                      ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
+                      : fontMeta.family,
+                  fontSize: `${rtl ? Math.max(prefs.fontSize + 4, 22) : prefs.fontSize}px`,
+                  lineHeight: rtl ? Math.max(prefs.lineHeight, 2.3) : prefs.lineHeight,
+                  wordSpacing: rtl ? '0.05em' : undefined,
+                  letterSpacing: rtl ? '0' : undefined,
+                  fontFeatureSettings: rtl ? '"liga" 1, "calt" 1, "mark" 1, "mkmk" 1' : undefined,
+                  unicodeBidi: rtl ? 'plaintext' : undefined,
                   color: theme.ink,
                 }}
               >
@@ -1870,15 +1906,34 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   .split(/\n{2,}/)
                   .map((p) => p.trim())
                   .filter(Boolean)
-                  .map((para, idx) => (
-                    <p
-                      key={idx}
-                      className={prefs.textAlign === 'justify' ? 'text-justify break-words' : 'text-left break-words'}
-                      style={{ textIndent: !rtl && !para.startsWith('"') && !para.startsWith('【') && !/^[A-Za-z]/.test(para) ? '2em' : undefined }}
-                    >
-                      {renderParagraphWithHighlights(para, currentChapterAnnotations, theme.isDark)}
-                    </p>
-                  ))}
+                  .map((rawPara, idx) => {
+                    const para = rtl || containsArabic(rawPara) ? normalizeArabicProse(rawPara) : rawPara;
+                    const paraIsArabic = rtl || isArabicHeavyText(para);
+                    return (
+                      <p
+                        key={idx}
+                        dir={paraIsArabic ? 'rtl' : 'ltr'}
+                        lang={paraIsArabic ? 'ar' : undefined}
+                        className={`${
+                          prefs.textAlign === 'justify'
+                            ? 'text-justify'
+                            : paraIsArabic
+                              ? 'text-right'
+                              : 'text-left'
+                        } break-words`}
+                        style={{
+                          textIndent:
+                            !paraIsArabic && !para.startsWith('"') && !para.startsWith('【') && !/^[A-Za-z]/.test(para)
+                              ? '2em'
+                              : undefined,
+                          unicodeBidi: paraIsArabic ? 'plaintext' : undefined,
+                          fontFeatureSettings: paraIsArabic ? '"liga" 1, "calt" 1, "mark" 1, "mkmk" 1' : undefined,
+                        }}
+                      >
+                        {renderParagraphWithHighlights(para, currentChapterAnnotations, theme.isDark)}
+                      </p>
+                    );
+                  })}
               </div>
 
               <div
@@ -1943,7 +1998,9 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               </button>
 
               {/* Open Book Paper Surface with authentic stacked page edges & warm center spine */}
+              {/* In RTL Arabic books, dir="rtl" puts Page N on the RIGHT column and Page N+1 on the LEFT column — matching physical Arabic books */}
               <div
+                dir={effectiveLayout === 'spread' && rtl ? 'rtl' : 'ltr'}
                 className={`relative flex h-full w-full overflow-hidden rounded-[14px] transition-colors duration-300 ${
                   effectiveLayout === 'spread' ? 'max-w-[1080px] grid grid-cols-2' : 'max-w-[700px] flex-col'
                 }`}
@@ -1955,12 +2012,12 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                     : '0 22px 54px rgba(48, 36, 20, 0.12), -5px 0 0 -1px #f6f0e3, -6px 0 0 -1px #d6cbb4, -10px 0 0 -2px #efe7d6, -11px 0 0 -2px #cfc2a7, 5px 0 0 -1px #f6f0e3, 6px 0 0 -1px #d6cbb4, 10px 0 0 -2px #efe7d6, 11px 0 0 -2px #cfc2a7',
                 }}
               >
-                {/* Left / Primary Page */}
+                {/* Primary Page (Left in LTR, Right in RTL Arabic open book) */}
                 <div className="h-full min-h-0 overflow-hidden">
                   {renderPageColumn(leftPage, spreadLeftIdx + 1, book.title)}
                 </div>
 
-                {/* Center Spine Shadow + Right Page in Two-Page Spread */}
+                {/* Center Spine Shadow + Next Page in Two-Page Spread */}
                 {effectiveLayout === 'spread' && (
                   <>
                     <div
@@ -1972,7 +2029,10 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                           : 'linear-gradient(90deg, rgba(64,48,26,0) 0%, rgba(64,48,26,0.09) 46%, rgba(42,30,16,0.16) 50%, rgba(255,252,244,0.34) 53%, rgba(64,48,26,0) 100%)',
                       }}
                     />
-                    <div className="h-full min-h-0 overflow-hidden" style={{ borderLeft: `1px solid ${theme.border}` }}>
+                    <div
+                      className="h-full min-h-0 overflow-hidden"
+                      style={rtl ? { borderRight: `1px solid ${theme.border}` } : { borderLeft: `1px solid ${theme.border}` }}
+                    >
                       {rightPage ? (
                         renderPageColumn(rightPage, spreadRightIdx + 1, activeChapter.title)
                       ) : (

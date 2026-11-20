@@ -1,4 +1,13 @@
 import { Util, type PDFDocumentProxy } from 'pdfjs-dist';
+import {
+  containsArabic,
+  detectArabicVisualReversal,
+  detectBrokenArabicEncoding,
+  isArabicChar,
+  isArabicCombiningMark,
+  isArabicHeavyText,
+  normalizeArabicProse,
+} from './arabicTextNormalize.ts';
 
 export type EbookBlockKind = 'h1' | 'h2' | 'paragraph' | 'footnote' | 'table';
 
@@ -15,6 +24,7 @@ export interface ExtractedEbookPage {
   blocks: EbookBlock[];
   plainText: string;
   isLikelyScanned: boolean;
+  extractionIssue?: 'scanned' | 'garbled_arabic';
   ocrApplied?: boolean;
 }
 
@@ -24,20 +34,86 @@ export interface PdfTocItem {
   level: number;
 }
 
-function isArabicHeavy(text: string): boolean {
-  const arCount = (text.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/g) || []).length;
-  const latinCjkCount = (text.match(/[A-Za-z\u4e00-\u9fff]/g) || []).length;
-  return arCount > 6 && arCount >= latinCjkCount * 0.45;
+interface TextSpanItem {
+  str: string;
+  x: number;
+  y: number;
+  width: number;
+  fontSize: number;
 }
 
 function isCjkChar(ch: string): boolean {
   return /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(ch);
 }
 
-function joinLineTokens(tokens: string[], isRtl: boolean): string {
+/**
+ * Geometry-aware line joiner: uses actual horizontal PDF point gaps so adjacent
+ * Arabic glyph runs (e.g., separate PDF text operators forming one cursive word
+ * or diacritic mark) concatenate WITHOUT inserting spurious spaces.
+ */
+function joinVisualLineItems(items: TextSpanItem[], isRtl: boolean, avgFontSize: number): string {
   let out = '';
-  for (const raw of tokens) {
-    const part = raw.replace(/\s+/g, ' ');
+  let prevItem: TextSpanItem | null = null;
+
+  for (const item of items) {
+    const part = item.str.replace(/[\r\n]+/g, ' ');
+    if (!part || !part.replace(/\s+/g, '')) {
+      if (out && !out.endsWith(' ')) {
+        out += ' ';
+      }
+      prevItem = item;
+      continue;
+    }
+
+    if (!out) {
+      out = part;
+      prevItem = item;
+      continue;
+    }
+
+    const prevLast = out[out.length - 1];
+    const nextFirst = part[0];
+
+    // Calculate true visual gap between adjacent PDF glyph spans
+    const gap = prevItem
+      ? isRtl
+        ? prevItem.x - (item.x + item.width)
+        : item.x - (prevItem.x + prevItem.width)
+      : avgFontSize;
+
+    const spaceThreshold = isRtl
+      ? Math.max(1.4, avgFontSize * 0.17)
+      : Math.max(1.2, avgFontSize * 0.14);
+
+    if (prevLast === ' ' || nextFirst === ' ') {
+      out += part;
+    } else if (isArabicCombiningMark(nextFirst)) {
+      // Never put a space before an Arabic Harakat / Tashkeel diacritic
+      out += part;
+    } else if (isRtl && isArabicChar(prevLast) && isArabicChar(nextFirst) && gap < spaceThreshold) {
+      // Adjacent Arabic glyph runs inside the same cursive word
+      out += part;
+    } else if (!isRtl && isCjkChar(prevLast) && isCjkChar(nextFirst) && gap < avgFontSize * 0.45) {
+      out += part;
+    } else if (!isRtl && prevLast === '-' && /[a-z]/.test(nextFirst)) {
+      out = out.slice(0, -1) + part;
+    } else if (gap < Math.max(0.6, avgFontSize * 0.06)) {
+      // Overlapping or directly touching glyph spans
+      out += part;
+    } else {
+      out += ' ' + part;
+    }
+
+    prevItem = item;
+  }
+
+  return out.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+function joinWrappedLines(lines: string[], isRtl: boolean): string {
+  let out = '';
+  for (const raw of lines) {
+    const part = raw.replace(/\s+/g, ' ').trim();
     if (!part) continue;
     if (!out) {
       out = part;
@@ -45,12 +121,9 @@ function joinLineTokens(tokens: string[], isRtl: boolean): string {
     }
     const prevLast = out[out.length - 1];
     const nextFirst = part[0];
-    if (prevLast === ' ' || nextFirst === ' ') {
+    if (!isRtl && isCjkChar(prevLast) && isCjkChar(nextFirst)) {
       out += part;
-    } else if (!isRtl && isCjkChar(prevLast) && isCjkChar(nextFirst)) {
-      out += part;
-    } else if (prevLast === '-' && /[a-z]/.test(nextFirst)) {
-      // De-hyphenate wrapped English words cleanly
+    } else if (!isRtl && prevLast === '-' && /[a-z]/.test(nextFirst)) {
       out = out.slice(0, -1) + part;
     } else {
       out += ' ' + part;
@@ -68,14 +141,23 @@ export function parseOcrMarkdownToBlocks(ocrText: string, pageNumber: number): E
     .filter(Boolean);
 
   rawSections.forEach((sec, idx) => {
+    const cleanText = (val: string) => (containsArabic(val) ? normalizeArabicProse(val) : val);
     if (sec.startsWith('## ')) {
-      blocks.push({ id: `p${pageNumber}_ocr_${idx}`, kind: 'h1', text: sec.replace(/^##\s+/, '').trim() });
+      blocks.push({ id: `p${pageNumber}_ocr_${idx}`, kind: 'h1', text: cleanText(sec.replace(/^##\s+/, '').trim()) });
     } else if (sec.startsWith('### ')) {
-      blocks.push({ id: `p${pageNumber}_ocr_${idx}`, kind: 'h2', text: sec.replace(/^###\s+/, '').trim() });
+      blocks.push({ id: `p${pageNumber}_ocr_${idx}`, kind: 'h2', text: cleanText(sec.replace(/^###\s+/, '').trim()) });
     } else if (sec.startsWith('[脚注]') || sec.startsWith('[Footnote]')) {
-      blocks.push({ id: `p${pageNumber}_ocr_${idx}`, kind: 'footnote', text: sec.replace(/^\[(脚注|Footnote)\]\s*/, '').trim() });
+      blocks.push({
+        id: `p${pageNumber}_ocr_${idx}`,
+        kind: 'footnote',
+        text: cleanText(sec.replace(/^\[(脚注|Footnote)\]\s*/, '').trim()),
+      });
     } else {
-      blocks.push({ id: `p${pageNumber}_ocr_${idx}`, kind: 'paragraph', text: sec.replace(/\n+/g, ' ').trim() });
+      blocks.push({
+        id: `p${pageNumber}_ocr_${idx}`,
+        kind: 'paragraph',
+        text: cleanText(sec.replace(/\n+/g, ' ').trim()),
+      });
     }
   });
   return blocks;
@@ -83,7 +165,7 @@ export function parseOcrMarkdownToBlocks(ocrText: string, pageNumber: number): E
 
 /**
  * Extracts structured, reflowable ebook content (headings, paragraphs, footnotes, tables)
- * from any PDF page via pdfjs-dist geometry.
+ * from any PDF page via pdfjs-dist geometry, with full Arabic cursive & RTL normalization.
  */
 export async function extractStructuredPdfPage(
   pdf: PDFDocumentProxy,
@@ -92,14 +174,6 @@ export async function extractStructuredPdfPage(
   const page = await pdf.getPage(pageNumber);
   const viewport = page.getViewport({ scale: 1 });
   const textContent = await page.getTextContent();
-
-  interface TextSpanItem {
-    str: string;
-    x: number;
-    y: number;
-    width: number;
-    fontSize: number;
-  }
 
   const rawItems: TextSpanItem[] = [];
   const fontSizes: number[] = [];
@@ -112,7 +186,7 @@ export async function extractStructuredPdfPage(
     const fontSize = Math.max(6, Math.hypot(tx[0], tx[1]) || Math.abs(item.height) || 12);
     const x = tx[4];
     const y = tx[5];
-    const width = Math.max(1, Number(item.width || 0));
+    const width = Math.max(0.5, Number(item.width || 0));
     rawItems.push({ str, x, y, width, fontSize });
     if (str.trim().length >= 2) fontSizes.push(fontSize);
   }
@@ -124,11 +198,12 @@ export async function extractStructuredPdfPage(
       blocks: [],
       plainText: '',
       isLikelyScanned: true,
+      extractionIssue: 'scanned',
     };
   }
 
   const fullRawSample = rawItems.map((i) => i.str).join(' ');
-  const isRtl = isArabicHeavy(fullRawSample);
+  const isRtl = isArabicHeavyText(fullRawSample);
 
   const sortedSizes = [...fontSizes].sort((a, b) => a - b);
   const medianFontSize = sortedSizes[Math.floor(sortedSizes.length * 0.5)] || 12;
@@ -141,6 +216,7 @@ export async function extractStructuredPdfPage(
     minX: number;
     maxX: number;
     items: TextSpanItem[];
+    rawText: string;
     text: string;
     columnSegments: string[];
   }
@@ -159,6 +235,7 @@ export async function extractStructuredPdfPage(
         minX: it.x,
         maxX: it.x + it.width,
         items: [it],
+        rawText: '',
         text: '',
         columnSegments: [],
       });
@@ -167,33 +244,48 @@ export async function extractStructuredPdfPage(
 
   lines.sort((a, b) => a.y - b.y);
 
+  // First pass: sort spans spatially and assemble raw line text (keeping Presentation Forms intact for reversal check)
   for (const line of lines) {
-    line.items.sort((a, b) => (isRtl ? b.x - a.x : a.x - b.x));
+    // For RTL, sort by right edge descending so spans flow right-to-left naturally
+    line.items.sort((a, b) => (isRtl ? (b.x + b.width) - (a.x + a.width) : a.x - b.x));
     line.avgFontSize = line.items.reduce((acc, i) => acc + i.fontSize, 0) / line.items.length;
     line.minX = Math.min(...line.items.map((i) => i.x));
     line.maxX = Math.max(...line.items.map((i) => i.x + i.width));
-    line.text = joinLineTokens(
-      line.items.map((i) => i.str),
-      isRtl
-    );
+    line.rawText = joinVisualLineItems(line.items, isRtl, line.avgFontSize);
+  }
 
-    // Detect wide horizontal gaps to spot simple tabular rows
+  // Detect page-level visually-reversed Arabic BEFORE NFKC normalization
+  const pageRawLinesSample = lines.map((l) => l.rawText).join('\n');
+  const pageIsVisuallyReversed = isRtl && detectArabicVisualReversal(pageRawLinesSample);
+
+  const normalizeTextForPage = (raw: string): string => {
+    if (!containsArabic(raw)) return raw.replace(/\s+/g, ' ').trim();
+    return normalizeArabicProse(raw, {
+      forceReverse: pageIsVisuallyReversed,
+      skipReverseCheck: pageIsVisuallyReversed,
+    });
+  };
+
+  // Second pass: normalize each line & detect tabular columns
+  for (const line of lines) {
+    line.text = normalizeTextForPage(line.rawText);
+
     const cols: string[] = [];
-    let currentCol: string[] = [];
+    let currentCol: TextSpanItem[] = [];
     for (let i = 0; i < line.items.length; i++) {
       const cur = line.items[i];
       if (i > 0) {
         const prev = line.items[i - 1];
         const gap = isRtl ? prev.x - (cur.x + cur.width) : cur.x - (prev.x + prev.width);
         if (gap > Math.max(26, line.avgFontSize * 2.4)) {
-          const joined = joinLineTokens(currentCol, isRtl);
+          const joined = normalizeTextForPage(joinVisualLineItems(currentCol, isRtl, line.avgFontSize));
           if (joined) cols.push(joined);
           currentCol = [];
         }
       }
-      currentCol.push(cur.str);
+      currentCol.push(cur);
     }
-    const lastCol = joinLineTokens(currentCol, isRtl);
+    const lastCol = normalizeTextForPage(joinVisualLineItems(currentCol, isRtl, line.avgFontSize));
     if (lastCol) cols.push(lastCol);
     line.columnSegments = cols;
   }
@@ -217,7 +309,7 @@ export async function extractStructuredPdfPage(
 
   const flushParagraph = () => {
     if (paraBuffer.length === 0) return;
-    const text = joinLineTokens(paraBuffer, isRtl);
+    const text = joinWrappedLines(paraBuffer, isRtl);
     if (text) {
       blocks.push({ id: `p${pageNumber}_b${blocks.length}`, kind: 'paragraph', text });
     }
@@ -226,7 +318,7 @@ export async function extractStructuredPdfPage(
 
   const flushFootnote = () => {
     if (footnoteBuffer.length === 0) return;
-    const text = joinLineTokens(footnoteBuffer, isRtl);
+    const text = joinWrappedLines(footnoteBuffer, isRtl);
     if (text) {
       blocks.push({ id: `p${pageNumber}_fn${blocks.length}`, kind: 'footnote', text });
     }
@@ -298,7 +390,9 @@ export async function extractStructuredPdfPage(
       const yGap = line.y - prevLine.y;
       const endsSentence = /[.!?。？！؛؟:：»”’]$/.test(prevLine.text);
       const isParagraphGap = yGap > medianGap * 1.42;
-      const indentShift = isRtl ? prevLine.maxX - line.maxX > medianFontSize * 1.1 : line.minX - prevLine.minX > medianFontSize * 1.1;
+      const indentShift = isRtl
+        ? prevLine.maxX - line.maxX > medianFontSize * 1.1
+        : line.minX - prevLine.minX > medianFontSize * 1.1;
       if (isParagraphGap || (endsSentence && indentShift)) {
         flushParagraph();
       }
@@ -314,13 +408,16 @@ export async function extractStructuredPdfPage(
 
   const plainText = blocks.map((b) => b.text).join('\n\n').trim();
   const nonSpaceChars = plainText.replace(/\s+/g, '').length;
+  const hasBrokenArabic = detectBrokenArabicEncoding(plainText);
+  const isScanned = nonSpaceChars < 30;
 
   return {
     pageNumber,
     dir: isRtl ? 'rtl' : 'ltr',
-    blocks,
-    plainText,
-    isLikelyScanned: nonSpaceChars < 30,
+    blocks: hasBrokenArabic ? [] : blocks,
+    plainText: hasBrokenArabic ? '' : plainText,
+    isLikelyScanned: isScanned || hasBrokenArabic,
+    extractionIssue: hasBrokenArabic ? 'garbled_arabic' : isScanned ? 'scanned' : undefined,
   };
 }
 
@@ -336,7 +433,8 @@ export async function extractPdfToc(pdf: PDFDocumentProxy): Promise<PdfTocItem[]
     const walk = async (nodes: any[], level: number) => {
       for (const node of nodes) {
         if (items.length >= 160) return;
-        const title = String(node?.title || '').trim();
+        const rawTitle = String(node?.title || '').trim();
+        const title = containsArabic(rawTitle) ? normalizeArabicProse(rawTitle) : rawTitle;
         let pageNumber = 1;
         try {
           let dest = node.dest;
@@ -372,7 +470,7 @@ export async function extractPdfToc(pdf: PDFDocumentProxy): Promise<PdfTocItem[]
 export async function renderPdfPageToJpegDataUrl(
   pdf: PDFDocumentProxy,
   pageNumber: number,
-  scale = 1.45
+  scale = 1.65
 ): Promise<string> {
   const page = await pdf.getPage(pageNumber);
   const viewport = page.getViewport({ scale });
@@ -384,7 +482,7 @@ export async function renderPdfPageToJpegDataUrl(
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.86);
   canvas.width = 0;
   canvas.height = 0;
   return dataUrl;

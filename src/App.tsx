@@ -848,7 +848,7 @@ export default function App() {
         lang={lang}
         currentUser={currentUser}
         conversations={conversations}
-        hidden={currentTab === 'chat' || agentSnap.commDrawerOpen || (currentTab === 'globe' && immersive)}
+        hidden={currentTab === 'globe' || currentTab === 'chat' || agentSnap.commDrawerOpen}
         onOpenDrawerChat={(convId) => {
           if (convId) {
             setActiveConversationId(convId);

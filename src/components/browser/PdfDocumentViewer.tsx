@@ -121,16 +121,86 @@ function resolveProxyPdfUrl(rawUrl: string, title: string, download = false): st
 
 function cleanWordToken(raw: string): string {
   return raw
-    .replace(/^[\s.,;:!?()[\]{}"'«»„“”‘’—–\-_/\\•·،؛؟。，、！？（）【】《》]+/, '')
-    .replace(/[\s.,;:!?()[\]{}"'«»„“”‘’—–\-_/\\•·،؛؟。，、！？（）【】《》]+$/, '')
+    .replace(/^[\s.,;:!?()[\]{}"'«»„“”‘’—–\-_/\\•·،؛؟。，、！？（）【】《》﴿﴾]+/, '')
+    .replace(/[\s.,;:!?()[\]{}"'«»„“”‘’—–\-_/\\•·،؛؟。，、！？（）【】《》﴿﴾]+$/, '')
     .trim();
 }
 
 function tokenizeInteractiveText(text: string): string[] {
   if (!text) return [];
-  // Keep whitespace intact, split Arabic/Latin words cleanly, and chunk CJK phrases naturally
-  return text.split(/(\s+|[.,;:!?()[\]{}"'«»“”‘’—–،؛؟。，、！？（）【】《》]+)/).filter(Boolean);
+  // Keep whitespace intact and preserve Arabic base letters + combining diacritics inside unbroken spans
+  return text.split(/(\s+|[.,;:!?()[\]{}"'«»“”‘’—–،؛؟。，、！？（）【】《》﴿﴾]+)/).filter(Boolean);
 }
+
+/**
+ * Renders a razor-sharp HiDPI original PDF page inline inside reflow mode when a page is
+ * scanned or uses a legacy non-Unicode Arabic font map, so Arabic calligraphy stays crystal clear.
+ */
+const InlineOriginalPdfPageCanvas: React.FC<{
+  pdf: PDFDocumentProxy;
+  pageNumber: number;
+  borderColor: string;
+}> = ({ pdf, pageNumber, borderColor }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [rendering, setRendering] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    let renderTask: RenderTask | undefined;
+    setRendering(true);
+
+    pdf
+      .getPage(pageNumber)
+      .then((page) => {
+        if (cancelled || !canvasRef.current) return;
+        const baseViewport = page.getViewport({ scale: 1 });
+        const containerW = containerRef.current?.clientWidth || 640;
+        const fitScale = Math.max(0.85, Math.min(2.2, (containerW - 8) / Math.max(1, baseViewport.width)));
+        const viewport = page.getViewport({ scale: fitScale });
+        const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = '100%';
+        canvas.style.height = 'auto';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, viewport.width, viewport.height);
+        renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+        return renderTask.promise.then(() => {
+          if (!cancelled) setRendering(false);
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setRendering(false);
+      });
+
+    return () => {
+      cancelled = true;
+      renderTask?.cancel();
+    };
+  }, [pdf, pageNumber]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative mx-auto w-full overflow-hidden rounded-xl border bg-white shadow-sm"
+      style={{ borderColor }}
+    >
+      {rendering && (
+        <div className="flex items-center justify-center py-12 text-xs text-neutral-500">
+          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+          <span>Rendering HD page…</span>
+        </div>
+      )}
+      <canvas ref={canvasRef} className={rendering ? 'hidden' : 'block w-full h-auto'} />
+    </div>
+  );
+};
 
 export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   sourceUrl,
@@ -454,7 +524,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       .then((page) => {
         if (cancelled || !canvasRef.current) return;
         const viewport = page.getViewport({ scale: originalZoom });
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
@@ -463,6 +533,8 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
         canvas.style.width = `${Math.floor(viewport.width)}px`;
         canvas.style.height = `${Math.floor(viewport.height)}px`;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, viewport.width, viewport.height);
         renderTask = page.render({ canvas, canvasContext: ctx, viewport });
         return renderTask.promise;
       })
@@ -1471,16 +1543,27 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                     ? Math.max(prefs.fontSize + 4, 22)
                     : prefs.fontSize;
 
+                  const effectivePageTextAlign: React.CSSProperties['textAlign'] = isArabicPage
+                    ? prefs.align === 'left'
+                      ? 'right'
+                      : 'justify'
+                    : prefs.align;
+
                   return (
                     <section
                       key={pNum}
                       dir={ep?.dir || 'ltr'}
+                      lang={isArabicPage ? 'ar' : undefined}
                       className="mb-12 last:mb-2"
                       style={{
                         fontFamily: effectivePageFont,
                         lineHeight: effectivePageLineHeight,
                         fontSize: `${effectivePageFontSize}px`,
-                        wordSpacing: isArabicPage ? '0.06em' : undefined,
+                        textAlign: effectivePageTextAlign,
+                        wordSpacing: isArabicPage ? '0.05em' : undefined,
+                        letterSpacing: isArabicPage ? '0' : undefined,
+                        fontFeatureSettings: isArabicPage ? '"liga" 1, "calt" 1, "mark" 1, "mkmk" 1' : undefined,
+                        unicodeBidi: isArabicPage ? 'plaintext' : undefined,
                       }}
                       onClick={() => {
                         if (prefs.layoutMode === 'scroll' && pageNumber !== pNum) {
@@ -1532,42 +1615,49 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                           <span>{isZh ? `正在排版第 ${pNum} 页…` : `Reflowing page ${pNum}…`}</span>
                         </div>
                       ) : ep.isLikelyScanned ? (
-                      <div
-                        className="rounded-2xl border p-5 text-center space-y-3"
-                        style={{ borderColor: palette.border, backgroundColor: palette.surface }}
-                      >
-                        <p className="text-xs leading-relaxed" style={{ color: palette.muted }}>
-                          {isOcrBusy
-                            ? isZh
-                              ? '正在通过 ONE AI 视觉 OCR 识别扫描页并重排为电子书…'
-                              : 'Running Vision OCR to convert scanned page to reflowable text…'
-                            : isZh
-                              ? '检测到本页为扫描图像版 PDF，可使用 AI OCR 转为可缩放重排文字，或直接查看原始页面。'
-                              : 'This page appears to be scanned. Run AI OCR for reflowable text or switch to Original view.'}
-                        </p>
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          <button
-                            type="button"
-                            disabled={isOcrBusy}
-                            onClick={() => void ensurePageExtracted(pNum, true)}
-                            className="inline-flex items-center gap-1.5 rounded-xl bg-[#247864] px-3.5 py-2 text-xs font-medium text-white disabled:opacity-50 cursor-pointer"
-                          >
-                            {isOcrBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanText className="h-3.5 w-3.5" />}
-                            <span>{isOcrBusy ? (isZh ? '正在识别…' : 'Recognizing…') : isZh ? 'AI OCR 转为电子书文字' : 'OCR to Ebook Text'}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPageNumber(pNum);
-                              setViewMode('original');
-                            }}
-                            className="inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-medium cursor-pointer"
-                            style={{ borderColor: palette.border }}
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                            <span>{isZh ? '查看原始页面' : 'Original Page'}</span>
-                          </button>
+                      <div className="space-y-3 font-sans" dir="ltr">
+                        <div
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-xs"
+                          style={{ borderColor: palette.border, backgroundColor: palette.surface, color: palette.muted }}
+                        >
+                          <span className="leading-relaxed">
+                            {isOcrBusy
+                              ? isZh
+                                ? '正在通过 ONE AI 视觉 OCR 识别阿拉伯语与正文并重排…'
+                                : 'Running Vision OCR to extract clean reflowable Arabic & text…'
+                              : ep.extractionIssue === 'garbled_arabic'
+                                ? isZh
+                                  ? '原 PDF 使用了非标准阿拉伯语字库编码，已自动呈现高清原版页面，可一键 AI OCR 转为可点查电子书。'
+                                  : 'Legacy non-Unicode Arabic PDF font detected. Showing HD original page — run AI OCR for tappable text.'
+                                : isZh
+                                  ? '本页为图像扫描版，已为您直接呈现高清原页，也可一键 AI OCR 转为可点查文字。'
+                                  : 'Scanned page — displaying HD original page below, or run AI OCR for reflowable text.'}
+                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              disabled={isOcrBusy}
+                              onClick={() => void ensurePageExtracted(pNum, true)}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-[#247864] px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-50 cursor-pointer"
+                            >
+                              {isOcrBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ScanText className="h-3 w-3" />}
+                              <span>{isOcrBusy ? (isZh ? '识别中…' : 'Recognizing…') : isZh ? 'AI OCR 转可点查文字' : 'AI OCR'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPageNumber(pNum);
+                                setViewMode('original');
+                              }}
+                              className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium cursor-pointer"
+                              style={{ borderColor: palette.border, color: palette.ink }}
+                            >
+                              <Eye className="h-3 w-3" />
+                              <span>{isZh ? '缩放原版' : 'Zoom View'}</span>
+                            </button>
+                          </div>
                         </div>
+                        <InlineOriginalPdfPageCanvas pdf={pdfProxy} pageNumber={pNum} borderColor={palette.border} />
                       </div>
                     ) : (
                       <div>
