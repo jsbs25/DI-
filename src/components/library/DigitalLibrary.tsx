@@ -36,6 +36,8 @@ import { getBookEmbedUrl, getBookPdfUrl, isRtlLanguage } from './bookEmbedUrl.ts
 import { AdminLibrary } from './AdminLibrary.tsx';
 import { filterLibrarySearchResults, getLibrarySearchFilterOptions, LIBRARY_RIGHTS_FILTER_LABELS } from './searchFilters.ts';
 import type { LibraryAgentAction } from '../../utils/oneAgentController.ts';
+import { listRecentReadingHistory, type BookProgressRecord } from '../../utils/readerPreferences.ts';
+import { Trash2 } from 'lucide-react';
 
 interface DigitalLibraryProps {
   lang: Language;
@@ -122,9 +124,41 @@ const SHELF_TABS: { id: BookshelfStatus | 'all'; label: string }[] = [
 
 export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUser, focusBookId, focusBookSeq, focusBookAutoRead, quickAction }) => {
   // ---- View routing ----
-  const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf' | 'noor' | 'admin'>('home');
+  const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf' | 'noor' | 'vocab' | 'admin'>('home');
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [noorInitialQuery, setNoorInitialQuery] = useState<string>('');
+  const [recentHistory, setRecentHistory] = useState<BookProgressRecord[]>(() => listRecentReadingHistory(6));
+  const [vocabItems, setVocabItems] = useState<Array<{
+    id: string;
+    word: string;
+    lemma?: string;
+    reading?: string;
+    partOfSpeech?: string;
+    meaning: string;
+    usage?: string;
+    example?: string;
+    bookTitle?: string;
+    savedAt?: string;
+  }>>([]);
+  const [vocabLoading, setVocabLoading] = useState(false);
+
+  const refreshRecentHistory = () => setRecentHistory(listRecentReadingHistory(6));
+
+  const loadVocabulary = async () => {
+    setVocabLoading(true);
+    try {
+      const res = await fetch('/api/library/vocabulary');
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.items)) setVocabItems(data.items);
+    } catch {} finally {
+      setVocabLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (view === 'vocab') void loadVocabulary();
+    if (view === 'home' || view === 'shelf') refreshRecentHistory();
+  }, [view]);
 
   // ---- Data ----
   const [books, setBooks] = useState<Book[]>([]);
@@ -144,7 +178,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [crawlResults, setCrawlResults] = useState<any[]>([]);
   const [crawlSources, setCrawlSources] = useState<any[]>([]);
   const [crawlReader, setCrawlReader] = useState<any | null>(null);
-  const [pdfReader, setPdfReader] = useState<{ url: string; title: string; sourceUrl?: string; bookId?: string; contentLanguage?: string; initialState?: { page?: number; zoom?: number; theme?: 'light' | 'paper' | 'dark'; viewMode?: 'single' | 'continuous'; rotation?: number } } | null>(null);
+  const [pdfReader, setPdfReader] = useState<{ url: string; title: string; sourceUrl?: string } | null>(null);
   const [webReader, setWebReader] = useState<{ url: string; title: string; sourceUrl?: string; label: string } | null>(null);
   const [readerNotice, setReaderNotice] = useState<string | null>(null);
   const [ingestingId, setIngestingId] = useState<string | null>(null);
@@ -571,7 +605,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const openExternalReadable = (ref: any) => {
     setReaderNotice(null);
     const pdf = getBookPdfUrl(ref);
-    if (pdf) { setPdfReader({ url: pdf, title: ref.title || 'PDF', sourceUrl: ref.sourceUrl || ref.externalReadUrl || pdf, bookId: (ref as any)?.id, contentLanguage: (ref as any)?.language }); return; }
+    if (pdf) { setPdfReader({ url: pdf, title: ref.title || 'PDF', sourceUrl: ref.sourceUrl || ref.externalReadUrl || pdf }); return; }
     const embed = getBookEmbedUrl(ref);
     if (embed) { setWebReader({ url: embed.url, title: ref.title || '在线阅读', sourceUrl: ref.sourceUrl || ref.externalReadUrl, label: embed.label }); return; }
     const reason = getOnlineReaderReason(ref);
@@ -609,23 +643,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
     const pdf = getBookPdfUrl(book as any) || (book.formatType === 'pdf' ? (book as any).textUrl || book.externalReadUrl : null);
     if (pdf) {
-      let shelfItem = shelf.find(item => item.bookId === book.id);
-      if (!shelfItem) shelfItem = await ensureShelfForReading(book) || undefined;
-      const st = shelfItem?.lastReadPdfState || {};
-      setPdfReader({
-        url: pdf,
-        title: book.title,
-        sourceUrl: book.sourceUrl || book.externalReadUrl || pdf,
-        bookId: book.id,
-        contentLanguage: book.language,
-        initialState: {
-          page: shelfItem?.lastReadPdfPage || st.page,
-          zoom: st.zoom,
-          theme: st.theme,
-          viewMode: st.viewMode,
-          rotation: st.rotation,
-        },
-      });
+      setPdfReader({ url: pdf, title: book.title, sourceUrl: book.sourceUrl || book.externalReadUrl || pdf });
+      await ensureShelfForReading(book);
       return;
     }
     if (book.chapters && book.chapters.length > 0 && book.chapters.some(ch => ch.content && ch.content.trim().length > 0)) {
@@ -797,20 +816,13 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       const res = await fetch(`/api/library/books/${encodeURIComponent(readingBook.id)}/ai-reading`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ chapterId: chapter.id, selectedText, replyLanguage: lang })
       });
       const data = await res.json();
       setAiCitation(data.citation || null);
-      const noticeParts = [
-        typeof data.notice === 'string' ? data.notice : null,
-        data.provider ? `AI: ${data.provider}${data.model ? '/' + data.model : ''}` : null,
-        data.coverage ? `范围: ${data.coverage}` : null,
-      ].filter(Boolean) as string[];
-      setAiReadingNotice(noticeParts.length ? noticeParts.join(' · ') : null);
-      const answer = data.answer || data.message?.content || '';
-      if (data.success && answer) {
-        setAiExplanation(answer);
+      setAiReadingNotice(data.notice || null);
+      if (data.success && data.message) {
+        setAiExplanation(data.message.content);
         setAiAnswerReady(true);
       } else {
         setAiExplanation(data.error || '无法核验当前正文，未生成 AI 解读。');
@@ -1033,65 +1045,36 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
   return (
     <div className="flex min-h-[calc(100dvh-4rem)] flex-1 flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
-      {/* ONE LIBRARY header */}
-      <header className="sticky top-[58px] z-30 border-b border-[var(--color-one-border)] bg-[color:var(--color-one-bg-elevated)]/88 backdrop-blur-xl md:top-16">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-3 sm:px-8 md:flex-row md:items-center md:justify-between">
+      {/* ONE LIBRARY unified header */}
+      <header className="sticky top-[52px] z-30 border-b border-[var(--color-one-border)] bg-[var(--color-one-surface)]/88 backdrop-blur-xl md:top-16">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-3 sm:px-8 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[var(--color-one-border-strong)] bg-white/[0.03] text-[var(--color-one-accent)]">
-              <Library className="h-5 w-5" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-accent)]">
+              <Library className="h-4.5 w-4.5" />
             </div>
             <div>
-              <p className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-one-text-dim)]">ONE LIBRARY</p>
-              <h1 className="text-base font-semibold leading-tight tracking-tight text-white sm:text-lg">A World of Knowledge</h1>
-              <p className="text-[11px] text-[var(--color-one-text-muted)]">One library for humanity · 真实馆藏、开放检索与阅读</p>
+              <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--color-one-text-dim)]">ONE LIBRARY</p>
+              <h1 className="text-base font-semibold leading-tight tracking-tight text-[var(--color-one-text)]">世界图书馆</h1>
             </div>
           </div>
 
-          <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:hidden" aria-label="ONE LIBRARY 导航">
+          <nav className="flex items-center gap-1 overflow-x-auto rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-1 text-xs font-medium" aria-label="世界图书馆导航">
             {[
-              { id: 'home', label: '首页' },
-              { id: 'noor', label: 'مكتبة النور · 全球书库' },
-              { id: 'shelf', label: '我的书架' },
-              { id: 'admin', label: '管理' }
-            ].map(n => (
+              { id: 'home', label: '馆藏首页' },
+              { id: 'noor', label: 'مكتبة النور 全球书库' },
+              { id: 'shelf', label: `我的书架${shelf.length > 0 ? ` (${shelf.length})` : ''}` },
+              { id: 'vocab', label: '生词本' },
+              { id: 'admin', label: '管理' },
+            ].map((n) => (
               <button
                 key={n.id}
                 type="button"
                 onClick={() => setView(n.id as any)}
                 aria-current={view === n.id ? 'page' : undefined}
-                className={`min-h-11 rounded-xl px-3 text-xs font-medium transition-colors cursor-pointer ${
+                className={`whitespace-nowrap rounded-lg px-3 py-1.5 transition-colors cursor-pointer ${
                   view === n.id
-                    ? n.id === 'noor'
-                      ? 'bg-emerald-500 text-[#04140e] font-semibold'
-                      : 'bg-[var(--color-one-accent)] text-[#071018]'
-                    : n.id === 'noor'
-                      ? 'border border-emerald-500/35 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/20'
-                      : 'border border-[var(--color-one-border)] bg-white/[0.02] text-[var(--color-one-text-muted)] hover:bg-white/[0.05] hover:text-white'
-                }`}
-              >
-                {n.label}
-              </button>
-            ))}
-          </nav>
-
-          <nav className="hidden items-center gap-1 rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] p-1 text-xs font-medium md:flex">
-            {[
-              { id: 'home', label: '首页' },
-              { id: 'noor', label: 'مكتبة النور · 全球书库' },
-              { id: 'shelf', label: '我的书架' },
-              { id: 'admin', label: '管理' }
-            ].map(n => (
-              <button
-                key={n.id}
-                onClick={() => setView(n.id as any)}
-                className={`rounded-xl px-3 py-2 transition-colors cursor-pointer ${
-                  view === n.id
-                    ? n.id === 'noor'
-                      ? 'bg-emerald-500 text-[#04140e] font-semibold'
-                      : 'bg-white/[0.08] text-white'
-                    : n.id === 'noor'
-                      ? 'text-emerald-200 hover:bg-emerald-500/15 hover:text-white'
-                      : 'text-[var(--color-one-text-muted)] hover:bg-white/[0.04] hover:text-white'
+                    ? 'bg-[var(--color-one-surface)] font-semibold text-[var(--color-one-text)] shadow-xs'
+                    : 'text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
                 }`}
               >
                 {n.label}
@@ -1102,135 +1085,134 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       </header>
 
       {readerNotice && (
-        <div role="status" className="mx-auto mt-3 w-full max-w-7xl px-4 sm:px-8">
-          <div className="flex items-start justify-between gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/[0.08] p-3 text-xs text-amber-100/90">
-            <p className="leading-relaxed"><span className="font-semibold text-amber-200">无法在站内完整阅读：</span>{readerNotice}</p>
-            <button type="button" onClick={()=>setReaderNotice(null)} className="shrink-0 rounded-lg p-1.5 text-amber-200 hover:bg-white/10"><X className="h-4 w-4" /></button>
+        <div role="status" className="mx-auto mt-3 w-full max-w-6xl px-4 sm:px-8">
+          <div className="flex items-start justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-[var(--color-one-text)]">
+            <p className="leading-relaxed"><span className="font-semibold text-amber-700 dark:text-amber-300">阅读提示：</span>{readerNotice}</p>
+            <button type="button" onClick={() => setReaderNotice(null)} className="shrink-0 rounded-lg p-1 text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]"><X className="h-4 w-4" /></button>
           </div>
         </div>
       )}
+
       {/* ===================================================================== */}
       {/* HOME VIEW                                                            */}
       {/* ===================================================================== */}
       {view === 'home' && (
-        <div className="max-w-7xl mx-auto w-full px-4 sm:px-8 py-8 space-y-12">
-          {/* ONE LIBRARY hero */}
-          <section className="grid grid-cols-1 items-center gap-8 py-4 lg:grid-cols-[1.2fr_0.8fr] lg:gap-12">
+        <div className="mx-auto w-full max-w-6xl space-y-10 px-4 py-7 sm:px-8 sm:py-9">
+          {/* Serene Apple-style Library Hero */}
+          <section className="grid grid-cols-1 items-center gap-8 lg:grid-cols-[1.25fr_0.75fr] lg:gap-12">
             <div>
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-1 text-xs font-medium text-[var(--color-one-text-muted)]">
-                <Sparkles className="h-3.5 w-3.5 text-[var(--color-one-accent)]" />
-                <span>开放馆藏 · 真实检索 · 诚实阅读能力</span>
-              </div>
-              <h2 className="max-w-2xl text-3xl font-semibold leading-[1.08] tracking-tight text-white sm:text-5xl">
-                一个世界，无数思想。
+              <p className="text-[11px] font-medium tracking-[0.18em] uppercase text-[var(--color-one-accent)]">
+                WORLD DIGITAL LIBRARY
+              </p>
+              <h2 className="mt-2 max-w-2xl font-serif text-3xl font-semibold leading-[1.14] tracking-tight text-[var(--color-one-text)] sm:text-4xl">
+                一个世界，无数典籍。
               </h2>
-              <p className="mt-4 max-w-xl text-sm leading-relaxed text-[var(--color-one-text-muted)] sm:text-base">
-                在 ONE LIBRARY 中检索与阅读真实的公开图书与文献资源。汇聚 Project Gutenberg、Open Library、Internet Archive、arXiv 等来源，保留原始入口、权利标注与可用阅读方式。
+              <p className="mt-3 max-w-xl text-sm leading-relaxed text-[var(--color-one-text-muted)]">
+                直连全球公开图书库（IslamHouse · Project Gutenberg · Open Library · Internet Archive）。下载 PDF 自动重排为电子书，内置字号排版自定义与统一 ONE AI 精讲查词。
               </p>
 
-              {/* Global search */}
-              <div className="mt-7 rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-3 shadow-[var(--shadow-one-sm)] backdrop-blur-sm sm:p-4">
+              {/* Unified Search Box */}
+              <div className="mt-6 rounded-2xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] p-3 shadow-xs sm:p-3.5">
                 <div className="relative">
-                  <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
                   <label htmlFor="world-library-search" className="sr-only">搜索全球馆藏</label>
                   <input
                     id="world-library-search"
                     type="text"
                     value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleUnifiedSearch()}
-                    placeholder="输入书名、作者、主题、ISBN 或 DOI..."
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleUnifiedSearch()}
+                    placeholder="输入书名、作者、主题、ISBN 或 DOI…"
                     aria-describedby="world-library-search-help"
-                    className="w-full rounded-2xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] py-3.5 pl-11 pr-4 text-sm text-white placeholder:text-[var(--color-one-text-dim)] focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)] sm:pr-[13.5rem]"
+                    className="w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] py-3 pl-10 pr-4 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none sm:pr-[12.5rem]"
                   />
-                  <div className="mt-2 flex items-center gap-2 sm:absolute sm:right-2 sm:top-1/2 sm:mt-0 sm:-translate-y-1/2">
+                  <div className="mt-2 flex items-center gap-2 sm:absolute sm:right-1.5 sm:top-1/2 sm:mt-0 sm:-translate-y-1/2">
                     <button
                       type="button"
                       onClick={() => handleCrawlBooks()}
                       disabled={isCrawling || !searchQuery.trim()}
-                      title="多源并行检索开放图书（Gutenberg/Open Library/Internet Archive/Wikisource）"
-                      className="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-[var(--color-one-border-strong)] bg-white/[0.03] px-3 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.06] hover:text-white disabled:opacity-40 sm:flex-none"
+                      title="多源并行检索开放图书"
+                      className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:text-[var(--color-one-text)] disabled:opacity-40 sm:flex-none"
                     >
                       <Compass className="h-3.5 w-3.5" />
-                      <span>{isCrawling ? '爬取中...' : '开放爬取'}</span>
+                      <span>{isCrawling ? '检索中…' : '开放源'}</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleUnifiedSearch()}
                       disabled={(isSearchingOnline && isCrawling) || !searchQuery.trim()}
-                      className="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-[#071018] transition hover:brightness-110 disabled:opacity-40 sm:flex-none"
+                      className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-40 sm:flex-none"
                     >
                       <Search className="h-3.5 w-3.5" />
-                      <span>{isSearchingOnline || isCrawling ? '检索中...' : '搜索'}</span>
+                      <span>{isSearchingOnline || isCrawling ? '检索中…' : '搜索'}</span>
                     </button>
                   </div>
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="flex items-center gap-1 text-[11px] text-[var(--color-one-text-dim)]">
-                    <Sparkles className="h-3 w-3 text-[var(--color-one-accent)]" /> 推荐检索
-                  </span>
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                  <span className="text-[11px] text-[var(--color-one-text-dim)]">推荐</span>
                   {[
                     { label: '道德经', q: '道德经' },
                     { label: '论语', q: '论语' },
                     { label: '史记', q: '史记' },
                     { label: 'The Time Machine', q: 'The Time Machine' },
                     { label: 'Principia', q: 'Philosophiae Naturalis Principia' },
-                    { label: 'Alice in Wonderland', q: 'Alice in Wonderland' }
-                  ].map(chip => (
+                  ].map((chip) => (
                     <button
                       key={chip.label}
                       type="button"
                       onClick={() => handleUnifiedSearch(chip.q)}
-                      className="cursor-pointer rounded-lg border border-[var(--color-one-border)] bg-white/[0.02] px-2.5 py-1.5 text-[11px] text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white"
+                      className="cursor-pointer text-xs text-[var(--color-one-text-muted)] underline-offset-4 transition hover:text-[var(--color-one-accent)] hover:underline"
                     >
                       {chip.label}
                     </button>
                   ))}
                 </div>
+                <p id="world-library-search-help" className="sr-only">直连全球公开图书馆</p>
+              </div>
 
-                <div className="mt-3 flex items-center gap-2 text-[11px] text-[var(--color-one-text-dim)]">
-                  <Globe className="h-3.5 w-3.5 text-[var(--color-one-accent)]/80" />
-                  <span id="world-library-search-help">直连公开/开放来源；结果保留来源、许可与可用性信息</span>
-                </div>
+              {/* Clean Global Catalog Entry */}
+              <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNoorInitialQuery(searchQuery.trim());
+                    setView('noor');
+                  }}
+                  className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
+                >
+                  <BookOpen className="h-3.5 w-3.5" />
+                  <span>مكتبة النور · 全球原版 PDF 书库</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+                <a
+                  href={`https://openlibrary.org/search?q=${encodeURIComponent(searchQuery.trim())}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
+                >
+                  <span>Open Library</span>
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+                <a
+                  href="https://www.noor-book.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
+                >
+                  <span>Noor Book</span>
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+                <a
+                  href="https://waqfeya.net/books"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
+                >
+                  <span>Waqfeya</span>
+                </a>
               </div>
-                <div className="mt-4">
-                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">
-                    国际数字图书馆官方入口 · {searchQuery.trim() ? '将当前关键词带到来源网站' : '可直接访问或搜索'}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <a href={`https://openlibrary.org/search?q=${encodeURIComponent(searchQuery.trim())}`} target="_blank" rel="noopener noreferrer" aria-label="在 Open Library 官方网站搜索当前关键词（新标签页）" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">
-                      Open Library <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                    </a>
-                    <a href={`https://www.europeana.eu/en/search?query=${encodeURIComponent(searchQuery.trim())}`} target="_blank" rel="noopener noreferrer" aria-label="在 Europeana 官方网站搜索当前关键词（新标签页）" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">
-                      Europeana <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                    </a>
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <p className="mb-2 text-[10px] uppercase tracking-[0.18em] text-emerald-300/80">مكتبة النور · 全球伊斯兰与世界原版书库（搜索 + 下载到原文书架 + AI 讲解）</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNoorInitialQuery(searchQuery.trim());
-                        setView('noor');
-                      }}
-                      className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-emerald-400/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25"
-                    >
-                      <BookOpen className="h-3.5 w-3.5" />
-                      <span>مكتبة النور · 进入全球图书搜索</span>
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </button>
-                    <a href="https://www.noor-book.com/" target="_blank" rel="noopener noreferrer" title="مكتبة النور 官方网站" className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">
-                      <span>Noor Book 官网</span>
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                    <a href="https://waqfeya.net/books" target="_blank" rel="noopener noreferrer" title="Waqfeya 官方扫描书目录" className="inline-flex min-h-11 items-center rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">Waqfeya</a>
-                    <a href="https://shamela.ws/search" target="_blank" rel="noopener noreferrer" title="Shamela 官方站内搜索" className="inline-flex min-h-11 items-center rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2 text-[11px] text-[var(--color-one-text-muted)] hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white">Shamela</a>
-                  </div>
-                </div>
-              </div>
+            </div>
 
             {/* Featured real book */}
             {featuredBook && (
@@ -1238,11 +1220,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 type="button"
                 onClick={() => openBookDetail(featuredBook)}
                 aria-label={`查看《${featuredBook.title}》详情`}
-                className="group flex cursor-pointer justify-center rounded-3xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-one-accent)] lg:justify-end"
+                className="group flex cursor-pointer justify-center rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-one-accent)] lg:justify-end"
               >
-                <div className="relative w-full max-w-sm rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-4 sm:p-5">
-                  <p className="mb-3 text-[11px] uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">馆藏精选</p>
-                  <div className="mx-auto aspect-[2/3] w-44 overflow-hidden rounded-2xl border border-white/10 shadow-[var(--shadow-one-md)] transition duration-300 group-hover:scale-[1.02] sm:w-52">
+                <div className="relative w-full max-w-xs rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 shadow-xs transition hover:border-[var(--color-one-border-strong)]">
+                  <p className="mb-3 text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">馆藏精选</p>
+                  <div className="mx-auto aspect-[2/3] w-40 overflow-hidden rounded-xl border border-[var(--color-one-border)] shadow-sm transition duration-300 group-hover:scale-[1.02] sm:w-44">
                     <img
                       src={featuredBook.coverImage || '/assets/library/cover-little-prince.jpg'}
                       alt={featuredBook.title}
@@ -1250,91 +1232,120 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     />
                   </div>
                   <div className="mt-4">
-                    <h3 className="text-base font-semibold leading-snug text-white transition-colors group-hover:text-[var(--color-one-accent-soft)]">
+                    <h3 className="text-sm font-semibold leading-snug text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)]">
                       {featuredBook.title}
                     </h3>
-                    <p className="mt-1 text-sm text-[var(--color-one-text-muted)]">{featuredBook.author}</p>
-                    {featuredBook.description && <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--color-one-text-dim)]">{featuredBook.description}</p>}
+                    <p className="mt-0.5 text-xs text-[var(--color-one-text-muted)]">{featuredBook.author}</p>
+                    {featuredBook.description && (
+                      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--color-one-text-dim)]">{featuredBook.description}</p>
+                    )}
                   </div>
                 </div>
               </button>
             )}
           </section>
 
-          {/* Saturn-style multi-engine open book & audiobook crawler results */}
-          {(crawlResults.length > 0 || isCrawling) && (
-            <section aria-labelledby="library-crawl-results-title" aria-busy={isCrawling} className="rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-5 shadow-[var(--shadow-one-sm)]">
-              <h3 id="library-crawl-results-title" className="mb-1 text-sm font-semibold text-white">全网图书 / 有声精读爬虫结果</h3>
-              <p className="mb-3 text-[11px] leading-relaxed text-[var(--color-one-text-muted)]">已并行接入 Google Books、YouTube 有声精读、Bilibili 读书、Gutenberg、Open Library、Internet Archive、Wikisource，支持直接站内翻开阅读与有声聆听。</p>
-              {crawlSources.length > 0 && (
-                <div className="mb-3 flex flex-wrap gap-1.5">
-                  {crawlSources.map((src: any) => {
-                    const srcNameMap: Record<string, string> = {
-                      youtube: 'YouTube 有声/精读',
-                      googlebooks: 'Google Books',
-                      bilibili: 'Bilibili 读书',
-                      openlibrary: 'Open Library',
-                      archive: 'Internet Archive',
-                      wikisource: 'Wikisource',
-                      gutenberg: 'Gutenberg',
-                      arabic_wikisource: 'Arabic Wikisource',
-                    };
-                    return (
-                      <span key={src.source} className={`rounded-md border px-2 py-1 text-[10px] ${src.ok && src.count > 0 ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : 'border-[var(--color-one-border)] text-[var(--color-one-text-dim)]'}`}>
-                        {srcNameMap[src.source] || src.source}: {src.ok ? `已采集 ${src.count}` : '待连接/超时'}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              {isCrawling ? (
-                <div role="status" className="py-6 text-center text-xs text-[var(--color-one-text-muted)]">正在并行爬取/检索开放图书来源...</div>
-              ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {crawlResults.map((r: any) => {
-                    const embedInfo = getBookEmbedUrl(r);
-                    return (
-                    <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-3 transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.04]">
-                      {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
-                      <div className="min-w-0 flex-1">
-                        <h4 className="line-clamp-1 text-xs font-semibold text-white">{r.title}</h4>
-                        <p className="mb-1 text-[11px] text-[var(--color-one-accent-soft)]">{r.author} · {(r.language || '').toUpperCase()} · {r.source}{r.year ? ` · ${r.year}` : ''}</p>
-                        <p className="mb-2 line-clamp-2 text-[11px] text-[var(--color-one-text-muted)]">{r.description}</p>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {r.canImport && (
-                            <button type="button" onClick={() => handleIngestCrawledBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-3 py-2 text-[11px] font-semibold text-[#071018] transition hover:brightness-110 disabled:opacity-50">
-                              {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="h-3 w-3" /><span>保存并诵读</span></>}
-                            </button>
-                          )}
-                          {(r.canReadOnline || embedInfo || getBookPdfUrl(r) || r.sourceUrl) && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const pdf = getBookPdfUrl(r);
-                                if (pdf) { setPdfReader({ url: pdf, title: r.title, sourceUrl: r.sourceUrl, contentLanguage: r.language }); return; }
-                                if (embedInfo) { setWebReader({ url: embedInfo.url, title: r.title, sourceUrl: r.sourceUrl, label: embedInfo.label }); return; }
-                                if (r.canImport) { void handleIngestCrawledBook(r); return; }
-                                setReaderNotice(getOnlineReaderReason(r));
-                                if (r.sourceUrl) window.open(r.sourceUrl, '_blank', 'noopener,noreferrer');
-                              }}
-                              className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/15"
-                            >
-                              <BookOpen className="h-3 w-3" /><span>在线阅读</span>
-                            </button>
-                          )}
-                          {r.canReadOnline === false && !embedInfo && !getBookPdfUrl(r) && !r.canImport && (
-                            <span className="text-[10px] text-amber-200/90">无法站内阅读：{r.rightsNote || r.availability || '来源受限/需官方页面'}</span>
-                          )}
-                          {r.sourceUrl && (
-                            <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-[var(--color-one-border)] px-3 py-2 text-[11px] font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white">
-                              <ExternalLink className="h-3 w-3" /><span>官方来源</span>
-                            </a>
-                          )}
-                        </div>
+          {/* Continue Reading (Recent Reading History from readerPreferences) */}
+          {recentHistory.length > 0 && (
+            <section>
+              <div className="mb-3.5 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-one-text)]">
+                  <Clock className="h-4 w-4 text-[var(--color-one-accent)]" />
+                  <span>继续阅读</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setView('shelf')}
+                  className="cursor-pointer text-xs font-medium text-[var(--color-one-accent)] hover:underline"
+                >
+                  我的书架
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {recentHistory.map((rec) => (
+                  <button
+                    key={rec.bookKey}
+                    type="button"
+                    onClick={() => {
+                      if (rec.sourceUrl) {
+                        setPdfReader({ url: rec.sourceUrl, title: rec.title });
+                      } else {
+                        const match = books.find((b) => b.id === rec.bookKey || b.title === rec.title);
+                        if (match) void openShelfBook(match);
+                      }
+                    }}
+                    className="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-4 py-3 text-left transition hover:border-[var(--color-one-border-strong)]"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-[var(--color-one-text)]">{rec.title}</div>
+                      <div className="mt-1 flex items-center gap-2 text-[11px] text-[var(--color-one-text-muted)]">
+                        <span>第 {rec.pageNumber}/{rec.totalPages} 页</span>
+                        <span>·</span>
+                        <span className="font-mono">{rec.progressPct}%</span>
+                      </div>
+                      <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[var(--color-one-border)]">
+                        <div className="h-full rounded-full bg-[var(--color-one-accent)]" style={{ width: `${rec.progressPct}%` }} />
                       </div>
                     </div>
-                    );
-                  })}
+                    <BookOpen className="h-4 w-4 shrink-0 text-[var(--color-one-accent)]" />
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Multi-engine open book search results (books only) */}
+          {(crawlResults.length > 0 || isCrawling) && (
+            <section aria-labelledby="library-crawl-results-title" aria-busy={isCrawling} className="rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 shadow-xs">
+              <h3 id="library-crawl-results-title" className="mb-1 text-sm font-semibold text-[var(--color-one-text)]">全球开放书籍检索结果</h3>
+              <p className="mb-3 text-xs text-[var(--color-one-text-muted)]">汇聚 Gutenberg、Open Library、Internet Archive、Wikisource、Google Books 公开图书资源。</p>
+              {isCrawling ? (
+                <div role="status" className="py-6 text-center text-xs text-[var(--color-one-text-muted)]">正在检索全球开放图书…</div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {crawlResults
+                    .filter((r: any) => !['youtube', 'bilibili'].includes(String(r.source || '').toLowerCase()))
+                    .map((r: any) => {
+                      const embedInfo = getBookEmbedUrl(r);
+                      return (
+                        <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-3.5 transition hover:border-[var(--color-one-border-strong)]">
+                          {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
+                          <div className="min-w-0 flex-1">
+                            <h4 className="line-clamp-1 text-xs font-semibold text-[var(--color-one-text)]">{r.title}</h4>
+                            <p className="mb-1 text-[11px] text-[var(--color-one-accent)]">{r.author} · {(r.language || '').toUpperCase()} · {r.source}{r.year ? ` · ${r.year}` : ''}</p>
+                            <p className="mb-2.5 line-clamp-2 text-[11px] text-[var(--color-one-text-muted)]">{r.description}</p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {r.canImport && (
+                                <button type="button" onClick={() => handleIngestCrawledBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50">
+                                  {ingestingId === r.id ? <span>保存中…</span> : <><BookOpen className="h-3 w-3" /><span>加入并阅读</span></>}
+                                </button>
+                              )}
+                              {(r.canReadOnline || embedInfo || getBookPdfUrl(r) || r.sourceUrl) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const pdf = getBookPdfUrl(r);
+                                    if (pdf) { setPdfReader({ url: pdf, title: r.title, sourceUrl: r.sourceUrl }); return; }
+                                    if (embedInfo) { setWebReader({ url: embedInfo.url, title: r.title, sourceUrl: r.sourceUrl, label: embedInfo.label }); return; }
+                                    if (r.canImport) { void handleIngestCrawledBook(r); return; }
+                                    setReaderNotice(getOnlineReaderReason(r));
+                                    if (r.sourceUrl) window.open(r.sourceUrl, '_blank', 'noopener,noreferrer');
+                                  }}
+                                  className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
+                                >
+                                  <BookOpen className="h-3 w-3" /><span>阅读</span>
+                                </button>
+                              )}
+                              {r.sourceUrl && (
+                                <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--color-one-border)] px-2.5 py-1.5 text-[11px] text-[var(--color-one-text-muted)] transition hover:text-[var(--color-one-text)]">
+                                  <ExternalLink className="h-3 w-3" /><span>来源</span>
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
               )}
             </section>
@@ -1342,152 +1353,99 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
           {/* Online search results */}
           {(onlineResults.length > 0 || isSearchingOnline || ingestError) && (
-            <section aria-labelledby="library-online-results-title" aria-busy={isSearchingOnline} className="rounded-[28px] border border-[var(--color-one-border)] bg-white/[0.03] p-5 shadow-[var(--shadow-one-sm)]">
-              <h3 id="library-online-results-title" className="mb-3 text-sm font-semibold text-white">全球检索结果</h3>
-              {onlineSourceStatuses.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                  {onlineSourceStatuses.map(source => {
-                    const statusLabel = source.status === 'ok' ? `可用 ${source.count}` : source.status === 'disabled' ? '未启用' : source.status === 'unsupported' ? '此查询语言暂不适用' : '查询失败';
-                    const statusTone = source.status === 'ok' ? 'text-emerald-300 border-emerald-800/70' : source.status === 'disabled' ? 'text-amber-200 border-amber-800/70' : source.status === 'unsupported' ? 'text-slate-300 border-slate-700' : 'text-red-300 border-red-800/70';
-                    return (
-                      <span key={source.source} title={source.reason} className={`max-w-full break-words rounded-md border px-2 py-1 text-[10px] ${statusTone}`}>
-                        {source.name}: {statusLabel}{source.reason && source.status !== 'ok' ? ` · ${source.reason}` : ''}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              {ingestError && <div role="status" aria-live="polite" className="text-xs text-red-400 mb-3">{ingestError}</div>}
+            <section aria-labelledby="library-online-results-title" aria-busy={isSearchingOnline} className="rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 shadow-xs">
+              <h3 id="library-online-results-title" className="mb-3 text-sm font-semibold text-[var(--color-one-text)]">全球馆藏索引</h3>
+              {ingestError && <div role="status" aria-live="polite" className="mb-3 text-xs text-rose-600 dark:text-rose-400">{ingestError}</div>}
               {!isSearchingOnline && onlineResults.length > 0 && (
-                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end xl:grid-cols-4">
+                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <label className="block text-[11px] text-[var(--color-one-text-muted)]">
-                    <span className="mb-1 block">按来源筛选</span>
-                    <select aria-label="按来源筛选全球检索结果" value={onlineSourceFilter} onChange={event => setOnlineSourceFilter(event.target.value)} className="min-h-11 w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] px-3 py-2 text-xs text-white focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)]">
+                    <span className="mb-1 block">来源</span>
+                    <select aria-label="按来源筛选" value={onlineSourceFilter} onChange={(e) => setOnlineSourceFilter(e.target.value)} className="min-h-10 w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] px-3 py-2 text-xs text-[var(--color-one-text)]">
                       <option value="all">全部来源（{onlineResults.length}）</option>
-                      {onlineFilterOptions.sources.map(option => (<option key={option.source} value={option.source}>{option.name}（{option.count}）</option>))}
+                      {onlineFilterOptions.sources.map((option) => (<option key={option.source} value={option.source}>{option.name}（{option.count}）</option>))}
                     </select>
                   </label>
                   <label className="block text-[11px] text-[var(--color-one-text-muted)]">
-                    <span className="mb-1 block">按语言筛选</span>
-                    <select aria-label="按语言筛选全球检索结果" value={onlineLanguageFilter} onChange={event => setOnlineLanguageFilter(event.target.value)} className="min-h-11 w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] px-3 py-2 text-xs text-white focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)]">
+                    <span className="mb-1 block">语言</span>
+                    <select aria-label="按语言筛选" value={onlineLanguageFilter} onChange={(e) => setOnlineLanguageFilter(e.target.value)} className="min-h-10 w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] px-3 py-2 text-xs text-[var(--color-one-text)]">
                       <option value="all">全部语言（{onlineResults.length}）</option>
-                      {onlineFilterOptions.languages.map(option => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
+                      {onlineFilterOptions.languages.map((option) => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
                     </select>
                   </label>
                   <label className="block text-[11px] text-[var(--color-one-text-muted)]">
-                    <span className="mb-1 block">按年份筛选</span>
-                    <select aria-label="按年份筛选全球检索结果" value={onlineYearFilter} onChange={event => setOnlineYearFilter(event.target.value)} className="min-h-11 w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] px-3 py-2 text-xs text-white focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)]">
+                    <span className="mb-1 block">年份</span>
+                    <select aria-label="按年份筛选" value={onlineYearFilter} onChange={(e) => setOnlineYearFilter(e.target.value)} className="min-h-10 w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] px-3 py-2 text-xs text-[var(--color-one-text)]">
                       <option value="all">全部年份（{onlineResults.length}）</option>
-                      {onlineFilterOptions.years.map(option => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
+                      {onlineFilterOptions.years.map((option) => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
                     </select>
                   </label>
                   <label className="block text-[11px] text-[var(--color-one-text-muted)]">
-                    <span className="mb-1 block">按来源标注的权利状态筛选</span>
-                    <select aria-label="按权利状态筛选全球检索结果" value={onlineRightsFilter} onChange={event => setOnlineRightsFilter(event.target.value)} className="min-h-11 w-full rounded-xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.7)] px-3 py-2 text-xs text-white focus:border-[rgba(78,161,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(78,161,255,0.12)]">
+                    <span className="mb-1 block">权利状态</span>
+                    <select aria-label="按权利状态筛选" value={onlineRightsFilter} onChange={(e) => setOnlineRightsFilter(e.target.value)} className="min-h-10 w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] px-3 py-2 text-xs text-[var(--color-one-text)]">
                       <option value="all">全部权利状态</option>
-                      {onlineFilterOptions.rights.map(option => (<option key={option.value} value={option.value}>{LIBRARY_RIGHTS_FILTER_LABELS[option.value]}（{option.count}）</option>))}
+                      {onlineFilterOptions.rights.map((option) => (<option key={option.value} value={option.value}>{LIBRARY_RIGHTS_FILTER_LABELS[option.value]}（{option.count}）</option>))}
                     </select>
                   </label>
-                  <p role="status" aria-live="polite" className="text-[10px] text-[var(--color-one-text-dim)] sm:col-span-2 xl:col-span-4">
-                    显示 {visibleOnlineResults.length} / {onlineResults.length} 条；仅按返回记录的来源、语言、年份和权利分类筛选，未标注的语言/年份及未知权利仍保留为未知。
-                  </p>
-                </div>
-              )}
-              {!isSearchingOnline && onlineResults.length > 0 && visibleOnlineResults.length === 0 && (
-                <div role="status" className="rounded-2xl border border-dashed border-[var(--color-one-border-strong)] px-4 py-8 text-center text-xs text-[var(--color-one-text-muted)]">
-                  没有符合当前筛选条件的结果，请尝试其他来源、语言、年份或权利状态。
                 </div>
               )}
               {isSearchingOnline ? (
-                <div role="status" aria-live="polite" className="py-6 text-center text-xs text-[var(--color-one-text-muted)]">正在查询全球图书馆与开放资源...</div>
+                <div role="status" aria-live="polite" className="py-6 text-center text-xs text-[var(--color-one-text-muted)]">正在查询全球馆藏…</div>
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {visibleOnlineResults.map(r => {
-                    const canImport = r.canImport === true;
-                    const sourceName = r.sourceName || ({
-                      youtube: 'YouTube 有声精读', bilibili: 'Bilibili 精读', openlibrary: 'Open Library', gutenberg: 'Project Gutenberg', googlebooks: 'Google Books', europeana: 'Europeana', archive: 'Internet Archive', wikisource: 'Wikisource', ar_wikisource: '阿拉伯语维基文库', openalex: 'OpenAlex', crossref: 'Crossref', arxiv: 'arXiv', europepmc: 'Europe PMC', pmc: 'PubMed Central', pubmed: 'PubMed', shamela: 'Shamela'
-                    } as Record<string, string>)[r.source] || r.source;
-                    const resourceType = typeof r.metadata?.resourceType === 'string' ? r.metadata.resourceType : undefined;
-                    const identifierLabel = r.doi ? `DOI ${r.doi}` : r.isbn?.length ? `ISBN ${r.isbn[0]}` : r.identifier ? `ID ${r.identifier}` : undefined;
-                    const availabilityLabel = ({ 'official-source-only': '仅官方来源页面', 'licensed-thumbnail-and-official-source': '官方页面；许可缩略图', 'provider-preview': '提供方预览', 'provider-full-view': '提供方页面阅读', 'open-access-link': '开放获取入口（官方来源）', 'provider-download': '提供方访问入口', 'metadata-only': '仅元数据', 'access-unknown': '访问状态未知', 'verify-official-opds': '需官方目录核验' } as Record<string, string>)[r.availability || ''] || '官方来源访问';
-                    const downloadLabel = (r.downloadLinks?.length || 0) > 0 ? `来源链接 ${r.downloadLinks!.length} 个（遵循许可）` : '无已核验下载入口';
-                    const rightsLabel = ({ PUBLIC_DOMAIN: '公共领域（依来源声明）', OPEN_LICENSE: '开放许可', OPEN_ACCESS: '开放获取', BORROWABLE: '需经来源借阅', PREVIEW_ONLY: '仅预览', METADATA_ONLY: '仅元数据', COPYRIGHT_RESTRICTED: '受版权限制', UNKNOWN: '权利状态未知' } as Record<string, string>)[r.rightsClassification || 'UNKNOWN'] || '权利状态未知';
-                    const licenseUrl = safeHttpsUrl(r.licenseUrl);
-                    const providerFullTextUrl = safeHttpsUrl(r.providerFullTextUrl);
-                    return (
-                      <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[rgba(10,14,22,0.55)] p-3 transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.04]">
-                        {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
-                        <div className="min-w-0 flex-1">
-                          <h4 className="line-clamp-1 text-xs font-semibold text-white">{r.title}</h4>
-                          <p className="mb-1 text-[11px] text-[var(--color-one-accent-soft)]">{r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}</p>
-                          <p className="mb-1 line-clamp-2 text-[11px] text-[var(--color-one-text-muted)]">{r.description}</p>
-                          {(resourceType || identifierLabel) && <p className="mb-1 text-[10px] text-[var(--color-one-text-dim)]">{resourceType ? `类型：${resourceType}` : ''}{resourceType && identifierLabel ? ' · ' : ''}{identifierLabel || ''}</p>}
-                          <p className="mb-1 text-[10px] text-[var(--color-one-text-dim)]">访问：{availabilityLabel} · 下载：{downloadLabel}</p>
-                          <p className="mb-2 text-[10px] text-[var(--color-one-text-dim)]">权利状态：{rightsLabel}{r.rightsNote ? ` · ${r.rightsNote}` : ''}</p>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {canImport && (
-                              <button type="button" onClick={() => handleIngestBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-3 py-2 text-[11px] font-semibold text-[#071018] transition hover:brightness-110 disabled:opacity-50">
-                                {ingestingId === r.id ? <span>正在读取...</span> : <><BookOpen className="h-3 w-3" /><span>保存并诵读</span></>}
-                              </button>
-                            )}
-                            {(() => {
-                              const onlineEmbed = getBookEmbedUrl(r);
-                              if (!onlineEmbed) return null;
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => setWebReader({ url: onlineEmbed.url, title: r.title, sourceUrl: r.sourceUrl, label: onlineEmbed.label })}
-                                  className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/15"
-                                >
-                                  <BookOpen className="h-3 w-3" /><span>在线阅读</span>
+                  {visibleOnlineResults
+                    .filter((r) => !['youtube', 'bilibili'].includes(String(r.source || '').toLowerCase()))
+                    .map((r) => {
+                      const canImport = r.canImport === true;
+                      const sourceName = r.sourceName || r.source;
+                      return (
+                        <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-3.5 transition hover:border-[var(--color-one-border-strong)]">
+                          {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
+                          <div className="min-w-0 flex-1">
+                            <h4 className="line-clamp-1 text-xs font-semibold text-[var(--color-one-text)]">{r.title}</h4>
+                            <p className="mb-1 text-[11px] text-[var(--color-one-accent)]">{r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}</p>
+                            <p className="mb-2.5 line-clamp-2 text-[11px] text-[var(--color-one-text-muted)]">{r.description}</p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {canImport && (
+                                <button type="button" onClick={() => handleIngestBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50">
+                                  {ingestingId === r.id ? <span>保存中…</span> : <><BookOpen className="h-3 w-3" /><span>加入并阅读</span></>}
                                 </button>
-                              );
-                            })()}
-                            {r.sourceUrl && (
-                              <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-[var(--color-one-border)] px-3 py-2 text-[11px] font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white">
-                                <ExternalLink className="h-3 w-3" /><span>在来源平台查看</span>
-                              </a>
-                            )}
-                            {providerFullTextUrl && providerFullTextUrl !== r.sourceUrl && (
-                              <a href={providerFullTextUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/15">
-                                <ExternalLink className="h-3 w-3" /><span>打开官方全文</span>
-                              </a>
-                            )}
-                            {licenseUrl && (
-                              <a href={licenseUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-[var(--color-one-border)] px-3 py-2 text-[11px] font-medium text-[var(--color-one-text-muted)] transition hover:bg-white/[0.05] hover:text-white">
-                                <ExternalLink className="h-3 w-3" /><span>查看许可证</span>
-                              </a>
-                            )}
+                              )}
+                              {r.sourceUrl && (
+                                <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--color-one-border)] px-2.5 py-1.5 text-[11px] text-[var(--color-one-text-muted)] transition hover:text-[var(--color-one-text)]">
+                                  <ExternalLink className="h-3 w-3" /><span>来源页</span>
+                                </a>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               )}
             </section>
           )}
 
           {/* Category sections */}
-          {CATEGORIES.filter(c => booksByCategory(c.id).length > 0).map(cat => {
+          {CATEGORIES.filter((c) => booksByCategory(c.id).length > 0).map((cat) => {
             const catBooks = booksByCategory(cat.id);
             return (
               <section key={cat.id}>
                 <div className="mb-4 flex items-end justify-between">
                   <div>
-                    <h3 className="text-lg font-semibold tracking-tight text-white">{cat.label}</h3>
+                    <h3 className="text-base font-semibold tracking-tight text-[var(--color-one-text)]">{cat.label}</h3>
                     <p className="mt-0.5 text-xs text-[var(--color-one-text-dim)]">{cat.description}</p>
                   </div>
                   <button
+                    type="button"
                     onClick={() => { setActiveCategory(cat.id); setView('category'); }}
-                    className="flex cursor-pointer items-center gap-1 text-xs font-medium text-[var(--color-one-accent-soft)] transition hover:text-white"
+                    className="flex cursor-pointer items-center gap-1 text-xs font-medium text-[var(--color-one-accent)] transition hover:underline"
                   >
                     <span>查看全部</span>
                     <ArrowRight className="h-3.5 w-3.5" />
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-                  {catBooks.slice(0, 6).map(book => (
+                  {catBooks.slice(0, 6).map((book) => (
                     <BookCard key={book.id} book={book} onClick={() => openBookDetail(book)} />
                   ))}
                 </div>
@@ -1495,12 +1453,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             );
           })}
 
-          {/* Empty state */}
           {!isLoading && books.length === 0 && (
-            <div className="rounded-[28px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] py-20 text-center text-[var(--color-one-text-muted)]">
-              <Library className="mx-auto mb-3 h-10 w-10 text-[var(--color-one-text-dim)]" />
-              <p className="text-sm font-medium text-white">ONE LIBRARY 正在加载馆藏</p>
-              <p className="mt-1 text-xs">使用上方搜索框检索全球公开/开放书籍与文献。</p>
+            <div className="rounded-[24px] border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] py-16 text-center text-[var(--color-one-text-muted)]">
+              <Library className="mx-auto mb-3 h-9 w-9 text-[var(--color-one-text-dim)]" />
+              <p className="text-sm font-medium text-[var(--color-one-text)]">世界图书馆正在加载馆藏</p>
+              <p className="mt-1 text-xs">使用上方搜索框检索全球公开书籍，或进入 مكتبة النور 全球书库。</p>
             </div>
           )}
         </div>
@@ -1510,32 +1467,33 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {/* CATEGORY VIEW                                                        */}
       {/* ===================================================================== */}
       {view === 'category' && (
-        <div className="max-w-7xl mx-auto w-full px-4 sm:px-8 py-8">
-          <button onClick={() => setView('home')} className="flex items-center space-x-1 text-xs text-slate-400 hover:text-white mb-6 cursor-pointer">
-            <ChevronLeft className="w-4 h-4" />
+        <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8">
+          <button type="button" onClick={() => setView('home')} className="mb-6 flex cursor-pointer items-center space-x-1 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
+            <ChevronLeft className="h-4 w-4" />
             <span>返回首页</span>
           </button>
-          <div className="flex items-center space-x-2 overflow-x-auto pb-4 mb-6">
-            {CATEGORIES.map(cat => (
+          <div className="mb-6 flex items-center space-x-2 overflow-x-auto pb-2">
+            {CATEGORIES.map((cat) => (
               <button
                 key={cat.id}
+                type="button"
                 onClick={() => setActiveCategory(cat.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                className={`whitespace-nowrap rounded-xl px-4 py-2 text-xs font-medium transition cursor-pointer ${
                   activeCategory === cat.id
-                    ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30 border border-amber-400/40'
-                    : 'bg-slate-900/60 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white'
+                    ? 'bg-[var(--color-one-accent)] text-white'
+                    : 'border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
                 }`}
               >
                 {cat.label}
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
-            {books.map(book => (
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {books.map((book) => (
               <BookCard key={book.id} book={book} onClick={() => openBookDetail(book)} />
             ))}
           </div>
-          {books.length === 0 && <div className="text-center text-slate-500 py-16">该分类暂无书籍。</div>}
+          {books.length === 0 && <div className="py-16 text-center text-sm text-[var(--color-one-text-muted)]">该分类暂无书籍。</div>}
         </div>
       )}
 
@@ -1543,102 +1501,87 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {/* BOOK DETAIL VIEW                                                     */}
       {/* ===================================================================== */}
       {view === 'detail' && selectedBook && (
-        <div className="max-w-5xl mx-auto w-full px-4 sm:px-8 py-8">
-          <button onClick={() => setView('home')} className="flex items-center space-x-1 text-xs text-slate-400 hover:text-white mb-6 cursor-pointer">
-            <ChevronLeft className="w-4 h-4" />
+        <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8">
+          <button type="button" onClick={() => setView('home')} className="mb-6 flex cursor-pointer items-center space-x-1 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
+            <ChevronLeft className="h-4 w-4" />
             <span>返回</span>
           </button>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {/* Cover */}
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
             <div>
-              <div className="w-full max-w-xs aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl border border-slate-700/50 bg-slate-900">
+              <div className="aspect-[2/3] w-full max-w-xs overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] shadow-sm">
                 <img
                   src={selectedBook.coverImage || '/assets/library/cover-little-prince.jpg'}
                   alt={selectedBook.title}
-                  className="w-full h-full object-cover"
+                  className="h-full w-full object-cover"
                 />
               </div>
               <div className="mt-4 space-y-2">
-                {(selectedBook.chapters?.some(c=>c.content?.trim()) || selectedBook.epubUrl || getBookPdfUrl(selectedBook as any) || getBookEmbedUrl(selectedBook as any) || selectedBook.sourceUrl || selectedBook.externalReadUrl) ? (
+                {(selectedBook.chapters?.some((c) => c.content?.trim()) || selectedBook.epubUrl || getBookPdfUrl(selectedBook as any) || getBookEmbedUrl(selectedBook as any) || selectedBook.sourceUrl || selectedBook.externalReadUrl) ? (
                   <button
+                    type="button"
                     onClick={() => openReader(selectedBook)}
-                    className="w-full flex items-center justify-center space-x-2 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-all cursor-pointer"
+                    className="flex w-full cursor-pointer items-center justify-center space-x-2 rounded-xl bg-[var(--color-one-accent)] py-3 text-sm font-semibold text-white transition hover:opacity-90"
                   >
-                    <BookOpen className="w-4 h-4" />
-                    <span>{selectedBook.chapters?.some(c=>c.content?.trim()) || selectedBook.epubUrl || getBookPdfUrl(selectedBook as any) || getBookEmbedUrl(selectedBook as any) ? '立即阅读' : '查看阅读方式'}</span>
+                    <BookOpen className="h-4 w-4" />
+                    <span>立即阅读</span>
                   </button>
                 ) : (
-                  <div className="w-full text-center text-xs text-slate-400 py-3 rounded-xl bg-slate-900 border border-slate-800">该记录无可用阅读入口（仅元数据或受限）。</div>
+                  <div className="w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] py-3 text-center text-xs text-[var(--color-one-text-muted)]">该记录无可用阅读入口。</div>
                 )}
-                {readerNotice && view === 'detail' && <p className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-800/40 rounded-lg p-2 leading-relaxed">{readerNotice}</p>}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => isOnShelf(selectedBook.id) ? removeFromShelf(selectedBook.id) : addToShelf(selectedBook, 'want_to_read')}
-                    className={`min-h-11 flex items-center justify-center space-x-1.5 px-2 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                    className={`flex min-h-10 cursor-pointer items-center justify-center space-x-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition ${
                       isOnShelf(selectedBook.id)
-                        ? 'bg-amber-950/60 text-amber-300 border-amber-500/50'
-                        : 'bg-slate-900 text-slate-200 border-slate-700 hover:bg-slate-800'
+                        ? 'border-[var(--color-one-accent)]/40 bg-[var(--color-one-accent)]/10 text-[var(--color-one-accent)]'
+                        : 'border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] text-[var(--color-one-text)]'
                     }`}
                   >
-                    {isOnShelf(selectedBook.id) ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                    <span>{isOnShelf(selectedBook.id) ? '已加入书架' : '加入书架'}</span>
+                    {isOnShelf(selectedBook.id) ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                    <span>{isOnShelf(selectedBook.id) ? '已在书架' : '加入书架'}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => addToShelf(selectedBook, 'favorite')}
-                    className="min-h-11 flex items-center justify-center space-x-1.5 px-2 py-2.5 rounded-xl bg-slate-900 text-slate-200 border border-slate-700 hover:bg-slate-800 text-xs font-semibold transition-all cursor-pointer"
+                    className="flex min-h-10 cursor-pointer items-center justify-center space-x-1.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-2 py-2 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
                   >
-                    <Heart className="w-3.5 h-3.5 text-red-400" />
+                    <Heart className="h-3.5 w-3.5 text-rose-500" />
                     <span>收藏</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Metadata */}
             <div className="md:col-span-2">
-              <p className="text-xs text-amber-400 font-semibold mb-1">{selectedBook.source}</p>
-              <h1 className="text-2xl sm:text-3xl font-serif font-bold text-white leading-tight">{selectedBook.title}</h1>
-              <p className="text-sm text-slate-300 mt-2">{selectedBook.author}</p>
+              <p className="mb-1 text-xs font-medium text-[var(--color-one-accent)]">{selectedBook.source}</p>
+              <h1 className="font-serif text-2xl font-bold leading-tight text-[var(--color-one-text)] sm:text-3xl">{selectedBook.title}</h1>
+              <p className="mt-2 text-sm text-[var(--color-one-text-muted)]">{selectedBook.author}</p>
 
-              {/* Real metadata only — omit fields without data */}
-              <div className="mt-6 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+              <div className="mt-6 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
                 {selectedBook.year && <MetaItem label="出版年份" value={selectedBook.year} />}
                 {selectedBook.publisher && <MetaItem label="出版社" value={selectedBook.publisher} />}
                 {selectedBook.isbn && <MetaItem label="ISBN" value={selectedBook.isbn} />}
                 {selectedBook.language && <MetaItem label="语言" value={selectedBook.language.toUpperCase()} />}
                 {selectedBook.originalLanguage && <MetaItem label="原始语言" value={selectedBook.originalLanguage} />}
-                <MetaItem label="版权/许可" value={selectedBook.rightsClassification === 'PUBLIC_DOMAIN' || selectedBook.copyrightStatus === 'public_domain' ? '公共领域（按来源标注）' : selectedBook.rightsClassification === 'OPEN_LICENSE' || selectedBook.copyrightStatus === 'licensed' ? '开放许可' : selectedBook.rightsClassification === 'OPEN_ACCESS' || selectedBook.copyrightStatus === 'open_access' ? '开放获取（再利用权需看许可）' : selectedBook.rightsClassification === 'COPYRIGHT_RESTRICTED' || selectedBook.copyrightStatus === 'copyrighted' ? '受版权保护' : '状态未确认'} />
                 <MetaItem label="章节" value={`${selectedBook.chapters.length} 章`} />
               </div>
 
-              {(selectedBook.rightsNote || safeHttpsUrl(selectedBook.licenseUrl)) && (
-                <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400">
-                  {selectedBook.rightsNote && <p>来源权利说明：{selectedBook.rightsNote}</p>}
-                  {safeHttpsUrl(selectedBook.licenseUrl) && (
-                    <a href={safeHttpsUrl(selectedBook.licenseUrl)} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-11 items-center gap-1 px-2 py-2 text-amber-300 hover:text-amber-200">
-                      <ExternalLink className="w-3 h-3" />查看许可证原文
-                    </a>
-                  )}
+              {selectedBook.description && (
+                <div className="mt-6">
+                  <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">内容简介</h3>
+                  <p className="text-sm leading-relaxed text-[var(--color-one-text-muted)]">{selectedBook.description}</p>
                 </div>
               )}
 
-              {/* Description */}
-              <div className="mt-6">
-                <h3 className="text-sm font-semibold text-slate-200 mb-2">内容简介</h3>
-                <p className="text-sm text-slate-400 leading-relaxed">{selectedBook.description}</p>
-              </div>
-
-              {/* Table of contents */}
               {selectedBook.chapters.length > 0 && (
                 <div className="mt-6">
-                  <h3 className="text-sm font-semibold text-slate-200 mb-2">目录</h3>
-                  <ol className="space-y-1 text-xs text-slate-400">
+                  <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">目录</h3>
+                  <ol className="space-y-1 text-xs text-[var(--color-one-text-muted)]">
                     {selectedBook.chapters.slice(0, 8).map((ch, i) => (
                       <li key={ch.id} className="flex items-center space-x-2">
-                        <span className="text-slate-600">{i + 1}.</span>
+                        <span className="font-mono text-[var(--color-one-text-dim)]">{i + 1}.</span>
                         <span>{ch.title}</span>
                       </li>
                     ))}
@@ -1646,26 +1589,15 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 </div>
               )}
 
-              {/* Actions */}
               <div className="mt-8 flex flex-wrap gap-3">
-                {selectedBook.chapters.some(chapter => chapter.content.trim().length > 0) && (
-                  <button
-                    type="button"
-                    onClick={() => openReader(selectedBook)}
-                    className="min-h-11 flex items-center space-x-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-all cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>AI 解读</span>
-                  </button>
-                )}
                 {(selectedBook.sourceUrl || selectedBook.externalReadUrl) && (
                   <a
                     href={selectedBook.sourceUrl || selectedBook.externalReadUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="min-h-11 flex items-center space-x-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-200 text-xs font-semibold transition-all"
+                    className="flex min-h-10 items-center space-x-2 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-4 py-2 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" />
+                    <ExternalLink className="h-3.5 w-3.5" />
                     <span>资源来源</span>
                   </a>
                 )}
@@ -1679,25 +1611,25 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {/* SHELF VIEW                                                           */}
       {/* ===================================================================== */}
       {view === 'shelf' && (
-        <div className="max-w-7xl mx-auto w-full px-4 sm:px-8 py-8">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-serif font-bold text-white">我的书架</h2>
-            <button type="button" onClick={() => setView('home')} className="min-h-11 px-3 flex items-center space-x-1 rounded-lg text-xs text-slate-400 hover:text-white cursor-pointer">
-              <ChevronLeft className="w-4 h-4" />
+        <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="font-serif text-xl font-semibold text-[var(--color-one-text)]">我的书架</h2>
+            <button type="button" onClick={() => setView('home')} className="flex min-h-10 cursor-pointer items-center space-x-1 rounded-lg px-3 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
+              <ChevronLeft className="h-4 w-4" />
               <span>返回首页</span>
             </button>
           </div>
 
-          {/* Shelf tabs */}
-          <div className="flex items-center space-x-2 overflow-x-auto pb-4 mb-6">
-            {SHELF_TABS.map(tab => (
+          <div className="mb-6 flex items-center space-x-2 overflow-x-auto pb-2">
+            {SHELF_TABS.map((tab) => (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setShelfTab(tab.id)}
-                className={`min-h-11 px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                className={`whitespace-nowrap rounded-xl px-4 py-2 text-xs font-medium transition cursor-pointer ${
                   shelfTab === tab.id
-                    ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                    : 'bg-slate-900/60 text-slate-300 border border-slate-800 hover:border-slate-700'
+                    ? 'bg-[var(--color-one-accent)] text-white'
+                    : 'border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
                 }`}
               >
                 {tab.label}
@@ -1706,52 +1638,47 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           </div>
 
           {shelfBooks.length === 0 ? (
-            <div className="rounded-[28px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] py-20 text-center text-[var(--color-one-text-muted)]">
-              <BookMarked className="mx-auto mb-3 h-10 w-10 text-[var(--color-one-text-dim)]" />
-              <p className="text-sm font-medium text-white">书架还是空的</p>
-              <p className="mt-1 text-xs">在「مكتبة النور · 全球书库」搜索全球图书，点击「下载到原文书架」即可直接阅读并使用 AI 逐页讲解与点词查义。</p>
+            <div className="rounded-[24px] border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] py-16 text-center text-[var(--color-one-text-muted)]">
+              <BookMarked className="mx-auto mb-3 h-9 w-9 text-[var(--color-one-text-dim)]" />
+              <p className="text-sm font-medium text-[var(--color-one-text)]">书架还是空的</p>
+              <p className="mt-1 text-xs">前往「مكتبة النور 全球书库」搜索全球原版图书，下载后自动转为电子书重排阅读。</p>
               <button
                 type="button"
                 onClick={() => setView('noor')}
-                className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-[#04140e] transition hover:brightness-110"
+                className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
               >
                 <BookOpen className="h-3.5 w-3.5" />
-                <span>去全球书库搜索并下载图书</span>
+                <span>去全球书库找书</span>
               </button>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 sm:gap-5">
-              {shelfBooks.map(item => {
+              {shelfBooks.map((item) => {
                 const localPdf = getBookPdfUrl(item.book as any);
                 return (
                   <div key={item.id} className="relative flex flex-col">
                     <div className="relative">
                       <BookCard book={item.book} onClick={() => openShelfBook(item.book)} />
-                      {localPdf && (
-                        <span className="pointer-events-none absolute right-2 top-2 rounded-lg border border-emerald-400/40 bg-[#051a14]/85 px-2 py-0.5 font-mono text-[10px] font-semibold text-emerald-200 backdrop-blur-sm">
-                          PDF 已存
-                        </span>
-                      )}
                       {item.progress > 0 && (
-                        <div className="pointer-events-none absolute inset-x-2 bottom-[3.25rem] h-1 overflow-hidden rounded-full bg-black/40 ring-1 ring-white/10">
+                        <div className="pointer-events-none absolute inset-x-2 bottom-[3.25rem] h-1 overflow-hidden rounded-full bg-black/30">
                           <div className="h-full rounded-full bg-[var(--color-one-accent)]" style={{ width: `${item.progress}%` }} />
                         </div>
                       )}
                     </div>
                     {localPdf && (
-                      <div className="mt-1.5 flex items-center gap-1.5">
+                      <div className="mt-2 flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => openShelfBook(item.book)}
-                          className="flex-1 cursor-pointer rounded-lg bg-emerald-500/18 px-2 py-1 text-[11px] font-medium text-emerald-100 transition hover:bg-emerald-500/28"
+                          className="flex-1 cursor-pointer rounded-lg bg-[var(--color-one-accent)]/12 px-2 py-1.5 text-[11px] font-medium text-[var(--color-one-accent)] transition hover:bg-[var(--color-one-accent)]/20"
                         >
-                          阅读 PDF
+                          电子书阅读
                         </button>
                         <a
                           href={localPdf.includes('?') ? `${localPdf}&download=1` : `${localPdf}?download=1&filename=${encodeURIComponent(item.book.title)}`}
                           download
-                          className="rounded-lg border border-white/12 px-2 py-1 text-[11px] text-slate-300 transition hover:bg-white/10 hover:text-white"
-                          title="下载到本地设备"
+                          className="rounded-lg border border-[var(--color-one-border)] px-2 py-1.5 text-[11px] text-[var(--color-one-text-muted)] transition hover:text-[var(--color-one-text)]"
+                          title="下载原始 PDF"
                         >
                           下载
                         </a>
@@ -1760,6 +1687,65 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* PERSONAL VOCABULARY BANK VIEW                                         */}
+      {/* ===================================================================== */}
+      {view === 'vocab' && (
+        <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-8">
+          <div className="mb-6 flex items-center justify-between">
+            <div>
+              <h2 className="font-serif text-xl font-semibold text-[var(--color-one-text)]">个人词汇库</h2>
+              <p className="mt-1 text-xs text-[var(--color-one-text-muted)]">在电子书阅读器中点击查词并保存的生词，自动跨设备持久化。</p>
+            </div>
+            <button type="button" onClick={() => setView('home')} className="flex min-h-10 cursor-pointer items-center space-x-1 rounded-lg px-3 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
+              <ChevronLeft className="h-4 w-4" />
+              <span>返回首页</span>
+            </button>
+          </div>
+
+          {vocabLoading ? (
+            <div className="py-12 text-center text-xs text-[var(--color-one-text-muted)]">正在加载个人生词本…</div>
+          ) : vocabItems.length === 0 ? (
+            <div className="rounded-[24px] border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] py-16 text-center text-[var(--color-one-text-muted)]">
+              <Sparkles className="mx-auto mb-3 h-8 w-8 text-[var(--color-one-text-dim)]" />
+              <p className="text-sm font-medium text-[var(--color-one-text)]">生词本为空</p>
+              <p className="mt-1 text-xs">打开任意书籍，轻点生词即可由 ONE AI 注解并一键收入个人词汇库。</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {vocabItems.map((v) => (
+                <div key={v.id} className="rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <span className="text-base font-semibold text-[var(--color-one-text)]">{v.word}</span>
+                        {v.partOfSpeech && <span className="text-[11px] text-[var(--color-one-accent)]">{v.partOfSpeech}</span>}
+                      </div>
+                      {v.reading && <div className="text-xs text-[var(--color-one-text-muted)]">{v.reading}</div>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await fetch(`/api/library/vocabulary/${encodeURIComponent(v.id)}`, { method: 'DELETE' }).catch(() => {});
+                        setVocabItems((prev) => prev.filter((item) => item.id !== v.id));
+                      }}
+                      className="cursor-pointer rounded-lg p-1.5 text-[var(--color-one-text-dim)] hover:text-rose-500"
+                      title="删除生词"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-[var(--color-one-text)]">{v.meaning}</p>
+                  {v.usage && <p className="mt-1 text-[11px] text-[var(--color-one-text-muted)]">用法：{v.usage}</p>}
+                  {v.example && <p className="mt-1 text-[11px] italic text-[var(--color-one-text-dim)]">{v.example}</p>}
+                  {v.bookTitle && <p className="mt-2 text-[10px] text-[var(--color-one-text-dim)]">出自《{v.bookTitle}》</p>}
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -1812,7 +1798,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           lang={lang}
           initialChapterIndex={activeChapterIndex}
           initialAnnotations={annotations}
-          onClose={closeReader}
+          onClose={() => {
+            closeReader();
+            refreshRecentHistory();
+          }}
           onSaveProgress={(progress, chapterId) => {
             if (chapterId) {
               const idx = readingBook.chapters.findIndex((c) => c.id === chapterId);
@@ -1832,7 +1821,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           key={`${currentUser?.id || 'guest'}:${readingEpub.id}`}
           book={readingEpub}
           ownerId={currentUser?.id}
-          initialCfi={shelf.find(item => item.bookId === readingEpub.id && item.userId === currentUser?.id)?.lastReadEpubCfi}
+          initialCfi={shelf.find((item) => item.bookId === readingEpub.id && item.userId === currentUser?.id)?.lastReadEpubCfi}
           onProgress={(progress, cfi, bookId, ownerId) => { void saveEpubProgress(bookId, progress, cfi, ownerId); }}
           onClose={() => setReadingEpub(null)}
         />
@@ -1840,90 +1829,74 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {crawlReader && (() => {
         const embed = getBookEmbedUrl(crawlReader);
         return (
-          <div role="dialog" aria-modal="true" aria-label="在线阅读" className="fixed inset-0 z-50 flex flex-col bg-[#030712]/98 backdrop-blur-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+          <div role="dialog" aria-modal="true" aria-label="在线阅读" className="fixed inset-0 z-[70] flex flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+            <div className="flex items-center justify-between border-b border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-4 py-3">
               <div className="min-w-0">
-                <h2 className="truncate text-sm font-bold text-white">{crawlReader.title}</h2>
-                <p className="truncate text-[11px] text-slate-400">{crawlReader.author} · {crawlReader.source} · {embed?.label || '官方来源'}</p>
+                <h2 className="truncate text-sm font-semibold text-[var(--color-one-text)]">{crawlReader.title}</h2>
+                <p className="truncate text-[11px] text-[var(--color-one-text-muted)]">{crawlReader.author} · {crawlReader.source}</p>
               </div>
               <div className="ml-3 flex shrink-0 items-center gap-2">
                 {crawlReader.sourceUrl && (
-                  <a href={crawlReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-slate-700 px-3 text-[11px] text-slate-300 hover:text-white">
+                  <a href={crawlReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-xl border border-[var(--color-one-border)] px-3 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
                     <ExternalLink className="h-3.5 w-3.5" /> 官方来源
                   </a>
                 )}
-                <button type="button" onClick={() => setCrawlReader(null)} aria-label="关闭阅读器" className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setCrawlReader(null)} aria-label="关闭阅读器" className="rounded-xl p-2 text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface-soft)]"><X className="h-4 w-4" /></button>
               </div>
             </div>
             {embed ? (
-              <>
-                <iframe
-                  src={embed.url}
-                  title={crawlReader.title}
-                  className="min-h-0 flex-1 border-0 bg-black sm:bg-white"
-                  referrerPolicy="strict-origin-when-cross-origin"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                  {...(/youtube\.com|bilibili\.com|archive\.org/i.test(embed.url)
-                    ? {}
-                    : { sandbox: 'allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-presentation' })}
-                />
-                <p className="flex items-start gap-1.5 border-t border-slate-800 px-4 py-2 text-[10px] leading-relaxed text-slate-500">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 通过官方/公开阅读页面或有声精读播放器嵌入显示；若加载空白，请点击“官方来源”打开。
-                </p>
-              </>
+              <iframe
+                src={embed.url}
+                title={crawlReader.title}
+                className="min-h-0 flex-1 border-0 bg-white"
+                referrerPolicy="strict-origin-when-cross-origin"
+                allowFullScreen
+              />
             ) : (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-slate-300">
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-[var(--color-one-text-muted)]">
                 <p>该来源暂不支持站内嵌入阅读，请使用官方来源打开。</p>
-                {crawlReader.sourceUrl && <a href={crawlReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-amber-600 px-4 py-2 text-white">打开官方来源</a>}
+                {crawlReader.sourceUrl && <a href={crawlReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-white">打开官方来源</a>}
               </div>
             )}
           </div>
         );
       })()}
       {webReader && (
-        <div role="dialog" aria-modal="true" aria-label="网页原文阅读" className="fixed inset-0 z-50 flex flex-col bg-[#030712]/98 backdrop-blur-2xl">
-          <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+        <div role="dialog" aria-modal="true" aria-label="网页原文阅读" className="fixed inset-0 z-[70] flex flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+          <div className="flex items-center justify-between border-b border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-4 py-3">
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-bold text-white">{webReader.title}</h2>
-              <p className="truncate text-[11px] text-slate-400">{webReader.label} · 官方/公开来源</p>
+              <h2 className="truncate text-sm font-semibold text-[var(--color-one-text)]">{webReader.title}</h2>
+              <p className="truncate text-[11px] text-[var(--color-one-text-muted)]">{webReader.label}</p>
             </div>
             <div className="ml-3 flex shrink-0 items-center gap-2">
               {webReader.sourceUrl && (
-                <a href={webReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-slate-700 px-3 text-[11px] text-slate-300 hover:text-white">
+                <a href={webReader.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-9 items-center gap-1 rounded-xl border border-[var(--color-one-border)] px-3 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
                   <ExternalLink className="h-3.5 w-3.5" /> 官方来源
                 </a>
               )}
-              <button type="button" onClick={() => setWebReader(null)} aria-label="关闭阅读器" className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-4 w-4" /></button>
+              <button type="button" onClick={() => setWebReader(null)} aria-label="关闭阅读器" className="rounded-xl p-2 text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface-soft)]"><X className="h-4 w-4" /></button>
             </div>
           </div>
           <iframe
             src={webReader.url}
             title={webReader.title}
-            className="min-h-0 flex-1 border-0 bg-black sm:bg-white"
+            className="min-h-0 flex-1 border-0 bg-white"
             referrerPolicy="strict-origin-when-cross-origin"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             allowFullScreen
-            {...(/youtube\.com|bilibili\.com|archive\.org/i.test(webReader.url)
-              ? {}
-              : { sandbox: 'allow-same-origin allow-scripts allow-popups allow-forms allow-downloads allow-presentation' })}
           />
-          <p className="flex items-start gap-1.5 border-t border-slate-800 px-4 py-2 text-[10px] leading-relaxed text-slate-500">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> 网页/官方阅读页或有声精读按来源站点权限嵌入显示；若加载受限请点击“官方来源”打开。
-          </p>
         </div>
       )}
       {pdfReader && (
-        <div role="dialog" aria-modal="true" aria-label={pdfReader.title} className="fixed inset-0 z-[70] flex flex-col bg-[#0b0e14]">
+        <div role="dialog" aria-modal="true" aria-label={pdfReader.title} className="fixed inset-0 z-[70] flex flex-col">
           <PdfDocumentViewer
             sourceUrl={pdfReader.url}
             title={pdfReader.title}
             lang={lang}
             originPageUrl={pdfReader.sourceUrl}
-            bookId={pdfReader.bookId}
-            contentLanguage={pdfReader.contentLanguage}
-            initialState={pdfReader.initialState}
-            onClose={() => setPdfReader(null)}
+            onClose={() => {
+              setPdfReader(null);
+              refreshRecentHistory();
+            }}
           />
         </div>
       )}
@@ -1942,16 +1915,15 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
       aria-label={`打开《${book.title}》详情`}
       className="group flex w-full cursor-pointer flex-col rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-one-accent)]"
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] shadow-[var(--shadow-one-sm)] transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-[var(--color-one-border-strong)] group-hover:shadow-[var(--shadow-one-md)]">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] shadow-xs transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-[var(--color-one-border-strong)] group-hover:shadow-md">
         <img
           src={book.coverImage || '/assets/library/cover-little-prince.jpg'}
           alt=""
           loading="lazy"
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
         />
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
-      <h3 className="mt-2.5 line-clamp-2 text-[13px] font-medium leading-snug text-white transition-colors group-hover:text-[var(--color-one-accent-soft)]">
+      <h3 className="mt-2.5 line-clamp-2 text-[13px] font-medium leading-snug text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)]">
         {book.title}
       </h3>
       <p className="mt-0.5 line-clamp-1 text-[11px] text-[var(--color-one-text-muted)]">{book.author}</p>
@@ -1964,7 +1936,7 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
 // ===========================================================================
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[var(--color-one-border)] bg-white/[0.02] px-3 py-2.5">
+    <div className="rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3 py-2.5">
       <div className="text-[10px] uppercase tracking-wide text-[var(--color-one-text-dim)]">{label}</div>
       <div className="mt-0.5 text-xs font-medium text-[var(--color-one-text)]">{value}</div>
     </div>

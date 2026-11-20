@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { User, Language, KnowledgeNode, Book, Community, Post } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
-import { Search, Command as CommandIcon, User as UserIcon, MapPin, ShieldCheck, Eye, EyeOff, LogOut, X, ChevronDown, Sparkles, Compass, BookOpen, Users2, Network, Sun, Moon, BatteryCharging, BatteryFull, BatteryLow, BatteryMedium } from 'lucide-react';
+import { Search, User as UserIcon, MapPin, ShieldCheck, Eye, EyeOff, LogOut, X, ChevronDown, Sparkles, Compass, BookOpen, Users2, Network, Sun, Moon, BatteryCharging, BatteryFull, BatteryLow, BatteryMedium, GraduationCap, MessageCircle, Music2 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton.tsx';
 import { ParadiseBrandEmblem } from '../brand/ParadiseBrandEmblem.tsx';
 import { useAgentUiState } from '../../agent/uiStateManager.ts';
@@ -178,8 +178,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             : 'pointer-events-auto mx-auto flex min-h-12 w-full max-w-[1280px] items-center justify-between gap-2 rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#faf7f0]/88 dark:bg-[#111b26]/86 backdrop-blur-2xl saturate-150 px-2.5 py-1 sm:px-3.5 shadow-[0_8px_28px_rgba(24,36,28,0.10)] dark:shadow-[0_14px_38px_rgba(0,0,0,0.45)]'
         }
       >
-        {/* Left: Unified Paradise Brand Emblem + Quick Spaces Launcher */}
-        <div className="flex shrink-0 items-center gap-2">
+        {/* Left: Minimal Brand Return Home */}
+        <div className="flex shrink-0 items-center">
           <button
             type="button"
             onClick={() => onSelectTab('home')}
@@ -192,10 +192,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             <ParadiseBrandEmblem
               surface={isGardenHome ? (isGardenDay ? 'garden-day' : 'garden-night') : (theme === 'dark' ? 'dark' : 'light')}
               variant="medallion"
-              size={isGardenHome ? 30 : 32}
+              size={isGardenHome ? 28 : 30}
             />
             <span
-              className={`hidden whitespace-nowrap text-[12px] font-semibold tracking-[0.2em] md:inline ${
+              className={`hidden whitespace-nowrap text-[11px] font-semibold tracking-[0.2em] lg:inline ${
                 isGardenHome
                   ? isGardenDay
                     ? 'text-[#1c2c24]'
@@ -206,78 +206,78 @@ export const Navbar: React.FC<NavbarProps> = ({
               EARTH ONE
             </span>
           </button>
-          {onOpenCommand && (
-            <button
-              type="button"
-              onClick={onOpenCommand}
-              className={
-                isGardenHome
-                  ? `hidden sm:inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium transition-colors cursor-pointer ${gardenSurfacePill}`
-                  : 'hidden sm:inline-flex h-8 items-center gap-1 rounded-xl border border-[#23362c]/12 dark:border-white/[0.12] bg-[#23362c]/[0.04] dark:bg-white/[0.05] px-2.5 text-[11px] font-medium text-[#273a30] dark:text-[#e9e3d6] hover:bg-[#23362c]/[0.08] dark:hover:bg-white/[0.1] transition-colors cursor-pointer'
-              }
-              title={lang === 'zh' ? '全部空间与功能 (⌘K)' : 'All Spaces (⌘K)'}
-            >
-              <Compass className={`h-3.5 w-3.5 ${isGardenHome ? (isGardenDay ? 'text-[#247864]' : 'text-[#d6b77f]') : 'text-[#247864] dark:text-[#C4A876]'}`} />
-              <span>{lang === 'zh' ? '空间' : 'Spaces'}</span>
-            </button>
-          )}
         </div>
 
-        {/* Center: Adaptive Search Field */}
-        <div ref={searchWrapRef} className={`relative flex min-w-0 flex-1 items-center ${isGardenHome ? 'max-w-[300px]' : 'max-w-[380px]'}`}>
-          <div
-            className={
-              isGardenHome
-                ? `flex h-9 min-w-0 flex-1 items-center rounded-full border px-3 transition-colors ${
-                    isGardenDay
-                      ? 'border-white/60 bg-[#faf6ee]/74 focus-within:bg-[#faf6ee]/95 focus-within:border-[#247864]/45 shadow-[0_6px_18px_rgba(24,36,28,0.10)]'
-                      : 'border-white/16 bg-[#131d29]/64 focus-within:bg-[#131d29]/88 focus-within:border-[#d6b77f]/50 shadow-[0_8px_22px_rgba(4,8,14,0.32)]'
-                  }`
-                : 'flex h-9 min-w-0 flex-1 items-center rounded-xl border border-[#23362c]/12 dark:border-white/[0.12] bg-white/75 dark:bg-white/[0.06] px-2.5 transition-colors focus-within:border-[#247864]/60 dark:focus-within:border-[#C4A876]/55 focus-within:bg-white dark:focus-within:bg-white/[0.1]'
-            }
-          >
-            <Search
-              className={`h-3.5 w-3.5 shrink-0 ${
-                isGardenHome
-                  ? isGardenDay
-                    ? 'text-[#395044]'
-                    : 'text-[#ded8cb]/80'
-                  : 'text-[#52685d] dark:text-[#98A1AE]'
-              }`}
-            />
+        {/* Center: Clean 4-Portal Navigation (图书馆 · 语言学习中心 · 通讯 · 音乐) */}
+        <nav
+          aria-label={lang === 'zh' ? '主导航' : 'Primary Navigation'}
+          className={`flex min-w-0 items-center justify-center gap-0.5 sm:gap-1 rounded-full border p-1 transition-colors ${
+            isGardenHome
+              ? isGardenDay
+                ? 'border-white/60 bg-[#faf6ee]/78 text-[#1f2e27] shadow-[0_6px_18px_rgba(24,36,28,0.10)]'
+                : 'border-white/15 bg-[#131d29]/68 text-[#f4f0e8] shadow-[0_8px_22px_rgba(4,8,14,0.32)]'
+              : 'border-[#23362c]/10 dark:border-white/[0.1] bg-[#f4efe4]/75 dark:bg-white/[0.04]'
+          }`}
+        >
+          {[
+            { id: 'library', icon: BookOpen, labelZh: '图书馆', labelEn: 'Library', labelAr: 'المكتبة' },
+            { id: 'arabic-learning', icon: GraduationCap, labelZh: '语言学习中心', shortZh: '语言学习', labelEn: 'Language', labelAr: 'اللغات' },
+            { id: 'chat', icon: MessageCircle, labelZh: '通讯', labelEn: 'Comm', labelAr: 'التواصل' },
+            { id: 'venus', icon: Music2, labelZh: '音乐', labelEn: 'Music', labelAr: 'الموسيقى' },
+          ].map((item) => {
+            const Icon = item.icon;
+            const active = currentTab === item.id;
+            const fullLabel = lang === 'ar' ? item.labelAr : lang === 'en' ? item.labelEn : item.labelZh;
+            const compactLabel = lang === 'zh' && item.shortZh ? item.shortZh : fullLabel;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onSelectTab(item.id)}
+                className={`inline-flex h-7 sm:h-8 items-center gap-1.5 rounded-full px-2.5 sm:px-3.5 text-[11px] sm:text-[12px] font-medium whitespace-nowrap transition-all cursor-pointer ${
+                  active
+                    ? isGardenHome
+                      ? isGardenDay
+                        ? 'bg-[#21332b] text-[#faf7f0] shadow-xs'
+                        : 'bg-[#ebe2cf] text-[#141e28] shadow-xs'
+                      : 'bg-[#1f332a] text-[#faf7f0] dark:bg-[#ece4d3] dark:text-[#141d28] shadow-xs'
+                    : isGardenHome
+                    ? isGardenDay
+                      ? 'text-[#283c33] hover:bg-black/[0.06]'
+                      : 'text-[#e8e2d5]/90 hover:bg-white/[0.10]'
+                    : 'text-[#31453b] dark:text-[#d8d3c8] hover:bg-black/[0.05] dark:hover:bg-white/[0.08]'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5 shrink-0 opacity-85" />
+                <span className="hidden md:inline">{fullLabel}</span>
+                <span className="md:hidden">{compactLabel}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Optional compact search dropdown container kept hidden on Home for purity */}
+        {!isGardenHome && (
+        <div ref={searchWrapRef} className="relative hidden xl:flex min-w-0 w-[180px] items-center">
+          <div className="flex h-8 min-w-0 flex-1 items-center rounded-full border border-[#23362c]/12 dark:border-white/[0.12] bg-white/75 dark:bg-white/[0.06] px-2.5 transition-colors focus-within:border-[#247864]/60 dark:focus-within:border-[#C4A876]/55">
+            <Search className="h-3.5 w-3.5 shrink-0 text-[#52685d] dark:text-[#98A1AE]" />
             <input
               value={searchQuery}
               onChange={e => onSearchChange(e.target.value)}
               onFocus={() => searchQuery.trim() && setGlobalSearchOpen(true)}
               placeholder={t.globalSearch || (lang === 'zh' ? '搜索…' : 'Search…')}
-              className={
-                isGardenHome
-                  ? isGardenDay
-                    ? 'ml-2 min-w-0 flex-1 bg-transparent text-xs text-[#1c2b24] placeholder:text-[#4e6459]/75 outline-none'
-                    : 'ml-2 min-w-0 flex-1 bg-transparent text-xs text-[#f6f3ec] placeholder:text-[#d8d2c5]/65 outline-none'
-                  : 'ml-2 min-w-0 flex-1 bg-transparent text-[13px] text-[#1c2b24] dark:text-slate-100 placeholder:text-[#5c7166] dark:placeholder:text-[#8E98A6] outline-none'
-              }
+              className="ml-1.5 min-w-0 flex-1 bg-transparent text-xs text-[#1c2b24] dark:text-slate-100 placeholder:text-[#5c7166] dark:placeholder:text-[#8E98A6] outline-none"
             />
-            {searchQuery ? (
+            {searchQuery && (
               <button
                 type="button"
                 onClick={closeGlobalSearch}
                 aria-label="Clear search"
-                className={`rounded p-1 ${
-                  isGardenHome
-                    ? isGardenDay
-                      ? 'text-[#395044] hover:text-[#16221c]'
-                      : 'text-white/80 hover:text-white'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
+                className="rounded p-0.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
               >
-                <X className="h-3.5 w-3.5" />
+                <X className="h-3 w-3" />
               </button>
-            ) : !isGardenHome && onOpenCommand ? (
-              <button type="button" onClick={onOpenCommand} title={lang === 'zh' ? '命令中心 (⌘K)' : 'Command (⌘K)'} className="hidden md:inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-[#52685d] dark:text-[#98A1AE] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.08] hover:text-[#1c2b24] dark:hover:text-slate-100 transition-colors">
-                <CommandIcon className="h-2.5 w-2.5" /><span>K</span>
-              </button>
-            ) : null}
+            )}
           </div>
 
           {globalSearchOpen && (
@@ -316,6 +316,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           )}
         </div>
+        )}
 
         {/* Right: Utilities & Floating Profile Avatar */}
         <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">

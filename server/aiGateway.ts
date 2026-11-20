@@ -210,7 +210,10 @@ class AIGateway {
   }
 
   public hasLiveEngine(): boolean {
+    const envGemini = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
     return (
+      (envGemini.length > 10 && envGemini !== 'MY_GEMINI_API_KEY') ||
+      oneAiRouter.hasAnyUsableEngine() ||
       this.isUsableKey(this.deepseekKey) ||
       this.isUsableKey(this.customKey) ||
       this.localOllamaModels.length > 0
@@ -711,23 +714,19 @@ ${page.content.slice(0, 4500)}
       }
     }
 
-    // Secondary path: Local Ollama model (completely offline / private fallback)
-    if (this.localOllamaModels.length === 0) {
-      await this.detectLocalOllama().catch(() => {});
-    }
-    const localModel =
+    // Secondary path: Local Ollama DeepSeek model (completely offline / private)
+    const localDeepSeek =
       this.localOllamaModels.find(n => n.toLowerCase().includes('deepseek')) ||
       this.ollamaChatModel ||
       (this.localOllamaModels.length > 0 ? this.localOllamaModels[0] : null);
-    if (localModel) {
-      const fallbackRes = await this.callOllamaNative(localModel, prompt, systemInstruction, history, onToken, signal);
+    if (localDeepSeek) {
+      const fallbackRes = await this.callOllamaNative(localDeepSeek, prompt, systemInstruction, history, onToken, signal);
       if (fallbackRes.success) {
         return { content: fallbackRes.content, tokens: fallbackRes.tokens };
       }
-      throw new Error(fallbackRes.errorMessage || `本地 Ollama 模型 ${localModel} 调用失败。`);
     }
 
-    throw new Error('DeepSeek 尚未配置服务端密钥（DEEPSEEK_API_KEY），且本地未检测到运行中的 Ollama 模型。请配置密钥或启动 `ollama serve`。');
+    throw new Error('DeepSeek 尚未配置服务端密钥（DEEPSEEK_API_KEY），且本地未检测到运行中的 DeepSeek Ollama 模型。');
   }
 
   private async runFastOllamaModel(
@@ -863,7 +862,6 @@ ${page.content.slice(0, 4500)}
     }
     messages.push({ role: 'user', content: prompt });
 
-    let lastErr = '';
     for (const host of OLLAMA_HOSTS) {
       try {
         const controller = new AbortController();
@@ -901,7 +899,6 @@ ${page.content.slice(0, 4500)}
                 if (!line.trim()) continue;
                 try {
                   const chunk = JSON.parse(line);
-                  if (chunk?.error) { lastErr = String(chunk.error).slice(0, 300); continue; }
                   const tok = typeof chunk?.message?.content === 'string' ? chunk.message.content : '';
                   if (tok) {
                     fullText += tok;
@@ -916,34 +913,25 @@ ${page.content.slice(0, 4500)}
               return { success: true, content: fullText, tokens: evalCount || Math.ceil((prompt.length + fullText.length) / 3.5) };
             }
           } else {
-            const data = await res.json().catch(() => null);
-            if (data?.error) {
-              lastErr = String(data.error).slice(0, 300);
-            } else {
-              const content = data?.message?.content || data?.response || '';
-              if (content) {
-                return {
-                  success: true,
-                  content,
-                  tokens: data?.eval_count || Math.ceil((prompt.length + content.length) / 3.5)
-                };
-              }
-              lastErr = '本地 Ollama 返回了空响应。';
+            const data = await res.json();
+            const content = data?.message?.content || data?.response || '';
+            if (content) {
+              return {
+                success: true,
+                content,
+                tokens: data?.eval_count || Math.ceil((prompt.length + content.length) / 3.5)
+              };
             }
           }
-        } else {
-          const errJson = await res.json().catch(() => null);
-          lastErr = String(errJson?.error || `HTTP ${res.status}`).slice(0, 300);
         }
-      } catch (e: any) {
-        lastErr = String(e?.name === 'AbortError' ? '本地 Ollama 请求超时。' : (e?.message || e)).slice(0, 300);
+      } catch {
         // try next host
       }
     }
     return {
       success: false,
       content: '',
-      errorMessage: lastErr || '本地电脑 Ollama (127.0.0.1:11434) 离线无响应。请在本地终端运行 `ollama serve` 启动双模型引擎。'
+      errorMessage: '本地电脑 Ollama (127.0.0.1:11434) 离线无响应。请在本地终端运行 `ollama serve` 启动双模型引擎。'
     };
   }
 

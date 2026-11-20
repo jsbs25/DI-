@@ -20,6 +20,7 @@ import {
   probeClientMediaConnectivity,
   sortClientMusicSources,
 } from '../services/media/scheduler.ts';
+import { uiStateManager } from '../agent/uiStateManager.ts';
 
 export interface MusicPlayerApi {
   state: PlayerState;
@@ -167,6 +168,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       lastAudioSrcRef.current = undefined;
       dispatch({ type: 'CLEAR_QUEUE' });
       clearPersistedPlayerState();
+      uiStateManager.setMusicStatus({ musicPlaying: false, musicTrackTitle: '', musicArtist: '' });
     };
     window.addEventListener('one-music-force-stop', onForceStop);
     return () => window.removeEventListener('one-music-force-stop', onForceStop);
@@ -486,6 +488,94 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const resolvedIndex = q ? Math.max(0, q.findIndex((item) => item.track.id === t.id)) : index;
     dispatch({ type: 'PLAY_TRACK', track: t, queue: q, index: resolvedIndex, sourceId: best?.id, play: true });
   }, [setUserStopped]);
+
+  // Sync live playback state into uiStateManager so the 3D Butterfly dances & floats musical notes in place
+  useEffect(() => {
+    uiStateManager.setMusicStatus({
+      musicPlaying: Boolean(state.isPlaying && currentTrack && !userStopped),
+      musicTrackTitle: currentTrack?.title || '',
+      musicArtist: currentTrack?.artist || '',
+    });
+  }, [state.isPlaying, currentTrack, userStopped]);
+
+  // Inline background music playback triggered by Butterfly AI ("我想听音乐 / 放首歌") — stays on current page!
+  useEffect(() => {
+    const pickDirectAudioTracks = (rawList: any[]): any[] => {
+      if (!Array.isArray(rawList)) return [];
+      const withDirect = rawList.filter((t) => {
+        const directUrl = t?.audioUrl || t?.playback?.audioUrl;
+        const hasAudioSource = Array.isArray(t?.sources) && t.sources.some((s: any) => s?.kind === 'audio' && s?.audioUrl);
+        return Boolean(directUrl || hasAudioSource);
+      });
+      return withDirect.length > 0 ? withDirect : rawList;
+    };
+
+    const onPlayInline = async (ev: Event) => {
+      const detail = (ev as CustomEvent<{ query?: string }>).detail || {};
+      const query = (detail.query || '').trim();
+      engine.unlockPlayback();
+      void engine.resumeContext();
+
+      try {
+        let tracks: any[] = [];
+        if (query) {
+          const crawlRes = await fetch('/api/music/crawl', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, limit: 10 }),
+          });
+          const crawlData = await crawlRes.json().catch(() => ({}));
+          if (Array.isArray(crawlData?.tracks) && crawlData.tracks.length > 0) {
+            tracks = pickDirectAudioTracks(crawlData.tracks);
+          }
+        }
+        if (tracks.length === 0) {
+          const listRes = await fetch(`/api/music/tracks${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+          const listData = await listRes.json().catch(() => ({}));
+          if (Array.isArray(listData?.tracks) && listData.tracks.length > 0) {
+            tracks = pickDirectAudioTracks(listData.tracks);
+          }
+        }
+        if (tracks.length === 0) {
+          const allRes = await fetch('/api/music/tracks');
+          const allData = await allRes.json().catch(() => ({}));
+          if (Array.isArray(allData?.tracks) && allData.tracks.length > 0) {
+            tracks = pickDirectAudioTracks(allData.tracks);
+          }
+        }
+
+        if (tracks.length > 0) {
+          const picked = tracks[0];
+          playTrack(picked, tracks, 0);
+          uiStateManager.setSpiritState('presenting_result');
+          uiStateManager.setSpiritBubble({
+            visible: true,
+            isLoading: false,
+            badge: '正在播放音乐',
+            text: `♪ ${picked.title || '轻音乐'}${picked.artist ? ` · ${picked.artist}` : ''}`,
+            quickActions: [
+              { label: '换一首', action: 'next_music' },
+              { label: '停止播放', action: 'stop_music' },
+            ],
+          });
+        }
+      } catch (err) {
+        console.warn('[InlineMusic] failed:', err);
+      }
+    };
+
+    const onNextInline = () => {
+      setUserStopped(false);
+      dispatch({ type: 'NEXT' });
+    };
+
+    window.addEventListener('one-music-play-inline', onPlayInline as EventListener);
+    window.addEventListener('one-music-next-inline', onNextInline);
+    return () => {
+      window.removeEventListener('one-music-play-inline', onPlayInline as EventListener);
+      window.removeEventListener('one-music-next-inline', onNextInline);
+    };
+  }, [engine, playTrack, setUserStopped]);
 
   const playNext = useCallback(() => {
     setUserStopped(false);

@@ -7,12 +7,50 @@ import type { Book, User } from '../src/types/index.ts';
 import { oneAiRouter } from './oneAi/router.ts';
 import { aiGateway } from './aiGateway.ts';
 import { getGeminiClient } from './geminiClient.ts';
-import { libraryAiDictionary, libraryAiExplain } from './libraryAiService.ts';
+import { runUnifiedAiTurn } from './ai/unifiedAiCore.ts';
 
 type DataStore = typeof appStore;
 
 const ISLAMHOUSE_API_BASE = 'https://api3.islamhouse.com/v3/paV29H2gm56kvLPy/main';
 const PDF_VAULT_DIR = path.resolve(process.cwd(), 'data', 'pdfs');
+const VOCAB_STORE_PATH = path.resolve(process.cwd(), 'data', 'vocabulary_bank.json');
+
+export interface SavedVocabItem {
+  id: string;
+  userId: string;
+  word: string;
+  lemma?: string;
+  reading?: string;
+  partOfSpeech?: string;
+  root?: string;
+  meaning: string;
+  usage?: string;
+  contextSentence?: string;
+  example?: string;
+  bookId?: string;
+  bookTitle?: string;
+  createdAt: string;
+}
+
+function readVocabBank(): SavedVocabItem[] {
+  try {
+    if (!fs.existsSync(VOCAB_STORE_PATH)) return [];
+    const raw = fs.readFileSync(VOCAB_STORE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeVocabBank(items: SavedVocabItem[]): void {
+  try {
+    fs.mkdirSync(path.dirname(VOCAB_STORE_PATH), { recursive: true });
+    fs.writeFileSync(VOCAB_STORE_PATH, JSON.stringify(items.slice(0, 4000), null, 2), 'utf8');
+  } catch (err) {
+    console.warn('[VocabBank] write failed:', err);
+  }
+}
 
 export type IslamicContentCategory =
   | 'books'
@@ -608,68 +646,23 @@ async function runFastLibraryAiText(
   req: Request,
   systemInstruction: string,
   prompt: string,
-  maxTokens = 768,
-  imageBase64?: string
+  maxTokens = 900,
+  imageBase64?: string,
+  speed: 'fast' | 'deep' = 'fast'
 ): Promise<string> {
-  // If a scanned PDF page canvas image is supplied and text is empty/short, use Gemini Vision directly!
-  if (imageBase64) {
-    const gemini = getGeminiClient();
-    if (gemini) {
-      try {
-        const cleanImg = imageBase64.replace(/^data:image\/[a-z+]+;base64,/i, '').trim();
-        const resp = await gemini.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: `${systemInstruction}\n\n${prompt}` },
-                { inlineData: { mimeType: 'image/jpeg', data: cleanImg } },
-              ],
-            },
-          ],
-        });
-        const text = (resp.text || '').trim();
-        if (text) return text;
-      } catch (err) {
-        console.warn('[LibraryAI Vision] fallback to text engine:', (err as Error)?.message);
-      }
-    }
+  const res = await runUnifiedAiTurn({
+    prompt,
+    systemInstruction,
+    imageBase64,
+    maxTokens,
+    speed,
+    mode: 'library-reading',
+    subjectKey: `ip:${req.ip || 'unknown'}`,
+  });
+  if (res.success && res.content.trim()) {
+    return res.content.trim();
   }
-
-  let lastError = '';
-  if (oneAiRouter.hasAnyUsableEngine()) {
-    const routed = await oneAiRouter.executeUnifiedTurn({
-      requestId: `libai_${Date.now().toString(36)}`,
-      userId: null,
-      subjectKey: `ip:${req.ip || 'unknown'}`,
-      userTier: 'free',
-      prompt,
-      messages: [
-        { role: 'system', content: systemInstruction },
-        { role: 'user', content: prompt },
-      ],
-      mode: 'library-reading',
-      maxTokens,
-      stream: false,
-    });
-    if (routed.success && routed.content.trim()) {
-      return routed.content.trim();
-    }
-    lastError = routed.errorMessage || '';
-  }
-
-  if (aiGateway.hasLiveEngine()) {
-    const res = await aiGateway.generateContent('one-ai', prompt, systemInstruction, undefined, undefined, undefined, {
-      mode: 'library-reading',
-    });
-    if (res.success && res.content.trim()) {
-      return res.content.trim();
-    }
-    lastError = res.errorMessage || lastError;
-  }
-
-  throw new Error(lastError || 'AI 讲解引擎暂忙，请稍后重试。');
+  throw new Error(res.errorMessage || 'ONE AI 阅读引擎暂忙，请稍后重试。');
 }
 
 export function registerNoorIslamicLibraryRoutes(
@@ -1117,94 +1110,400 @@ export function registerNoorIslamicLibraryRoutes(
     return res.sendFile(filePath);
   });
 
-  // 6. AI Page Tutor — context-aware via unified Library AI Service (Gemini-backed, supports text & scanned image pages)
+  // 6. AI Page Tutor ("读到这一页不会讲，让 AI 分析这一页怎么讲") — supports both PDF text & scanned image pages!
   app.post('/api/library/ai/explain-page', async (req: Request, res: Response) => {
-    const { title, pageNumber, pageText, pageImageBase64, question, lang, bookId, chapterTitle, language: contentLanguage, surroundingContext, selectedText, totalPages } = req.body || {};
-    const cleanText = typeof pageText === 'string' ? pageText.trim().slice(0, 7000) : '';
+    const { title, pageNumber, pageText, pageImageBase64, question, lang } = req.body || {};
+    const cleanText = typeof pageText === 'string' ? pageText.trim().slice(0, 6500) : '';
     const hasImage = typeof pageImageBase64 === 'string' && pageImageBase64.length > 200;
 
-    if (!cleanText && !hasImage && !String(selectedText || '').trim()) {
+    if (!cleanText && !hasImage) {
       return res.status(400).json({ success: false, error: '当前页未提取到可分析的文本或页面图像。' });
     }
 
+    const replyZh = lang !== 'en';
+    const systemInstruction = replyZh
+      ? '你是博学、温和、表达清晰的资深双语（阿拉伯语/英语/汉语）典籍讲师。用户正在阅读一本书的某一页，可能不知道这一页该怎么理解或怎么讲给别人听。请用清晰、自然、易懂的中文分点讲解：1)「本页核心大意」（用大白话讲明白）；2)「这一页该怎么讲」（帮你梳理讲解逻辑和逐段要点）；3)「重点外语/阿语词句解析」（挑出 3-5 个关键原词，给读音/标音与释义）。如果用户提了具体问题，请优先直接回答该问题。不要输出多余寒暄。'
+      : 'You are an expert bilingual book tutor (Arabic/English/Chinese). Clearly explain the current page so the reader understands it deeply and knows how to explain it to others: 1) Core meaning, 2) How to explain this page step-by-step, 3) Key vocabulary with pronunciation and meaning.';
+
+    const prompt = [
+      `书名：${String(title || '原版书籍').slice(0, 140)}`,
+      pageNumber ? `页码：第 ${pageNumber} 页` : '',
+      question ? `读者追问：${String(question).slice(0, 400)}` : '请帮我分析这一页在讲什么，以及我该怎么把它讲清楚。',
+      cleanText ? `本页原文内容：\n"""\n${cleanText}\n"""` : '（本页为扫描图像页，请直接识读附图中的全部原文并进行精讲）',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
     try {
-      const result = await libraryAiExplain({
-        bookId: typeof bookId === 'string' ? bookId : undefined,
-        bookTitle: typeof title === 'string' ? title : undefined,
-        chapterTitle: typeof chapterTitle === 'string' ? chapterTitle : undefined,
-        pageNumber: typeof pageNumber === 'number' ? pageNumber : (Number(pageNumber) || undefined),
-        totalPages: typeof totalPages === 'number' ? totalPages : undefined,
-        language: typeof contentLanguage === 'string' ? contentLanguage : undefined,
-        pageText: cleanText || undefined,
-        selectedText: typeof selectedText === 'string' ? selectedText : undefined,
-        surroundingContext: typeof surroundingContext === 'string' ? surroundingContext : undefined,
-        question: typeof question === 'string' ? question : undefined,
-        pageImageBase64: hasImage ? pageImageBase64 : undefined,
-        uiLanguage: lang === 'en' ? 'en' : (lang === 'ar' ? 'ar' : 'zh'),
-      }, req);
-      if (!result.success) {
-        return res.status(result.errorCode === 'GEMINI_UNAVAILABLE' || result.errorCode === 'NO_AI_ENGINE' ? 503 : 500).json({
-          success: false,
-          error: result.error || 'AI 本页讲解暂时不可用，请稍后重试。',
-          provider: result.provider,
-          model: result.model,
-          contextUsed: result.contextUsed,
-        });
-      }
-      return res.json({ success: true, explanation: result.content, provider: result.provider, model: result.model, contextUsed: result.contextUsed });
+      const explanation = await runFastLibraryAiText(
+        req,
+        systemInstruction,
+        prompt,
+        1500,
+        cleanText.length < 40 && hasImage ? pageImageBase64 : undefined
+      );
+      return res.json({ success: true, explanation });
     } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'AI 本页讲解暂时不可用，请稍后重试。' });
+      return res.status(503).json({
+        success: false,
+        error: err?.message || 'AI 本页讲解暂时不可用，请稍后重试。',
+      });
     }
   });
 
-  // 7. Context-aware dictionary lookup via unified Library AI Service (Gemini-backed, Arabic/context-specialized)
+  // 7. Instant Tap-Any-Word AI Dictionary Lookup (原形 · 发音 · 词性 · 中文含义 · 常见用法 · 例句)
   app.post('/api/library/ai/lookup-word', async (req: Request, res: Response) => {
-    const { word, contextSentence, bookTitle, lang, bookId, chapterTitle, pageNumber, language: contentLanguage, pageText } = req.body || {};
-    const cleanWord = typeof word === 'string' ? word.trim().slice(0, 100) : '';
+    const { word, contextSentence, bookTitle, lang } = req.body || {};
+    const cleanWord = typeof word === 'string' ? word.trim().slice(0, 80) : '';
     if (!cleanWord) {
       return res.status(400).json({ success: false, error: '请选择要查询的单词。' });
     }
 
-    try {
-      const result = await libraryAiDictionary({
-        bookId: typeof bookId === 'string' ? bookId : undefined,
-        bookTitle: typeof bookTitle === 'string' ? bookTitle : undefined,
-        chapterTitle: typeof chapterTitle === 'string' ? chapterTitle : undefined,
-        pageNumber: typeof pageNumber === 'number' ? pageNumber : undefined,
-        language: typeof contentLanguage === 'string' ? contentLanguage : undefined,
-        selectedText: cleanWord,
-        surroundingContext: typeof contextSentence === 'string' ? contextSentence : undefined,
-        pageText: typeof pageText === 'string' ? pageText : undefined,
-        question: cleanWord,
-        uiLanguage: lang === 'en' ? 'en' : (lang === 'ar' ? 'ar' : 'zh'),
-      }, req);
+    const replyZh = lang !== 'en';
+    const systemInstruction = replyZh
+      ? '你是 ONE AI 词典与多语阅读助教（精通阿拉伯语、英语、汉语及古典文献）。请仅返回严格 JSON（不要加 markdown 代码块），包含以下字段：{"word":"原词","lemma":"单词原形/词典形","reading":"发音（阿语完全标音 Tashkeel+拉丁读音 或 国际音标 IPA / 汉语拼音）","partOfSpeech":"词性","root":"词根或词源（无则留空）","meaning":"精准简洁的中文核心释义","usage":"常见搭配与典型用法","contextMeaning":"结合当前句子的确切语境含义","example":"1句自然实用例句及中文翻译"}。'
+      : 'You are ONE AI multilingual dictionary (Arabic/English/Chinese). Return ONLY strict JSON (no markdown fences): {"word":"...","lemma":"...","reading":"...","partOfSpeech":"...","root":"...","meaning":"...","usage":"...","contextMeaning":"...","example":"..."}.';
 
-      if (!result.success) {
-        return res.status(result.errorCode === 'GEMINI_UNAVAILABLE' || result.errorCode === 'NO_AI_ENGINE' ? 503 : 500).json({
-          success: false,
-          error: result.error || 'AI 查词暂时不可用，请稍后重试。',
-          provider: result.provider,
-          model: result.model,
+    const prompt = [
+      `查询单词：${cleanWord}`,
+      bookTitle ? `所在书籍：${String(bookTitle).slice(0, 120)}` : '',
+      contextSentence ? `所在上下文：${String(contextSentence).slice(0, 320)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    try {
+      const raw = await runFastLibraryAiText(req, systemInstruction, prompt, 800, undefined, 'fast');
+      let parsed: Record<string, string> | null = null;
+      try {
+        const cleanedRaw = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        const jsonMatch = cleanedRaw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+      } catch {}
+
+      if (parsed && typeof parsed.meaning === 'string') {
+        return res.json({
+          success: true,
+          entry: {
+            word: parsed.word || cleanWord,
+            lemma: parsed.lemma || parsed.word || cleanWord,
+            reading: parsed.reading || '',
+            partOfSpeech: parsed.partOfSpeech || '',
+            root: parsed.root || '',
+            meaning: parsed.meaning || '',
+            usage: parsed.usage || '',
+            contextMeaning: parsed.contextMeaning || '',
+            example: parsed.example || '',
+          },
         });
       }
 
-      const d = (result.data || {}) as Record<string, any>;
-      const entry = {
-        word: String(d.word || cleanWord),
-        reading: String(d.reading || ''),
-        partOfSpeech: String(d.partOfSpeech || ''),
-        root: String(d.root || ''),
-        meaning: String(d.meaning || d.basicMeaning || d.zh || d.contextMeaning || (result.content || '').slice(0, 800)),
-        contextMeaning: String(d.contextMeaning || ''),
-        example: String(d.example || ''),
-        zh: String(d.zh || ''),
-        en: String(d.en || ''),
-        forms: String(d.forms || ''),
-        notes: String(d.notes || ''),
-      };
-      return res.json({ success: true, entry, raw: result.content, provider: result.provider, model: result.model, contextUsed: result.contextUsed });
+      return res.json({
+        success: true,
+        entry: {
+          word: cleanWord,
+          lemma: cleanWord,
+          reading: '',
+          partOfSpeech: '',
+          root: '',
+          meaning: raw.slice(0, 600),
+          usage: '',
+          contextMeaning: '',
+          example: '',
+        },
+      });
     } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'AI 查词暂时不可用，请稍后重试。' });
+      return res.status(503).json({
+        success: false,
+        error: err?.message || 'AI 查词暂时不可用，请稍后重试。',
+      });
+    }
+  });
+
+  // 8. Scanned PDF Page Vision OCR -> Structured Reflowable Paragraphs
+  app.post('/api/library/ai/ocr-page', async (req: Request, res: Response) => {
+    const { pageImageBase64, pageNumber, bookTitle, language } = req.body || {};
+    if (typeof pageImageBase64 !== 'string' || pageImageBase64.length < 200) {
+      return res.status(400).json({ success: false, error: '缺少待识别的页面图像。' });
+    }
+    const systemInstruction =
+      'You are a high-precision book digitization OCR engine for Arabic, Chinese, and English publications. Extract ALL readable text from the page image faithfully in original reading order. Preserve headings by prefixing major headings with "## " and subheadings with "### ". Separate natural paragraphs with a blank line. Preserve footnotes at the end prefixed with "[脚注] ". Output ONLY the extracted structured text with zero commentary or markdown fences.';
+    const prompt = `Book: ${String(bookTitle || 'Document').slice(0, 140)} | Page ${Number(pageNumber) || 1} | Primary language hint: ${String(language || 'auto')}. Transcribe every paragraph accurately for reflowable ebook reading.`;
+    try {
+      const text = await runFastLibraryAiText(req, systemInstruction, prompt, 2400, pageImageBase64, 'fast');
+      return res.json({ success: true, text });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'OCR 识别暂时不可用。' });
+    }
+  });
+
+  // 9. Inline Paragraph / Selection Translation
+  app.post('/api/library/ai/translate', async (req: Request, res: Response) => {
+    const { text, targetLang = 'zh', bookTitle } = req.body || {};
+    const cleanText = typeof text === 'string' ? text.trim().slice(0, 4500) : '';
+    if (!cleanText) {
+      return res.status(400).json({ success: false, error: '请选中需要翻译的段落或句子。' });
+    }
+    const targetLabel =
+      targetLang === 'en' ? '流畅自然的英文' : targetLang === 'ar' ? '地道典雅的现代标准阿拉伯语' : '精准流畅、富有书卷气的简体中文';
+    const systemInstruction = `你是 ONE AI 专业图书翻译专家。请将读者选中的原文忠实、自然地翻译为${targetLabel}。保留原有段落结构，不遗漏关键术语，直接输出译文，不要加多余寒暄或标题。`;
+    const prompt = [bookTitle ? `书名：《${String(bookTitle).slice(0, 120)}》` : '', `待翻译原文：\n"""\n${cleanText}\n"""`]
+      .filter(Boolean)
+      .join('\n\n');
+    try {
+      const translation = await runFastLibraryAiText(req, systemInstruction, prompt, 1400, undefined, 'fast');
+      return res.json({ success: true, translation });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || '段落翻译暂时不可用。' });
+    }
+  });
+
+  // 10. AI Deep Explanation (AI 精讲：内容背景 · 核心观点 · 重点词汇 · 句子结构 · 难点分析 · 延伸知识)
+  app.post('/api/library/ai/deep-explain', async (req: Request, res: Response) => {
+    const { text, bookTitle, chapterTitle, lang } = req.body || {};
+    const cleanText = typeof text === 'string' ? text.trim().slice(0, 5000) : '';
+    if (!cleanText) {
+      return res.status(400).json({ success: false, error: '请选择需要 AI 精讲的段落内容。' });
+    }
+    const replyZh = lang !== 'en';
+    const systemInstruction = replyZh
+      ? '你是 ONE AI 资深人文与学术伴读导师。请对读者选中的书页段落进行深度精讲，严格按以下 6 个清晰小节组织（简明精炼、切中要害，避免空话）：\n1. **内容背景**：出处语境与历史/思想背景\n2. **核心观点**：作者最核心的论点与表达意图\n3. **重点词汇**：挑选 3-5 个关键原词或术语，附读音与准确释义\n4. **句子结构**：拆解难句的语法主干与修辞逻辑\n5. **难点分析**：点破读者容易误解或晦涩之处\n6. **延伸知识**：关联相关思想、典故或现实启发'
+      : 'You are ONE AI scholarly reading mentor. Provide a structured deep explanation of the passage in 6 clear sections: 1. Context & Background, 2. Core Thesis, 3. Key Vocabulary, 4. Sentence Structure, 5. Difficult Nuances, 6. Extended Knowledge.';
+
+    const prompt = [
+      bookTitle ? `书名：《${String(bookTitle).slice(0, 140)}》` : '',
+      chapterTitle ? `章节：${String(chapterTitle).slice(0, 120)}` : '',
+      `选中原文：\n"""\n${cleanText}\n"""`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    try {
+      const explanation = await runFastLibraryAiText(req, systemInstruction, prompt, 1800, undefined, 'deep');
+      return res.json({ success: true, explanation });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'AI 精讲暂时不可用。' });
+    }
+  });
+
+  // 11. Whole-Book Context AI Q&A (结合整本书检索相关上下文回答，而不只看当前屏幕)
+  app.post('/api/library/ai/book-qa', async (req: Request, res: Response) => {
+    const { question, bookTitle, author, currentSectionText, fullBookChunks, history, lang } = req.body || {};
+    const cleanQuestion = typeof question === 'string' ? question.trim().slice(0, 800) : '';
+    if (!cleanQuestion) {
+      return res.status(400).json({ success: false, error: '请输入你想围绕本书提出的问题。' });
+    }
+
+    // Retrieve top relevant excerpts across the ENTIRE extracted book using lexical/BM25-style scoring
+    const chunks: Array<{ label: string; text: string }> = Array.isArray(fullBookChunks)
+      ? fullBookChunks
+          .filter((c: any) => typeof c?.text === 'string' && c.text.trim().length > 12)
+          .slice(0, 400)
+          .map((c: any, i: number) => ({
+            label: String(c.label || `第 ${i + 1} 节`).slice(0, 80),
+            text: String(c.text).trim().slice(0, 2600),
+          }))
+      : [];
+
+    const tokens = cleanQuestion
+      .toLowerCase()
+      .split(/[\s,，。？！?!、；;：:"'“”‘’()（）\-]+/)
+      .filter((t) => t.length >= 2);
+    const bigrams: string[] = [];
+    const compactQ = cleanQuestion.replace(/\s+/g, '');
+    for (let i = 0; i < compactQ.length - 1; i++) {
+      const bg = compactQ.slice(i, i + 2);
+      if (/[\u4e00-\u9fff\u0600-\u06ff]/.test(bg)) bigrams.push(bg);
+    }
+    const queryTerms = Array.from(new Set([...tokens, ...bigrams])).slice(0, 24);
+
+    const scored = chunks
+      .map((ch, idx) => {
+        const lower = ch.text.toLowerCase();
+        let score = 0;
+        for (const term of queryTerms) {
+          if (lower.includes(term)) {
+            score += term.length >= 3 ? 3 : 1.5;
+          }
+        }
+        return { ...ch, idx, score };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const pickedExcerpts = scored.filter((s) => s.score > 0).slice(0, 6);
+    // If question is broad ("这本书讲了什么 / 核心思想"), sample evenly across start, middle, and end of whole book!
+    if (pickedExcerpts.length < 3 && chunks.length > 0) {
+      const sampleIndices = Array.from(
+        new Set([
+          0,
+          Math.floor(chunks.length * 0.2),
+          Math.floor(chunks.length * 0.5),
+          Math.floor(chunks.length * 0.8),
+          chunks.length - 1,
+        ])
+      ).filter((i) => i >= 0 && i < chunks.length);
+      for (const idx of sampleIndices) {
+        if (!pickedExcerpts.some((p) => p.idx === idx) && pickedExcerpts.length < 6) {
+          pickedExcerpts.push({ ...chunks[idx], idx, score: 0.5 });
+        }
+      }
+    }
+
+    const replyZh = lang !== 'en';
+    const systemInstruction = replyZh
+      ? '你是 ONE AI 书籍伴读专家。你会结合「全书检索到的多处上下文片段」与「读者当前所读页面」，精准、深刻地回答读者关于整本书的问题。引用书中依据时注明对应页码或章节，语言简洁优雅，不编造书中未出现的内容。'
+      : 'You are ONE AI book reading assistant. Answer the reader using the retrieved excerpts from across the entire book plus the current reading section. Cite chapter/page references accurately and concisely.';
+
+    const excerptsBlock = pickedExcerpts
+      .map((ex) => `【${ex.label}】\n${ex.text.slice(0, 1400)}`)
+      .join('\n\n---\n\n');
+
+    const prompt = [
+      `书名：《${String(bookTitle || '当前书籍').slice(0, 140)}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
+      `全书覆盖片段数：共检索 ${chunks.length} 个章节/页面，命中 ${pickedExcerpts.length} 处关键上下文。`,
+      currentSectionText ? `【当前正在阅读的位置】\n${String(currentSectionText).trim().slice(0, 1600)}` : '',
+      excerptsBlock ? `【全书相关上下文】\n${excerptsBlock}` : '',
+      `读者提问：${cleanQuestion}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    try {
+      const safeHistory = Array.isArray(history)
+        ? history
+            .filter((h: any) => (h?.role === 'user' || h?.role === 'assistant') && typeof h?.content === 'string')
+            .slice(-6)
+        : [];
+      const resAi = await runUnifiedAiTurn({
+        prompt,
+        systemInstruction,
+        history: safeHistory,
+        maxTokens: 1400,
+        speed: 'fast',
+        mode: 'library-reading',
+        subjectKey: `ip:${req.ip || 'unknown'}`,
+      });
+      if (!resAi.success || !resAi.content) {
+        throw new Error(resAi.errorMessage || '全书问答引擎暂忙');
+      }
+      return res.json({
+        success: true,
+        answer: resAi.content,
+        citedSections: pickedExcerpts.map((p) => p.label),
+      });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'AI 阅读问答暂时不可用。' });
+    }
+  });
+
+  // 12. AI Summary (支持：段落总结 · 章节总结 · 整本书总结)
+  app.post('/api/library/ai/summarize', async (req: Request, res: Response) => {
+    const { scope = 'chapter', bookTitle, author, sectionTitle, content, lang } = req.body || {};
+    const cleanContent = typeof content === 'string' ? content.trim().slice(0, 14000) : '';
+    if (!cleanContent) {
+      return res.status(400).json({ success: false, error: '暂无可用于总结的文本内容。' });
+    }
+
+    const scopeLabel = scope === 'book' ? '整本书' : scope === 'paragraph' ? '当前段落' : '当前章节';
+    const replyZh = lang !== 'en';
+    const systemInstruction = replyZh
+      ? `你是 ONE AI 精炼图书总结专家。请针对「${scopeLabel}」生成清晰、高密度的中文总结：先用 1-2 句话概括核心主旨，再列出 3-5 条关键要点，最后提炼一句值得记住的精华启发。排版干净利落。`
+      : `You are ONE AI book summarizer. Summarize the ${scope} clearly: 1-2 sentence core thesis, 3-5 key takeaways, and 1 memorable insight.`;
+
+    const prompt = [
+      `书名：《${String(bookTitle || '书籍').slice(0, 140)}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
+      sectionTitle ? `范围：${String(sectionTitle).slice(0, 120)}` : `范围：${scopeLabel}`,
+      `原文素材：\n"""\n${cleanContent}\n"""`,
+    ].join('\n\n');
+
+    try {
+      const summary = await runFastLibraryAiText(req, systemInstruction, prompt, 1200, undefined, 'fast');
+      return res.json({ success: true, summary, scope });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'AI 总结暂时不可用。' });
+    }
+  });
+
+  // 13. Personal Vocabulary Book (个人生词库 — 持久化存储)
+  app.get('/api/library/vocabulary', (req: Request, res: Response) => {
+    const userId = resolveShelfUserId(req);
+    const all = readVocabBank();
+    const items = all
+      .filter((v) => v.userId === userId || (userId !== 'guest' && v.userId === 'guest'))
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    return res.json({ success: true, items });
+  });
+
+  app.post('/api/library/vocabulary', (req: Request, res: Response) => {
+    const userId = resolveShelfUserId(req);
+    const { word, lemma, reading, partOfSpeech, root, meaning, usage, contextSentence, example, bookId, bookTitle } = req.body || {};
+    const cleanWord = String(word || '').trim().slice(0, 100);
+    const cleanMeaning = String(meaning || '').trim().slice(0, 800);
+    if (!cleanWord || !cleanMeaning) {
+      return res.status(400).json({ success: false, error: '单词与释义不能为空。' });
+    }
+    const all = readVocabBank();
+    const existingIdx = all.findIndex(
+      (v) => v.userId === userId && v.word.toLowerCase() === cleanWord.toLowerCase()
+    );
+    const item: SavedVocabItem = {
+      id: existingIdx >= 0 ? all[existingIdx].id : `voc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      userId,
+      word: cleanWord,
+      lemma: typeof lemma === 'string' ? lemma.trim().slice(0, 100) : cleanWord,
+      reading: typeof reading === 'string' ? reading.trim().slice(0, 160) : '',
+      partOfSpeech: typeof partOfSpeech === 'string' ? partOfSpeech.trim().slice(0, 60) : '',
+      root: typeof root === 'string' ? root.trim().slice(0, 100) : '',
+      meaning: cleanMeaning,
+      usage: typeof usage === 'string' ? usage.trim().slice(0, 320) : '',
+      contextSentence: typeof contextSentence === 'string' ? contextSentence.trim().slice(0, 320) : '',
+      example: typeof example === 'string' ? example.trim().slice(0, 400) : '',
+      bookId: typeof bookId === 'string' ? bookId.trim().slice(0, 120) : undefined,
+      bookTitle: typeof bookTitle === 'string' ? bookTitle.trim().slice(0, 160) : undefined,
+      createdAt: new Date().toISOString(),
+    };
+    if (existingIdx >= 0) all[existingIdx] = item;
+    else all.unshift(item);
+    writeVocabBank(all);
+    return res.json({ success: true, item });
+  });
+
+  app.delete('/api/library/vocabulary/:id', (req: Request, res: Response) => {
+    const userId = resolveShelfUserId(req);
+    const targetId = String(req.params.id || '').trim();
+    const all = readVocabBank();
+    const next = all.filter((v) => !(v.id === targetId && (v.userId === userId || v.userId === 'guest')));
+    writeVocabBank(next);
+    return res.json({ success: true, removedId: targetId });
+  });
+
+  // 14. Fast Unified Search AI Answer (used by Mercury Search & Built-in Search Bar)
+  app.post('/api/search/ai-answer', async (req: Request, res: Response) => {
+    const { query, snippets, lang } = req.body || {};
+    const cleanQuery = typeof query === 'string' ? query.trim().slice(0, 500) : '';
+    if (!cleanQuery) {
+      return res.status(400).json({ success: false, error: '请输入搜索问题。' });
+    }
+    const snippetBlock = Array.isArray(snippets)
+      ? snippets
+          .slice(0, 6)
+          .map((s: any, idx: number) => `${idx + 1}. ${String(s?.title || '').slice(0, 100)}：${String(s?.snippet || '').slice(0, 260)}`)
+          .join('\n')
+      : '';
+
+    const replyZh = lang !== 'en';
+    const systemInstruction = replyZh
+      ? '你是 EARTH ONE 统一 AI 核心（ONE AI）的搜索分析引擎。请直接、清晰、准确地回答用户检索的问题，结构简洁（不超过 260 字），优先给出结论与关键事实，不输出任何模板废话。'
+      : 'You are ONE AI Search Synthesis. Provide a clear, direct, accurate answer under 180 words with key facts first.';
+
+    const prompt = snippetBlock
+      ? `用户检索：${cleanQuery}\n\n实时参考检索结果：\n${snippetBlock}\n\n请综合给出精准回答：`
+      : `用户检索：${cleanQuery}\n\n请给出精准、简洁的解答：`;
+
+    try {
+      const answer = await runFastLibraryAiText(req, systemInstruction, prompt, 650, undefined, 'fast');
+      return res.json({ success: true, answer, model: 'ONE AI' });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'AI 搜索解析暂时不可用。' });
     }
   });
 }

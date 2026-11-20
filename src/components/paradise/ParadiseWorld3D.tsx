@@ -255,6 +255,80 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     }
   }, [agentSnap.weatherCommand]);
 
+  // Subtle, quiet feature-reminder whispers from the butterfly while idling
+  useEffect(() => {
+    const promptsZh = [
+      {
+        text: '图书馆收录了全球典籍，点上方即可静心阅读。',
+        quickActions: [{ label: '去图书馆', action: 'open_library' as const }],
+      },
+      {
+        text: '想听歌随时告诉我，我会直接在这里为你播放。',
+        quickActions: [{ label: '听轻音乐', action: 'play_music' as const }],
+      },
+      {
+        text: '上方可随时进入语言学习中心、通讯或音乐空间。',
+        quickActions: [],
+      },
+    ];
+    const promptsEn = [
+      {
+        text: 'World Library is right above whenever you want to read.',
+        quickActions: [{ label: 'Library', action: 'open_library' as const }],
+      },
+      {
+        text: 'Ask for music anytime and I will play it right here.',
+        quickActions: [{ label: 'Play Music', action: 'play_music' as const }],
+      },
+      {
+        text: 'Use the top bar for Library, Language, Comm, or Music.',
+        quickActions: [],
+      },
+    ];
+
+    let idx = 0;
+    let hideTimer: number | null = null;
+    const scheduleNext = () => {
+      const snap = uiStateManager.getSnapshot();
+      const busy =
+        snap.liveVoiceActive ||
+        snap.voiceListening ||
+        snap.musicPlaying ||
+        snap.commDrawerOpen ||
+        snap.languageStudioOpen ||
+        Boolean(snap.spiritBubble?.visible) ||
+        Boolean(snap.pendingConfirmation);
+      if (busy) return;
+
+      const list = lang === 'zh' ? promptsZh : promptsEn;
+      const item = list[idx % list.length];
+      idx += 1;
+      uiStateManager.setSpiritBubble({
+        visible: true,
+        isLoading: false,
+        isAmbientHint: true,
+        badge: '',
+        text: item.text,
+        quickActions: item.quickActions,
+      });
+      if (hideTimer) window.clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(() => {
+        const cur = uiStateManager.getSnapshot().spiritBubble;
+        if (cur?.visible && cur.isAmbientHint) {
+          uiStateManager.hideSpiritBubble();
+        }
+      }, 7500);
+    };
+
+    const initialTimer = window.setTimeout(scheduleNext, 16000);
+    const interval = window.setInterval(scheduleNext, 48000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+      if (hideTimer) window.clearTimeout(hideTimer);
+    };
+  }, [lang]);
+
   useEffect(() => {
     if (!webglReady) return;
     const container = stageRef.current;

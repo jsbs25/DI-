@@ -226,7 +226,7 @@ export const PavilionAiHud: React.FC<PavilionAiHudProps> = ({ lang }) => {
             type="button"
             onClick={() => uiStateManager.openLanguageStudio({ targetLang: 'en', mode: 'image_pool' })}
             className={`inline-flex h-6 w-6 items-center justify-center rounded-lg transition-colors cursor-pointer ${subtleBtnCls}`}
-            title={isZh ? '打开免费额度生图画室' : 'Open Free AI Art Studio'}
+            title={isZh ? '打开 ONE 画室' : 'Open ONE Art Studio'}
           >
             <ImageIcon className="h-3.5 w-3.5" />
           </button>
@@ -327,7 +327,7 @@ export const PavilionAiHud: React.FC<PavilionAiHudProps> = ({ lang }) => {
                     />
                   </button>
                   <div className="flex items-center justify-between gap-1 px-2 py-1 text-[10px]">
-                    <span className="truncate opacity-70">{m.generatedImage.providerLabelZh || '免费额度画室'}</span>
+                    <span className="truncate opacity-70">{m.generatedImage.providerLabelZh || 'ONE 画室'}</span>
                     <div className="flex items-center gap-1 shrink-0">
                       <button
                         type="button"

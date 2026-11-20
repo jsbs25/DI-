@@ -121,6 +121,24 @@ function createSoftShadowTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+function createMusicNoteTexture(symbol: string, fillColor: string, glowColor: string): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, 128, 128);
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = fillColor;
+  ctx.font = 'bold 76px "SF Pro Display", "Segoe UI Symbol", Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(symbol, 64, 68);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 /**
  * Lightweight procedural butterfly placeholder shown for the ~100ms while butterfly.glb loads.
  */
@@ -336,6 +354,32 @@ export function createParadiseSpirit(quality: ParadiseQualityProfile): ParadiseS
   const wingDust = new THREE.Points(dustGeo, dustMat);
   group.add(wingDust);
 
+  // Floating 3D musical note sprites above the butterfly's head when playing music in place
+  const noteDefs = [
+    { symbol: '♪', color: '#fff3c4', glow: 'rgba(255, 224, 130, 0.85)', phase: 0.0, radius: 0.22 },
+    { symbol: '♫', color: '#d8f3ff', glow: 'rgba(130, 222, 255, 0.85)', phase: 1.55, radius: 0.28 },
+    { symbol: '♩', color: '#ffe0ec', glow: 'rgba(255, 180, 210, 0.82)', phase: 3.1, radius: 0.2 },
+    { symbol: '♬', color: '#d6f8e5', glow: 'rgba(120, 232, 180, 0.85)', phase: 4.65, radius: 0.26 },
+  ];
+  const musicNoteGroup = new THREE.Group();
+  musicNoteGroup.visible = false;
+  group.add(musicNoteGroup);
+  const musicNotes = noteDefs.map((def) => {
+    const tex = track(createMusicNoteTexture(def.symbol, def.color, def.glow));
+    const mat = track(
+      new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      })
+    );
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(0.28, 0.28, 1);
+    musicNoteGroup.add(sprite);
+    return { sprite, mat, phase: def.phase, radius: def.radius };
+  });
+
   // Soft warm-azure butterfly aura light (illuminates petals gently at dusk/night)
   const butterflyGlow = new THREE.PointLight('#bce8ff', 0.24, 5.2, 1.8);
   butterflyGlow.position.set(0, 0.15, 0);
@@ -357,6 +401,7 @@ export function createParadiseSpirit(quality: ParadiseQualityProfile): ParadiseS
   let currentYaw = 0;
   let currentPitch = 0;
   let currentRoll = 0;
+  let musicSpinAngle = 0;
   let greetingFlutterTimer = 1.6;
   let prevTargetState: SpiritState = 'idle_explore';
 
@@ -409,8 +454,10 @@ export function createParadiseSpirit(quality: ParadiseQualityProfile): ParadiseS
       const isSpeaking = Boolean(snap.spiritBubble?.speaking || snap.liveVoicePhase === 'speaking');
       const isThinking = targetState === 'working_in_pavilion' || snap.liveVoicePhase === 'thinking';
       const isLiveActive = Boolean(snap.liveVoiceActive || snap.voiceListening);
+      const isMusicDancing = Boolean(snap.musicPlaying);
 
       const wantsForegroundTalk =
+        isMusicDancing ||
         isLiveActive ||
         isSpeaking ||
         isThinking ||
@@ -419,7 +466,7 @@ export function createParadiseSpirit(quality: ParadiseQualityProfile): ParadiseS
         targetState === 'presenting_result';
 
       if (targetState === 'sleeping_in_house' || targetState === 'returning_to_rest') {
-        goalWpIdx = REST_WP_IDX;
+        goalWpIdx = isMusicDancing ? TALK_WP_IDX : REST_WP_IDX;
       } else if (wantsForegroundTalk) {
         goalWpIdx = TALK_WP_IDX;
       } else {
@@ -436,14 +483,18 @@ export function createParadiseSpirit(quality: ParadiseQualityProfile): ParadiseS
       const wp = FLIGHT_WAYPOINTS[goalWpIdx];
       const baseGroundY = walkableFloorY(wp.x, wp.z);
 
-      // Gentle figure-8 fluttering around the target hover point when roaming or conversing
-      const orbitAmp = wantsForegroundTalk ? 0.24 : isPerched ? 0.02 : 0.46;
-      const orbitFreq = wantsForegroundTalk ? 1.15 : 0.72;
+      // Gentle figure-8 fluttering around the target hover point, or graceful circular dance during music playback
+      const orbitAmp = isMusicDancing ? 0.38 : wantsForegroundTalk ? 0.24 : isPerched ? 0.02 : 0.46;
+      const orbitFreq = isMusicDancing ? 1.65 : wantsForegroundTalk ? 1.15 : 0.72;
       const swayX = Math.sin(elapsed * orbitFreq) * orbitAmp;
-      const swayZ = Math.sin(elapsed * orbitFreq * 2) * (orbitAmp * 0.45);
+      const swayZ = isMusicDancing
+        ? Math.cos(elapsed * orbitFreq) * (orbitAmp * 0.75)
+        : Math.sin(elapsed * orbitFreq * 2) * (orbitAmp * 0.45);
       const bobY = isPerched
         ? Math.sin(elapsed * 2.2) * 0.015
-        : Math.sin(elapsed * 2.8) * 0.14 + Math.cos(elapsed * 1.4) * 0.06;
+        : isMusicDancing
+          ? Math.sin(elapsed * 3.8) * 0.16 + 0.12
+          : Math.sin(elapsed * 2.8) * 0.14 + Math.cos(elapsed * 1.4) * 0.06;
 
       tmpGoal.set(
         wp.x + swayX,
@@ -502,25 +553,53 @@ export function createParadiseSpirit(quality: ParadiseQualityProfile): ParadiseS
       shadowDisc.scale.setScalar(shadowScale);
       shadowMat.opacity = THREE.MathUtils.clamp(0.36 - altitude * 0.08, 0.1, 0.34);
 
-      // Orientation: bank into flight direction while travelling, face camera gracefully when hovering to talk
+      // Orientation: graceful twirl during music playback, bank into flight otherwise
       const horizSpeed = Math.hypot(velocity.x, velocity.z);
       const toCamYaw = Math.atan2(cameraPos.x - spiritPos.x, cameraPos.z - spiritPos.z);
-      let targetYaw = toCamYaw + Math.sin(elapsed * 1.1) * 0.16;
-      if (horizSpeed > 0.65 && !wantsForegroundTalk) {
-        targetYaw = Math.atan2(velocity.x, velocity.z);
-      } else if (horizSpeed > 1.25 && wantsForegroundTalk) {
-        targetYaw = Math.atan2(velocity.x, velocity.z);
+      if (isMusicDancing) {
+        musicSpinAngle = (musicSpinAngle + safeDt * 1.95) % (Math.PI * 2);
+        currentYaw = lerpAngle(currentYaw, toCamYaw + musicSpinAngle, Math.min(1, safeDt * 6.5));
+        const danceRoll = Math.sin(elapsed * 3.2) * 0.22;
+        const dancePitch = Math.sin(elapsed * 2.4) * 0.14 + 0.08;
+        currentRoll = THREE.MathUtils.damp(currentRoll, danceRoll, 6.5, safeDt);
+        currentPitch = THREE.MathUtils.damp(currentPitch, dancePitch, 6.5, safeDt);
+      } else {
+        let targetYaw = toCamYaw + Math.sin(elapsed * 1.1) * 0.16;
+        if (horizSpeed > 0.65 && !wantsForegroundTalk) {
+          targetYaw = Math.atan2(velocity.x, velocity.z);
+        } else if (horizSpeed > 1.25 && wantsForegroundTalk) {
+          targetYaw = Math.atan2(velocity.x, velocity.z);
+        }
+        const yawDiff = ((targetYaw - currentYaw + Math.PI) % (Math.PI * 2)) - Math.PI;
+        currentYaw = lerpAngle(currentYaw, targetYaw, Math.min(1, safeDt * 5.2));
+        const targetRoll = THREE.MathUtils.clamp(-yawDiff * 0.48, -0.45, 0.45);
+        const targetPitch = THREE.MathUtils.clamp(velocity.y * 0.22, -0.28, 0.32) + (isSpeaking ? Math.sin(elapsed * 6.5) * 0.06 : 0);
+        currentRoll = THREE.MathUtils.damp(currentRoll, targetRoll, 6.5, safeDt);
+        currentPitch = THREE.MathUtils.damp(currentPitch, targetPitch, 6.5, safeDt);
       }
 
-      const yawDiff = ((targetYaw - currentYaw + Math.PI) % (Math.PI * 2)) - Math.PI;
-      currentYaw = lerpAngle(currentYaw, targetYaw, Math.min(1, safeDt * 5.2));
-      const targetRoll = THREE.MathUtils.clamp(-yawDiff * 0.48, -0.45, 0.45);
-      const targetPitch = THREE.MathUtils.clamp(velocity.y * 0.22, -0.28, 0.32) + (isSpeaking ? Math.sin(elapsed * 6.5) * 0.06 : 0);
-
-      currentRoll = THREE.MathUtils.damp(currentRoll, targetRoll, 6.5, safeDt);
-      currentPitch = THREE.MathUtils.damp(currentPitch, targetPitch, 6.5, safeDt);
-
       flightPivot.rotation.set(currentPitch, currentYaw, currentRoll);
+
+      // Animate floating 3D musical notes rising above the butterfly's head while music plays
+      musicNoteGroup.visible = isMusicDancing;
+      if (isMusicDancing) {
+        for (let i = 0; i < musicNotes.length; i++) {
+          const n = musicNotes[i];
+          const cycle = ((elapsed * 0.52 + n.phase / (Math.PI * 2)) % 1 + 1) % 1;
+          const angle = elapsed * 1.5 + n.phase;
+          const liftY = 0.48 + cycle * 0.88;
+          n.sprite.position.set(
+            Math.cos(angle) * (n.radius + cycle * 0.12),
+            liftY,
+            Math.sin(angle) * (n.radius + cycle * 0.12)
+          );
+          const fadeIn = Math.min(1, cycle * 4.5);
+          const fadeOut = Math.min(1, (1 - cycle) * 3.0);
+          n.mat.opacity = fadeIn * fadeOut * 0.94;
+          const s = 0.22 + Math.sin(cycle * Math.PI) * 0.12;
+          n.sprite.scale.set(s, s, 1);
+        }
+      }
 
       if (greetingFlutterTimer > 0) {
         greetingFlutterTimer = Math.max(0, greetingFlutterTimer - safeDt);
@@ -531,34 +610,35 @@ export function createParadiseSpirit(quality: ParadiseQualityProfile): ParadiseS
         const speedBoost =
           isPerched
             ? 0.55
-            : isSpeaking
-              ? 1.55
-              : isThinking
-                ? 1.35
-                : greetingFlutterTimer > 0
-                  ? 1.75
-                  : THREE.MathUtils.clamp(0.95 + horizSpeed * 0.32, 0.9, 1.85);
+            : isMusicDancing
+              ? 1.48
+              : isSpeaking
+                ? 1.55
+                : isThinking
+                  ? 1.35
+                  : greetingFlutterTimer > 0
+                    ? 1.75
+                    : THREE.MathUtils.clamp(0.95 + horizSpeed * 0.32, 0.9, 1.85);
         mixer.timeScale = speedBoost;
         mixer.update(safeDt);
       } else {
-        // Fallback wing flap animation while GLB loads
-        const flap = Math.sin(elapsed * (isSpeaking ? 18 : 13)) * 0.78;
+        const flap = Math.sin(elapsed * (isSpeaking || isMusicDancing ? 18 : 13)) * 0.78;
         fallback.leftWing.rotation.y = flap;
         fallback.rightWing.rotation.y = -flap;
       }
 
-      // Dynamic wing luminescence & iridescent glow across day, twilight, and speaking states
-      const glowLevel = 0.24 + nightFactor * 0.52 + (isSpeaking ? 0.26 : 0) + (isThinking ? 0.16 : 0);
+      // Dynamic wing luminescence & iridescent glow across day, twilight, music, and speaking states
+      const glowLevel = 0.24 + nightFactor * 0.52 + (isSpeaking || isMusicDancing ? 0.28 : 0) + (isThinking ? 0.16 : 0);
       for (let i = 0; i < wingMaterials.length; i++) {
         wingMaterials[i].emissiveIntensity = glowLevel;
       }
-      haloMat.opacity = 0.26 + nightFactor * 0.34 + (isSpeaking ? 0.22 : 0);
-      const haloScale = 1.08 + Math.sin(elapsed * 3.2) * 0.09 + (isSpeaking ? 0.18 : 0);
+      haloMat.opacity = 0.26 + nightFactor * 0.34 + (isSpeaking || isMusicDancing ? 0.22 : 0);
+      const haloScale = 1.08 + Math.sin(elapsed * 3.2) * 0.09 + (isSpeaking || isMusicDancing ? 0.18 : 0);
       haloSprite.scale.set(haloScale, haloScale, 1);
 
       // Fairy stardust trail swirling delicately around the wings
       const posAttr = dustGeo.attributes.position as THREE.BufferAttribute;
-      const swirlRate = isSpeaking ? 1.5 : isThinking ? 1.85 : 0.78;
+      const swirlRate = isMusicDancing ? 2.1 : isSpeaking ? 1.5 : isThinking ? 1.85 : 0.78;
       for (let i = 0; i < dustCount; i++) {
         const ph = dustPhases[i] + elapsed * swirlRate;
         const ox = dustOffsets[i * 3];
@@ -577,9 +657,9 @@ export function createParadiseSpirit(quality: ParadiseQualityProfile): ParadiseS
         );
       }
       posAttr.needsUpdate = true;
-      dustMat.opacity = 0.48 + nightFactor * 0.38 + (isSpeaking ? 0.16 : 0);
+      dustMat.opacity = 0.48 + nightFactor * 0.38 + (isSpeaking || isMusicDancing ? 0.18 : 0);
 
-      butterflyGlow.intensity = 0.24 + nightFactor * 1.25 + (isSpeaking ? 0.42 : 0);
+      butterflyGlow.intensity = 0.24 + nightFactor * 1.25 + (isSpeaking || isMusicDancing ? 0.44 : 0);
       handle.pavilionSwirlIntensity = isThinking ? 0.72 : 0;
 
       return nextState;

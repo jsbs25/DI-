@@ -293,14 +293,14 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
   };
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-8">
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
       {/* Top action bar */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-white/[0.02] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:bg-white/[0.05] hover:text-white"
+            className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             <span>返回图书馆</span>
@@ -309,7 +309,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
           <button
             type="button"
             onClick={onGoToShelf}
-            className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-400/40 bg-emerald-500/14 px-3.5 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/24"
+            className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-accent)]/35 bg-[var(--color-one-accent)]/10 px-3.5 py-2 text-xs font-semibold text-[var(--color-one-accent)] transition hover:bg-[var(--color-one-accent)]/18"
           >
             <BookMarked className="h-3.5 w-3.5" />
             <span>我的原文书架</span>
@@ -328,7 +328,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-500/35 bg-emerald-500/12 px-3.5 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/20 disabled:opacity-50"
+            className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-border-strong)] disabled:opacity-50"
           >
             {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
             <span>{uploading ? '正在导入…' : '导入本地 PDF / Markdown'}</span>
@@ -337,7 +337,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
           <button
             type="button"
             onClick={() => setShowUrlImport((v) => !v)}
-            className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-white/[0.03] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-white"
+            className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
           >
             <Link2 className="h-3.5 w-3.5" />
             <span>链接直开</span>
@@ -347,38 +347,38 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
             href={noorBookSearchUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-amber-500/35 bg-amber-500/12 px-3.5 py-2 text-xs font-semibold text-amber-100 transition hover:bg-amber-500/20"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
           >
-            <span>مكتبة النور 官网</span>
+            <span>مكتبة النور</span>
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
         </div>
       </div>
 
       {/* Focused Single-Search-Box Global Books Header */}
-      <section className="mb-6 rounded-[28px] border border-[var(--color-one-border)] bg-gradient-to-br from-[#0e1824] via-[#0b131e] to-[#0a1019] p-5 sm:p-7">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <section className="mb-7 rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 shadow-xs sm:p-7">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <div className="flex flex-wrap items-baseline gap-x-3.5 gap-y-1">
               <h2
                 dir="rtl"
                 lang="ar"
-                className="font-serif text-3xl font-bold tracking-tight text-white sm:text-4xl"
+                className="font-serif text-2xl font-semibold tracking-tight text-[var(--color-one-text)] sm:text-3xl"
               >
                 مكتبة النور
               </h2>
-              <span className="text-lg font-semibold text-white/95 sm:text-xl">
-                全球伊斯兰与典籍原版书库
+              <span className="text-base font-semibold text-[var(--color-one-text)] sm:text-lg">
+                全球原版书库
               </span>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-[var(--color-one-text-muted)] sm:text-sm">
-              一个搜索框直搜全球伊斯兰与世界原版书籍（IslamHouse 5,099+ 阿/中/英 PDF · Internet Archive · Project Gutenberg）。点击 <strong className="text-emerald-200">「下载到原文书架」</strong> 后，阅读时支持 <strong className="text-white">AI 逐页讲解</strong> 与 <strong className="text-white">点击任意单词自动查义</strong>。
+              直连 IslamHouse、Internet Archive、Project Gutenberg 等全球公开原版书籍。下载到书架后自动转为电子书重排阅读，支持 AI 精讲、段落翻译、点词查义与生词本。
             </p>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2 text-xs text-emerald-300">
-            <Sparkles className="h-4 w-4" />
-            <span>阅读器内置 AI 讲解本页 · 点词查词 · 一键返回</span>
+          <div className="flex shrink-0 items-center gap-1.5 text-xs text-[var(--color-one-accent)]">
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>PDF 电子书重排 · AI 智能伴读</span>
           </div>
         </div>
 
@@ -386,25 +386,25 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
         {showUrlImport && (
           <form
             onSubmit={handleOpenDirectUrl}
-            className="mt-4 grid grid-cols-1 gap-2.5 rounded-2xl border border-white/10 bg-black/30 p-3.5 sm:grid-cols-[1.5fr_1fr_auto]"
+            className="mt-4 grid grid-cols-1 gap-2.5 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-3.5 sm:grid-cols-[1.5fr_1fr_auto]"
           >
             <input
               type="url"
               value={directPdfUrl}
               onChange={(e) => setDirectPdfUrl(e.target.value)}
-              placeholder="粘贴 IslamHouse / Archive.org / Waqfeya 的 HTTPS .pdf 直链..."
-              className="rounded-xl border border-white/10 bg-[#080d15] px-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:border-emerald-400/50 focus:outline-none"
+              placeholder="粘贴 HTTPS .pdf 直链..."
+              className="rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2.5 text-xs text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none"
             />
             <input
               type="text"
               value={directPdfTitle}
               onChange={(e) => setDirectPdfTitle(e.target.value)}
               placeholder="书名（可选）"
-              className="rounded-xl border border-white/10 bg-[#080d15] px-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:border-emerald-400/50 focus:outline-none"
+              className="rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2.5 text-xs text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none"
             />
             <button
               type="submit"
-              className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-[#061310] transition hover:brightness-110"
+              className="inline-flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
             >
               <BookOpen className="h-3.5 w-3.5" />
               <span>立即打开</span>
@@ -421,18 +421,18 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               dir={containsArabic(searchInput) ? 'rtl' : 'auto'}
-              placeholder="输入任意书名或作者（阿拉伯语 / 中文 / 英文），全网搜书并下载到原文书架..."
-              className="w-full rounded-2xl border border-[var(--color-one-border-strong)] bg-[rgba(7,11,18,0.9)] py-3.5 pl-11 pr-28 text-sm text-white placeholder:text-[var(--color-one-text-dim)] focus:border-emerald-400/60 focus:outline-none focus:ring-2 focus:ring-emerald-400/15"
+              placeholder="输入任意书名或作者（阿拉伯语 / 中文 / 英文）..."
+              className="w-full rounded-2xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-bg)] py-3 pl-11 pr-24 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none"
             />
             <button
               type="submit"
-              className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-[#04140e] transition hover:brightness-110"
+              className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
             >
-              搜索书籍
+              搜索
             </button>
           </form>
 
-          <div className="flex flex-wrap gap-1.5">
+          <div className="inline-flex flex-wrap gap-1 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-1">
             {LANG_TABS.map((tab) => {
               const active = selectedLang === tab.id;
               return (
@@ -443,10 +443,10 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                     setSelectedLang(tab.id);
                     setPage(1);
                   }}
-                  className={`cursor-pointer rounded-xl border px-3 py-2.5 text-xs font-medium transition ${
+                  className={`cursor-pointer rounded-lg px-3 py-2 text-xs font-medium transition ${
                     active
-                      ? 'border-emerald-400/55 bg-emerald-500/18 text-white'
-                      : 'border-[var(--color-one-border)] bg-white/[0.02] text-[var(--color-one-text-muted)] hover:bg-white/[0.06] hover:text-white'
+                      ? 'bg-[var(--color-one-surface)] text-[var(--color-one-text)] shadow-xs'
+                      : 'text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
                   }`}
                 >
                   {tab.label}
@@ -457,8 +457,8 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
         </div>
 
         {/* Minimal Quick Book Shortcuts */}
-        <div className="mt-3.5 flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-[11px] text-[var(--color-one-text-dim)]">快捷搜书：</span>
+        <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+          <span className="text-[11px] text-[var(--color-one-text-dim)]">快捷检索</span>
           {QUICK_BOOK_TOPICS.map((topic) => (
             <button
               key={topic.label}
@@ -469,7 +469,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                 setPage(1);
                 setActiveQuery(topic.q);
               }}
-              className="cursor-pointer rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1 text-xs text-slate-200 transition hover:border-emerald-400/40 hover:bg-emerald-500/10 hover:text-white"
+              className="cursor-pointer text-xs text-[var(--color-one-text-muted)] underline-offset-4 transition hover:text-[var(--color-one-accent)] hover:underline"
             >
               {topic.label}
             </button>
@@ -482,31 +482,31 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                 setActiveQuery('');
                 setPage(1);
               }}
-              className="cursor-pointer rounded-lg border border-white/10 px-2.5 py-1 text-xs text-amber-200 hover:bg-white/10"
+              className="cursor-pointer text-xs font-medium text-[var(--color-one-accent)] hover:underline"
             >
-              清除搜索 · 看全部书目
+              清除筛选
             </button>
           )}
         </div>
       </section>
 
       {statusNotice && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-500/35 bg-emerald-500/12 px-4 py-3 text-xs text-emerald-100">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--color-one-accent)]/30 bg-[var(--color-one-accent)]/8 px-4 py-3 text-xs text-[var(--color-one-text)]">
           <span>{statusNotice.text}</span>
           <div className="flex items-center gap-2">
             {statusNotice.showShelfLink && (
               <button
                 type="button"
                 onClick={onGoToShelf}
-                className="cursor-pointer rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-[#04140e] transition hover:brightness-110"
+                className="cursor-pointer rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
               >
-                去我的书架查看
+                去书架查看
               </button>
             )}
             <button
               type="button"
               onClick={() => setStatusNotice(null)}
-              className="cursor-pointer text-[11px] text-emerald-200/80 hover:text-white"
+              className="cursor-pointer text-[11px] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]"
             >
               关闭
             </button>
@@ -515,36 +515,36 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
       )}
 
       {error && (
-        <div className="mb-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-100">
+        <div className="mb-5 rounded-2xl border border-rose-500/30 bg-rose-500/8 px-4 py-3 text-xs text-rose-600 dark:text-rose-300">
           {error}
         </div>
       )}
 
-      {/* Clean Books Grid */}
+      {/* Clean Editorial Books Grid */}
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, idx) => (
             <div
               key={idx}
-              className="h-52 animate-pulse rounded-2xl border border-[var(--color-one-border)] bg-white/[0.03] p-4"
+              className="h-48 animate-pulse rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5"
             />
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="rounded-[24px] border border-dashed border-[var(--color-one-border-strong)] bg-white/[0.02] px-6 py-14 text-center">
-          <FileText className="mx-auto mb-3 h-9 w-9 text-[var(--color-one-text-dim)]" />
-          <p className="text-sm font-semibold text-white">暂未检索到匹配的书籍</p>
+        <div className="rounded-[24px] border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-6 py-14 text-center">
+          <FileText className="mx-auto mb-3 h-8 w-8 text-[var(--color-one-text-dim)]" />
+          <p className="text-sm font-semibold text-[var(--color-one-text)]">暂未检索到匹配的书籍</p>
           <p className="mx-auto mt-1.5 max-w-md text-xs text-[var(--color-one-text-muted)]">
-            你可以切换语言筛选（或选「全球全部」），也可以前往 مكتبة النور 官网下载后点击右上角「导入本地 PDF」直接加入书架。
+            可切换语言筛选或选择「全球全部」，也可直接导入本地 PDF / Markdown 到书架阅读。
           </p>
           <div className="mt-4 flex flex-wrap justify-center gap-2.5">
             <a
               href={noorBookSearchUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-xs font-semibold text-[#151008]"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-white"
             >
-              <span>在 مكتبة النور 官网搜此书</span>
+              <span>在 مكتبة النور 检索</span>
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
             <button
@@ -554,9 +554,9 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                 setActiveQuery('');
                 setPage(1);
               }}
-              className="cursor-pointer rounded-xl border border-white/15 px-4 py-2 text-xs text-slate-200 hover:bg-white/10"
+              className="cursor-pointer rounded-xl border border-[var(--color-one-border-strong)] px-4 py-2 text-xs text-[var(--color-one-text)] hover:bg-[var(--color-one-surface-soft)]"
             >
-              浏览全部原版书籍
+              查看全部书目
             </button>
           </div>
         </div>
@@ -573,22 +573,22 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
               return (
                 <article
                   key={item.id}
-                  className="flex flex-col justify-between rounded-2xl border border-[var(--color-one-border)] bg-[rgba(12,18,28,0.8)] p-4 transition hover:border-emerald-400/35 hover:bg-[rgba(16,24,36,0.94)]"
+                  className="flex flex-col justify-between rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 transition hover:border-[var(--color-one-border-strong)] hover:shadow-sm"
                 >
                   <div>
-                    <div className="mb-2.5 flex items-center justify-between gap-2 text-[10px]">
-                      <span className="truncate font-medium text-emerald-300/90">
-                        {isOnShelf ? '已在原文书架 · 秒开' : item.sourceName}
+                    <div className="mb-2.5 flex items-center justify-between gap-2 text-[11px] text-[var(--color-one-text-dim)]">
+                      <span className="truncate font-medium text-[var(--color-one-accent)]">
+                        {isOnShelf ? '已在原文书架' : item.sourceName}
                       </span>
-                      <span className="shrink-0 rounded-md border border-white/10 bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-slate-300">
-                        {pdfAtt ? `PDF${pdfAtt.size ? ` · ${pdfAtt.size}` : ''}` : item.textUrl ? '原著全文' : '原版书'}
+                      <span className="shrink-0 font-mono text-[10px]">
+                        {pdfAtt ? `PDF${pdfAtt.size ? ` · ${pdfAtt.size}` : ''}` : item.textUrl ? '全文' : '原版'}
                       </span>
                     </div>
 
                     <h3
                       dir={isArabic ? 'rtl' : 'ltr'}
                       lang={item.language}
-                      className={`line-clamp-2 text-[15px] font-semibold leading-snug text-white ${
+                      className={`line-clamp-2 text-[15px] font-semibold leading-snug text-[var(--color-one-text)] ${
                         isArabic ? 'font-serif text-right text-[17px] leading-relaxed' : ''
                       }`}
                     >
@@ -597,7 +597,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
 
                     <p
                       dir={isArabic ? 'rtl' : 'ltr'}
-                      className={`mt-1 line-clamp-1 text-xs text-amber-200/85 ${isArabic ? 'text-right' : ''}`}
+                      className={`mt-1 line-clamp-1 text-xs text-[var(--color-one-text-muted)] ${isArabic ? 'text-right' : ''}`}
                     >
                       {item.author}
                     </p>
@@ -605,7 +605,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                     {item.description && (
                       <p
                         dir={isArabic ? 'rtl' : 'ltr'}
-                        className={`mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--color-one-text-muted)] ${
+                        className={`mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--color-one-text-dim)] ${
                           isArabic ? 'text-right' : ''
                         }`}
                       >
@@ -614,37 +614,37 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                     )}
                   </div>
 
-                  <div className="mt-4 space-y-2 border-t border-white/8 pt-3">
+                  <div className="mt-4 space-y-2.5 border-t border-[var(--color-one-border)] pt-3.5">
                     <div className="flex items-center gap-2">
                       {isOnShelf ? (
                         <button
                           type="button"
                           onClick={onGoToShelf}
-                          className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-emerald-400/50 bg-emerald-500/18 px-3 py-1.5 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/28"
+                          className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-[var(--color-one-accent)]/40 bg-[var(--color-one-accent)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--color-one-accent)] transition hover:bg-[var(--color-one-accent)]/18"
                         >
                           <Check className="h-3.5 w-3.5" />
-                          <span>已在书架 · 查看</span>
+                          <span>已在书架</span>
                         </button>
                       ) : (
                         <button
                           type="button"
                           onClick={() => handleDownloadToShelf(item)}
                           disabled={savingId === item.id}
-                          className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-[#04140e] transition hover:brightness-110 disabled:opacity-55"
+                          className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-55"
                         >
                           {savingId === item.id ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           ) : (
                             <BookMarked className="h-3.5 w-3.5" />
                           )}
-                          <span>{savingId === item.id ? '下载中…' : '下载到原文书架'}</span>
+                          <span>{savingId === item.id ? '下载中…' : '下载到书架'}</span>
                         </button>
                       )}
 
                       <button
                         type="button"
                         onClick={() => void handleOpenItemReader(item)}
-                        className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-xl border border-white/15 bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-white/[0.12]"
+                        className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] px-3.5 py-1.5 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
                       >
                         <BookOpen className="h-3.5 w-3.5" />
                         <span>阅读</span>
@@ -656,10 +656,10 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                         <a
                           href={primaryDownloadUrl}
                           download
-                          className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-slate-300 transition hover:text-white"
+                          className="inline-flex items-center gap-1 transition hover:text-[var(--color-one-text)]"
                         >
                           <Download className="h-3 w-3" />
-                          <span>存到本机</span>
+                          <span>下载原文件</span>
                         </a>
                       ) : (
                         <span />
@@ -669,7 +669,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                           href={item.sourcePageUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-slate-400 transition hover:text-white"
+                          className="inline-flex items-center gap-1 transition hover:text-[var(--color-one-text)]"
                         >
                           <span>原页</span>
                           <ExternalLink className="h-3 w-3" />
@@ -688,7 +688,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                 type="button"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-medium text-slate-200 transition hover:bg-white/[0.08] disabled:opacity-35"
+                className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-4 py-2 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-border-strong)] disabled:opacity-35"
               >
                 <ChevronLeft className="h-4 w-4" />
                 <span>上一页</span>
@@ -699,7 +699,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
               <button
                 type="button"
                 onClick={() => setPage((p) => p + 1)}
-                className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-xl border border-white/15 bg-white/[0.03] px-4 py-2 text-xs font-medium text-slate-200 transition hover:bg-white/[0.08]"
+                className="inline-flex min-h-10 cursor-pointer items-center gap-1 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-4 py-2 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-border-strong)]"
               >
                 <span>下一页</span>
                 <ChevronRight className="h-4 w-4" />

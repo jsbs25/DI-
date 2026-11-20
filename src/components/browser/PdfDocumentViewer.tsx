@@ -2,106 +2,89 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getDocument,
   GlobalWorkerOptions,
-  Util,
   type PDFDocumentProxy,
   type RenderTask,
 } from 'pdfjs-dist';
 import {
+  AlignJustify,
+  AlignLeft,
   ArrowLeft,
   ArrowRight,
-  BookOpen,
   Bookmark,
   BookmarkCheck,
+  BookOpen,
+  Check,
   CheckCircle2,
   Download,
   ExternalLink,
+  Eye,
+  FileText,
   Languages,
   List,
   Loader2,
+  MessageSquare,
   Minus,
-  Moon,
   Plus,
-  RotateCw,
-  Rows3,
-  Search,
+  RotateCcw,
+  ScanText,
   Send,
+  SlidersHorizontal,
   Sparkles,
-  StickyNote,
-  Sun,
   Trash2,
   X,
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
+import {
+  DEFAULT_READER_PREFS,
+  READER_BG_PRESETS,
+  READER_FONT_FAMILIES,
+  TEXT_COLOR_PRESETS,
+  loadBookProgress,
+  loadReaderPreferences,
+  resolveColumnMaxWidth,
+  resolveFontCss,
+  resolveHorizontalPadding,
+  resolveReaderPalette,
+  saveBookProgress,
+  saveReaderPreferences,
+  type BookBookmarkItem,
+  type ReaderBgPresetId,
+  type ReaderPreferences,
+} from '../../utils/readerPreferences.ts';
+import {
+  extractPdfToc,
+  extractStructuredPdfPage,
+  parseOcrMarkdownToBlocks,
+  renderPdfPageToJpegDataUrl,
+  type ExtractedEbookPage,
+  type PdfTocItem,
+} from '../../utils/pdfEbookExtractor.ts';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
-type PdfThemeId = 'light' | 'paper' | 'dark';
-
-const PDF_THEMES: Record<
-  PdfThemeId,
-  {
-    label: string;
-    shellBg: string;
-    chromeBg: string;
-    panelBg: string;
-    ink: string;
-    muted: string;
-    border: string;
-    canvasFilter?: string;
-    isDark: boolean;
-  }
-> = {
-  light: {
-    label: '原始白',
-    shellBg: '#F5F5F7',
-    chromeBg: '#FFFFFF',
-    panelBg: '#FFFFFF',
-    ink: '#1D1D1F',
-    muted: '#6E6E73',
-    border: '#E5E5EA',
-    isDark: false,
-  },
-  paper: {
-    label: '护眼纸',
-    shellBg: '#EFE7D6',
-    chromeBg: '#F8F3E8',
-    panelBg: '#FCF9F2',
-    ink: '#2B241B',
-    muted: '#736654',
-    border: '#DDD0B8',
-    canvasFilter: 'sepia(0.14) contrast(0.98)',
-    isDark: false,
-  },
-  dark: {
-    label: '夜间黑',
-    shellBg: '#121215',
-    chromeBg: '#1C1C1F',
-    panelBg: '#18181C',
-    ink: '#EBEBF0',
-    muted: '#9A9AA0',
-    border: '#2E2E34',
-    isDark: true,
-  },
-};
-
-interface OverlayTextSpan {
-  id: string;
-  text: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  fontSize: number;
-}
-
 export interface WordLookupEntry {
   word: string;
+  lemma?: string;
   reading: string;
   partOfSpeech: string;
   root: string;
   meaning: string;
+  usage?: string;
   contextMeaning: string;
   example: string;
+}
+
+interface SavedVocabItem {
+  id: string;
+  word: string;
+  lemma?: string;
+  reading?: string;
+  partOfSpeech?: string;
+  root?: string;
+  meaning: string;
+  usage?: string;
+  example?: string;
+  bookTitle?: string;
 }
 
 export interface PdfDocumentViewerProps {
@@ -110,20 +93,6 @@ export interface PdfDocumentViewerProps {
   lang: Language;
   /** Optional original external source URL (e.g. IslamHouse / Archive / Noor page). */
   originPageUrl?: string;
-  /** Library book id for progress/reading-state persistence. */
-  bookId?: string;
-  /** Book content language (ar/zh/en) for AI context and RTL hints. */
-  contentLanguage?: string;
-  /** Optional chapter/section label for AI context. */
-  chapterTitle?: string;
-  /** Resume state from shelf. */
-  initialState?: {
-    page?: number;
-    zoom?: number;
-    theme?: PdfThemeId;
-    viewMode?: 'single' | 'continuous';
-    rotation?: number;
-  };
   /** Callback to return to Bookshelf / Library. */
   onClose?: () => void;
 }
@@ -150,291 +119,154 @@ function cleanWordToken(raw: string): string {
     .trim();
 }
 
-function splitTokensForClick(line: string): string[] {
-  if (!line.trim()) return [];
-  // Keep whitespace so layout matches closely, while splitting Arabic/Latin words cleanly
-  return line.split(/(\s+)/);
+function tokenizeInteractiveText(text: string): string[] {
+  if (!text) return [];
+  // Keep whitespace intact, split Arabic/Latin words cleanly, and chunk CJK phrases naturally
+  return text.split(/(\s+|[.,;:!?()[\]{}"'«»“”‘’—–،؛؟。，、！？（）【】《》]+)/).filter(Boolean);
 }
-
-function extractPageVocabulary(pageText: string): string[] {
-  if (!pageText.trim()) return [];
-  const matches = pageText.match(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]{2,}|[A-Za-z][A-Za-z'-]{2,}|[\u4e00-\u9fff]{2,4}/g) || [];
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const raw of matches) {
-    const cleaned = cleanWordToken(raw);
-    if (!cleaned || cleaned.length < 2) continue;
-    const key = cleaned.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(cleaned);
-    if (result.length >= 36) break;
-  }
-  return result;
-}
-
-interface ContinuousPdfPageProps {
-  pdf: PDFDocumentProxy;
-  pageNum: number;
-  zoom: number;
-  rotation: number;
-  theme: typeof PDF_THEMES.light;
-  isActive: boolean;
-  isChinese: boolean;
-  registerRef: (el: HTMLDivElement | null) => void;
-  registerCanvas: (canvas: HTMLCanvasElement | null) => void;
-  onActivate: () => void;
-  onTextExtracted: (text: string, spans: OverlayTextSpan[]) => void;
-  onLookupWord: (word: string, context?: string) => void;
-}
-
-const ContinuousPdfPage: React.FC<ContinuousPdfPageProps> = ({
-  pdf, pageNum, zoom, rotation, theme, isActive, isChinese,
-  registerRef, registerCanvas, onActivate, onTextExtracted, onLookupWord,
-}) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [dims, setDims] = useState({ w: 0, h: 0 });
-  const [spans, setSpans] = useState<OverlayTextSpan[]>([]);
-  const [shouldRender, setShouldRender] = useState(isActive);
-
-  useEffect(() => {
-    registerRef(containerRef.current);
-    return () => registerRef(null);
-  }, [registerRef, pageNum]);
-
-  useEffect(() => {
-    if (isActive) {
-      setShouldRender(true);
-      registerCanvas(canvasRef.current);
-    }
-  }, [isActive, registerCanvas, dims.w, dims.h]);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver((entries) => {
-      const e = entries[0];
-      if (!e) return;
-      if (e.isIntersecting) setShouldRender(true);
-      if (e.isIntersecting && e.intersectionRatio >= 0.45) onActivate();
-    }, { rootMargin: '1200px 0px', threshold: [0, 0.2, 0.45, 0.6, 0.8] });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [onActivate]);
-
-  useEffect(() => {
-    if (!shouldRender) return;
-    let cancelled = false;
-    let renderTask: RenderTask | undefined;
-    pdf.getPage(pageNum).then(async (page) => {
-      if (cancelled) return;
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext('2d');
-      if (!canvas || !ctx) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const cssViewport = page.getViewport({ scale: zoom, rotation });
-      const hiDpiViewport = page.getViewport({ scale: zoom * dpr, rotation });
-      const cssW = Math.ceil(cssViewport.width);
-      const cssH = Math.ceil(cssViewport.height);
-      canvas.width = Math.ceil(hiDpiViewport.width);
-      canvas.height = Math.ceil(hiDpiViewport.height);
-      canvas.style.width = `${cssW}px`;
-      canvas.style.height = `${cssH}px`;
-      setDims({ w: cssW, h: cssH });
-      renderTask = page.render({ canvas, canvasContext: ctx, viewport: hiDpiViewport });
-      await renderTask.promise.catch(() => {});
-      try {
-        const textContent = await page.getTextContent();
-        if (cancelled) return;
-        const out: OverlayTextSpan[] = [];
-        const parts: string[] = [];
-        textContent.items.forEach((rawItem, idx) => {
-          if (!('str' in rawItem)) return;
-          const text = rawItem.str;
-          if (!text || !text.trim()) return;
-          parts.push(text);
-          try {
-            const tx = Util.transform(cssViewport.transform, rawItem.transform);
-            const fontSize = Math.max(9, Math.min(64, Math.hypot(tx[2], tx[3]) || Math.hypot(tx[0], tx[1]) || 12));
-            const left = tx[4];
-            const top = tx[5] - fontSize * 0.88;
-            const width = Math.max(10, (rawItem.width || 0) * cssViewport.scale);
-            const height = fontSize * 1.18;
-            if (Number.isFinite(left) && Number.isFinite(top)) {
-              out.push({ id: `p${pageNum}_${idx}`, text, left, top, width, height, fontSize });
-            }
-          } catch {}
-        });
-        setSpans(out);
-        if (isActive) onTextExtracted(parts.join(' ').replace(/\s+/g, ' ').trim(), out);
-      } catch {
-        if (isActive) onTextExtracted('', []);
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; renderTask?.cancel(); };
-  }, [pdf, pageNum, zoom, rotation, isActive, onTextExtracted, shouldRender]);
-
-  const placeholderW = dims.w > 0 ? dims.w : Math.max(320, Math.round(680 * zoom));
-  const placeholderH = dims.h > 0 ? dims.h : Math.max(420, Math.round(960 * zoom));
-
-  return (
-    <div ref={containerRef} data-pdf-page={pageNum} className="relative shrink-0">
-      <div className="mb-1 text-center text-[10px]" style={{ color: isActive ? '#10B981' : 'inherit', opacity: isActive ? 1 : 0.5 }}>P.{pageNum}</div>
-      <div className="relative mx-auto" style={{ width: placeholderW, height: placeholderH }}>
-        {shouldRender ? (
-          <>
-            <canvas
-              ref={canvasRef}
-              aria-label={`PDF page ${pageNum}`}
-              className={`block rounded-lg shadow-[0_14px_42px_rgba(0,0,0,0.22)] transition-all ${isActive ? 'ring-2 ring-emerald-500/40' : ''}`}
-              style={theme.canvasFilter ? { filter: theme.canvasFilter } : undefined}
-            />
-            {isActive && spans.length > 0 && dims.w > 0 && (
-              <div className="absolute inset-0 overflow-hidden rounded-lg" style={{ width: dims.w, height: dims.h }}>
-                {spans.map((span) => {
-                  const tokens = splitTokensForClick(span.text);
-                  return (
-                    <div key={span.id} style={{ position: 'absolute', left: `${span.left}px`, top: `${span.top}px`, minWidth: `${span.width}px`, height: `${span.height}px`, fontSize: `${span.fontSize}px`, lineHeight: 1.05, whiteSpace: 'pre' }}>
-                      {tokens.map((tok, i) => {
-                        const clean = cleanWordToken(tok);
-                        if (!clean) return <span key={i} className="text-transparent select-none">{tok}</span>;
-                        return (
-                          <button key={i} type="button" onClick={(e) => { e.stopPropagation(); void onLookupWord(clean, span.text); }} title={isChinese ? `点击让 AI 查询「${clean}」` : `Look up "${clean}"`} className="inline cursor-pointer rounded-[3px] text-transparent transition-colors hover:bg-emerald-400/28 focus:bg-emerald-400/32 focus:outline-none" style={{ fontSize: 'inherit', lineHeight: 'inherit', padding: 0, margin: 0, border: 'none' }}>{tok}</button>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="flex h-full w-full items-center justify-center rounded-lg border text-xs" style={{ borderColor: theme.border, color: theme.muted, backgroundColor: theme.chromeBg }}>
-            {isChinese ? `第 ${pageNum} 页（滚动加载）` : `Page ${pageNum}`}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   sourceUrl,
   title,
   lang,
   originPageUrl,
-  bookId,
-  contentLanguage,
-  chapterTitle,
-  initialState,
   onClose,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const continuousActiveCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const continuousPageRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const [documentProxy, setDocumentProxy] = useState<PDFDocumentProxy | null>(null);
-  const [pageNumber, setPageNumber] = useState(Math.max(1, Math.floor(initialState?.page || 1)));
-  const [pageInput, setPageInput] = useState(String(Math.max(1, Math.floor(initialState?.page || 1))));
-  const [pageCount, setPageCount] = useState(0);
-  const [zoom, setZoom] = useState(typeof initialState?.zoom === 'number' ? Math.max(0.65, Math.min(2.6, initialState.zoom)) : 1.2);
-  const [themeId, setThemeId] = useState<PdfThemeId>(initialState?.theme || 'paper');
-  const [viewMode, setViewMode] = useState<'single' | 'continuous'>(initialState?.viewMode || 'single');
-  const [rotation, setRotation] = useState<number>(((Math.round((initialState?.rotation || 0) / 90) * 90) % 360 + 360) % 360);
-  const [searchText, setSearchText] = useState('');
-  const [matchingPages, setMatchingPages] = useState<number[]>([]);
-  const [status, setStatus] = useState('');
-  const [error, setError] = useState('');
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Interactive PDF text layer for tap-any-word lookup + page text extraction
-  const [canvasDims, setCanvasDims] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
-  const [overlaySpans, setOverlaySpans] = useState<OverlayTextSpan[]>([]);
-  const [currentPageText, setCurrentPageText] = useState('');
-  const [wordBarOpen, setWordBarOpen] = useState(false);
-  const [manualWordInput, setManualWordInput] = useState('');
-
-  // AI Page Explanation Drawer
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
-  const [aiAction, setAiAction] = useState<'explain' | 'translate' | 'summarize' | 'ask' | 'ocr'>('explain');
-  const [aiTargetLang, setAiTargetLang] = useState<'zh' | 'en' | 'ar'>('zh');
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiExplanation, setAiExplanation] = useState('');
-  const [aiExplainedPage, setAiExplainedPage] = useState<number | null>(null);
-  const [aiError, setAiError] = useState('');
-  const [aiQuestion, setAiQuestion] = useState('');
-  const [aiUsedVision, setAiUsedVision] = useState(false);
-  const [aiProviderInfo, setAiProviderInfo] = useState<string>('');
-
-  // Page bookmarks/notes (library annotations)
-  const [annotations, setAnnotations] = useState<any[]>([]);
-  const [annotationsOpen, setAnnotationsOpen] = useState(false);
-  const [noteDraft, setNoteDraft] = useState('');
-
-  // Tap-Any-Word AI Dictionary Popover
-  const [lookupWord, setLookupWord] = useState<string | null>(null);
-  const [lookupLoading, setLookupLoading] = useState(false);
-  const [lookupEntry, setLookupEntry] = useState<WordLookupEntry | null>(null);
-  const [lookupError, setLookupError] = useState('');
-
-  const isChinese = lang === 'zh';
-  const effectiveContentLang = contentLanguage || (title.match(/[\u0600-\u06FF]/) ? 'ar' : undefined);
+  const isZh = lang === 'zh';
   const streamUrl = resolveProxyPdfUrl(sourceUrl, title, false);
   const downloadUrl = resolveProxyPdfUrl(sourceUrl, title, true);
-  const theme = PDF_THEMES[themeId];
-  const isLastPage = pageCount > 0 && pageNumber >= pageCount;
+  const bookKey = useMemo(() => `pdf:${sourceUrl || title}`, [sourceUrl, title]);
 
-  const pageWords = useMemo(() => extractPageVocabulary(currentPageText), [currentPageText]);
+  // Core PDF state
+  const [pdfProxy, setPdfProxy] = useState<PDFDocumentProxy | null>(null);
+  const [pageCount, setPageCount] = useState(0);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [toc, setToc] = useState<PdfTocItem[]>([]);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
 
+  // Reflowable Ebook vs Original Page View
+  const [viewMode, setViewMode] = useState<'reflow' | 'original'>('reflow');
+  const [extractedPages, setExtractedPages] = useState<Record<number, ExtractedEbookPage>>({});
+  const [scrollWindowEnd, setScrollWindowEnd] = useState(3);
+  const [ocrLoadingPage, setOcrLoadingPage] = useState<number | null>(null);
+
+  // Original PDF canvas zoom & ref
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [originalZoom, setOriginalZoom] = useState(1.15);
+
+  // Reader Typography Preferences (persisted)
+  const [prefs, setPrefs] = useState<ReaderPreferences>(() => loadReaderPreferences());
+  const palette = useMemo(() => resolveReaderPalette(prefs), [prefs]);
+  const fontCss = useMemo(() => resolveFontCss(prefs.fontFamily), [prefs.fontFamily]);
+  const colMaxWidth = useMemo(() => resolveColumnMaxWidth(prefs.widthMode), [prefs.widthMode]);
+  const horizPad = useMemo(() => resolveHorizontalPadding(prefs.marginMode), [prefs.marginMode]);
+
+  // Drawers & Lightweight Panels
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tocOpen, setTocOpen] = useState(false);
+  const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
+  const [aiTab, setAiTab] = useState<'explain' | 'qa' | 'summary' | 'vocab'>('explain');
+  const [bookmarks, setBookmarks] = useState<BookBookmarkItem[]>([]);
+  const [pageJumpInput, setPageJumpInput] = useState('1');
+
+  // Inline Paragraph Translations (blockId -> translated string)
+  const [inlineTranslations, setInlineTranslations] = useState<Record<string, { loading?: boolean; text?: string; error?: string }>>({});
+
+  // Floating Text Selection Action Bar
+  const [selectionAction, setSelectionAction] = useState<{ text: string; blockId?: string } | null>(null);
+
+  // Tap-Any-Word AI Annotation Card
+  const [wordCard, setWordCard] = useState<{
+    word: string;
+    context: string;
+    loading: boolean;
+    entry: WordLookupEntry | null;
+    error: string;
+    saved: boolean;
+  } | null>(null);
+
+  // AI Deep Explanation State
+  const [deepExplainLoading, setDeepExplainLoading] = useState(false);
+  const [deepExplainText, setDeepExplainText] = useState('');
+  const [deepExplainTarget, setDeepExplainTarget] = useState('');
+  const [deepExplainError, setDeepExplainError] = useState('');
+
+  // Whole-Book AI Q&A State
+  const [qaInput, setQaInput] = useState('');
+  const [qaLoading, setQaLoading] = useState(false);
+  const [qaHistory, setQaHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string; cited?: string[] }>>([]);
+  const [wholeBookIndexedPages, setWholeBookIndexedPages] = useState(0);
+  const wholeBookChunksRef = useRef<Array<{ pageNumber: number; label: string; text: string }>>([]);
+
+  // AI Summary State
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryScope, setSummaryScope] = useState<'paragraph' | 'chapter' | 'book'>('chapter');
+  const [summaryText, setSummaryText] = useState('');
+  const [summaryError, setSummaryError] = useState('');
+
+  // Personal Vocabulary Bank
+  const [vocabItems, setVocabItems] = useState<SavedVocabItem[]>([]);
+  const [vocabLoading, setVocabLoading] = useState(false);
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const updatePrefs = useCallback((patch: Partial<ReaderPreferences>) => {
+    setPrefs((prev) => {
+      const next = { ...prev, ...patch };
+      saveReaderPreferences(next);
+      return next;
+    });
+  }, []);
+
+  // Load saved progress & bookmarks for this book
   useEffect(() => {
-    setPageInput(String(pageNumber));
-  }, [pageNumber]);
+    const saved = loadBookProgress(bookKey);
+    if (saved) {
+      setPageNumber(Math.max(1, saved.pageNumber || 1));
+      setScrollWindowEnd(Math.max(3, (saved.pageNumber || 1) + 2));
+      setBookmarks(Array.isArray(saved.bookmarks) ? saved.bookmarks : []);
+    } else {
+      setPageNumber(1);
+      setScrollWindowEnd(3);
+      setBookmarks([]);
+    }
+  }, [bookKey]);
 
-  // Load annotations for this book (bookmarks/notes per page)
+  // Persist reading progress whenever page or bookmarks change
   useEffect(() => {
-    if (!bookId) { setAnnotations([]); return; }
+    if (pageCount <= 0) return;
+    setPageJumpInput(String(pageNumber));
+    saveBookProgress({
+      bookKey,
+      title,
+      sourceUrl,
+      pageNumber,
+      totalPages: pageCount,
+      scrollRatio: pageNumber / Math.max(1, pageCount),
+      progressPct: Math.min(100, Math.round((pageNumber / Math.max(1, pageCount)) * 100)),
+      bookmarks,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [bookKey, title, sourceUrl, pageNumber, pageCount, bookmarks]);
+
+  // Load PDF document via pdfjs-dist
+  useEffect(() => {
     let cancelled = false;
-    fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations`, { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => { if (!cancelled && data?.success && Array.isArray(data.annotations)) setAnnotations(data.annotations); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [bookId]);
-
-  // Persist PDF reading state (page/zoom/theme/viewMode/rotation/progress) for resume
-  useEffect(() => {
-    if (!bookId || !pageCount) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      const progress = Math.min(100, Math.max(0, Math.round((pageNumber / pageCount) * 100)));
-      fetch(`/api/library/shelf/${encodeURIComponent(bookId)}/pdf-reading-state`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ progress, page: pageNumber, zoom, theme: themeId, viewMode, rotation }),
-      }).catch(() => {});
-    }, 700);
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    };
-  }, [bookId, pageNumber, pageCount, zoom, themeId, viewMode, rotation]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setDocumentProxy(null);
-    setPageNumber(1);
-    setPageInput('1');
+    setPdfProxy(null);
     setPageCount(0);
-    setMatchingPages([]);
-    setOverlaySpans([]);
-    setCurrentPageText('');
-    setAiExplanation('');
-    setAiExplainedPage(null);
-    setLookupWord(null);
-    setLookupEntry(null);
+    setToc([]);
+    setExtractedPages({});
+    setInlineTranslations({});
+    setWordCard(null);
+    setSelectionAction(null);
+    setDeepExplainText('');
+    setQaHistory([]);
+    setSummaryText('');
+    wholeBookChunksRef.current = [];
+    setWholeBookIndexedPages(0);
     setError('');
-    setStatus(isChinese ? '正在载入 PDF 典籍…' : 'Loading PDF document…');
+    setStatus(isZh ? '正在解析电子书排版…' : 'Preparing reflowable ebook…');
 
     const task = getDocument({
       url: streamUrl,
@@ -443,22 +275,21 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     });
 
     task.promise
-      .then((pdf) => {
+      .then(async (pdf) => {
         if (cancelled) return;
-        setDocumentProxy(pdf);
+        setPdfProxy(pdf);
         setPageCount(pdf.numPages);
-        const initPage = Math.max(1, Math.min(pdf.numPages, Math.floor(initialState?.page || 1)));
-        setPageNumber(initPage);
-        setPageInput(String(initPage));
         setStatus('');
+        const outline = await extractPdfToc(pdf);
+        if (!cancelled) setToc(outline);
       })
       .catch((reason) => {
         if (cancelled) return;
         const msg = reason instanceof Error ? reason.message : String(reason);
         setError(
-          isChinese
-            ? `PDF 载入未完成：${msg}。您可以点击右上角「下载 PDF」直接下载到本地阅读。`
-            : `Could not load PDF: ${msg}. You can still download the PDF directly.`
+          isZh
+            ? `PDF 载入未完成：${msg}。你仍可点击右上角「下载原 PDF」保存到本地阅读。`
+            : `Could not load PDF: ${msg}. You can still download the original PDF.`
         );
         setStatus('');
       });
@@ -467,1230 +298,1957 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
       cancelled = true;
       void task.destroy();
     };
-  }, [streamUrl, isChinese]);
+  }, [streamUrl, isZh]);
 
+  // Extract structured reflowable content for active page(s)
+  const ensurePageExtracted = useCallback(
+    async (targetPage: number, autoOcr = false): Promise<ExtractedEbookPage | null> => {
+      if (!pdfProxy || targetPage < 1 || targetPage > pdfProxy.numPages) return null;
+      const existing = extractedPages[targetPage];
+      if (existing && (!autoOcr || !existing.isLikelyScanned || existing.ocrApplied)) {
+        return existing;
+      }
+
+      const extracted = existing || (await extractStructuredPdfPage(pdfProxy, targetPage));
+      setExtractedPages((prev) => ({ ...prev, [targetPage]: extracted }));
+
+      // Automatically adjust font choice if page is Arabic and user hasn't picked an Arabic font
+      if (extracted.dir === 'rtl' && targetPage === pageNumber && !prefs.fontFamily.endsWith('_ar')) {
+        // Keep user preference intact, CSS fallback handles Arabic seamlessly
+      }
+
+      // If scanned image page and autoOcr requested, run Vision OCR cleanly
+      if (autoOcr && extracted.isLikelyScanned && !extracted.ocrApplied) {
+        setOcrLoadingPage(targetPage);
+        try {
+          const jpeg = await renderPdfPageToJpegDataUrl(pdfProxy, targetPage, 1.45);
+          const res = await fetch('/api/library/ai/ocr-page', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              pageImageBase64: jpeg,
+              pageNumber: targetPage,
+              bookTitle: title,
+              language: lang,
+            }),
+          });
+          const data = await res.json();
+          if (res.ok && data?.success && typeof data.text === 'string' && data.text.trim()) {
+            const blocks = parseOcrMarkdownToBlocks(data.text, targetPage);
+            const hasArabic = /[\u0600-\u06FF]/.test(data.text);
+            const ocrPage: ExtractedEbookPage = {
+              pageNumber: targetPage,
+              dir: hasArabic ? 'rtl' : 'ltr',
+              blocks,
+              plainText: data.text.trim(),
+              isLikelyScanned: false,
+              ocrApplied: true,
+            };
+            setExtractedPages((prev) => ({ ...prev, [targetPage]: ocrPage }));
+            return ocrPage;
+          }
+        } catch {
+          // Graceful fallback: user can still switch to Original Page mode
+        } finally {
+          setOcrLoadingPage((cur) => (cur === targetPage ? null : cur));
+        }
+      }
+
+      return extracted;
+    },
+    [pdfProxy, extractedPages, pageNumber, prefs.fontFamily, title, lang]
+  );
+
+  // Extract active window of pages whenever pdfProxy / pageNumber / layout changes
   useEffect(() => {
-    if (!documentProxy || viewMode === 'continuous') return;
+    if (!pdfProxy || viewMode !== 'reflow') return;
+    let cancelled = false;
+
+    const pagesToLoad: number[] = [];
+    if (prefs.layoutMode === 'paged') {
+      pagesToLoad.push(pageNumber);
+      if (pageNumber + 1 <= pdfProxy.numPages) pagesToLoad.push(pageNumber + 1);
+    } else {
+      const start = Math.max(1, pageNumber);
+      const end = Math.min(pdfProxy.numPages, Math.max(scrollWindowEnd, start + 2));
+      for (let p = start; p <= end; p++) pagesToLoad.push(p);
+    }
+
+    (async () => {
+      for (const p of pagesToLoad) {
+        if (cancelled) break;
+        const already = extractedPages[p];
+        if (!already) {
+          const res = await extractStructuredPdfPage(pdfProxy, p);
+          if (cancelled) break;
+          setExtractedPages((prev) => (prev[p] ? prev : { ...prev, [p]: res }));
+          // Auto-OCR the first visible scanned page so user immediately sees reflowable prose
+          if (p === pageNumber && res.isLikelyScanned) {
+            void ensurePageExtracted(p, true);
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfProxy, pageNumber, scrollWindowEnd, prefs.layoutMode, viewMode]);
+
+  // Background whole-book text indexing for Whole-Book Context AI Q&A & Book Summary
+  useEffect(() => {
+    if (!pdfProxy || pageCount <= 0) return;
+    let cancelled = false;
+
+    (async () => {
+      const maxIndexPages = Math.min(pageCount, 80);
+      const step = pageCount > 80 ? Math.ceil(pageCount / 80) : 1;
+      const chunks: Array<{ pageNumber: number; label: string; text: string }> = [];
+      for (let p = 1; p <= pageCount && chunks.length < maxIndexPages; p += step) {
+        if (cancelled) return;
+        try {
+          const page = await pdfProxy.getPage(p);
+          const tc = await page.getTextContent();
+          const text = (tc.items as any[])
+            .map((it) => (typeof it?.str === 'string' ? it.str : ''))
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (text.length > 20) {
+            chunks.push({ pageNumber: p, label: `第 ${p} 页`, text: text.slice(0, 2400) });
+          }
+        } catch {
+          // skip unreadable page
+        }
+        if (chunks.length % 10 === 0 && !cancelled) {
+          wholeBookChunksRef.current = [...chunks];
+          setWholeBookIndexedPages(chunks.length);
+        }
+      }
+      if (!cancelled) {
+        wholeBookChunksRef.current = chunks;
+        setWholeBookIndexedPages(chunks.length);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfProxy, pageCount]);
+
+  // Render Original Page Canvas when in 'original' fallback view
+  useEffect(() => {
+    if (!pdfProxy || viewMode !== 'original') return;
     let cancelled = false;
     let renderTask: RenderTask | undefined;
 
-    documentProxy
+    pdfProxy
       .getPage(pageNumber)
-      .then(async (page) => {
-        if (cancelled) return;
-        const canvas = canvasRef.current;
-        const context = canvas?.getContext('2d');
-        if (!canvas || !context) return;
-
+      .then((page) => {
+        if (cancelled || !canvasRef.current) return;
+        const viewport = page.getViewport({ scale: originalZoom });
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        const cssViewport = page.getViewport({ scale: zoom, rotation });
-        const hiDpiViewport = page.getViewport({ scale: zoom * dpr, rotation });
-
-        const cssW = Math.ceil(cssViewport.width);
-        const cssH = Math.ceil(cssViewport.height);
-        canvas.width = Math.ceil(hiDpiViewport.width);
-        canvas.height = Math.ceil(hiDpiViewport.height);
-        canvas.style.width = `${cssW}px`;
-        canvas.style.height = `${cssH}px`;
-        setCanvasDims({ width: cssW, height: cssH });
-
-        renderTask = page.render({ canvas, canvasContext: context, viewport: hiDpiViewport });
-        const renderPromise = renderTask.promise.catch((reason) => {
-          if (!cancelled && (reason as Error)?.name !== 'RenderingCancelledException') {
-            setError(reason instanceof Error ? reason.message : String(reason));
-          }
-        });
-
-        // Extract selectable/clickable text layer in parallel
-        try {
-          const textContent = await page.getTextContent();
-          if (cancelled) return;
-
-          const spans: OverlayTextSpan[] = [];
-          const fullTextParts: string[] = [];
-
-          textContent.items.forEach((rawItem, idx) => {
-            if (!('str' in rawItem)) return;
-            const text = rawItem.str;
-            if (!text || !text.trim()) return;
-            fullTextParts.push(text);
-
-            try {
-              const tx = Util.transform(cssViewport.transform, rawItem.transform);
-              const fontSize = Math.max(9, Math.min(64, Math.hypot(tx[2], tx[3]) || Math.hypot(tx[0], tx[1]) || 12));
-              const left = tx[4];
-              const top = tx[5] - fontSize * 0.88;
-              const width = Math.max(10, (rawItem.width || 0) * cssViewport.scale);
-              const height = fontSize * 1.18;
-
-              if (Number.isFinite(left) && Number.isFinite(top)) {
-                spans.push({
-                  id: `p${pageNumber}_${idx}`,
-                  text,
-                  left,
-                  top,
-                  width,
-                  height,
-                  fontSize,
-                });
-              }
-            } catch {
-              // Skip malformed PDF text matrix items
-            }
-          });
-
-          setOverlaySpans(spans);
-          setCurrentPageText(fullTextParts.join(' ').replace(/\s+/g, ' ').trim());
-        } catch {
-          if (!cancelled) {
-            setOverlaySpans([]);
-            setCurrentPageText('');
-          }
-        }
-
-        await renderPromise;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+        return renderTask.promise;
       })
-      .catch((reason) => {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
-      });
+      .catch(() => {});
 
     return () => {
       cancelled = true;
       renderTask?.cancel();
     };
-  }, [documentProxy, pageNumber, zoom, rotation, viewMode]);
+  }, [pdfProxy, viewMode, pageNumber, originalZoom]);
 
-  const scrollToPdfPage = useCallback((n: number) => {
-    const el = continuousPageRefs.current[n];
-    if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  // Load Personal Vocabulary Bank
+  const fetchVocabulary = useCallback(async () => {
+    setVocabLoading(true);
+    try {
+      const res = await fetch('/api/library/vocabulary');
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.items)) {
+        setVocabItems(data.items);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setVocabLoading(false);
+    }
   }, []);
 
-  // In continuous mode, keep active page in view when page changes via controls
   useEffect(() => {
-    if (viewMode !== 'continuous') return;
-    const t = setTimeout(() => scrollToPdfPage(pageNumber), 0);
-    return () => clearTimeout(t);
-  }, [viewMode, pageNumber, scrollToPdfPage]);
+    void fetchVocabulary();
+  }, [fetchVocabulary]);
 
-  // Keyboard navigation + Escape close
+  // Keyboard navigation in paged / original modes
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (e.key === 'Escape') {
-        if (lookupWord) {
-          setLookupWord(null);
-        } else if (aiPanelOpen) {
-          setAiPanelOpen(false);
-        } else if (onClose) {
-          onClose();
-        }
-        return;
-      }
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === 'ArrowRight' || e.key === 'PageDown') {
-        setPageNumber((p) => Math.min(pageCount || 1, p + 1));
+        if (prefs.layoutMode === 'paged' || viewMode === 'original') {
+          setPageNumber((p) => Math.min(Math.max(1, pageCount), p + 1));
+        }
       } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-        setPageNumber((p) => Math.max(1, p - 1));
+        if (prefs.layoutMode === 'paged' || viewMode === 'original') {
+          setPageNumber((p) => Math.max(1, p - 1));
+        }
+      } else if (e.key === 'Escape') {
+        setWordCard(null);
+        setSelectionAction(null);
+        setSettingsOpen(false);
+        setTocOpen(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [pageCount, lookupWord, aiPanelOpen, onClose]);
+  }, [prefs.layoutMode, viewMode, pageCount]);
 
-  const handleJumpPage = (e: React.FormEvent) => {
-    e.preventDefault();
-    const target = Math.max(1, Math.min(pageCount || 1, Number.parseInt(pageInput, 10) || 1));
-    setPageNumber(target);
-    if (viewMode === 'continuous') setTimeout(() => scrollToPdfPage(target), 0);
-  };
+  // Listen for text selection inside reflowable prose
+  const handleProseMouseUp = useCallback(() => {
+    const sel = window.getSelection();
+    const txt = sel?.toString().trim() || '';
+    if (txt.length >= 2 && txt.length <= 2800) {
+      setSelectionAction({ text: txt });
+    } else if (!txt) {
+      setSelectionAction(null);
+    }
+  }, []);
 
-  const runLibraryAiAction = useCallback(
-    async (action: 'explain' | 'translate' | 'summarize' | 'ask' | 'ocr', customQuestion?: string) => {
-      setAiPanelOpen(true);
-      setAiAction(action);
-      setAiLoading(true);
-      setAiError('');
-      setAiProviderInfo('');
-      const q = typeof customQuestion === 'string' ? customQuestion.trim() : '';
-      let pageImageBase64: string | undefined;
-      const ocrHint = /ocr|识别|识文|扫描/i.test(q || '');
-      const needsVision = action === 'ocr' || ocrHint || currentPageText.trim().length < 40;
-      const visionCanvas = viewMode === 'continuous' ? continuousActiveCanvasRef.current : canvasRef.current;
-      if (needsVision && visionCanvas && visionCanvas.width > 0) {
-        try { pageImageBase64 = visionCanvas.toDataURL('image/jpeg', 0.72); } catch {}
-      }
-      setAiUsedVision(Boolean(needsVision && pageImageBase64));
-
-      const endpoint = action === 'explain' ? '/api/library/ai/explain-page' : `/api/library-ai/${action}`;
-      try {
-        const body: Record<string, unknown> = {
-          bookId,
-          title,
-          bookTitle: title,
-          chapterTitle,
-          pageNumber,
-          totalPages: pageCount,
-          pageText: currentPageText,
-          language: effectiveContentLang,
-          lang: isChinese ? 'zh' : 'en',
-          uiLanguage: isChinese ? 'zh' : 'en',
-        };
-        if (action === 'explain') {
-          body.question = q || undefined;
-          body.pageImageBase64 = pageImageBase64;
-        } else if (action === 'translate') {
-          body.selectedText = currentPageText || undefined;
-          body.pageImageBase64 = pageImageBase64;
-          body.targetLanguage = aiTargetLang;
-          body.question = q || undefined;
-        } else if (action === 'summarize') {
-          body.selectedText = currentPageText || undefined;
-          body.pageImageBase64 = pageImageBase64;
-          body.question = q || undefined;
-        } else if (action === 'ask') {
-          body.question = q || aiQuestion || (isChinese ? '请结合当前页内容回答。' : 'Answer based on this page.');
-          body.pageImageBase64 = pageImageBase64;
-          body.surroundingContext = currentPageText;
-        } else if (action === 'ocr') {
-          body.pageImageBase64 = pageImageBase64;
-          body.selectedText = currentPageText || undefined;
-          body.question = q || (isChinese ? '请识别本页可见文字。' : 'Extract visible text from this page.');
-        }
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        if (data?.success) {
-          let textOut = data.explanation || data.content || '';
-          if (action === 'ocr') {
-            const ocrText = data?.data?.text || (typeof data?.data === 'object' && data?.data && 'text' in data.data ? String((data.data as any).text || '') : '');
-            const warn = Array.isArray(data?.data?.warnings) ? (data.data.warnings as any[]).join('；') : '';
-            const conf = data?.data?.confidenceNote ? String(data.data.confidenceNote) : '';
-            const guess = data?.data?.languageGuess ? String(data.data.languageGuess) : '';
-            textOut = [
-              isChinese ? `【OCR 识别结果 · 第 ${pageNumber} 页】` : `[OCR Result · Page ${pageNumber}]`,
-              ocrText ? (isChinese ? `识别文本：\n${ocrText}` : `Extracted text:\n${ocrText}`) : '',
-              guess ? (isChinese ? `语言判断：${guess}` : `Language: ${guess}`) : '',
-              conf ? (isChinese ? `质量说明：${conf}` : `Confidence: ${conf}`) : '',
-              warn ? (isChinese ? `注意：${warn}` : `Warnings: ${warn}`) : '',
-              textOut && textOut !== ocrText ? (isChinese ? `\n补充说明：\n${textOut}` : `\nNotes:\n${textOut}`) : '',
-            ].filter(Boolean).join('\n\n');
-          } else if (!textOut && typeof data?.data?.text === 'string') {
-            textOut = data.data.text;
-          }
-          setAiExplanation(textOut || (isChinese ? 'AI 已完成分析，但未返回可显示文本。' : 'No displayable text returned.'));
-          setAiExplainedPage(pageNumber);
-          const p = data.provider ? ` · ${data.provider}${data.model ? '/' + data.model : ''}` : '';
-          setAiProviderInfo(p);
-          if (q) setAiQuestion('');
-        } else {
-          setAiError(data?.error || (isChinese ? 'AI 处理失败，请稍后重试。' : 'AI request failed.'));
-        }
-      } catch {
-        setAiError(isChinese ? '网络波动，请稍后重试。' : 'Network error, please retry.');
-      } finally {
-        setAiLoading(false);
-      }
-    },
-    [aiQuestion, aiTargetLang, bookId, chapterTitle, currentPageText, effectiveContentLang, isChinese, pageCount, pageNumber, title]
-  );
-
-  const handleExplainCurrentPage = useCallback(
-    async (customQuestion?: string) => runLibraryAiAction('explain', customQuestion),
-    [runLibraryAiAction]
-  );
-
+  // Tap-any-word AI lookup
   const handleLookupWord = useCallback(
-    async (rawWord: string, contextSentence?: string) => {
+    async (rawWord: string, contextSentence: string) => {
       const cleaned = cleanWordToken(rawWord);
       if (!cleaned) return;
-      setLookupWord(cleaned);
-      setLookupLoading(true);
-      setLookupError('');
-      setLookupEntry(null);
-
+      setSelectionAction(null);
+      setWordCard({
+        word: cleaned,
+        context: contextSentence.slice(0, 260),
+        loading: true,
+        entry: null,
+        error: '',
+        saved: vocabItems.some((v) => v.word.toLowerCase() === cleaned.toLowerCase()),
+      });
       try {
         const res = await fetch('/api/library/ai/lookup-word', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify({
             word: cleaned,
-            selectedText: cleaned,
-            contextSentence: (contextSentence || currentPageText).slice(0, 600),
-            surroundingContext: (contextSentence || currentPageText).slice(0, 1200),
+            contextSentence: contextSentence.slice(0, 300),
             bookTitle: title,
-            title,
-            bookId,
-            chapterTitle,
-            pageNumber,
-            pageText: currentPageText.slice(0, 1500),
-            language: effectiveContentLang,
-            lang: isChinese ? 'zh' : 'en',
-            uiLanguage: isChinese ? 'zh' : 'en',
+            lang,
           }),
         });
         const data = await res.json();
-        if (data?.success && data.entry) {
-          setLookupEntry(data.entry);
-        } else {
-          setLookupError(data?.error || (isChinese ? '暂时无法查出该词释义。' : 'Could not look up this word.'));
+        if (!res.ok || !data?.success || !data.entry) {
+          throw new Error(data?.error || '查词失败');
         }
-      } catch {
-        setLookupError(isChinese ? '网络波动，请稍后重试查词。' : 'Network error.');
-      } finally {
-        setLookupLoading(false);
+        setWordCard((prev) => (prev ? { ...prev, loading: false, entry: data.entry } : null));
+      } catch (err: any) {
+        setWordCard((prev) =>
+          prev ? { ...prev, loading: false, error: err?.message || '查词暂不可用' } : null
+        );
       }
     },
-    [bookId, chapterTitle, currentPageText, effectiveContentLang, isChinese, pageNumber, title]
+    [title, lang, vocabItems]
   );
 
-  const handleSearch = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const query = searchText.trim().toLocaleLowerCase();
-    if (!documentProxy || !query) {
-      setMatchingPages([]);
-      setStatus(isChinese ? '请输入要查找的文字。' : 'Enter text to search for.');
-      return;
-    }
-
-    setStatus(isChinese ? '正在检索全文…' : 'Searching document text…');
-    const hits: number[] = [];
-    const scanLimit = Math.min(documentProxy.numPages, 120);
-    for (let pageIndex = 1; pageIndex <= scanLimit; pageIndex += 1) {
-      const page = await documentProxy.getPage(pageIndex);
-      const text = await page.getTextContent();
-      const pageText = text.items
-        .map((item) => ('str' in item ? item.str : ''))
-        .join(' ')
-        .toLocaleLowerCase();
-      if (pageText.includes(query)) hits.push(pageIndex);
-    }
-
-    setMatchingPages(hits);
-    if (hits.length > 0) {
-      setPageNumber(hits[0]);
-      setStatus(isChinese ? `找到 ${hits.length} 页匹配内容` : `Found ${hits.length} matching pages`);
-    } else {
-      setStatus(
-        isChinese
-          ? '未在前 120 页检索到该文字（部分扫描古籍为图像页，可直接点「AI 讲解本页」识图精讲）。'
-          : 'No matching text found in first 120 pages.'
-      );
-    }
-  };
-
-  const pageChapterId = useMemo(() => `pdf_page_${pageNumber}`, [pageNumber]);
-  const pageBookmark = useMemo(
-    () => annotations.find((a) => a.bookId === bookId && a.chapterId === pageChapterId && (a.kind === 'bookmark' || String(a.selectedText || '').startsWith('书签'))),
-    [annotations, bookId, pageChapterId]
-  );
-  const pageNotes = useMemo(
-    () => annotations.filter((a) => a.bookId === bookId && (a.chapterId === pageChapterId || a.pageIndex === pageNumber) && a.kind !== 'bookmark'),
-    [annotations, bookId, pageChapterId, pageNumber]
-  );
-
-  const togglePageBookmark = useCallback(async () => {
-    if (!bookId) return;
-    if (pageBookmark) {
-      try {
-        await fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations/${encodeURIComponent(pageBookmark.id)}`, { method: 'DELETE', credentials: 'include' });
-      } catch {}
-      setAnnotations((prev) => prev.filter((a) => a.id !== pageBookmark.id));
-      return;
-    }
+  const handleSaveWordToVocab = useCallback(async () => {
+    if (!wordCard?.entry) return;
     try {
-      const res = await fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations`, {
+      const res = await fetch('/api/library/vocabulary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
-          chapterId: pageChapterId,
-          selectedText: isChinese ? `书签：第 ${pageNumber} 页` : `Bookmark: Page ${pageNumber}`,
-          note: (currentPageText || '').slice(0, 80),
-          kind: 'bookmark',
-          pageIndex: pageNumber,
+          word: wordCard.entry.word,
+          lemma: wordCard.entry.lemma,
+          reading: wordCard.entry.reading,
+          partOfSpeech: wordCard.entry.partOfSpeech,
+          root: wordCard.entry.root,
+          meaning: wordCard.entry.meaning,
+          usage: wordCard.entry.usage,
+          contextSentence: wordCard.context,
+          example: wordCard.entry.example,
+          bookId: bookKey,
+          bookTitle: title,
         }),
       });
       const data = await res.json();
-      if (data?.success && data.annotation) setAnnotations((prev) => [data.annotation, ...prev]);
-    } catch {}
-  }, [bookId, currentPageText, isChinese, pageBookmark, pageChapterId, pageNumber]);
-
-  const savePageNote = useCallback(async () => {
-    if (!bookId || !noteDraft.trim()) return;
-    try {
-      const res = await fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          chapterId: pageChapterId,
-          selectedText: (currentPageText || title).slice(0, 120),
-          note: noteDraft.trim(),
-          aiExplanation: aiExplanation || undefined,
-          kind: 'note',
-          pageIndex: pageNumber,
-        }),
-      });
-      const data = await res.json();
-      if (data?.success && data.annotation) {
-        setAnnotations((prev) => [data.annotation, ...prev]);
-        setNoteDraft('');
+      if (data?.success && data.item) {
+        setWordCard((prev) => (prev ? { ...prev, saved: true } : null));
+        setVocabItems((prev) => [data.item, ...prev.filter((i) => i.id !== data.item.id)]);
       }
-    } catch {}
-  }, [aiExplanation, bookId, currentPageText, isChinese, noteDraft, pageChapterId, pageNumber, title]);
+    } catch {
+      // ignore
+    }
+  }, [wordCard, bookKey, title]);
 
-  const deleteAnnotation = useCallback(async (id: string) => {
-    if (!bookId) return;
-    try { await fetch(`/api/library/books/${encodeURIComponent(bookId)}/annotations/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include' }); } catch {}
-    setAnnotations((prev) => prev.filter((a) => a.id !== id));
-  }, [bookId]);
+  const handleDeleteVocab = useCallback(async (id: string) => {
+    setVocabItems((prev) => prev.filter((v) => v.id !== id));
+    try {
+      await fetch(`/api/library/vocabulary/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch {
+      // ignore
+    }
+  }, []);
 
+  // Inline Paragraph Translation
+  const handleTranslateBlock = useCallback(
+    async (blockId: string, text: string) => {
+      setInlineTranslations((prev) => ({ ...prev, [blockId]: { loading: true } }));
+      try {
+        const res = await fetch('/api/library/ai/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, targetLang: lang === 'en' ? 'en' : 'zh', bookTitle: title }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.success) throw new Error(data?.error || '翻译失败');
+        setInlineTranslations((prev) => ({ ...prev, [blockId]: { text: data.translation } }));
+      } catch (err: any) {
+        setInlineTranslations((prev) => ({ ...prev, [blockId]: { error: err?.message || '翻译暂不可用' } }));
+      }
+    },
+    [lang, title]
+  );
+
+  // AI Deep Explanation (6-dimension mentor breakdown)
+  const handleDeepExplain = useCallback(
+    async (passageText?: string) => {
+      const currentText = passageText?.trim() || extractedPages[pageNumber]?.plainText || '';
+      if (!currentText) return;
+      setSelectionAction(null);
+      setAiDrawerOpen(true);
+      setAiTab('explain');
+      setDeepExplainTarget(currentText.slice(0, 140));
+      setDeepExplainLoading(true);
+      setDeepExplainError('');
+      try {
+        const res = await fetch('/api/library/ai/deep-explain', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: currentText.slice(0, 4800),
+            bookTitle: title,
+            chapterTitle: `第 ${pageNumber} 页`,
+            lang,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.success) throw new Error(data?.error || 'AI 精讲失败');
+        setDeepExplainText(data.explanation || '');
+      } catch (err: any) {
+        setDeepExplainError(err?.message || 'AI 精讲暂不可用');
+      } finally {
+        setDeepExplainLoading(false);
+      }
+    },
+    [extractedPages, pageNumber, title, lang]
+  );
+
+  // Whole-Book AI Q&A
+  const handleAskBookQa = useCallback(
+    async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      const q = qaInput.trim();
+      if (!q || qaLoading) return;
+      setQaInput('');
+      setQaHistory((prev) => [...prev, { role: 'user', content: q }]);
+      setQaLoading(true);
+      try {
+        const chunks =
+          wholeBookChunksRef.current.length > 0
+            ? wholeBookChunksRef.current
+            : Object.values(extractedPages).map((ep) => ({
+                label: `第 ${ep.pageNumber} 页`,
+                text: ep.plainText,
+              }));
+        const res = await fetch('/api/library/ai/book-qa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question: q,
+            bookTitle: title,
+            currentSectionText: extractedPages[pageNumber]?.plainText || '',
+            fullBookChunks: chunks,
+            history: qaHistory.slice(-6).map((m) => ({ role: m.role, content: m.content })),
+            lang,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.success) throw new Error(data?.error || '问答暂不可用');
+        setQaHistory((prev) => [
+          ...prev,
+          { role: 'assistant', content: data.answer || '', cited: data.citedSections || [] },
+        ]);
+      } catch (err: any) {
+        setQaHistory((prev) => [
+          ...prev,
+          { role: 'assistant', content: err?.message || 'ONE AI 阅读问答暂时不可用，请稍后重试。' },
+        ]);
+      } finally {
+        setQaLoading(false);
+      }
+    },
+    [qaInput, qaLoading, extractedPages, pageNumber, title, qaHistory, lang]
+  );
+
+  // AI Summary (Paragraph / Chapter-Page / Full Book)
+  const handleRunSummary = useCallback(
+    async (scope: 'paragraph' | 'chapter' | 'book', customText?: string) => {
+      setAiDrawerOpen(true);
+      setAiTab('summary');
+      setSummaryScope(scope);
+      setSummaryLoading(true);
+      setSummaryError('');
+      setSummaryText('');
+      try {
+        let material = customText?.trim() || '';
+        if (!material && scope === 'book') {
+          const allChunks = wholeBookChunksRef.current;
+          if (allChunks.length > 0) {
+            // Sample evenly across the entire book for comprehensive whole-book summary
+            const step = Math.max(1, Math.floor(allChunks.length / 10));
+            material = allChunks
+              .filter((_, i) => i % step === 0)
+              .slice(0, 12)
+              .map((c) => `【${c.label}】${c.text.slice(0, 1000)}`)
+              .join('\n\n');
+          } else {
+            material = Object.values(extractedPages)
+              .map((p) => `【第 ${p.pageNumber} 页】${p.plainText.slice(0, 1000)}`)
+              .join('\n\n');
+          }
+        } else if (!material) {
+          material = extractedPages[pageNumber]?.plainText || '';
+        }
+
+        if (!material.trim()) {
+          throw new Error('当前页尚无提取文本，可先点击 OCR 识别后再总结。');
+        }
+
+        const res = await fetch('/api/library/ai/summarize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scope,
+            bookTitle: title,
+            sectionTitle: scope === 'book' ? '全书' : `第 ${pageNumber} 页`,
+            content: material,
+            lang,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.success) throw new Error(data?.error || '总结失败');
+        setSummaryText(data.summary || '');
+      } catch (err: any) {
+        setSummaryError(err?.message || 'AI 总结暂不可用');
+      } finally {
+        setSummaryLoading(false);
+      }
+    },
+    [extractedPages, pageNumber, title, lang]
+  );
+
+  // Toggle Bookmark for current page
+  const isCurrentPageBookmarked = bookmarks.some((b) => b.pageNumber === pageNumber);
+  const toggleBookmark = useCallback(() => {
+    setBookmarks((prev) => {
+      if (prev.some((b) => b.pageNumber === pageNumber)) {
+        return prev.filter((b) => b.pageNumber !== pageNumber);
+      }
+      const excerpt = (extractedPages[pageNumber]?.plainText || '').slice(0, 90);
+      return [
+        {
+          id: `bm_${Date.now()}`,
+          pageNumber,
+          label: `第 ${pageNumber} 页`,
+          excerpt,
+          createdAt: new Date().toISOString(),
+        },
+        ...prev,
+      ];
+    });
+  }, [pageNumber, extractedPages]);
+
+  const jumpToPage = useCallback(
+    (target: number) => {
+      const clamped = Math.max(1, Math.min(Math.max(1, pageCount), target));
+      setPageNumber(clamped);
+      setScrollWindowEnd((prev) => Math.max(prev, clamped + 2));
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    [pageCount]
+  );
+
+  const visiblePageNumbers = useMemo(() => {
+    if (pageCount <= 0) return [];
+    if (prefs.layoutMode === 'paged') return [pageNumber];
+    const end = Math.min(pageCount, Math.max(scrollWindowEnd, pageNumber + 2));
+    const list: number[] = [];
+    for (let p = pageNumber; p <= end; p++) list.push(p);
+    return list;
+  }, [pageCount, pageNumber, scrollWindowEnd, prefs.layoutMode]);
+
+  const progressPct = pageCount > 0 ? Math.min(100, Math.round((pageNumber / pageCount) * 100)) : 0;
+  const isLastPage = pageCount > 0 && (prefs.layoutMode === 'paged' ? pageNumber >= pageCount : scrollWindowEnd >= pageCount);
 
   return (
-    <section
-      aria-label={isChinese ? 'ONE 智能 PDF 阅读器' : 'PDF Document Reader'}
-      className="flex h-full w-full flex-col overflow-hidden transition-colors duration-200"
-      style={{
-        backgroundColor: theme.shellBg,
-        color: theme.ink,
-      }}
+    <div
+      className="fixed inset-0 z-[75] flex flex-col overflow-hidden transition-colors duration-200"
+      style={{ backgroundColor: palette.bg, color: palette.ink }}
+      data-testid="pdf-ebook-reader"
     >
-      {/* Top Toolbar: Unmistakable Back Button + Book Title + Page Nav + AI Tutor + Word Lookup + Download */}
-      <div
-        className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5 sm:px-5"
-        style={{ backgroundColor: theme.chromeBg, borderColor: theme.border }}
+      {/* Minimal Apple Books-Grade Top Navigation Bar */}
+      <header
+        className="shrink-0 z-20 flex items-center justify-between gap-2 px-3 sm:px-5 h-13 border-b backdrop-blur-xl transition-colors"
+        style={{
+          backgroundColor: palette.isDark ? 'rgba(18,21,27,0.9)' : 'rgba(255,255,255,0.88)',
+          borderColor: palette.border,
+          paddingTop: 'env(safe-area-inset-top)',
+        }}
       >
-        {/* Left: Back Button + Title + Page Controls */}
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
           {onClose && (
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition hover:opacity-85"
-              style={{
-                borderColor: theme.border,
-                backgroundColor: theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
-                color: theme.ink,
-              }}
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>{isChinese ? '返回' : 'Back'}</span>
-            </button>
-          )}
-
-          <div className="hidden min-w-0 max-w-[200px] lg:block xl:max-w-[280px]">
-            <div className="truncate text-xs font-semibold" title={title}>
-              {title}
-            </div>
-            <div className="truncate text-[10px]" style={{ color: theme.muted }}>
-              {isChinese ? '点词自动 AI 查义 · 支持本页精讲' : 'Tap any word for AI dictionary'}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
-              disabled={pageNumber <= 1}
-              aria-label="上一页"
-              className="inline-flex h-9 w-8 cursor-pointer items-center justify-center rounded-xl border transition disabled:opacity-35"
-              style={{ borderColor: theme.border }}
+              className="inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-medium transition hover:opacity-75 cursor-pointer shrink-0"
+              style={{ backgroundColor: palette.surface, color: palette.ink }}
             >
               <ArrowLeft className="h-3.5 w-3.5" />
+              <span>{isZh ? '返回' : 'Back'}</span>
             </button>
-
-            <form onSubmit={handleJumpPage} className="flex items-center gap-1 text-xs font-medium">
-              <input
-                type="text"
-                inputMode="numeric"
-                value={pageInput}
-                onChange={(e) => setPageInput(e.target.value.replace(/[^0-9]/g, ''))}
-                aria-label="页码"
-                className="h-9 w-11 rounded-xl border bg-transparent text-center text-xs font-semibold tabular-nums focus:outline-none"
-                style={{ borderColor: theme.border }}
-              />
-              <span className="text-[11px]" style={{ color: theme.muted }}>
-                / {pageCount || '…'}
-              </span>
-            </form>
-
-            <button
-              type="button"
-              onClick={() => setPageNumber((p) => Math.min(pageCount || 1, p + 1))}
-              disabled={!pageCount || pageNumber >= pageCount}
-              aria-label="下一页"
-              className="inline-flex h-9 w-8 cursor-pointer items-center justify-center rounded-xl border transition disabled:opacity-35"
-              style={{ borderColor: theme.border }}
-            >
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Center: AI Page Explain + Tap-Word Bar + Zoom + Paper Theme */}
-        <div className="flex flex-wrap items-center gap-1.5">
+          )}
           <button
             type="button"
             onClick={() => {
-              if (aiPanelOpen && aiAction === 'explain' && aiExplainedPage === pageNumber && aiExplanation) {
-                setAiPanelOpen(false);
-              } else {
-                void runLibraryAiAction('explain');
-              }
+              setTocOpen((v) => !v);
+              setSettingsOpen(false);
             }}
-            className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg transition hover:opacity-75 cursor-pointer shrink-0"
+            style={{ backgroundColor: tocOpen ? palette.surface : 'transparent' }}
+            title={isZh ? '目录与书签' : 'Contents & Bookmarks'}
           >
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>{isChinese ? 'AI 讲解' : 'AI Explain'}</span>
+            <List className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => void runLibraryAiAction('translate')}
-            className="hidden h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85 sm:inline-flex"
-            style={{ borderColor: theme.border }}
-          >
-            <span>{isChinese ? '翻译' : 'Translate'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => void runLibraryAiAction('summarize')}
-            className="hidden h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85 md:inline-flex"
-            style={{ borderColor: theme.border }}
-          >
-            <span>{isChinese ? '总结' : 'Summary'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setWordBarOpen((v) => !v)}
-            className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition hover:opacity-85"
-            style={{
-              borderColor: wordBarOpen ? '#10B981' : theme.border,
-              backgroundColor: wordBarOpen ? 'rgba(16,185,129,0.14)' : 'transparent',
-              color: wordBarOpen ? (theme.isDark ? '#6EE7B7' : '#047857') : theme.ink,
-            }}
-          >
-            <Languages className="h-3.5 w-3.5" />
-            <span>{isChinese ? '点词查义' : 'Lookup Word'}</span>
-          </button>
-          {bookId && (
-            <>
-              <button
-                type="button"
-                onClick={() => void togglePageBookmark()}
-                title={isChinese ? (pageBookmark ? '移除书签' : '添加本页书签') : (pageBookmark ? 'Remove bookmark' : 'Bookmark page')}
-                className="inline-flex h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85"
-                style={{ borderColor: pageBookmark ? '#F59E0B' : theme.border, color: pageBookmark ? '#D97706' : theme.ink, backgroundColor: pageBookmark ? 'rgba(245,158,11,0.12)' : 'transparent' }}
-              >
-                {pageBookmark ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
-                <span className="hidden sm:inline">{isChinese ? '书签' : 'Mark'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setAnnotationsOpen((v) => !v)}
-                title={isChinese ? '笔记与书签' : 'Notes & bookmarks'}
-                className="inline-flex h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85"
-                style={{ borderColor: annotationsOpen ? '#10B981' : theme.border, color: annotationsOpen ? '#059669' : theme.ink, backgroundColor: annotationsOpen ? 'rgba(16,185,129,0.12)' : 'transparent' }}
-              >
-                <StickyNote className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{isChinese ? '笔记' : 'Notes'}</span>
-              </button>
-            </>
-          )}
-
-          <div
-            className="hidden items-center rounded-xl border p-0.5 sm:inline-flex"
-            style={{ borderColor: theme.border }}
-          >
-            <button
-              type="button"
-              onClick={() => setZoom((z) => Math.max(0.65, Number((z - 0.15).toFixed(2))))}
-              aria-label="缩小"
-              className="inline-flex h-8 w-7 cursor-pointer items-center justify-center rounded-lg hover:opacity-75"
-            >
-              <Minus className="h-3.5 w-3.5" />
-            </button>
-            <span className="px-1.5 text-[11px] font-medium tabular-nums">{Math.round(zoom * 100)}%</span>
-            <button
-              type="button"
-              onClick={() => setZoom((z) => Math.min(2.4, Number((z + 0.15).toFixed(2))))}
-              aria-label="放大"
-              className="inline-flex h-8 w-7 cursor-pointer items-center justify-center rounded-lg hover:opacity-75"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
+          <div className="min-w-0 hidden sm:block pl-1">
+            <h1 className="truncate text-[13px] font-semibold tracking-tight max-w-[34vw]">{title}</h1>
           </div>
-
-          <div
-            className="hidden items-center gap-0.5 rounded-xl border p-0.5 text-[11px] md:inline-flex"
-            style={{ borderColor: theme.border }}
-          >
-            {(['light', 'paper', 'dark'] as PdfThemeId[]).map((tid) => (
-              <button
-                key={tid}
-                type="button"
-                onClick={() => setThemeId(tid)}
-                className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-2 font-medium transition"
-                style={{
-                  backgroundColor: themeId === tid ? (tid === 'dark' ? '#32323A' : '#1D1D1F') : 'transparent',
-                  color: themeId === tid ? '#FFFFFF' : theme.muted,
-                }}
-              >
-                {tid === 'dark' ? <Moon className="h-3 w-3" /> : tid === 'paper' ? <BookOpen className="h-3 w-3" /> : <Sun className="h-3 w-3" />}
-                <span>{PDF_THEMES[tid].label}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="hidden items-center gap-0.5 rounded-xl border p-0.5 md:inline-flex" style={{ borderColor: theme.border }}>
-            <button
-              type="button"
-              onClick={() => setViewMode('single')}
-              title={isChinese ? '单页' : 'Single page'}
-              className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition"
-              style={{ backgroundColor: viewMode === 'single' ? (theme.isDark ? '#32323A' : '#1D1D1F') : 'transparent', color: viewMode === 'single' ? '#FFFFFF' : theme.muted }}
-            >
-              <BookOpen className="h-3 w-3" />
-              <span>{isChinese ? '单页' : 'Single'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('continuous')}
-              title={isChinese ? '连续滚动' : 'Continuous scroll'}
-              className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg px-2 text-[11px] font-medium transition"
-              style={{ backgroundColor: viewMode === 'continuous' ? (theme.isDark ? '#32323A' : '#1D1D1F') : 'transparent', color: viewMode === 'continuous' ? '#FFFFFF' : theme.muted }}
-            >
-              <Rows3 className="h-3 w-3" />
-              <span>{isChinese ? '连续' : 'Continuous'}</span>
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setRotation((r) => (r + 90) % 360)}
-            title={isChinese ? '旋转页面' : 'Rotate page'}
-            className="hidden h-9 cursor-pointer items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-85 md:inline-flex"
-            style={{ borderColor: theme.border }}
-          >
-            <RotateCw className="h-3.5 w-3.5" />
-            <span>{isChinese ? '旋转' : 'Rotate'}</span>
-          </button>
         </div>
 
-        {/* Right: In-Document Search + Download PDF */}
-        <div className="flex items-center gap-1.5">
-          <form onSubmit={handleSearch} className="hidden items-center sm:flex">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-50" />
-              <input
-                type="search"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                placeholder={isChinese ? '搜书内词…' : 'Search PDF…'}
-                className="h-9 w-32 rounded-xl border bg-transparent pl-8 pr-2 text-xs focus:outline-none xl:w-40"
-                style={{ borderColor: theme.border }}
-              />
-            </div>
-          </form>
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {/* Reflowable Ebook vs Original PDF Fallback Switch */}
+          <div
+            className="inline-flex items-center rounded-lg p-0.5 text-[11px] font-medium border"
+            style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+          >
+            <button
+              type="button"
+              onClick={() => setViewMode('reflow')}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 transition cursor-pointer"
+              style={
+                viewMode === 'reflow'
+                  ? { backgroundColor: palette.isDark ? '#F4F1EA' : '#1C2621', color: palette.isDark ? '#111821' : '#FFFFFF' }
+                  : { color: palette.muted }
+              }
+            >
+              <BookOpen className="h-3 w-3" />
+              <span className="hidden xs:inline">{isZh ? '电子书' : 'Ebook'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('original')}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 transition cursor-pointer"
+              style={
+                viewMode === 'original'
+                  ? { backgroundColor: palette.isDark ? '#F4F1EA' : '#1C2621', color: palette.isDark ? '#111821' : '#FFFFFF' }
+                  : { color: palette.muted }
+              }
+            >
+              <Eye className="h-3 w-3" />
+              <span className="hidden xs:inline">{isZh ? '原版面' : 'Original'}</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={toggleBookmark}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg transition hover:opacity-75 cursor-pointer"
+            title={isCurrentPageBookmarked ? '移除书签' : '添加书签'}
+          >
+            {isCurrentPageBookmarked ? (
+              <BookmarkCheck className="h-4 w-4 text-[#247864] dark:text-[#52b798]" />
+            ) : (
+              <Bookmark className="h-4 w-4" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSettingsOpen((v) => !v);
+              setTocOpen(false);
+            }}
+            className="inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-medium transition hover:opacity-75 cursor-pointer"
+            style={{ backgroundColor: settingsOpen ? palette.surface : 'transparent' }}
+            title={isZh ? '排版与外观' : 'Reading Settings'}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">{isZh ? '排版' : 'Aa'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setAiDrawerOpen((v) => !v);
+              setSettingsOpen(false);
+            }}
+            className="inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-medium transition cursor-pointer"
+            style={{
+              backgroundColor: aiDrawerOpen ? '#247864' : palette.surface,
+              color: aiDrawerOpen ? '#FFFFFF' : palette.ink,
+            }}
+            title={isZh ? 'ONE AI 伴读' : 'ONE AI Reading'}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">AI</span>
+          </button>
 
           <a
             href={downloadUrl}
             download
-            className="inline-flex h-9 items-center gap-1 rounded-xl border px-3 text-xs font-medium transition hover:opacity-85"
-            style={{ borderColor: theme.border, color: theme.ink }}
+            className="inline-flex h-8 items-center gap-1 rounded-lg px-2.5 text-xs font-medium transition hover:opacity-80"
+            style={{ backgroundColor: palette.surface, color: palette.ink }}
+            title={isZh ? '下载原始 PDF' : 'Download Original PDF'}
           >
             <Download className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{isChinese ? '保存本地' : 'Download'}</span>
+            <span className="hidden lg:inline">{isZh ? '原 PDF' : 'PDF'}</span>
           </a>
-
-          {originPageUrl && (
-            <a
-              href={originPageUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden h-9 items-center gap-1 rounded-xl border px-2.5 text-xs font-medium transition hover:opacity-80 xl:inline-flex"
-              style={{ borderColor: theme.border, color: theme.muted }}
-              title="原始来源"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-          )}
         </div>
-      </div>
+      </header>
 
-      {/* Collapsible Tap-Any-Word Strip + Manual Lookup Input (works even on scanned image PDFs) */}
-      {wordBarOpen && (
-        <div
-          className="border-b px-4 py-2.5 text-xs"
-          style={{ backgroundColor: theme.panelBg, borderColor: theme.border }}
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (manualWordInput.trim()) void handleLookupWord(manualWordInput.trim());
-              }}
-              className="flex items-center gap-1.5"
-            >
-              <input
-                type="text"
-                value={manualWordInput}
-                onChange={(e) => setManualWordInput(e.target.value)}
-                placeholder={isChinese ? '输入不会的阿语/英语词直接查…' : 'Type any word to look up…'}
-                className="h-8 w-52 rounded-lg border bg-transparent px-2.5 text-xs focus:outline-none"
-                style={{ borderColor: theme.border }}
-              />
-              <button
-                type="submit"
-                className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-500"
-              >
-                <span>{isChinese ? 'AI 查词' : 'Lookup'}</span>
+      {/* Main Content Stage (Reading Column + Lightweight Side Panels) */}
+      <div className="relative flex flex-1 min-h-0 overflow-hidden">
+        {/* TOC & Bookmarks Slide-over (Left) */}
+        {tocOpen && (
+          <aside
+            className="absolute inset-y-0 left-0 z-30 w-[min(86vw,310px)] border-r flex flex-col shadow-xl"
+            style={{ backgroundColor: palette.bg, borderColor: palette.border }}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: palette.border }}>
+              <span className="text-xs font-semibold tracking-wide">{isZh ? '目录与书签' : 'Contents & Bookmarks'}</span>
+              <button type="button" onClick={() => setTocOpen(false)} className="p-1 opacity-70 hover:opacity-100 cursor-pointer">
+                <X className="h-4 w-4" />
               </button>
-            </form>
-
-            {pageWords.length > 0 ? (
-              <div className="flex flex-1 flex-wrap items-center gap-1.5">
-                <span className="text-[11px]" style={{ color: theme.muted }}>
-                  {isChinese ? '本页词条（轻点即查）：' : 'Tap a word:'}
-                </span>
-                {pageWords.slice(0, 22).map((w) => (
-                  <button
-                    key={w}
-                    type="button"
-                    onClick={() => void handleLookupWord(w)}
-                    className="cursor-pointer rounded-md border px-2 py-0.5 text-xs transition hover:border-emerald-500 hover:text-emerald-600"
-                    style={{
-                      borderColor: lookupWord === w ? '#10B981' : theme.border,
-                      backgroundColor: lookupWord === w ? 'rgba(16,185,129,0.14)' : 'transparent',
-                    }}
-                  >
-                    {w}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <span className="text-[11px]" style={{ color: theme.muted }}>
-                {isChinese
-                  ? '本页为扫描图像页：可直接输入不会的词查义，或点「AI 讲解本页」识图精讲。'
-                  : 'Scanned page: type any word above or use AI Explain Page.'}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Status / Search Match Strip */}
-      {(status || error || matchingPages.length > 0) && (
-        <div
-          className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 text-xs"
-          style={{ borderColor: theme.border, backgroundColor: theme.chromeBg }}
-        >
-          <div>
-            {error ? (
-              <span className="font-medium text-rose-500">{error}</span>
-            ) : (
-              <span style={{ color: theme.muted }}>{status}</span>
-            )}
-          </div>
-          {matchingPages.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1">
-              {matchingPages.slice(0, 12).map((hitPage) => (
-                <button
-                  key={hitPage}
-                  type="button"
-                  onClick={() => setPageNumber(hitPage)}
-                  className="cursor-pointer rounded-md border px-2 py-0.5 text-[11px] font-medium"
-                  style={{
-                    borderColor: theme.border,
-                    backgroundColor: hitPage === pageNumber ? '#10B981' : 'transparent',
-                    color: hitPage === pageNumber ? '#FFFFFF' : theme.ink,
-                  }}
-                >
-                  P.{hitPage}
-                </button>
-              ))}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Main Stage: PDF Canvas (+ Interactive Tap-Word Layer) + Optional Right-Side AI Tutor Panel */}
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        {/* Scrollable PDF Viewport */}
-        <div ref={scrollContainerRef} className="flex min-h-0 flex-1 flex-col items-center overflow-auto p-4 sm:p-6">
-          {viewMode === 'continuous' && documentProxy && pageCount > 0 ? (
-            <div className="flex w-full max-w-full flex-col items-center gap-5">
-              {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
-                <ContinuousPdfPage
-                  key={n}
-                  pdf={documentProxy}
-                  pageNum={n}
-                  zoom={zoom}
-                  rotation={rotation}
-                  theme={theme}
-                  isActive={n === pageNumber}
-                  isChinese={isChinese}
-                  registerRef={(el) => { continuousPageRefs.current[n] = el; }}
-                  registerCanvas={(canvas) => { if (n === pageNumber) continuousActiveCanvasRef.current = canvas; }}
-                  onActivate={() => setPageNumber(n)}
-                  onTextExtracted={(text, spans) => {
-                    if (n === pageNumber) {
-                      setCurrentPageText(text);
-                      setOverlaySpans(spans);
+            <div className="flex-1 overflow-y-auto p-3 space-y-5">
+              {/* Fast Page Jump */}
+              <div className="rounded-xl p-3 border" style={{ borderColor: palette.border, backgroundColor: palette.surface }}>
+                <div className="text-[11px] font-medium mb-2" style={{ color: palette.muted }}>
+                  {isZh ? `快速跳转（共 ${pageCount || 1} 页）` : `Jump to Page (1-${pageCount || 1})`}
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const n = parseInt(pageJumpInput, 10);
+                    if (Number.isFinite(n)) {
+                      jumpToPage(n);
+                      setTocOpen(false);
                     }
                   }}
-                  onLookupWord={handleLookupWord}
-                />
-              ))}
-              {isLastPage && (
-                <div className="mt-2 w-full max-w-xl rounded-2xl border p-5 text-center shadow-lg" style={{ backgroundColor: theme.panelBg, borderColor: theme.border }}>
-                  <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
-                  <div className="text-sm font-semibold">{isChinese ? `全书共 ${pageCount} 页已读完` : `Finished all ${pageCount} pages`}</div>
-                  <p className="mt-1 text-xs" style={{ color: theme.muted }}>{isChinese ? `《${title}》阅读进度已到达尾页。` : `You have reached the end of "${title}".`}</p>
-                  {onClose && <button type="button" onClick={onClose} className="mt-3 inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-emerald-500"><ArrowLeft className="h-4 w-4" /><span>{isChinese ? '读完 · 返回书架' : 'Done · Back to Library'}</span></button>}
-                </div>
-              )}
-            </div>
-          ) : (
-            <>
-              <div
-                className="relative shrink-0"
-                style={canvasDims.width > 0 ? { width: canvasDims.width, height: canvasDims.height } : undefined}
-              >
-                <canvas
-                  ref={canvasRef}
-                  aria-label={title}
-                  className="mx-auto block rounded-lg shadow-[0_14px_42px_rgba(0,0,0,0.22)] transition-all"
-                  style={theme.canvasFilter ? { filter: theme.canvasFilter } : undefined}
-                />
-
-                {/* Transparent Interactive Word Layer directly over PDF text */}
-                {overlaySpans.length > 0 && canvasDims.width > 0 && (
-                  <div
-                    aria-label="可点击查词文本层"
-                    className="absolute inset-0 overflow-hidden rounded-lg"
-                    style={{ width: canvasDims.width, height: canvasDims.height }}
+                  className="flex items-center gap-2"
+                >
+                  <input
+                    type="number"
+                    min={1}
+                    max={Math.max(1, pageCount)}
+                    value={pageJumpInput}
+                    onChange={(e) => setPageJumpInput(e.target.value)}
+                    className="w-20 rounded-lg border px-2.5 py-1 text-xs bg-transparent outline-none"
+                    style={{ borderColor: palette.border }}
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg px-3 py-1 text-xs font-medium bg-[#247864] text-white cursor-pointer"
                   >
-                    {overlaySpans.map((span) => {
-                      const tokens = splitTokensForClick(span.text);
-                      return (
-                        <div
-                          key={span.id}
-                          style={{
-                            position: 'absolute',
-                            left: `${span.left}px`,
-                            top: `${span.top}px`,
-                            minWidth: `${span.width}px`,
-                            height: `${span.height}px`,
-                            fontSize: `${span.fontSize}px`,
-                            lineHeight: 1.05,
-                            whiteSpace: 'pre',
-                          }}
-                        >
-                          {tokens.map((tok, i) => {
-                            const clean = cleanWordToken(tok);
-                            if (!clean) {
-                              return (
-                                <span key={i} className="text-transparent select-none">
-                                  {tok}
-                                </span>
-                              );
-                            }
-                            return (
-                              <button
-                                key={i}
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void handleLookupWord(clean, span.text);
-                                }}
-                                title={isChinese ? `点击让 AI 查询「${clean}」` : `Look up "${clean}"`}
-                                className="inline cursor-pointer rounded-[3px] text-transparent transition-colors hover:bg-emerald-400/28 focus:bg-emerald-400/32 focus:outline-none"
-                                style={{ fontSize: 'inherit', lineHeight: 'inherit', padding: 0, margin: 0, border: 'none' }}
-                              >
-                                {tok}
-                              </button>
-                            );
-                          })}
+                    {isZh ? '跳转' : 'Go'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Bookmarks */}
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider mb-2 px-1" style={{ color: palette.muted }}>
+                  {isZh ? `书签 (${bookmarks.length})` : `Bookmarks (${bookmarks.length})`}
+                </div>
+                {bookmarks.length === 0 ? (
+                  <p className="text-xs px-1" style={{ color: palette.muted }}>
+                    {isZh ? '点击顶部书签图标即可收藏当前阅读位置。' : 'Tap the bookmark icon to save a page.'}
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {bookmarks.map((bm) => (
+                      <div
+                        key={bm.id}
+                        className="group flex items-start justify-between gap-2 rounded-xl px-2.5 py-2 border cursor-pointer transition hover:opacity-85"
+                        style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                        onClick={() => {
+                          jumpToPage(bm.pageNumber);
+                          setTocOpen(false);
+                        }}
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium">{bm.label}</div>
+                          {bm.excerpt && (
+                            <div className="text-[11px] line-clamp-2 mt-0.5" style={{ color: palette.muted }}>
+                              {bm.excerpt}
+                            </div>
+                          )}
                         </div>
-                      );
-                    })}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setBookmarks((prev) => prev.filter((item) => item.id !== bm.id));
+                          }}
+                          className="p-1 opacity-50 hover:opacity-100 cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
 
-              {isLastPage && (
-                <div
-                  className="mt-6 w-full max-w-xl rounded-2xl border p-5 text-center shadow-lg"
-                  style={{ backgroundColor: theme.panelBg, borderColor: theme.border }}
-                >
-                  <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
-                  <div className="text-sm font-semibold">
-                    {isChinese ? `全书共 ${pageCount} 页已读完` : `Finished all ${pageCount} pages`}
-                  </div>
-                  <p className="mt-1 text-xs" style={{ color: theme.muted }}>
-                    {isChinese ? `《${title}》阅读进度已到达尾页，你可以随时返回书架或重温本书。` : `You have reached the end of "${title}".`}
+              {/* PDF Outline / Chapters */}
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wider mb-2 px-1" style={{ color: palette.muted }}>
+                  {isZh ? '章节目录' : 'Chapters'}
+                </div>
+                {toc.length === 0 ? (
+                  <p className="text-xs px-1" style={{ color: palette.muted }}>
+                    {isZh ? '本书未内置目录书签，可使用上方页码快速跳转。' : 'No embedded outline in this PDF.'}
                   </p>
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
-                    {onClose && (
+                ) : (
+                  <div className="space-y-1">
+                    {toc.map((item, idx) => (
                       <button
+                        key={`${item.title}_${idx}`}
                         type="button"
-                        onClick={onClose}
-                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
+                        onClick={() => {
+                          jumpToPage(item.pageNumber);
+                          setTocOpen(false);
+                        }}
+                        style={{ paddingLeft: `${8 + Math.min(item.level, 3) * 14}px` }}
+                        className="flex w-full items-center justify-between gap-2 rounded-lg py-1.5 pr-2 text-left text-xs transition hover:opacity-75 cursor-pointer"
                       >
-                        <ArrowLeft className="h-4 w-4" />
-                        <span>{isChinese ? '读完 · 返回书架' : 'Done · Back to Library'}</span>
+                        <span className="truncate">{item.title}</span>
+                        <span className="text-[11px] tabular-nums shrink-0" style={{ color: palette.muted }}>
+                          {item.pageNumber}
+                        </span>
                       </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </aside>
+        )}
+
+        {/* Custom Typography & Reading Settings Popover */}
+        {settingsOpen && (
+          <div
+            className="absolute right-3 top-3 z-30 w-[min(92vw,340px)] max-h-[82vh] overflow-y-auto rounded-2xl border p-4 shadow-2xl space-y-4"
+            style={{ backgroundColor: palette.bg, borderColor: palette.border, color: palette.ink }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold">{isZh ? '阅读外观与排版' : 'Typography & Theme'}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  saveReaderPreferences(DEFAULT_READER_PREFS);
+                  setPrefs({ ...DEFAULT_READER_PREFS });
+                }}
+                className="inline-flex items-center gap-1 text-[11px] opacity-70 hover:opacity-100 cursor-pointer"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>{isZh ? '恢复默认' : 'Reset'}</span>
+              </button>
+            </div>
+
+            {/* Reading Mode: Continuous Scroll vs Page Flip */}
+            <div>
+              <div className="text-[11px] mb-1.5" style={{ color: palette.muted }}>{isZh ? '翻页方式' : 'Reading Flow'}</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { id: 'scroll' as const, label: isZh ? '连续滚动阅读' : 'Continuous Scroll' },
+                  { id: 'paged' as const, label: isZh ? '单页翻页阅读' : 'Page-by-Page' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => updatePrefs({ layoutMode: opt.id })}
+                    className="rounded-xl border py-1.5 text-xs font-medium transition cursor-pointer"
+                    style={{
+                      borderColor: prefs.layoutMode === opt.id ? '#247864' : palette.border,
+                      backgroundColor: prefs.layoutMode === opt.id ? 'rgba(36,120,100,0.14)' : palette.surface,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Font Size */}
+            <div>
+              <div className="flex items-center justify-between text-[11px] mb-1.5" style={{ color: palette.muted }}>
+                <span>{isZh ? '字体大小' : 'Font Size'}</span>
+                <span className="tabular-nums font-medium">{prefs.fontSize}px</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => updatePrefs({ fontSize: Math.max(14, prefs.fontSize - 1) })}
+                  className="inline-flex h-8 w-9 items-center justify-center rounded-lg border cursor-pointer"
+                  style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+                <input
+                  type="range"
+                  min={14}
+                  max={34}
+                  step={1}
+                  value={prefs.fontSize}
+                  onChange={(e) => updatePrefs({ fontSize: Number(e.target.value) })}
+                  className="flex-1 accent-[#247864] cursor-pointer"
+                />
+                <button
+                  type="button"
+                  onClick={() => updatePrefs({ fontSize: Math.min(34, prefs.fontSize + 1) })}
+                  className="inline-flex h-8 w-9 items-center justify-center rounded-lg border cursor-pointer"
+                  style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Background Themes + Custom Color */}
+            <div>
+              <div className="text-[11px] mb-1.5" style={{ color: palette.muted }}>{isZh ? '阅读背景' : 'Background'}</div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {(['white', 'warm', 'cream', 'night'] as Array<Exclude<ReaderBgPresetId, 'custom'>>).map((id) => {
+                  const preset = READER_BG_PRESETS[id];
+                  const active = prefs.bgPreset === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => updatePrefs({ bgPreset: id })}
+                      className="flex flex-col items-center gap-1 rounded-xl border p-1.5 text-[10px] transition cursor-pointer"
+                      style={{
+                        borderColor: active ? '#247864' : palette.border,
+                        backgroundColor: preset.bg,
+                        color: preset.ink,
+                      }}
+                    >
+                      <span className="font-medium truncate w-full text-center">{preset.label}</span>
+                    </button>
+                  );
+                })}
+                <label
+                  className="flex flex-col items-center justify-center gap-0.5 rounded-xl border p-1.5 text-[10px] cursor-pointer"
+                  style={{
+                    borderColor: prefs.bgPreset === 'custom' ? '#247864' : palette.border,
+                    backgroundColor: prefs.customBgColor,
+                  }}
+                >
+                  <input
+                    type="color"
+                    value={prefs.customBgColor}
+                    onChange={(e) => updatePrefs({ bgPreset: 'custom', customBgColor: e.target.value })}
+                    className="h-4 w-4 cursor-pointer border-0 bg-transparent p-0"
+                  />
+                  <span className="text-[9px] font-medium" style={{ color: palette.ink }}>{isZh ? '自定义' : 'Custom'}</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Text Color + Custom Picker + Reset */}
+            <div>
+              <div className="flex items-center justify-between text-[11px] mb-1.5" style={{ color: palette.muted }}>
+                <span>{isZh ? '文字颜色' : 'Text Color'}</span>
+                {prefs.textColor && (
+                  <button
+                    type="button"
+                    onClick={() => updatePrefs({ textColor: '' })}
+                    className="text-[10px] underline cursor-pointer"
+                  >
+                    {isZh ? '恢复默认' : 'Default'}
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {TEXT_COLOR_PRESETS.map((c) => (
+                  <button
+                    key={c.label}
+                    type="button"
+                    onClick={() => updatePrefs({ textColor: c.value })}
+                    className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] cursor-pointer"
+                    style={{
+                      borderColor: prefs.textColor === c.value ? '#247864' : palette.border,
+                      backgroundColor: palette.surface,
+                    }}
+                  >
+                    {c.value && <span className="h-2.5 w-2.5 rounded-full border border-black/20" style={{ backgroundColor: c.value }} />}
+                    <span>{c.label}</span>
+                  </button>
+                ))}
+                <label className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] cursor-pointer" style={{ borderColor: palette.border }}>
+                  <input
+                    type="color"
+                    value={prefs.textColor || palette.ink}
+                    onChange={(e) => updatePrefs({ textColor: e.target.value })}
+                    className="h-3.5 w-3.5 border-0 bg-transparent p-0 cursor-pointer"
+                  />
+                  <span>{isZh ? '自选' : 'Pick'}</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Font Family (Chinese, Arabic, English) */}
+            <div>
+              <div className="text-[11px] mb-1.5" style={{ color: palette.muted }}>{isZh ? '阅读字体（中 / 阿 / 英）' : 'Font Family'}</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {READER_FONT_FAMILIES.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => updatePrefs({ fontFamily: f.id })}
+                    className="flex items-center justify-between rounded-xl border px-2.5 py-1.5 text-left text-xs transition cursor-pointer"
+                    style={{
+                      fontFamily: f.css,
+                      borderColor: prefs.fontFamily === f.id ? '#247864' : palette.border,
+                      backgroundColor: prefs.fontFamily === f.id ? 'rgba(36,120,100,0.14)' : palette.surface,
+                    }}
+                  >
+                    <span className="truncate">{f.label}</span>
+                    <span className="text-[10px] opacity-60 shrink-0">{f.langTag}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Line Height & Paragraph Spacing */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: palette.muted }}>
+                  <span>{isZh ? '行间距' : 'Line Height'}</span>
+                  <span className="tabular-nums">{prefs.lineHeight.toFixed(2)}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1.4}
+                  max={2.4}
+                  step={0.05}
+                  value={prefs.lineHeight}
+                  onChange={(e) => updatePrefs({ lineHeight: Number(e.target.value) })}
+                  className="w-full accent-[#247864] cursor-pointer"
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between text-[11px] mb-1" style={{ color: palette.muted }}>
+                  <span>{isZh ? '段间距' : 'Paragraph'}</span>
+                  <span className="tabular-nums">{prefs.paragraphSpacing.toFixed(1)}em</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.6}
+                  max={2.2}
+                  step={0.1}
+                  value={prefs.paragraphSpacing}
+                  onChange={(e) => updatePrefs({ paragraphSpacing: Number(e.target.value) })}
+                  className="w-full accent-[#247864] cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {/* Margins, Column Width & Alignment */}
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <div className="text-[10px] mb-1" style={{ color: palette.muted }}>{isZh ? '页边距' : 'Margins'}</div>
+                <div className="flex flex-col gap-1">
+                  {(['compact', 'standard', 'generous'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => updatePrefs({ marginMode: m })}
+                      className="rounded-lg border py-1 text-[11px] cursor-pointer"
+                      style={{
+                        borderColor: prefs.marginMode === m ? '#247864' : palette.border,
+                        backgroundColor: prefs.marginMode === m ? 'rgba(36,120,100,0.14)' : palette.surface,
+                      }}
+                    >
+                      {m === 'compact' ? '紧凑' : m === 'generous' ? '宽松' : '标准'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] mb-1" style={{ color: palette.muted }}>{isZh ? '阅读宽度' : 'Width'}</div>
+                <div className="flex flex-col gap-1">
+                  {(['narrow', 'standard', 'wide'] as const).map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      onClick={() => updatePrefs({ widthMode: w })}
+                      className="rounded-lg border py-1 text-[11px] cursor-pointer"
+                      style={{
+                        borderColor: prefs.widthMode === w ? '#247864' : palette.border,
+                        backgroundColor: prefs.widthMode === w ? 'rgba(36,120,100,0.14)' : palette.surface,
+                      }}
+                    >
+                      {w === 'narrow' ? '窄栏' : w === 'wide' ? '宽栏' : '适中'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] mb-1" style={{ color: palette.muted }}>{isZh ? '对齐' : 'Align'}</div>
+                <div className="flex flex-col gap-1">
+                  <button
+                    type="button"
+                    onClick={() => updatePrefs({ align: 'left' })}
+                    className="inline-flex items-center justify-center gap-1 rounded-lg border py-1 text-[11px] cursor-pointer"
+                    style={{
+                      borderColor: prefs.align === 'left' ? '#247864' : palette.border,
+                      backgroundColor: prefs.align === 'left' ? 'rgba(36,120,100,0.14)' : palette.surface,
+                    }}
+                  >
+                    <AlignLeft className="h-3 w-3" />
+                    <span>自然</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updatePrefs({ align: 'justify' })}
+                    className="inline-flex items-center justify-center gap-1 rounded-lg border py-1 text-[11px] cursor-pointer"
+                    style={{
+                      borderColor: prefs.align === 'justify' ? '#247864' : palette.border,
+                      backgroundColor: prefs.align === 'justify' ? 'rgba(36,120,100,0.14)' : palette.surface,
+                    }}
+                  >
+                    <AlignJustify className="h-3 w-3" />
+                    <span>两端</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Primary Reading Canvas */}
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden scroll-smooth"
+          onMouseUp={handleProseMouseUp}
+          onTouchEnd={handleProseMouseUp}
+        >
+          {status && !error && (
+            <div className="flex flex-col items-center justify-center py-24 gap-3 text-sm" style={{ color: palette.muted }}>
+              <Loader2 className="h-6 w-6 animate-spin text-[#247864]" />
+              <span>{status}</span>
+            </div>
+          )}
+
+          {error && (
+            <div className="mx-auto max-w-lg px-6 py-20 text-center space-y-4">
+              <FileText className="mx-auto h-10 w-10 opacity-45" />
+              <p className="text-sm leading-relaxed">{error}</p>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <a
+                  href={downloadUrl}
+                  download
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#247864] px-4 py-2 text-xs font-medium text-white"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>{isZh ? '下载原始 PDF' : 'Download PDF'}</span>
+                </a>
+                {originPageUrl && (
+                  <a
+                    href={originPageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-xl border px-4 py-2 text-xs font-medium"
+                    style={{ borderColor: palette.border }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span>{isZh ? '源站查看' : 'Source'}</span>
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* REFLOWABLE EBOOK MODE — Classical Open-Book Paper Sheet Layout */}
+          {!error && pdfProxy && viewMode === 'reflow' && (
+            <div className="mx-auto w-full px-3 sm:px-6 py-5 sm:py-8 pb-28">
+              <article
+                className="mx-auto w-full rounded-[14px] py-8 sm:py-11 transition-all"
+                style={{
+                  maxWidth: colMaxWidth,
+                  paddingLeft: horizPad,
+                  paddingRight: horizPad,
+                  backgroundColor: palette.paper,
+                  border: `1px solid ${palette.border}`,
+                  boxShadow: palette.isDark
+                    ? '0 22px 54px rgba(0,0,0,0.52), -4px 0 0 -1px #1d2330, 4px 0 0 -1px #1d2330'
+                    : '0 18px 46px rgba(58,44,24,0.10), -5px 0 0 -1px #f6f0e3, -6px 0 0 -1px #d7ccb5, -10px 0 0 -2px #efe7d6, -11px 0 0 -2px #d2c5ab, 5px 0 0 -1px #f6f0e3, 6px 0 0 -1px #d7ccb5, 10px 0 0 -2px #efe7d6, 11px 0 0 -2px #d2c5ab',
+                  fontFamily: fontCss,
+                  fontSize: `${prefs.fontSize}px`,
+                  lineHeight: prefs.lineHeight,
+                  textAlign: prefs.align,
+                  overflowWrap: 'break-word',
+                  wordBreak: 'normal',
+                }}
+              >
+                {/* Classical Book Title Masthead on Page 1 */}
+                {pageNumber === 1 && (
+                  <header className="mb-9 pb-5 border-b text-center" style={{ borderColor: palette.border }}>
+                    <div className="text-[11px] tracking-[0.18em] mb-2" style={{ color: palette.muted }}>
+                      EARTH ONE · {isZh ? '世界图书馆典籍版' : 'WORLD LIBRARY EDITION'}
+                    </div>
+                    <h1
+                      className="font-semibold tracking-tight leading-snug"
+                      style={{ fontSize: `${Math.min(34, prefs.fontSize * 1.42)}px` }}
+                    >
+                      {title}
+                    </h1>
+                    <p className="mt-2 text-[11px]" style={{ color: palette.muted }}>
+                      {isZh
+                        ? `共 ${pageCount} 页 · 轻点任意词查义 · 选中段落可翻译或 AI 精讲`
+                        : `${pageCount} pages · Tap any word to look up · Select text to translate or explain`}
+                    </p>
+                  </header>
+                )}
+
+                {/* Render Reflowable Structured Pages */}
+                {visiblePageNumbers.map((pNum) => {
+                  const ep = extractedPages[pNum];
+                  const isOcrBusy = ocrLoadingPage === pNum;
+                  const isArabicPage = ep?.dir === 'rtl';
+                  const userPickedArabicFont =
+                    prefs.fontFamily === 'scheherazade_ar' ||
+                    prefs.fontFamily === 'amiri_ar' ||
+                    prefs.fontFamily === 'tajawal_ar';
+                  const effectivePageFont =
+                    isArabicPage && !userPickedArabicFont
+                      ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
+                      : fontCss;
+                  const effectivePageLineHeight = isArabicPage
+                    ? Math.max(prefs.lineHeight, 2.25)
+                    : prefs.lineHeight;
+                  const effectivePageFontSize = isArabicPage
+                    ? Math.max(prefs.fontSize + 4, 22)
+                    : prefs.fontSize;
+
+                  return (
+                    <section
+                      key={pNum}
+                      dir={ep?.dir || 'ltr'}
+                      className="mb-12 last:mb-2"
+                      style={{
+                        fontFamily: effectivePageFont,
+                        lineHeight: effectivePageLineHeight,
+                        fontSize: `${effectivePageFontSize}px`,
+                        wordSpacing: isArabicPage ? '0.06em' : undefined,
+                      }}
+                      onClick={() => {
+                        if (prefs.layoutMode === 'scroll' && pageNumber !== pNum) {
+                          setPageNumber(pNum);
+                        }
+                      }}
+                    >
+                      {/* Classical 3-part Sepia Running Header matching physical book spread */}
+                      <div
+                        dir="ltr"
+                        className="grid grid-cols-3 items-center text-[11px] mb-6 pb-2 border-b select-none font-sans"
+                        style={{ borderColor: palette.border, color: palette.muted }}
+                      >
+                        <span className="truncate text-left">{title}</span>
+                        <span className="text-center font-mono text-[10.5px] opacity-85">
+                          {pNum} / {pageCount}
+                          {ep?.ocrApplied ? (isZh ? ' · OCR' : ' · OCR') : ''}
+                        </span>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPageNumber(pNum);
+                              void handleDeepExplain(ep?.plainText);
+                            }}
+                            className="hover:opacity-100 opacity-75 transition cursor-pointer"
+                          >
+                            {isZh ? '精讲' : 'Explain'}
+                          </button>
+                          <span className="opacity-45">·</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPageNumber(pNum);
+                              void handleRunSummary('chapter', ep?.plainText);
+                            }}
+                            className="hover:opacity-100 opacity-75 transition cursor-pointer"
+                          >
+                            {isZh ? '总结' : 'Summary'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {!ep ? (
+                        <div className="flex items-center gap-2 py-8 text-xs font-sans" style={{ color: palette.muted }}>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>{isZh ? `正在排版第 ${pNum} 页…` : `Reflowing page ${pNum}…`}</span>
+                        </div>
+                      ) : ep.isLikelyScanned ? (
+                      <div
+                        className="rounded-2xl border p-5 text-center space-y-3"
+                        style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                      >
+                        <p className="text-xs leading-relaxed" style={{ color: palette.muted }}>
+                          {isOcrBusy
+                            ? isZh
+                              ? '正在通过 ONE AI 视觉 OCR 识别扫描页并重排为电子书…'
+                              : 'Running Vision OCR to convert scanned page to reflowable text…'
+                            : isZh
+                              ? '检测到本页为扫描图像版 PDF，可使用 AI OCR 转为可缩放重排文字，或直接查看原始页面。'
+                              : 'This page appears to be scanned. Run AI OCR for reflowable text or switch to Original view.'}
+                        </p>
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            disabled={isOcrBusy}
+                            onClick={() => void ensurePageExtracted(pNum, true)}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-[#247864] px-3.5 py-2 text-xs font-medium text-white disabled:opacity-50 cursor-pointer"
+                          >
+                            {isOcrBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanText className="h-3.5 w-3.5" />}
+                            <span>{isOcrBusy ? (isZh ? '正在识别…' : 'Recognizing…') : isZh ? 'AI OCR 转为电子书文字' : 'OCR to Ebook Text'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPageNumber(pNum);
+                              setViewMode('original');
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-medium cursor-pointer"
+                            style={{ borderColor: palette.border }}
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            <span>{isZh ? '查看原始页面' : 'Original Page'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        {ep.blocks.map((block) => {
+                          const tr = inlineTranslations[block.id];
+                          if (block.kind === 'h1') {
+                            return (
+                              <h2
+                                key={block.id}
+                                className="font-semibold tracking-tight leading-snug mt-7 mb-3"
+                                style={{ fontSize: `${Math.min(34, prefs.fontSize * 1.32)}px` }}
+                              >
+                                {block.text}
+                              </h2>
+                            );
+                          }
+                          if (block.kind === 'h2') {
+                            return (
+                              <h3
+                                key={block.id}
+                                className="font-semibold leading-snug mt-6 mb-2.5"
+                                style={{ fontSize: `${Math.min(30, prefs.fontSize * 1.16)}px` }}
+                              >
+                                {block.text}
+                              </h3>
+                            );
+                          }
+                          if (block.kind === 'table' && block.rows) {
+                            return (
+                              <div key={block.id} className="my-5 overflow-x-auto rounded-xl border" style={{ borderColor: palette.border }}>
+                                <table className="w-full text-left border-collapse" style={{ fontSize: `${Math.max(13, prefs.fontSize * 0.84)}px` }}>
+                                  <tbody>
+                                    {block.rows.map((row, rIdx) => (
+                                      <tr key={rIdx} className="border-b last:border-b-0" style={{ borderColor: palette.border }}>
+                                        {row.map((cell, cIdx) => (
+                                          <td key={cIdx} className="px-3 py-2 align-top">
+                                            {cell}
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            );
+                          }
+                          if (block.kind === 'footnote') {
+                            return (
+                              <p
+                                key={block.id}
+                                className="mt-4 pt-2 border-t leading-relaxed"
+                                style={{
+                                  borderColor: palette.border,
+                                  color: palette.muted,
+                                  fontSize: `${Math.max(12, prefs.fontSize * 0.8)}px`,
+                                }}
+                              >
+                                {block.text}
+                              </p>
+                            );
+                          }
+
+                          // Standard reflowable paragraph with tap-any-word dictionary + subtle hover translate/explain
+                          const tokens = tokenizeInteractiveText(block.text);
+                          return (
+                            <div
+                              key={block.id}
+                              className="group relative"
+                              style={{ marginBottom: `${prefs.paragraphSpacing}em` }}
+                            >
+                              <p className="m-0">
+                                {tokens.map((tok, tIdx) => {
+                                  const cleaned = cleanWordToken(tok);
+                                  if (!cleaned || /^\s+$/.test(tok)) {
+                                    return <React.Fragment key={tIdx}>{tok}</React.Fragment>;
+                                  }
+                                  return (
+                                    <span
+                                      key={tIdx}
+                                      onClick={(e) => {
+                                        const sel = window.getSelection()?.toString().trim();
+                                        if (sel && sel.length > 1) return;
+                                        e.stopPropagation();
+                                        void handleLookupWord(cleaned, block.text);
+                                      }}
+                                      className="cursor-pointer rounded-sm transition-colors hover:bg-[#247864]/15"
+                                    >
+                                      {tok}
+                                    </span>
+                                  );
+                                })}
+                              </p>
+
+                              {/* Subtle per-paragraph inline actions on hover (desktop) */}
+                              <div className="mt-1 flex items-center gap-3 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity text-[11px] select-none" style={{ color: palette.muted }}>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleTranslateBlock(block.id, block.text)}
+                                  className="inline-flex items-center gap-1 hover:opacity-100 cursor-pointer"
+                                >
+                                  <Languages className="h-3 w-3" />
+                                  <span>{isZh ? '译' : 'Translate'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeepExplain(block.text)}
+                                  className="inline-flex items-center gap-1 hover:opacity-100 cursor-pointer"
+                                >
+                                  <Sparkles className="h-3 w-3" />
+                                  <span>{isZh ? '精讲' : 'Explain'}</span>
+                                </button>
+                              </div>
+
+                              {/* Inline Paragraph Translation Result */}
+                              {tr && (
+                                <div
+                                  dir="auto"
+                                  className="mt-2 rounded-xl border px-3.5 py-2.5 leading-relaxed"
+                                  style={{
+                                    borderColor: palette.border,
+                                    backgroundColor: palette.surface,
+                                    fontSize: `${Math.max(14, prefs.fontSize * 0.88)}px`,
+                                    color: palette.muted,
+                                  }}
+                                >
+                                  {tr.loading ? (
+                                    <span className="inline-flex items-center gap-1.5 text-xs">
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      {isZh ? '正在翻译段落…' : 'Translating…'}
+                                    </span>
+                                  ) : tr.error ? (
+                                    <span className="text-xs text-rose-500">{tr.error}</span>
+                                  ) : (
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="whitespace-pre-wrap">{tr.text}</div>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setInlineTranslations((prev) => {
+                                            const copy = { ...prev };
+                                            delete copy[block.id];
+                                            return copy;
+                                          })
+                                        }
+                                        className="p-0.5 opacity-60 hover:opacity-100 cursor-pointer shrink-0"
+                                      >
+                                        <X className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
+                  </section>
+                );
+              })}
+
+              {/* Continuous Scroll Load Next Pages */}
+              {prefs.layoutMode === 'scroll' && scrollWindowEnd < pageCount && (
+                <div className="pt-2 pb-6 text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextEnd = Math.min(pageCount, scrollWindowEnd + 4);
+                      setScrollWindowEnd(nextEnd);
+                      setPageNumber(Math.min(pageCount, scrollWindowEnd + 1));
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full border px-5 py-2 text-xs font-medium transition hover:opacity-80 cursor-pointer"
+                    style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                  >
+                    <span>{isZh ? `继续阅读下几页（剩余 ${pageCount - scrollWindowEnd} 页）` : `Load next pages (${pageCount - scrollWindowEnd} left)`}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* End-of-Book Completion Card with Return Button */}
+              {isLastPage && onClose && (
+                <div
+                  className="mt-10 rounded-2xl border p-6 text-center space-y-3"
+                  style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                >
+                  <CheckCircle2 className="mx-auto h-7 w-7 text-[#247864] dark:text-[#52b798]" />
+                  <div className="text-sm font-semibold">{isZh ? '已读至全书末尾' : 'Finished reading'}</div>
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => setPageNumber(1)}
-                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-4 py-2.5 text-xs font-medium transition hover:opacity-80"
-                      style={{ borderColor: theme.border, color: theme.ink }}
+                      onClick={() => void handleRunSummary('book')}
+                      className="inline-flex items-center gap-1.5 rounded-xl border px-4 py-2 text-xs font-medium cursor-pointer"
+                      style={{ borderColor: palette.border }}
                     >
-                      <span>{isChinese ? '回到第 1 页' : 'Back to Page 1'}</span>
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>{isZh ? 'AI 生成全书总结' : 'Summarize Book'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[#247864] px-4 py-2 text-xs font-medium text-white cursor-pointer"
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                      <span>{isZh ? '读完 · 返回书架' : 'Return to Library'}</span>
                     </button>
                   </div>
                 </div>
               )}
-            </>
+            </article>
+            </div>
+          )}
+
+          {/* ORIGINAL PDF FALLBACK MODE (Complex layouts / tables / diagrams) */}
+          {!error && pdfProxy && viewMode === 'original' && (
+            <div className="flex flex-col items-center px-3 py-6 pb-24">
+              <div className="mb-4 flex items-center gap-2 rounded-full border px-3 py-1 text-xs" style={{ borderColor: palette.border, backgroundColor: palette.surface }}>
+                <button
+                  type="button"
+                  onClick={() => setOriginalZoom((z) => Math.max(0.6, Number((z - 0.15).toFixed(2))))}
+                  className="p-1 cursor-pointer"
+                >
+                  <Minus className="h-3.5 w-3.5" />
+                </button>
+                <span className="tabular-nums w-11 text-center">{Math.round(originalZoom * 100)}%</span>
+                <button
+                  type="button"
+                  onClick={() => setOriginalZoom((z) => Math.min(2.4, Number((z + 0.15).toFixed(2))))}
+                  className="p-1 cursor-pointer"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="max-w-full overflow-x-auto rounded-xl shadow-lg border" style={{ borderColor: palette.border }}>
+                <canvas ref={canvasRef} className="block bg-white" />
+              </div>
+            </div>
           )}
         </div>
 
-        {/* Right-Side AI Page Tutor Drawer ("这一页怎么讲") */}
-        {aiPanelOpen && (
-          <aside
-            className="absolute inset-y-0 right-0 z-30 flex w-[min(94vw,400px)] flex-col border-l shadow-2xl lg:static lg:w-[390px] lg:shadow-none"
-            style={{ backgroundColor: theme.panelBg, borderColor: theme.border }}
+        {/* Floating Selection Action Bar (Translate / Deep Explain / Summarize / Lookup) */}
+        {selectionAction && (
+          <div
+            className="fixed bottom-16 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 rounded-full border px-2 py-1.5 shadow-xl backdrop-blur-xl"
+            style={{
+              backgroundColor: palette.isDark ? 'rgba(24,30,39,0.96)' : 'rgba(255,255,255,0.96)',
+              borderColor: palette.border,
+            }}
           >
-            <div
-              className="flex items-center justify-between gap-2 border-b px-4 py-3"
-              style={{ borderColor: theme.border }}
+            <button
+              type="button"
+              onClick={() => {
+                const txt = selectionAction.text;
+                setSelectionAction(null);
+                void handleLookupWord(txt.split(/\s+/)[0] || txt, txt);
+              }}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
             >
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-emerald-500" />
-                <div>
-                  <div className="text-xs font-semibold">
-                    {isChinese ? `AI 阅读助手 · 第 ${pageNumber} 页` : `AI Reading Assistant · Page ${pageNumber}`}
-                    <span className="ml-1 font-normal opacity-70">{aiProviderInfo}</span>
-                  </div>
-                  <div className="text-[10px]" style={{ color: theme.muted }}>
-                    {aiUsedVision
-                      ? (isChinese ? '已识读扫描页图像（视觉/OCR 辅助）' : 'Scanned page analyzed with vision/OCR aid')
-                      : (isChinese ? '基于当前书籍与本页上下文作答，不脱离原文' : 'Grounded in current book/page context')}
-                  </div>
+              <BookOpen className="h-3.5 w-3.5" />
+              <span>{isZh ? '查词' : 'Define'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const txt = selectionAction.text;
+                setSelectionAction(null);
+                void handleTranslateBlock(`sel_${pageNumber}`, txt);
+                // Show translation neatly in AI explain tab too if selection wasn't bound to a single block
+                setAiDrawerOpen(true);
+                setAiTab('explain');
+                setDeepExplainTarget(txt.slice(0, 120));
+                setDeepExplainLoading(true);
+                setDeepExplainError('');
+                fetch('/api/library/ai/translate', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ text: txt, targetLang: lang === 'en' ? 'en' : 'zh', bookTitle: title }),
+                })
+                  .then((r) => r.json())
+                  .then((d) => setDeepExplainText(d?.translation || d?.error || ''))
+                  .catch(() => setDeepExplainError('翻译暂不可用'))
+                  .finally(() => setDeepExplainLoading(false));
+              }}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+            >
+              <Languages className="h-3.5 w-3.5" />
+              <span>{isZh ? '翻译' : 'Translate'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDeepExplain(selectionAction.text)}
+              className="inline-flex items-center gap-1 rounded-full bg-[#247864] px-3 py-1 text-xs font-medium text-white cursor-pointer"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>{isZh ? 'AI 精讲' : 'Deep Explain'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const txt = selectionAction.text;
+                setSelectionAction(null);
+                void handleRunSummary('paragraph', txt);
+              }}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+            >
+              <span>{isZh ? '总结' : 'Summarize'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectionAction(null)}
+              className="p-1 opacity-60 hover:opacity-100 cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Lightweight Floating Word Annotation Card (Tap any word) */}
+        {wordCard && (
+          <div
+            className="fixed bottom-16 right-4 z-40 w-[min(92vw,360px)] rounded-2xl border p-4 shadow-2xl"
+            style={{ backgroundColor: palette.bg, borderColor: palette.border, color: palette.ink }}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-base font-semibold" dir="auto">{wordCard.entry?.word || wordCard.word}</span>
+                  {wordCard.entry?.partOfSpeech && (
+                    <span className="text-[11px]" style={{ color: palette.muted }}>{wordCard.entry.partOfSpeech}</span>
+                  )}
                 </div>
+                {wordCard.entry?.reading && (
+                  <div className="text-xs mt-0.5 font-mono" style={{ color: '#247864' }}>
+                    {wordCard.entry.reading}
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
+                {wordCard.entry && (
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveWordToVocab()}
+                    className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium cursor-pointer"
+                    style={{
+                      borderColor: wordCard.saved ? '#247864' : palette.border,
+                      backgroundColor: wordCard.saved ? 'rgba(36,120,100,0.14)' : palette.surface,
+                    }}
+                  >
+                    {wordCard.saved ? <Check className="h-3 w-3 text-[#247864]" /> : <Plus className="h-3 w-3" />}
+                    <span>{wordCard.saved ? (isZh ? '已存生词' : 'Saved') : isZh ? '存生词本' : 'Save'}</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setAiPanelOpen(false)}
-                  aria-label={isChinese ? '关闭 AI 助手' : 'Close AI assistant'}
-                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg opacity-70 hover:opacity-100"
+                  onClick={() => setWordCard(null)}
+                  className="p-1 opacity-60 hover:opacity-100 cursor-pointer"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
-            <div className="border-b px-4 py-2 flex flex-wrap gap-1.5" style={{ borderColor: theme.border }}>
-              {([
-                { id: 'explain' as const, zh: '讲解', en: 'Explain' },
-                { id: 'translate' as const, zh: '翻译', en: 'Translate' },
-                { id: 'summarize' as const, zh: '总结', en: 'Summary' },
-                { id: 'ask' as const, zh: '问答', en: 'Ask' },
-              ]).map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => void runLibraryAiAction(a.id)}
-                  className="cursor-pointer rounded-lg px-2.5 py-1 text-[11px] font-medium transition"
-                  style={{ border: `1px solid ${aiAction === a.id ? '#10B981' : theme.border}`, color: aiAction === a.id ? '#059669' : theme.muted, backgroundColor: aiAction === a.id ? 'rgba(16,185,129,0.12)' : 'transparent' }}
-                >
-                  {isChinese ? a.zh : a.en}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => void runLibraryAiAction('ocr')}
-                className="cursor-pointer rounded-lg px-2.5 py-1 text-[11px] font-medium transition"
-                style={{ border: `1px solid ${aiAction === 'ocr' ? '#10B981' : theme.border}`, color: aiAction === 'ocr' ? '#059669' : theme.muted, backgroundColor: aiAction === 'ocr' ? 'rgba(16,185,129,0.12)' : 'transparent' }}
-                title={isChinese ? '识别本页文字（扫描/OCR）' : 'OCR/extract text from this page'}
-              >
-                {isChinese ? '识文' : 'OCR'}
-              </button>
-              {aiAction === 'translate' && (
-                <select
-                  value={aiTargetLang}
-                  onChange={(e) => setAiTargetLang(e.target.value as 'zh' | 'en' | 'ar')}
-                  className="ml-auto h-7 rounded-lg border bg-transparent px-2 text-[11px]"
-                  style={{ borderColor: theme.border, color: theme.ink }}
-                >
-                  <option value="zh">译为中文</option>
-                  <option value="en">Translate to English</option>
-                  <option value="ar">ترجمة إلى العربية</option>
-                </select>
-              )}
-            </div>
-            <div className="flex-1 overflow-y-auto px-4 py-3.5 text-xs leading-relaxed">
-              {aiLoading ? (
-                <div className="flex flex-col items-center justify-center gap-2.5 py-12 text-center" style={{ color: theme.muted }}>
-                  <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
-                  <div>{isChinese ? `正在深度分析第 ${pageNumber} 页并整理讲解思路…` : 'Analyzing this page…'}</div>
-                </div>
-              ) : aiError ? (
-                <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-rose-500">
-                  <div>{aiError}</div>
-                  <button
-                    type="button"
-                    onClick={() => void runLibraryAiAction(aiAction)}
-                    className="mt-2 cursor-pointer rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-medium text-white"
-                  >
-                    {isChinese ? '重新分析' : 'Retry'}
-                  </button>
-                </div>
-              ) : aiExplanation ? (
-                <div className="space-y-3 whitespace-pre-wrap leading-7">{aiExplanation}</div>
-              ) : (
-                <div className="py-8 text-center" style={{ color: theme.muted }}>
-                  {isChinese ? '点击下方按钮让 AI 分析当前页怎么讲。' : 'Click to analyze the current page.'}
-                </div>
-              )}
-            </div>
-
-            {/* Follow-up Question Form */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!aiLoading) void runLibraryAiAction(aiQuestion.trim() ? 'ask' : aiAction, aiQuestion);
-              }}
-              className="border-t p-3"
-              style={{ borderColor: theme.border }}
-            >
-              <div className="mb-2 flex flex-wrap gap-1.5">
-                {(isChinese
-                  ? ['用大白话讲这一页', '怎么给初学者讲这段', '逐句翻译重点句']
-                  : ['Explain simply', 'How to teach this?', 'Translate key lines']
-                ).map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    disabled={aiLoading}
-                    onClick={() => void runLibraryAiAction(aiQuestion ? 'ask' : 'explain', preset)}
-                    className="cursor-pointer rounded-lg border px-2 py-1 text-[11px] transition hover:border-emerald-500 disabled:opacity-40"
-                    style={{ borderColor: theme.border, color: theme.muted }}
-                  >
-                    {preset}
-                  </button>
-                ))}
+            {wordCard.loading ? (
+              <div className="flex items-center gap-2 py-4 text-xs" style={{ color: palette.muted }}>
+                <Loader2 className="h-4 w-4 animate-spin text-[#247864]" />
+                <span>{isZh ? 'ONE AI 正在解析词义…' : 'Looking up…'}</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  value={aiQuestion}
-                  onChange={(e) => setAiQuestion(e.target.value)}
-                  placeholder={isChinese ? '针对这一页继续追问 AI…' : 'Ask a follow-up question…'}
-                  className="h-9 flex-1 rounded-xl border bg-transparent px-3 text-xs focus:outline-none"
-                  style={{ borderColor: theme.border }}
-                />
-                <button
-                  type="submit"
-                  disabled={aiLoading}
-                  aria-label="发送追问"
-                  className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-emerald-600 text-white transition hover:bg-emerald-500 disabled:opacity-40"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </form>
-          </aside>
-        )}
-
-        {/* Bookmarks & Notes Panel (library persistence) */}
-        {annotationsOpen && bookId && (
-          <aside className="absolute inset-y-0 left-0 z-30 flex w-[min(92vw,320px)] flex-col border-r shadow-2xl lg:static lg:w-[300px] lg:shadow-none" style={{ backgroundColor: theme.panelBg, borderColor: theme.border }}>
-            <div className="flex items-center justify-between border-b px-3 py-2.5" style={{ borderColor: theme.border }}>
-              <div className="flex items-center gap-1.5 text-xs font-semibold"><StickyNote className="h-3.5 w-3.5 text-emerald-500" /><span>{isChinese ? '笔记与书签' : 'Notes & Bookmarks'}</span></div>
-              <button type="button" onClick={() => setAnnotationsOpen(false)} className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg opacity-70 hover:opacity-100"><X className="h-4 w-4" /></button>
-            </div>
-            <div className="border-b p-3 space-y-2" style={{ borderColor: theme.border }}>
-              <textarea
-                value={noteDraft}
-                onChange={(e) => setNoteDraft(e.target.value)}
-                placeholder={isChinese ? `为第 ${pageNumber} 页添加笔记…` : `Add a note for page ${pageNumber}…`}
-                className="h-20 w-full resize-none rounded-xl border bg-transparent p-2 text-xs focus:outline-none"
-                style={{ borderColor: theme.border, color: theme.ink }}
-              />
-              <div className="flex gap-1.5">
-                <button type="button" onClick={() => void togglePageBookmark()} className="inline-flex cursor-pointer items-center gap-1 rounded-lg border px-2 py-1 text-[11px]" style={{ borderColor: theme.border }}>
-                  {pageBookmark ? <BookmarkCheck className="h-3 w-3 text-amber-500" /> : <Bookmark className="h-3 w-3" />} {pageBookmark ? (isChinese ? '已加书签' : 'Bookmarked') : (isChinese ? '加书签' : 'Bookmark')}
-                </button>
-                <button type="button" onClick={() => void savePageNote()} disabled={!noteDraft.trim()} className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-40">
-                  {isChinese ? '保存笔记' : 'Save note'}
-                </button>
-              </div>
-              <div className="text-[10px]" style={{ color: theme.muted }}>{isChinese ? `本页书签/笔记：${(pageBookmark ? 1 : 0) + pageNotes.length} 条` : `This page: ${(pageBookmark ? 1 : 0) + pageNotes.length}`}</div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-              {annotations.filter(a => a.bookId === bookId).length === 0 ? (
-                <div className="p-3 text-center text-[11px]" style={{ color: theme.muted }}>{isChinese ? '暂无笔记或书签' : 'No notes or bookmarks yet'}</div>
-              ) : (
-                annotations.filter(a => a.bookId === bookId).map((a) => (
-                  <div key={a.id} className="rounded-xl border p-2 text-[11px]" style={{ borderColor: theme.border }}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="font-medium truncate">{a.kind === 'bookmark' || String(a.selectedText||'').startsWith('书签') ? '🔖 ' : '📝 '}{a.selectedText || (isChinese ? '笔记' : 'Note')}</div>
-                        {a.note && <div className="mt-0.5 whitespace-pre-wrap" style={{ color: theme.muted }}>{a.note}</div>}
-                        {typeof a.pageIndex === 'number' && <button type="button" onClick={() => setPageNumber(a.pageIndex)} className="mt-1 cursor-pointer text-emerald-600 hover:underline">P.{a.pageIndex}</button>}
-                      </div>
-                      <button type="button" onClick={() => void deleteAnnotation(a.id)} className="shrink-0 cursor-pointer opacity-60 hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button>
-                    </div>
+            ) : wordCard.error ? (
+              <p className="mt-2 text-xs text-rose-500">{wordCard.error}</p>
+            ) : wordCard.entry ? (
+              <div className="mt-3 space-y-2 text-xs leading-relaxed">
+                {wordCard.entry.lemma && wordCard.entry.lemma !== wordCard.entry.word && (
+                  <div>
+                    <span style={{ color: palette.muted }}>{isZh ? '原形：' : 'Lemma: '}</span>
+                    <span className="font-medium" dir="auto">{wordCard.entry.lemma}</span>
                   </div>
-                ))
-              )}
-            </div>
-          </aside>
-        )}
-
-        {/* Floating Tap-Any-Word AI Dictionary Card */}
-        {lookupWord && (
-          <div
-            role="dialog"
-            aria-label="AI 查词卡"
-            className="absolute bottom-4 left-4 right-4 z-40 mx-auto max-w-md rounded-2xl border p-4 shadow-2xl sm:left-6 sm:right-auto sm:mx-0 sm:w-[370px]"
-            style={{ backgroundColor: theme.panelBg, borderColor: theme.border, color: theme.ink }}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-base font-bold">{lookupEntry?.word || lookupWord}</span>
-                  {lookupEntry?.partOfSpeech && (
-                    <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-300">
-                      {lookupEntry.partOfSpeech}
-                    </span>
-                  )}
-                </div>
-                {lookupEntry?.reading && (
-                  <div className="mt-0.5 text-xs font-medium" style={{ color: theme.muted }}>
-                    {lookupEntry.reading}
+                )}
+                {wordCard.entry.root && (
+                  <div>
+                    <span style={{ color: palette.muted }}>{isZh ? '词根：' : 'Root: '}</span>
+                    <span dir="auto">{wordCard.entry.root}</span>
+                  </div>
+                )}
+                <div className="text-[13px] font-medium">{wordCard.entry.meaning}</div>
+                {wordCard.entry.contextMeaning && (
+                  <div className="rounded-xl p-2.5" style={{ backgroundColor: palette.surface }}>
+                    <div className="text-[10px] mb-0.5" style={{ color: palette.muted }}>{isZh ? '本句语境含义' : 'In Context'}</div>
+                    <div>{wordCard.entry.contextMeaning}</div>
+                  </div>
+                )}
+                {wordCard.entry.usage && (
+                  <div>
+                    <span style={{ color: palette.muted }}>{isZh ? '常见用法：' : 'Usage: '}</span>
+                    <span>{wordCard.entry.usage}</span>
+                  </div>
+                )}
+                {wordCard.entry.example && (
+                  <div className="pt-1 border-t text-[11px]" style={{ borderColor: palette.border, color: palette.muted }}>
+                    {wordCard.entry.example}
                   </div>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => setLookupWord(null)}
-                aria-label="关闭查词卡"
-                className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg opacity-65 hover:opacity-100"
-              >
+            ) : null}
+          </div>
+        )}
+
+        {/* Lightweight Non-Blocking ONE AI Reading Side Sheet */}
+        {aiDrawerOpen && (
+          <aside
+            className="w-[min(92vw,370px)] shrink-0 border-l flex flex-col z-30 absolute inset-y-0 right-0 md:static shadow-2xl md:shadow-none"
+            style={{ backgroundColor: palette.bg, borderColor: palette.border }}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: palette.border }}>
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-[#247864]" />
+                <span className="text-xs font-semibold">ONE AI {isZh ? '伴读' : 'Reading'}</span>
+              </div>
+              <button type="button" onClick={() => setAiDrawerOpen(false)} className="p-1 opacity-70 hover:opacity-100 cursor-pointer">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="mt-2.5 text-xs leading-relaxed">
-              {lookupLoading ? (
-                <div className="flex items-center gap-2 py-3" style={{ color: theme.muted }}>
-                  <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
-                  <span>{isChinese ? `AI 正在查询「${lookupWord}」…` : `Looking up "${lookupWord}"…`}</span>
-                </div>
-              ) : lookupError ? (
-                <div className="text-rose-500">{lookupError}</div>
-              ) : lookupEntry ? (
-                <div className="space-y-2">
-                  <div>
-                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                      {isChinese ? '释义：' : 'Meaning: '}
-                    </span>
-                    <span>{lookupEntry.meaning}</span>
-                  </div>
-                  {lookupEntry.root && (
-                    <div className="text-[11px]" style={{ color: theme.muted }}>
-                      <span className="font-semibold">{isChinese ? '词根 / 词源：' : 'Root: '}</span>
-                      <span>{lookupEntry.root}</span>
-                    </div>
-                  )}
-                  {lookupEntry.contextMeaning && (
-                    <div
-                      className="rounded-xl p-2 text-[11px]"
-                      style={{
-                        backgroundColor: theme.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-                      }}
-                    >
-                      <span className="font-semibold">{isChinese ? '本页语境：' : 'In context: '}</span>
-                      <span>{lookupEntry.contextMeaning}</span>
-                    </div>
-                  )}
-                  {lookupEntry.example && (
-                    <div className="text-[11px] italic" style={{ color: theme.muted }}>
-                      {isChinese ? '例句：' : 'Example: '}
-                      {lookupEntry.example}
-                    </div>
-                  )}
-                </div>
-              ) : null}
+            {/* 4 Focused Tabs: 精讲 / 全书问答 / 总结 / 生词本 */}
+            <div className="grid grid-cols-4 border-b text-[11px] font-medium" style={{ borderColor: palette.border }}>
+              {[
+                { id: 'explain' as const, label: isZh ? 'AI 精讲' : 'Explain' },
+                { id: 'qa' as const, label: isZh ? '全书问答' : 'Book Q&A' },
+                { id: 'summary' as const, label: isZh ? 'AI 总结' : 'Summary' },
+                { id: 'vocab' as const, label: isZh ? `生词 (${vocabItems.length})` : `Vocab (${vocabItems.length})` },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setAiTab(t.id)}
+                  className="py-2.5 border-b-2 transition cursor-pointer"
+                  style={{
+                    borderBottomColor: aiTab === t.id ? '#247864' : 'transparent',
+                    color: aiTab === t.id ? palette.ink : palette.muted,
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
 
-            <div
-              className="mt-3 flex items-center justify-between border-t pt-2.5 text-[11px]"
-              style={{ borderColor: theme.border }}
-            >
-              <span style={{ color: theme.muted }}>
-                {isChinese ? '点页面任意单词即可继续查' : 'Tap any word on page'}
-              </span>
-              <button
-                type="button"
-                onClick={() => void runLibraryAiAction('explain', `请结合本页上下文讲解词语「${lookupWord}」在本书当前句子/段落中的具体含义（不要只给脱离上下文的词典释义），并说明词根/词性/用法（如可确认）。`)}
-                className="inline-flex cursor-pointer items-center gap-1 font-semibold text-emerald-600 hover:underline dark:text-emerald-400"
-              >
-                <Sparkles className="h-3 w-3" />
-                <span>{isChinese ? '结合本页语境精讲' : 'Explain in context'}</span>
-              </button>
-            </div>
-          </div>
+            {/* Tab 1: AI Deep Explain */}
+            {aiTab === 'explain' && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs leading-relaxed">
+                <div className="flex items-center justify-between gap-2">
+                  <span style={{ color: palette.muted }}>
+                    {deepExplainTarget ? `${isZh ? '当前分析：' : 'Passage: '}“${deepExplainTarget.slice(0, 28)}…”` : isZh ? `第 ${pageNumber} 页精讲` : `Page ${pageNumber}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeepExplain()}
+                    disabled={deepExplainLoading}
+                    className="rounded-lg bg-[#247864] px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-50 cursor-pointer shrink-0"
+                  >
+                    {deepExplainLoading ? (isZh ? '精讲中…' : 'Working…') : isZh ? '精讲本页' : 'Explain Page'}
+                  </button>
+                </div>
+                {deepExplainLoading ? (
+                  <div className="flex items-center gap-2 py-8" style={{ color: palette.muted }}>
+                    <Loader2 className="h-4 w-4 animate-spin text-[#247864]" />
+                    <span>{isZh ? '正在剖析背景、核心观点与句式难点…' : 'Analyzing passage…'}</span>
+                  </div>
+                ) : deepExplainError ? (
+                  <p className="text-rose-500">{deepExplainError}</p>
+                ) : deepExplainText ? (
+                  <div className="whitespace-pre-wrap leading-7 text-[13px]">{deepExplainText}</div>
+                ) : (
+                  <div className="rounded-xl border p-4 text-center space-y-2" style={{ borderColor: palette.border, backgroundColor: palette.surface }}>
+                    <p style={{ color: palette.muted }}>
+                      {isZh
+                        ? '选中任意段落点击「AI 精讲」，或点击上方「精讲本页」，立即获取背景、核心观点、重点词汇、句子结构与难点剖析。'
+                        : 'Select any passage or click Explain Page for a structured deep breakdown.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 2: Whole-Book Context AI Q&A */}
+            {aiTab === 'qa' && (
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="px-4 py-2 text-[11px] border-b" style={{ borderColor: palette.border, color: palette.muted }}>
+                  {isZh
+                    ? `已关联全书 ${wholeBookIndexedPages || Object.keys(extractedPages).length} 页上下文，支持跨章节提问`
+                    : `Indexed ${wholeBookIndexedPages || Object.keys(extractedPages).length} pages for whole-book Q&A`}
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
+                  {qaHistory.length === 0 && (
+                    <div className="space-y-2">
+                      <p style={{ color: palette.muted }}>
+                        {isZh ? '围绕整本书向 ONE AI 提问：' : 'Ask anything about the entire book:'}
+                      </p>
+                      {(isZh
+                        ? ['这本书的核心思想是什么？', '作者在全书中反复强调了哪些观点？', '帮我梳理前几章的逻辑脉络']
+                        : ['What is the central thesis of this book?', 'Summarize the key arguments across chapters']
+                      ).map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => setQaInput(q)}
+                          className="block w-full text-left rounded-xl border px-3 py-2 text-xs transition hover:opacity-80 cursor-pointer"
+                          style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {qaHistory.map((m, i) => (
+                    <div
+                      key={i}
+                      className={`rounded-2xl px-3.5 py-2.5 leading-relaxed ${m.role === 'user' ? 'ml-6 bg-[#247864] text-white' : 'mr-2 border'}`}
+                      style={m.role === 'assistant' ? { borderColor: palette.border, backgroundColor: palette.surface } : undefined}
+                    >
+                      <div className="whitespace-pre-wrap text-[13px]">{m.content}</div>
+                      {m.cited && m.cited.length > 0 && (
+                        <div className="mt-1.5 text-[10px] opacity-70">
+                          {isZh ? '参考出处：' : 'Sources: '}{m.cited.join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {qaLoading && (
+                    <div className="flex items-center gap-2 text-xs" style={{ color: palette.muted }}>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[#247864]" />
+                      <span>{isZh ? '正在检索全书并作答…' : 'Searching whole book…'}</span>
+                    </div>
+                  )}
+                </div>
+                <form
+                  onSubmit={(e) => void handleAskBookQa(e)}
+                  className="p-3 border-t flex items-center gap-2"
+                  style={{ borderColor: palette.border }}
+                >
+                  <input
+                    value={qaInput}
+                    onChange={(e) => setQaInput(e.target.value)}
+                    placeholder={isZh ? '针对整本书提问…' : 'Ask about this book…'}
+                    className="flex-1 rounded-xl border px-3 py-2 text-xs bg-transparent outline-none"
+                    style={{ borderColor: palette.border }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={qaLoading || !qaInput.trim()}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[#247864] text-white disabled:opacity-40 cursor-pointer"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* Tab 3: AI Summary (Paragraph / Chapter / Full Book) */}
+            {aiTab === 'summary' && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { id: 'paragraph' as const, label: isZh ? '当前段落' : 'Paragraph' },
+                    { id: 'chapter' as const, label: isZh ? '本页/本章' : 'Chapter' },
+                    { id: 'book' as const, label: isZh ? '整本书总结' : 'Full Book' },
+                  ].map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => void handleRunSummary(s.id)}
+                      className="rounded-xl border py-2 text-[11px] font-medium transition cursor-pointer"
+                      style={{
+                        borderColor: summaryScope === s.id ? '#247864' : palette.border,
+                        backgroundColor: summaryScope === s.id ? 'rgba(36,120,100,0.14)' : palette.surface,
+                      }}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+
+                {summaryLoading ? (
+                  <div className="flex items-center gap-2 py-8" style={{ color: palette.muted }}>
+                    <Loader2 className="h-4 w-4 animate-spin text-[#247864]" />
+                    <span>{isZh ? '正在提炼核心要点…' : 'Summarizing…'}</span>
+                  </div>
+                ) : summaryError ? (
+                  <p className="text-rose-500">{summaryError}</p>
+                ) : summaryText ? (
+                  <div className="whitespace-pre-wrap leading-7 text-[13px]">{summaryText}</div>
+                ) : (
+                  <p style={{ color: palette.muted }}>
+                    {isZh ? '点击上方按钮即可生成本页或整本书的精炼总结。' : 'Choose a scope above to generate a summary.'}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Tab 4: Personal Vocabulary Book */}
+            {aiTab === 'vocab' && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-2.5 text-xs">
+                {vocabLoading ? (
+                  <div className="flex items-center gap-2 py-6" style={{ color: palette.muted }}>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>{isZh ? '正在加载生词本…' : 'Loading vocabulary…'}</span>
+                  </div>
+                ) : vocabItems.length === 0 ? (
+                  <div className="rounded-xl border p-4 text-center" style={{ borderColor: palette.border, backgroundColor: palette.surface, color: palette.muted }}>
+                    {isZh ? '阅读时轻点任意单词并点击「存生词本」，即可积累你的个人词汇库。' : 'Tap any word while reading to save it to your vocabulary bank.'}
+                  </div>
+                ) : (
+                  vocabItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border p-3 space-y-1"
+                      style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="text-sm font-semibold" dir="auto">{item.word}</span>
+                          {item.reading && <span className="ml-2 font-mono text-[11px] text-[#247864]">{item.reading}</span>}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteVocab(item.id)}
+                          className="p-0.5 opacity-50 hover:opacity-100 cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <div className="text-xs leading-relaxed">{item.meaning}</div>
+                      {item.bookTitle && (
+                        <div className="text-[10px]" style={{ color: palette.muted }}>
+                          《{item.bookTitle}》
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </aside>
         )}
       </div>
 
-      {/* Bottom Apple Books Page Scrubber + Last-Page Return Action */}
-      {pageCount >= 1 && (
-        <div
-          className="flex items-center gap-3 border-t px-4 py-2.5 text-xs sm:px-5"
-          style={{ backgroundColor: theme.chromeBg, borderColor: theme.border }}
+      {/* Subtle Bottom Progress & Page Navigation Bar */}
+      <footer
+        className="shrink-0 z-20 flex items-center justify-between gap-3 px-4 h-11 border-t text-xs select-none"
+        style={{
+          backgroundColor: palette.isDark ? 'rgba(18,21,27,0.92)' : 'rgba(255,255,255,0.9)',
+          borderColor: palette.border,
+          paddingBottom: 'env(safe-area-inset-bottom)',
+        }}
+      >
+        <button
+          type="button"
+          disabled={pageNumber <= 1}
+          onClick={() => jumpToPage(pageNumber - 1)}
+          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 transition disabled:opacity-35 cursor-pointer"
         >
-          <span className="shrink-0 font-medium tabular-nums" style={{ color: theme.muted }}>
-            {pageNumber} / {pageCount}
+          <ArrowLeft className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">{isZh ? '上一页' : 'Prev'}</span>
+        </button>
+
+        <div className="flex flex-1 max-w-md items-center gap-3">
+          <input
+            type="range"
+            min={1}
+            max={Math.max(1, pageCount)}
+            value={pageNumber}
+            onChange={(e) => jumpToPage(Number(e.target.value))}
+            className="flex-1 accent-[#247864] cursor-pointer"
+          />
+          <span className="tabular-nums text-[11px] shrink-0" style={{ color: palette.muted }}>
+            {pageNumber} / {pageCount || 1} · {progressPct}%
           </span>
-          {pageCount > 1 ? (
-            <input
-              type="range"
-              min={1}
-              max={pageCount}
-              value={pageNumber}
-              onChange={(e) => setPageNumber(Number(e.target.value))}
-              aria-label="页面进度滑块"
-              className="h-1.5 flex-1 cursor-pointer accent-emerald-600"
-            />
-          ) : (
-            <div className="flex-1" />
-          )}
-          <span className="shrink-0 tabular-nums" style={{ color: theme.muted }}>
-            {Math.round((pageNumber / pageCount) * 100)}%
-          </span>
-          {isLastPage && onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              <span>{isChinese ? '读完返回' : 'Finish & Back'}</span>
-            </button>
-          )}
         </div>
-      )}
-    </section>
+
+        <button
+          type="button"
+          disabled={pageNumber >= pageCount}
+          onClick={() => jumpToPage(pageNumber + 1)}
+          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 transition disabled:opacity-35 cursor-pointer"
+        >
+          <span className="hidden sm:inline">{isZh ? '下一页' : 'Next'}</span>
+          <ArrowRight className="h-3.5 w-3.5" />
+        </button>
+      </footer>
+    </div>
   );
 };
+
+export default PdfDocumentViewer;

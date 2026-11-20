@@ -149,23 +149,72 @@ export const SpiritSpeechBubble: React.FC<SpiritSpeechBubbleProps> = ({ lang, co
       className="z-30 transition-opacity duration-200"
       data-testid="spirit-overhead-bubble"
     >
-      <div className="relative -translate-x-1/2 -translate-y-full pb-3">
+      <div className="relative -translate-x-1/2 -translate-y-full pb-2">
+        {bubble?.isAmbientHint && !snap.liveVoiceActive && !snap.voiceListening && !snap.pendingConfirmation ? (
+          <div
+            className={`w-[min(72vw,216px)] rounded-xl border px-2.5 py-1.5 transition-colors ${surfaceCls}`}
+          >
+            <div className="flex items-start justify-between gap-1.5">
+              <p className="text-[11px] leading-[1.45] opacity-90">{bubble.text}</p>
+              <button
+                type="button"
+                onClick={() => uiStateManager.hideSpiritBubble()}
+                className={`-mr-0.5 -mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded cursor-pointer opacity-60 hover:opacity-100 ${btnGhostCls}`}
+                title={isZh ? '关闭提示' : 'Dismiss'}
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </div>
+            {bubble.quickActions && bubble.quickActions.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                {bubble.quickActions.map((qa, idx) => (
+                  <button
+                    key={`${qa.action}_${idx}`}
+                    type="button"
+                    onClick={() => {
+                      if (qa.action === 'open_library') {
+                        uiStateManager.hideSpiritBubble();
+                        window.dispatchEvent(new CustomEvent('one-spirit-quick-action', { detail: { action: 'open_library' } }));
+                      } else if (qa.action === 'play_music') {
+                        window.dispatchEvent(new CustomEvent('one-music-play-inline', { detail: { query: '轻音乐 钢琴' } }));
+                      } else if (qa.action === 'next_music') {
+                        window.dispatchEvent(new Event('one-music-next-inline'));
+                      } else if (qa.action === 'stop_music') {
+                        window.dispatchEvent(new Event('one-music-force-stop'));
+                        uiStateManager.hideSpiritBubble();
+                      }
+                    }}
+                    className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium cursor-pointer transition-colors ${
+                      idx === 0
+                        ? accentBtnCls
+                        : isDay
+                        ? 'border border-black/10 bg-white/70 text-[#22322b] hover:bg-white'
+                        : 'border border-white/14 bg-white/[0.08] text-[#f2eee6] hover:bg-white/[0.15]'
+                    }`}
+                  >
+                    {qa.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
         <div
-          className={`w-[min(86vw,344px)] max-h-[54vh] overflow-y-auto rounded-2xl border p-3 transition-colors ${surfaceCls}`}
+          className={`w-[min(80vw,280px)] max-h-[46vh] overflow-y-auto rounded-2xl border p-2.5 transition-colors ${surfaceCls}`}
         >
-          {/* Header Row */}
-          <div className={`flex items-center justify-between gap-2 pb-1.5 mb-1.5 border-b ${isDay ? 'border-black/8' : 'border-white/10'}`}>
+          {/* Compact Header Row */}
+          <div className={`flex items-center justify-between gap-1.5 pb-1 mb-1 border-b ${isDay ? 'border-black/8' : 'border-white/10'}`}>
             <div className="flex items-center gap-1.5 min-w-0">
               <img
                 src="/assets/spirit/one-butterfly-avatar.jpg"
                 alt={snap.aiName}
                 referrerPolicy="no-referrer"
-                className="h-6 w-6 shrink-0 rounded-full object-cover ring-1 ring-black/10 dark:ring-white/20"
+                className="h-4.5 w-4.5 shrink-0 rounded-full object-cover ring-1 ring-black/10 dark:ring-white/20"
               />
-              <span className="text-xs font-semibold tracking-tight truncate">{snap.aiName}</span>
+              <span className="text-[11px] font-semibold tracking-tight truncate">{snap.aiName}</span>
               {liveBadgeText && (
                 <span
-                  className={`truncate rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
+                  className={`truncate rounded px-1 py-0.5 text-[9px] font-medium ${
                     snap.liveVoiceActive || snap.voiceListening
                       ? isDay
                         ? 'bg-[#dfeee6] text-[#1c4b39]'
@@ -275,8 +324,42 @@ export const SpiritSpeechBubble: React.FC<SpiritSpeechBubbleProps> = ({ lang, co
             <>
               {/* Main Spoken Dialogue Text */}
               {bubble?.text && (
-                <div className="text-[13px] leading-relaxed font-medium whitespace-pre-wrap break-words">
+                <div className="text-[11.5px] leading-[1.55] font-normal whitespace-pre-wrap break-words">
                   {bubble.text}
+                </div>
+              )}
+
+              {/* Subtle 1-Tap Ambient & Inline Music Quick Actions */}
+              {bubble?.quickActions && bubble.quickActions.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {bubble.quickActions.map((qa, idx) => (
+                    <button
+                      key={`${qa.action}_${idx}`}
+                      type="button"
+                      onClick={() => {
+                        if (qa.action === 'open_library') {
+                          uiStateManager.hideSpiritBubble();
+                          window.dispatchEvent(new CustomEvent('one-spirit-quick-action', { detail: { action: 'open_library' } }));
+                        } else if (qa.action === 'play_music') {
+                          window.dispatchEvent(new CustomEvent('one-music-play-inline', { detail: { query: '轻音乐 钢琴' } }));
+                        } else if (qa.action === 'next_music') {
+                          window.dispatchEvent(new Event('one-music-next-inline'));
+                        } else if (qa.action === 'stop_music') {
+                          window.dispatchEvent(new Event('one-music-force-stop'));
+                          uiStateManager.hideSpiritBubble();
+                        }
+                      }}
+                      className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium cursor-pointer transition-colors ${
+                        idx === 0
+                          ? accentBtnCls
+                          : isDay
+                          ? 'border border-black/12 bg-white/75 text-[#22322b] hover:bg-white'
+                          : 'border border-white/15 bg-white/[0.08] text-[#f2eee6] hover:bg-white/[0.15]'
+                      }`}
+                    >
+                      <span>{qa.label}</span>
+                    </button>
+                  ))}
                 </div>
               )}
 
@@ -411,10 +494,11 @@ export const SpiritSpeechBubble: React.FC<SpiritSpeechBubbleProps> = ({ lang, co
             </>
           )}
         </div>
+        )}
 
         {/* Speech Bubble Pointer Tail pointing cleanly to the 3D Spirit's head */}
         <div
-          className={`mx-auto -mt-[1px] h-3 w-3 rotate-45 border-b border-r ${
+          className={`mx-auto -mt-[1px] h-2 w-2 rotate-45 border-b border-r ${
             isDay ? 'border-[#d8cfbe] bg-[#faf7f0]' : 'border-white/18 bg-[#121b28]'
           }`}
         />

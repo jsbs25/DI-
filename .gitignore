@@ -18,6 +18,5 @@ tmp/
 dev-dist/
 .aistudio/
 data/pdfs/
+data/vocabulary_bank.json
 
-# Local Electron runtime binaries
-.electron-runtime/

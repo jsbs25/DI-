@@ -29,6 +29,7 @@ import {
 } from './server/oneAi/quotaAndSecurity.ts';
 import type { PrivacyMode, UnifiedContentPart, UnifiedMessage } from './server/oneAi/types.ts';
 import { getGeminiClient } from './server/geminiClient.ts';
+import { hasUnifiedLiveEngine, runUnifiedAiTurn } from './server/ai/unifiedAiCore.ts';
 import {
   AI_COMPANION_TOOLS,
   buildCompanionSystemInstruction,
@@ -127,7 +128,6 @@ import {
   type IslamicLibrarySource
 } from './server/islamicLibraryCrawler.ts';
 import { registerNoorIslamicLibraryRoutes } from './server/noorIslamicPdfService.ts';
-import { getGeminiStatus, libraryAiAnalyze, libraryAiAsk, libraryAiDictionary, libraryAiExplain, libraryAiOcr, libraryAiSummarize, libraryAiTranslate } from './server/libraryAiService.ts';
 
 dotenv.config();
 
@@ -3320,6 +3320,37 @@ app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
   };
 
   const runOneAiOrGateway = async (onDelta?: (delta: string) => void) => {
+    const useUnifiedCore =
+      !resolvedModelId.startsWith('ollama:') &&
+      resolvedModelId !== 'custom' &&
+      hasUnifiedLiveEngine();
+
+    if (useUnifiedCore) {
+      const fastMode = mode === 'search' || mode === 'browser' || mode === 'voice-agent' || mode === 'quick' || userPrompt.length < 180;
+      const unifiedRes = await runUnifiedAiTurn({
+        prompt: userPrompt,
+        systemInstruction: ctx.systemPrompt,
+        history: ctx.mergedHistory,
+        attachments: cleanAttachments,
+        maxTokens: ctx.resolvedMaxTokens,
+        speed: fastMode ? 'fast' : 'deep',
+        mode,
+        subjectKey: quota.subjectKey,
+        signal: abortController.signal,
+        onDelta,
+      });
+      if (unifiedRes.success && unifiedRes.content.trim()) {
+        return {
+          success: true,
+          content: unifiedRes.content,
+          tokens: unifiedRes.tokens,
+          modelLabel: 'ONE AI',
+          taskType: fastMode ? 'quick_qa' : 'deep_reasoning',
+          privacyMode: resolvedPrivacy,
+        };
+      }
+    }
+
     const useOneAiRouter =
       !resolvedModelId.startsWith('ollama:') &&
       resolvedModelId !== 'custom' &&
@@ -3427,7 +3458,7 @@ app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
   }
 
   // 3. If no live AI engine is configured, use multi-turn context + memory engine + live knowledge
-  if (!(apiKey && isOneAiAdmin(sessionUser)) && !aiGateway.hasLiveEngine()) {
+  if (!(apiKey && isOneAiAdmin(sessionUser)) && !hasUnifiedLiveEngine()) {
     const ctxReply = await generateContextAwareFallbackReply(ctx, mode);
     markIdempotencyFinished(quota.subjectKey, cleanIdem, { reply: ctxReply.text, tokens: Math.ceil(ctxReply.text.length / 2), intent: ctx.intent.kind });
     return emitDirectAnswer(ctxReply.text, 'ONE AI');
@@ -5270,27 +5301,6 @@ app.post('/api/library/shelf/:bookId/epub-reading-state', (req, res) => {
   res.json({ success: true, item });
 });
 
-app.post('/api/library/shelf/:bookId/pdf-reading-state', (req, res) => {
-  const user = getSessionUser(req);
-  if (!user) return res.status(401).json({ success: false, error: 'Unauthorized.' });
-  const book = store.books.find(b => b.id === req.params.bookId);
-  if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
-  const progress = Number(req.body.progress);
-  if (!Number.isFinite(progress) || progress < 0 || progress > 100) {
-    return res.status(400).json({ success: false, error: 'A valid reading progress percentage is required' });
-  }
-  const state = {
-    page: req.body.page,
-    zoom: req.body.zoom,
-    theme: req.body.theme,
-    viewMode: req.body.viewMode,
-    rotation: req.body.rotation,
-  };
-  const item = store.updateBookShelfPdfReadingState(user.id, book.id, state, progress);
-  if (!item) return res.status(404).json({ success: false, error: 'Book is not on this user’s bookshelf' });
-  res.json({ success: true, item });
-});
-
 app.get('/api/library/books', (req, res) => {
   const { category, search } = req.query;
   let books = store.books;
@@ -5326,31 +5336,8 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
   const { prompt, systemInstruction } = buildReadingPrompt(evidence, req.body.replyLanguage);
   let replyContent = '';
   let errorMsg = '';
-  let provider: 'gemini' | 'fallback' | 'none' = 'none';
-  let model: string | undefined;
 
-  // Prefer Gemini when configured (context-aware, evidence-grounded)
-  try {
-    const gemini = getGeminiClient();
-    if (gemini) {
-      const geminiModel = process.env.GEMINI_FLASH_MODEL || 'gemini-2.5-flash';
-      const resp = await gemini.models.generateContent({
-        model: geminiModel,
-        contents: [{ role: 'user', parts: [{ text: `${systemInstruction}\n\n${prompt}` }] }],
-        config: { temperature: 0.2, maxOutputTokens: 1200 },
-      });
-      const textOut = (resp as any)?.text?.trim?.() || '';
-      if (textOut) {
-        replyContent = textOut;
-        provider = 'gemini';
-        model = geminiModel;
-      }
-    }
-  } catch (e: any) {
-    errorMsg = e?.message || String(e);
-  }
-
-  if (!replyContent && oneAiRouter.hasAnyUsableEngine()) {
+  if (oneAiRouter.hasAnyUsableEngine()) {
     const reqUser = getSessionUser(req);
     const routed = await oneAiRouter.executeUnifiedTurn({
       requestId: `libread_${Date.now().toString(36)}`,
@@ -5363,14 +5350,13 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
         { role: 'user', content: prompt },
       ],
       mode: 'library-reading',
-      maxTokens: 1024,
+      maxTokens: 768,
       stream: false,
     });
     if (routed.success && routed.content.trim()) {
       replyContent = routed.content.trim();
-      provider = 'fallback';
     } else {
-      errorMsg = routed.errorMessage || errorMsg;
+      errorMsg = routed.errorMessage || '';
     }
   }
 
@@ -5378,7 +5364,6 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
     const result = await aiGateway.generateContent('one-ai', prompt, systemInstruction, undefined, undefined, undefined, { mode: 'library-reading' });
     if (result.success && result.content.trim()) {
       replyContent = result.content.trim();
-      provider = 'fallback';
     } else {
       errorMsg = result.errorMessage || errorMsg;
     }
@@ -5390,22 +5375,16 @@ app.post('/api/library/books/:id/ai-reading', async (req, res) => {
       error: errorMsg || '当前没有可用的 AI 模型；正文和引用已核验，但未生成回答。',
       citation: evidence.citation,
       coverage: evidence.coverage,
-      notice: evidence.notice,
-      provider,
-      model,
+      notice: evidence.notice
     });
   }
 
   res.json({
     success: true,
-    // Keep both fields for compatibility (AppleBookReader reads `answer`, some clients read `message.content`)
-    answer: replyContent,
     message: { content: replyContent },
     citation: evidence.citation,
     coverage: evidence.coverage,
-    notice: evidence.notice,
-    provider,
-    model,
+    notice: evidence.notice
   });
 });
 
@@ -5478,28 +5457,6 @@ app.delete('/api/library/books/:id/annotations/:annotationId', (req, res) => {
   if (!removed) return res.status(404).json({ success: false, error: 'Annotation not found' });
   res.json({ success: true });
 });
-
-// Unified Library AI Service (Gemini-backed, with transparent fallback/error reporting)
-app.get('/api/library-ai/status', (_req, res) => {
-  res.json({ success: true, ...getGeminiStatus() });
-});
-const libraryAiHandler = (action: 'explain'|'translate'|'dictionary'|'analyze'|'summarize'|'ask'|'ocr', fn: any) => async (req: any, res: any) => {
-  try {
-    const ctx = req.body && typeof req.body === 'object' ? req.body : {};
-    const result = await fn(ctx, req);
-    const status = result.success ? 200 : (result.errorCode === 'GEMINI_UNAVAILABLE' || result.errorCode === 'NO_AI_ENGINE' ? 503 : 500);
-    res.status(status).json(result);
-  } catch (err: any) {
-    res.status(500).json({ success: false, action, error: err?.message || 'Library AI request failed' });
-  }
-};
-app.post('/api/library-ai/explain', libraryAiHandler('explain', libraryAiExplain));
-app.post('/api/library-ai/translate', libraryAiHandler('translate', libraryAiTranslate));
-app.post('/api/library-ai/dictionary', libraryAiHandler('dictionary', libraryAiDictionary));
-app.post('/api/library-ai/analyze', libraryAiHandler('analyze', libraryAiAnalyze));
-app.post('/api/library-ai/summarize', libraryAiHandler('summarize', libraryAiSummarize));
-app.post('/api/library-ai/ask', libraryAiHandler('ask', libraryAiAsk));
-app.post('/api/library-ai/ocr', libraryAiHandler('ocr', libraryAiOcr));
 
 // Mount Noor / Islamic Multi-Format Library APIs (IslamHouse 12,724+ Books/Quran/Audios/Videos/Articles/Khotab/Fatwa,
 // Archive.org resolver, CORS-free streaming & download proxy, and direct download-to-bookshelf vault)

@@ -66,14 +66,14 @@ interface ScoredCandidate {
 const DEFAULT_COOLDOWN_MS_BY_ERR: Record<ErrorCategory, number> = {
   auth_invalid: 30 * 60 * 1000,
   quota_exhausted: 6 * 60 * 60 * 1000,
-  rate_limited: 25 * 1000,
+  rate_limited: 4 * 1000,
   model_deprecated: 24 * 60 * 60 * 1000,
   context_overflow: 0,
   content_filtered: 0,
-  timeout: 45 * 1000,
-  upstream_5xx: 60 * 1000,
-  schema_invalid: 15 * 1000,
-  network_error: 30 * 1000,
+  timeout: 10 * 1000,
+  upstream_5xx: 15 * 1000,
+  schema_invalid: 10 * 1000,
+  network_error: 10 * 1000,
 };
 
 export class OneAiRouterEngine {

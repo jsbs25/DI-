@@ -25,8 +25,10 @@ import type { Book, BookAnnotation, Language } from '../../types/index.ts';
 import { isRtlLanguage } from './bookEmbedUrl.ts';
 import { speakSpiritReply, stopSpiritSpeech } from '../../agent/agentClient.ts';
 
-export type AppleThemeId = 'original' | 'quiet' | 'paper' | 'calm' | 'midnight';
-export type AppleFontId = 'serif' | 'sans' | 'kai' | 'georgia';
+import { loadBookProgress, saveBookProgress, TEXT_COLOR_PRESETS } from '../../utils/readerPreferences.ts';
+
+export type AppleThemeId = 'original' | 'quiet' | 'paper' | 'calm' | 'midnight' | 'custom';
+export type AppleFontId = 'serif' | 'sans' | 'kai' | 'georgia' | 'amiri' | 'naskh';
 export type AppleLayoutMode = 'spread' | 'single' | 'scroll';
 export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple';
 
@@ -35,16 +37,28 @@ interface AppleReaderPrefs {
   font: AppleFontId;
   fontSize: number;
   lineHeight: number;
+  paragraphSpacing: number;
+  pageMargin: number;
+  maxWidth: number;
+  textAlign: 'justify' | 'left';
+  customTextColor: string | null;
+  customBgColor: string;
   layout: AppleLayoutMode;
 }
 
-const PREFS_STORAGE_KEY = 'one_apple_books_prefs_v1';
+const PREFS_STORAGE_KEY = 'one_apple_books_prefs_v2';
 
 const DEFAULT_PREFS: AppleReaderPrefs = {
   theme: 'quiet',
   font: 'serif',
   fontSize: 19,
   lineHeight: 1.9,
+  paragraphSpacing: 20,
+  pageMargin: 36,
+  maxWidth: 740,
+  textAlign: 'justify',
+  customTextColor: null,
+  customBgColor: '#F6F3EC',
   layout: 'spread',
 };
 
@@ -80,19 +94,20 @@ const THEME_TOKENS: Record<
     isDark: false,
   },
   quiet: {
-    label: '静谧米',
-    bg: '#F2ECE0',
-    pageBg: '#F9F5EC',
-    chromeBg: 'rgba(249, 245, 236, 0.94)',
+    label: '典籍纸张',
+    bg: '#EDE6D8',
+    paper: '#FCF9F2',
+    pageBg: '#FCF9F2',
+    chromeBg: 'rgba(252, 249, 242, 0.94)',
     popoverBg: '#FCF9F2',
-    ink: '#26211B',
-    muted: '#746B5F',
-    border: '#E5DCCB',
-    accent: '#9A6324',
-    swatch: '#F9F5EC',
+    ink: '#1B1713',
+    muted: '#8B7557',
+    border: '#DDD4C0',
+    accent: '#8B6F47',
+    swatch: '#FCF9F2',
     swatchRing: '#D4C7AF',
     isDark: false,
-  },
+  } as any,
   paper: {
     label: '纸韵暖',
     bg: '#E8DEC8',
@@ -130,10 +145,24 @@ const THEME_TOKENS: Record<
     ink: '#E5E5EA',
     muted: '#8E8E93',
     border: '#2C2C2E',
-    accent: '#70C8FF',
+    accent: '#52B798',
     swatch: '#0E0E11',
     swatchRing: '#48484A',
     isDark: true,
+  },
+  custom: {
+    label: '自定义',
+    bg: '#F2EFE8',
+    pageBg: '#F6F3EC',
+    chromeBg: 'rgba(246, 243, 236, 0.94)',
+    popoverBg: '#FAF8F3',
+    ink: '#1E2421',
+    muted: '#66716B',
+    border: '#DFD8C8',
+    accent: '#247864',
+    swatch: '#E6DFCE',
+    swatchRing: '#B9AE96',
+    isDark: false,
   },
 };
 
@@ -144,7 +173,7 @@ const FONT_STACKS: Record<AppleFontId, { label: string; sample: string; family: 
     family: '"Songti SC", "Noto Serif SC", "Source Han Serif SC", Georgia, "Times New Roman", serif',
   },
   sans: {
-    label: '苹果黑体',
+    label: '黑体无衬线',
     sample: '黑',
     family: '-apple-system, BlinkMacSystemFont, "PingFang SC", "SF Pro Text", "Helvetica Neue", sans-serif',
   },
@@ -157,6 +186,16 @@ const FONT_STACKS: Record<AppleFontId, { label: string; sample: string; family: 
     label: 'Georgia',
     sample: 'Aa',
     family: 'Georgia, "Iowan Old Style", "Palatino Linotype", "Songti SC", serif',
+  },
+  amiri: {
+    label: '典籍纳斯赫',
+    sample: 'ع',
+    family: '"Scheherazade New", "Amiri", "Noto Naskh Arabic", "Traditional Arabic", serif',
+  },
+  naskh: {
+    label: 'Naskh 阿语清晰',
+    sample: 'ن',
+    family: '"Noto Naskh Arabic", "Amiri", "Geeza Pro", "Segoe UI", sans-serif',
   },
 };
 
@@ -232,14 +271,20 @@ function paginateChapter(
 
 function loadPrefs(): AppleReaderPrefs {
   try {
-    const raw = localStorage.getItem(PREFS_STORAGE_KEY);
+    const raw = localStorage.getItem(PREFS_STORAGE_KEY) || localStorage.getItem('one_apple_books_prefs_v1');
     if (!raw) return DEFAULT_PREFS;
     const parsed = JSON.parse(raw);
     return {
       theme: parsed.theme in THEME_TOKENS ? parsed.theme : DEFAULT_PREFS.theme,
       font: parsed.font in FONT_STACKS ? parsed.font : DEFAULT_PREFS.font,
-      fontSize: typeof parsed.fontSize === 'number' ? Math.min(28, Math.max(14, parsed.fontSize)) : DEFAULT_PREFS.fontSize,
-      lineHeight: typeof parsed.lineHeight === 'number' ? Math.min(2.4, Math.max(1.5, parsed.lineHeight)) : DEFAULT_PREFS.lineHeight,
+      fontSize: typeof parsed.fontSize === 'number' ? Math.min(30, Math.max(13, parsed.fontSize)) : DEFAULT_PREFS.fontSize,
+      lineHeight: typeof parsed.lineHeight === 'number' ? Math.min(2.5, Math.max(1.4, parsed.lineHeight)) : DEFAULT_PREFS.lineHeight,
+      paragraphSpacing: typeof parsed.paragraphSpacing === 'number' ? Math.min(40, Math.max(8, parsed.paragraphSpacing)) : DEFAULT_PREFS.paragraphSpacing,
+      pageMargin: typeof parsed.pageMargin === 'number' ? Math.min(72, Math.max(16, parsed.pageMargin)) : DEFAULT_PREFS.pageMargin,
+      maxWidth: typeof parsed.maxWidth === 'number' ? Math.min(980, Math.max(540, parsed.maxWidth)) : DEFAULT_PREFS.maxWidth,
+      textAlign: parsed.textAlign === 'left' ? 'left' : 'justify',
+      customTextColor: typeof parsed.customTextColor === 'string' ? parsed.customTextColor : null,
+      customBgColor: typeof parsed.customBgColor === 'string' ? parsed.customBgColor : DEFAULT_PREFS.customBgColor,
       layout: ['spread', 'single', 'scroll'].includes(parsed.layout) ? parsed.layout : DEFAULT_PREFS.layout,
     };
   } catch {
@@ -334,21 +379,20 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
   const [aiCitation, setAiCitation] = useState<BookAnnotation['citation'] | null>(null);
-  const [aiNotice, setAiNotice] = useState<string>('');
-  const [aiCoverage, setAiCoverage] = useState<string>('');
-  const [aiProvider, setAiProvider] = useState<string>('');
   const [statusToast, setStatusToast] = useState<string | null>(null);
 
-  // Full-Page AI Tutor ("这一页怎么讲")
+  // Unified ONE AI Panel ("AI 精讲 / 全书问答 / AI 总结")
   const [pageAiOpen, setPageAiOpen] = useState(false);
+  const [pageAiTab, setPageAiTab] = useState<'explain' | 'qa' | 'summary'>('explain');
   const [pageAiLoading, setPageAiLoading] = useState(false);
   const [pageAiAnswer, setPageAiAnswer] = useState('');
   const [pageAiError, setPageAiError] = useState('');
   const [pageAiQuestion, setPageAiQuestion] = useState('');
   const [pageAiKey, setPageAiKey] = useState('');
-  const [pageAiAction, setPageAiAction] = useState<'explain' | 'translate' | 'summarize' | 'ask'>('explain');
-  const [pageAiTargetLang, setPageAiTargetLang] = useState<'zh' | 'en' | 'ar'>('zh');
-  const [pageAiProvider, setPageAiProvider] = useState('');
+  const [bookQaHistory, setBookQaHistory] = useState<Array<{ q: string; a: string }>>([]);
+  const [summaryText, setSummaryText] = useState('');
+  const [inlineTranslation, setInlineTranslation] = useState<{ loading: boolean; text: string } | null>(null);
+  const [vocabSavedWord, setVocabSavedWord] = useState<string | null>(null);
 
   // Tap-Any-Word AI Dictionary Card ("点一个不会的单词点开自动查")
   const [lookupWord, setLookupWord] = useState<string | null>(null);
@@ -356,10 +400,12 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
   const [lookupError, setLookupError] = useState('');
   const [lookupEntry, setLookupEntry] = useState<{
     word: string;
+    lemma?: string;
     reading: string;
     partOfSpeech: string;
     root: string;
     meaning: string;
+    usage?: string;
     contextMeaning: string;
     example: string;
   } | null>(null);
@@ -372,7 +418,18 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
 
   const chapters = book.chapters && book.chapters.length > 0 ? book.chapters : [{ id: 'ch1', title: book.title, content: book.description || '' }];
   const activeChapter = chapters[chapterIndex] || chapters[0];
-  const theme = THEME_TOKENS[prefs.theme];
+  const baseTheme = THEME_TOKENS[prefs.theme];
+  const theme = useMemo(() => {
+    const resolvedBg = prefs.theme === 'custom' ? prefs.customBgColor : baseTheme.bg;
+    const resolvedPageBg = prefs.theme === 'custom' ? prefs.customBgColor : baseTheme.pageBg;
+    const resolvedInk = prefs.customTextColor || baseTheme.ink;
+    return {
+      ...baseTheme,
+      bg: resolvedBg,
+      pageBg: resolvedPageBg,
+      ink: resolvedInk,
+    };
+  }, [baseTheme, prefs.theme, prefs.customBgColor, prefs.customTextColor]);
   const fontMeta = FONT_STACKS[prefs.font];
   const rtl = isRtlLanguage(book.language);
 
@@ -443,13 +500,24 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     return Math.max(1, Math.ceil(remainingChars / 380));
   }, [pages, pageIndex, spreadLeftIdx, effectiveLayout]);
 
-  // Debounced automatic progress persistence to backend
+  // Debounced automatic progress persistence to backend + local reading history
   useEffect(() => {
     const timer = window.setTimeout(() => {
       onSaveProgress(progressPercent, activeChapter.id, activeChapter.title);
+      const existing = loadBookProgress(book.id);
+      saveBookProgress({
+        bookKey: book.id,
+        title: book.title,
+        pageNumber: chapterIndex + 1,
+        totalPages: chapters.length,
+        scrollRatio: Math.max(0, Math.min(1, progressPercent / 100)),
+        progressPct: progressPercent,
+        bookmarks: existing?.bookmarks || [],
+        updatedAt: new Date().toISOString(),
+      });
     }, 800);
     return () => clearTimeout(timer);
-  }, [progressPercent, activeChapter.id, activeChapter.title]);
+  }, [progressPercent, activeChapter.id, activeChapter.title, book.id, book.title, chapterIndex, chapters.length]);
 
   // Stop voice on unmount
   useEffect(() => {
@@ -635,29 +703,20 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     setAiLoading(true);
     setAiAnswer(null);
     setAiCitation(null);
-    setAiNotice('');
-    setAiCoverage('');
-    setAiProvider('');
     try {
       const res = await fetch(`/api/library/books/${encodeURIComponent(book.id)}/ai-reading`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
           chapterId: activeChapter.id,
           selectedText: passage,
           mode: 'explain',
-          replyLanguage: isZh ? 'zh' : 'en',
         }),
       });
       const data = await res.json();
-      if (data?.success && (data.answer || data.message?.content)) {
-        setAiAnswer(data.answer || data.message?.content || '');
+      if (data?.success && data.answer) {
+        setAiAnswer(data.answer);
         setAiCitation(data.citation || null);
-        setAiNotice(typeof data.notice === 'string' ? data.notice : '');
-        setAiCoverage(typeof data.coverage === 'string' ? data.coverage : '');
-        const p = data.provider ? `${data.provider}${data.model ? '/' + data.model : ''}` : '';
-        setAiProvider(p);
       } else {
         setAiAnswer(data?.error || (isZh ? '暂时未能生成 AI 伴读解析，请稍后再试。' : 'Could not generate AI insight right now.'));
       }
@@ -705,58 +764,34 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     chapterIndex >= chapters.length - 1 &&
     (effectiveLayout === 'scroll' || spreadLeftIdx + (effectiveLayout === 'spread' ? 2 : 1) >= pages.length);
 
-  const runPageAiAction = useCallback(
-    async (action: 'explain' | 'translate' | 'summarize' | 'ask', customQuestion?: string) => {
-      const pageContent = currentVisiblePageText.trim() || activeChapter.title;
+  const handleExplainCurrentPage = useCallback(
+    async (customQuestion?: string, overridePassage?: string) => {
+      const pageContent = (overridePassage || currentVisiblePageText).trim() || activeChapter.title;
       setPageAiOpen(true);
-      setPageAiAction(action);
+      setPageAiTab('explain');
       setPageAiLoading(true);
       setPageAiError('');
-      setPageAiProvider('');
       const q = typeof customQuestion === 'string' ? customQuestion.trim() : '';
-      const endpoint = action === 'explain' ? '/api/library/ai/explain-page' : `/api/library-ai/${action}`;
+
       try {
-        const body: Record<string, unknown> = {
-          bookId: book.id,
-          title: book.title,
-          bookTitle: book.title,
-          author: book.author,
-          chapterId: activeChapter.id,
-          chapterTitle: activeChapter.title,
-          pageNumber: spreadLeftIdx + 1,
-          pageText: pageContent,
-          selectedText: selectedText || pageContent,
-          surroundingContext: pageContent.slice(0, 3500),
-          language: book.language || 'zh',
-          lang: isZh ? 'zh' : 'en',
-          uiLanguage: isZh ? 'zh' : 'en',
-        };
-        if (action === 'explain') {
-          body.question = q || undefined;
-        } else if (action === 'translate') {
-          body.targetLanguage = pageAiTargetLang;
-          body.question = q || undefined;
-        } else if (action === 'summarize') {
-          body.question = q || undefined;
-        } else if (action === 'ask') {
-          body.question = q || pageAiQuestion || (isZh ? '请结合当前页内容回答。' : 'Answer based on this page.');
-        }
-        const res = await fetch(endpoint, {
+        const res = await fetch('/api/library/ai/deep-explain', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            title: `${book.title} · ${activeChapter.title}`,
+            passage: pageContent,
+            pageNumber: spreadLeftIdx + 1,
+            question: q || undefined,
+            lang: isZh ? 'zh' : 'en',
+          }),
         });
         const data = await res.json();
-        if (data?.success) {
-          const textOut = data.explanation || data.content || data.answer || data.message?.content || '';
-          setPageAiAnswer(textOut || (isZh ? 'AI 已完成分析，但未返回可显示文本。' : 'No displayable text returned.'));
+        if (data?.success && data.explanation) {
+          setPageAiAnswer(data.explanation);
           setPageAiKey(currentPageKey);
-          const p = data.provider ? `${data.provider}${data.model ? '/' + data.model : ''}` : '';
-          setPageAiProvider(p);
           if (q) setPageAiQuestion('');
         } else {
-          setPageAiError(data?.error || (isZh ? 'AI 本页处理失败，请稍后重试。' : 'AI request failed.'));
+          setPageAiError(data?.error || (isZh ? 'AI 精讲暂时不可用，请稍后重试。' : 'Could not explain this page.'));
         }
       } catch {
         setPageAiError(isZh ? '网络波动，请稍后重试。' : 'Network error.');
@@ -764,13 +799,133 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         setPageAiLoading(false);
       }
     },
-    [activeChapter.id, activeChapter.title, book.author, book.id, book.language, book.title, currentPageKey, currentVisiblePageText, isZh, pageAiQuestion, pageAiTargetLang, selectedText, spreadLeftIdx]
+    [activeChapter.title, book.title, currentPageKey, currentVisiblePageText, isZh, spreadLeftIdx]
   );
 
-  const handleExplainCurrentPage = useCallback(
-    async (customQuestion?: string) => runPageAiAction('explain', customQuestion),
-    [runPageAiAction]
+  const handleBookQa = useCallback(
+    async (question: string) => {
+      const q = question.trim();
+      if (!q) return;
+      setPageAiOpen(true);
+      setPageAiTab('qa');
+      setPageAiLoading(true);
+      setPageAiError('');
+      try {
+        const allChunks = chapters.map((ch, idx) => ({
+          page: idx + 1,
+          text: `${ch.title}\n${(ch.content || '').slice(0, 2600)}`,
+        }));
+        const res = await fetch('/api/library/ai/book-qa', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: book.title,
+            question: q,
+            currentPage: chapterIndex + 1,
+            currentPageText: currentVisiblePageText,
+            bookChunks: allChunks,
+            lang: isZh ? 'zh' : 'en',
+          }),
+        });
+        const data = await res.json();
+        if (data?.success && data.answer) {
+          setBookQaHistory((prev) => [...prev, { q, a: data.answer }]);
+          setPageAiQuestion('');
+        } else {
+          setPageAiError(data?.error || '全书问答暂时不可用。');
+        }
+      } catch {
+        setPageAiError('网络波动，请稍后重试。');
+      } finally {
+        setPageAiLoading(false);
+      }
+    },
+    [book.title, chapterIndex, chapters, currentVisiblePageText, isZh]
   );
+
+  const handleSummarize = useCallback(
+    async (scope: 'paragraph' | 'chapter' | 'book') => {
+      setPageAiOpen(true);
+      setPageAiTab('summary');
+      setPageAiLoading(true);
+      setPageAiError('');
+      const content =
+        scope === 'paragraph'
+          ? (selectedText.trim() || currentVisiblePageText)
+          : scope === 'chapter'
+            ? `${activeChapter.title}\n${activeChapter.content || ''}`
+            : chapters.map((ch) => `【${ch.title}】\n${(ch.content || '').slice(0, 900)}`).join('\n\n');
+      try {
+        const res = await fetch('/api/library/ai/summarize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: book.title,
+            scope,
+            content: content.slice(0, 14000),
+            lang: isZh ? 'zh' : 'en',
+          }),
+        });
+        const data = await res.json();
+        if (data?.success && data.summary) {
+          setSummaryText(data.summary);
+        } else {
+          setPageAiError(data?.error || '总结生成失败。');
+        }
+      } catch {
+        setPageAiError('网络波动，请稍后重试。');
+      } finally {
+        setPageAiLoading(false);
+      }
+    },
+    [activeChapter.content, activeChapter.title, book.title, chapters, currentVisiblePageText, isZh, selectedText]
+  );
+
+  const handleInlineTranslate = useCallback(
+    async (text: string) => {
+      const clean = text.trim();
+      if (!clean) return;
+      setInlineTranslation({ loading: true, text: '' });
+      try {
+        const res = await fetch('/api/library/ai/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: clean,
+            targetLang: isZh ? 'zh' : 'en',
+            bookTitle: book.title,
+          }),
+        });
+        const data = await res.json();
+        setInlineTranslation({
+          loading: false,
+          text: data?.success && data.translation ? data.translation : data?.error || '翻译失败，请重试。',
+        });
+      } catch {
+        setInlineTranslation({ loading: false, text: '网络波动，请稍后重试。' });
+      }
+    },
+    [book.title, isZh]
+  );
+
+  const handleSaveToVocabulary = useCallback(async () => {
+    if (!lookupEntry) return;
+    try {
+      const res = await fetch('/api/library/vocabulary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...lookupEntry,
+          bookTitle: book.title,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success) {
+        setVocabSavedWord(lookupEntry.word);
+        flashToast(isZh ? `已将「${lookupEntry.word}」收入生词本` : `Saved "${lookupEntry.word}"`);
+      }
+    } catch {}
+  }, [book.title, flashToast, isZh, lookupEntry]);
 
   const handleLookupWord = useCallback(
     async (rawWord: string, contextSentence?: string) => {
@@ -788,19 +943,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         const res = await fetch('/api/library/ai/lookup-word', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify({
-            bookId: book.id,
             word: cleaned,
-            selectedText: cleaned,
-            contextSentence: (contextSentence || currentVisiblePageText).slice(0, 600),
-            surroundingContext: (contextSentence || currentVisiblePageText).slice(0, 1200),
+            contextSentence: (contextSentence || currentVisiblePageText).slice(0, 320),
             bookTitle: book.title,
-            title: book.title,
-            chapterTitle: activeChapter.title,
-            language: book.language || 'zh',
             lang: isZh ? 'zh' : 'en',
-            uiLanguage: isZh ? 'zh' : 'en',
           }),
         });
         const data = await res.json();
@@ -921,14 +1068,15 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
       dir={rtl ? 'rtl' : 'ltr'}
       lang={book.language || undefined}
     >
-      {/* Subtle Apple Books Running Header */}
+      {/* Classical 3-column Sepia Running Header matching physical book spread */}
       <div
-        className="mb-5 flex items-center justify-between text-[11px] tracking-wide select-none"
+        className="mb-5 grid grid-cols-3 items-center text-[11px] tracking-wide select-none"
         style={{ color: theme.muted }}
       >
-        <span className="truncate max-w-[78%]">{runningHeader}</span>
-        <span className="font-mono text-[10px] opacity-75">
-          {chapterIndex + 1}/{chapters.length}
+        <span className="truncate text-start">{runningHeader}</span>
+        <span className="text-center font-mono text-[10.5px] opacity-85">{pageNumLabel}</span>
+        <span className="truncate text-end font-mono text-[10.5px] opacity-85">
+          {isZh ? `第 ${chapterIndex + 1} 章` : `Ch. ${chapterIndex + 1}`}
         </span>
       </div>
 
@@ -939,9 +1087,13 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         onClick={handleTapWordLookup}
         className="flex-1 overflow-y-auto pr-1 cursor-text"
         style={{
-          fontFamily: fontMeta.family,
-          fontSize: `${prefs.fontSize}px`,
-          lineHeight: prefs.lineHeight,
+          fontFamily:
+            rtl && prefs.font !== 'amiri' && prefs.font !== 'naskh'
+              ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
+              : fontMeta.family,
+          fontSize: `${rtl ? Math.max(prefs.fontSize + 4, 22) : prefs.fontSize}px`,
+          lineHeight: rtl ? Math.max(prefs.lineHeight, 2.25) : prefs.lineHeight,
+          wordSpacing: rtl ? '0.06em' : undefined,
           color: theme.ink,
         }}
       >
@@ -962,11 +1114,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
           </header>
         )}
 
-        <div className="space-y-5">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: `${prefs.paragraphSpacing}px` }}>
           {page.paragraphs.map((para, idx) => (
             <p
               key={`${activeChapter.id}_${page.index}_${idx}`}
-              className="text-justify tracking-[0.01em]"
+              className={prefs.textAlign === 'justify' ? 'text-justify tracking-[0.01em] break-words' : 'text-left tracking-[0.01em] break-words'}
               style={{ textIndent: !rtl && !para.startsWith('"') && !para.startsWith('【') && !/^[A-Za-z]/.test(para) ? '2em' : undefined }}
             >
               {renderParagraphWithHighlights(para, currentChapterAnnotations, theme.isDark)}
@@ -1175,7 +1327,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         {/* =============================================================== */}
         {appearanceOpen && (
           <div
-            className="absolute right-3 sm:right-6 top-16 z-50 w-[min(92vw,324px)] rounded-2xl p-4 shadow-2xl"
+            className="absolute right-3 sm:right-6 top-16 z-50 max-h-[80vh] w-[min(92vw,348px)] overflow-y-auto rounded-2xl p-4 shadow-2xl"
             style={{
               backgroundColor: theme.popoverBg,
               border: `1px solid ${theme.border}`,
@@ -1183,7 +1335,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             }}
           >
             <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-semibold tracking-tight">{isZh ? '主题与排版设置' : 'Themes & Settings'}</span>
+              <span className="text-xs font-semibold tracking-tight">{isZh ? '阅读与排版设置' : 'Themes & Typography'}</span>
               <button
                 type="button"
                 onClick={() => setAppearanceOpen(false)}
@@ -1193,8 +1345,8 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               </button>
             </div>
 
-            {/* 5 Apple Theme Circles */}
-            <div className="grid grid-cols-5 gap-2 pb-4" style={{ borderBottom: `1px solid ${theme.border}` }}>
+            {/* Reading Background Presets + Custom Background */}
+            <div className="grid grid-cols-6 gap-1.5 pb-4" style={{ borderBottom: `1px solid ${theme.border}` }}>
               {(Object.keys(THEME_TOKENS) as AppleThemeId[]).map((tid) => {
                 const t = THEME_TOKENS[tid];
                 const active = prefs.theme === tid;
@@ -1203,12 +1355,12 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                     key={tid}
                     type="button"
                     onClick={() => setPrefs((p) => ({ ...p, theme: tid }))}
-                    className="flex flex-col items-center gap-1.5 cursor-pointer group"
+                    className="flex flex-col items-center gap-1 cursor-pointer group"
                   >
                     <span
-                      className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-serif font-semibold transition-transform group-hover:scale-105"
+                      className="flex h-9 w-9 items-center justify-center rounded-full text-[11px] font-serif font-semibold transition-transform group-hover:scale-105"
                       style={{
-                        backgroundColor: t.swatch,
+                        backgroundColor: tid === 'custom' ? prefs.customBgColor : t.swatch,
                         color: t.ink,
                         border: active ? `2.5px solid ${theme.accent}` : `1.5px solid ${t.swatchRing}`,
                       }}
@@ -1223,38 +1375,47 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               })}
             </div>
 
+            {prefs.theme === 'custom' && (
+              <div className="flex items-center justify-between py-2.5 text-[11px]" style={{ borderBottom: `1px solid ${theme.border}` }}>
+                <span style={{ color: theme.muted }}>自定义背景色</span>
+                <input
+                  type="color"
+                  value={prefs.customBgColor}
+                  onChange={(e) => setPrefs((p) => ({ ...p, customBgColor: e.target.value }))}
+                  className="h-7 w-10 cursor-pointer rounded border-0 bg-transparent"
+                />
+              </div>
+            )}
+
             {/* Font Size Stepper */}
-            <div className="py-3.5" style={{ borderBottom: `1px solid ${theme.border}` }}>
+            <div className="py-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
               <div className="mb-2 flex items-center justify-between text-[11px]" style={{ color: theme.muted }}>
                 <span>{isZh ? '字号大小' : 'Font Size'}</span>
                 <span className="font-mono">{prefs.fontSize} px</span>
               </div>
-              <div
-                className="grid grid-cols-2 overflow-hidden rounded-xl"
-                style={{ border: `1px solid ${theme.border}` }}
-              >
+              <div className="grid grid-cols-2 overflow-hidden rounded-xl" style={{ border: `1px solid ${theme.border}` }}>
                 <button
                   type="button"
-                  onClick={() => setPrefs((p) => ({ ...p, fontSize: Math.max(14, p.fontSize - 1) }))}
-                  className="py-2 text-xs font-medium transition-opacity hover:opacity-75 cursor-pointer"
+                  onClick={() => setPrefs((p) => ({ ...p, fontSize: Math.max(13, p.fontSize - 1) }))}
+                  className="py-2 text-xs font-medium hover:opacity-75 cursor-pointer"
                   style={{ borderRight: `1px solid ${theme.border}` }}
                 >
                   A-
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPrefs((p) => ({ ...p, fontSize: Math.min(28, p.fontSize + 1) }))}
-                  className="py-2 text-base font-medium transition-opacity hover:opacity-75 cursor-pointer"
+                  onClick={() => setPrefs((p) => ({ ...p, fontSize: Math.min(30, p.fontSize + 1) }))}
+                  className="py-2 text-base font-medium hover:opacity-75 cursor-pointer"
                 >
                   A+
                 </button>
               </div>
             </div>
 
-            {/* Font Family */}
-            <div className="py-3.5" style={{ borderBottom: `1px solid ${theme.border}` }}>
+            {/* Font Family (Chinese / Arabic / English) */}
+            <div className="py-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
               <div className="mb-2 text-[11px]" style={{ color: theme.muted }}>
-                {isZh ? '字体风格' : 'Typeface'}
+                {isZh ? '字体类型（中 / 阿 / 英）' : 'Typeface'}
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 {(Object.keys(FONT_STACKS) as AppleFontId[]).map((fid) => {
@@ -1265,84 +1426,124 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                       key={fid}
                       type="button"
                       onClick={() => setPrefs((p) => ({ ...p, font: fid }))}
-                      className="flex items-center justify-between rounded-xl px-3 py-2 text-xs transition-colors cursor-pointer"
+                      className="flex items-center justify-between rounded-xl px-2.5 py-1.5 text-xs transition-colors cursor-pointer"
                       style={{
                         fontFamily: f.family,
                         border: `1px solid ${active ? theme.accent : theme.border}`,
-                        backgroundColor: active
-                          ? theme.isDark
-                            ? 'rgba(100,210,255,0.14)'
-                            : 'rgba(0,113,227,0.08)'
-                          : 'transparent',
                         color: active ? theme.accent : theme.ink,
                       }}
                     >
-                      <span>{f.label}</span>
-                      {active && <Check className="h-3.5 w-3.5" />}
+                      <span className="truncate">{f.label}</span>
+                      {active && <Check className="h-3.5 w-3.5 shrink-0" />}
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Line Spacing & Page Layout */}
-            <div className="pt-3.5 space-y-3">
-              <div>
-                <div className="mb-1.5 text-[11px]" style={{ color: theme.muted }}>
-                  {isZh ? '行距舒适度' : 'Line Spacing'}
-                </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {[
-                    { label: '紧凑', value: 1.65 },
-                    { label: '标准', value: 1.9 },
-                    { label: '舒展', value: 2.2 },
-                  ].map((opt) => {
-                    const active = Math.abs(prefs.lineHeight - opt.value) < 0.08;
-                    return (
-                      <button
-                        key={opt.label}
-                        type="button"
-                        onClick={() => setPrefs((p) => ({ ...p, lineHeight: opt.value }))}
-                        className="rounded-xl py-1.5 text-xs font-medium cursor-pointer"
-                        style={{
-                          border: `1px solid ${active ? theme.accent : theme.border}`,
-                          color: active ? theme.accent : theme.ink,
-                        }}
-                      >
-                        {opt.label}
-                      </button>
-                    );
-                  })}
-                </div>
+            {/* Custom Text Color + Reset */}
+            <div className="py-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+              <div className="mb-2 flex items-center justify-between text-[11px]" style={{ color: theme.muted }}>
+                <span>{isZh ? '文字颜色' : 'Text Color'}</span>
+                {prefs.customTextColor && (
+                  <button
+                    type="button"
+                    onClick={() => setPrefs((p) => ({ ...p, customTextColor: null }))}
+                    className="cursor-pointer text-[11px] font-medium hover:underline"
+                    style={{ color: theme.accent }}
+                  >
+                    恢复默认
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {TEXT_COLOR_PRESETS.map((c) => (
+                  <button
+                    key={c.label}
+                    type="button"
+                    onClick={() => setPrefs((p) => ({ ...p, customTextColor: c.value || null }))}
+                    className="h-6 w-6 cursor-pointer rounded-full border transition hover:scale-110"
+                    style={{
+                      backgroundColor: c.value || baseTheme.ink,
+                      borderColor: (prefs.customTextColor || '') === c.value ? theme.accent : theme.border,
+                      borderWidth: (prefs.customTextColor || '') === c.value ? 2 : 1,
+                    }}
+                    title={c.label}
+                  />
+                ))}
+                <input
+                  type="color"
+                  value={prefs.customTextColor || baseTheme.ink}
+                  onChange={(e) => setPrefs((p) => ({ ...p, customTextColor: e.target.value }))}
+                  className="h-6 w-7 cursor-pointer rounded border-0 bg-transparent"
+                  title="自定义文字色"
+                />
+              </div>
+            </div>
+
+            {/* Spacing, Margins, Width, Alignment & Layout */}
+            <div className="pt-3 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-[11px]" style={{ color: theme.muted }}>
+                  <span className="flex justify-between"><span>行距</span><span className="font-mono">{prefs.lineHeight.toFixed(1)}</span></span>
+                  <input type="range" min={1.4} max={2.4} step={0.1} value={prefs.lineHeight} onChange={(e) => setPrefs((p) => ({ ...p, lineHeight: Number(e.target.value) }))} className="mt-1 w-full" style={{ accentColor: theme.accent }} />
+                </label>
+                <label className="text-[11px]" style={{ color: theme.muted }}>
+                  <span className="flex justify-between"><span>段距</span><span className="font-mono">{prefs.paragraphSpacing}px</span></span>
+                  <input type="range" min={10} max={36} step={2} value={prefs.paragraphSpacing} onChange={(e) => setPrefs((p) => ({ ...p, paragraphSpacing: Number(e.target.value) }))} className="mt-1 w-full" style={{ accentColor: theme.accent }} />
+                </label>
               </div>
 
-              <div>
-                <div className="mb-1.5 text-[11px]" style={{ color: theme.muted }}>
-                  {isZh ? '翻页与排版' : 'Page Layout'}
-                </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {[
-                    { id: 'spread' as AppleLayoutMode, label: '双页摊开' },
-                    { id: 'single' as AppleLayoutMode, label: '单页翻阅' },
-                    { id: 'scroll' as AppleLayoutMode, label: '连续滚动' },
-                  ].map((opt) => {
-                    const active = prefs.layout === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setPrefs((p) => ({ ...p, layout: opt.id }))}
-                        className="rounded-xl py-1.5 text-xs font-medium cursor-pointer"
-                        style={{
-                          border: `1px solid ${active ? theme.accent : theme.border}`,
-                          color: active ? theme.accent : theme.ink,
-                        }}
-                      >
-                        {opt.label}
-                      </button>
-                    );
-                  })}
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-[11px]" style={{ color: theme.muted }}>
+                  <span className="flex justify-between"><span>页边距</span><span className="font-mono">{prefs.pageMargin}px</span></span>
+                  <input type="range" min={16} max={64} step={4} value={prefs.pageMargin} onChange={(e) => setPrefs((p) => ({ ...p, pageMargin: Number(e.target.value) }))} className="mt-1 w-full" style={{ accentColor: theme.accent }} />
+                </label>
+                <label className="text-[11px]" style={{ color: theme.muted }}>
+                  <span className="flex justify-between"><span>版心宽度</span><span className="font-mono">{prefs.maxWidth}px</span></span>
+                  <input type="range" min={560} max={940} step={20} value={prefs.maxWidth} onChange={(e) => setPrefs((p) => ({ ...p, maxWidth: Number(e.target.value) }))} className="mt-1 w-full" style={{ accentColor: theme.accent }} />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                {(['justify', 'left'] as const).map((al) => (
+                  <button
+                    key={al}
+                    type="button"
+                    onClick={() => setPrefs((p) => ({ ...p, textAlign: al }))}
+                    className="rounded-xl py-1.5 text-xs font-medium cursor-pointer"
+                    style={{
+                      border: `1px solid ${prefs.textAlign === al ? theme.accent : theme.border}`,
+                      color: prefs.textAlign === al ? theme.accent : theme.ink,
+                    }}
+                  >
+                    {al === 'justify' ? '两端对齐' : '左对齐'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { id: 'spread' as AppleLayoutMode, label: '双页摊开' },
+                  { id: 'single' as AppleLayoutMode, label: '单页翻阅' },
+                  { id: 'scroll' as AppleLayoutMode, label: '连续滚动' },
+                ].map((opt) => {
+                  const active = prefs.layout === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setPrefs((p) => ({ ...p, layout: opt.id }))}
+                      className="rounded-xl py-1.5 text-xs font-medium cursor-pointer"
+                      style={{
+                        border: `1px solid ${active ? theme.accent : theme.border}`,
+                        color: active ? theme.accent : theme.ink,
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1628,8 +1829,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         >
           {effectiveLayout === 'scroll' ? (
             <div
-              className="h-full w-full max-w-3xl overflow-y-auto rounded-2xl px-6 py-8 sm:px-14 sm:py-12 shadow-sm"
+              className="h-full w-full overflow-y-auto overflow-x-hidden rounded-2xl py-8 sm:py-12 shadow-sm"
               style={{
+                maxWidth: `${prefs.maxWidth}px`,
+                paddingLeft: `${prefs.pageMargin}px`,
+                paddingRight: `${prefs.pageMargin}px`,
                 backgroundColor: theme.pageBg,
                 border: `1px solid ${theme.border}`,
               }}
@@ -1646,8 +1850,10 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               </header>
 
               <div
-                className="space-y-6"
                 style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: `${prefs.paragraphSpacing}px`,
                   fontFamily: fontMeta.family,
                   fontSize: `${prefs.fontSize}px`,
                   lineHeight: prefs.lineHeight,
@@ -1661,7 +1867,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   .map((para, idx) => (
                     <p
                       key={idx}
-                      className="text-justify"
+                      className={prefs.textAlign === 'justify' ? 'text-justify break-words' : 'text-left break-words'}
                       style={{ textIndent: !rtl && !para.startsWith('"') && !para.startsWith('【') && !/^[A-Za-z]/.test(para) ? '2em' : undefined }}
                     >
                       {renderParagraphWithHighlights(para, currentChapterAnnotations, theme.isDark)}
@@ -1730,17 +1936,17 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 <ChevronLeft className="h-6 w-6" />
               </button>
 
-              {/* Open Book Paper Surface */}
+              {/* Open Book Paper Surface with authentic stacked page edges & warm center spine */}
               <div
-                className={`relative flex h-full w-full overflow-hidden rounded-2xl transition-colors duration-300 ${
-                  effectiveLayout === 'spread' ? 'max-w-[1060px] grid grid-cols-2' : 'max-w-[680px] flex-col'
+                className={`relative flex h-full w-full overflow-hidden rounded-[14px] transition-colors duration-300 ${
+                  effectiveLayout === 'spread' ? 'max-w-[1080px] grid grid-cols-2' : 'max-w-[700px] flex-col'
                 }`}
                 style={{
                   backgroundColor: theme.pageBg,
                   border: `1px solid ${theme.border}`,
                   boxShadow: theme.isDark
-                    ? '0 24px 60px rgba(0, 0, 0, 0.55)'
-                    : '0 20px 50px rgba(42, 34, 24, 0.12), 0 2px 8px rgba(42, 34, 24, 0.06)',
+                    ? '0 24px 60px rgba(0, 0, 0, 0.55), -5px 0 0 -1px #1d212b, 5px 0 0 -1px #1d212b'
+                    : '0 22px 54px rgba(48, 36, 20, 0.12), -5px 0 0 -1px #f6f0e3, -6px 0 0 -1px #d6cbb4, -10px 0 0 -2px #efe7d6, -11px 0 0 -2px #cfc2a7, 5px 0 0 -1px #f6f0e3, 6px 0 0 -1px #d6cbb4, 10px 0 0 -2px #efe7d6, 11px 0 0 -2px #cfc2a7',
                 }}
               >
                 {/* Left / Primary Page */}
@@ -1753,11 +1959,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   <>
                     <div
                       aria-hidden="true"
-                      className="pointer-events-none absolute inset-y-0 left-1/2 w-10 -translate-x-1/2"
+                      className="pointer-events-none absolute inset-y-0 left-1/2 w-12 -translate-x-1/2 z-10"
                       style={{
                         background: theme.isDark
-                          ? 'linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.34) 48%, rgba(255,255,255,0.04) 52%, rgba(0,0,0,0) 100%)'
-                          : 'linear-gradient(90deg, rgba(45,35,20,0) 0%, rgba(45,35,20,0.075) 48%, rgba(255,255,255,0.28) 52%, rgba(45,35,20,0) 100%)',
+                          ? 'linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.42) 48%, rgba(255,255,255,0.05) 52%, rgba(0,0,0,0) 100%)'
+                          : 'linear-gradient(90deg, rgba(64,48,26,0) 0%, rgba(64,48,26,0.09) 46%, rgba(42,30,16,0.16) 50%, rgba(255,252,244,0.34) 53%, rgba(64,48,26,0) 100%)',
                       }}
                     />
                     <div className="h-full min-h-0 overflow-hidden" style={{ borderLeft: `1px solid ${theme.border}` }}>
@@ -1877,12 +2083,20 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 <div className="flex flex-wrap items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => void handleLookupWord(selectedText.slice(0, 60))}
+                    onClick={() => void handleInlineTranslate(selectedText)}
                     className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-medium cursor-pointer"
                     style={{ border: `1px solid ${theme.border}` }}
                   >
                     <Languages className="h-3.5 w-3.5" />
-                    <span>{isZh ? 'AI 查词' : 'Lookup'}</span>
+                    <span>{isZh ? '翻译段落' : 'Translate'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleLookupWord(selectedText.slice(0, 60))}
+                    className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-medium cursor-pointer"
+                    style={{ border: `1px solid ${theme.border}` }}
+                  >
+                    <span>{isZh ? '查词' : 'Lookup'}</span>
                   </button>
                   <button
                     type="button"
@@ -1895,24 +2109,29 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => void handleToggleReadAloud(selectedText)}
-                    className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-medium cursor-pointer"
-                    style={{ border: `1px solid ${theme.border}` }}
-                  >
-                    <Volume2 className="h-3.5 w-3.5" />
-                    <span>{isZh ? '朗读' : 'Speak'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleAiExplain()}
+                    onClick={() => void handleExplainCurrentPage(undefined, selectedText)}
                     className="inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-medium cursor-pointer"
                     style={{ backgroundColor: theme.accent, color: '#FFFFFF' }}
                   >
                     <Sparkles className="h-3.5 w-3.5" />
-                    <span>{isZh ? 'AI 伴读' : 'Ask AI'}</span>
+                    <span>{isZh ? 'AI 精讲' : 'Deep Explain'}</span>
                   </button>
                 </div>
               </div>
+
+              {inlineTranslation && (
+                <div className="mt-2.5 rounded-xl p-2.5 text-xs leading-relaxed" style={{ backgroundColor: theme.bg, border: `1px solid ${theme.border}` }}>
+                  <div className="mb-1 flex items-center justify-between text-[11px] font-semibold" style={{ color: theme.accent }}>
+                    <span>段落翻译</span>
+                    <button type="button" onClick={() => setInlineTranslation(null)} className="cursor-pointer opacity-70 hover:opacity-100"><X className="h-3 w-3" /></button>
+                  </div>
+                  {inlineTranslation.loading ? (
+                    <div className="flex items-center gap-1.5 py-1 opacity-75"><Loader2 className="h-3.5 w-3.5 animate-spin" /><span>正在翻译…</span></div>
+                  ) : (
+                    <div className="whitespace-pre-wrap">{inlineTranslation.text}</div>
+                  )}
+                </div>
+              )}
 
               {showNoteComposer && (
                 <div className="mt-2.5 space-y-2 pt-2.5" style={{ borderTop: `1px solid ${theme.border}` }}>
@@ -1947,7 +2166,6 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                     <span className="inline-flex items-center gap-1 font-semibold" style={{ color: theme.accent }}>
                       <Sparkles className="h-3.5 w-3.5" />
                       <span>{isZh ? 'AI 伴读解读' : 'AI Reading Companion'}</span>
-                      {aiProvider ? <span className="ml-1 text-[10px] font-normal opacity-70">· {aiProvider}</span> : null}
                     </span>
                     {aiAnswer && (
                       <button
@@ -1960,26 +2178,21 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                       </button>
                     )}
                   </div>
-                  {(aiCoverage || aiNotice) && (
-                    <div className="mb-2 rounded-lg px-2 py-1.5 text-[10px] leading-relaxed" style={{ backgroundColor: theme.isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', color: theme.muted }}>
-                      {aiCoverage ? <div><span className="font-medium">{isZh ? '文本范围：' : 'Coverage: '}</span>{aiCoverage === 'full_text' ? (isZh ? '已存全文（本次限所选段及邻近上下文）' : 'Full text (selected passage + nearby context)') : aiCoverage}</div> : null}
-                      {aiNotice ? <div className="mt-0.5">{aiNotice}</div> : null}
-                    </div>
-                  )}
                   {aiLoading ? (
                     <div className="py-2 opacity-75">{isZh ? '正在精读解析这段文字…' : 'Analyzing passage…'}</div>
                   ) : (
                     <div className="whitespace-pre-line">{aiAnswer}</div>
                   )}
-                  {aiCitation && (
-                    <div className="mt-2 space-y-0.5 text-[10px] opacity-80">
-                      <div>{isZh ? '引用：' : 'Citation: '}{[aiCitation.title, aiCitation.author, aiCitation.version, aiCitation.location].filter(Boolean).join(' · ')}</div>
-                      {aiCitation.sourceUrl && (
-                        <a href={aiCitation.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:opacity-100 underline">
-                          <span>{isZh ? '来源' : 'Source'}</span><ExternalLink className="h-3 w-3" />
-                        </a>
-                      )}
-                    </div>
+                  {aiCitation?.sourceUrl && (
+                    <a
+                      href={aiCitation.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-[10px] opacity-75 hover:opacity-100"
+                    >
+                      <span>{aiCitation.location}</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
                   )}
                 </div>
               )}
@@ -2034,12 +2247,24 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                   <div className="text-rose-500">{lookupError}</div>
                 ) : lookupEntry ? (
                   <div className="space-y-2">
+                    {lookupEntry.lemma && lookupEntry.lemma !== lookupEntry.word && (
+                      <div className="text-[11px]" style={{ color: theme.muted }}>
+                        <span className="font-semibold">原形：</span>
+                        <span>{lookupEntry.lemma}</span>
+                      </div>
+                    )}
                     <div>
                       <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                         {isZh ? '释义：' : 'Meaning: '}
                       </span>
                       <span>{lookupEntry.meaning}</span>
                     </div>
+                    {lookupEntry.usage && (
+                      <div className="text-[11px]" style={{ color: theme.muted }}>
+                        <span className="font-semibold">常见用法：</span>
+                        <span>{lookupEntry.usage}</span>
+                      </div>
+                    )}
                     {lookupEntry.root && (
                       <div className="text-[11px]" style={{ color: theme.muted }}>
                         <span className="font-semibold">{isZh ? '词根 / 词源：' : 'Root: '}</span>
@@ -2047,10 +2272,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                       </div>
                     )}
                     {lookupEntry.contextMeaning && (
-                      <div
-                        className="rounded-xl p-2 text-[11px]"
-                        style={{ backgroundColor: theme.bg }}
-                      >
+                      <div className="rounded-xl p-2 text-[11px]" style={{ backgroundColor: theme.bg }}>
                         <span className="font-semibold">{isZh ? '本页语境：' : 'Context: '}</span>
                         <span>{lookupEntry.contextMeaning}</span>
                       </div>
@@ -2065,15 +2287,27 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 ) : null}
               </div>
 
-              <div className="mt-3 flex items-center justify-between pt-2.5 text-[11px]" style={{ borderTop: `1px solid ${theme.border}` }}>
-                <span style={{ color: theme.muted }}>{isZh ? '轻点书中任意单词即查' : 'Tap any word to look up'}</span>
+              <div className="mt-3 flex items-center justify-between gap-2 pt-2.5 text-[11px]" style={{ borderTop: `1px solid ${theme.border}` }}>
+                {lookupEntry ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveToVocabulary()}
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 font-medium"
+                    style={{ border: `1px solid ${theme.border}`, color: vocabSavedWord === lookupEntry.word ? theme.accent : theme.ink }}
+                  >
+                    <Check className="h-3 w-3" />
+                    <span>{vocabSavedWord === lookupEntry.word ? '已存生词本' : '存生词本'}</span>
+                  </button>
+                ) : (
+                  <span style={{ color: theme.muted }}>{isZh ? '轻点任意单词即查' : 'Tap any word'}</span>
+                )}
                 <button
                   type="button"
-                  onClick={() => void runPageAiAction('explain', `请结合本页上下文讲解词条「${lookupWord}」在当前句子/段落中的具体含义（不要只给脱离上下文的词典释义），并说明词性/用法或词根（如可确认）。`)}
+                  onClick={() => void handleExplainCurrentPage(`请结合本页讲解词条「${lookupWord}」以及所在段落的含义。`)}
                   className="inline-flex items-center gap-1 font-semibold text-emerald-600 hover:underline dark:text-emerald-400 cursor-pointer"
                 >
                   <Sparkles className="h-3 w-3" />
-                  <span>{isZh ? '结合本页精讲' : 'Explain page'}</span>
+                  <span>{isZh ? 'AI 精讲本页' : 'Explain page'}</span>
                 </button>
               </div>
             </div>
@@ -2093,7 +2327,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
           )}
         </main>
 
-        {/* Right-Side AI Page Explanation Panel ("这一页怎么讲") */}
+        {/* Right-Side Unified ONE AI Side Sheet (AI 精讲 / 全书问答 / AI 总结) */}
         {pageAiOpen && (
           <aside
             className="absolute inset-y-0 right-0 z-40 flex w-[min(94vw,400px)] flex-col shadow-2xl lg:static lg:w-[390px] lg:shadow-none"
@@ -2106,128 +2340,110 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
             <div className="flex items-center justify-between gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-emerald-500" />
-                <div>
-                  <div className="text-xs font-semibold">
-                    {isZh ? `AI 阅读助手 · 第 ${spreadLeftIdx + 1} 页` : `AI Reading Assistant · P.${spreadLeftIdx + 1}`}
-                    {pageAiProvider ? <span className="ml-1 font-normal opacity-70">· {pageAiProvider}</span> : null}
-                  </div>
-                  <div className="text-[10px]" style={{ color: theme.muted }}>
-                    {isZh ? '基于当前书籍/章节与本页内容作答，不脱离原文' : 'Grounded in current book/chapter/page context'}
-                  </div>
-                </div>
+                <div className="text-xs font-semibold">ONE AI 智能阅读</div>
               </div>
-              <div className="flex items-center gap-1">
-                {pageAiKey !== currentPageKey && !pageAiLoading && (
-                  <button
-                    type="button"
-                    onClick={() => void runPageAiAction(pageAiAction)}
-                    className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white cursor-pointer hover:bg-emerald-500"
-                  >
-                    {isZh ? '分析当前页' : 'Analyze'}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setPageAiOpen(false)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg cursor-pointer opacity-70 hover:opacity-100"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setPageAiOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg cursor-pointer opacity-70 hover:opacity-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            <div className="border-b px-4 py-2 flex flex-wrap gap-1.5" style={{ borderColor: theme.border }}>
-              {([
-                { id: 'explain' as const, zh: '讲解', en: 'Explain' },
-                { id: 'translate' as const, zh: '翻译', en: 'Translate' },
-                { id: 'summarize' as const, zh: '总结', en: 'Summary' },
-                { id: 'ask' as const, zh: '问答', en: 'Ask' },
-              ]).map((a) => (
+            {/* 3-Tab Switcher */}
+            <div className="grid grid-cols-3 gap-1 px-3 py-2" style={{ borderBottom: `1px solid ${theme.border}` }}>
+              {[
+                { id: 'explain' as const, label: 'AI 精讲' },
+                { id: 'qa' as const, label: '全书问答' },
+                { id: 'summary' as const, label: 'AI 总结' },
+              ].map((t) => (
                 <button
-                  key={a.id}
+                  key={t.id}
                   type="button"
-                  onClick={() => void runPageAiAction(a.id)}
-                  className="cursor-pointer rounded-lg px-2.5 py-1 text-[11px] font-medium transition"
-                  style={{ border: `1px solid ${pageAiAction === a.id ? '#10B981' : theme.border}`, color: pageAiAction === a.id ? '#059669' : theme.muted, backgroundColor: pageAiAction === a.id ? 'rgba(16,185,129,0.12)' : 'transparent' }}
+                  onClick={() => setPageAiTab(t.id)}
+                  className="cursor-pointer rounded-lg py-1.5 text-[11px] font-medium transition"
+                  style={{
+                    backgroundColor: pageAiTab === t.id ? theme.accent : 'transparent',
+                    color: pageAiTab === t.id ? '#FFFFFF' : theme.muted,
+                  }}
                 >
-                  {isZh ? a.zh : a.en}
+                  {t.label}
                 </button>
               ))}
-              {pageAiAction === 'translate' && (
-                <select
-                  value={pageAiTargetLang}
-                  onChange={(e) => setPageAiTargetLang(e.target.value as 'zh' | 'en' | 'ar')}
-                  className="ml-auto h-7 rounded-lg border bg-transparent px-2 text-[11px]"
-                  style={{ borderColor: theme.border, color: theme.ink }}
-                >
-                  <option value="zh">译为中文</option>
-                  <option value="en">Translate to English</option>
-                  <option value="ar">ترجمة إلى العربية</option>
-                </select>
-              )}
             </div>
+
             <div className="flex-1 overflow-y-auto px-4 py-3.5 text-xs leading-relaxed">
+              {pageAiTab === 'summary' && (
+                <div className="mb-3 grid grid-cols-3 gap-1.5">
+                  <button type="button" disabled={pageAiLoading} onClick={() => void handleSummarize('paragraph')} className="cursor-pointer rounded-lg py-1.5 text-[11px] font-medium disabled:opacity-40" style={{ border: `1px solid ${theme.border}` }}>本段总结</button>
+                  <button type="button" disabled={pageAiLoading} onClick={() => void handleSummarize('chapter')} className="cursor-pointer rounded-lg py-1.5 text-[11px] font-medium disabled:opacity-40" style={{ border: `1px solid ${theme.border}` }}>本章总结</button>
+                  <button type="button" disabled={pageAiLoading} onClick={() => void handleSummarize('book')} className="cursor-pointer rounded-lg py-1.5 text-[11px] font-medium disabled:opacity-40" style={{ border: `1px solid ${theme.border}` }}>全书总结</button>
+                </div>
+              )}
+
               {pageAiLoading ? (
                 <div className="flex flex-col items-center justify-center gap-2.5 py-12 text-center" style={{ color: theme.muted }}>
                   <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
-                  <div>{isZh ? '正在分析当前页核心大意与讲解思路…' : 'Analyzing current page…'}</div>
+                  <div>ONE AI 正在深入研读全书上下文…</div>
                 </div>
               ) : pageAiError ? (
                 <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-rose-500">
                   <div>{pageAiError}</div>
-                  <button
-                    type="button"
-                    onClick={() => void runPageAiAction(pageAiAction)}
-                    className="mt-2 rounded-lg bg-rose-500 px-3 py-1 text-[11px] font-medium text-white cursor-pointer"
-                  >
-                    {isZh ? '重新分析' : 'Retry'}
-                  </button>
+                </div>
+              ) : pageAiTab === 'explain' ? (
+                <div className="whitespace-pre-wrap leading-7">
+                  {pageAiAnswer || '点击下方按钮或选中段落，获取内容背景、核心观点、重点词汇、句式结构与难点精讲。'}
+                </div>
+              ) : pageAiTab === 'qa' ? (
+                <div className="space-y-3">
+                  {bookQaHistory.length === 0 && (
+                    <p style={{ color: theme.muted }}>输入关于整本书的任意问题，ONE AI 将结合全书章节上下文作答。</p>
+                  )}
+                  {bookQaHistory.map((turn, i) => (
+                    <div key={i} className="space-y-1.5">
+                      <div className="rounded-xl px-3 py-2 font-medium" style={{ backgroundColor: theme.bg }}>问：{turn.q}</div>
+                      <div className="whitespace-pre-wrap px-1 leading-7">{turn.a}</div>
+                    </div>
+                  ))}
                 </div>
               ) : (
-                <div className="whitespace-pre-wrap leading-7">{pageAiAnswer}</div>
+                <div className="whitespace-pre-wrap leading-7">
+                  {summaryText || '选择上方「本段总结 / 本章总结 / 全书总结」一键生成结构化提要。'}
+                </div>
               )}
             </div>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!pageAiLoading) void runPageAiAction(pageAiQuestion.trim() ? 'ask' : pageAiAction, pageAiQuestion);
-              }}
-              className="p-3"
-              style={{ borderTop: `1px solid ${theme.border}` }}
-            >
-              <div className="mb-2 flex flex-wrap gap-1.5">
-                {(isZh ? ['用大白话讲这一页', '翻译本页重点', '总结本页要点', '梳理重点词句'] : ['Explain simply', 'Translate page', 'Summarize page', 'Key vocabulary']).map((preset) => (
+            {pageAiTab !== 'summary' && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (pageAiLoading) return;
+                  if (pageAiTab === 'qa') void handleBookQa(pageAiQuestion);
+                  else void handleExplainCurrentPage(pageAiQuestion);
+                }}
+                className="p-3"
+                style={{ borderTop: `1px solid ${theme.border}` }}
+              >
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={pageAiQuestion}
+                    onChange={(e) => setPageAiQuestion(e.target.value)}
+                    placeholder={pageAiTab === 'qa' ? '结合全书向 ONE AI 提问…' : '针对当前内容继续追问…'}
+                    className="h-9 flex-1 rounded-xl bg-transparent px-3 text-xs focus:outline-none"
+                    style={{ border: `1px solid ${theme.border}`, color: theme.ink }}
+                  />
                   <button
-                    key={preset}
-                    type="button"
+                    type="submit"
                     disabled={pageAiLoading}
-                    onClick={() => void runPageAiAction(pageAiQuestion ? 'ask' : 'explain', preset)}
-                    className="rounded-lg px-2 py-1 text-[11px] cursor-pointer disabled:opacity-40"
-                    style={{ border: `1px solid ${theme.border}`, color: theme.muted }}
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white cursor-pointer hover:bg-emerald-500 disabled:opacity-40"
                   >
-                    {preset}
+                    <Send className="h-3.5 w-3.5" />
                   </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  value={pageAiQuestion}
-                  onChange={(e) => setPageAiQuestion(e.target.value)}
-                  placeholder={isZh ? '针对本页继续追问 AI…' : 'Ask a follow-up…'}
-                  className="h-9 flex-1 rounded-xl bg-transparent px-3 text-xs focus:outline-none"
-                  style={{ border: `1px solid ${theme.border}`, color: theme.ink }}
-                />
-                <button
-                  type="submit"
-                  disabled={pageAiLoading}
-                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white cursor-pointer hover:bg-emerald-500 disabled:opacity-40"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </form>
+                </div>
+              </form>
+            )}
           </aside>
         )}
       </div>

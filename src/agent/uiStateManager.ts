@@ -86,6 +86,11 @@ export interface GeneratedImagePayload {
   createdAt?: string;
 }
 
+export interface SpiritQuickAction {
+  label: string;
+  action: 'open_library' | 'play_music' | 'stop_music' | 'next_music';
+}
+
 export interface SpiritBubbleState {
   visible: boolean;
   isLoading?: boolean;
@@ -99,6 +104,8 @@ export interface SpiritBubbleState {
   rescueCards?: SpokenRescueCard[];
   rescueExpanded?: boolean;
   generatedImage?: GeneratedImagePayload | null;
+  quickActions?: SpiritQuickAction[];
+  isAmbientHint?: boolean;
   updatedAt: number;
 }
 
@@ -192,6 +199,9 @@ export interface AgentUiSnapshot {
   lastSpokenTranscript: string;
   liveVoiceActive: boolean;
   liveVoicePhase: 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking';
+  musicPlaying: boolean;
+  musicTrackTitle: string;
+  musicArtist: string;
 }
 
 let state: AgentUiSnapshot = {
@@ -220,6 +230,9 @@ let state: AgentUiSnapshot = {
   lastSpokenTranscript: '',
   liveVoiceActive: false,
   liveVoicePhase: 'idle',
+  musicPlaying: false,
+  musicTrackTitle: '',
+  musicArtist: '',
 };
 
 const listeners = new Set<() => void>();
@@ -461,6 +474,26 @@ export const uiStateManager = {
     liveVoicePhase?: 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking';
   }) {
     state = { ...state, ...patch };
+    emit();
+  },
+
+  setMusicStatus(patch: { musicPlaying?: boolean; musicTrackTitle?: string; musicArtist?: string }) {
+    const nextPlaying = typeof patch.musicPlaying === 'boolean' ? patch.musicPlaying : state.musicPlaying;
+    const nextTitle = typeof patch.musicTrackTitle === 'string' ? patch.musicTrackTitle : state.musicTrackTitle;
+    const nextArtist = typeof patch.musicArtist === 'string' ? patch.musicArtist : state.musicArtist;
+    if (
+      state.musicPlaying === nextPlaying &&
+      state.musicTrackTitle === nextTitle &&
+      state.musicArtist === nextArtist
+    ) {
+      return;
+    }
+    state = {
+      ...state,
+      musicPlaying: nextPlaying,
+      musicTrackTitle: nextTitle,
+      musicArtist: nextArtist,
+    };
     emit();
   },
 };

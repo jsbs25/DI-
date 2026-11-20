@@ -7,6 +7,7 @@ import { CommandPalette } from './components/layout/CommandPalette.tsx';
 import { OneHome } from './components/home/OneHome.tsx';
 import { GlobalFeed } from './components/social/GlobalFeed.tsx';
 import { GlobalMessenger, type MessengerQuickAction } from './components/chat/GlobalMessenger.tsx';
+import { FloatingCommWidget } from './components/chat/FloatingCommWidget.tsx';
 import { AIHub } from './components/ai/AIHub.tsx';
 import { CreatorHub } from './components/creator/CreatorHub.tsx';
 import { VideoCenter } from './components/video/VideoCenter.tsx';
@@ -358,12 +359,11 @@ export default function App() {
           window.dispatchEvent(new Event('one-music-force-stop'));
           return;
         }
-        setVenusQuickAction({
-          seq: Date.now(),
-          kind: 'crawl_and_play',
-          query: opts.query,
-        });
-        navigateToTab('venus');
+        window.dispatchEvent(
+          new CustomEvent('one-music-play-inline', {
+            detail: { query: opts.query || '轻音乐 钢琴' },
+          })
+        );
       },
       onWatchDocumentaryAction: (opts) => {
         setSaturnQuickAction({
@@ -385,7 +385,7 @@ export default function App() {
           setActiveConversationId(convId);
           setMessengerQuickAction({ seq: Date.now(), kind: 'open_chat', conversationId: convId });
         }
-        if (currentTabRef.current === 'globe') {
+        if (currentTabRef.current !== 'chat') {
           uiStateManager.setCommDrawerOpen(true);
         } else {
           navigateToTab('chat');
@@ -406,6 +406,22 @@ export default function App() {
       void pauseActiveSpiritTask();
     }
   }, [agentSnap.commDrawerOpen]);
+
+  // Handle interactive quick action buttons inside the Butterfly's ambient speech bubble
+  useEffect(() => {
+    const onSpiritQuickAction = (e: Event) => {
+      const detail = (e as CustomEvent<{ action?: string; query?: string }>).detail || {};
+      if (detail.action === 'open_library') {
+        navigateToTab('library');
+      } else if (detail.action === 'play_music') {
+        window.dispatchEvent(new CustomEvent('one-music-play-inline', { detail: { query: detail.query || '轻音乐 钢琴' } }));
+      } else if (detail.action === 'next_music') {
+        window.dispatchEvent(new CustomEvent('one-music-next-inline'));
+      }
+    };
+    window.addEventListener('one-spirit-quick-action', onSpiritQuickAction);
+    return () => window.removeEventListener('one-spirit-quick-action', onSpiritQuickAction);
+  }, [navigateToTab]);
 
   const isMobileSubpage = currentTab !== 'globe';
   const mobileSubpageTitleMap: Record<string, string> = lang === 'ar'
@@ -614,8 +630,8 @@ export default function App() {
               type="button"
               onClick={() => navigateToTab('globe')}
               className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[#244e41]/14 dark:border-[#d6b77f]/18 bg-[#efe9dc]/80 dark:bg-white/[0.06] text-[#355246] dark:text-[#d6b77f] hover:bg-[#e5decb] dark:hover:bg-white/12 shrink-0"
-              title={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到天堂花园'}
-              aria-label={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到天堂花园'}
+              title={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到 ONE'}
+              aria-label={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到 ONE'}
             >
               <Home className="w-4 h-4" />
             </button>
@@ -652,14 +668,14 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'universe' && <div className="h-full w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[env(safe-area-inset-bottom)] md:pb-0 bg-[#101c33] text-slate-100"><UniverseEngine onSwitchToEarthWorld={() => navigateToTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
-        {currentTab === 'saturn' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><SaturnSpace lang={lang} onBack={goBack} quickAction={saturnQuickAction} /></div>}
-        {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8"><VenusMusicSpace lang={lang} onBack={goBack} quickAction={venusQuickAction} /></div>}
-        {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MercurySearch lang={lang} onBack={goBack} onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); navigateToTab('knowledge'); }} onSelectTab={navigateToTab} /></div>}
-        {currentTab === 'feed' && <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); navigateToTab('globe'); }} lang={lang} /></div>}
-        {currentTab === 'globe' && agentSnap.commDrawerOpen && (
+        {currentTab === 'universe' && <div className="h-full w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[env(safe-area-inset-bottom)] md:pb-0 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><UniverseEngine onSwitchToEarthWorld={() => navigateToTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
+        {currentTab === 'saturn' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><SaturnSpace lang={lang} onBack={goBack} quickAction={saturnQuickAction} /></div>}
+        {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><VenusMusicSpace lang={lang} onBack={goBack} quickAction={venusQuickAction} /></div>}
+        {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><MercurySearch lang={lang} onBack={goBack} onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); navigateToTab('knowledge'); }} onSelectTab={navigateToTab} /></div>}
+        {currentTab === 'feed' && <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); navigateToTab('globe'); }} lang={lang} /></div>}
+        {currentTab !== 'chat' && agentSnap.commDrawerOpen && (
           <div
-            className="fixed inset-0 z-[57] bg-slate-950/35"
+            className="fixed inset-0 z-[77] bg-slate-950/28 backdrop-blur-[2px]"
             onClick={() => uiStateManager.setCommDrawerOpen(false)}
             aria-hidden="true"
           />
@@ -674,16 +690,16 @@ export default function App() {
           onRefreshConversations={refreshConversations}
           onUserUpdate={(u) => { setCurrentUser(u); void refreshIntegrations(); }}
           directOpenSeq={directOpenSeq}
-          isVisible={currentTab === 'chat' || (currentTab === 'globe' && agentSnap.commDrawerOpen)}
-          drawerMode={currentTab === 'globe' && agentSnap.commDrawerOpen}
+          isVisible={currentTab === 'chat' || agentSnap.commDrawerOpen}
+          drawerMode={currentTab !== 'chat' && agentSnap.commDrawerOpen}
           workspaceClassName={
-            currentTab === 'globe' && agentSnap.commDrawerOpen
-              ? 'fixed inset-y-0 left-0 z-[58] w-full max-w-[460px] pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)] shadow-2xl border-r border-[#244e41]/14 dark:border-[#d6b77f]/16 bg-[#faf7f0] dark:bg-[#111b26] flex flex-col min-h-0'
+            currentTab !== 'chat' && agentSnap.commDrawerOpen
+              ? 'fixed inset-y-0 right-0 z-[78] w-full max-w-[420px] pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)] shadow-2xl border-l border-[var(--color-one-border)] bg-[var(--color-one-bg)] flex flex-col min-h-0'
               : 'h-full w-full max-w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-16 md:pl-[5.5rem] md:pb-0 flex flex-col min-h-0'
           }
           quickAction={messengerQuickAction}
           onBackToHome={() => {
-            if (currentTab === 'globe' && agentSnap.commDrawerOpen) {
+            if (currentTab !== 'chat' && agentSnap.commDrawerOpen) {
               uiStateManager.setCommDrawerOpen(false);
             } else {
               goBack();
@@ -691,9 +707,9 @@ export default function App() {
           }}
           onMobileChatChange={handleMobileChatChange}
         />
-        {currentTab === 'aihub' && <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8"><AIHub lang={lang} /></div>}
-        <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[#121e36] text-slate-100"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} focusBookSeq={libraryFocusSeq} focusBookAutoRead={libraryFocusAutoRead} quickAction={libraryQuickAction} /></div></div>
-        {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonSpaceObservatory lang={lang} onBack={goBack} /></div>}
+        {currentTab === 'aihub' && <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><AIHub lang={lang} /></div>}
+        <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} focusBookSeq={libraryFocusSeq} focusBookAutoRead={libraryFocusAutoRead} quickAction={libraryQuickAction} /></div></div>
+        {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><MoonSpaceObservatory lang={lang} onBack={goBack} /></div>}
         {currentTab === 'arabic-learning' && (
           <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]">
             <ArabicLearningHub
@@ -703,8 +719,8 @@ export default function App() {
             />
           </div>
         )}
-        {currentTab === 'knowledge' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => navigateToTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }} /></div>}
-        <div className={currentTab === 'browser' ? 'block h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className="h-full w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[env(safe-area-inset-bottom)] md:pb-0 flex flex-col min-h-0 bg-[#121e36] text-slate-100"><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} quickSearchRequest={browserQuickSearch} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => navigateToTab('universe')} onBackToGlobe={() => navigateToTab('globe')} /></div></div>
+        {currentTab === 'knowledge' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => navigateToTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }} /></div>}
+        <div className={currentTab === 'browser' ? 'block h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className="h-full w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[env(safe-area-inset-bottom)] md:pb-0 flex flex-col min-h-0 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} quickSearchRequest={browserQuickSearch} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => navigateToTab('universe')} onBackToGlobe={() => navigateToTab('globe')} /></div></div>
         {currentTab === 'network' && (
           <OneNetworkCenter
             lang={lang}
@@ -715,51 +731,48 @@ export default function App() {
             onOpenCalls={() => navigateToTab('chat')}
           />
         )}
-        {currentTab === 'crawler' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><CrawlerDashboard lang={lang} /></div>}
-        {currentTab === 'creator' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
-        {currentTab === 'video' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8"><VideoCenter videos={videos} lang={lang} /></div>}
-        {currentTab === 'game' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100 min-h-[100dvh]"><GameCenter currentUser={currentUser} lang={lang} /></div>}
-        {currentTab === 'community' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
-        {currentTab === 'academy' && <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><MoonAcademy lang={lang} currentUser={currentUser} onBack={goBack} /></div>}
+        {currentTab === 'crawler' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]"><CrawlerDashboard lang={lang} /></div>}
+        {currentTab === 'creator' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
+        {currentTab === 'video' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><VideoCenter videos={videos} lang={lang} /></div>}
+        {currentTab === 'game' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]"><GameCenter currentUser={currentUser} lang={lang} /></div>}
+        {currentTab === 'community' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
+        {currentTab === 'academy' && <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><MoonAcademy lang={lang} currentUser={currentUser} onBack={goBack} /></div>}
         {currentTab === 'settings' && (
           <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
-            <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
-              <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'设置与安全':'Settings & Security'}</h1>
-              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'ONE 当前未提供独立的全局设置页面。账户、安全、隐私与绑定等真实能力已在「账户与安全」中提供。':'ONE does not currently provide a standalone global settings page. Real account, security, privacy, and linking controls are available in Account & Security.'}</p>
+            <div className="max-w-lg w-full rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-6 sm:p-8 space-y-4 shadow-sm">
+              <h1 className="text-xl font-semibold text-[var(--color-one-text)]">{lang==='zh'?'设置与安全':'Settings & Security'}</h1>
+              <p className="text-sm text-[var(--color-one-text-muted)] leading-relaxed">{lang==='zh'?'账户、安全、隐私与绑定等设置已在「账户与安全」中统一管理。':'Account, security, privacy, and linking controls are managed in Account & Security.'}</p>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => setIsSecurityModalOpen(true)} className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">Account &amp; Security</button>
-                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.06] text-slate-800 dark:text-slate-100 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-white/[0.12]">{lang==='zh'?'个人资料':'Profile'}</button>
+                <button onClick={() => setIsSecurityModalOpen(true)} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium">Account &amp; Security</button>
+                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text)] text-sm font-medium">{lang==='zh'?'个人资料':'Profile'}</button>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='zh'?'状态：独立设置模块未实现；已开放能力均为真实功能。':'Status: standalone settings module not implemented; exposed controls are real.'}</p>
             </div>
           </div>
         )}
         {currentTab === 'profile' && (
           <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
-            <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
-              <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'个人主页':'Profile'}</h1>
-              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'你的个人资料与地球信标通过真实资料面板管理（非独立路由页）。':'Your profile and globe beacon are managed via the real profile panel (no standalone route page).'}</p>
+            <div className="max-w-lg w-full rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-6 sm:p-8 space-y-4 shadow-sm">
+              <h1 className="text-xl font-semibold text-[var(--color-one-text)]">{lang==='zh'?'个人主页':'Profile'}</h1>
+              <p className="text-sm text-[var(--color-one-text-muted)] leading-relaxed">{lang==='zh'?'你的个人资料与地球信标通过资料面板管理。':'Manage your profile and globe beacon from your profile sheet.'}</p>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">{lang==='zh'?'打开个人资料':'Open profile'}</button>
-                <button onClick={() => setIsOnboardingModalOpen(true)} className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/15 bg-slate-50 dark:bg-white/[0.06] text-slate-800 dark:text-slate-100 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-white/[0.12]">{lang==='zh'?'编辑地球信标':'Edit beacon'}</button>
+                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium">{lang==='zh'?'打开个人资料':'Open profile'}</button>
+                <button onClick={() => setIsOnboardingModalOpen(true)} className="px-4 py-2.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text)] text-sm font-medium">{lang==='zh'?'编辑地球信标':'Edit beacon'}</button>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='zh'?'状态：独立 profile 页面未实现；以上入口为真实功能。':'Status: standalone profile page not implemented; entries above are real.'}</p>
             </div>
           </div>
         )}
         {currentTab === 'call' && (
           <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
-            <div className="max-w-lg w-full rounded-[28px] border border-slate-200 dark:border-white/15 bg-white dark:bg-[#162238] backdrop-blur-xl p-6 sm:p-8 space-y-4 shadow-lg">
-              <h1 className="text-xl font-semibold text-slate-900 dark:text-white">{lang==='zh'?'通话':'Calls'}</h1>
-              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{lang==='zh'?'当前没有独立的通话模块页面。通话能力（如可用）集成在消息/会话体验中，并依赖真实设备权限与连接状态；本路由不提供伪造通话界面。':'There is no standalone call module page. Call capabilities, where available, are integrated into messaging/conversations and depend on real device permissions and connectivity; this route does not provide a fabricated call UI.'}</p>
+            <div className="max-w-lg w-full rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-6 sm:p-8 space-y-4 shadow-sm">
+              <h1 className="text-xl font-semibold text-[var(--color-one-text)]">{lang==='zh'?'通话':'Calls'}</h1>
+              <p className="text-sm text-[var(--color-one-text-muted)] leading-relaxed">{lang==='zh'?'你可以在消息中心或右下角悬浮通信入口发起实时语音与视频通话，通话过程中不退出当前阅读或浏览页面。':'Start real-time voice or video calls from Messages or the floating communication dock without leaving your current page.'}</p>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => navigateToTab('chat')} className="px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">{lang==='zh'?'打开消息':'Open messages'}</button>
+                <button onClick={() => navigateToTab('chat')} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium">{lang==='zh'?'打开消息中心':'Open Messages'}</button>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">{lang==='zh'?'状态：独立 call 模块未实现；多端/设备通话需真实环境验证。':'Status: standalone call module not implemented; multi-device calling requires real-environment verification.'}</p>
             </div>
           </div>
         )}
-        {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[#121e36] text-slate-100"><BrandIdentitySystem lang={lang} onBackToGlobe={goBack} /></div>}
+        {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><BrandIdentitySystem lang={lang} onBackToGlobe={goBack} /></div>}
       </main>
 
       <AppDock
@@ -794,12 +807,11 @@ export default function App() {
         onOpenAIHub={() => navigateToTab('aihub')}
         onNavigateTab={navigateToTab}
         onPlayMusicAction={(opts) => {
-          setVenusQuickAction({
-            seq: Date.now(),
-            kind: 'crawl_and_play',
-            query: opts.query,
-          });
-          navigateToTab('venus');
+          window.dispatchEvent(
+            new CustomEvent('one-music-play-inline', {
+              detail: { query: opts.query || '轻音乐 钢琴' },
+            })
+          );
         }}
         onOpenBookAction={(opts) => {
           setLibraryQuickAction({
@@ -864,6 +876,34 @@ export default function App() {
           </div>
         </footer>
       )}
+      <FloatingCommWidget
+        lang={lang}
+        currentUser={currentUser}
+        conversations={conversations}
+        hidden={currentTab === 'chat' || agentSnap.commDrawerOpen || (currentTab === 'globe' && immersive)}
+        onOpenDrawerChat={(convId) => {
+          if (convId) {
+            setActiveConversationId(convId);
+            setMessengerQuickAction({ seq: Date.now(), kind: 'open_chat', conversationId: convId });
+          }
+          uiStateManager.setCommDrawerOpen(true);
+        }}
+        onOpenFullCenter={() => {
+          uiStateManager.setCommDrawerOpen(false);
+          navigateToTab('chat');
+        }}
+        onStartVoiceCall={(target) => {
+          if (target.conversationId) setActiveConversationId(target.conversationId);
+          setMessengerQuickAction({
+            seq: Date.now(),
+            kind: 'audio',
+            targetUserId: target.targetUserId,
+            conversationId: target.conversationId,
+            startMinimized: true,
+          });
+        }}
+      />
+
       <OfflineIndicator lang={lang} />
     </div>
     </PlayerProvider>

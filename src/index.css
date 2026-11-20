@@ -2,50 +2,50 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /* ONE Quiet Futurism tokens — Bright Daylight default */
-  --color-one-bg: #f4f7fb;
-  --color-one-bg-deep: #e8eef7;
+  /* EARTH ONE Unified Design System — Refined Warm Daylight */
+  --color-one-bg: #faf8f3;
+  --color-one-bg-deep: #f2eee4;
   --color-one-surface: #ffffff;
-  --color-one-surface-soft: #eef3fa;
+  --color-one-surface-soft: #f4f1e9;
   --color-one-surface-elevated: #ffffff;
-  --color-one-text: #0f172a;
-  --color-one-text-muted: #475569;
-  --color-one-text-dim: #64748b;
-  --color-one-accent: #0284c7;
-  --color-one-accent-soft: rgba(2, 132, 199, 0.12);
-  --color-one-gold: #b45309;
-  --color-one-gold-soft: rgba(180, 83, 9, 0.11);
-  --color-one-border: rgba(15, 23, 42, 0.1);
-  --color-one-border-strong: rgba(15, 23, 42, 0.18);
-  --color-one-success: #059669;
-  --color-one-warning: #d97706;
-  --color-one-danger: #dc2626;
+  --color-one-text: #1c2621;
+  --color-one-text-muted: #515f57;
+  --color-one-text-dim: #738179;
+  --color-one-accent: #247864;
+  --color-one-accent-soft: rgba(36, 120, 100, 0.11);
+  --color-one-gold: #9e7a3a;
+  --color-one-gold-soft: rgba(158, 122, 58, 0.12);
+  --color-one-border: rgba(28, 38, 33, 0.09);
+  --color-one-border-strong: rgba(28, 38, 33, 0.16);
+  --color-one-success: #247864;
+  --color-one-warning: #b47b27;
+  --color-one-danger: #c44536;
 
   /* Legacy compatibility tokens */
-  --color-space-bg: #f4f7fb;
+  --color-space-bg: #faf8f3;
   --color-space-bg-soft: #ffffff;
-  --color-hud-surface: rgba(255, 255, 255, 0.86);
+  --color-hud-surface: rgba(250, 248, 243, 0.88);
   --color-hud-surface-strong: rgba(255, 255, 255, 0.96);
-  --color-hud-border: rgba(15, 23, 42, 0.12);
-  --color-accent: #0284c7;
-  --color-accent-soft: #0369a1;
-  --color-text-primary: rgba(15, 23, 42, 0.96);
-  --color-text-secondary: rgba(71, 85, 105, 0.9);
-  --color-status-ok: #059669;
+  --color-hud-border: rgba(28, 38, 33, 0.1);
+  --color-accent: #247864;
+  --color-accent-soft: #1d5e4e;
+  --color-text-primary: rgba(28, 38, 33, 0.96);
+  --color-text-secondary: rgba(81, 95, 87, 0.9);
+  --color-status-ok: #247864;
 
-  --radius-one-sm: 12px;
+  --radius-one-sm: 10px;
   --radius-one-md: 16px;
-  --radius-one-lg: 24px;
-  --radius-one-xl: 32px;
+  --radius-one-lg: 22px;
+  --radius-one-xl: 28px;
 
-  --shadow-one-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 24px rgba(15, 23, 42, 0.06);
-  --shadow-one-md: 0 2px 8px rgba(15, 23, 42, 0.06), 0 18px 42px rgba(15, 23, 42, 0.08);
-  --shadow-one-lg: 0 8px 24px rgba(15, 23, 42, 0.08), 0 32px 64px rgba(15, 23, 42, 0.12);
+  --shadow-one-sm: 0 1px 2px rgba(24, 34, 28, 0.04), 0 6px 18px rgba(24, 34, 28, 0.05);
+  --shadow-one-md: 0 2px 8px rgba(24, 34, 28, 0.05), 0 16px 36px rgba(24, 34, 28, 0.08);
+  --shadow-one-lg: 0 8px 24px rgba(24, 34, 28, 0.07), 0 28px 60px rgba(24, 34, 28, 0.11);
 
-  --ease-one: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --dur-one-fast: 140ms;
-  --dur-one-base: 220ms;
-  --dur-one-slow: 360ms;
+  --ease-one: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-one-fast: 150ms;
+  --dur-one-base: 240ms;
+  --dur-one-slow: 380ms;
 }
 
 :root {
@@ -62,38 +62,38 @@
 
 html.dark {
   color-scheme: dark;
-  --color-one-bg: #0f172a;
-  --color-one-bg-deep: #0b1120;
-  --color-one-surface: #162238;
-  --color-one-surface-soft: #1d2b45;
-  --color-one-surface-elevated: #233352;
-  --color-one-text: #f8fafc;
-  --color-one-text-muted: #cbd5e1;
-  --color-one-text-dim: #94a3b8;
-  --color-one-accent: #38bdf8;
-  --color-one-accent-soft: rgba(56, 189, 248, 0.16);
-  --color-one-gold: #fbbf24;
-  --color-one-gold-soft: rgba(251, 191, 36, 0.15);
-  --color-one-border: rgba(248, 250, 252, 0.13);
-  --color-one-border-strong: rgba(248, 250, 252, 0.22);
-  --color-one-success: #34d399;
-  --color-one-warning: #fbbf24;
-  --color-one-danger: #f87171;
+  --color-one-bg: #111821;
+  --color-one-bg-deep: #0c1219;
+  --color-one-surface: #18222f;
+  --color-one-surface-soft: #1f2b3a;
+  --color-one-surface-elevated: #243244;
+  --color-one-text: #f4f1ea;
+  --color-one-text-muted: #b9c2ca;
+  --color-one-text-dim: #8a96a3;
+  --color-one-accent: #52b798;
+  --color-one-accent-soft: rgba(82, 183, 152, 0.16);
+  --color-one-gold: #d6b77f;
+  --color-one-gold-soft: rgba(214, 183, 127, 0.15);
+  --color-one-border: rgba(244, 241, 234, 0.11);
+  --color-one-border-strong: rgba(244, 241, 234, 0.2);
+  --color-one-success: #52b798;
+  --color-one-warning: #e0b366;
+  --color-one-danger: #e2786c;
 
-  --color-space-bg: #0f172a;
-  --color-space-bg-soft: #162238;
-  --color-hud-surface: rgba(22, 34, 56, 0.84);
-  --color-hud-surface-strong: rgba(30, 44, 72, 0.94);
-  --color-hud-border: rgba(248, 250, 252, 0.14);
-  --color-accent: #38bdf8;
-  --color-accent-soft: #7dd3fc;
-  --color-text-primary: rgba(248, 250, 252, 0.98);
-  --color-text-secondary: rgba(203, 213, 225, 0.88);
-  --color-status-ok: #34d399;
+  --color-space-bg: #111821;
+  --color-space-bg-soft: #18222f;
+  --color-hud-surface: rgba(17, 24, 33, 0.86);
+  --color-hud-surface-strong: rgba(24, 34, 47, 0.96);
+  --color-hud-border: rgba(244, 241, 234, 0.12);
+  --color-accent: #52b798;
+  --color-accent-soft: #7ccdb3;
+  --color-text-primary: rgba(244, 241, 234, 0.98);
+  --color-text-secondary: rgba(185, 194, 202, 0.88);
+  --color-status-ok: #52b798;
 
-  --shadow-one-sm: 0 1px 2px rgba(0, 0, 0, 0.28), 0 8px 24px rgba(0, 0, 0, 0.16);
-  --shadow-one-md: 0 2px 8px rgba(0, 0, 0, 0.28), 0 20px 48px rgba(0, 0, 0, 0.22);
-  --shadow-one-lg: 0 8px 24px rgba(0, 0, 0, 0.34), 0 40px 80px rgba(0, 0, 0, 0.26);
+  --shadow-one-sm: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 20px rgba(0, 0, 0, 0.18);
+  --shadow-one-md: 0 2px 8px rgba(0, 0, 0, 0.28), 0 18px 42px rgba(0, 0, 0, 0.24);
+  --shadow-one-lg: 0 8px 24px rgba(0, 0, 0, 0.34), 0 36px 72px rgba(0, 0, 0, 0.3);
 }
 
 @layer base {
@@ -110,7 +110,7 @@ html.dark {
     -webkit-tap-highlight-color: transparent;
   }
   @media (max-width: 768px) {
-    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),
     textarea,
     select {
       font-size: 16px !important;
@@ -122,24 +122,24 @@ html.dark {
   body {
     margin: 0;
     color: var(--color-one-text);
-    background:
-      radial-gradient(1200px 600px at 72% -10%, rgba(14, 165, 233, 0.1), transparent 55%),
-      radial-gradient(900px 500px at 10% 0%, rgba(245, 158, 11, 0.06), transparent 50%),
-      linear-gradient(180deg, #f8fafd 0%, #f2f6fc 52%, #e9f0f8 100%);
-    font-family: 'Plus Jakarta Sans', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
-    letter-spacing: 0.005em;
+    background-color: var(--color-one-bg);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Plus Jakarta Sans', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', system-ui, sans-serif;
+    letter-spacing: 0.004em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   html.dark body {
-    background:
-      radial-gradient(1200px 600px at 70% -10%, rgba(56, 189, 248, 0.14), transparent 55%),
-      radial-gradient(900px 500px at 10% 0%, rgba(251, 191, 36, 0.07), transparent 50%),
-      linear-gradient(180deg, #131f36 0%, #0f172a 50%, #0b1120 100%);
+    background-color: var(--color-one-bg);
   }
   [dir="rtl"] {
-    font-family: 'Tajawal', system-ui, -apple-system, sans-serif;
+    font-family: 'Tajawal', 'Amiri', system-ui, -apple-system, sans-serif;
   }
   ::selection {
-    background: rgba(14, 165, 233, 0.22);
+    background: rgba(36, 120, 100, 0.2);
+    color: var(--color-one-text);
+  }
+  html.dark ::selection {
+    background: rgba(82, 183, 152, 0.28);
     color: var(--color-one-text);
   }
 }

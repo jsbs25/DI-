@@ -5,11 +5,7 @@ import {
   X,
   BookOpen,
   Maximize2,
-  Menu,
-  Sparkles,
-  Languages,
-  Loader2,
-  Send
+  Menu
 } from 'lucide-react';
 import { Book } from '../../types/index.ts';
 
@@ -49,15 +45,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
   const [error, setError] = useState<string | null>(null);
   const [showToc, setShowToc] = useState(false);
   const [fontSize, setFontSize] = useState(100);
-  const [readerTheme, setReaderTheme] = useState<'light' | 'sepia' | 'dark'>('light');
   const [progress, setProgress] = useState(0);
-  const [aiOpen, setAiOpen] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState('');
-  const [aiError, setAiError] = useState('');
-  const [aiQuestion, setAiQuestion] = useState('');
-  const [currentCfi, setCurrentCfi] = useState<string>('');
-  const [visibleText, setVisibleText] = useState('');
   const onProgressRef = useRef(onProgress);
   const pendingProgressRef = useRef<{ progress: number; cfi: string; bookId: string; ownerId?: string } | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -76,11 +64,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
     if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
     progressTimerRef.current = setTimeout(flushProgress, 600);
   };
-
-  useEffect(() => {
-    if (!rendition) return;
-    try { rendition.themes.select(readerTheme); } catch {}
-  }, [rendition, readerTheme]);
 
   const closeReader = () => {
     flushProgress();
@@ -156,14 +139,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
           spread: 'none',
           flow: 'paginated'
         });
-        try {
-          rend.themes.register('light', { body: { background: '#f5f1e8', color: '#1f2937', 'line-height': '1.85' } });
-          rend.themes.register('sepia', { body: { background: '#efe4cc', color: '#3b2f1d', 'line-height': '1.85' } });
-          rend.themes.register('dark', { body: { background: '#111827', color: '#e5e7eb', 'line-height': '1.85' } });
-          rend.themes.select('light');
-          rend.themes.fontSize('100%');
-          if (isRtl && typeof (rend as any).direction === 'function') (rend as any).direction('rtl');
-        } catch {}
 
         const loaded = await bookObj.ready;
         if (cancelled) return;
@@ -181,15 +156,9 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
             const pct = location.start.percentage || 0;
             setProgress(Math.round(pct * 100));
             const cfi = location.start.cfi;
-            if (typeof cfi === 'string') setCurrentCfi(cfi);
             if (ownerId && typeof cfi === 'string' && cfi.startsWith('epubcfi(') && cfi.length <= 2048) {
               queueProgress(Math.round(pct * 100), cfi, book.id, ownerId);
             }
-            try {
-              const contents = rend.getContents?.() || [];
-              const texts = contents.map((c: any) => (c?.document?.body?.innerText || c?.document?.body?.textContent || '') as string).filter(Boolean);
-              setVisibleText(texts.join('\n').replace(/\s+/g, ' ').trim().slice(0, 5000));
-            } catch {}
           }
         });
 
@@ -245,49 +214,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
     else document.exitFullscreen?.();
   };
 
-  const runEpubAi = async (action: 'explain' | 'translate' | 'ask') => {
-    setAiOpen(true);
-    setAiLoading(true);
-    setAiError('');
-    try {
-      const contextText = visibleText || '';
-      if (!contextText && action !== 'ask') {
-        setAiError('当前视图文本尚未提取到，请翻页后重试或直接提问。');
-        setAiLoading(false);
-        return;
-      }
-      const endpoint = action === 'explain' ? '/api/library/ai/explain-page' : `/api/library-ai/${action}`;
-      const ui = /^(en|ar)/i.test(book.language || '') ? (book.language as string).slice(0, 2).toLowerCase() : 'zh';
-      const body: any = {
-        bookId: book.id,
-        title: book.title,
-        bookTitle: book.title,
-        author: book.author,
-        chapterTitle: 'EPUB 当前视图',
-        pageText: contextText,
-        selectedText: contextText,
-        surroundingContext: contextText,
-        language: book.language,
-        lang: ui,
-        uiLanguage: ui,
-        question: aiQuestion || undefined,
-      };
-      if (action === 'translate') body.targetLanguage = ui === 'ar' ? 'ar' : ui === 'en' ? 'en' : 'zh';
-      if (action === 'ask') body.question = aiQuestion || (ui === 'en' ? 'Explain the visible content in context.' : ui === 'ar' ? 'اشرح المحتوى الظاهر في سياقه.' : '请结合当前可见内容进行说明。');
-      const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body) });
-      const data = await res.json();
-      if (data?.success) {
-        setAiResult(data.explanation || data.content || '');
-      } else {
-        setAiError(data?.error || 'AI 暂时不可用。');
-      }
-    } catch (e: any) {
-      setAiError(e?.message || '网络错误，请重试。');
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
   return (
     <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="epub-reader-title" tabIndex={-1} className="fixed inset-0 z-50 bg-[var(--one-bg,#030712)] flex flex-col focus:outline-none text-[var(--one-text,#e8edf5)]">
       {/* Toolbar */}
@@ -318,21 +244,8 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
           <div className="flex items-center justify-between sm:justify-end gap-1.5">
             <button type="button" onClick={() => adjustFont(-10)} aria-label="缩小字体" className="min-h-11 min-w-11 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs text-slate-200 cursor-pointer transition">A-</button>
             <button type="button" onClick={() => adjustFont(10)} aria-label="增大字体" className="min-h-11 min-w-11 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs text-slate-200 cursor-pointer transition">A+</button>
-            <select
-              value={readerTheme}
-              onChange={(e) => setReaderTheme(e.target.value as 'light' | 'sepia' | 'dark')}
-              aria-label="阅读主题"
-              className="h-11 rounded-xl border border-white/10 bg-white/5 px-2 text-xs text-slate-200 cursor-pointer"
-            >
-              <option value="light">浅色</option>
-              <option value="sepia">护眼</option>
-              <option value="dark">深色</option>
-            </select>
             <button type="button" onClick={() => setShowToc(!showToc)} aria-label={showToc ? '关闭目录' : '打开目录'} aria-expanded={showToc} aria-controls="epub-reader-toc" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-100 cursor-pointer transition">
               <Menu className="w-4 h-4" />
-            </button>
-            <button type="button" onClick={() => setAiOpen(v => !v)} aria-label="AI 阅读助手" className={`min-h-11 min-w-11 flex items-center justify-center rounded-xl border cursor-pointer transition ${aiOpen ? 'bg-emerald-600/30 border-emerald-400/40 text-emerald-200' : 'bg-white/5 border-white/10 hover:bg-white/10 text-slate-100'}`}>
-              <Sparkles className="w-4 h-4" />
             </button>
             <button type="button" onClick={toggleFullscreen} aria-label="切换全屏" className="min-h-11 min-w-11 flex items-center justify-center rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-100 cursor-pointer transition">
               <Maximize2 className="w-4 h-4" />
@@ -341,25 +254,10 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
         </div>
       </header>
 
-      <aside aria-label="EPUB 阅读说明" className="border-b border-emerald-400/20 bg-emerald-500/10 px-4 py-2 text-[11px] leading-relaxed text-emerald-100/90">
-        <strong className="mr-1">EPUB AI 辅助已启用（基于当前视图文本）。</strong>
-        可对当前可见内容进行讲解/翻译/问答；由于 EPUB 定位与服务端可核验文本未完全关联，AI 结果会基于客户端提取的当前视图上下文，请结合原文核对，不将其视为逐字引文证明。
+      <aside aria-label="EPUB 阅读说明" className="border-b border-amber-400/20 bg-amber-500/10 px-4 py-2 text-[11px] leading-relaxed text-amber-100/90">
+        <strong className="mr-1">EPUB AI 段落解读暂不可用。</strong>
+        阅读与续读仍可使用；这本 EPUB 的具体文件版本、服务器章节正文和 CFI 定位尚未建立可核验关联，因此不会把选文或阅读位置发送给 AI。公版/开放许可标签或已保存的续读 CFI 都不能替代这项核验。若馆藏提供已核实的 TXT/正文版本，可改用该版本的段落解读。
       </aside>
-      {aiOpen && (
-        <div className="border-b border-white/10 bg-[rgba(12,18,28,0.96)] px-4 py-3">
-          <div className="flex flex-wrap items-center gap-2 mb-2">
-            <button type="button" onClick={() => runEpubAi('explain')} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"><Sparkles className="w-3.5 h-3.5"/>讲解当前页</button>
-            <button type="button" onClick={() => runEpubAi('translate')} className="inline-flex items-center gap-1 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-slate-200"><Languages className="w-3.5 h-3.5"/>翻译为中文</button>
-            <div className="flex-1 min-w-[200px] flex items-center gap-1.5">
-              <input value={aiQuestion} onChange={(e)=>setAiQuestion(e.target.value)} placeholder="针对当前可见内容提问…" className="h-9 flex-1 rounded-lg border border-white/10 bg-transparent px-3 text-xs text-slate-100 placeholder:text-slate-500" />
-              <button type="button" onClick={() => runEpubAi('ask')} className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white"><Send className="w-3.5 h-3.5"/></button>
-            </div>
-          </div>
-          <div className="max-h-44 overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-3 text-xs leading-relaxed text-slate-200 whitespace-pre-wrap">
-            {aiLoading ? <div className="flex items-center gap-2 text-slate-400"><Loader2 className="w-4 h-4 animate-spin"/>AI 正在分析当前视图文本…</div> : aiError ? <div className="text-rose-300">{aiError}</div> : aiResult || <div className="text-slate-500">点击上方操作，基于当前 EPUB 可见内容进行讲解、翻译或问答（Gemini 优先）。</div>}
-          </div>
-        </div>
-      )}
 
       {/* Body */}
       <div className="flex-1 flex overflow-hidden relative">
@@ -381,7 +279,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
           </aside>
         )}
 
-        <div className={`flex-1 flex items-center justify-center relative ${readerTheme === 'dark' ? 'bg-[#111827]' : readerTheme === 'sepia' ? 'bg-[#efe4cc]' : 'bg-[#f5f1e8]'}`} dir={isRtl ? 'rtl' : 'ltr'} lang={book.language || undefined}>
+        <div className="flex-1 bg-[#f5f1e8] flex items-center justify-center relative" dir={isRtl ? 'rtl' : 'ltr'} lang={book.language || undefined}>
           {loading && (
               <div role="status" aria-live="polite" className="text-slate-600 text-sm flex items-center space-x-2">
               <BookOpen className="w-5 h-5 animate-pulse" />
