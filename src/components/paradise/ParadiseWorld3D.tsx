@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { ChevronDown, ChevronUp, Compass, Download, Loader2, LocateFixed, MapPin, Radio, RotateCcw, Search, SlidersHorizontal, SunMedium, Wind, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Compass, Download, Loader2, LocateFixed, MapPin, Maximize2, Radio, RotateCcw, Search, SlidersHorizontal, SunMedium, Wind, X } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
 import { uiStateManager, useAgentUiState } from '../../agent/uiStateManager.ts';
 import {
@@ -80,12 +80,14 @@ function readStoredQuality(): UserQualityChoice {
 interface ParadiseWorld3DProps {
   lang: Language;
   immersive?: boolean;
+  embedded?: boolean;
   onImmersiveChange?: (v: boolean) => void;
 }
 
 export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   lang,
   immersive = false,
+  embedded = false,
   onImmersiveChange,
 }) => {
   const isZh = lang === 'zh';
@@ -983,11 +985,13 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         // If Spirit is momentarily behind the camera, anchor cleanly in upper-left safe zone
         if (tmpKeyWorld.z > 1) {
           sx = rect.left + Math.min(vw * 0.36, 260);
-          sy = rect.top + Math.max(190, vh * 0.42);
+          sy = rect.top + Math.max(embedded && !immersive ? 130 : 190, vh * 0.42);
         } else {
           const padX = Math.min(185, vw * 0.42);
+          const topPad = embedded && !immersive ? 120 : 165;
+          const botPad = embedded && !immersive ? 48 : 115;
           sx = Math.max(rect.left + padX, Math.min(rect.left + vw - padX, sx));
-          sy = Math.max(rect.top + 165, Math.min(rect.top + vh - 115, sy));
+          sy = Math.max(rect.top + topPad, Math.min(rect.top + vh - botPad, sy));
         }
         bubbleEl.style.transform = `translate3d(${Math.round(sx)}px, ${Math.round(sy)}px, 0)`;
       }
@@ -1252,78 +1256,115 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Top-Center Desktop Clock, Standard Location & Live Weather Pill */}
+      {/* Clock, Location, Live Weather & Camera Controls */}
       <div
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.45rem+env(safe-area-inset-top))] sm:top-[max(0.65rem,env(safe-area-inset-top))] z-[56] flex flex-col items-center gap-2 max-w-[calc(100vw-1.5rem)]"
+        className={
+          embedded && !immersive
+            ? 'pointer-events-none absolute inset-x-3.5 top-3.5 z-[25] flex flex-col items-start gap-2'
+            : 'pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.45rem+env(safe-area-inset-top))] sm:top-[max(0.65rem,env(safe-area-inset-top))] z-[60] flex flex-col items-center gap-2 max-w-[calc(100vw-1.5rem)]'
+        }
       >
-        <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/55' : 'ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
-          <button
-            type="button"
-            onClick={() => setControlsOpen((o) => !o)}
-            className="inline-flex h-9 items-center gap-2 px-3.5 text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
-            title={isZh ? '实时时间、精准定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
-          >
-            <span className="tabular-nums text-[13px] font-semibold tracking-tight">
-              {agentSnap.realtimeSync
-                ? `${String(liveClockNow.getHours()).padStart(2, '0')}:${String(liveClockNow.getMinutes()).padStart(2, '0')}`
-                : currentClockLabel}
-            </span>
-            <span className="opacity-35">·</span>
-            <span className="inline-flex items-center gap-1 max-w-[130px] sm:max-w-[180px] truncate opacity-90">
-              <MapPin className="h-3 w-3 shrink-0 opacity-75" />
-              <span className="truncate">
-                {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable
-                  ? agentSnap.liveWeather.locationName
-                  : isZh
-                    ? '定位中…'
-                    : 'Locating…'}
-              </span>
-            </span>
-            {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && (
-              <>
-                <span className="hidden xs:inline opacity-35">·</span>
-                <span className="hidden xs:inline opacity-85">
-                  {Math.round(agentSnap.liveWeather.temperatureC)}°C {isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}
-                </span>
-              </>
-            )}
-            {controlsOpen ? <ChevronUp className="h-3 w-3 opacity-65 shrink-0" /> : <ChevronDown className="h-3 w-3 opacity-65 shrink-0" />}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void fetchLiveWeather(true)}
-            disabled={locating}
-            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
-            title={isZh ? '高精度 GPS 重新定位' : 'Refresh precise GPS location'}
-            aria-label={isZh ? '高精度定位' : 'Locate'}
-          >
-            {locating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="h-3.5 w-3.5" />}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
-            className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
-            title={isZh ? '重置视角' : 'Reset View'}
-            aria-label={isZh ? '重置视角' : 'Reset View'}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
-
-          {immersive && onImmersiveChange && (
+        <div className={embedded && !immersive ? 'flex w-full items-center justify-between gap-2' : 'flex items-center justify-center'}>
+          <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/55' : 'ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
             <button
               type="button"
-              onClick={() => onImmersiveChange(false)}
-              className={`h-9 px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
+              onClick={() => setControlsOpen((o) => !o)}
+              className="inline-flex h-9 items-center gap-2 px-3.5 text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
+              title={isZh ? '实时时间、精准定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
             >
-              {isZh ? '退出' : 'Exit'}
+              <span className="tabular-nums text-[13px] font-semibold tracking-tight">
+                {agentSnap.realtimeSync
+                  ? `${String(liveClockNow.getHours()).padStart(2, '0')}:${String(liveClockNow.getMinutes()).padStart(2, '0')}`
+                  : currentClockLabel}
+              </span>
+              <span className="opacity-35">·</span>
+              <span className="inline-flex items-center gap-1 max-w-[118px] sm:max-w-[170px] truncate opacity-90">
+                <MapPin className="h-3 w-3 shrink-0 opacity-75" />
+                <span className="truncate">
+                  {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable
+                    ? agentSnap.liveWeather.locationName
+                    : isZh
+                      ? '定位中…'
+                      : 'Locating…'}
+                </span>
+              </span>
+              {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && (
+                <>
+                  <span className="hidden xs:inline opacity-35">·</span>
+                  <span className="hidden xs:inline opacity-85">
+                    {Math.round(agentSnap.liveWeather.temperatureC)}°C {isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}
+                  </span>
+                </>
+              )}
+              {controlsOpen ? <ChevronUp className="h-3 w-3 opacity-65 shrink-0" /> : <ChevronDown className="h-3 w-3 opacity-65 shrink-0" />}
             </button>
+
+            <button
+              type="button"
+              onClick={() => void fetchLiveWeather(true)}
+              disabled={locating}
+              className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
+              title={isZh ? '高精度 GPS 重新定位' : 'Refresh precise GPS location'}
+              aria-label={isZh ? '高精度定位' : 'Locate'}
+            >
+              {locating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="h-3.5 w-3.5" />}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
+              className="inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
+              title={isZh ? '重置视角' : 'Reset View'}
+              aria-label={isZh ? '重置视角' : 'Reset View'}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+
+            {immersive && onImmersiveChange && (
+              <button
+                type="button"
+                onClick={() => onImmersiveChange(false)}
+                className={`h-9 px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
+              >
+                {isZh ? '退出全屏' : 'Exit'}
+              </button>
+            )}
+          </div>
+
+          {embedded && !immersive && (
+            <div className="pointer-events-auto flex items-center gap-1.5 shrink-0">
+              <div className={`hidden xl:inline-flex items-center rounded-full border p-0.5 gap-0.5 backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/55' : 'ring-white/[0.08]'} ${dockShellCls}`}>
+                {CAMERA_PRESETS.map((cp) => (
+                  <button
+                    key={cp.id}
+                    type="button"
+                    onClick={() => moveCameraToPreset(cp)}
+                    className={`h-8 rounded-full px-2.5 text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                      cameraPreset === cp.id ? dockActiveCls : 'opacity-80 hover:opacity-100'
+                    }`}
+                  >
+                    {isZh ? cp.zh : cp.en}
+                  </button>
+                ))}
+              </div>
+              {onImmersiveChange && (
+                <button
+                  type="button"
+                  onClick={() => onImmersiveChange(true)}
+                  title={isZh ? '进入全屏 3D 漫游' : 'Enter Fullscreen 3D'}
+                  aria-label={isZh ? '进入全屏 3D 漫游' : 'Enter Fullscreen 3D'}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-[11.5px] font-medium transition-all backdrop-blur-2xl ring-1 ring-inset cursor-pointer whitespace-nowrap active:scale-[0.97] ${isDayUi ? 'ring-white/55' : 'ring-white/[0.08]'} ${dockShellCls}`}
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">{isZh ? '全屏 3D' : 'Fullscreen'}</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
 
         {controlsOpen && (
-          <div className={`pointer-events-auto w-[min(92vw,372px)] rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-2xl ${dockShellCls}`}>
+          <div className={`pointer-events-auto w-[min(92vw,372px)] max-h-[380px] overflow-y-auto rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-2xl ${dockShellCls}`}>
 
             <div className={`mb-2.5 space-y-2 rounded-xl border px-2.5 py-2 ${dockBorderCls} ${isDayUi ? 'bg-white/48' : 'bg-white/[0.04]'}`}>
               <div className="flex items-center justify-between gap-2">

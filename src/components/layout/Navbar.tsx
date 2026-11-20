@@ -174,17 +174,11 @@ export const Navbar: React.FC<NavbarProps> = ({
     return null;
   }
 
-  const surfaceChip = isGardenHome
-    ? isGardenDay
-      ? 'border-white/75 bg-[#fcfaf5]/84 text-[#1b2b23] hover:bg-[#fcfaf5]/96 shadow-[0_8px_24px_rgba(20,34,27,0.12)] backdrop-blur-2xl ring-1 ring-inset ring-white/55'
-      : 'border-white/16 bg-[#101924]/74 text-[#f5f1e8] hover:bg-[#101924]/90 shadow-[0_10px_28px_rgba(2,6,12,0.40)] backdrop-blur-2xl ring-1 ring-inset ring-white/[0.06]'
-    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/92 dark:bg-[#101924]/90 text-[#1b2b23] dark:text-[#f5f1e8] hover:bg-white dark:hover:bg-[#182534] shadow-[0_6px_20px_rgba(20,34,27,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.38)] backdrop-blur-2xl ring-1 ring-inset ring-white/50 dark:ring-white/[0.05]';
+  const surfaceChip =
+    'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/88 dark:bg-[#101924]/88 text-[#1b2b23] dark:text-[#f5f1e8] hover:bg-white dark:hover:bg-[#182534] shadow-[0_6px_20px_rgba(20,34,27,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.38)] backdrop-blur-2xl ring-1 ring-inset ring-white/55 dark:ring-white/[0.06]';
 
-  const dockShell = isGardenHome
-    ? isGardenDay
-      ? 'border-white/75 bg-[#fcfaf5]/86 text-[#1b2b23] shadow-[0_14px_38px_rgba(20,34,27,0.16),0_2px_8px_rgba(20,34,27,0.06)] backdrop-blur-2xl ring-1 ring-inset ring-white/60'
-      : 'border-white/16 bg-[#0f1722]/80 text-[#f5f1e8] shadow-[0_18px_46px_rgba(2,6,12,0.52)] backdrop-blur-2xl ring-1 ring-inset ring-white/[0.07]'
-    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/94 dark:bg-[#0f1722]/92 text-[#1b2b23] dark:text-[#f5f1e8] shadow-[0_14px_36px_rgba(20,34,27,0.12)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.50)] backdrop-blur-2xl ring-1 ring-inset ring-white/60 dark:ring-white/[0.06]';
+  const dockShell =
+    'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/92 dark:bg-[#0f1722]/90 text-[#1b2b23] dark:text-[#f5f1e8] shadow-[0_14px_36px_rgba(20,34,27,0.12)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.50)] backdrop-blur-2xl ring-1 ring-inset ring-white/65 dark:ring-white/[0.06]';
 
   return (
     <>
@@ -199,7 +193,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             className={`pointer-events-auto flex h-9 items-center gap-2 rounded-full border pl-1 pr-3 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
           >
             <ParadiseBrandEmblem
-              surface={isGardenHome ? (isGardenDay ? 'garden-day' : 'garden-night') : theme === 'dark' ? 'dark' : 'light'}
+              surface={theme === 'dark' ? 'dark' : 'light'}
               variant="medallion"
               size={27}
             />
@@ -371,23 +365,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               const fullLabel = lang === 'ar' ? item.labelAr : lang === 'en' ? item.labelEn : item.labelZh;
               const compactLabel = lang === 'zh' ? item.shortZh : fullLabel;
 
-              const activeTabCls = isGardenHome
-                ? isGardenDay
-                  ? 'bg-[#1d352c] text-[#faf7f0] shadow-[0_4px_12px_rgba(20,38,30,0.24)]'
-                  : 'bg-[#ede3ce] text-[#131d27] shadow-[0_4px_14px_rgba(0,0,0,0.28)]'
-                : 'bg-[#1f6250] text-[#faf7f0] dark:bg-[#ede3ce] dark:text-[#131d27] shadow-[0_4px_12px_rgba(20,56,45,0.20)]';
+              const activeTabCls =
+                'bg-[#1f6250] text-[#faf7f0] dark:bg-[#ede3ce] dark:text-[#131d27] shadow-[0_4px_12px_rgba(20,56,45,0.20)]';
 
-              const inactiveTabCls = isGardenHome
-                ? isGardenDay
-                  ? isCenterAi
-                    ? 'bg-black/[0.045] text-[#1b2e26] hover:bg-black/[0.08]'
-                    : 'text-[#2b3f36]/90 hover:bg-black/[0.055] hover:text-[#14221c]'
-                  : isCenterAi
-                    ? 'bg-white/[0.08] text-[#f6f1e6] hover:bg-white/[0.14]'
-                    : 'text-[#e8e2d5]/85 hover:bg-white/[0.09] hover:text-white'
-                : isCenterAi
-                  ? 'bg-[#1f6250]/[0.08] text-[#1c4b3d] dark:bg-white/[0.09] dark:text-[#efe7d6] hover:bg-[#1f6250]/[0.14] dark:hover:bg-white/[0.15]'
-                  : 'text-[#31453b]/90 dark:text-[#d8d3c8]/88 hover:bg-black/[0.05] dark:hover:bg-white/[0.08] hover:text-[#16241d] dark:hover:text-white';
+              const inactiveTabCls = isCenterAi
+                ? 'bg-[#1f6250]/[0.08] text-[#1c4b3d] dark:bg-white/[0.09] dark:text-[#efe7d6] hover:bg-[#1f6250]/[0.14] dark:hover:bg-white/[0.15]'
+                : 'text-[#31453b]/90 dark:text-[#d8d3c8]/88 hover:bg-black/[0.05] dark:hover:bg-white/[0.08] hover:text-[#16241d] dark:hover:text-white';
 
               return (
                 <button
