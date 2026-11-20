@@ -7,10 +7,29 @@ import { getCallById } from './calls/index.ts';
 import { isActiveCallStatus } from './calls/service.ts';
 import { pushCallSignal } from './calls/signals.ts';
 
-type Client = { ws: WebSocket; userId: string; deviceId: string; activeConversationId?: string | null };
+type Client = { ws: WebSocket; userId: string; deviceId: string; activeConversationId?: string | null; isAlive: boolean; connectedAt: number };
 
 const clientsByUser = new Map<string, Set<Client>>();
 const typingTimers = new Map<string, NodeJS.Timeout>(); // key conv:user -> timeout
+const recentClientMsgs = new Map<string, { message: any; ts: number }>();
+
+export function getWsHealthMetrics() {
+  let totalConnections = 0;
+  for (const set of clientsByUser.values()) totalConnections += set.size;
+  return {
+    onlineUsers: clientsByUser.size,
+    activeSockets: totalConnections,
+    dedupCacheSize: recentClientMsgs.size,
+  };
+}
+
+// Prune expired clientMsgId dedup cache entries every 2 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  for (const [k, v] of recentClientMsgs.entries()) {
+    if (v.ts < cutoff) recentClientMsgs.delete(k);
+  }
+}, 2 * 60 * 1000).unref?.();
 
 export function isUserViewingConversation(userId: string, conversationId?: string | null): boolean {
   if (!userId || !conversationId) return false;
@@ -87,6 +106,22 @@ export function getTokenFromReq(req: IncomingMessage): string | null {
 }
 
 export function attachMessengerWs(wss: WebSocketServer) {
+  // Server-side WebSocket liveness sweep every 30s to reap zombie sockets & keep presence accurate
+  const heartbeatInterval = setInterval(() => {
+    for (const [, set] of clientsByUser.entries()) {
+      for (const c of set) {
+        if (!c.isAlive) {
+          try { c.ws.terminate(); } catch {}
+          continue;
+        }
+        c.isAlive = false;
+        try { (c.ws as any).ping?.(); } catch {}
+      }
+    }
+  }, 30_000);
+  heartbeatInterval.unref?.();
+  wss.on('close', () => clearInterval(heartbeatInterval));
+
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const token = getTokenFromReq(req);
     const user = token ? store.getUserByToken(token) : null;
@@ -97,7 +132,8 @@ export function attachMessengerWs(wss: WebSocketServer) {
     }
     let deviceId = '';
     try { const u = new URL(req.url || '/', 'http://localhost'); deviceId = u.searchParams.get('deviceId') || `dev_${Date.now()}_${Math.random().toString(36).slice(2,6)}`; } catch { deviceId = `dev_${Date.now()}`; }
-    const client: Client = { ws, userId: user.id, deviceId };
+    const client: Client = { ws, userId: user.id, deviceId, isAlive: true, connectedAt: Date.now() };
+    (ws as any).on?.('pong', () => { client.isAlive = true; });
     if (!clientsByUser.has(user.id)) clientsByUser.set(user.id, new Set());
     clientsByUser.get(user.id)!.add(client);
     // update server-side last active on connect
@@ -107,6 +143,7 @@ export function attachMessengerWs(wss: WebSocketServer) {
     try { store.saveToDisk(); } catch {}
 
     ws.on('message', async (raw: any) => {
+      client.isAlive = true;
       let msg: any;
       try { msg = JSON.parse(String(raw)); } catch { return; }
       const type = msg?.type;
@@ -183,6 +220,15 @@ export function attachMessengerWs(wss: WebSocketServer) {
         }
         const attachments = Array.isArray(msg.attachments) ? msg.attachments : undefined;
         if (!content.trim() && !(attachments && attachments.length)) { safeSend(ws, { type: 'send_ack', clientMsgId, ok: false, error: 'empty' }); return; }
+        // Idempotent deduplication guard: prevent duplicate messages on reconnect retries
+        const dedupKey = clientMsgId ? `${user.id}:${convId}:${clientMsgId}` : '';
+        if (dedupKey) {
+          const prev = recentClientMsgs.get(dedupKey);
+          if (prev && Date.now() - prev.ts < 5 * 60 * 1000) {
+            safeSend(ws, { type: 'send_ack', clientMsgId, ok: true, message: prev.message, fromDeviceId: deviceId, deduplicated: true });
+            return;
+          }
+        }
         try {
           let saved: any;
           let senderMarkedNotifs = 0;
@@ -201,6 +247,9 @@ export function attachMessengerWs(wss: WebSocketServer) {
             }
             store.persist();
           });
+          if (dedupKey && saved) {
+            recentClientMsgs.set(dedupKey, { message: saved, ts: Date.now() });
+          }
           if (senderMarkedNotifs > 0) {
             broadcastToUsers([user.id], { type: 'notification_sync', unreadCount: store.getUnreadNotificationCount(user.id), conversationId: convId });
           }

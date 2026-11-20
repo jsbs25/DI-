@@ -110,6 +110,9 @@ export default defineConfig(() => {
           manualChunks(id) {
             if (id.includes('node_modules/three/')) return 'vendor-three';
             if (id.includes('node_modules/livekit-client/')) return 'vendor-livekit';
+            if (id.includes('node_modules/pdfjs-dist/')) return 'vendor-pdfjs';
+            if (id.includes('node_modules/epubjs/')) return 'vendor-epub';
+            if (id.includes('node_modules/motion/')) return 'vendor-motion';
             if (id.includes('node_modules/lucide-react/')) return 'vendor-icons';
           },
         },

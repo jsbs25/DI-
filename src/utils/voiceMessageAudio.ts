@@ -7,7 +7,7 @@
  * 24 kHz 16-bit PCM WAV (with high-bitrate 128 kbps MediaRecorder automatic fallback).
  */
 
-const TARGET_SAMPLE_RATE = 24000;
+const TARGET_SAMPLE_RATE = 32000;
 const TAIL_PRESERVE_MS = 180;
 
 function resampleFloat32(input: Float32Array, fromRate: number, toRate: number): Float32Array {

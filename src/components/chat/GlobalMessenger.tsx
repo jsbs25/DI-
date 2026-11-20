@@ -11,7 +11,7 @@ import {
   Minimize2, Maximize2, ShieldCheck, Play, Pause
 } from 'lucide-react';
 import { callApi } from '../../services/calls/api.ts';
-import { createCallMediaSession, type ICallMediaSession, type CallMediaState, friendlyMediaError, unlockCallAudioContext } from '../../services/calls/media.ts';
+import { createCallMediaSession, type ICallMediaSession, type CallMediaState, type CallVideoQuality, friendlyMediaError, unlockCallAudioContext } from '../../services/calls/media.ts';
 import { startIncomingRingtone, startOutgoingRingback, stopCallTones } from '../../services/calls/ringtone.ts';
 import { CallCenterPanel, type CallLogEntry, type CallCapabilitiesSummary } from './CallCenterPanel.tsx';
 import { startClearVoiceRecorder, type VoiceRecorderSession } from '../../utils/voiceMessageAudio.ts';
@@ -23,7 +23,7 @@ const VoiceAudioPlayer: React.FC<{ src: string; durationSec?: number; isMe?: boo
   const [playing, setPlaying] = React.useState(false);
   const [curTime, setCurTime] = React.useState(0);
   const [totalTime, setTotalTime] = React.useState(durationSec || 0);
-  const [rate, setRate] = React.useState<1 | 1.25 | 1.5>(1);
+  const [rate, setRate] = React.useState<1 | 1.25 | 1.5 | 2>(1);
 
   React.useEffect(() => {
     setPlaying(false);
@@ -156,8 +156,8 @@ const VoiceAudioPlayer: React.FC<{ src: string; durationSec?: number; isMe?: boo
           <span>{playing || curTime > 0 ? `${fmt(curTime)} / ${fmt(dur)}` : fmt(dur)}</span>
           <button
             type="button"
-            onClick={() => setRate(r => (r === 1 ? 1.25 : r === 1.25 ? 1.5 : 1))}
-            className="rounded px-1.5 py-0.5 bg-current/15 hover:bg-current/25 font-semibold"
+            onClick={() => setRate(r => (r === 1 ? 1.25 : r === 1.25 ? 1.5 : r === 1.5 ? 2 : 1))}
+            className="rounded px-1.5 py-0.5 bg-current/15 hover:bg-current/25 font-semibold cursor-pointer"
             title="切换倍速"
           >
             {rate}x
@@ -291,6 +291,8 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
+  const [videoQuality, setVideoQuality] = useState<CallVideoQuality>('hd720');
+  const [videoFit, setVideoFit] = useState<'cover' | 'contain'>('cover');
   const [autoTranslate, setAutoTranslate] = useState(true);
   const [targetTranslateLang, setTargetTranslateLang] = useState('English');
   const [isSending, setIsSending] = useState(false);
@@ -2202,6 +2204,19 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
     const session = mediaSessionRef.current; if (!session) { setCallMediaNote(lang==='ar'?'لا يوجد اتصال وسائط نشط':lang==='en'?'No active media connection':'无活动媒体连接'); return; }
     try { await session.switchCamera(); } catch (e:any) { setCallMediaNote(friendlyMediaError(e)); }
   };
+  const cycleVideoQuality = async () => {
+    const order: CallVideoQuality[] = ['hd720', 'hd1080', 'sd480'];
+    const current = mediaState.videoQuality || videoQuality;
+    const next = order[(order.indexOf(current) + 1) % order.length];
+    setVideoQuality(next);
+    const label = next === 'hd1080' ? '超清 1080p' : next === 'hd720' ? '高清 720p' : '流畅 480p';
+    try {
+      await mediaSessionRef.current?.setVideoQuality?.(next);
+      setCallMediaNote(`视频画质已切换至 ${label}`);
+    } catch (e: any) {
+      setCallMediaNote(friendlyMediaError(e));
+    }
+  };
   const requestCallMediaToken = async () => {
     const c = activeCall; if (!c?.id || callAction) return;
     setCallAction('token');
@@ -3126,43 +3141,51 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             </div>
           )}
           {isRecordingVoice ? (
-            <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/10 px-3 py-2">
-              <div className="flex items-center gap-2 text-xs text-rose-700 dark:text-rose-200 min-w-0">
-                <Mic className="w-4 h-4 text-rose-600 dark:text-rose-400 animate-pulse shrink-0" />
+            <div className="flex items-center justify-between gap-2.5 rounded-2xl border border-rose-300/80 dark:border-rose-500/40 bg-rose-50/90 dark:bg-rose-500/10 px-3.5 py-2.5">
+              <div className="flex items-center gap-2.5 text-xs text-rose-700 dark:text-rose-200 min-w-0">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-rose-500/15 shrink-0">
+                  <Mic className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 animate-pulse" />
+                </span>
                 <span className="font-semibold tabular-nums shrink-0">{formatDuration(voiceSeconds)}</span>
-                <div className="flex items-center gap-0.5 h-4 shrink-0" aria-hidden="true">
-                  {[0.25, 0.55, 0.85, 0.6, 0.35].map((scale, idx) => (
+                <div className="flex items-center gap-[3px] h-5 shrink-0" aria-hidden="true">
+                  {[0.28, 0.52, 0.82, 1.0, 0.72, 0.9, 0.6, 0.42, 0.25].map((scale, idx) => (
                     <span
                       key={idx}
-                      className="w-1 rounded-full bg-rose-500/80 transition-all duration-75"
-                      style={{ height: `${Math.max(4, Math.min(16, Math.round(4 + voiceLevel * 14 * scale)))}px` }}
+                      className="w-[3px] rounded-full bg-rose-500/85 transition-all duration-75"
+                      style={{ height: `${Math.max(4, Math.min(20, Math.round(4 + voiceLevel * 16 * scale)))}px` }}
                     />
                   ))}
                 </div>
-                <span className="truncate">{voiceSending ? '降噪增强发送中…' : '高清录制中…'}</span>
+                <span className="truncate text-[11px]">{voiceSending ? '32kHz 降噪增强发送中…' : '高清语音录制中…'}</span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <button type="button" onClick={stopVoiceRecordingCleanup} className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-white/15 bg-white dark:bg-white/10 text-xs text-slate-700 dark:text-slate-200">取消</button>
-                <button type="button" onClick={() => void sendVoiceRecording()} disabled={voiceSending} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-40">{voiceSending ? '处理中…' : '发送语音'}</button>
+                <button type="button" onClick={stopVoiceRecordingCleanup} className="min-h-[36px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/15 bg-white dark:bg-white/10 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">取消</button>
+                <button type="button" onClick={() => void sendVoiceRecording()} disabled={voiceSending} className="min-h-[36px] px-3.5 py-1.5 rounded-xl bg-[#247864] hover:bg-[#1d6251] text-white text-xs font-semibold disabled:opacity-40 cursor-pointer">{voiceSending ? '处理中…' : '发送语音'}</button>
               </div>
             </div>
           ) : (
             <div className="flex items-end gap-1.5 sm:gap-2">
               <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
               <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e=>{ if(e.target.files?.length) queueFiles(e.target.files); e.currentTarget.value=''; }} />
-              <button type="button" onClick={()=>imageInputRef.current?.click()} title="发送图片" className="min-h-[44px] min-w-[38px] px-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0"><ImagePlus className="w-4 h-4"/></button>
-              <button type="button" onClick={()=>fileInputRef.current?.click()} title="发送文件" className="min-h-[44px] min-w-[38px] px-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0"><Paperclip className="w-4 h-4"/></button>
-              <button type="button" onClick={()=>void startVoiceRecording()} disabled={!activeConv || voiceSending} title="录制语音消息" className="min-h-[44px] min-w-[38px] px-2 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0 disabled:opacity-40"><Mic className="w-4 h-4"/></button>
+              <button type="button" onClick={()=>imageInputRef.current?.click()} title="发送图片" className="min-h-[44px] min-w-[40px] px-2 rounded-xl border border-[var(--color-one-border)] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0 cursor-pointer"><ImagePlus className="w-4 h-4"/></button>
+              <button type="button" onClick={()=>fileInputRef.current?.click()} title="发送文件" className="min-h-[44px] min-w-[40px] px-2 rounded-xl border border-[var(--color-one-border)] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0 cursor-pointer"><Paperclip className="w-4 h-4"/></button>
+              <button type="button" onClick={()=>void startVoiceRecording()} disabled={!activeConv || voiceSending} title="录制高清语音消息" className="min-h-[44px] min-w-[40px] px-2 rounded-xl border border-[var(--color-one-border)] text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center shrink-0 disabled:opacity-40 cursor-pointer"><Mic className="w-4 h-4"/></button>
               <textarea
                 value={inputText}
-                onChange={e=>{ setInputText(e.target.value); sendTyping(true); }}
+                onChange={e=>{
+                  setInputText(e.target.value);
+                  sendTyping(true);
+                  const el = e.currentTarget;
+                  el.style.height = 'auto';
+                  el.style.height = `${Math.min(120, Math.max(44, el.scrollHeight))}px`;
+                }}
                 onBlur={()=>sendTyping(false)}
                 onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); void handleSendMessage(); } }}
-                placeholder="输入消息…"
+                placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"
                 rows={1}
-                className="flex-1 min-h-[44px] max-h-28 resize-none px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-[rgba(15,20,28,0.72)] border border-slate-200 dark:border-white/10 text-base sm:text-sm text-slate-900 dark:text-slate-100 outline-none focus:border-sky-400"
+                className="flex-1 min-h-[44px] max-h-[120px] resize-none px-3.5 py-2.5 rounded-2xl bg-[var(--color-one-surface-soft)] dark:bg-[rgba(15,20,28,0.72)] border border-[var(--color-one-border)] text-base sm:text-sm text-[var(--color-one-text)] outline-none focus:border-[var(--color-one-accent)] transition-colors"
               />
-              <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-3.5 sm:px-4 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 h-[44px] shrink-0"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
+              <button type="submit" disabled={(!inputText.trim() && pendingUploads.length===0) || isSending || isUploading || !activeConv} className="px-4 rounded-2xl bg-[#247864] hover:bg-[#1c6150] disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 h-[44px] shrink-0 cursor-pointer transition-colors"><Send className="w-3.5 h-3.5"/><span>{(isSending||isUploading)?'...':'发送'}</span></button>
             </div>
           )}
         </form>
@@ -3512,9 +3535,9 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
               {activeCall.kind === 'video' ? (
                 <div className={`w-full h-full grid gap-3 ${tilesToRender.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
                   {tilesToRender.map((p: any) => (
-                    <div key={p.identity} className="relative w-full h-full min-h-[220px] rounded-2xl bg-black/20 border border-white/10 overflow-hidden flex items-center justify-center">
+                    <div key={p.identity} className="relative w-full h-full min-h-[220px] rounded-2xl bg-black/35 border border-white/10 overflow-hidden flex items-center justify-center">
                       {p.videoTrack ? (
-                        <CallTrackView track={p.videoTrack} kind="video" className="w-full h-full object-cover" />
+                        <CallTrackView track={p.videoTrack} kind="video" className={`w-full h-full ${videoFit === 'contain' ? 'object-contain bg-black' : 'object-cover'}`} />
                       ) : p.screenTrack ? (
                         <CallTrackView track={p.screenTrack} kind="video" className="w-full h-full object-contain bg-black" />
                       ) : (
@@ -3574,7 +3597,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                   <span>{stats.hasLocalAudio ? (callDevices.micEnabled ? `麦克风音量 ${stats.localLevel}%` : '已静音') : '未获取到麦克风'}</span>
                   <span className="text-white/25">|</span>
                   <span>{stats.usingRelay ? `中继收包 ${stats.remoteAudioFrames}` : `ICE: ${stats.iceCandidateType || stats.iceState}${stats.transportProtocol ? `/${stats.transportProtocol.toUpperCase()}` : ''}`}</span>
-                  {stats.videoWidth && stats.videoHeight && <><span className="text-white/25">|</span><span>{stats.videoWidth}×{stats.videoHeight}{typeof stats.videoBitrateKbps === 'number' ? ` · ${stats.videoBitrateKbps}kbps` : ''}</span></>}
+                  {stats.videoWidth && stats.videoHeight && <><span className="text-white/25">|</span><span>{stats.videoWidth}×{stats.videoHeight}{typeof stats.videoFps === 'number' && stats.videoFps > 0 ? ` · ${Math.round(stats.videoFps)}fps` : ''}{typeof stats.videoBitrateKbps === 'number' ? ` · ${stats.videoBitrateKbps}kbps` : ''}</span></>}
                   {typeof stats.rttMs === 'number' && <><span className="text-white/25">|</span><span>{stats.rttMs} ms</span></>}
                 </div>
               )}
@@ -3611,9 +3634,17 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                           {callDevices.cameraEnabled ? <Video className="w-5 h-5"/> : <VideoOff className="w-5 h-5"/>}
                           <span>{callDevices.cameraEnabled ? '摄像头' : '关画面'}</span>
                         </button>
-                        <button type="button" onClick={()=>void switchCallCamera()} disabled={!callDevices.cameraEnabled || !mediaSessionRef.current} className="min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border border-white/15 bg-white/10 text-white flex flex-col items-center justify-center gap-1 text-[11px] font-medium disabled:opacity-40">
+                        <button type="button" onClick={()=>void switchCallCamera()} disabled={!callDevices.cameraEnabled || !mediaSessionRef.current} className="min-h-[52px] min-w-[64px] px-3.5 py-2 rounded-2xl border border-white/15 bg-white/10 text-white flex flex-col items-center justify-center gap-1 text-[11px] font-medium disabled:opacity-40 cursor-pointer">
                           <RefreshCw className="w-5 h-5"/>
                           <span>翻转</span>
+                        </button>
+                        <button type="button" onClick={()=>void cycleVideoQuality()} disabled={!mediaSessionRef.current} className="min-h-[52px] min-w-[68px] px-3 py-2 rounded-2xl border border-emerald-400/35 bg-emerald-500/15 text-emerald-100 flex flex-col items-center justify-center gap-1 text-[11px] font-medium disabled:opacity-40 cursor-pointer" title="切换视频清晰度">
+                          <Sparkles className="w-4 h-4"/>
+                          <span>{(mediaState.videoQuality || videoQuality) === 'hd1080' ? '超清 1080p' : (mediaState.videoQuality || videoQuality) === 'sd480' ? '流畅 480p' : '高清 720p'}</span>
+                        </button>
+                        <button type="button" onClick={()=>setVideoFit(f => f === 'cover' ? 'contain' : 'cover')} className="min-h-[52px] min-w-[60px] px-3 py-2 rounded-2xl border border-white/15 bg-white/10 text-slate-200 flex flex-col items-center justify-center gap-1 text-[11px] font-medium cursor-pointer" title="切换画面裁切模式">
+                          {videoFit === 'cover' ? <Minimize2 className="w-4 h-4"/> : <Maximize2 className="w-4 h-4"/>}
+                          <span>{videoFit === 'cover' ? '完整画面' : '充满屏幕'}</span>
                         </button>
                       </>
                     )}

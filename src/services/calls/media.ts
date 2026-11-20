@@ -13,6 +13,113 @@ import {
 } from 'livekit-client';
 
 export type CallMediaPhase = 'idle' | 'acquiring' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed' | 'blocked';
+export type CallVideoQuality = 'hd1080' | 'hd720' | 'sd480';
+
+const VIDEO_QUALITY_PRESETS: Record<CallVideoQuality, { width: number; height: number; minWidth: number; minHeight: number; fps: number; maxBitrate: number; sdpMinKbps: number; sdpStartKbps: number; sdpMaxKbps: number }> = {
+  hd1080: { width: 1920, height: 1080, minWidth: 1280, minHeight: 720, fps: 30, maxBitrate: 4_200_000, sdpMinKbps: 1200, sdpStartKbps: 2500, sdpMaxKbps: 4500 },
+  hd720: { width: 1280, height: 720, minWidth: 640, minHeight: 480, fps: 30, maxBitrate: 2_600_000, sdpMinKbps: 800, sdpStartKbps: 1800, sdpMaxKbps: 3200 },
+  sd480: { width: 854, height: 480, minWidth: 480, minHeight: 360, fps: 24, maxBitrate: 1_200_000, sdpMinKbps: 450, sdpStartKbps: 900, sdpMaxKbps: 1500 },
+};
+
+function buildHdAudioConstraints(): MediaTrackConstraints {
+  return {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    sampleRate: { ideal: 48000 },
+    channelCount: { ideal: 1 },
+  };
+}
+
+function buildHdVideoConstraints(facingMode: 'user' | 'environment', quality: CallVideoQuality): MediaTrackConstraints {
+  const p = VIDEO_QUALITY_PRESETS[quality] || VIDEO_QUALITY_PRESETS.hd720;
+  return {
+    facingMode,
+    width: { ideal: p.width, min: p.minWidth },
+    height: { ideal: p.height, min: p.minHeight },
+    frameRate: { ideal: p.fps, min: 20 },
+  };
+}
+
+function applyVideoTrackDetailHint(track: MediaStreamTrack | null) {
+  if (!track) return;
+  try {
+    if ('contentHint' in track) {
+      (track as any).contentHint = 'detail';
+    }
+  } catch {}
+}
+
+function enhanceSdpForHdCalls(sdp: string | undefined, quality: CallVideoQuality): string | undefined {
+  if (!sdp) return sdp;
+  const p = VIDEO_QUALITY_PRESETS[quality] || VIDEO_QUALITY_PRESETS.hd720;
+  const lines = sdp.split('\r\n');
+  let section: 'none' | 'audio' | 'video' = 'none';
+  let opusPt: string | null = null;
+  const videoPts = new Set<string>();
+
+  for (const line of lines) {
+    if (line.startsWith('m=audio')) section = 'audio';
+    else if (line.startsWith('m=video')) section = 'video';
+    else if (line.startsWith('m=')) section = 'none';
+    else if (section === 'audio' && line.startsWith('a=rtpmap:') && /opus\/48000/i.test(line)) {
+      opusPt = line.slice(9).split(' ')[0];
+    } else if (section === 'video' && line.startsWith('a=rtpmap:') && /(vp8|vp9|h264|av1)\/90000/i.test(line)) {
+      videoPts.add(line.slice(9).split(' ')[0]);
+    }
+  }
+
+  const out: string[] = [];
+  section = 'none';
+  let addedVideoBw = false;
+  for (const rawLine of lines) {
+    let line = rawLine;
+    if (line.startsWith('m=audio')) {
+      section = 'audio';
+      out.push(line);
+      continue;
+    }
+    if (line.startsWith('m=video')) {
+      section = 'video';
+      addedVideoBw = false;
+      out.push(line);
+      continue;
+    }
+    if (line.startsWith('m=')) {
+      section = 'none';
+      out.push(line);
+      continue;
+    }
+    if (section === 'video' && line.startsWith('c=IN ') && !addedVideoBw) {
+      out.push(line);
+      out.push(`b=AS:${p.sdpMaxKbps}`);
+      addedVideoBw = true;
+      continue;
+    }
+    if (section === 'video' && line.startsWith('b=AS:')) {
+      addedVideoBw = true;
+      out.push(`b=AS:${p.sdpMaxKbps}`);
+      continue;
+    }
+    if (section === 'audio' && opusPt && line.startsWith(`a=fmtp:${opusPt} `)) {
+      if (!/maxaveragebitrate=/i.test(line)) line += ';maxaveragebitrate=96000';
+      if (!/useinbandfec=/i.test(line)) line += ';useinbandfec=1';
+      if (!/usedtx=/i.test(line)) line += ';usedtx=0';
+      out.push(line);
+      continue;
+    }
+    if (section === 'video' && line.startsWith('a=fmtp:')) {
+      const pt = line.slice(7).split(' ')[0];
+      if (videoPts.has(pt) && !/x-google-max-bitrate=/i.test(line)) {
+        line += `;x-google-min-bitrate=${p.sdpMinKbps};x-google-start-bitrate=${p.sdpStartKbps};x-google-max-bitrate=${p.sdpMaxKbps}`;
+      }
+      out.push(line);
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\r\n');
+}
 
 export interface CallMediaParticipantView {
   identity: string;
@@ -61,6 +168,7 @@ export interface CallMediaState {
   canPlaybackAudio: boolean;
   connectionQuality?: string;
   weakNetwork?: boolean;
+  videoQuality?: CallVideoQuality;
   audioOutputDevices?: AudioOutputOption[];
   selectedAudioOutputId?: string;
   supportsOutputSelection?: boolean;
@@ -95,6 +203,7 @@ export interface ICallMediaSession {
   setCameraEnabled(enabled: boolean): Promise<void>;
   switchCamera(): Promise<void>;
   setScreenShareEnabled(enabled: boolean): Promise<void>;
+  setVideoQuality?(quality: CallVideoQuality): Promise<void>;
   setAudioOutputDevice?(deviceId: string): Promise<void>;
   setIceTransportPolicy?(policy: RTCIceTransportPolicy): Promise<void>;
   startAudioPlayback(): Promise<void>;
@@ -344,15 +453,29 @@ export class LiveKitCallSession implements ICallMediaSession {
     const room = new Room({
       adaptiveStream: true,
       dynacast: true,
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 48000,
+        channelCount: 1,
+      },
       videoCaptureDefaults: {
         resolution: VideoPresets.h720.resolution,
       },
       publishDefaults: {
         simulcast: true,
         videoCodec: 'vp8',
+        degradationPreference: 'maintain-resolution',
+        videoEncoding: {
+          maxBitrate: 3_000_000,
+          maxFramerate: 30,
+        },
+        audioPreset: { maxBitrate: 96_000 },
       },
     });
     this.room = room;
+    this.emit({ videoQuality: 'hd720' });
 
     room
       .on(RoomEvent.ParticipantConnected, () => this.refreshParticipants())
@@ -456,6 +579,26 @@ export class LiveKitCallSession implements ICallMediaSession {
       await room.localParticipant.setScreenShareEnabled(enabled);
     } catch (e: any) { this.emit({ error: friendlyMediaError(e) }); }
     this.refreshParticipants();
+  }
+
+  async setVideoQuality(quality: CallVideoQuality) {
+    this.emit({ videoQuality: quality });
+    const room: any = this.room;
+    if (!room) return;
+    try {
+      const p = VIDEO_QUALITY_PRESETS[quality] || VIDEO_QUALITY_PRESETS.hd720;
+      const pubs = Array.from(room.localParticipant.videoTrackPublications?.values?.() || []) as any[];
+      for (const pub of pubs) {
+        const mediaTrack: MediaStreamTrack | undefined = pub?.track?.mediaStreamTrack;
+        if (mediaTrack && typeof mediaTrack.applyConstraints === 'function') {
+          await mediaTrack.applyConstraints({
+            width: { ideal: p.width },
+            height: { ideal: p.height },
+            frameRate: { ideal: p.fps },
+          }).catch(() => {});
+        }
+      }
+    } catch {}
   }
 
   async setAudioOutputDevice(deviceId: string) {
@@ -602,6 +745,7 @@ export class WebRTCCallSession implements ICallMediaSession {
   private iceRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private lastIceRestartAt = new Map<string, number>();
   private lastVideoTier: 'high' | 'low' = 'high';
+  private videoQuality: CallVideoQuality = 'hd720';
   private prevVideoBytes = 0;
   private prevVideoAt = 0;
 
@@ -680,19 +824,29 @@ export class WebRTCCallSession implements ICallMediaSession {
     if (!wantAudio && !wantVideo) return;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: wantAudio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false,
-        video: wantVideo ? { facingMode: this.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } } : false,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: wantAudio ? buildHdAudioConstraints() : false,
+          video: wantVideo ? buildHdVideoConstraints(this.facingMode, this.videoQuality) : false,
+        });
+      } catch {
+        // Fallback without strict min constraints for older mobile webviews
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: wantAudio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false,
+          video: wantVideo ? { facingMode: this.facingMode, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } : false,
+        });
+      }
       this.localAudioTrack = stream.getAudioTracks()[0] || null;
       this.localVideoTrack = stream.getVideoTracks()[0] || null;
+      applyVideoTrackDetailHint(this.localVideoTrack);
       if (this.localAudioTrack) this.localAudioTrack.enabled = this.micEnabled;
       if (this.localVideoTrack) this.localVideoTrack.enabled = this.cameraEnabled;
     } catch (err: any) {
       if (wantVideo && wantAudio) {
         try {
           const audioStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            audio: buildHdAudioConstraints(),
             video: false,
           });
           this.localAudioTrack = audioStream.getAudioTracks()[0] || null;
@@ -718,7 +872,13 @@ export class WebRTCCallSession implements ICallMediaSession {
       entry.lastOfferAt = Date.now();
       const offer = await pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
       if (this.disposed) return;
-      await pc.setLocalDescription(offer);
+      try {
+        const enhancedSdp = enhanceSdpForHdCalls(offer.sdp, this.videoQuality);
+        await pc.setLocalDescription({ type: offer.type, sdp: enhancedSdp });
+      } catch {
+        await pc.setLocalDescription(offer);
+      }
+      void this.applySenderEncodingParams(pc);
       if (pc.localDescription) {
         await this.opts?.sendSignal?.(peerId, { type: 'offer', sdp: pc.localDescription.toJSON() });
       }
@@ -766,10 +926,12 @@ export class WebRTCCallSession implements ICallMediaSession {
     }
     const activeVideo = this.localScreenTrack || this.localVideoTrack;
     if (activeVideo) {
+      applyVideoTrackDetailHint(activeVideo);
       pc.addTrack(activeVideo, new MediaStream([activeVideo]));
     } else if (this.opts?.kind === 'video') {
       try { pc.addTransceiver('video', { direction: 'recvonly' }); } catch {}
     }
+    void this.applySenderEncodingParams(pc);
 
     pc.onicecandidate = (ev) => {
       if (this.disposed || !ev.candidate) return;
@@ -839,6 +1001,7 @@ export class WebRTCCallSession implements ICallMediaSession {
       if (states.some((s) => s === 'connected') || iceStates.some((s) => s === 'connected' || s === 'completed')) {
         clearRestartTimer();
         if (this.usingRelay && this.webrtcBytesReceived > 0) this.usingRelay = false;
+        void this.applySenderEncodingParams(pc);
         this.emit({ phase: 'connected', connectionQuality: 'excellent' });
       } else if (this.usingRelay) {
         this.emit({ phase: 'connected', connectionQuality: 'good' });
@@ -1164,22 +1327,64 @@ export class WebRTCCallSession implements ICallMediaSession {
     });
   }
 
-  private async applyVideoBitrateCap(tier: 'high' | 'low') {
-    const maxBitrate = tier === 'low' ? 320_000 : 1_200_000;
-    const maxFramerate = tier === 'low' ? 15 : 30;
-    for (const [, entry] of this.peers.entries()) {
-      const sender = this.findSender(entry.pc, 'video');
-      if (!sender || typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') continue;
+  private async applySenderEncodingParams(pc: RTCPeerConnection, tier: 'high' | 'low' = this.lastVideoTier) {
+    const preset = VIDEO_QUALITY_PRESETS[this.videoQuality] || VIDEO_QUALITY_PRESETS.hd720;
+    const videoBitrate = tier === 'low' ? Math.min(950_000, preset.maxBitrate) : preset.maxBitrate;
+    const videoFps = tier === 'low' ? 20 : preset.fps;
+
+    const videoSender = this.findSender(pc, 'video');
+    if (videoSender && typeof videoSender.getParameters === 'function' && typeof videoSender.setParameters === 'function') {
       try {
-        const params = sender.getParameters();
+        const params: any = videoSender.getParameters();
         if (!params.encodings || params.encodings.length === 0) {
           params.encodings = [{}];
         }
-        params.encodings[0].maxBitrate = maxBitrate;
-        params.encodings[0].maxFramerate = maxFramerate;
-        await sender.setParameters(params);
+        params.degradationPreference = 'maintain-resolution';
+        params.encodings[0].maxBitrate = videoBitrate;
+        params.encodings[0].maxFramerate = videoFps;
+        params.encodings[0].scaleResolutionDownBy = 1;
+        params.encodings[0].priority = 'high';
+        params.encodings[0].networkPriority = 'high';
+        await videoSender.setParameters(params);
       } catch {}
     }
+
+    const audioSender = this.findSender(pc, 'audio');
+    if (audioSender && typeof audioSender.getParameters === 'function' && typeof audioSender.setParameters === 'function') {
+      try {
+        const params: any = audioSender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].maxBitrate = 96_000;
+        params.encodings[0].priority = 'high';
+        params.encodings[0].networkPriority = 'high';
+        await audioSender.setParameters(params);
+      } catch {}
+    }
+  }
+
+  private async applyVideoBitrateCap(tier: 'high' | 'low') {
+    for (const [, entry] of this.peers.entries()) {
+      await this.applySenderEncodingParams(entry.pc, tier);
+    }
+  }
+
+  async setVideoQuality(quality: CallVideoQuality) {
+    this.videoQuality = quality;
+    this.emit({ videoQuality: quality });
+    const preset = VIDEO_QUALITY_PRESETS[quality] || VIDEO_QUALITY_PRESETS.hd720;
+    if (this.localVideoTrack && typeof this.localVideoTrack.applyConstraints === 'function') {
+      try {
+        await this.localVideoTrack.applyConstraints({
+          width: { ideal: preset.width },
+          height: { ideal: preset.height },
+          frameRate: { ideal: preset.fps },
+        });
+      } catch {}
+      applyVideoTrackDetailHint(this.localVideoTrack);
+    }
+    await this.applyVideoBitrateCap(this.lastVideoTier);
   }
 
   async connect(opts: CallMediaOptions): Promise<void> {
@@ -1204,6 +1409,7 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.state = {
       phase: 'acquiring',
       canPlaybackAudio: true,
+      videoQuality: this.videoQuality,
       participants: {},
       roomName: opts.roomName,
       supportsOutputSelection: supportsSinkIdSelection(),
@@ -1360,7 +1566,13 @@ export class WebRTCCallSession implements ICallMediaSession {
 
       if (desc.type === 'offer') {
         const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        try {
+          const enhancedSdp = enhanceSdpForHdCalls(answer.sdp, this.videoQuality);
+          await pc.setLocalDescription({ type: answer.type, sdp: enhancedSdp });
+        } catch {
+          await pc.setLocalDescription(answer);
+        }
+        void this.applySenderEncodingParams(pc);
         if (pc.localDescription) {
           await this.opts?.sendSignal?.(fromUserId, { type: 'answer', sdp: pc.localDescription.toJSON() });
         }
@@ -1381,6 +1593,7 @@ export class WebRTCCallSession implements ICallMediaSession {
   }
 
   private async replaceVideoTrackOnPeers(newTrack: MediaStreamTrack | null) {
+    applyVideoTrackDetailHint(newTrack);
     for (const [peerId, entry] of this.peers.entries()) {
       const sender = this.findSender(entry.pc, 'video');
       if (sender) {
@@ -1394,6 +1607,7 @@ export class WebRTCCallSession implements ICallMediaSession {
         entry.pc.addTrack(newTrack, new MediaStream([newTrack]));
         await this.createAndSendOffer(peerId, entry, false);
       }
+      void this.applySenderEncodingParams(entry.pc);
     }
   }
 
@@ -1402,7 +1616,7 @@ export class WebRTCCallSession implements ICallMediaSession {
     if (enabled && !this.localAudioTrack && hasLocalMediaSupport()) {
       try {
         const s = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          audio: buildHdAudioConstraints(),
           video: false,
         });
         const t = s.getAudioTracks()[0] || null;
@@ -1422,6 +1636,7 @@ export class WebRTCCallSession implements ICallMediaSession {
               entry.pc.addTrack(t, new MediaStream([t]));
               await this.createAndSendOffer(peerId, entry, false);
             }
+            void this.applySenderEncodingParams(entry.pc);
           }
         }
       } catch (e: any) {
@@ -1436,12 +1651,21 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.cameraEnabled = enabled;
     if (enabled && !this.localVideoTrack && hasLocalMediaSupport()) {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: this.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
-        });
+        let s: MediaStream;
+        try {
+          s = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: buildHdVideoConstraints(this.facingMode, this.videoQuality),
+          });
+        } catch {
+          s = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: this.facingMode, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+          });
+        }
         const t = s.getVideoTracks()[0] || null;
         if (t) {
+          applyVideoTrackDetailHint(t);
           this.localVideoTrack = t;
           if (!this.screenShareEnabled) await this.replaceVideoTrackOnPeers(t);
         }
@@ -1459,12 +1683,21 @@ export class WebRTCCallSession implements ICallMediaSession {
     this.facingMode = this.facingMode === 'user' ? 'environment' : 'user';
     try {
       const old = this.localVideoTrack;
-      const s = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: this.facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
-      });
+      let s: MediaStream;
+      try {
+        s = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: buildHdVideoConstraints(this.facingMode, this.videoQuality),
+        });
+      } catch {
+        s = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: this.facingMode, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        });
+      }
       const next = s.getVideoTracks()[0] || null;
       if (next) {
+        applyVideoTrackDetailHint(next);
         next.enabled = this.cameraEnabled;
         this.localVideoTrack = next;
         if (!this.screenShareEnabled) await this.replaceVideoTrackOnPeers(next);

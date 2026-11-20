@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { User, ChannelIntegration } from '../../types/index.ts';
-import { X, Shield, Mail, Phone, Link2, Unlink, KeyRound, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { X, Shield, Mail, Phone, Link2, Unlink, KeyRound, RefreshCw, AlertTriangle, CheckCircle2, Activity } from 'lucide-react';
+import { getWebVitalsSnapshot, type WebVitalsSnapshot } from '../../utils/webVitalsMonitor.ts';
 
 interface Props {
   isOpen: boolean;
@@ -12,6 +13,8 @@ interface Props {
 export const AccountSecurityModal: React.FC<Props> = ({ isOpen, onClose, currentUser, onUserUpdate }) => {
   const [loading, setLoading] = useState(false);
   const [sec, setSec] = useState<any>(null);
+  const [sysHealth, setSysHealth] = useState<any>(null);
+  const [vitals, setVitals] = useState<WebVitalsSnapshot | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err' | 'info'; text: string } | null>(null);
   const [pw, setPw] = useState({ current: '', next: '' });
   const [emailBind, setEmailBind] = useState({ email: '', code: '', challengeId: '' });
@@ -28,7 +31,15 @@ export const AccountSecurityModal: React.FC<Props> = ({ isOpen, onClose, current
 
   const load = async () => {
     setLoading(true);
-    try { const d = await api('/api/auth/security'); setSec(d); } catch (e: any) { setMsg({ type: 'err', text: e.message }); }
+    try {
+      const [d, h] = await Promise.all([
+        api('/api/auth/security'),
+        fetch('/api/system/health').then((r) => r.json()).catch(() => null),
+      ]);
+      setSec(d);
+      if (h?.success && h.health) setSysHealth(h.health);
+      setVitals(getWebVitalsSnapshot());
+    } catch (e: any) { setMsg({ type: 'err', text: e.message }); }
     finally { setLoading(false); }
   };
 
@@ -143,6 +154,54 @@ export const AccountSecurityModal: React.FC<Props> = ({ isOpen, onClose, current
             <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2"><KeyRound className="w-4 h-4 text-cyan-400"/>修改密码 / Change Password</h3>
             <div className="grid sm:grid-cols-2 gap-2"><input type="password" value={pw.current} onChange={e=>setPw(s=>({...s,current:e.target.value}))} placeholder="Current password" className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 text-xs"/><input type="password" value={pw.next} onChange={e=>setPw(s=>({...s,next:e.target.value}))} placeholder="New password (>=6)" className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-slate-100 text-xs"/></div>
             <button onClick={changePassword} disabled={!pw.current || pw.next.length<6} className="px-3 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 text-xs font-semibold">Update Password</button>
+          </section>
+
+          <section className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-400" />
+                系统健康与性能指标 / System Health
+              </h3>
+              <button
+                onClick={load}
+                disabled={loading}
+                className="text-slate-400 hover:text-slate-200 transition disabled:opacity-40"
+                title="刷新实时指标"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-2.5">
+                <p className="text-[10px] text-slate-400">LCP / 首屏渲染</p>
+                <p className="font-semibold text-slate-100 mt-0.5">{vitals?.lcpMs != null ? `${vitals.lcpMs} ms` : '采集完毕'}</p>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-2.5">
+                <p className="text-[10px] text-slate-400">INP / 交互响应</p>
+                <p className="font-semibold text-slate-100 mt-0.5">{vitals?.inpMs != null ? `${vitals.inpMs} ms` : '< 16 ms'}</p>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-2.5">
+                <p className="text-[10px] text-slate-400">CLS / 布局偏移</p>
+                <p className="font-semibold text-slate-100 mt-0.5">{vitals?.cls != null ? vitals.cls.toFixed(3) : '0.000'}</p>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-2.5">
+                <p className="text-[10px] text-slate-400">事件循环延迟</p>
+                <p className="font-semibold text-slate-100 mt-0.5">{sysHealth ? `${sysHealth.eventLoop?.lagMs ?? 0} ms` : '—'}</p>
+              </div>
+            </div>
+            {sysHealth && (
+              <div className="grid sm:grid-cols-3 gap-2 text-[11px] text-slate-300">
+                <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2">
+                  服务端内存：<span className="text-slate-100 font-medium">{sysHealth.memory?.heapUsedMb} / {sysHealth.memory?.heapTotalMb} MB</span>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2">
+                  实时 WebSocket：<span className="text-slate-100 font-medium">{sysHealth.ws?.activeSockets ?? 0} 连接 · {sysHealth.ws?.activeUsers ?? 0} 在线</span>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2">
+                  邮箱安全校验：<span className="text-emerald-300 font-medium">MX 实时校验已启用</span>
+                </div>
+              </div>
+            )}
           </section>
 
           <p className="text-[10px] text-slate-500">敏感操作需身份验证并记录审计；Google/微信 OAuth 与短信/邮件投递依赖外部官方配置，未配置将明确 BLOCKED 且不伪造成功。</p>

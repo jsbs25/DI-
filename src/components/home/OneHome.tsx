@@ -35,6 +35,7 @@ type Props = {
 
 export const OneHome: React.FC<Props> = ({
   lang,
+  onSelectTab,
   immersive = false,
   onImmersiveChange,
 }) => {
@@ -46,8 +47,8 @@ export const OneHome: React.FC<Props> = ({
         onImmersiveChange={onImmersiveChange}
       />
 
-      {/* Single Minimal Desktop AI Chat Bar */}
-      {!immersive && <SpiritCommandBar lang={lang} />}
+      {/* Compact Home AI Bar positioned cleanly above the bottom navigation dock */}
+      {!immersive && <SpiritCommandBar lang={lang} onOpenFullAi={() => onSelectTab('aihub')} />}
     </main>
   );
 };

@@ -145,23 +145,46 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
     setLookupInput(term);
     setLookupLoading(true);
     try {
-      const res = await fetch(`/api/learning/english/lookup?word=${encodeURIComponent(term)}`);
+      const res = await fetch(`/api/dictionary/lookup?word=${encodeURIComponent(term)}`);
       const data = await res.json();
       if (data?.success && data.entry) {
-        const entry = data.entry as EnglishLookupResult;
-        if (entry.meanings.length === 0) {
+        const raw = data.entry;
+        const groupedMeanings: EnglishLookupResult['meanings'] = [];
+        if (Array.isArray(raw.senses) && raw.senses.length > 0) {
+          for (const sense of raw.senses) {
+            const ex = Array.isArray(sense.examples) && sense.examples[0] ? sense.examples[0] : undefined;
+            groupedMeanings.push({
+              partOfSpeech: String(sense.partOfSpeech || 'term'),
+              cefr: sense.cefr,
+              guideword: sense.guideword,
+              definitions: [
+                {
+                  definition: String(sense.definitionEn || sense.definitionZh || ''),
+                  definitionZh: sense.definitionZh ? String(sense.definitionZh) : undefined,
+                  example: ex?.en,
+                  exampleZh: ex?.zh,
+                },
+              ],
+            });
+          }
+        }
+        if (groupedMeanings.length === 0) {
           const localMatch = ENGLISH_CORE_WORDS.find((w) => w.word.toLowerCase() === term);
           if (localMatch) {
             setLookupResult({
               word: localMatch.word,
               phonetic: accent === 'en-GB' ? localMatch.ipaUk : localMatch.ipaUs,
+              ukPhonetic: localMatch.ipaUk,
+              usPhonetic: localMatch.ipaUs,
               meanings: [
                 {
                   partOfSpeech: localMatch.pos,
                   definitions: [
                     {
-                      definition: `${localMatch.meaningEn}（${localMatch.meaningZh}）`,
+                      definition: localMatch.meaningEn,
+                      definitionZh: localMatch.meaningZh,
                       example: localMatch.exampleEn,
+                      exampleZh: localMatch.exampleZh,
                     },
                   ],
                 },
@@ -172,7 +195,21 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
             return;
           }
         }
-        setLookupResult(entry);
+        setLookupResult({
+          word: String(raw.word || term),
+          phonetic: accent === 'en-GB' ? raw.ukPhonetic || raw.usPhonetic : raw.usPhonetic || raw.ukPhonetic,
+          ukPhonetic: raw.ukPhonetic,
+          usPhonetic: raw.usPhonetic,
+          audioUrl: accent === 'en-GB' ? raw.ukAudioUrl || raw.audioUrl : raw.usAudioUrl || raw.audioUrl,
+          ukAudioUrl: raw.ukAudioUrl,
+          usAudioUrl: raw.usAudioUrl,
+          cefrLevel: raw.cefrLevel,
+          usageNote: raw.usageNote,
+          collocations: Array.isArray(raw.collocations) ? raw.collocations : undefined,
+          meanings: groupedMeanings,
+          related: Array.isArray(raw.synonyms) && raw.synonyms.length > 0 ? raw.synonyms : Array.isArray(raw.related) ? raw.related : [],
+          source: 'live',
+        });
       }
     } catch {
       const localMatch = ENGLISH_CORE_WORDS.find((w) => w.word.toLowerCase() === term);
@@ -180,13 +217,17 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
         setLookupResult({
           word: localMatch.word,
           phonetic: accent === 'en-GB' ? localMatch.ipaUk : localMatch.ipaUs,
+          ukPhonetic: localMatch.ipaUk,
+          usPhonetic: localMatch.ipaUs,
           meanings: [
             {
               partOfSpeech: localMatch.pos,
               definitions: [
                 {
-                  definition: `${localMatch.meaningEn}（${localMatch.meaningZh}）`,
+                  definition: localMatch.meaningEn,
+                  definitionZh: localMatch.meaningZh,
                   example: localMatch.exampleEn,
+                  exampleZh: localMatch.exampleZh,
                 },
               ],
             },
@@ -483,34 +524,69 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
               {lookupResult && (
                 <div className="mt-4 rounded-xl border p-4" style={{ borderColor: 'var(--color-one-border)', background: 'rgba(244,243,238,0.02)' }}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-baseline gap-3">
+                    <div className="flex flex-wrap items-baseline gap-2.5">
                       <span className="text-xl font-semibold text-[color:var(--color-one-text)]">{lookupResult.word}</span>
-                      {lookupResult.phonetic && (
+                      {lookupResult.cefrLevel && (
+                        <span className="rounded bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">
+                          {lookupResult.cefrLevel}
+                        </span>
+                      )}
+                      {lookupResult.ukPhonetic && (
+                        <span className="font-mono text-xs text-[#8ECFFF]">UK {lookupResult.ukPhonetic}</span>
+                      )}
+                      {lookupResult.usPhonetic && lookupResult.usPhonetic !== lookupResult.ukPhonetic && (
+                        <span className="font-mono text-xs text-[#E5C17D]">US {lookupResult.usPhonetic}</span>
+                      )}
+                      {!lookupResult.ukPhonetic && !lookupResult.usPhonetic && lookupResult.phonetic && (
                         <span className="font-mono text-xs text-[#8ECFFF]">{lookupResult.phonetic}</span>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => speakEnglish(lookupResult.word, lookupResult.audioUrl)}
-                      className="one-btn one-btn-sm one-btn-secondary"
-                    >
-                      <Volume2 className="h-3.5 w-3.5" />
-                      <span>{accent === 'en-GB' ? 'UK 朗读' : 'US 朗读'}</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => speakEnglish(lookupResult.word, lookupResult.ukAudioUrl || lookupResult.audioUrl)}
+                        className="one-btn one-btn-sm one-btn-secondary"
+                      >
+                        <Volume2 className="h-3.5 w-3.5" />
+                        <span>UK</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => speakEnglish(lookupResult.word, lookupResult.usAudioUrl || lookupResult.audioUrl)}
+                        className="one-btn one-btn-sm one-btn-secondary"
+                      >
+                        <Volume2 className="h-3.5 w-3.5" />
+                        <span>US</span>
+                      </button>
+                    </div>
                   </div>
 
                   {lookupResult.meanings.length > 0 ? (
                     <div className="mt-3 space-y-2.5 text-xs">
                       {lookupResult.meanings.map((m, idx) => (
                         <div key={idx} className="space-y-1">
-                          <span className="inline-block rounded bg-[#C4A876]/15 px-1.5 py-0.5 font-mono text-[10px] text-[#E5C17D]">
-                            {m.partOfSpeech}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="inline-block rounded bg-[#C4A876]/15 px-1.5 py-0.5 font-mono text-[10px] text-[#E5C17D]">
+                              {m.partOfSpeech}
+                            </span>
+                            {m.guideword && (
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-[#8ECFFF]">
+                                {m.guideword}
+                              </span>
+                            )}
+                          </div>
                           {m.definitions.map((d, dIdx) => (
                             <div key={dIdx} className="pl-1">
-                              <p className="text-[color:var(--color-one-text-muted)] leading-relaxed">• {d.definition}</p>
+                              {d.definitionZh && (
+                                <p className="font-medium text-[color:var(--color-one-text)] leading-relaxed">{d.definitionZh}</p>
+                              )}
+                              {d.definition && (
+                                <p className="text-[color:var(--color-one-text-muted)] leading-relaxed">{d.definition}</p>
+                              )}
                               {d.example && (
-                                <p className="mt-0.5 italic text-[color:var(--color-one-text-dim)]">“{d.example}”</p>
+                                <p className="mt-0.5 italic text-[color:var(--color-one-text-dim)]">
+                                  “{d.example}”{d.exampleZh ? ` — ${d.exampleZh}` : ''}
+                                </p>
                               )}
                             </div>
                           ))}
@@ -523,10 +599,28 @@ export const EnglishLearningSection: React.FC<{ lang: Language }> = ({ lang }) =
                     </p>
                   )}
 
+                  {lookupResult.collocations && lookupResult.collocations.length > 0 && (
+                    <div className="mt-3 border-t pt-2.5" style={{ borderColor: 'var(--color-one-border)' }}>
+                      <span className="text-[10px] uppercase tracking-wider text-[color:var(--color-one-text-dim)]">
+                        {isZh ? '高频搭配：' : 'Collocations: '}
+                      </span>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {lookupResult.collocations.map((col, idx) => (
+                          <span
+                            key={idx}
+                            className="rounded-md bg-[#C4A876]/12 px-2 py-0.5 text-[11px] text-[#E5C17D]"
+                          >
+                            {col.phrase}{col.zh ? ` · ${col.zh}` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {lookupResult.related.length > 0 && (
                     <div className="mt-3 border-t pt-2.5" style={{ borderColor: 'var(--color-one-border)' }}>
                       <span className="text-[10px] uppercase tracking-wider text-[color:var(--color-one-text-dim)]">
-                        {isZh ? '关联拓展词：' : 'Related: '}
+                        {isZh ? '同义与关联词：' : 'Related: '}
                       </span>
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {lookupResult.related.map((rel) => (

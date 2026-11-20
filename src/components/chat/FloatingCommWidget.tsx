@@ -117,7 +117,7 @@ export const FloatingCommWidget: React.FC<FloatingCommWidgetProps> = ({
   if (hidden || !currentUser) return null;
 
   return (
-    <div className="fixed bottom-16 right-4 z-[82] flex flex-col items-end sm:bottom-6 sm:right-5 pointer-events-none">
+    <div className="fixed bottom-[calc(4.9rem+env(safe-area-inset-bottom))] right-3.5 z-[52] flex flex-col items-end sm:bottom-[calc(4.75rem+env(safe-area-inset-bottom))] sm:right-5 pointer-events-none">
       {/* Compact Non-Blocking Contacts & In-Place Voice Call Popover */}
       {open && (
         <div

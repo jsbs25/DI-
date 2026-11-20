@@ -1,51 +1,57 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import type { User, Post, GlobeUserNode, GlobeCountryStat, Conversation, CreatorArticle, VideoItem, Community, Language } from './types/index.ts';
 import { translations } from './i18n/translations.ts';
 import { Navbar } from './components/layout/Navbar.tsx';
-import { AppDock } from './components/layout/AppDock.tsx';
 import { CommandPalette } from './components/layout/CommandPalette.tsx';
 import { OneHome } from './components/home/OneHome.tsx';
-import { GlobalFeed } from './components/social/GlobalFeed.tsx';
 import { GlobalMessenger, type MessengerQuickAction } from './components/chat/GlobalMessenger.tsx';
 import { FloatingCommWidget } from './components/chat/FloatingCommWidget.tsx';
-import { AIHub } from './components/ai/AIHub.tsx';
-import { CreatorHub } from './components/creator/CreatorHub.tsx';
-import { VideoCenter } from './components/video/VideoCenter.tsx';
-import { GameCenter } from './components/games/GameCenter.tsx';
-import { CommunityList } from './components/community/CommunityList.tsx';
 import { UserProfileModal } from './components/profile/UserProfileModal.tsx';
 import { LuxuryAdBanner } from './components/commercial/LuxuryAdBanner.tsx';
 import { AuthModal } from './components/auth/AuthModal.tsx';
 import { OnboardingModal } from './components/auth/OnboardingModal.tsx';
 import { AccountSecurityModal } from './components/auth/AccountSecurityModal.tsx';
-import { DigitalLibrary } from './components/library/DigitalLibrary.tsx';
-import { ArabicLearningHub } from './components/learning/ArabicLearningHub.tsx';
-import { WebBrowser } from './components/browser/WebBrowser.tsx';
-import { CrawlerDashboard } from './components/crawler/CrawlerDashboard.tsx';
-import { KnowledgeUniverse } from './components/knowledge/KnowledgeUniverse.tsx';
-import { UniverseEngine } from './universe/UniverseEngine.tsx';
-import { SaturnSpace } from './universe/SaturnSpace.tsx';
-import { VenusMusicSpace } from './universe/VenusMusicSpace.tsx';
-import { MercurySearch } from './components/search/MercurySearch.tsx';
-import { getPlanetEcosystem } from './universe/planetEcosystems.ts';
 import { HolographicAICompanion } from './components/ai/HolographicAICompanion.tsx';
-import { ShieldCheck, Sparkles, ChevronLeft, Home } from 'lucide-react';
-import { MoonSpaceObservatory } from './universe/MoonSpaceObservatory.tsx';
-import { MoonAcademy } from './universe/MoonAcademy.tsx';
+import { ShieldCheck, Sparkles, Loader2 } from 'lucide-react';
 import { CinematicIntro } from './components/intro/CinematicIntro.tsx';
 import { LoginPage } from './components/auth/LoginPage.tsx';
 import { OfflineIndicator } from './components/layout/OfflineIndicator.tsx';
-import { BrandIdentitySystem } from './components/brand/BrandIdentitySystem.tsx';
 import { ParadiseBrandEmblem } from './components/brand/ParadiseBrandEmblem.tsx';
-import { OneNetworkCenter } from './components/network/OneNetworkCenter.tsx';
 import { PlayerProvider } from './music/PlayerContext.tsx';
 import type { LibraryAgentAction, SaturnAgentAction, VenusAgentAction } from './utils/oneAgentController.ts';
 import { uiStateManager, useAgentUiState } from './agent/uiStateManager.ts';
+import { initWebVitalsMonitor } from './utils/webVitalsMonitor.ts';
 import {
   registerAgentClientHandlers,
   pauseActiveSpiritTask,
   type LearningAgentAction,
 } from './agent/agentClient.ts';
+
+// Lazy-loaded workspaces for optimal LCP / INP / mobile bundle performance
+const AIHub = lazy(() => import('./components/ai/AIHub.tsx').then(m => ({ default: m.AIHub })));
+const DigitalLibrary = lazy(() => import('./components/library/DigitalLibrary.tsx').then(m => ({ default: m.DigitalLibrary })));
+const ArabicLearningHub = lazy(() => import('./components/learning/ArabicLearningHub.tsx').then(m => ({ default: m.ArabicLearningHub })));
+const VenusMusicSpace = lazy(() => import('./universe/VenusMusicSpace.tsx').then(m => ({ default: m.VenusMusicSpace })));
+const WebBrowser = lazy(() => import('./components/browser/WebBrowser.tsx').then(m => ({ default: m.WebBrowser })));
+const SaturnSpace = lazy(() => import('./universe/SaturnSpace.tsx').then(m => ({ default: m.SaturnSpace })));
+const MercurySearch = lazy(() => import('./components/search/MercurySearch.tsx').then(m => ({ default: m.MercurySearch })));
+const MoonSpaceObservatory = lazy(() => import('./universe/MoonSpaceObservatory.tsx').then(m => ({ default: m.MoonSpaceObservatory })));
+const MoonAcademy = lazy(() => import('./universe/MoonAcademy.tsx').then(m => ({ default: m.MoonAcademy })));
+const KnowledgeUniverse = lazy(() => import('./components/knowledge/KnowledgeUniverse.tsx').then(m => ({ default: m.KnowledgeUniverse })));
+const GlobalFeed = lazy(() => import('./components/social/GlobalFeed.tsx').then(m => ({ default: m.GlobalFeed })));
+const CreatorHub = lazy(() => import('./components/creator/CreatorHub.tsx').then(m => ({ default: m.CreatorHub })));
+const VideoCenter = lazy(() => import('./components/video/VideoCenter.tsx').then(m => ({ default: m.VideoCenter })));
+const GameCenter = lazy(() => import('./components/games/GameCenter.tsx').then(m => ({ default: m.GameCenter })));
+const CommunityList = lazy(() => import('./components/community/CommunityList.tsx').then(m => ({ default: m.CommunityList })));
+const CrawlerDashboard = lazy(() => import('./components/crawler/CrawlerDashboard.tsx').then(m => ({ default: m.CrawlerDashboard })));
+const OneNetworkCenter = lazy(() => import('./components/network/OneNetworkCenter.tsx').then(m => ({ default: m.OneNetworkCenter })));
+const BrandIdentitySystem = lazy(() => import('./components/brand/BrandIdentitySystem.tsx').then(m => ({ default: m.BrandIdentitySystem })));
+
+const WorkspaceFallback: React.FC = () => (
+  <div className="flex min-h-[60dvh] w-full items-center justify-center bg-[var(--color-one-bg)] text-[var(--color-one-text-muted)]">
+    <Loader2 className="h-5 w-5 animate-spin text-[var(--color-one-accent)]" />
+  </div>
+);
 
 export default function App() {
   const [showIntro, setShowIntro] = useState<boolean>(() => {
@@ -75,7 +81,7 @@ export default function App() {
   const t = translations[lang] || translations.zh;
   const normalizeModule = (m: string | null | undefined): string => {
     const raw = (m || '').trim().toLowerCase();
-    const alias: Record<string, string> = { search: 'mercury', ai: 'aihub', games: 'game', studio: 'creator', academy: 'academy', learning: 'arabic-learning', arabic: 'arabic-learning', messages: 'chat', discover: 'feed', home: 'globe', vpn: 'network', proxy: 'network' };
+    const alias: Record<string, string> = { search: 'library', ai: 'aihub', aihub: 'aihub', games: 'globe', studio: 'globe', academy: 'arabic-learning', learning: 'arabic-learning', arabic: 'arabic-learning', messages: 'chat', comm: 'chat', music: 'venus', discover: 'globe', universe: 'globe', spaces: 'globe', home: 'globe', vpn: 'network', proxy: 'network' };
     return alias[raw] || raw || 'globe';
   };
   const [currentTab, setCurrentTab] = useState<string>(() => {
@@ -245,9 +251,10 @@ export default function App() {
     };
   }, []);
 
-  const isViewportWorkspace = ['universe', 'chat', 'browser'].includes(currentTab);
-  const isSpaceExperience = isViewportWorkspace || ['globe', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'knowledge', 'network', 'settings', 'profile', 'call'].includes(currentTab);
+  const isViewportWorkspace = ['chat', 'browser'].includes(currentTab);
+  const isSpaceExperience = isViewportWorkspace || ['globe', 'aihub', 'saturn', 'venus', 'mercury', 'moon', 'academy', 'library', 'arabic-learning', 'knowledge', 'network', 'settings', 'profile', 'call'].includes(currentTab);
   useEffect(() => { if (currentTab !== 'globe') setImmersive(false); }, [currentTab]);
+  useEffect(() => { initWebVitalsMonitor(); }, []);
 
   useEffect(() => {
     if (currentTab === 'settings') setIsSecurityModalOpen(true);
@@ -322,7 +329,6 @@ export default function App() {
     setMessengerQuickAction({ seq: Date.now(), kind: 'open_calls' });
     navigateToTab('chat');
   };
-  const handleEnterPlanet = (planetId: string) => { const eco = getPlanetEcosystem(planetId); if (!eco || !eco.available) return; navigateToTab(eco.tab); };
 
   // Register unified ONE AI Agent frontend handlers & pause SQLite session on Communication Drawer open
   useEffect(() => {
@@ -508,17 +514,19 @@ export default function App() {
       return (
         <>
           <OfflineIndicator lang={lang} />
-          <BrandIdentitySystem
-            lang={lang}
-            onBackToGlobe={() => {
-              setCurrentTab('globe');
-              try {
-                const url = new URL(window.location.href);
-                url.searchParams.delete('module');
-                window.history.replaceState({}, '', url.pathname + url.search);
-              } catch {}
-            }}
-          />
+          <Suspense fallback={<WorkspaceFallback />}>
+            <BrandIdentitySystem
+              lang={lang}
+              onBackToGlobe={() => {
+                setCurrentTab('globe');
+                try {
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete('module');
+                  window.history.replaceState({}, '', url.pathname + url.search);
+                } catch {}
+              }}
+            />
+          </Suspense>
         </>
       );
     }
@@ -583,61 +591,29 @@ export default function App() {
       )}
       {welcomeToast && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-2xl border border-[#244e41]/18 dark:border-[#d6b77f]/24 bg-[#faf7f0]/92 dark:bg-[#121c27]/92 text-[#1d2e26] dark:text-[#f5f1e8] shadow-lg text-xs flex items-center gap-2"><Sparkles className="w-4 h-4 text-[#247864] dark:text-[#d6b77f]" /><span>{welcomeToast}</span></div>}
 
-      <div className={isMobileSubpage ? 'hidden md:block' : 'block'}>
-        <Navbar
-          currentTab={currentTab}
-          immersive={immersive}
-          onSelectTab={navigateToTab}
-          lang={lang}
-          onSelectLang={setLang}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          currentUser={currentUser}
-          onOpenProfile={() => currentUser && setProfileModalUser(currentUser)}
-          onOpenAuth={() => setIsAuthModalOpen(true)}
-          onOpenSecurity={() => setIsSecurityModalOpen(true)}
-          onLogout={handleLogout}
-          onOpenOnboarding={() => setIsOnboardingModalOpen(true)}
-          onToggleLocationPrivacy={handleToggleLocationPrivacy}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }}
-          onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); navigateToTab('knowledge'); }}
-          onReplayIntro={() => { setIntroGestureUnlocked(true); setShowIntro(true); }}
-          onOpenCommand={() => setCommandOpen(true)}
-        />
-      </div>
-
-      {isMobileSubpage && currentTab !== 'chat' && (
-        <header
-          style={{ paddingTop: 'env(safe-area-inset-top)' }}
-          className="fixed inset-x-0 top-0 z-[55] md:hidden border-b border-[#244e41]/12 dark:border-[#d6b77f]/15 bg-[#faf7f0]/95 dark:bg-[#111b26]/95 backdrop-blur-xl shadow-xs"
-        >
-          <div className="flex h-[52px] items-center justify-between px-3 gap-2">
-            <button
-              type="button"
-              onClick={goBack}
-              className="inline-flex items-center gap-1 rounded-xl border border-[#244e41]/14 dark:border-[#d6b77f]/18 bg-[#efe9dc]/80 dark:bg-white/[0.06] px-2.5 py-1.5 text-xs font-semibold text-[#1d2e26] dark:text-[#f5f1e8] hover:bg-[#e5decb] dark:hover:bg-white/12 active:scale-[0.98] transition shrink-0"
-              aria-label={lang === 'ar' ? 'رجوع' : lang === 'en' ? 'Back' : '返回'}
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>{lang === 'ar' ? 'رجوع' : lang === 'en' ? 'Back' : '返回'}</span>
-            </button>
-            <div className="min-w-0 flex-1 text-center">
-              <span className="text-sm font-semibold text-[#1d2e26] dark:text-[#f5f1e8] truncate block">{mobileSubpageTitle}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigateToTab('globe')}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[#244e41]/14 dark:border-[#d6b77f]/18 bg-[#efe9dc]/80 dark:bg-white/[0.06] text-[#355246] dark:text-[#d6b77f] hover:bg-[#e5decb] dark:hover:bg-white/12 shrink-0"
-              title={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到 ONE'}
-              aria-label={lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '回到 ONE'}
-            >
-              <Home className="w-4 h-4" />
-            </button>
-          </div>
-        </header>
-      )}
+      <Navbar
+        currentTab={currentTab}
+        immersive={immersive}
+        hideBottomNav={isMobileKeyboardOpen || (isNarrowViewport && currentTab === 'chat' && mobileChatOpen)}
+        onSelectTab={navigateToTab}
+        lang={lang}
+        onSelectLang={setLang}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        currentUser={currentUser}
+        onOpenProfile={() => currentUser && setProfileModalUser(currentUser)}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onOpenSecurity={() => setIsSecurityModalOpen(true)}
+        onLogout={handleLogout}
+        onOpenOnboarding={() => setIsOnboardingModalOpen(true)}
+        onToggleLocationPrivacy={handleToggleLocationPrivacy}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }}
+        onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); navigateToTab('knowledge'); }}
+        onReplayIntro={() => { setIntroGestureUnlocked(true); setShowIntro(true); }}
+        onOpenCommand={() => setCommandOpen(true)}
+      />
 
       <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} lang={lang} onSelectTab={navigateToTab} onSearch={(q) => { setSearchQuery(q); }} />
 
@@ -645,6 +621,7 @@ export default function App() {
         style={isViewportWorkspace ? { height: 'var(--one-vvh, 100dvh)' } : undefined}
         className={`relative w-full max-w-full overflow-x-clip ${isViewportWorkspace ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'}`}
       >
+        <Suspense fallback={<WorkspaceFallback />}>
         {currentTab === 'globe' && (
           <OneHome
             lang={lang}
@@ -668,11 +645,10 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'universe' && <div className="h-full w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[env(safe-area-inset-bottom)] md:pb-0 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><UniverseEngine onSwitchToEarthWorld={() => navigateToTab('globe')} onEnterEcosystem={handleEnterPlanet} /></div>}
-        {currentTab === 'saturn' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><SaturnSpace lang={lang} onBack={goBack} quickAction={saturnQuickAction} /></div>}
-        {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><VenusMusicSpace lang={lang} onBack={goBack} quickAction={venusQuickAction} /></div>}
-        {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><MercurySearch lang={lang} onBack={goBack} onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); navigateToTab('knowledge'); }} onSelectTab={navigateToTab} /></div>}
-        {currentTab === 'feed' && <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); navigateToTab('globe'); }} lang={lang} /></div>}
+        {currentTab === 'saturn' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><SaturnSpace lang={lang} onBack={goBack} quickAction={saturnQuickAction} /></div>}
+        {currentTab === 'venus' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><VenusMusicSpace lang={lang} onBack={goBack} quickAction={venusQuickAction} /></div>}
+        {currentTab === 'mercury' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><MercurySearch lang={lang} onBack={goBack} onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }} onOpenKnowledge={nodeId => { setKnowledgeFocusNodeId(nodeId); navigateToTab('knowledge'); }} onSelectTab={navigateToTab} /></div>}
+        {currentTab === 'feed' && <div className="w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><GlobalFeed posts={posts} countries={countries} activeCountry={activeCountry} onSelectCountry={setActiveCountry} currentUser={currentUser} onLikePost={handleLikePost} onAddComment={handleAddComment} onCreatePost={handleCreatePost} onSelectUser={u => setProfileModalUser(u)} onFlyToCoordinates={(lat,lng) => { setFocusCoordinates({ lat, lng, timestamp: Date.now() }); navigateToTab('globe'); }} lang={lang} /></div>}
         {currentTab !== 'chat' && agentSnap.commDrawerOpen && (
           <div
             className="fixed inset-0 z-[77] bg-slate-950/28 backdrop-blur-[2px]"
@@ -694,8 +670,8 @@ export default function App() {
           drawerMode={currentTab !== 'chat' && agentSnap.commDrawerOpen}
           workspaceClassName={
             currentTab !== 'chat' && agentSnap.commDrawerOpen
-              ? 'fixed inset-y-0 right-0 z-[78] w-full max-w-[420px] pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)] shadow-2xl border-l border-[var(--color-one-border)] bg-[var(--color-one-bg)] flex flex-col min-h-0'
-              : 'h-full w-full max-w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-16 md:pl-[5.5rem] md:pb-0 flex flex-col min-h-0'
+              ? 'fixed inset-y-0 right-0 z-[78] w-full max-w-[420px] pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)] shadow-2xl border-l border-[var(--color-one-border)] bg-[var(--color-one-bg)] flex flex-col min-h-0'
+              : `h-full w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] ${isNarrowViewport && mobileChatOpen ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(4.65rem+env(safe-area-inset-bottom))]'} flex flex-col min-h-0`
           }
           quickAction={messengerQuickAction}
           onBackToHome={() => {
@@ -707,11 +683,11 @@ export default function App() {
           }}
           onMobileChatChange={handleMobileChatChange}
         />
-        {currentTab === 'aihub' && <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><AIHub lang={lang} /></div>}
-        <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 flex flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} focusBookSeq={libraryFocusSeq} focusBookAutoRead={libraryFocusAutoRead} quickAction={libraryQuickAction} /></div></div>
-        {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><MoonSpaceObservatory lang={lang} onBack={goBack} /></div>}
+        {currentTab === 'aihub' && <div className="w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(4.85rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><AIHub lang={lang} /></div>}
+        <div className={currentTab === 'library' ? 'block' : 'hidden'} aria-hidden={currentTab !== 'library'}><div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] flex flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><DigitalLibrary lang={lang} currentUser={currentUser} focusBookId={libraryFocusBookId} focusBookSeq={libraryFocusSeq} focusBookAutoRead={libraryFocusAutoRead} quickAction={libraryQuickAction} /></div></div>
+        {currentTab === 'moon' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><MoonSpaceObservatory lang={lang} onBack={goBack} /></div>}
         {currentTab === 'arabic-learning' && (
-          <div className="w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]">
+          <div className="w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]">
             <ArabicLearningHub
               lang={lang}
               onOpenLibrary={() => navigateToTab('library')}
@@ -719,8 +695,8 @@ export default function App() {
             />
           </div>
         )}
-        {currentTab === 'knowledge' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.25rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => navigateToTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }} /></div>}
-        <div className={currentTab === 'browser' ? 'block h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className="h-full w-full max-w-full pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[env(safe-area-inset-bottom)] md:pb-0 flex flex-col min-h-0 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} quickSearchRequest={browserQuickSearch} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => navigateToTab('universe')} onBackToGlobe={() => navigateToTab('globe')} /></div></div>
+        {currentTab === 'knowledge' && <div className="min-h-[100dvh] w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><KnowledgeUniverse lang={lang} focusNodeId={knowledgeFocusNodeId} onOpenLibrary={() => navigateToTab('library')} onOpenBook={bookId => { setLibraryFocusBookId(bookId); navigateToTab('library'); }} /></div>}
+        <div className={currentTab === 'browser' ? 'block h-full' : 'hidden'} aria-hidden={currentTab !== 'browser'}><div className="h-full w-full max-w-full pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(4.65rem+env(safe-area-inset-bottom))] flex flex-col min-h-0 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><WebBrowser lang={lang} initialQuery={browserInitialQuery ?? undefined} quickSearchRequest={browserQuickSearch} openProxySeq={browserOpenProxySeq} onBackToUniverse={() => navigateToTab('globe')} onBackToGlobe={() => navigateToTab('globe')} /></div></div>
         {currentTab === 'network' && (
           <OneNetworkCenter
             lang={lang}
@@ -731,60 +707,52 @@ export default function App() {
             onOpenCalls={() => navigateToTab('chat')}
           />
         )}
-        {currentTab === 'crawler' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]"><CrawlerDashboard lang={lang} /></div>}
-        {currentTab === 'creator' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
-        {currentTab === 'video' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><VideoCenter videos={videos} lang={lang} /></div>}
-        {currentTab === 'game' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]"><GameCenter currentUser={currentUser} lang={lang} /></div>}
-        {currentTab === 'community' && <div className="pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
-        {currentTab === 'academy' && <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><MoonAcademy lang={lang} currentUser={currentUser} onBack={goBack} /></div>}
+        {currentTab === 'crawler' && <div className="pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]"><CrawlerDashboard lang={lang} /></div>}
+        {currentTab === 'creator' && <div className="pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><CreatorHub articles={articles} onCreateArticle={handleCreateArticle} lang={lang} /></div>}
+        {currentTab === 'video' && <div className="pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><VideoCenter videos={videos} lang={lang} /></div>}
+        {currentTab === 'game' && <div className="pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)] min-h-[100dvh]"><GameCenter currentUser={currentUser} lang={lang} /></div>}
+        {currentTab === 'community' && <div className="pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><CommunityList communities={communities} onToggleJoin={handleToggleJoinCommunity} lang={lang} /></div>}
+        {currentTab === 'academy' && <div className="min-h-[100dvh] pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><MoonAcademy lang={lang} currentUser={currentUser} onBack={goBack} /></div>}
         {currentTab === 'settings' && (
-          <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
+          <div className="min-h-[100dvh] pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] flex items-center justify-center px-4">
             <div className="max-w-lg w-full rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-6 sm:p-8 space-y-4 shadow-sm">
               <h1 className="text-xl font-semibold text-[var(--color-one-text)]">{lang==='zh'?'设置与安全':'Settings & Security'}</h1>
               <p className="text-sm text-[var(--color-one-text-muted)] leading-relaxed">{lang==='zh'?'账户、安全、隐私与绑定等设置已在「账户与安全」中统一管理。':'Account, security, privacy, and linking controls are managed in Account & Security.'}</p>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => setIsSecurityModalOpen(true)} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium">Account &amp; Security</button>
-                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text)] text-sm font-medium">{lang==='zh'?'个人资料':'Profile'}</button>
+                <button onClick={() => setIsSecurityModalOpen(true)} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium cursor-pointer">Account &amp; Security</button>
+                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text)] text-sm font-medium cursor-pointer">{lang==='zh'?'个人资料':'Profile'}</button>
               </div>
             </div>
           </div>
         )}
         {currentTab === 'profile' && (
-          <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
+          <div className="min-h-[100dvh] pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] flex items-center justify-center px-4">
             <div className="max-w-lg w-full rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-6 sm:p-8 space-y-4 shadow-sm">
               <h1 className="text-xl font-semibold text-[var(--color-one-text)]">{lang==='zh'?'个人主页':'Profile'}</h1>
               <p className="text-sm text-[var(--color-one-text-muted)] leading-relaxed">{lang==='zh'?'你的个人资料与地球信标通过资料面板管理。':'Manage your profile and globe beacon from your profile sheet.'}</p>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium">{lang==='zh'?'打开个人资料':'Open profile'}</button>
-                <button onClick={() => setIsOnboardingModalOpen(true)} className="px-4 py-2.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text)] text-sm font-medium">{lang==='zh'?'编辑地球信标':'Edit beacon'}</button>
+                <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium cursor-pointer">{lang==='zh'?'打开个人资料':'Open profile'}</button>
+                <button onClick={() => setIsOnboardingModalOpen(true)} className="px-4 py-2.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text)] text-sm font-medium cursor-pointer">{lang==='zh'?'编辑地球信标':'Edit beacon'}</button>
               </div>
             </div>
           </div>
         )}
         {currentTab === 'call' && (
-          <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 flex items-center justify-center px-4">
+          <div className="min-h-[100dvh] pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] flex items-center justify-center px-4">
             <div className="max-w-lg w-full rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-6 sm:p-8 space-y-4 shadow-sm">
               <h1 className="text-xl font-semibold text-[var(--color-one-text)]">{lang==='zh'?'通话':'Calls'}</h1>
-              <p className="text-sm text-[var(--color-one-text-muted)] leading-relaxed">{lang==='zh'?'你可以在消息中心或右下角悬浮通信入口发起实时语音与视频通话，通话过程中不退出当前阅读或浏览页面。':'Start real-time voice or video calls from Messages or the floating communication dock without leaving your current page.'}</p>
+              <p className="text-sm text-[var(--color-one-text-muted)] leading-relaxed">{lang==='zh'?'你可以在通讯中心或右下角悬浮通信入口发起高清语音与视频通话，通话过程中不退出当前阅读或浏览页面。':'Start HD voice or video calls from Communications or the floating communication dock without leaving your current page.'}</p>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => navigateToTab('chat')} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium">{lang==='zh'?'打开消息中心':'Open Messages'}</button>
+                <button onClick={() => navigateToTab('chat')} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium cursor-pointer">{lang==='zh'?'打开通讯中心':'Open Communications'}</button>
               </div>
             </div>
           </div>
         )}
-        {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[calc(3.25rem+env(safe-area-inset-top))] md:pt-16 md:pl-[5.5rem] pb-[max(1.5rem,env(safe-area-inset-bottom))] md:pb-8 bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><BrandIdentitySystem lang={lang} onBackToGlobe={goBack} /></div>}
+        {currentTab === 'brand' && <div className="min-h-[100dvh] pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[calc(5.25rem+env(safe-area-inset-bottom))] bg-[var(--color-one-bg)] text-[var(--color-one-text)]"><BrandIdentitySystem lang={lang} onBackToGlobe={goBack} /></div>}
+        </Suspense>
       </main>
 
-      <AppDock
-        currentTab={currentTab}
-        lang={lang}
-        hidden={(currentTab === 'globe' && immersive) || (isMobileKeyboardOpen && isViewportWorkspace)}
-        hideMobileDock={currentTab === 'globe' || isMobileSubpage}
-        hideDesktopDock={currentTab === 'globe'}
-        onSelectTab={navigateToTab}
-      />
-
-      {!isSpaceExperience && <div className={`md:pl-[5.5rem] ${isMobileSubpage ? 'pb-[env(safe-area-inset-bottom)]' : 'pb-[calc(5.5rem+env(safe-area-inset-bottom))]'} md:pb-0`}><LuxuryAdBanner lang={lang} /></div>}
+      {!isSpaceExperience && <div className="pb-[env(safe-area-inset-bottom)] md:pb-0"><LuxuryAdBanner lang={lang} /></div>}
 
       {profileModalUser && <UserProfileModal user={profileModalUser} currentUser={currentUser} onClose={() => setProfileModalUser(null)} onFollow={id => { fetch(`/api/users/${id}/follow`, { method: 'POST' }).catch(() => {}); }} onDirectMessage={handleOpenDirectChat} onUpdateProfile={handleUpdateProfile} lang={lang} />}
       <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} onAuthSuccess={handleAuthSuccess} lang={lang} />
@@ -797,13 +765,13 @@ export default function App() {
         isAuthenticated={true}
         userName={currentUser.displayName || currentUser.username}
         userCity={currentUser.location?.cityName}
-        showLauncher={currentTab !== 'globe' && !immersive && !(isNarrowViewport && currentTab === 'chat' && mobileChatOpen)}
+        showLauncher={currentTab !== 'globe' && currentTab !== 'aihub' && !immersive && !(isNarrowViewport && currentTab === 'chat' && mobileChatOpen)}
         placement={currentTab === 'globe' ? 'center-bottom' : 'corner'}
         onFlyTo={(lat, lng) => {
           setFocusCoordinates({ lat, lng, timestamp: Date.now() });
           navigateToTab('globe');
         }}
-        onExploreUniverse={() => navigateToTab('universe')}
+        onExploreUniverse={() => navigateToTab('library')}
         onOpenAIHub={() => navigateToTab('aihub')}
         onNavigateTab={navigateToTab}
         onPlayMusicAction={(opts) => {
@@ -866,7 +834,7 @@ export default function App() {
       />
 
       {!isSpaceExperience && (
-        <footer className="w-full border-t border-[#244e41]/12 dark:border-[#d6b77f]/14 bg-[#faf7f0]/88 dark:bg-[#111b26]/88 py-5 px-4 text-xs text-[#5d7066] dark:text-[#96a6ae] md:pl-24">
+        <footer className="w-full border-t border-[#244e41]/12 dark:border-[#d6b77f]/14 bg-[#faf7f0]/88 dark:bg-[#111b26]/88 py-5 px-4 text-xs text-[#5d7066] dark:text-[#96a6ae]">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <ParadiseBrandEmblem variant="medallion" size={24} surface={theme === 'dark' ? 'dark' : 'light'} />

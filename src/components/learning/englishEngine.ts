@@ -51,12 +51,23 @@ export interface EnglishStudyState {
 export interface EnglishLookupResult {
   word: string;
   phonetic?: string;
+  ukPhonetic?: string;
+  usPhonetic?: string;
   audioUrl?: string;
+  ukAudioUrl?: string;
+  usAudioUrl?: string;
+  cefrLevel?: string;
+  usageNote?: string;
+  collocations?: Array<{ phrase: string; zh?: string }>;
   meanings: Array<{
     partOfSpeech: string;
+    cefr?: string;
+    guideword?: string;
     definitions: Array<{
       definition: string;
+      definitionZh?: string;
       example?: string;
+      exampleZh?: string;
     }>;
   }>;
   related: string[];

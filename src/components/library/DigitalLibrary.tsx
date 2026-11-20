@@ -25,19 +25,20 @@ import {
   ArrowRight,
   Maximize2,
   Menu,
-  User
+  User,
+  Download,
+  Loader2,
+  Trash2,
 } from 'lucide-react';
 import { Book, Chapter, BookAnnotation, BookShelfItem, BookshelfStatus, Language } from '../../types/index.ts';
 import { EpubReader } from './EpubReader.tsx';
 import { AppleBookReader } from './AppleBookReader.tsx';
-import { NoorIslamicPdfPortal } from './NoorIslamicPdfPortal.tsx';
 import { PdfDocumentViewer } from '../browser/PdfDocumentViewer.tsx';
 import { getBookEmbedUrl, getBookPdfUrl, isRtlLanguage } from './bookEmbedUrl.ts';
 import { AdminLibrary } from './AdminLibrary.tsx';
 import { filterLibrarySearchResults, getLibrarySearchFilterOptions, LIBRARY_RIGHTS_FILTER_LABELS } from './searchFilters.ts';
 import type { LibraryAgentAction } from '../../utils/oneAgentController.ts';
 import { listRecentReadingHistory, type BookProgressRecord } from '../../utils/readerPreferences.ts';
-import { Trash2 } from 'lucide-react';
 
 interface DigitalLibraryProps {
   lang: Language;
@@ -124,9 +125,8 @@ const SHELF_TABS: { id: BookshelfStatus | 'all'; label: string }[] = [
 
 export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUser, focusBookId, focusBookSeq, focusBookAutoRead, quickAction }) => {
   // ---- View routing ----
-  const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf' | 'noor' | 'vocab' | 'admin'>('home');
+  const [view, setView] = useState<'home' | 'category' | 'detail' | 'shelf' | 'vocab' | 'admin'>('home');
   const [activeCategory, setActiveCategory] = useState<string>('all');
-  const [noorInitialQuery, setNoorInitialQuery] = useState<string>('');
   const [recentHistory, setRecentHistory] = useState<BookProgressRecord[]>(() => listRecentReadingHistory(6));
   const [vocabItems, setVocabItems] = useState<Array<{
     id: string;
@@ -175,6 +175,9 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const [onlineYearFilter, setOnlineYearFilter] = useState('all');
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [isCrawling, setIsCrawling] = useState(false);
+  const [isSearchingIslamic, setIsSearchingIslamic] = useState(false);
+  const [islamicResults, setIslamicResults] = useState<any[]>([]);
+  const [savingIslamicId, setSavingIslamicId] = useState<string | null>(null);
   const [crawlResults, setCrawlResults] = useState<any[]>([]);
   const [crawlSources, setCrawlSources] = useState<any[]>([]);
   const [crawlReader, setCrawlReader] = useState<any | null>(null);
@@ -276,11 +279,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     handledLibrarySeqRef.current = quickAction.seq;
     const q = quickAction.query.trim();
     if (/^__noor_library__$|مكتبة\s*ال?نور|noor[\s-]?book|努尔图书馆|伊斯兰(?:书籍|书库|电子书|图书|PDF)/i.test(q)) {
-      const cleanedNoorQ = q
+      const cleanedQ = q
         .replace(/__noor_library__|مكتبة\s*ال?نور|noor[\s-]?book|努尔图书馆|伊斯兰(?:书籍|书库|电子书|图书|PDF)/gi, '')
-        .trim();
-      setNoorInitialQuery(cleanedNoorQ);
-      setView('noor');
+        .trim() || 'صحيح البخاري';
+      setView('home');
+      void handleUnifiedSearch(cleanedQ);
       return;
     }
     let cancelled = false;
@@ -532,10 +535,91 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
     }
   };
 
+  const handleSearchIslamicBooks = async (overrideQuery?: string) => {
+    const q = (typeof overrideQuery === 'string' ? overrideQuery : searchQuery).trim();
+    if (!q) return;
+    setIsSearchingIslamic(true);
+    setIslamicResults([]);
+    try {
+      const res = await fetch(
+        `/api/library/islamic/books?type=books&lang=all&limit=18&q=${encodeURIComponent(q)}`
+      );
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.items)) {
+        setIslamicResults(data.items);
+      }
+    } catch {
+      // Non-blocking: other global sources still render
+    } finally {
+      setIsSearchingIslamic(false);
+    }
+  };
+
+  const handleSaveIslamicBookToShelf = async (item: any, openAfterSave = false) => {
+    if (!item || savingIslamicId) return;
+    setSavingIslamicId(item.id);
+    setReaderNotice(null);
+    try {
+      const res = await fetch('/api/library/islamic/save-to-shelf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
+        body: JSON.stringify({
+          pdfUrl: item.pdfUrl,
+          textUrl: item.textUrl,
+          title: item.title,
+          author: item.author,
+          description: item.description,
+          language: item.language,
+          sourcePageUrl: item.sourcePageUrl,
+          coverImage: item.coverImage,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success && data.book) {
+        const savedBook: Book = data.book;
+        setBooks((prev) => (prev.some((b) => b.id === savedBook.id) ? prev : [savedBook, ...prev]));
+        setShelf((prev) => {
+          const entry: BookShelfItem & { book: Book } = {
+            id: data.shelfItem?.id || `shelf_${savedBook.id}`,
+            userId: data.shelfItem?.userId || currentUser?.id || 'guest',
+            bookId: savedBook.id,
+            status: data.shelfItem?.status || 'reading',
+            progress: data.shelfItem?.progress || 0,
+            savedAt: data.shelfItem?.savedAt || new Date().toISOString(),
+            updatedAt: data.shelfItem?.updatedAt || new Date().toISOString(),
+            book: savedBook,
+          };
+          return prev.some((i) => i.bookId === savedBook.id)
+            ? prev.map((i) => (i.bookId === savedBook.id ? entry : i))
+            : [entry, ...prev];
+        });
+        setIslamicResults((prev) =>
+          prev.map((x) => (x.id === item.id ? { ...x, onShelf: true, savedBookId: savedBook.id, pdfUrl: data.localPdfUrl || x.pdfUrl } : x))
+        );
+        if (openAfterSave) {
+          if (data.localPdfUrl || item.pdfUrl) {
+            setPdfReader({ url: data.localPdfUrl || item.pdfUrl, title: savedBook.title, sourceUrl: item.sourcePageUrl });
+          } else {
+            await openReader(savedBook);
+          }
+        } else {
+          setReaderNotice(`《${savedBook.title}》已下载 PDF 并加入「我的书架」。`);
+        }
+      } else {
+        setReaderNotice(data?.error || '下载到书架未完成，请尝试直接在线阅读。');
+      }
+    } catch {
+      setReaderNotice('下载 PDF 时网络波动，请稍后重试。');
+    } finally {
+      setSavingIslamicId(null);
+    }
+  };
+
   const handleUnifiedSearch = async (overrideQuery?: string) => {
     const q = (typeof overrideQuery === 'string' ? overrideQuery : searchQuery).trim();
     if (!q) return;
     if (typeof overrideQuery === 'string') setSearchQuery(overrideQuery);
+    void handleSearchIslamicBooks(q);
     void handleCrawlBooks(q, true);
     void handleOnlineSearch(q, true);
   };
@@ -1061,7 +1145,6 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           <nav className="flex items-center gap-1 overflow-x-auto rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-1 text-xs font-medium" aria-label="世界图书馆导航">
             {[
               { id: 'home', label: '馆藏首页' },
-              { id: 'noor', label: 'مكتبة النور 全球书库' },
               { id: 'shelf', label: `我的书架${shelf.length > 0 ? ` (${shelf.length})` : ''}` },
               { id: 'vocab', label: '生词本' },
               { id: 'admin', label: '管理' },
@@ -1108,10 +1191,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                 一个世界，无数典籍。
               </h2>
               <p className="mt-3 max-w-xl text-sm leading-relaxed text-[var(--color-one-text-muted)]">
-                直连全球公开图书库（IslamHouse · Project Gutenberg · Open Library · Internet Archive）。下载 PDF 自动重排为电子书，内置字号排版自定义与统一 ONE AI 精讲查词。
+                一个搜索框直通全球公开书库（世界名著、学术原典、伊斯兰经典书籍、PDF 电子书）。搜索即达，一键下载 PDF 到书架并以典籍精排电子书阅读，支持点击查词与 AI 精讲注解。
               </p>
 
-              {/* Unified Search Box */}
+              {/* Single Unified Search Box */}
               <div className="mt-6 rounded-2xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] p-3 shadow-xs sm:p-3.5">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
@@ -1122,39 +1205,29 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleUnifiedSearch()}
-                    placeholder="输入书名、作者、主题、ISBN 或 DOI…"
+                    placeholder="搜索任何书籍（如：صحيح البخاري、تفسير ابن كثير、道德经、Principia、作者或 ISBN）…"
                     aria-describedby="world-library-search-help"
-                    className="w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] py-3 pl-10 pr-4 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none sm:pr-[12.5rem]"
+                    className="w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] py-3 pl-10 pr-4 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none sm:pr-28"
                   />
                   <div className="mt-2 flex items-center gap-2 sm:absolute sm:right-1.5 sm:top-1/2 sm:mt-0 sm:-translate-y-1/2">
                     <button
                       type="button"
-                      onClick={() => handleCrawlBooks()}
-                      disabled={isCrawling || !searchQuery.trim()}
-                      title="多源并行检索开放图书"
-                      className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-3 py-1.5 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:text-[var(--color-one-text)] disabled:opacity-40 sm:flex-none"
-                    >
-                      <Compass className="h-3.5 w-3.5" />
-                      <span>{isCrawling ? '检索中…' : '开放源'}</span>
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => handleUnifiedSearch()}
-                      disabled={(isSearchingOnline && isCrawling) || !searchQuery.trim()}
-                      className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-40 sm:flex-none"
+                      disabled={(isSearchingOnline && isCrawling && isSearchingIslamic) || !searchQuery.trim()}
+                      className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-[var(--color-one-accent)] px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-40 sm:flex-none"
                     >
                       <Search className="h-3.5 w-3.5" />
-                      <span>{isSearchingOnline || isCrawling ? '检索中…' : '搜索'}</span>
+                      <span>{isSearchingOnline || isCrawling || isSearchingIslamic ? '检索中…' : '全库搜索'}</span>
                     </button>
                   </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
-                  <span className="text-[11px] text-[var(--color-one-text-dim)]">推荐</span>
+                  <span className="text-[11px] text-[var(--color-one-text-dim)]">热搜示例</span>
                   {[
+                    { label: 'صحيح البخاري', q: 'صحيح البخاري' },
+                    { label: 'تفسير ابن كثير', q: 'تفسير ابن كثير' },
                     { label: '道德经', q: '道德经' },
-                    { label: '论语', q: '论语' },
-                    { label: '史记', q: '史记' },
                     { label: 'The Time Machine', q: 'The Time Machine' },
                     { label: 'Principia', q: 'Philosophiae Naturalis Principia' },
                   ].map((chip) => (
@@ -1168,49 +1241,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     </button>
                   ))}
                 </div>
-                <p id="world-library-search-help" className="sr-only">直连全球公开图书馆</p>
-              </div>
-
-              {/* Clean Global Catalog Entry */}
-              <div className="mt-4 flex flex-wrap items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNoorInitialQuery(searchQuery.trim());
-                    setView('noor');
-                  }}
-                  className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
-                >
-                  <BookOpen className="h-3.5 w-3.5" />
-                  <span>مكتبة النور · 全球原版 PDF 书库</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </button>
-                <a
-                  href={`https://openlibrary.org/search?q=${encodeURIComponent(searchQuery.trim())}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
-                >
-                  <span>Open Library</span>
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-                <a
-                  href="https://www.noor-book.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
-                >
-                  <span>Noor Book</span>
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-                <a
-                  href="https://waqfeya.net/books"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
-                >
-                  <span>Waqfeya</span>
-                </a>
+                <p id="world-library-search-help" className="sr-only">统一检索全球开放图书馆与伊斯兰原版 PDF 书库</p>
               </div>
             </div>
 
@@ -1291,6 +1322,105 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   </button>
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* Unified Original PDF & Islamic / Global Book Search Results */}
+          {(islamicResults.length > 0 || isSearchingIslamic) && (
+            <section aria-labelledby="library-pdf-results-title" aria-busy={isSearchingIslamic} className="rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 shadow-xs">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div>
+                  <h3 id="library-pdf-results-title" className="text-sm font-semibold text-[var(--color-one-text)]">
+                    原版典籍与伊斯兰 / 全球 PDF 书库检索结果
+                  </h3>
+                  <p className="mt-0.5 text-xs text-[var(--color-one-text-muted)]">
+                    自动匹配 IslamHouse、Internet Archive、Project Gutenberg 等全球原版书籍，支持一键下载 PDF 到我的书架并以典籍精排模式阅读。
+                  </p>
+                </div>
+                {islamicResults.length > 0 && (
+                  <span className="shrink-0 font-mono text-xs text-[var(--color-one-text-dim)]">{islamicResults.length} 部</span>
+                )}
+              </div>
+
+              {isSearchingIslamic ? (
+                <div role="status" className="flex items-center justify-center gap-2 py-6 text-xs text-[var(--color-one-text-muted)]">
+                  <Loader2 className="h-4 w-4 animate-spin text-[var(--color-one-accent)]" />
+                  <span>正在检索全球原版 PDF 书库…</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {islamicResults.map((item: any) => {
+                    const isAr = item.language === 'ar' || /[\u0600-\u06FF]/.test(String(item.title || ''));
+                    const saving = savingIslamicId === item.id;
+                    return (
+                      <div
+                        key={item.id}
+                        className="flex flex-col justify-between gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-4 transition hover:border-[var(--color-one-border-strong)]"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--color-one-text-dim)]">
+                            <span className="truncate font-medium text-[var(--color-one-accent)]">{item.sourceName || '全球原版库'}</span>
+                            <span className="shrink-0 uppercase">{item.language || 'BOOK'}</span>
+                          </div>
+                          <h4
+                            dir={isAr ? 'rtl' : 'auto'}
+                            className={`mt-1.5 line-clamp-2 text-sm font-semibold leading-snug text-[var(--color-one-text)] ${isAr ? 'font-serif text-base' : ''}`}
+                          >
+                            {item.title}
+                          </h4>
+                          {item.author && (
+                            <p dir={isAr ? 'rtl' : 'auto'} className="mt-1 truncate text-xs text-[var(--color-one-text-muted)]">
+                              {item.author}
+                            </p>
+                          )}
+                          {item.description && (
+                            <p dir={isAr ? 'rtl' : 'auto'} className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-[var(--color-one-text-dim)]">
+                              {item.description}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--color-one-border)] pt-2.5">
+                          {(item.pdfUrl || item.textUrl) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (item.pdfUrl) {
+                                  setPdfReader({ url: item.pdfUrl, title: item.title, sourceUrl: item.sourcePageUrl });
+                                } else {
+                                  void handleSaveIslamicBookToShelf(item, true);
+                                }
+                              }}
+                              className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90"
+                            >
+                              <BookOpen className="h-3 w-3" />
+                              <span>电子书阅读</span>
+                            </button>
+                          )}
+
+                          {(item.pdfUrl || item.textUrl) && (
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => void handleSaveIslamicBookToShelf(item, false)}
+                              className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)] disabled:opacity-50"
+                            >
+                              {saving ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : item.onShelf ? (
+                                <Check className="h-3 w-3 text-emerald-500" />
+                              ) : (
+                                <Download className="h-3 w-3" />
+                              )}
+                              <span>{saving ? '下载中…' : item.onShelf ? '已在书架' : '下载 PDF 到书架'}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           )}
 
@@ -1457,7 +1587,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             <div className="rounded-[24px] border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] py-16 text-center text-[var(--color-one-text-muted)]">
               <Library className="mx-auto mb-3 h-9 w-9 text-[var(--color-one-text-dim)]" />
               <p className="text-sm font-medium text-[var(--color-one-text)]">世界图书馆正在加载馆藏</p>
-              <p className="mt-1 text-xs">使用上方搜索框检索全球公开书籍，或进入 مكتبة النور 全球书库。</p>
+              <p className="mt-1 text-xs">使用上方统一搜索框检索全球公开书籍、学术原著或伊斯兰典籍。</p>
             </div>
           )}
         </div>
@@ -1641,10 +1771,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             <div className="rounded-[24px] border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] py-16 text-center text-[var(--color-one-text-muted)]">
               <BookMarked className="mx-auto mb-3 h-9 w-9 text-[var(--color-one-text-dim)]" />
               <p className="text-sm font-medium text-[var(--color-one-text)]">书架还是空的</p>
-              <p className="mt-1 text-xs">前往「مكتبة النور 全球书库」搜索全球原版图书，下载后自动转为电子书重排阅读。</p>
+              <p className="mt-1 text-xs">前往全球统一书库搜索原版图书，下载后自动转为电子书重排阅读。</p>
               <button
                 type="button"
-                onClick={() => setView('noor')}
+                onClick={() => setView('home')}
                 className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
               >
                 <BookOpen className="h-3.5 w-3.5" />
@@ -1749,38 +1879,6 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             </div>
           )}
         </div>
-      )}
-
-      {/* ===================================================================== */}
-      {/* NOOR ISLAMIC PDF PORTAL VIEW                                         */}
-      {/* ===================================================================== */}
-      {view === 'noor' && (
-        <NoorIslamicPdfPortal
-          lang={lang}
-          initialQuery={noorInitialQuery}
-          onBack={() => setView('home')}
-          onGoToShelf={() => setView('shelf')}
-          onOpenPdf={(payload) => setPdfReader(payload)}
-          onOpenBook={(book) => { void openReader(book); }}
-          onBookSavedToShelf={(savedBook, shelfItem) => {
-            setBooks((prev) => (prev.some((b) => b.id === savedBook.id) ? prev : [savedBook, ...prev]));
-            setShelf((prev) => {
-              const entry: BookShelfItem & { book: Book } = {
-                id: shelfItem?.id || `shelf_${savedBook.id}`,
-                userId: shelfItem?.userId || currentUser?.id || 'guest',
-                bookId: savedBook.id,
-                status: shelfItem?.status || 'reading',
-                progress: shelfItem?.progress || 0,
-                savedAt: shelfItem?.savedAt || new Date().toISOString(),
-                updatedAt: shelfItem?.updatedAt || new Date().toISOString(),
-                book: savedBook,
-              };
-              return prev.some((i) => i.bookId === savedBook.id)
-                ? prev.map((i) => (i.bookId === savedBook.id ? entry : i))
-                : [entry, ...prev];
-            });
-          }}
-        />
       )}
 
       {/* ===================================================================== */}

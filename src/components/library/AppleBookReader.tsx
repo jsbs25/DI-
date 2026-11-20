@@ -402,6 +402,12 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
     word: string;
     lemma?: string;
     reading: string;
+    ukPhonetic?: string;
+    usPhonetic?: string;
+    audioUrl?: string;
+    ukAudioUrl?: string;
+    usAudioUrl?: string;
+    cefrLevel?: string;
     partOfSpeech: string;
     root: string;
     meaning: string;
@@ -2216,15 +2222,45 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-base font-bold">{lookupEntry?.word || lookupWord}</span>
+                    {lookupEntry?.cefrLevel && (
+                      <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                        {lookupEntry.cefrLevel}
+                      </span>
+                    )}
                     {lookupEntry?.partOfSpeech && (
-                      <span className="rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-300">
+                      <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-300">
                         {lookupEntry.partOfSpeech}
                       </span>
                     )}
                   </div>
                   {lookupEntry?.reading && (
-                    <div className="mt-0.5 text-xs font-medium" style={{ color: theme.muted }}>
-                      {lookupEntry.reading}
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-mono font-medium" style={{ color: theme.muted }}>
+                        {lookupEntry.reading}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const url = lookupEntry.usAudioUrl || lookupEntry.ukAudioUrl || lookupEntry.audioUrl;
+                          if (url) {
+                            const audio = new Audio(url);
+                            void audio.play().catch(() => {});
+                            return;
+                          }
+                          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                            window.speechSynthesis.cancel();
+                            const utt = new SpeechSynthesisUtterance(lookupEntry.word);
+                            utt.lang = /[\u0600-\u06FF]/.test(utt.text) ? 'ar-SA' : 'en-US';
+                            window.speechSynthesis.speak(utt);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium cursor-pointer"
+                        style={{ backgroundColor: theme.bg, color: theme.accent }}
+                        title={isZh ? '朗读发音' : 'Pronounce'}
+                      >
+                        <Volume2 className="h-3 w-3" />
+                        <span>{isZh ? '发音' : 'Listen'}</span>
+                      </button>
                     </div>
                   )}
                 </div>

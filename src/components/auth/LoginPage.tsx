@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Language, User } from '../../types/index.ts';
-import { Eye, EyeOff, Loader2, Moon, Sun } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, Loader2, MailCheck, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { PWAInstallButton } from '../layout/PWAInstallButton.tsx';
 import { ParadiseBrandEmblem } from '../brand/ParadiseBrandEmblem.tsx';
 import { unlockSteadyVoiceAudio } from '../../utils/steadyVoicePlayer.ts';
@@ -33,7 +33,66 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [authStatus, setAuthStatus] = useState<{
+    googleConfigured: boolean;
+    smtpConfigured: boolean;
+    requireEmailOtp: boolean;
+  }>({ googleConfigured: false, smtpConfigured: false, requireEmailOtp: false });
+  const [emailOtpChallengeId, setEmailOtpChallengeId] = useState('');
+  const [emailOtpCode, setEmailOtpCode] = useState('');
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
   const bgCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/auth/status')
+      .then((r) => r.json())
+      .then((data) => {
+        if (!active || !data?.success) return;
+        setAuthStatus({
+          googleConfigured: Boolean(data?.google?.configured),
+          smtpConfigured: Boolean(data?.emailVerification?.smtpConfigured),
+          requireEmailOtp: Boolean(data?.emailVerification?.requireVerification),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+    const t = window.setTimeout(() => setOtpCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => window.clearTimeout(t);
+  }, [otpCooldown]);
+
+  const detectedEmailProvider = useMemo(() => {
+    const clean = email.trim().toLowerCase();
+    const at = clean.lastIndexOf('@');
+    if (at < 1) return null;
+    const domain = clean.slice(at + 1);
+    if (!domain || !domain.includes('.')) return null;
+    if (domain === 'gmail.com' || domain === 'googlemail.com') return 'Google Gmail';
+    if (domain === 'qq.com' || domain === 'vip.qq.com' || domain === 'foxmail.com') return 'QQ 邮箱';
+    if (domain === '163.com' || domain === '126.com') return '网易邮箱';
+    if (domain === 'outlook.com' || domain === 'hotmail.com' || domain === 'live.com') return 'Microsoft Outlook';
+    if (domain === 'icloud.com' || domain === 'me.com') return 'Apple iCloud';
+    return domain;
+  }, [email]);
+
+  const passwordStrength = useMemo(() => {
+    if (!registerPassword) return { score: 0, label: '' };
+    let s = 0;
+    if (registerPassword.length >= 6) s += 1;
+    if (registerPassword.length >= 10) s += 1;
+    if (/[A-Z]/.test(registerPassword) && /[a-z]/.test(registerPassword)) s += 1;
+    if (/\d/.test(registerPassword) && /[^A-Za-z0-9]/.test(registerPassword)) s += 1;
+    if (s <= 1) return { score: 1, label: L('弱（建议包含字母与数字）', 'Weak', 'ضعيفة') };
+    if (s <= 2) return { score: 2, label: L('中等', 'Fair', 'متوسطة') };
+    return { score: 3, label: L('强密码', 'Strong', 'قوية') };
+  }, [registerPassword, lang]);
 
   useEffect(() => {
     const canvas = bgCanvasRef.current;
@@ -230,6 +289,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) { setErrorMsg(L('请输入有效的邮箱地址。', 'Please enter a valid email address.', 'يرجى إدخال بريد إلكتروني صالح.')); return; }
     if (registerPassword.length < 6) { setErrorMsg(L('密码至少需要 6 个字符。', 'Password must be at least 6 characters.', 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.')); return; }
     if (registerPassword !== confirmPassword) { setErrorMsg(L('两次输入的密码不一致。', 'Passwords do not match.', 'كلمتا المرور غير متطابقتين.')); return; }
+    if (authStatus.requireEmailOtp && (!emailOtpChallengeId || !emailOtpCode.trim())) {
+      setErrorMsg(L('请先获取并输入邮箱验证码。', 'Please request and enter your email verification code.', 'يرجى طلب وإدخال رمز التحقق من البريد الإلكتروني.'));
+      return;
+    }
 
     setLoading(true);
     try {
@@ -242,6 +305,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
           password: registerPassword,
           username: cleanUsername,
           displayName: cleanUsername,
+          ...(emailOtpChallengeId && emailOtpCode.trim()
+            ? { emailVerificationChallengeId: emailOtpChallengeId, emailVerificationCode: emailOtpCode.trim() }
+            : {}),
         }),
       });
       const data = await parseJsonSafe(res);
@@ -254,6 +320,36 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
       setErrorMsg(L('网络连接失败，请稍后重试。', 'Network error. Please try again.', 'خطأ في الشبكة. حاول مرة أخرى.'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const requestEmailVerificationCode = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    setErrorMsg(null);
+    setInfoMsg(null);
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setErrorMsg(L('请先输入有效的 Gmail、QQ 邮箱或其他真实邮箱。', 'Enter a valid Gmail, QQ Mail, or email address first.'));
+      return;
+    }
+    setSendingOtp(true);
+    try {
+      const res = await fetch('/api/auth/email/send-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
+      });
+      const data = await parseJsonSafe(res);
+      if (res.ok && data?.success && data?.challengeId) {
+        setEmailOtpChallengeId(data.challengeId);
+        setOtpCooldown(60);
+        setInfoMsg(data.message || L('验证码已发送至您的邮箱，请查收。', 'Verification code sent. Check your inbox.'));
+      } else {
+        setErrorMsg(data?.error || L('无法发送验证码邮件，请检查邮箱地址或稍后重试。', 'Unable to send verification code.'));
+      }
+    } catch {
+      setErrorMsg(L('网络异常，无法发送验证码。', 'Network error while sending code.'));
+    } finally {
+      setSendingOtp(false);
     }
   };
 
@@ -450,26 +546,101 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
                   />
                 </label>
                 <label className="block space-y-1.5">
-                  <span className={`text-xs font-medium ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
-                    {L('邮箱', 'Email', 'البريد الإلكتروني')}
+                  <span className={`text-xs font-medium flex items-center justify-between ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
+                    <span>{L('邮箱（支持 Gmail / QQ 邮箱）', 'Email (Gmail / QQ Mail supported)', 'البريد الإلكتروني')}</span>
+                    <span className={`inline-flex items-center gap-1 text-[11px] font-normal ${isDark ? 'text-[#9bd3be]' : 'text-[#247864]'}`}>
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      {L('真实域名校验', 'MX Verified')}
+                    </span>
                   </span>
                   <input
                     type="email"
                     autoComplete="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (emailOtpChallengeId) {
+                        setEmailOtpChallengeId('');
+                        setEmailOtpCode('');
+                      }
+                    }}
                     disabled={loading}
                     className={`w-full h-11 rounded-xl border px-3.5 text-sm outline-none transition disabled:opacity-50 ${
                       isDark
                         ? 'border-white/14 bg-[#0d1520] text-[#f5f1e8] placeholder:text-[#a8a296]/55 focus:border-[#d6b77f]/65'
                         : 'border-[#23362c]/14 bg-white/85 text-[#1b2b24] placeholder:text-[#6b7d73]/70 focus:border-[#247864]'
                     }`}
-                    placeholder="you@example.com"
+                    placeholder="name@gmail.com / 123456@qq.com"
                   />
+                  {detectedEmailProvider && (
+                    <p className={`text-[11px] flex items-center gap-1.5 ${isDark ? 'text-[#c9c2b4]/80' : 'text-[#496356]'}`}>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-[#247864] dark:text-[#52b798] shrink-0" />
+                      <span>
+                        {L(`已识别 ${detectedEmailProvider} · 服务端将实时验证域名与防伪造`, `Detected ${detectedEmailProvider} · Server-side MX check active`)}
+                      </span>
+                    </p>
+                  )}
                 </label>
+
+                {authStatus.smtpConfigured && (
+                  <div className="space-y-1.5">
+                    <span className={`text-xs font-medium flex items-center gap-1.5 ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
+                      <MailCheck className="w-3.5 h-3.5 text-[#247864] dark:text-[#52b798]" />
+                      {authStatus.requireEmailOtp
+                        ? L('邮箱验证码（必填）', 'Email verification code (required)')
+                        : L('邮箱验证码（可选验证）', 'Email verification code (optional)')}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={8}
+                        value={emailOtpCode}
+                        onChange={(e) => setEmailOtpCode(e.target.value.replace(/\s+/g, ''))}
+                        disabled={loading}
+                        placeholder={L('输入 6 位验证码', '6-digit code')}
+                        className={`flex-1 h-10 rounded-xl border px-3.5 text-sm outline-none transition disabled:opacity-50 ${
+                          isDark
+                            ? 'border-white/14 bg-[#0d1520] text-[#f5f1e8] placeholder:text-[#a8a296]/55 focus:border-[#d6b77f]/65'
+                            : 'border-[#23362c]/14 bg-white/85 text-[#1b2b24] placeholder:text-[#6b7d73]/70 focus:border-[#247864]'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={requestEmailVerificationCode}
+                        disabled={sendingOtp || otpCooldown > 0 || loading}
+                        className={`h-10 px-3.5 rounded-xl border text-xs font-medium whitespace-nowrap transition cursor-pointer disabled:opacity-50 ${
+                          isDark
+                            ? 'border-white/15 bg-[#192634] text-[#e5d9be] hover:bg-[#223447]'
+                            : 'border-[#23362c]/15 bg-[#f2ede0] text-[#1e352b] hover:bg-[#e7e0cf]'
+                        }`}
+                      >
+                        {sendingOtp
+                          ? L('发送中…', 'Sending…')
+                          : otpCooldown > 0
+                            ? `${otpCooldown}s`
+                            : L('获取验证码', 'Send code')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <label className="block space-y-1.5">
-                  <span className={`text-xs font-medium ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
-                    {L('密码', 'Password', 'كلمة المرور')}
+                  <span className={`text-xs font-medium flex items-center justify-between ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
+                    <span>{L('密码', 'Password', 'كلمة المرور')}</span>
+                    {passwordStrength.label && (
+                      <span
+                        className={`text-[11px] font-normal ${
+                          passwordStrength.score >= 3
+                            ? 'text-[#247864] dark:text-[#52b798]'
+                            : passwordStrength.score === 2
+                              ? 'text-amber-600 dark:text-amber-300'
+                              : 'text-rose-600 dark:text-rose-300'
+                        }`}
+                      >
+                        {passwordStrength.label}
+                      </span>
+                    )}
                   </span>
                   <div className="relative">
                     <input
@@ -497,6 +668,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
                       {showRegisterPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                  {registerPassword.length > 0 && (
+                    <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                      {[1, 2, 3].map((step) => (
+                        <div
+                          key={step}
+                          className={`h-1 rounded-full transition-colors ${
+                            passwordStrength.score >= step
+                              ? passwordStrength.score >= 3
+                                ? 'bg-[#247864] dark:bg-[#52b798]'
+                                : passwordStrength.score === 2
+                                  ? 'bg-amber-500'
+                                  : 'bg-rose-500'
+                              : isDark
+                                ? 'bg-white/10'
+                                : 'bg-[#23362c]/10'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </label>
                 <label className="block space-y-1.5">
                   <span className={`text-xs font-medium ${isDark ? 'text-[#d9d3c6]' : 'text-[#394e43]'}`}>
@@ -551,6 +742,34 @@ export const LoginPage: React.FC<LoginPageProps> = ({ lang, onAuthSuccess, onOpe
                     : L('创建账号并进入', 'Create account', 'إنشاء حساب')}
             </button>
           </form>
+
+          {authStatus.googleConfigured && (
+            <div className="mt-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className={`h-px flex-1 ${isDark ? 'bg-white/10' : 'bg-[#23362c]/10'}`} />
+                <span className={`text-[11px] ${isDark ? 'text-[#c9c2b4]/60' : 'text-[#62756b]'}`}>
+                  {L('或通过第三方身份继续', 'or continue with')}
+                </span>
+                <div className={`h-px flex-1 ${isDark ? 'bg-white/10' : 'bg-[#23362c]/10'}`} />
+              </div>
+              <a
+                href="/api/auth/google/start"
+                className={`w-full h-10 rounded-full border text-xs font-medium inline-flex items-center justify-center gap-2 transition ${
+                  isDark
+                    ? 'border-white/15 bg-[#0f1823] text-[#f3efe6] hover:bg-[#182535]'
+                    : 'border-[#23362c]/15 bg-white text-[#1d2b24] hover:bg-[#f4f0e6]'
+                }`}
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                <span>{L('使用 Google 邮箱账号继续', 'Continue with Google')}</span>
+              </a>
+            </div>
+          )}
 
           <div className={`mt-5 text-center text-xs ${isDark ? 'text-[#c9c2b4]/75' : 'text-[#52675c]'}`}>
             {mode === 'login' ? (

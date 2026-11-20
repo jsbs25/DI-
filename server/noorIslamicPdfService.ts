@@ -8,6 +8,7 @@ import { oneAiRouter } from './oneAi/router.ts';
 import { aiGateway } from './aiGateway.ts';
 import { getGeminiClient } from './geminiClient.ts';
 import { runUnifiedAiTurn } from './ai/unifiedAiCore.ts';
+import { lookupAuthoritativeDictionary } from './dictionaryService.ts';
 
 type DataStore = typeof appStore;
 
@@ -1151,7 +1152,7 @@ export function registerNoorIslamicLibraryRoutes(
     }
   });
 
-  // 7. Instant Tap-Any-Word AI Dictionary Lookup (原形 · 发音 · 词性 · 中文含义 · 常见用法 · 例句)
+  // 7. Instant Tap-Any-Word Authoritative Dictionary Lookup (剑桥/牛津双解 · 真人英美音标发音 · CEFR · 语境义 · 例句)
   app.post('/api/library/ai/lookup-word', async (req: Request, res: Response) => {
     const { word, contextSentence, bookTitle, lang } = req.body || {};
     const cleanWord = typeof word === 'string' ? word.trim().slice(0, 80) : '';
@@ -1159,9 +1160,77 @@ export function registerNoorIslamicLibraryRoutes(
       return res.status(400).json({ success: false, error: '请选择要查询的单词。' });
     }
 
+    try {
+      const ctxStr = [
+        typeof bookTitle === 'string' && bookTitle ? `《${bookTitle.slice(0, 80)}》` : '',
+        typeof contextSentence === 'string' && contextSentence ? contextSentence.slice(0, 280) : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+
+      const authEntry = await lookupAuthoritativeDictionary(cleanWord, ctxStr || undefined);
+      if (authEntry && authEntry.senses.length > 0) {
+        const primarySense = authEntry.senses[0];
+        const summaryMeaning = authEntry.senses
+          .slice(0, 3)
+          .map((s) => {
+            const zh = s.definitionZh ? s.definitionZh : '';
+            const en = s.definitionEn ? s.definitionEn : '';
+            const body = zh && en ? `${zh}（${en}）` : zh || en;
+            return s.partOfSpeech ? `[${s.partOfSpeech}] ${body}` : body;
+          })
+          .join('；');
+
+        const firstExample = primarySense?.examples?.[0];
+        const exampleStr = firstExample
+          ? firstExample.zh
+            ? `${firstExample.en} — ${firstExample.zh}`
+            : firstExample.en
+          : '';
+
+        const usageStr =
+          authEntry.usageNote ||
+          (authEntry.collocations.length > 0
+            ? authEntry.collocations
+                .slice(0, 3)
+                .map((c) => (c.zh ? `${c.phrase}（${c.zh}）` : c.phrase))
+                .join(' · ')
+            : '');
+
+        return res.json({
+          success: true,
+          entry: {
+            word: authEntry.word,
+            lemma: authEntry.lemma || authEntry.word,
+            reading:
+              authEntry.ukPhonetic && authEntry.usPhonetic && authEntry.ukPhonetic !== authEntry.usPhonetic
+                ? `UK ${authEntry.ukPhonetic} · US ${authEntry.usPhonetic}`
+                : authEntry.usPhonetic || authEntry.ukPhonetic || authEntry.reading || '',
+            ukPhonetic: authEntry.ukPhonetic,
+            usPhonetic: authEntry.usPhonetic,
+            audioUrl: authEntry.audioUrl || authEntry.usAudioUrl || authEntry.ukAudioUrl,
+            ukAudioUrl: authEntry.ukAudioUrl,
+            usAudioUrl: authEntry.usAudioUrl,
+            cefrLevel: authEntry.cefrLevel,
+            partOfSpeech: primarySense?.partOfSpeech || '',
+            root: authEntry.root || authEntry.etymology || '',
+            meaning: summaryMeaning,
+            usage: usageStr,
+            contextMeaning: authEntry.contextMeaning || '',
+            example: exampleStr,
+            senses: authEntry.senses,
+            collocations: authEntry.collocations,
+            sources: authEntry.sources,
+          },
+        });
+      }
+    } catch {
+      // Fall through to direct AI lookup if authoritative service had an issue
+    }
+
     const replyZh = lang !== 'en';
     const systemInstruction = replyZh
-      ? '你是 ONE AI 词典与多语阅读助教（精通阿拉伯语、英语、汉语及古典文献）。请仅返回严格 JSON（不要加 markdown 代码块），包含以下字段：{"word":"原词","lemma":"单词原形/词典形","reading":"发音（阿语完全标音 Tashkeel+拉丁读音 或 国际音标 IPA / 汉语拼音）","partOfSpeech":"词性","root":"词根或词源（无则留空）","meaning":"精准简洁的中文核心释义","usage":"常见搭配与典型用法","contextMeaning":"结合当前句子的确切语境含义","example":"1句自然实用例句及中文翻译"}。'
+      ? '你是 ONE AI 权威词典与多语阅读助教（精通英语、阿拉伯语、汉语及古典文献）。请仅返回严格 JSON（不要加 markdown 代码块），包含以下字段：{"word":"原词","lemma":"单词原形/词典形","reading":"发音（阿语完全标音 Tashkeel+拉丁读音 或 国际音标 IPA / 汉语拼音）","partOfSpeech":"词性","root":"词根或词源（无则留空）","meaning":"精准简洁的中文核心释义","usage":"常见搭配与典型用法","contextMeaning":"结合当前句子的确切语境含义","example":"1句自然实用例句及中文翻译"}。'
       : 'You are ONE AI multilingual dictionary (Arabic/English/Chinese). Return ONLY strict JSON (no markdown fences): {"word":"...","lemma":"...","reading":"...","partOfSpeech":"...","root":"...","meaning":"...","usage":"...","contextMeaning":"...","example":"..."}.';
 
     const prompt = [

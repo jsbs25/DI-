@@ -3,6 +3,7 @@ import {
   ArrowUp,
   AudioLines,
   ImagePlus,
+  Maximize2,
   PhoneOff,
   Play,
   X,
@@ -14,9 +15,10 @@ import { stopSpiritLiveVoice, toggleSpiritLiveVoice } from '../../agent/spiritLi
 
 interface SpiritCommandBarProps {
   lang: Language;
+  onOpenFullAi?: () => void;
 }
 
-export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
+export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang, onOpenFullAi }) => {
   const isZh = lang === 'zh';
   const snap = useAgentUiState();
   const isDay = snap.gardenDaylight > 0.44;
@@ -76,8 +78,8 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
   }
 
   const shellCls = isDay
-    ? 'border-white/65 bg-[#faf7f1]/78 text-[#1f2c26] shadow-[0_8px_24px_rgba(24,36,28,0.10)]'
-    : 'border-white/14 bg-[#131b26]/74 text-[#f2eee6] shadow-[0_10px_28px_rgba(4,8,14,0.34)]';
+    ? 'border-white/65 bg-[#faf7f1]/80 text-[#1f2c26] shadow-[0_6px_18px_rgba(24,36,28,0.10)] backdrop-blur-xl'
+    : 'border-white/14 bg-[#131b26]/74 text-[#f2eee6] shadow-[0_8px_22px_rgba(4,8,14,0.34)] backdrop-blur-xl';
 
   const iconBtnCls = isDay
     ? 'text-[#394b42]/80 hover:bg-black/[0.06] hover:text-[#16221c]'
@@ -93,52 +95,46 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
 
   const placeholderText = snap.liveVoiceActive
     ? snap.liveVoicePhase === 'connecting'
-      ? isZh
-        ? '正在连接语音…'
-        : 'Connecting…'
+      ? isZh ? '正在连接语音…' : 'Connecting…'
       : snap.liveVoicePhase === 'speaking'
-      ? isZh
-        ? '正在回应，随时可说话…'
-        : 'Speaking…'
-      : isZh
-      ? '请直接开口说话…'
-      : 'Speak now…'
+      ? isZh ? '正在回应，随时可说话…' : 'Speaking…'
+      : isZh ? '请直接开口说话…' : 'Speak now…'
     : isZh
-    ? '说点什么，比如看书、听歌或查问题…'
-    : 'Ask anything, read a book, or play music…';
+    ? '轻声问一句，看书、听歌或查问题…'
+    : 'Ask ONE AI, read, or play music…';
 
   return (
     <div
-      className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 w-[min(88vw,380px)] flex flex-col items-center gap-1.5"
+      className="pointer-events-none fixed bottom-[calc(4.65rem+env(safe-area-inset-bottom))] sm:bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30 w-[min(82vw,310px)] flex flex-col items-center gap-1.5"
       data-testid="spirit-command-bar"
     >
       {snap.pausedTask && (
         <button
           type="button"
           onClick={() => void resumePausedSpiritTask(lang)}
-          className={`pointer-events-auto inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium transition-colors cursor-pointer ${shellCls}`}
+          className={`pointer-events-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors cursor-pointer ${shellCls}`}
         >
           <Play className="h-3 w-3" />
-          <span className="truncate max-w-[220px]">
+          <span className="truncate max-w-[200px]">
             {isZh ? `继续：${snap.pausedTask.prompt}` : `Resume: ${snap.pausedTask.prompt}`}
           </span>
         </button>
       )}
 
       {voiceNote && (
-        <div className={`pointer-events-auto rounded-full border px-3 py-1 text-[11px] ${shellCls}`}>
+        <div className={`pointer-events-auto rounded-full border px-2.5 py-0.5 text-[11px] ${shellCls}`}>
           {voiceNote}
         </div>
       )}
 
       {imageDataUrl && (
-        <div className={`pointer-events-auto flex items-center gap-2 rounded-2xl border px-2.5 py-1.5 ${shellCls}`}>
-          <img src={imageDataUrl} alt="Attachment" className="h-7 w-7 rounded-lg object-cover" />
+        <div className={`pointer-events-auto flex items-center gap-2 rounded-2xl border px-2 py-1 ${shellCls}`}>
+          <img src={imageDataUrl} alt="Attachment" className="h-6 w-6 rounded-lg object-cover" />
           <span className="text-[11px] opacity-85">{isZh ? '已附图片' : 'Attached'}</span>
           <button
             type="button"
             onClick={() => setImageDataUrl(null)}
-            className={`rounded-full p-1 cursor-pointer ${iconBtnCls}`}
+            className={`rounded-full p-0.5 cursor-pointer ${iconBtnCls}`}
           >
             <X className="h-3 w-3" />
           </button>
@@ -150,14 +146,14 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
           e.preventDefault();
           void handleSend();
         }}
-        className={`pointer-events-auto flex w-full items-center gap-1 rounded-full border py-1 pl-3.5 pr-1 transition-colors ${shellCls}`}
+        className={`pointer-events-auto flex w-full items-center gap-0.5 rounded-full border py-0.5 pl-3 pr-1 transition-colors ${shellCls}`}
       >
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={placeholderText}
-          className={`h-7 min-w-0 flex-1 bg-transparent text-xs focus:outline-none ${
+          className={`h-7 min-w-0 flex-1 bg-transparent text-[12px] focus:outline-none ${
             isDay ? 'text-[#1c2922] placeholder:text-[#516359]/75' : 'text-[#f6f3ec] placeholder:text-[#d9d4c7]/55'
           }`}
         />
@@ -173,7 +169,7 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer ${iconBtnCls}`}
+          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer ${iconBtnCls}`}
           title={isZh ? '附带图片' : 'Attach image'}
         >
           <ImagePlus className="h-3.5 w-3.5" />
@@ -182,19 +178,30 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
         <button
           type="button"
           onClick={handleToggleRealTimeVoice}
-          className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer ${
+          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer ${
             snap.liveVoiceActive ? liveActiveCls : iconBtnCls
           }`}
           title={snap.liveVoiceActive ? (isZh ? '结束语音' : 'End voice') : isZh ? '语音对话' : 'Voice chat'}
           data-testid="spirit-live-voice-btn"
         >
-          {snap.liveVoiceActive ? <PhoneOff className="h-3.5 w-3.5" /> : <AudioLines className="h-3.5 w-3.5" />}
+          {snap.liveVoiceActive ? <PhoneOff className="h-3 w-3" /> : <AudioLines className="h-3.5 w-3.5" />}
         </button>
+
+        {onOpenFullAi && (
+          <button
+            type="button"
+            onClick={onOpenFullAi}
+            className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors cursor-pointer ${iconBtnCls}`}
+            title={isZh ? '进入纯净 ONE AI 界面' : 'Open full ONE AI'}
+          >
+            <Maximize2 className="h-3 w-3" />
+          </button>
+        )}
 
         <button
           type="submit"
           disabled={submitting || (!input.trim() && !imageDataUrl)}
-          className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full disabled:opacity-30 transition-colors cursor-pointer ${sendBtnCls}`}
+          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full disabled:opacity-30 transition-colors cursor-pointer ${sendBtnCls}`}
           title={isZh ? '发送' : 'Send'}
         >
           <ArrowUp className="h-3.5 w-3.5" />
@@ -205,4 +212,3 @@ export const SpiritCommandBar: React.FC<SpiritCommandBarProps> = ({ lang }) => {
 };
 
 export default SpiritCommandBar;
-

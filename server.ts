@@ -89,9 +89,11 @@ import { musicStore } from './server/musicStore.ts';
 import { resolveMusicEmbedUrlAsync, searchYouTubeMusic } from './server/youtubeMusicSearch.ts';
 import { getChannelIntegrations } from './server/channelIntegrations.ts';
 import { getSmsProvider, smsStatus } from './server/smsProvider.ts';
-import { getMailProvider, mailStatus } from './server/mailProvider.ts';
+import { getMailProvider, mailStatus, verifyEmailDomainReal } from './server/mailProvider.ts';
 import { createChallenge, verifyChallenge, canSendTo, normalizePhone, isValidE164 } from './server/otp.ts';
-import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers, isUserViewingConversation } from './server/messengerWs.ts';
+import { attachMessengerWs, wsBroadcastConversationEvent, wsBroadcastToUser, broadcastToUsers, isUserViewingConversation, getWsHealthMetrics } from './server/messengerWs.ts';
+import { getSystemHealthSnapshot, startEventLoopMonitor } from './server/systemHealth.ts';
+import { gzipSync } from 'node:zlib';
 import { attachAiLiveWs } from './server/aiLiveWs.ts';
 import { addCall, getCallById, listCallsForUser, ensureCallsArray } from './server/calls/index.ts';
 import { createCallRecord, acceptCall as acceptCallRecord, rejectCall as rejectCallRecord, cancelCall as cancelCallRecord, endCall as endCallRecord, leaveCall as leaveCallRecord, getActiveCallForUser, issueMediaToken, markActive, markReconnecting, canIssueMediaToken, isActiveCallStatus, cleanupStaleCalls, cleanupStaleCallsDetailed, getCommunicationCapabilities } from './server/calls/service.ts';
@@ -128,15 +130,58 @@ import {
   type IslamicLibrarySource
 } from './server/islamicLibraryCrawler.ts';
 import { registerNoorIslamicLibraryRoutes } from './server/noorIslamicPdfService.ts';
+import {
+  lookupAuthoritativeDictionary,
+  registerAuthoritativeDictionaryRoutes,
+} from './server/dictionaryService.ts';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+startEventLoopMonitor();
 
 if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === '1' || process.env.EARTH_ONE_SERVE_DIST === 'true') {
   app.set('trust proxy', 1);
 }
+
+// Global HTTP security headers
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self)');
+  next();
+});
+
+// Lightweight gzip compression for JSON/text API responses > 1KB (skips SSE & binary streams)
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/') || req.method === 'HEAD') return next();
+  const acceptEnc = String(req.headers['accept-encoding'] || '');
+  if (!acceptEnc.includes('gzip')) return next();
+
+  const origJson = res.json.bind(res);
+  res.json = ((body: any) => {
+    try {
+      if (res.headersSent || res.getHeader('Content-Encoding')) {
+        return origJson(body);
+      }
+      const raw = JSON.stringify(body);
+      if (raw && raw.length > 1024) {
+        const compressed = gzipSync(Buffer.from(raw, 'utf8'));
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Encoding', 'gzip');
+        res.setHeader('Vary', 'Accept-Encoding');
+        res.setHeader('Content-Length', String(compressed.length));
+        return res.send(compressed);
+      }
+    } catch {
+      // Fallback to uncompressed json
+    }
+    return origJson(body);
+  }) as typeof res.json;
+  next();
+});
 
 // Optional CORS for split web deployment (Pages frontend + separate API). Set CORS_ORIGIN to frontend origin(s), comma-separated.
 app.use((req, res, next) => {
@@ -352,22 +397,69 @@ app.get('/api/integrations', (req, res) => {
 // -------------------------------------------------------------
 // 1. AUTH & USER PROFILE ENDPOINTS
 // -------------------------------------------------------------
-app.post('/api/auth/register', (req, res) => {
-  const { email, password, displayName, username } = req.body;
-  if (!email || !password) {
+app.post('/api/auth/register', async (req, res) => {
+  const {
+    email,
+    password,
+    displayName,
+    username,
+    emailVerificationChallengeId,
+    emailVerificationCode,
+  } = req.body || {};
+  const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!cleanEmail || !password) {
     return res.status(400).json({ success: false, error: 'Email and password are required.' });
   }
-  if (password.length < 6) {
+  if (String(password).length < 6) {
     return res.status(400).json({ success: false, error: 'Password must be at least 6 characters.' });
   }
   const clientKey = req.ip || req.socket.remoteAddress || 'unknown';
   if (!checkAuthRateLimit(`register:${clientKey}`, 20)) {
     return res.status(429).json({ success: false, error: '注册尝试过于频繁，请稍后再试。' });
   }
+
+  // Server-side real email domain & MX verification (blocks fake/disposable domains)
+  const domainCheck = await verifyEmailDomainReal(cleanEmail);
+  if (!domainCheck.ok) {
+    store.addAudit(undefined, 'register_blocked_email_domain', `email=${cleanEmail}`, req.ip);
+    return res.status(400).json({ success: false, error: domainCheck.error || '请输入有效的真实邮箱（支持 Gmail / QQ 邮箱）。' });
+  }
+
+  // Optional or enforced email OTP verification when SMTP is configured
+  const mail = mailStatus();
+  const requireEmailOtp = mail.configured && String(process.env.REQUIRE_EMAIL_VERIFICATION || '').toLowerCase() === 'true';
+  let verifiedByOtp = false;
+  if (emailVerificationChallengeId || emailVerificationCode) {
+    const cid = typeof emailVerificationChallengeId === 'string' ? emailVerificationChallengeId.trim() : '';
+    const code = typeof emailVerificationCode === 'string' ? emailVerificationCode.trim() : '';
+    if (!cid || !code) {
+      return res.status(400).json({ success: false, error: '请输入完整的邮箱验证码。' });
+    }
+    const v = verifyChallenge(cid, code);
+    if (!v.ok || !v.challenge || v.challenge.purpose !== 'email_verify' || v.challenge.target !== cleanEmail) {
+      return res.status(400).json({ success: false, error: v.error || '邮箱验证码无效或已过期，请重新获取。' });
+    }
+    verifiedByOtp = true;
+  } else if (requireEmailOtp) {
+    return res.status(400).json({ success: false, error: '请先获取并输入邮箱验证码后再完成注册。' });
+  }
+
   try {
-    const { user, token } = store.registerUser(email, password, displayName, username);
+    const { user, token } = store.registerUser(cleanEmail, password, displayName, username);
+    if (verifiedByOtp) {
+      (user as any).emailVerified = true;
+      store.persist();
+    }
+    store.addAudit(user.id, 'register_success', `provider=${domainCheck.providerLabel} otp=${verifiedByOtp}`, req.ip);
     setSessionCookie(req, res, token);
-    res.json({ success: true, user, token, message: 'Welcome to Earth One! Please complete your citizen profile.' });
+    res.json({
+      success: true,
+      user,
+      token,
+      emailProvider: domainCheck.providerLabel,
+      emailVerified: Boolean((user as any).emailVerified),
+      message: 'Welcome to Earth One! Please complete your citizen profile.',
+    });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
   }
@@ -416,6 +508,7 @@ app.get('/api/auth/me', (req, res) => {
 
 app.get('/api/auth/status', (req, res) => {
   const st = getAuthRuntimeStatus();
+  const mail = mailStatus();
   res.json({
     success: true,
     env: st.env,
@@ -431,7 +524,38 @@ app.get('/api/auth/status', (req, res) => {
       message: st.wechat.configured ? (st.wechat.appUrlIsPlaceholder ? 'APP_URL 仍为占位值，需配置真实回调地址后才能完成生产可用登录。' : '微信登录已具备配置条件。') : '微信登录尚未配置，请使用邮箱注册或登录。',
     },
     google: { configured: st.google.configured },
+    emailVerification: {
+      smtpConfigured: mail.configured,
+      mailProvider: mail.provider,
+      smtpHostHint: mail.smtpHostHint,
+      domainMxCheckEnabled: true,
+      requireVerification: mail.configured && String(process.env.REQUIRE_EMAIL_VERIFICATION || '').toLowerCase() === 'true',
+      supportedProviders: ['gmail.com', 'qq.com', 'foxmail.com', 'outlook.com', 'icloud.com', '163.com'],
+    },
   });
+});
+
+app.get('/api/system/health', (_req, res) => {
+  const st = getAuthRuntimeStatus();
+  const mail = mailStatus();
+  const health = getSystemHealthSnapshot({
+    wsMetrics: getWsHealthMetrics(),
+    storeCounts: {
+      users: Array.isArray((store as any).users) ? (store as any).users.length : 0,
+      conversations: Array.isArray((store as any).conversations) ? (store as any).conversations.length : 0,
+      books: Array.isArray((store as any).books) ? (store as any).books.length : 0,
+      posts: Array.isArray((store as any).posts) ? (store as any).posts.length : 0,
+    },
+    security: {
+      mailConfigured: mail.configured,
+      mailProvider: mail.provider,
+      googleOAuthConfigured: st.google.configured,
+    },
+    ai: {
+      liveEngineOnline: hasUnifiedLiveEngine(),
+    },
+  });
+  res.json({ success: true, health });
 });
 
 app.post('/api/auth/dev-login', async (_req, res) => {
@@ -601,13 +725,13 @@ app.get('/api/auth/wechat/callback', async (req, res) => {
 // ---------------- Email verification / password reset / account security ----------------
 function isValidEmail(email: string) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
 
-async function sendMailOrBlock(to: string, subject: string, text: string) {
+async function sendMailOrBlock(to: string, subject: string, text: string, html?: string) {
   const provider = getMailProvider();
   if (!provider.isConfigured()) {
     store.addAudit(undefined, 'mail_blocked', `to=${to} subject=${subject}`, undefined);
-    return { ok: false, blocked: true, provider: provider.id, error: 'Mail service is not configured. No email was sent. Configure MAIL_PROVIDER and credentials.' };
+    return { ok: false, blocked: true, provider: provider.id, error: '邮件服务尚未配置（支持 QQ 邮箱 / Gmail SMTP 授权码），未发送验证码邮件。' };
   }
-  const result = await provider.send(to, subject, text);
+  const result = await provider.send(to, subject, text, html);
   if (!result.success) {
     store.addAudit(undefined, 'mail_failed', `to=${to} err=${result.error||''}`, undefined);
     return { ok: false, blocked: !!result.blocked, provider: result.provider, error: result.error || 'Failed to send email. No email was sent.' };
@@ -617,15 +741,21 @@ async function sendMailOrBlock(to: string, subject: string, text: string) {
 
 app.post('/api/auth/email/send-verification', async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
-  if (!isValidEmail(email)) return res.status(400).json({ success: false, error: 'Valid email required.' });
-  if (!checkAuthRateLimit(`email-verify:${req.ip||'ip'}:${email}`, 5, 15*60*1000)) return res.status(429).json({ success:false, error:'Too many requests.' });
+  if (!isValidEmail(email)) return res.status(400).json({ success: false, error: '请输入有效的邮箱地址。' });
+  const domainCheck = await verifyEmailDomainReal(email);
+  if (!domainCheck.ok) {
+    return res.status(400).json({ success: false, error: domainCheck.error || '邮箱域名无法接收邮件。' });
+  }
+  if (!checkAuthRateLimit(`email-verify:${req.ip||'ip'}:${email}`, 5, 15*60*1000)) return res.status(429).json({ success:false, error:'验证码请求过于频繁，请稍后再试。' });
   const gate = canSendTo(`email:${email}`, 60*1000, 1, 5);
-  if (!gate.ok) return res.status(429).json({ success:false, error:'Please wait before requesting another email.', retryAfterMs: gate.retryAfterMs });
+  if (!gate.ok) return res.status(429).json({ success:false, error:'请等待 60 秒后再重新发送验证码。', retryAfterMs: gate.retryAfterMs });
   const { challenge, code } = createChallenge('email_verify', email, { ttlMs: 30*60*1000, maxAttempts: 5 });
-  const mail = await sendMailOrBlock(email, 'EARTH ONE email verification', `Your EARTH ONE verification code is ${code}. It expires in 30 minutes.`);
+  const plain = `EARTH ONE 邮箱验证码：${code}（30 分钟内有效）。\nYour EARTH ONE verification code is ${code}. It expires in 30 minutes.`;
+  const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1d2b24;background:#faf7f0;border-radius:16px;border:1px solid #e5dfd1;"><h2 style="margin:0 0 12px;font-size:18px;color:#244e41;">EARTH ONE · 邮箱身份验证</h2><p style="margin:0 0 16px;font-size:14px;line-height:1.6;">您正在验证 <strong>${email}</strong>，请在 30 分钟内输入以下 6 位验证码：</p><div style="font-size:28px;font-weight:700;letter-spacing:6px;color:#1c3e33;background:#ffffff;padding:14px 20px;border-radius:12px;text-align:center;border:1px solid #d9d2c2;">${code}</div><p style="margin:16px 0 0;font-size:12px;color:#5a6e63;">如果这不是您的本人操作，请忽略此邮件。</p></div>`;
+  const mail = await sendMailOrBlock(email, 'EARTH ONE 邮箱验证码 / Email Verification', plain, html);
   if (!mail.ok) return res.status(503).json({ success:false, blocked:true, error: mail.error, provider: mail.provider });
-  store.addAudit(undefined, 'email_verify_sent', `email=${email}`, req.ip);
-  res.json({ success:true, challengeId: challenge.id, expiresAt: challenge.expiresAt, message:'Verification email sent.' });
+  store.addAudit(undefined, 'email_verify_sent', `email=${email} provider=${domainCheck.providerLabel}`, req.ip);
+  res.json({ success:true, challengeId: challenge.id, expiresAt: challenge.expiresAt, emailProvider: domainCheck.providerLabel, message:`验证码已发送至您的 ${domainCheck.providerLabel}，请查收。` });
 });
 
 app.post('/api/auth/email/verify', async (req, res) => {
@@ -5462,6 +5592,9 @@ app.delete('/api/library/books/:id/annotations/:annotationId', (req, res) => {
 // Archive.org resolver, CORS-free streaming & download proxy, and direct download-to-bookshelf vault)
 registerNoorIslamicLibraryRoutes(app, store, getSessionUser);
 
+// Mount Authoritative Cambridge/Oxford Bilingual Dictionary & Autocomplete APIs
+registerAuthoritativeDictionaryRoutes(app);
+
 // -------------------------------------------------------------
 // 9. WEB CRAWLER & CONTENT INGESTION (CHAPTER 6)
 // -------------------------------------------------------------
@@ -6092,79 +6225,37 @@ app.get('/api/learning/english/lookup', async (req, res) => {
   }
 
   try {
-    const [dictRes, relRes] = await Promise.allSettled([
-      fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`, {
-        signal: AbortSignal.timeout(4500),
-      }),
-      fetch(`https://api.datamuse.com/words?ml=${encodeURIComponent(word)}&max=8`, {
-        signal: AbortSignal.timeout(4000),
-      }),
-    ]);
-
-    let phonetic: string | undefined;
-    let audioUrl: string | undefined;
-    let meanings: Array<{
-      partOfSpeech: string;
-      definitions: Array<{ definition: string; example?: string }>;
-    }> = [];
-
-    if (dictRes.status === 'fulfilled' && dictRes.value.ok) {
-      const json = await dictRes.value.json();
-      if (Array.isArray(json) && json[0]) {
-        const entry = json[0];
-        const phonetics = Array.isArray(entry.phonetics) ? entry.phonetics : [];
-        phonetic =
-          entry.phonetic ||
-          phonetics.find((p: any) => typeof p?.text === 'string' && p.text)?.text;
-        audioUrl = phonetics.find((p: any) => typeof p?.audio === 'string' && p.audio)?.audio;
-        if (Array.isArray(entry.meanings)) {
-          meanings = entry.meanings.slice(0, 4).map((m: any) => ({
-            partOfSpeech: String(m.partOfSpeech || 'term'),
-            definitions: Array.isArray(m.definitions)
-              ? m.definitions.slice(0, 3).map((d: any) => ({
-                  definition: String(d.definition || ''),
-                  example: typeof d.example === 'string' ? d.example : undefined,
-                }))
-              : [],
-          }));
-        }
-      }
-    }
-
-    let related: string[] = [];
-    if (relRes.status === 'fulfilled' && relRes.value.ok) {
-      const relJson = await relRes.value.json();
-      if (Array.isArray(relJson)) {
-        related = relJson
-          .map((item: any) => String(item?.word || ''))
-          .filter((w: string) => w && w !== word)
-          .slice(0, 8);
-      }
-    }
-
-    if (meanings.length === 0) {
-      return res.json({
-        success: true,
-        entry: {
-          word,
-          phonetic: phonetic || undefined,
-          audioUrl,
-          meanings: [],
-          related,
-          source: 'fallback',
+    const auth = await lookupAuthoritativeDictionary(word);
+    const meanings = auth.senses.map((s) => ({
+      partOfSpeech: s.partOfSpeech,
+      cefr: s.cefr,
+      guideword: s.guideword,
+      definitions: [
+        {
+          definition: s.definitionEn || s.definitionZh || '',
+          definitionZh: s.definitionZh,
+          example: s.examples[0]?.en,
+          exampleZh: s.examples[0]?.zh,
         },
-      });
-    }
+      ],
+    }));
 
     return res.json({
       success: true,
       entry: {
-        word,
-        phonetic,
-        audioUrl,
+        word: auth.word,
+        phonetic: auth.usPhonetic || auth.ukPhonetic || auth.reading || undefined,
+        ukPhonetic: auth.ukPhonetic,
+        usPhonetic: auth.usPhonetic,
+        audioUrl: auth.audioUrl || auth.usAudioUrl || auth.ukAudioUrl,
+        ukAudioUrl: auth.ukAudioUrl,
+        usAudioUrl: auth.usAudioUrl,
+        cefrLevel: auth.cefrLevel,
+        usageNote: auth.usageNote,
+        collocations: auth.collocations,
         meanings,
-        related,
-        source: 'live',
+        related: auth.synonyms.length > 0 ? auth.synonyms : auth.related,
+        source: meanings.length > 0 ? 'live' : 'fallback',
       },
     });
   } catch (err: any) {

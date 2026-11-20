@@ -31,6 +31,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  Volume2,
   X,
 } from 'lucide-react';
 import { Language } from '../../types/index.ts';
@@ -66,6 +67,12 @@ export interface WordLookupEntry {
   word: string;
   lemma?: string;
   reading: string;
+  ukPhonetic?: string;
+  usPhonetic?: string;
+  audioUrl?: string;
+  ukAudioUrl?: string;
+  usAudioUrl?: string;
+  cefrLevel?: string;
   partOfSpeech: string;
   root: string;
   meaning: string;
@@ -1880,20 +1887,52 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
         {/* Lightweight Floating Word Annotation Card (Tap any word) */}
         {wordCard && (
           <div
-            className="fixed bottom-16 right-4 z-40 w-[min(92vw,360px)] rounded-2xl border p-4 shadow-2xl"
-            style={{ backgroundColor: palette.bg, borderColor: palette.border, color: palette.ink }}
+            className="fixed bottom-16 right-4 z-40 w-[min(92vw,380px)] rounded-2xl border p-4 shadow-2xl"
+            style={{ backgroundColor: palette.paper, borderColor: palette.border, color: palette.ink }}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="flex items-baseline gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-base font-semibold" dir="auto">{wordCard.entry?.word || wordCard.word}</span>
+                  {wordCard.entry?.cefrLevel && (
+                    <span className="rounded bg-[#247864]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#247864]">
+                      {wordCard.entry.cefrLevel}
+                    </span>
+                  )}
                   {wordCard.entry?.partOfSpeech && (
-                    <span className="text-[11px]" style={{ color: palette.muted }}>{wordCard.entry.partOfSpeech}</span>
+                    <span className="rounded px-1.5 py-0.5 text-[10px] font-medium" style={{ backgroundColor: palette.surface, color: palette.muted }}>
+                      {wordCard.entry.partOfSpeech}
+                    </span>
                   )}
                 </div>
                 {wordCard.entry?.reading && (
-                  <div className="text-xs mt-0.5 font-mono" style={{ color: '#247864' }}>
-                    {wordCard.entry.reading}
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-mono" style={{ color: '#247864' }}>
+                      {wordCard.entry.reading}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = wordCard.entry?.usAudioUrl || wordCard.entry?.ukAudioUrl || wordCard.entry?.audioUrl;
+                        if (url) {
+                          const a = new Audio(url);
+                          void a.play().catch(() => {});
+                          return;
+                        }
+                        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                          window.speechSynthesis.cancel();
+                          const u = new SpeechSynthesisUtterance(wordCard.entry?.word || wordCard.word);
+                          u.lang = /[\u0600-\u06FF]/.test(u.text) ? 'ar-SA' : 'en-US';
+                          window.speechSynthesis.speak(u);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium cursor-pointer transition hover:opacity-80"
+                      style={{ backgroundColor: palette.surface, color: '#247864' }}
+                      title={isZh ? '朗读单词发音' : 'Pronounce word'}
+                    >
+                      <Volume2 className="h-3 w-3" />
+                      <span>{isZh ? '发音' : 'Listen'}</span>
+                    </button>
                   </div>
                 )}
               </div>
@@ -1925,7 +1964,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
             {wordCard.loading ? (
               <div className="flex items-center gap-2 py-4 text-xs" style={{ color: palette.muted }}>
                 <Loader2 className="h-4 w-4 animate-spin text-[#247864]" />
-                <span>{isZh ? 'ONE AI 正在解析词义…' : 'Looking up…'}</span>
+                <span>{isZh ? '权威词典正在解析词义与音标…' : 'Looking up authoritative definition…'}</span>
               </div>
             ) : wordCard.error ? (
               <p className="mt-2 text-xs text-rose-500">{wordCard.error}</p>
@@ -1939,25 +1978,25 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                 )}
                 {wordCard.entry.root && (
                   <div>
-                    <span style={{ color: palette.muted }}>{isZh ? '词根：' : 'Root: '}</span>
+                    <span style={{ color: palette.muted }}>{isZh ? '词根/词源：' : 'Root: '}</span>
                     <span dir="auto">{wordCard.entry.root}</span>
                   </div>
                 )}
-                <div className="text-[13px] font-medium">{wordCard.entry.meaning}</div>
+                <div className="text-[13px] font-medium leading-relaxed">{wordCard.entry.meaning}</div>
                 {wordCard.entry.contextMeaning && (
                   <div className="rounded-xl p-2.5" style={{ backgroundColor: palette.surface }}>
-                    <div className="text-[10px] mb-0.5" style={{ color: palette.muted }}>{isZh ? '本句语境含义' : 'In Context'}</div>
+                    <div className="text-[10px] font-semibold mb-0.5" style={{ color: palette.muted }}>{isZh ? '本句语境注解' : 'In-Context Note'}</div>
                     <div>{wordCard.entry.contextMeaning}</div>
                   </div>
                 )}
                 {wordCard.entry.usage && (
                   <div>
-                    <span style={{ color: palette.muted }}>{isZh ? '常见用法：' : 'Usage: '}</span>
+                    <span style={{ color: palette.muted }}>{isZh ? '高频搭配与用法：' : 'Usage: '}</span>
                     <span>{wordCard.entry.usage}</span>
                   </div>
                 )}
                 {wordCard.entry.example && (
-                  <div className="pt-1 border-t text-[11px]" style={{ borderColor: palette.border, color: palette.muted }}>
+                  <div className="pt-1.5 border-t text-[11px]" style={{ borderColor: palette.border, color: palette.muted }}>
                     {wordCard.entry.example}
                   </div>
                 )}
