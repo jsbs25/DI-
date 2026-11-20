@@ -168,7 +168,9 @@ function buildTaperedLimbGeo(
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  const uvAttr = new THREE.Float32BufferAttribute(uvs, 2);
+  geo.setAttribute('uv', uvAttr);
+  geo.setAttribute('uv2', uvAttr);
   geo.setIndex(indices);
   return geo;
 }
@@ -309,11 +311,11 @@ function buildSakuraPrototype(seed: number, scale: number): TreePrototypeData {
           twOrigin.z + Math.sin(twYaw) * twLen
         );
         branchGeos.push(buildTaperedLimbGeo([twOrigin, twEnd], r2 * 0.42, r2 * 0.16, 3, 4, 0, 0.8));
-        twigTips.push({ pos: twEnd, size: (1.28 + rand() * 0.42) * scale * 5.2 });
-        if (k === 1) {
+        twigTips.push({ pos: twEnd, size: (1.36 + rand() * 0.44) * scale * 5.2 });
+        if (k !== 1) {
           twigTips.push({
-            pos: new THREE.Vector3().lerpVectors(twOrigin, twEnd, 0.45),
-            size: (1.1 + rand() * 0.3) * scale * 5.2,
+            pos: new THREE.Vector3().lerpVectors(twOrigin, twEnd, 0.48),
+            size: (1.14 + rand() * 0.32) * scale * 5.2,
           });
         }
       }
@@ -331,12 +333,13 @@ function buildSakuraPrototype(seed: number, scale: number): TreePrototypeData {
         topEnd.y + (rand() - 0.3) * 0.45 * scale * 5.2,
         topEnd.z + Math.sin(a) * 0.65 * scale * 5.2
       ),
-      size: (1.35 + rand() * 0.35) * scale * 5.2,
+      size: (1.42 + rand() * 0.36) * scale * 5.2,
     });
   }
 
   const barkGeo = mergeGeometries(branchGeos, false);
   branchGeos.forEach((g) => g.dispose());
+  if (barkGeo.attributes.uv) barkGeo.setAttribute('uv2', barkGeo.attributes.uv);
 
   // Compute crown centroid for spherical normal & AO shading
   const crownCenter = new THREE.Vector3();
@@ -439,6 +442,7 @@ function buildGinkgoPrototype(seed: number, scale: number): TreePrototypeData {
 
   const barkGeo = mergeGeometries(branchGeos, false);
   branchGeos.forEach((g) => g.dispose());
+  if (barkGeo.attributes.uv) barkGeo.setAttribute('uv2', barkGeo.attributes.uv);
 
   const crownCenter = new THREE.Vector3();
   twigTips.forEach((t) => crownCenter.add(t.pos));
@@ -674,9 +678,12 @@ export function createParadiseFlora(
   const sakuraBarkMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.sakuraBarkMap,
-      normalMap: textures.barkNormalMap,
-      normalScale: new THREE.Vector2(0.75, 0.75),
-      roughness: 0.72,
+      normalMap: textures.sakuraBarkNormalMap,
+      normalScale: new THREE.Vector2(0.85, 0.85),
+      aoMap: textures.barkAoMap,
+      aoMapIntensity: 0.72,
+      roughnessMap: textures.barkRoughnessMap,
+      roughness: 0.86,
       metalness: 0.03,
     })
   );
@@ -685,8 +692,11 @@ export function createParadiseFlora(
     new THREE.MeshStandardMaterial({
       map: textures.ginkgoBarkMap,
       normalMap: textures.barkNormalMap,
-      normalScale: new THREE.Vector2(1.05, 1.05),
-      roughness: 0.88,
+      normalScale: new THREE.Vector2(1.15, 1.15),
+      aoMap: textures.barkAoMap,
+      aoMapIntensity: 0.95,
+      roughnessMap: textures.barkRoughnessMap,
+      roughness: 0.96,
       metalness: 0.02,
     })
   );
@@ -698,7 +708,7 @@ export function createParadiseFlora(
       vertexColors: true,
       alphaTest: 0.36,
       side: THREE.DoubleSide,
-      roughness: 0.62,
+      roughness: 0.58,
       metalness: 0.01,
     })
   );
@@ -706,9 +716,9 @@ export function createParadiseFlora(
     freq: 1.15,
     amp: 0.09,
     heightFactor: 0.18,
-    translucencyColor: '0.14, 0.09, 0.11',
+    translucencyColor: '0.16, 0.10, 0.12',
     nightBloomGlow: true,
-    cacheKey: 'paradise-botanical-sakura-v3',
+    cacheKey: 'paradise-botanical-sakura-v4',
   });
 
   const ginkgoLeafMat = trackMat(
@@ -718,7 +728,7 @@ export function createParadiseFlora(
       vertexColors: true,
       alphaTest: 0.36,
       side: THREE.DoubleSide,
-      roughness: 0.54,
+      roughness: 0.5,
       metalness: 0.02,
     })
   );
@@ -726,8 +736,8 @@ export function createParadiseFlora(
     freq: 1.02,
     amp: 0.085,
     heightFactor: 0.15,
-    translucencyColor: '0.17, 0.13, 0.03',
-    cacheKey: 'paradise-botanical-ginkgo-v3',
+    translucencyColor: '0.19, 0.14, 0.03',
+    cacheKey: 'paradise-botanical-ginkgo-v4',
   });
 
   const pineLeafMat = trackMat(

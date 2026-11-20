@@ -25,6 +25,9 @@ export interface ParadiseFaunaHandle {
 interface ButterflyAgent {
   mesh: THREE.Mesh;
   mat: THREE.ShaderMaterial;
+  halo?: THREE.Sprite;
+  haloMat?: THREE.SpriteMaterial;
+  isGlowingBlue: boolean;
   pos: THREE.Vector3;
   target: THREE.Vector3;
   speed: number;
@@ -97,7 +100,7 @@ export function createParadiseFauna(
         ];
 
   // =========================================================================
-  // 1. Textured Patterned Butterflies with Camera Curiosity Fly-Bys
+  // 1. Textured Patterned Butterflies + 2 Bioluminescent Glowing Blue Morphos
   // =========================================================================
   const bflyGeo = trackGeo(new THREE.PlaneGeometry(0.3, 0.22, 6, 2));
   bflyGeo.rotateX(-Math.PI / 2);
@@ -110,10 +113,21 @@ export function createParadiseFauna(
     [0xfbf2f5, 0x7c4f60, 0xffd5e2], // Sakura Pieris
   ];
 
+  const totalButterflies = quality.butterflyCount + 2;
+  const glowingSpawnSpots = [
+    new THREE.Vector3(-2.4, 1.38, 6.4),
+    new THREE.Vector3(2.9, 1.48, 2.4),
+  ];
+
   const butterflies: ButterflyAgent[] = [];
   const butterflyPositions: THREE.Vector3[] = [];
-  for (let i = 0; i < quality.butterflyCount; i++) {
-    const [cMain, cEdge, cSpot] = butterflySpecies[i % butterflySpecies.length];
+  for (let i = 0; i < totalButterflies; i++) {
+    const isGlowingBlue = i >= quality.butterflyCount;
+    const glowingIdx = i - quality.butterflyCount;
+    const [cMain, cEdge, cSpot] = isGlowingBlue
+      ? [0x3be0ff, 0x0d4599, 0xe2fbff]
+      : butterflySpecies[i % butterflySpecies.length];
+
     const mat = trackMat(
       new THREE.ShaderMaterial({
         side: THREE.DoubleSide,
@@ -123,6 +137,7 @@ export function createParadiseFauna(
           uFlapAmp: { value: 1.0 },
           uFlapFreq: { value: 13.5 },
           uOpacity: { value: 1.0 },
+          uGlowStrength: { value: isGlowingBlue ? 1.35 : 0.0 },
           uMainColor: { value: new THREE.Color(cMain) },
           uEdgeColor: { value: new THREE.Color(cEdge) },
           uSpotColor: { value: new THREE.Color(cSpot) },
@@ -145,6 +160,7 @@ export function createParadiseFauna(
         `,
         fragmentShader: /* glsl */ `
           uniform float uOpacity;
+          uniform float uGlowStrength;
           uniform vec3 uMainColor;
           uniform vec3 uEdgeColor;
           uniform vec3 uSpotColor;
@@ -173,6 +189,10 @@ export function createParadiseFauna(
 
             vec3 wingCol = mix(uMainColor, uEdgeColor, rim * 0.88 + veins * 0.28);
             wingCol = mix(wingCol, uSpotColor, spotBand * 0.75);
+            if (uGlowStrength > 0.01) {
+              float coreLum = (1.0 - rim * 0.65) + spotBand * 0.45;
+              wingCol += uMainColor * (uGlowStrength * coreLum * 0.75);
+            }
             vec3 finalCol = mix(wingCol, vec3(0.11, 0.1, 0.11), bodyMask);
 
             float alpha = max(wingGap * step(wingShape, 0.42), bodyMask) * uOpacity * 0.96;
@@ -185,20 +205,44 @@ export function createParadiseFauna(
 
     const mesh = new THREE.Mesh(bflyGeo, mat);
     const homeIdx = i % anchors.length;
-    const origin = anchors[homeIdx];
-    const startPos = origin
-      .clone()
-      .add(new THREE.Vector3((Math.random() - 0.5) * 4, 0.6 + Math.random() * 1.4, (Math.random() - 0.5) * 4));
+    const origin = isGlowingBlue ? glowingSpawnSpots[glowingIdx % glowingSpawnSpots.length] : anchors[homeIdx];
+    const startPos = isGlowingBlue
+      ? origin.clone()
+      : origin
+          .clone()
+          .add(new THREE.Vector3((Math.random() - 0.5) * 4, 0.6 + Math.random() * 1.4, (Math.random() - 0.5) * 4));
     mesh.position.copy(startPos);
-    mesh.scale.setScalar(0.85 + Math.random() * 0.45);
+    mesh.scale.setScalar(isGlowingBlue ? 1.28 : 0.85 + Math.random() * 0.45);
     group.add(mesh);
+
+    let halo: THREE.Sprite | undefined;
+    let haloMat: THREE.SpriteMaterial | undefined;
+    if (isGlowingBlue) {
+      haloMat = trackMat(
+        new THREE.SpriteMaterial({
+          map: textures.softGlow,
+          color: 0x4ce2ff,
+          transparent: true,
+          opacity: 0.72,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        })
+      );
+      halo = new THREE.Sprite(haloMat);
+      halo.position.copy(startPos);
+      halo.scale.set(0.88, 0.88, 0.88);
+      group.add(halo);
+    }
 
     butterflies.push({
       mesh,
       mat,
+      halo,
+      haloMat,
+      isGlowingBlue,
       pos: startPos,
       target: origin.clone().add(new THREE.Vector3(0, 0.45, 0)),
-      speed: 1.4 + Math.random() * 0.72,
+      speed: isGlowingBlue ? 1.35 + glowingIdx * 0.22 : 1.4 + Math.random() * 0.72,
       yaw: Math.random() * Math.PI * 2,
       roll: 0,
       restTimer: Math.random() * 3.5,
@@ -422,11 +466,15 @@ export function createParadiseFauna(
     }
 
     for (const b of butterflies) {
-      b.mesh.visible = bflyVis > 0.04;
+      const activeVis = b.isGlowingBlue
+        ? Math.max(0.74, bflyVis) * (1 - rainIntensity * 0.85)
+        : bflyVis;
+      b.mesh.visible = activeVis > 0.04;
+      if (b.halo) b.halo.visible = b.mesh.visible;
       if (!b.mesh.visible) continue;
 
       b.mat.uniforms.uTime.value = elapsed + b.phase;
-      b.mat.uniforms.uOpacity.value = bflyVis;
+      b.mat.uniforms.uOpacity.value = activeVis;
 
       // Scatter gently if user sweeps pointer close
       const distPtr = b.pos.distanceTo(pointerWorld);
@@ -505,6 +553,15 @@ export function createParadiseFauna(
       if (b.pos.y < groundFloor) b.pos.y = groundFloor;
       b.mesh.position.copy(b.pos);
       b.mesh.rotation.set(0, b.yaw, b.roll);
+
+      if (b.halo && b.haloMat) {
+        b.halo.position.copy(b.pos);
+        const pulse = 0.72 + 0.28 * Math.sin(elapsed * 4.5 + b.phase);
+        const nightBoost = THREE.MathUtils.lerp(0.65, 1.0, nightFactor);
+        b.haloMat.opacity = activeVis * pulse * nightBoost * 0.78;
+        const sc = 0.78 + 0.24 * pulse;
+        b.halo.scale.set(sc, sc, sc);
+      }
     }
 
     // 2. Update soaring birds across valley sky

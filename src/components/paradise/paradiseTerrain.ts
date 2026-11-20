@@ -565,17 +565,84 @@ export function createParadiseTerrain(
   group.add(waterMesh);
 
   // -------------------------------------------------------------------------
-  // Multi-Stage Cascading Waterfall Sheet
+  // Realistic Multi-Stage Geological Waterfall, Wet Cliff Ledges & Plunge Mist
   // -------------------------------------------------------------------------
-  const wfGeo = new THREE.CylinderGeometry(2.2, 2.95, 11.8, 28, 20, true, -0.54, 1.08);
+  const waterfallGeos: THREE.BufferGeometry[] = [];
+  const waterfallMats: THREE.Material[] = [];
+
+  const wfAnchor = new THREE.Group();
+  wfAnchor.position.set(-20.4, 5.0, -22.5);
+  wfAnchor.rotation.y = 0.64;
+
+  // Wet dark slate cliff ledges behind the cascade so water physically tumbles over rock shelves
+  const wetRockMat = new THREE.MeshStandardMaterial({
+    color: 0x3b4248,
+    map: textures.rockColorMap,
+    normalMap: textures.rockNormalMap,
+    normalScale: new THREE.Vector2(1.15, 1.15),
+    aoMap: textures.plasterAoMap,
+    aoMapIntensity: 0.75,
+    roughness: 0.24,
+    metalness: 0.08,
+  });
+  waterfallMats.push(wetRockMat);
+
+  const ledgeDefs: Array<[number, number, number, number, number, number]> = [
+    [0.0, 5.1, 1.6, 2.35, 1.15, 1.35],   // upper spillway rim
+    [0.15, 0.25, 2.55, 2.15, 1.05, 1.4], // mid-fall split boulder ledge
+    [-1.45, -1.6, 2.3, 1.35, 1.9, 1.2],  // left wet crag cheek
+    [1.55, -1.4, 2.25, 1.4, 1.85, 1.25], // right wet crag cheek
+    [0.0, -3.6, 3.35, 2.4, 1.1, 1.5],    // lower plunge splash shelf
+  ];
+  for (let i = 0; i < ledgeDefs.length; i++) {
+    const [lx, ly, lz, sx, sy, sz] = ledgeDefs[i];
+    const rGeo = new THREE.IcosahedronGeometry(1, 2);
+    const rp = rGeo.attributes.position as THREE.BufferAttribute;
+    for (let v = 0; v < rp.count; v++) {
+      const vx = rp.getX(v);
+      const vy = rp.getY(v);
+      const vz = rp.getZ(v);
+      const jag = 1 + 0.14 * Math.sin(vx * 3.8 + i) + 0.1 * Math.cos(vy * 4.5 - vz * 2.9);
+      rp.setXYZ(v, vx * sx * jag, vy * sy * jag, vz * sz * jag);
+    }
+    rGeo.computeVertexNormals();
+    if (rGeo.attributes.uv) rGeo.setAttribute('uv2', rGeo.attributes.uv);
+    waterfallGeos.push(rGeo);
+    const rMesh = new THREE.Mesh(rGeo, wetRockMat);
+    rMesh.position.set(lx, ly, lz);
+    rMesh.castShadow = quality.enableShadows;
+    rMesh.receiveShadow = quality.enableShadows;
+    wfAnchor.add(rMesh);
+  }
+
+  // Contoured dual-tier waterfall chute geometry
+  const wfGeo = new THREE.CylinderGeometry(2.15, 3.05, 11.8, 32, 28, true, -0.56, 1.12);
   const wfPos = wfGeo.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < wfPos.count; i++) {
+    const vx = wfPos.getX(i);
     const vy = wfPos.getY(i);
+    const vz = wfPos.getZ(i);
     const fallT = Math.max(0, Math.min(1, 1 - (vy + 5.9) / 11.8));
-    const stepLedge = Math.sin(fallT * Math.PI * 2) * 0.18;
-    wfPos.setZ(i, wfPos.getZ(i) + Math.pow(fallT, 1.32) * 2.45 + stepLedge);
+    // Parabolic spillway projection + mid-shelf bounce + spreading fan at plunge base
+    const topLip = Math.pow(fallT, 0.65) * 0.9;
+    const midBounce = Math.exp(-Math.pow((fallT - 0.48) / 0.16, 2)) * 0.56;
+    const lowerPour = Math.pow(fallT, 1.38) * 2.35;
+    const ribbonRipple = Math.sin(vx * 2.8 + fallT * 5.0) * 0.08 * fallT;
+    wfPos.setXYZ(i, vx * (1 + fallT * 0.18), vy, vz + topLip + midBounce + lowerPour + ribbonRipple);
   }
   wfGeo.computeVertexNormals();
+  waterfallGeos.push(wfGeo);
+
+  // Outer translucent spray veil slightly proud of core cascade
+  const wfVeilGeo = wfGeo.clone();
+  const vPos = wfVeilGeo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < vPos.count; i++) {
+    const vy = vPos.getY(i);
+    const fallT = Math.max(0, Math.min(1, 1 - (vy + 5.9) / 11.8));
+    vPos.setZ(i, vPos.getZ(i) + 0.16 + fallT * 0.34);
+  }
+  wfVeilGeo.computeVertexNormals();
+  waterfallGeos.push(wfVeilGeo);
 
   const waterfallUniforms: Record<string, THREE.IUniform> = {
     uTime: { value: 0 },
@@ -586,81 +653,222 @@ export function createParadiseTerrain(
     uFogDensity: { value: 0.0042 },
   };
 
-  const wfMat = new THREE.ShaderMaterial({
+  const buildWaterfallShaderMat = (isVeil: boolean) =>
+    new THREE.ShaderMaterial({
+      uniforms: waterfallUniforms,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vWorldNormal;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          vWorldNormal = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform float uDayFactor;
+        uniform vec3 uSkyHorizon;
+        uniform float uRainIntensity;
+        uniform vec3 uFogColor;
+        uniform float uFogDensity;
+
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vWorldNormal;
+
+        float hash21(vec2 p) {
+          p = fract(p * vec2(127.1, 311.7));
+          p += dot(p, p + 19.19);
+          return fract(p.x * p.y);
+        }
+
+        float noise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
+            mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
+            u.y
+          );
+        }
+
+        float fbmWater(vec2 p) {
+          float s = 0.0;
+          s += 0.52 * noise(p);
+          s += 0.28 * noise(p * 2.13 + vec2(3.1, 1.7));
+          s += 0.14 * noise(p * 4.41 - vec2(1.4, 5.2));
+          return s;
+        }
+
+        void main() {
+          float speed = 1.95 + uRainIntensity * 0.85;
+          float accelUvY = vUv.y + (1.0 - vUv.y) * 0.35;
+          float warp = (noise(vec2(vUv.x * 7.0, vUv.y * 5.0 + uTime * 0.7)) - 0.5) * 0.24;
+
+          float mainRibbons = fbmWater(vec2(vUv.x * 11.5 + warp, accelUvY * 3.8 + uTime * speed));
+          float fineMist = fbmWater(vec2(vUv.x * 23.0 - warp * 1.4, accelUvY * 7.2 + uTime * speed * 1.42));
+          float droplets = noise(vec2(vUv.x * 38.0, vUv.y * 16.0 + uTime * speed * 1.9));
+
+          // Water splits slightly into twin braided chutes around central cliff crag
+          float twinChute = 0.78 + 0.22 * cos((vUv.x - 0.5) * 14.0 + warp * 4.0);
+          float foamRaw = (mainRibbons * 0.58 + fineMist * 0.32 + droplets * 0.12) * twinChute;
+          float foam = smoothstep(${isVeil ? '0.46, 0.88' : '0.32, 0.78'}, foamRaw);
+
+          float midLedgeSplash = exp(-pow((vUv.y - 0.52) / 0.095, 2.0)) * (0.55 + fineMist * 0.45);
+          float bottomSpray = (1.0 - smoothstep(0.0, 0.34, vUv.y)) * (0.65 + fineMist * 0.35);
+          float topCrest = smoothstep(0.84, 1.0, vUv.y);
+          float edgeFade = smoothstep(0.0, 0.16, vUv.x) * (1.0 - smoothstep(0.84, 1.0, vUv.x));
+
+          // Cool clear stream-aqua core behind aerated whitewater foam + sun sheen
+          vec3 deepWater = mix(vec3(0.08, 0.15, 0.24), mix(vec3(0.26, 0.48, 0.54), uSkyHorizon, 0.32), uDayFactor);
+          vec3 foamColor = mix(vec3(0.46, 0.56, 0.70), vec3(0.95, 0.98, 1.0), uDayFactor);
+          float aeration = clamp(foam * 0.92 + bottomSpray * 0.72 + topCrest * 0.46 + midLedgeSplash * 0.68, 0.0, 1.0);
+          vec3 col = mix(deepWater, foamColor, aeration);
+
+          // Subtle directional glint on sunlit water ridges
+          float fresnel = pow(1.0 - abs(dot(normalize(cameraPosition - vWorldPos), normalize(vWorldNormal))), 2.2);
+          col += vec3(0.85, 0.93, 1.0) * fresnel * 0.16 * uDayFactor;
+
+          float distCam = length(cameraPosition - vWorldPos);
+          float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * distCam * distCam);
+          col = mix(col, uFogColor, clamp(fogFactor, 0.0, 1.0));
+
+          float baseAlpha = ${isVeil ? '0.18 + foam * 0.34 + bottomSpray * 0.22' : '0.52 + foam * 0.42 + bottomSpray * 0.24'};
+          float alpha = baseAlpha * edgeFade;
+          if (alpha < 0.02) discard;
+          gl_FragColor = vec4(col, clamp(alpha, 0.0, ${isVeil ? '0.62' : '0.95'}));
+        }
+      `,
+    });
+
+  const wfMat = buildWaterfallShaderMat(false);
+  const wfVeilMat = buildWaterfallShaderMat(true);
+  waterfallMats.push(wfMat, wfVeilMat);
+
+  const waterfallMesh = new THREE.Mesh(wfGeo, wfMat);
+  waterfallMesh.renderOrder = 3;
+  wfAnchor.add(waterfallMesh);
+
+  const wfVeilMesh = new THREE.Mesh(wfVeilGeo, wfVeilMat);
+  wfVeilMesh.renderOrder = 4;
+  wfAnchor.add(wfVeilMesh);
+  group.add(wfAnchor);
+
+  // Churning Plunge-Pool Boil Ring & Rising Spray Mist Plumes at (-19.5, 0.05, -20.5)
+  const boilGeo = new THREE.RingGeometry(0.45, 4.4, 36, 4);
+  boilGeo.rotateX(-Math.PI / 2);
+  waterfallGeos.push(boilGeo);
+
+  const boilMat = new THREE.ShaderMaterial({
     uniforms: waterfallUniforms,
     transparent: true,
     depthWrite: false,
-    side: THREE.DoubleSide,
     vertexShader: /* glsl */ `
-      varying vec2 vUv;
-      varying vec3 vWorldPos;
+      varying vec2 vLocalPos;
       void main() {
-        vUv = uv;
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorldPos = wp.xyz;
-        gl_Position = projectionMatrix * viewMatrix * wp;
+        vLocalPos = position.xz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: /* glsl */ `
       uniform float uTime;
       uniform float uDayFactor;
-      uniform vec3 uSkyHorizon;
-      uniform float uRainIntensity;
-      uniform vec3 uFogColor;
-      uniform float uFogDensity;
-
-      varying vec2 vUv;
-      varying vec3 vWorldPos;
-
-      float hash21(vec2 p) {
-        p = fract(p * vec2(127.1, 311.7));
-        p += dot(p, p + 19.19);
-        return fract(p.x * p.y);
-      }
-
-      float noise(vec2 p) {
-        vec2 i = floor(p);
-        vec2 f = fract(p);
-        vec2 u = f * f * (3.0 - 2.0 * f);
-        return mix(
-          mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
-          mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
-          u.y
-        );
-      }
-
+      varying vec2 vLocalPos;
       void main() {
-        float speed = 1.75 + uRainIntensity * 0.8;
-        vec2 uv1 = vec2(vUv.x * 8.0, vUv.y * 4.2 + uTime * speed);
-        vec2 uv2 = vec2(vUv.x * 16.0 + 0.5, vUv.y * 7.5 + uTime * speed * 1.45);
-        float streak1 = noise(uv1);
-        float streak2 = noise(uv2);
-        float foam = smoothstep(0.38, 0.84, streak1 * 0.62 + streak2 * 0.38);
-
-        float midLedge = exp(-pow((vUv.y - 0.52) / 0.1, 2.0)) * 0.55;
-        float bottomSpray = 1.0 - smoothstep(0.0, 0.32, vUv.y);
-        float topCrest = smoothstep(0.84, 1.0, vUv.y);
-        float edgeFade = smoothstep(0.0, 0.14, vUv.x) * (1.0 - smoothstep(0.86, 1.0, vUv.x));
-
-        vec3 waterBase = mix(vec3(0.14, 0.22, 0.32), mix(vec3(0.48, 0.68, 0.78), uSkyHorizon, 0.35), uDayFactor);
-        vec3 foamColor = mix(vec3(0.45, 0.54, 0.68), vec3(0.96, 0.98, 1.0), uDayFactor);
-        vec3 col = mix(waterBase, foamColor, clamp(foam * 0.85 + bottomSpray * 0.65 + topCrest * 0.5 + midLedge, 0.0, 1.0));
-
-        float distCam = length(cameraPosition - vWorldPos);
-        float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * distCam * distCam);
-        col = mix(col, uFogColor, clamp(fogFactor, 0.0, 1.0));
-
-        float alpha = (0.45 + foam * 0.42 + bottomSpray * 0.22) * edgeFade;
-        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.94));
+        float r = length(vLocalPos);
+        float a = atan(vLocalPos.y, vLocalPos.x);
+        float wave1 = sin(r * 5.2 - uTime * 4.4 + sin(a * 5.0) * 0.9) * 0.5 + 0.5;
+        float wave2 = cos(r * 9.5 - uTime * 6.8 - a * 3.0) * 0.5 + 0.5;
+        float froth = smoothstep(0.38, 0.88, wave1 * 0.65 + wave2 * 0.35);
+        float radialMask = smoothstep(0.5, 1.35, r) * (1.0 - smoothstep(2.4, 4.35, r));
+        vec3 col = mix(vec3(0.44, 0.54, 0.66), vec3(0.95, 0.98, 1.0), uDayFactor);
+        float alpha = froth * radialMask * 0.68;
+        if (alpha < 0.02) discard;
+        gl_FragColor = vec4(col, alpha);
       }
     `,
   });
+  waterfallMats.push(boilMat);
 
-  const waterfallMesh = new THREE.Mesh(wfGeo, wfMat);
-  waterfallMesh.position.set(-20.4, 5.0, -22.5);
-  waterfallMesh.rotation.y = 0.64;
-  waterfallMesh.renderOrder = 3;
-  group.add(waterfallMesh);
+  const boilMesh = new THREE.Mesh(boilGeo, boilMat);
+  boilMesh.position.set(-19.5, 0.05, -20.5);
+  boilMesh.renderOrder = 3;
+  group.add(boilMesh);
+
+  // Soft rising & billowing spray mist clouds above plunge pool (100% GPU-driven via uTime)
+  const mistCount = 12;
+  const mistGeo = new THREE.BufferGeometry();
+  const mistPos = new Float32Array(mistCount * 3);
+  const mistSeeds = new Float32Array(mistCount * 3);
+  for (let i = 0; i < mistCount; i++) {
+    const ang = (i / mistCount) * Math.PI * 2;
+    const rad = 0.6 + (i % 3) * 1.15;
+    mistPos[i * 3] = -19.5 + Math.cos(ang) * rad;
+    mistPos[i * 3 + 1] = 0.35 + (i % 4) * 0.42;
+    mistPos[i * 3 + 2] = -20.5 + Math.sin(ang) * rad;
+    mistSeeds[i * 3] = i * 1.37;
+    mistSeeds[i * 3 + 1] = 0.75 + (i % 3) * 0.25;
+    mistSeeds[i * 3 + 2] = 0.85 + (i % 4) * 0.22;
+  }
+  mistGeo.setAttribute('position', new THREE.BufferAttribute(mistPos, 3));
+  mistGeo.setAttribute('aSeed', new THREE.BufferAttribute(mistSeeds, 3));
+  waterfallGeos.push(mistGeo);
+
+  const sprayMistMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: waterfallUniforms.uTime,
+      uDayFactor: waterfallUniforms.uDayFactor,
+      uRainIntensity: waterfallUniforms.uRainIntensity,
+      uMap: { value: textures.mistPuff },
+      uPixelRatio: { value: quality.pixelRatio },
+    },
+    transparent: true,
+    depthWrite: false,
+    vertexShader: /* glsl */ `
+      attribute vec3 aSeed;
+      uniform float uTime;
+      uniform float uPixelRatio;
+      varying float vLifeAlpha;
+      void main() {
+        float life = fract(uTime * 0.24 * aSeed.y + aSeed.x);
+        vec3 pos = position;
+        pos.y += life * 2.4;
+        pos.x += sin(life * 4.2 + aSeed.x) * 0.75;
+        pos.z += cos(life * 3.8 + aSeed.x) * 0.75;
+        vLifeAlpha = sin(life * 3.14159265) * 0.44;
+        vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+        gl_PointSize = clamp((195.0 * aSeed.z * (0.75 + life * 0.65) * uPixelRatio) / max(1.0, -mv.z), 8.0, 140.0);
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D uMap;
+      uniform float uDayFactor;
+      uniform float uRainIntensity;
+      varying float vLifeAlpha;
+      void main() {
+        vec4 tex = texture2D(uMap, gl_PointCoord);
+        vec3 col = mix(vec3(0.45, 0.56, 0.70), vec3(0.94, 0.98, 1.0), uDayFactor);
+        float alpha = tex.a * vLifeAlpha * (1.0 + uRainIntensity * 0.35);
+        if (alpha < 0.015) discard;
+        gl_FragColor = vec4(col, alpha);
+      }
+    `,
+  });
+  waterfallMats.push(sprayMistMat);
+
+  const sprayMistPoints = new THREE.Points(mistGeo, sprayMistMat);
+  sprayMistPoints.frustumCulled = false;
+  sprayMistPoints.renderOrder = 5;
+  group.add(sprayMistPoints);
 
   let rippleSlot = 0;
   const triggerWaterRipple = (worldX: number, worldZ: number, nowSec: number, strength = 1.0) => {
@@ -685,8 +893,8 @@ export function createParadiseTerrain(
       waterDepthTex.dispose();
       const rt = (waterMesh as unknown as { material?: THREE.ShaderMaterial })?.material?.uniforms?.mirrorSampler?.value;
       if (rt && typeof rt.dispose === 'function') rt.dispose();
-      wfGeo.dispose();
-      wfMat.dispose();
+      waterfallGeos.forEach((g) => g.dispose());
+      waterfallMats.forEach((m) => m.dispose());
     },
   };
 }

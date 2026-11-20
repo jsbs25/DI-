@@ -220,6 +220,9 @@ export function createParadiseArchitecture(
   const materials: THREE.Material[] = [];
 
   const trackGeo = <T extends THREE.BufferGeometry>(g: T): T => {
+    if (g.attributes.uv && !g.attributes.uv2) {
+      g.setAttribute('uv2', g.attributes.uv);
+    }
     geometries.push(g);
     return g;
   };
@@ -232,7 +235,7 @@ export function createParadiseArchitecture(
     return m;
   };
 
-  // Distinct high-definition PBR material library
+  // Distinct high-definition PBR material library with AO + Roughness + Normal maps
   const graniteMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0x918c83,
@@ -240,7 +243,9 @@ export function createParadiseArchitecture(
       metalness: 0.04,
       map: textures.rockColorMap,
       normalMap: textures.rockNormalMap,
-      normalScale: new THREE.Vector2(0.85, 0.85),
+      normalScale: new THREE.Vector2(0.95, 0.95),
+      aoMap: textures.plasterAoMap,
+      aoMapIntensity: 0.55,
     })
   );
 
@@ -251,62 +256,78 @@ export function createParadiseArchitecture(
       metalness: 0.04,
       map: textures.terrainDetail,
       normalMap: textures.rockNormalMap,
-      normalScale: new THREE.Vector2(0.45, 0.45),
+      normalScale: new THREE.Vector2(0.55, 0.55),
+      aoMap: textures.plasterAoMap,
+      aoMapIntensity: 0.45,
     })
   );
 
   const rosewoodMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x4f261b,
-      roughness: 0.44,
+      color: 0x51271c,
+      roughness: 0.78,
       metalness: 0.05,
       map: textures.sakuraBarkMap,
-      normalMap: textures.barkNormalMap,
-      normalScale: new THREE.Vector2(0.55, 0.55),
+      normalMap: textures.sakuraBarkNormalMap,
+      normalScale: new THREE.Vector2(0.6, 0.6),
+      aoMap: textures.barkAoMap,
+      aoMapIntensity: 0.68,
+      roughnessMap: textures.barkRoughnessMap,
     })
   );
 
   const cedarDeckMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x8d6344,
-      roughness: 0.64,
+      color: 0x926848,
+      roughness: 0.88,
       metalness: 0.02,
       map: textures.timberPlankMap,
       normalMap: textures.barkNormalMap,
-      normalScale: new THREE.Vector2(0.42, 0.42),
+      normalScale: new THREE.Vector2(0.48, 0.48),
+      aoMap: textures.timberAoMap,
+      aoMapIntensity: 0.92,
+      roughnessMap: textures.timberRoughnessMap,
     })
   );
 
   const charredCedarMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x332721,
-      roughness: 0.72,
+      color: 0x352923,
+      roughness: 0.92,
       metalness: 0.03,
       map: textures.timberPlankMap,
       normalMap: textures.barkNormalMap,
-      normalScale: new THREE.Vector2(0.65, 0.65),
+      normalScale: new THREE.Vector2(0.7, 0.7),
+      aoMap: textures.timberAoMap,
+      aoMapIntensity: 0.95,
+      roughnessMap: textures.timberRoughnessMap,
     })
   );
 
   const plasterWallMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0xf1e9da,
+      color: 0xf2eadb,
       roughness: 0.88,
       metalness: 0.01,
       map: textures.plasterWallMap,
       normalMap: textures.rockNormalMap,
-      normalScale: new THREE.Vector2(0.22, 0.22),
+      normalScale: new THREE.Vector2(0.24, 0.24),
+      aoMap: textures.plasterAoMap,
+      aoMapIntensity: 0.72,
     })
   );
 
   const ceramicTileMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x434d59,
-      roughness: 0.44,
+      color: 0x45505d,
+      roughness: 0.84,
       metalness: 0.16,
       map: textures.slateRoofMap,
       normalMap: textures.slateNormalMap,
-      normalScale: new THREE.Vector2(0.95, 0.95),
+      normalScale: new THREE.Vector2(1.05, 1.05),
+      aoMap: textures.slateAoMap,
+      aoMapIntensity: 0.95,
+      roughnessMap: textures.slateRoughnessMap,
       side: THREE.DoubleSide,
     })
   );
@@ -314,10 +335,12 @@ export function createParadiseArchitecture(
   const ridgeStoneMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0x2c343e,
-      roughness: 0.48,
+      roughness: 0.56,
       metalness: 0.14,
       normalMap: textures.slateNormalMap,
-      normalScale: new THREE.Vector2(0.4, 0.4),
+      normalScale: new THREE.Vector2(0.45, 0.45),
+      aoMap: textures.slateAoMap,
+      aoMapIntensity: 0.65,
     })
   );
 

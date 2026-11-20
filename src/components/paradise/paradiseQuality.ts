@@ -232,10 +232,18 @@ export interface ProceduralTextureSet {
   sakuraBarkMap: THREE.CanvasTexture;
   ginkgoBarkMap: THREE.CanvasTexture;
   barkNormalMap: THREE.DataTexture;
+  sakuraBarkNormalMap: THREE.DataTexture;
+  barkAoMap: THREE.DataTexture;
+  barkRoughnessMap: THREE.DataTexture;
   plasterWallMap: THREE.CanvasTexture;
+  plasterAoMap: THREE.DataTexture;
   timberPlankMap: THREE.CanvasTexture;
+  timberAoMap: THREE.DataTexture;
+  timberRoughnessMap: THREE.DataTexture;
   slateRoofMap: THREE.CanvasTexture;
   slateNormalMap: THREE.DataTexture;
+  slateAoMap: THREE.DataTexture;
+  slateRoughnessMap: THREE.DataTexture;
   waterNormals: THREE.DataTexture;
   sakuraClusterMap: THREE.CanvasTexture;
   ginkgoClusterMap: THREE.CanvasTexture;
@@ -294,6 +302,34 @@ function buildNormalFromHeight(heights: Float32Array, size: number, strength = 2
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function buildLinearDataMap(
+  values: Float32Array,
+  size: number,
+  repeatX: number,
+  repeatY: number,
+  maxAniso: number
+): THREE.DataTexture {
+  const bytes = new Uint8Array(size * size * 4);
+  for (let i = 0; i < size * size; i++) {
+    const v = Math.max(0, Math.min(255, Math.round(values[i] * 255)));
+    const idx = i * 4;
+    bytes[idx] = v;
+    bytes[idx + 1] = v;
+    bytes[idx + 2] = v;
+    bytes[idx + 3] = 255;
+  }
+  const tex = new THREE.DataTexture(bytes, size, size, THREE.RGBAFormat);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeatX, repeatY);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = Math.min(16, maxAniso);
   tex.needsUpdate = true;
   return tex;
 }
@@ -375,48 +411,56 @@ function drawSakuraFlower(
     tintVariant < 0.32 ? '#fce5ec' : tintVariant < 0.7 ? '#f8c5d6' : '#f1a7bf';
   const centerHex = '#cc4e77';
 
+  ctx.shadowColor = 'rgba(72, 24, 42, 0.22)';
+  ctx.shadowBlur = Math.max(2, radius * 0.14);
+  ctx.shadowOffsetY = Math.max(1, radius * 0.05);
+
   for (let p = 0; p < 5; p++) {
     ctx.save();
     ctx.rotate((p * Math.PI * 2) / 5);
 
-    const grad = ctx.createRadialGradient(0, -radius * 0.08, radius * 0.06, 0, -radius * 0.55, radius);
+    const grad = ctx.createRadialGradient(0, -radius * 0.08, radius * 0.05, 0, -radius * 0.56, radius);
     grad.addColorStop(0.0, centerHex);
-    grad.addColorStop(0.24, midHex);
-    grad.addColorStop(0.84, outerHex);
-    grad.addColorStop(1.0, '#fffafc');
+    grad.addColorStop(0.22, midHex);
+    grad.addColorStop(0.8, outerHex);
+    grad.addColorStop(1.0, '#fffbfd');
 
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.bezierCurveTo(-radius * 0.48, -radius * 0.25, -radius * 0.56, -radius * 0.85, -radius * 0.14, -radius * 0.98);
-    ctx.lineTo(0, -radius * 0.83);
+    ctx.lineTo(0, -radius * 0.82);
     ctx.lineTo(radius * 0.14, -radius * 0.98);
     ctx.bezierCurveTo(radius * 0.56, -radius * 0.85, radius * 0.48, -radius * 0.25, 0, 0);
     ctx.closePath();
     ctx.fill();
 
     // Subtle petal vein & soft rim shadow
-    ctx.strokeStyle = 'rgba(182, 82, 118, 0.26)';
+    ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = 'rgba(182, 82, 118, 0.28)';
     ctx.lineWidth = Math.max(0.9, radius * 0.032);
     ctx.stroke();
 
-    ctx.strokeStyle = 'rgba(204, 110, 145, 0.16)';
+    ctx.strokeStyle = 'rgba(204, 110, 145, 0.2)';
     ctx.lineWidth = Math.max(0.6, radius * 0.02);
     ctx.beginPath();
     ctx.moveTo(0, -radius * 0.12);
-    ctx.lineTo(-radius * 0.09, -radius * 0.72);
+    ctx.lineTo(-radius * 0.1, -radius * 0.72);
     ctx.moveTo(0, -radius * 0.12);
-    ctx.lineTo(radius * 0.09, -radius * 0.72);
+    ctx.lineTo(0, -radius * 0.68);
+    ctx.moveTo(0, -radius * 0.12);
+    ctx.lineTo(radius * 0.1, -radius * 0.72);
     ctx.stroke();
 
     ctx.restore();
   }
+  ctx.shadowColor = 'transparent';
 
   // Soft depth darkening for inner blossoms
   if (depthShade < 0.98) {
-    ctx.fillStyle = `rgba(68, 28, 46, ${(1 - depthShade) * 0.26})`;
+    ctx.fillStyle = `rgba(68, 28, 46, ${(1 - depthShade) * 0.28})`;
     ctx.beginPath();
-    ctx.arc(0, 0, radius * 0.95, 0, Math.PI * 2);
+    ctx.arc(0, 0, radius * 0.96, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -925,6 +969,9 @@ function buildBarkTextureSet(maxAniso: number): {
   sakuraBarkMap: THREE.CanvasTexture;
   ginkgoBarkMap: THREE.CanvasTexture;
   barkNormalMap: THREE.DataTexture;
+  sakuraBarkNormalMap: THREE.DataTexture;
+  barkAoMap: THREE.DataTexture;
+  barkRoughnessMap: THREE.DataTexture;
 } {
   const size = 512;
   const rand = makeSeededRand(4409);
@@ -945,27 +992,44 @@ function buildBarkTextureSet(maxAniso: number): {
   barkMap.wrapS = barkMap.wrapT = THREE.RepeatWrapping;
   barkMap.repeat.set(2, 3);
   barkMap.colorSpace = THREE.SRGBColorSpace;
-  barkMap.anisotropy = Math.min(8, maxAniso);
+  barkMap.anisotropy = Math.min(16, maxAniso);
 
-  // Sakura bark: rich coppery-brown Prunus bark + crisp horizontal lenticels
+  // Sakura bark: rich coppery-brown Prunus bark + crisp horizontal lenticels & subtle moss/lichen flecks
   const [sCanvas, sCtx] = makeCanvas(size, size);
-  sCtx.fillStyle = '#4a312c';
+  sCtx.fillStyle = '#4c322c';
   sCtx.fillRect(0, 0, size, size);
-  for (let i = 0; i < 650; i++) {
+  const sakuraHeights = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x / size) * Math.PI * 2;
+      const v = (y / size) * Math.PI * 2;
+      const band = Math.sin(v * 22 + Math.sin(u * 4) * 1.1) * 0.25 + Math.cos(v * 47 + u * 3) * 0.14;
+      sakuraHeights[y * size + x] = 0.52 + band * 0.3;
+    }
+  }
+  for (let i = 0; i < 680; i++) {
     const y = rand() * size;
     const x = rand() * size;
     const h = 14 + rand() * 48;
-    sCtx.fillStyle = rand() > 0.5 ? 'rgba(34,20,18,0.3)' : 'rgba(105,68,58,0.22)';
+    sCtx.fillStyle = rand() > 0.5 ? 'rgba(32,19,17,0.34)' : 'rgba(112,72,62,0.24)';
     sCtx.fillRect(x, y, 2 + rand() * 5, h);
   }
-  // Characteristic horizontal lenticels of cherry trees
-  for (let i = 0; i < 240; i++) {
-    const y = rand() * size;
-    const x = rand() * size;
-    const w = 22 + rand() * 68;
-    const h = 2 + rand() * 3.5;
-    sCtx.fillStyle = rand() > 0.35 ? 'rgba(148,108,92,0.48)' : 'rgba(28,16,14,0.45)';
+  // Characteristic horizontal lenticels of cherry trees (also etched into height map)
+  for (let i = 0; i < 280; i++) {
+    const y = Math.floor(rand() * size);
+    const x = Math.floor(rand() * size);
+    const w = Math.floor(20 + rand() * 72);
+    const h = Math.floor(2 + rand() * 4);
+    const isLight = rand() > 0.35;
+    sCtx.fillStyle = isLight ? 'rgba(156,114,96,0.52)' : 'rgba(24,14,12,0.5)';
     sCtx.fillRect(x, y, w, h);
+    for (let dy = 0; dy < h; dy++) {
+      const py = (y + dy) % size;
+      for (let dx = 0; dx < w; dx++) {
+        const px = (x + dx) % size;
+        sakuraHeights[py * size + px] = Math.max(0.05, Math.min(0.95, sakuraHeights[py * size + px] + (isLight ? 0.22 : -0.25)));
+      }
+    }
   }
   const sakuraBarkMap = new THREE.CanvasTexture(sCanvas);
   sakuraBarkMap.wrapS = sakuraBarkMap.wrapT = THREE.RepeatWrapping;
@@ -973,11 +1037,17 @@ function buildBarkTextureSet(maxAniso: number): {
   sakuraBarkMap.colorSpace = THREE.SRGBColorSpace;
   sakuraBarkMap.anisotropy = Math.min(16, maxAniso);
 
-  // Ginkgo bark: fissured ash-grey / warm stone-brown vertical bark furrows
+  const sakuraBarkNormalMap = buildNormalFromHeight(sakuraHeights, size, 2.4);
+  sakuraBarkNormalMap.repeat.set(2, 4);
+  sakuraBarkNormalMap.anisotropy = Math.min(16, maxAniso);
+
+  // Ginkgo bark: deeply fissured ash-grey / stone-brown vertical bark furrows + linear AO & roughness
   const [gCanvas, gCtx] = makeCanvas(size, size);
   gCtx.fillStyle = '#6f6559';
   gCtx.fillRect(0, 0, size, size);
   const heights = new Float32Array(size * size);
+  const barkAoValues = new Float32Array(size * size);
+  const barkRoughValues = new Float32Array(size * size);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const u = (x / size) * Math.PI * 2;
@@ -986,15 +1056,19 @@ function buildBarkTextureSet(maxAniso: number): {
         Math.sin(u * 14 + Math.sin(v * 3) * 1.4) * 0.45 +
         Math.cos(u * 29 - Math.sin(v * 6) * 0.9) * 0.3 +
         Math.sin(u * 7 + v * 2) * 0.2;
-      heights[y * size + x] = 0.5 + ridge * 0.45;
+      const h = 0.5 + ridge * 0.45;
+      heights[y * size + x] = h;
+      // Crevices get lower AO (0.42..1.0) and higher roughness (0.95..0.58)
+      barkAoValues[y * size + x] = Math.max(0.42, Math.min(1.0, 0.56 + h * 0.52));
+      barkRoughValues[y * size + x] = Math.max(0.56, Math.min(0.96, 0.92 - h * 0.32));
     }
   }
-  for (let i = 0; i < 1100; i++) {
+  for (let i = 0; i < 1200; i++) {
     const x = rand() * size;
     const y = rand() * size;
     const h = 30 + rand() * 110;
     const w = 2 + rand() * 6;
-    gCtx.fillStyle = rand() > 0.48 ? 'rgba(42,36,30,0.42)' : 'rgba(162,148,132,0.28)';
+    gCtx.fillStyle = rand() > 0.48 ? 'rgba(38,32,26,0.46)' : 'rgba(166,152,136,0.3)';
     gCtx.fillRect(x, y, w, h);
   }
   const ginkgoBarkMap = new THREE.CanvasTexture(gCanvas);
@@ -1003,30 +1077,47 @@ function buildBarkTextureSet(maxAniso: number): {
   ginkgoBarkMap.colorSpace = THREE.SRGBColorSpace;
   ginkgoBarkMap.anisotropy = Math.min(16, maxAniso);
 
-  const barkNormalMap = buildNormalFromHeight(heights, size, 2.2);
+  const barkNormalMap = buildNormalFromHeight(heights, size, 2.5);
   barkNormalMap.repeat.set(2, 4);
+  barkNormalMap.anisotropy = Math.min(16, maxAniso);
 
-  return { barkMap, sakuraBarkMap, ginkgoBarkMap, barkNormalMap };
+  const barkAoMap = buildLinearDataMap(barkAoValues, size, 2, 4, maxAniso);
+  const barkRoughnessMap = buildLinearDataMap(barkRoughValues, size, 2, 4, maxAniso);
+
+  return {
+    barkMap,
+    sakuraBarkMap,
+    ginkgoBarkMap,
+    barkNormalMap,
+    sakuraBarkNormalMap,
+    barkAoMap,
+    barkRoughnessMap,
+  };
 }
 
 function buildArchitectureTextures(maxAniso: number): {
   plasterWallMap: THREE.CanvasTexture;
+  plasterAoMap: THREE.DataTexture;
   timberPlankMap: THREE.CanvasTexture;
+  timberAoMap: THREE.DataTexture;
+  timberRoughnessMap: THREE.DataTexture;
   slateRoofMap: THREE.CanvasTexture;
   slateNormalMap: THREE.DataTexture;
+  slateAoMap: THREE.DataTexture;
+  slateRoughnessMap: THREE.DataTexture;
 } {
   const rand = makeSeededRand(6207);
 
-  // 1. Kyoto/Jiangnan warm lime-plaster stucco wall texture
+  // 1. Kyoto/Jiangnan warm lime-plaster stucco wall texture + subtle AO cavity map
   const pSize = 512;
   const [pCanvas, pCtx] = makeCanvas(pSize, pSize);
-  pCtx.fillStyle = '#eee5d4';
+  pCtx.fillStyle = '#efe6d5';
   pCtx.fillRect(0, 0, pSize, pSize);
   for (let i = 0; i < 2400; i++) {
     const x = rand() * pSize;
     const y = rand() * pSize;
     const r = 3 + rand() * 14;
-    pCtx.fillStyle = rand() > 0.5 ? 'rgba(255,252,246,0.16)' : 'rgba(182,168,144,0.12)';
+    pCtx.fillStyle = rand() > 0.5 ? 'rgba(255,252,246,0.18)' : 'rgba(182,168,144,0.14)';
     pCtx.beginPath();
     pCtx.arc(x, y, r, 0, Math.PI * 2);
     pCtx.fill();
@@ -1035,31 +1126,52 @@ function buildArchitectureTextures(maxAniso: number): {
   plasterWallMap.wrapS = plasterWallMap.wrapT = THREE.RepeatWrapping;
   plasterWallMap.repeat.set(2, 2);
   plasterWallMap.colorSpace = THREE.SRGBColorSpace;
-  plasterWallMap.anisotropy = Math.min(8, maxAniso);
+  plasterWallMap.anisotropy = Math.min(16, maxAniso);
 
-  // 2. Grooved Cedar / Hinoki Floorboard Plank texture
+  const plasterAoValues = new Float32Array(pSize * pSize);
+  for (let y = 0; y < pSize; y++) {
+    const edgeBottomShade = y > pSize * 0.82 ? 0.84 : 1.0;
+    const edgeTopShade = y < pSize * 0.14 ? 0.86 : 1.0;
+    for (let x = 0; x < pSize; x++) {
+      const micro = 0.92 + Math.sin(x * 0.12 + y * 0.08) * 0.04 + (rand() - 0.5) * 0.05;
+      plasterAoValues[y * pSize + x] = Math.min(1.0, micro * edgeBottomShade * edgeTopShade);
+    }
+  }
+  const plasterAoMap = buildLinearDataMap(plasterAoValues, pSize, 1, 1, maxAniso);
+
+  // 2. Grooved Cedar / Hinoki Floorboard Plank texture + groove AO & varnish roughness
   const tSize = 512;
   const [tCanvas, tCtx] = makeCanvas(tSize, tSize);
   tCtx.fillStyle = '#7c563a';
   tCtx.fillRect(0, 0, tSize, tSize);
   const plankCount = 8;
   const plankH = tSize / plankCount;
+  const timberAoValues = new Float32Array(tSize * tSize);
+  const timberRoughValues = new Float32Array(tSize * tSize);
+
   for (let p = 0; p < plankCount; p++) {
     const y0 = p * plankH;
     const toneShift = (rand() - 0.5) * 20;
     tCtx.fillStyle = `rgb(${124 + toneShift}, ${86 + toneShift * 0.7}, ${58 + toneShift * 0.5})`;
     tCtx.fillRect(0, y0 + 2, tSize, plankH - 3);
-    // Fine horizontal wood grain streaks
-    for (let g = 0; g < 65; g++) {
+    for (let g = 0; g < 75; g++) {
       const gy = y0 + 3 + rand() * (plankH - 6);
       const gx = rand() * tSize;
       const gw = 40 + rand() * 160;
-      tCtx.fillStyle = rand() > 0.5 ? 'rgba(42,24,14,0.2)' : 'rgba(182,136,96,0.16)';
+      tCtx.fillStyle = rand() > 0.5 ? 'rgba(42,24,14,0.22)' : 'rgba(182,136,96,0.18)';
       tCtx.fillRect(gx, gy, gw, 1.5);
     }
-    // Crisp dark plank groove
-    tCtx.fillStyle = 'rgba(28, 16, 10, 0.72)';
-    tCtx.fillRect(0, y0, tSize, 2.5);
+    tCtx.fillStyle = 'rgba(24, 14, 8, 0.78)';
+    tCtx.fillRect(0, y0, tSize, 2.8);
+  }
+  for (let y = 0; y < tSize; y++) {
+    const localY = (y % plankH) / plankH;
+    const isSeam = localY < 0.065 || localY > 0.945;
+    for (let x = 0; x < tSize; x++) {
+      const grain = Math.sin(y * 0.55 + Math.sin(x * 0.04) * 3.0) * 0.06;
+      timberAoValues[y * tSize + x] = isSeam ? 0.36 : 0.94 + grain;
+      timberRoughValues[y * tSize + x] = isSeam ? 0.92 : Math.max(0.4, Math.min(0.76, 0.56 - grain * 1.4));
+    }
   }
   const timberPlankMap = new THREE.CanvasTexture(tCanvas);
   timberPlankMap.wrapS = timberPlankMap.wrapT = THREE.RepeatWrapping;
@@ -1067,7 +1179,10 @@ function buildArchitectureTextures(maxAniso: number): {
   timberPlankMap.colorSpace = THREE.SRGBColorSpace;
   timberPlankMap.anisotropy = Math.min(16, maxAniso);
 
-  // 3. Ultra-crisp 1024x1024 Traditional Curved Ceramic Roof Tiles + Normal Map
+  const timberAoMap = buildLinearDataMap(timberAoValues, tSize, 2, 2, maxAniso);
+  const timberRoughnessMap = buildLinearDataMap(timberRoughValues, tSize, 2, 2, maxAniso);
+
+  // 3. Ultra-crisp 1024x1024 Traditional Curved Ceramic Roof Tiles + Normal, AO & Roughness Maps
   const sSize = 1024;
   const [sCanvas, sCtx] = makeCanvas(sSize, sSize);
   sCtx.fillStyle = '#2a313b';
@@ -1081,20 +1196,18 @@ function buildArchitectureTextures(maxAniso: number): {
     for (let c = 0; c < cols; c++) {
       const x0 = c * colW;
       const y0 = r * rowH;
-      const shade = 42 + Math.floor(rand() * 20);
+      const shade = 44 + Math.floor(rand() * 20);
       const grad = sCtx.createLinearGradient(x0, y0, x0 + colW, y0);
-      grad.addColorStop(0.0, `rgb(${shade - 14}, ${shade - 10}, ${shade - 4})`);
-      grad.addColorStop(0.32, `rgb(${shade + 28}, ${shade + 33}, ${shade + 42})`);
+      grad.addColorStop(0.0, `rgb(${shade - 16}, ${shade - 12}, ${shade - 6})`);
+      grad.addColorStop(0.32, `rgb(${shade + 30}, ${shade + 35}, ${shade + 44})`);
       grad.addColorStop(0.72, `rgb(${shade + 10}, ${shade + 14}, ${shade + 20})`);
       grad.addColorStop(1.0, `rgb(${shade - 18}, ${shade - 14}, ${shade - 8})`);
       sCtx.fillStyle = grad;
       sCtx.fillRect(x0 + 1.5, y0 + 1.5, colW - 3, rowH - 5);
-      // Overlap shadow ridge at bottom of each tile course
-      sCtx.fillStyle = 'rgba(8, 12, 18, 0.72)';
-      sCtx.fillRect(x0, y0 + rowH - 5, colW, 5);
-      // Subtle highlight rim at tile lip
-      sCtx.fillStyle = 'rgba(130, 145, 165, 0.22)';
-      sCtx.fillRect(x0 + 2, y0 + rowH - 7, colW - 4, 2);
+      sCtx.fillStyle = 'rgba(8, 12, 18, 0.78)';
+      sCtx.fillRect(x0, y0 + rowH - 5.5, colW, 5.5);
+      sCtx.fillStyle = 'rgba(138, 152, 174, 0.26)';
+      sCtx.fillRect(x0 + 2, y0 + rowH - 7.5, colW - 4, 2);
     }
   }
   const slateRoofMap = new THREE.CanvasTexture(sCanvas);
@@ -1103,24 +1216,43 @@ function buildArchitectureTextures(maxAniso: number): {
   slateRoofMap.colorSpace = THREE.SRGBColorSpace;
   slateRoofMap.anisotropy = Math.min(16, maxAniso);
 
-  // Tile relief normal map (512x512)
   const nSize = 512;
   const tileHeights = new Float32Array(nSize * nSize);
+  const tileAoValues = new Float32Array(nSize * nSize);
+  const tileRoughValues = new Float32Array(nSize * nSize);
   for (let y = 0; y < nSize; y++) {
     const ty = (y / nSize) * rows;
     const rowFrac = ty - Math.floor(ty);
     for (let x = 0; x < nSize; x++) {
       const tx = (x / nSize) * cols;
       const colFrac = tx - Math.floor(tx);
-      const rib = Math.sin(colFrac * Math.PI) * 0.72;
-      const overlap = rowFrac > 0.88 ? -0.45 : rowFrac * 0.25;
+      const rib = Math.sin(colFrac * Math.PI);
+      const overlap = rowFrac > 0.86 ? -0.52 : rowFrac * 0.25;
       tileHeights[y * nSize + x] = 0.5 + rib * 0.35 + overlap * 0.25;
+      // Valley seam & course overhang cast crisp ambient occlusion & higher matte roughness
+      const seamAo = (1 - Math.abs(colFrac - 0.5) * 0.55) * (rowFrac > 0.86 ? 0.38 : 0.96);
+      tileAoValues[y * nSize + x] = Math.max(0.32, Math.min(1.0, seamAo));
+      tileRoughValues[y * nSize + x] = rowFrac > 0.86 ? 0.88 : Math.max(0.36, 0.66 - rib * 0.24);
     }
   }
-  const slateNormalMap = buildNormalFromHeight(tileHeights, nSize, 3.2);
+  const slateNormalMap = buildNormalFromHeight(tileHeights, nSize, 3.4);
   slateNormalMap.repeat.set(4, 2);
+  slateNormalMap.anisotropy = Math.min(16, maxAniso);
 
-  return { plasterWallMap, timberPlankMap, slateRoofMap, slateNormalMap };
+  const slateAoMap = buildLinearDataMap(tileAoValues, nSize, 4, 2, maxAniso);
+  const slateRoughnessMap = buildLinearDataMap(tileRoughValues, nSize, 4, 2, maxAniso);
+
+  return {
+    plasterWallMap,
+    plasterAoMap,
+    timberPlankMap,
+    timberAoMap,
+    timberRoughnessMap,
+    slateRoofMap,
+    slateNormalMap,
+    slateAoMap,
+    slateRoughnessMap,
+  };
 }
 
 export function createParadiseTextures(maxAniso: number): ProceduralTextureSet {
@@ -1143,8 +1275,26 @@ export function createParadiseTextures(maxAniso: number): ProceduralTextureSet {
   terrainDetail.colorSpace = THREE.SRGBColorSpace;
   terrainDetail.anisotropy = Math.min(16, maxAniso);
 
-  const { barkMap, sakuraBarkMap, ginkgoBarkMap, barkNormalMap } = buildBarkTextureSet(maxAniso);
-  const { plasterWallMap, timberPlankMap, slateRoofMap, slateNormalMap } = buildArchitectureTextures(maxAniso);
+  const {
+    barkMap,
+    sakuraBarkMap,
+    ginkgoBarkMap,
+    barkNormalMap,
+    sakuraBarkNormalMap,
+    barkAoMap,
+    barkRoughnessMap,
+  } = buildBarkTextureSet(maxAniso);
+  const {
+    plasterWallMap,
+    plasterAoMap,
+    timberPlankMap,
+    timberAoMap,
+    timberRoughnessMap,
+    slateRoofMap,
+    slateNormalMap,
+    slateAoMap,
+    slateRoughnessMap,
+  } = buildArchitectureTextures(maxAniso);
 
   const waterNormals = buildSeamlessWaterNormals(256);
   const sakuraClusterMap = buildSakuraClusterTexture(maxAniso);
@@ -1183,10 +1333,18 @@ export function createParadiseTextures(maxAniso: number): ProceduralTextureSet {
     sakuraBarkMap,
     ginkgoBarkMap,
     barkNormalMap,
+    sakuraBarkNormalMap,
+    barkAoMap,
+    barkRoughnessMap,
     plasterWallMap,
+    plasterAoMap,
     timberPlankMap,
+    timberAoMap,
+    timberRoughnessMap,
     slateRoofMap,
     slateNormalMap,
+    slateAoMap,
+    slateRoughnessMap,
     waterNormals,
     sakuraClusterMap,
     ginkgoClusterMap,
@@ -1205,10 +1363,18 @@ export function createParadiseTextures(maxAniso: number): ProceduralTextureSet {
       sakuraBarkMap.dispose();
       ginkgoBarkMap.dispose();
       barkNormalMap.dispose();
+      sakuraBarkNormalMap.dispose();
+      barkAoMap.dispose();
+      barkRoughnessMap.dispose();
       plasterWallMap.dispose();
+      plasterAoMap.dispose();
       timberPlankMap.dispose();
+      timberAoMap.dispose();
+      timberRoughnessMap.dispose();
       slateRoofMap.dispose();
       slateNormalMap.dispose();
+      slateAoMap.dispose();
+      slateRoughnessMap.dispose();
       waterNormals.dispose();
       sakuraClusterMap.dispose();
       ginkgoClusterMap.dispose();
