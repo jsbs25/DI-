@@ -1801,7 +1801,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                     prefs.fontFamily === 'tajawal_ar';
                   const effectivePageFont =
                     isArabicPage && !userPickedArabicFont
-                      ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
+                      ? '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif'
                       : fontCss;
                   const effectivePageLineHeight = isArabicPage
                     ? Math.max(prefs.lineHeight, 2.25)

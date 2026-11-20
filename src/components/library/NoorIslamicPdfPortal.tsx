@@ -349,7 +349,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
             rel="noopener noreferrer"
             className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-3.5 py-2 text-xs font-medium text-[var(--color-one-text-muted)] transition hover:border-[var(--color-one-border-strong)] hover:text-[var(--color-one-text)]"
           >
-            <span>مكتبة النور</span>
+            <span dir="rtl" lang="ar" className="font-arabic-ui text-sm leading-normal">مكتبة النور</span>
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
         </div>
@@ -363,7 +363,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
               <h2
                 dir="rtl"
                 lang="ar"
-                className="font-serif text-2xl font-semibold tracking-tight text-[var(--color-one-text)] sm:text-3xl"
+                className="font-arabic-book text-2xl font-bold leading-[1.7] text-[var(--color-one-text)] sm:text-3xl"
               >
                 مكتبة النور
               </h2>
@@ -422,7 +422,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
               onChange={(e) => setSearchInput(e.target.value)}
               dir={containsArabic(searchInput) ? 'rtl' : 'auto'}
               placeholder="输入任意书名或作者（阿拉伯语 / 中文 / 英文）..."
-              className="w-full rounded-2xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-bg)] py-3 pl-11 pr-24 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none"
+              className={`w-full rounded-2xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-bg)] py-3 pl-11 pr-24 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none ${containsArabic(searchInput) ? 'font-arabic-ui' : ''}`}
             />
             <button
               type="submit"
@@ -459,21 +459,28 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
         {/* Minimal Quick Book Shortcuts */}
         <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
           <span className="text-[11px] text-[var(--color-one-text-dim)]">快捷检索</span>
-          {QUICK_BOOK_TOPICS.map((topic) => (
-            <button
-              key={topic.label}
-              type="button"
-              onClick={() => {
-                setSelectedLang(topic.lang);
-                setSearchInput(topic.q);
-                setPage(1);
-                setActiveQuery(topic.q);
-              }}
-              className="cursor-pointer text-xs text-[var(--color-one-text-muted)] underline-offset-4 transition hover:text-[var(--color-one-accent)] hover:underline"
-            >
-              {topic.label}
-            </button>
-          ))}
+          {QUICK_BOOK_TOPICS.map((topic) => {
+            const topicIsAr = containsArabic(topic.label);
+            return (
+              <button
+                key={topic.label}
+                type="button"
+                dir={topicIsAr ? 'rtl' : 'auto'}
+                lang={topicIsAr ? 'ar' : undefined}
+                onClick={() => {
+                  setSelectedLang(topic.lang);
+                  setSearchInput(topic.q);
+                  setPage(1);
+                  setActiveQuery(topic.q);
+                }}
+                className={`cursor-pointer text-[var(--color-one-text-muted)] underline-offset-4 transition hover:text-[var(--color-one-accent)] hover:underline ${
+                  topicIsAr ? 'font-arabic-ui text-sm leading-normal' : 'text-xs'
+                }`}
+              >
+                {topic.label}
+              </button>
+            );
+          })}
           {activeQuery && (
             <button
               type="button"
@@ -588,8 +595,8 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                     <h3
                       dir={isArabic ? 'rtl' : 'ltr'}
                       lang={item.language}
-                      className={`line-clamp-2 text-[15px] font-semibold leading-snug text-[var(--color-one-text)] ${
-                        isArabic ? 'font-serif text-right text-[17px] leading-relaxed' : ''
+                      className={`line-clamp-2 font-semibold text-[var(--color-one-text)] ${
+                        isArabic ? 'font-arabic-book text-right text-[18px] leading-[1.9]' : 'text-[15px] leading-snug'
                       }`}
                     >
                       {item.title}
@@ -597,7 +604,10 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
 
                     <p
                       dir={isArabic ? 'rtl' : 'ltr'}
-                      className={`mt-1 line-clamp-1 text-xs text-[var(--color-one-text-muted)] ${isArabic ? 'text-right' : ''}`}
+                      lang={isArabic ? 'ar' : undefined}
+                      className={`mt-1 line-clamp-1 text-[var(--color-one-text-muted)] ${
+                        isArabic ? 'font-arabic-ui text-right text-[13px] leading-[1.75]' : 'text-xs'
+                      }`}
                     >
                       {item.author}
                     </p>
@@ -605,8 +615,9 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                     {item.description && (
                       <p
                         dir={isArabic ? 'rtl' : 'ltr'}
-                        className={`mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--color-one-text-dim)] ${
-                          isArabic ? 'text-right' : ''
+                        lang={isArabic ? 'ar' : undefined}
+                        className={`mt-2 line-clamp-3 text-[var(--color-one-text-dim)] ${
+                          isArabic ? 'font-arabic-ui text-right text-[13px] leading-[1.85]' : 'text-xs leading-relaxed'
                         }`}
                       >
                         {item.description}

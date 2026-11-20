@@ -39,6 +39,7 @@ import { AdminLibrary } from './AdminLibrary.tsx';
 import { filterLibrarySearchResults, getLibrarySearchFilterOptions, LIBRARY_RIGHTS_FILTER_LABELS } from './searchFilters.ts';
 import type { LibraryAgentAction } from '../../utils/oneAgentController.ts';
 import { listRecentReadingHistory, type BookProgressRecord } from '../../utils/readerPreferences.ts';
+import { containsArabic } from '../../utils/arabicTextNormalize.ts';
 
 interface DigitalLibraryProps {
   lang: Language;
@@ -1405,9 +1406,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleUnifiedSearch()}
+                    dir={containsArabic(searchQuery) ? 'rtl' : 'auto'}
                     placeholder="搜索任何书籍（如：صحيح البخاري、تفسير ابن كثير、道德经、Principia、作者或 ISBN）…"
                     aria-describedby="world-library-search-help"
-                    className="w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] py-3 pl-10 pr-4 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none sm:pr-28"
+                    className={`w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] py-3 pl-10 pr-4 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none sm:pr-28 ${containsArabic(searchQuery) ? 'font-arabic-ui' : ''}`}
                   />
                   <div className="mt-2 flex items-center gap-2 sm:absolute sm:right-1.5 sm:top-1/2 sm:mt-0 sm:-translate-y-1/2">
                     <button
@@ -1430,16 +1432,23 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     { label: '道德经', q: '道德经' },
                     { label: 'The Time Machine', q: 'The Time Machine' },
                     { label: 'Principia', q: 'Philosophiae Naturalis Principia' },
-                  ].map((chip) => (
-                    <button
-                      key={chip.label}
-                      type="button"
-                      onClick={() => handleUnifiedSearch(chip.q)}
-                      className="cursor-pointer text-xs text-[var(--color-one-text-muted)] underline-offset-4 transition hover:text-[var(--color-one-accent)] hover:underline"
-                    >
-                      {chip.label}
-                    </button>
-                  ))}
+                  ].map((chip) => {
+                    const chipIsAr = containsArabic(chip.label);
+                    return (
+                      <button
+                        key={chip.label}
+                        type="button"
+                        dir={chipIsAr ? 'rtl' : 'auto'}
+                        lang={chipIsAr ? 'ar' : undefined}
+                        onClick={() => handleUnifiedSearch(chip.q)}
+                        className={`cursor-pointer text-[var(--color-one-text-muted)] underline-offset-4 transition hover:text-[var(--color-one-accent)] hover:underline ${
+                          chipIsAr ? 'font-arabic-ui text-sm' : 'text-xs'
+                        }`}
+                      >
+                        {chip.label}
+                      </button>
+                    );
+                  })}
                 </div>
                 <p id="world-library-search-help" className="sr-only">统一检索全球开放图书馆与伊斯兰原版 PDF 书库</p>
               </div>
@@ -1463,13 +1472,40 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     />
                   </div>
                   <div className="mt-4">
-                    <h3 className="text-sm font-semibold leading-snug text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)]">
-                      {featuredBook.title}
-                    </h3>
-                    <p className="mt-0.5 text-xs text-[var(--color-one-text-muted)]">{featuredBook.author}</p>
-                    {featuredBook.description && (
-                      <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-[var(--color-one-text-dim)]">{featuredBook.description}</p>
-                    )}
+                    {(() => {
+                      const featIsAr = isRtlLanguage(featuredBook.language) || containsArabic(featuredBook.title);
+                      return (
+                        <>
+                          <h3
+                            dir={featIsAr ? 'rtl' : 'auto'}
+                            lang={featIsAr ? 'ar' : undefined}
+                            className={`text-sm font-semibold text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)] ${
+                              featIsAr ? 'font-arabic-book text-right text-base leading-[1.85]' : 'leading-snug'
+                            }`}
+                          >
+                            {featuredBook.title}
+                          </h3>
+                          <p
+                            dir={featIsAr ? 'rtl' : 'auto'}
+                            lang={featIsAr ? 'ar' : undefined}
+                            className={`mt-0.5 text-xs text-[var(--color-one-text-muted)] ${featIsAr ? 'font-arabic-ui text-right' : ''}`}
+                          >
+                            {featuredBook.author}
+                          </p>
+                          {featuredBook.description && (
+                            <p
+                              dir={featIsAr ? 'rtl' : 'auto'}
+                              lang={featIsAr ? 'ar' : undefined}
+                              className={`mt-2 line-clamp-2 text-xs text-[var(--color-one-text-dim)] ${
+                                featIsAr ? 'font-arabic-ui text-right leading-[1.85]' : 'leading-relaxed'
+                              }`}
+                            >
+                              {featuredBook.description}
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </button>
@@ -1508,7 +1544,15 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     className="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-4 py-3 text-left transition hover:border-[var(--color-one-border-strong)]"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-[var(--color-one-text)]">{rec.title}</div>
+                      <div
+                        dir={containsArabic(rec.title) ? 'rtl' : 'auto'}
+                        lang={containsArabic(rec.title) ? 'ar' : undefined}
+                        className={`truncate text-sm font-medium text-[var(--color-one-text)] ${
+                          containsArabic(rec.title) ? 'font-arabic-ui text-right text-[15px]' : ''
+                        }`}
+                      >
+                        {rec.title}
+                      </div>
                       <div className="mt-1 flex items-center gap-2 text-[11px] text-[var(--color-one-text-muted)]">
                         <span>第 {rec.pageNumber}/{rec.totalPages} 页</span>
                         <span>·</span>
@@ -1564,17 +1608,32 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                           </div>
                           <h4
                             dir={isAr ? 'rtl' : 'auto'}
-                            className={`mt-1.5 line-clamp-2 text-sm font-semibold leading-snug text-[var(--color-one-text)] ${isAr ? 'font-serif text-base' : ''}`}
+                            lang={isAr ? 'ar' : undefined}
+                            className={`mt-1.5 line-clamp-2 font-semibold text-[var(--color-one-text)] ${
+                              isAr ? 'font-arabic-book text-right text-[17px] leading-[1.9]' : 'text-sm leading-snug'
+                            }`}
                           >
                             {item.title}
                           </h4>
                           {item.author && (
-                            <p dir={isAr ? 'rtl' : 'auto'} className="mt-1 truncate text-xs text-[var(--color-one-text-muted)]">
+                            <p
+                              dir={isAr ? 'rtl' : 'auto'}
+                              lang={isAr ? 'ar' : undefined}
+                              className={`mt-1 truncate text-xs text-[var(--color-one-text-muted)] ${
+                                isAr ? 'font-arabic-ui text-right text-[13px]' : ''
+                              }`}
+                            >
                               {item.author}
                             </p>
                           )}
                           {item.description && (
-                            <p dir={isAr ? 'rtl' : 'auto'} className="mt-1.5 line-clamp-2 text-[11px] leading-relaxed text-[var(--color-one-text-dim)]">
+                            <p
+                              dir={isAr ? 'rtl' : 'auto'}
+                              lang={isAr ? 'ar' : undefined}
+                              className={`mt-1.5 line-clamp-2 text-[var(--color-one-text-dim)] ${
+                                isAr ? 'font-arabic-ui text-right text-xs leading-[1.85]' : 'text-[11px] leading-relaxed'
+                              }`}
+                            >
                               {item.description}
                             </p>
                           )}
@@ -1641,9 +1700,32 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                         <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-3.5 transition hover:border-[var(--color-one-border-strong)]">
                           {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
                           <div className="min-w-0 flex-1">
-                            <h4 className="line-clamp-1 text-xs font-semibold text-[var(--color-one-text)]">{r.title}</h4>
-                            <p className="mb-1 text-[11px] text-[var(--color-one-accent)]">{r.author} · {(r.language || '').toUpperCase()} · {r.source}{r.year ? ` · ${r.year}` : ''}</p>
-                            <p className="mb-2.5 line-clamp-2 text-[11px] text-[var(--color-one-text-muted)]">{r.description}</p>
+                            {(() => {
+                              const isAr = r.language === 'ar' || containsArabic(String(r.title || ''));
+                              return (
+                                <>
+                                  <h4
+                                    dir={isAr ? 'rtl' : 'auto'}
+                                    lang={isAr ? 'ar' : undefined}
+                                    className={`line-clamp-1 font-semibold text-[var(--color-one-text)] ${
+                                      isAr ? 'font-arabic-book text-right text-sm leading-[1.85]' : 'text-xs'
+                                    }`}
+                                  >
+                                    {r.title}
+                                  </h4>
+                                  <p className="mb-1 text-[11px] text-[var(--color-one-accent)]">{r.author} · {(r.language || '').toUpperCase()} · {r.source}{r.year ? ` · ${r.year}` : ''}</p>
+                                  <p
+                                    dir={isAr ? 'rtl' : 'auto'}
+                                    lang={isAr ? 'ar' : undefined}
+                                    className={`mb-2.5 line-clamp-2 text-[var(--color-one-text-muted)] ${
+                                      isAr ? 'font-arabic-ui text-right text-xs leading-[1.8]' : 'text-[11px]'
+                                    }`}
+                                  >
+                                    {r.description}
+                                  </p>
+                                </>
+                              );
+                            })()}
                             <div className="flex flex-wrap items-center gap-1.5">
                               {r.canImport && (
                                 <button type="button" onClick={() => handleIngestCrawledBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50">
@@ -1731,9 +1813,32 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                         <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-3.5 transition hover:border-[var(--color-one-border-strong)]">
                           {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
                           <div className="min-w-0 flex-1">
-                            <h4 className="line-clamp-1 text-xs font-semibold text-[var(--color-one-text)]">{r.title}</h4>
-                            <p className="mb-1 text-[11px] text-[var(--color-one-accent)]">{r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}</p>
-                            <p className="mb-2.5 line-clamp-2 text-[11px] text-[var(--color-one-text-muted)]">{r.description}</p>
+                            {(() => {
+                              const isAr = r.language === 'ar' || containsArabic(String(r.title || ''));
+                              return (
+                                <>
+                                  <h4
+                                    dir={isAr ? 'rtl' : 'auto'}
+                                    lang={isAr ? 'ar' : undefined}
+                                    className={`line-clamp-1 font-semibold text-[var(--color-one-text)] ${
+                                      isAr ? 'font-arabic-book text-right text-sm leading-[1.85]' : 'text-xs'
+                                    }`}
+                                  >
+                                    {r.title}
+                                  </h4>
+                                  <p className="mb-1 text-[11px] text-[var(--color-one-accent)]">{r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}</p>
+                                  <p
+                                    dir={isAr ? 'rtl' : 'auto'}
+                                    lang={isAr ? 'ar' : undefined}
+                                    className={`mb-2.5 line-clamp-2 text-[var(--color-one-text-muted)] ${
+                                      isAr ? 'font-arabic-ui text-right text-xs leading-[1.8]' : 'text-[11px]'
+                                    }`}
+                                  >
+                                    {r.description}
+                                  </p>
+                                </>
+                              );
+                            })()}
                             <div className="flex flex-wrap items-center gap-1.5">
                               {canImport && (
                                 <button type="button" onClick={() => handleIngestBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50">
@@ -1885,39 +1990,81 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             </div>
 
             <div className="md:col-span-2">
-              <p className="mb-1 text-xs font-medium text-[var(--color-one-accent)]">{selectedBook.source}</p>
-              <h1 className="font-serif text-2xl font-bold leading-tight text-[var(--color-one-text)] sm:text-3xl">{selectedBook.title}</h1>
-              <p className="mt-2 text-sm text-[var(--color-one-text-muted)]">{selectedBook.author}</p>
+              {(() => {
+                const detailIsAr = isRtlLanguage(selectedBook.language) || containsArabic(selectedBook.title);
+                return (
+                  <>
+                    <p className="mb-1 text-xs font-medium text-[var(--color-one-accent)]">{selectedBook.source}</p>
+                    <h1
+                      dir={detailIsAr ? 'rtl' : 'auto'}
+                      lang={detailIsAr ? 'ar' : undefined}
+                      className={`font-bold text-[var(--color-one-text)] ${
+                        detailIsAr
+                          ? 'font-arabic-book text-right text-3xl leading-[1.8] sm:text-4xl'
+                          : 'font-serif text-2xl leading-tight sm:text-3xl'
+                      }`}
+                    >
+                      {selectedBook.title}
+                    </h1>
+                    <p
+                      dir={detailIsAr || containsArabic(selectedBook.author) ? 'rtl' : 'auto'}
+                      lang={detailIsAr || containsArabic(selectedBook.author) ? 'ar' : undefined}
+                      className={`mt-2 text-sm text-[var(--color-one-text-muted)] ${
+                        detailIsAr || containsArabic(selectedBook.author) ? 'font-arabic-ui text-right text-base' : ''
+                      }`}
+                    >
+                      {selectedBook.author}
+                    </p>
 
-              <div className="mt-6 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
-                {selectedBook.year && <MetaItem label="出版年份" value={selectedBook.year} />}
-                {selectedBook.publisher && <MetaItem label="出版社" value={selectedBook.publisher} />}
-                {selectedBook.isbn && <MetaItem label="ISBN" value={selectedBook.isbn} />}
-                {selectedBook.language && <MetaItem label="语言" value={selectedBook.language.toUpperCase()} />}
-                {selectedBook.originalLanguage && <MetaItem label="原始语言" value={selectedBook.originalLanguage} />}
-                <MetaItem label="章节" value={`${selectedBook.chapters.length} 章`} />
-              </div>
+                    <div className="mt-6 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
+                      {selectedBook.year && <MetaItem label="出版年份" value={selectedBook.year} />}
+                      {selectedBook.publisher && <MetaItem label="出版社" value={selectedBook.publisher} />}
+                      {selectedBook.isbn && <MetaItem label="ISBN" value={selectedBook.isbn} />}
+                      {selectedBook.language && <MetaItem label="语言" value={selectedBook.language.toUpperCase()} />}
+                      {selectedBook.originalLanguage && <MetaItem label="原始语言" value={selectedBook.originalLanguage} />}
+                      <MetaItem label="章节" value={`${selectedBook.chapters.length} 章`} />
+                    </div>
 
-              {selectedBook.description && (
-                <div className="mt-6">
-                  <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">内容简介</h3>
-                  <p className="text-sm leading-relaxed text-[var(--color-one-text-muted)]">{selectedBook.description}</p>
-                </div>
-              )}
+                    {selectedBook.description && (
+                      <div className="mt-6">
+                        <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">内容简介</h3>
+                        <p
+                          dir={containsArabic(selectedBook.description) ? 'rtl' : 'auto'}
+                          lang={containsArabic(selectedBook.description) ? 'ar' : undefined}
+                          className={`text-sm text-[var(--color-one-text-muted)] ${
+                            containsArabic(selectedBook.description) ? 'font-arabic-book text-right text-base leading-[1.95]' : 'leading-relaxed'
+                          }`}
+                        >
+                          {selectedBook.description}
+                        </p>
+                      </div>
+                    )}
 
-              {selectedBook.chapters.length > 0 && (
-                <div className="mt-6">
-                  <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">目录</h3>
-                  <ol className="space-y-1 text-xs text-[var(--color-one-text-muted)]">
-                    {selectedBook.chapters.slice(0, 8).map((ch, i) => (
-                      <li key={ch.id} className="flex items-center space-x-2">
-                        <span className="font-mono text-[var(--color-one-text-dim)]">{i + 1}.</span>
-                        <span>{ch.title}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              )}
+                    {selectedBook.chapters.length > 0 && (
+                      <div className="mt-6">
+                        <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">目录</h3>
+                        <ol className="space-y-1.5 text-xs text-[var(--color-one-text-muted)]">
+                          {selectedBook.chapters.slice(0, 8).map((ch, i) => {
+                            const chIsAr = containsArabic(ch.title);
+                            return (
+                              <li key={ch.id} className="flex items-baseline gap-2">
+                                <span className="font-mono text-[var(--color-one-text-dim)]">{i + 1}.</span>
+                                <span
+                                  dir={chIsAr ? 'rtl' : 'auto'}
+                                  lang={chIsAr ? 'ar' : undefined}
+                                  className={chIsAr ? 'font-arabic-ui text-sm leading-[1.8]' : ''}
+                                >
+                                  {ch.title}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               <div className="mt-8 flex flex-wrap gap-3">
                 {(selectedBook.sourceUrl || selectedBook.externalReadUrl) && (
@@ -2240,6 +2387,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 // Book card (ONE LIBRARY)
 // ===========================================================================
 function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
+  const isArTitle = isRtlLanguage(book.language) || containsArabic(book.title);
+  const isArAuthor = isArTitle || containsArabic(book.author);
   return (
     <button
       type="button"
@@ -2255,10 +2404,24 @@ function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
         />
       </div>
-      <h3 className="mt-2.5 line-clamp-2 text-[13px] font-medium leading-snug text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)]">
+      <h3
+        dir={isArTitle ? 'rtl' : 'auto'}
+        lang={isArTitle ? 'ar' : undefined}
+        className={`mt-2.5 line-clamp-2 w-full font-medium text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)] ${
+          isArTitle ? 'font-arabic-book text-right text-[15px] leading-[1.85]' : 'text-[13px] leading-snug'
+        }`}
+      >
         {book.title}
       </h3>
-      <p className="mt-0.5 line-clamp-1 text-[11px] text-[var(--color-one-text-muted)]">{book.author}</p>
+      <p
+        dir={isArAuthor ? 'rtl' : 'auto'}
+        lang={isArAuthor ? 'ar' : undefined}
+        className={`mt-0.5 line-clamp-1 w-full text-[var(--color-one-text-muted)] ${
+          isArAuthor ? 'font-arabic-ui text-right text-xs leading-[1.7]' : 'text-[11px]'
+        }`}
+      >
+        {book.author}
+      </p>
     </button>
   );
 }

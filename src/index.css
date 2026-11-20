@@ -131,8 +131,26 @@ html.dark {
   html.dark body {
     background-color: var(--color-one-bg);
   }
-  [dir="rtl"] {
-    font-family: 'Tajawal', 'Amiri', system-ui, -apple-system, sans-serif;
+  [dir="rtl"],
+  [lang="ar"],
+  [lang^="ar-"] {
+    font-family: 'Noto Naskh Arabic', 'Amiri', 'Scheherazade New', 'Geeza Pro', 'Traditional Arabic', serif;
+    letter-spacing: 0 !important;
+    font-feature-settings: "liga" 1, "calt" 1, "mark" 1, "mkmk" 1;
+  }
+  .font-arabic-book {
+    font-family: 'Amiri', 'Noto Naskh Arabic', 'Scheherazade New', 'Geeza Pro', 'Traditional Arabic', serif;
+    letter-spacing: 0 !important;
+    line-height: 1.95;
+    font-feature-settings: "liga" 1, "calt" 1, "mark" 1, "mkmk" 1;
+    unicode-bidi: plaintext;
+  }
+  .font-arabic-ui {
+    font-family: 'Noto Naskh Arabic', 'Amiri', 'Scheherazade New', 'Geeza Pro', 'Traditional Arabic', serif;
+    letter-spacing: 0 !important;
+    line-height: 1.8;
+    font-feature-settings: "liga" 1, "calt" 1, "mark" 1, "mkmk" 1;
+    unicode-bidi: plaintext;
   }
   ::selection {
     background: rgba(36, 120, 100, 0.2);

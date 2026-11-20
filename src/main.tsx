@@ -1,5 +1,13 @@
 import {createRoot} from 'react-dom/client';
 import {registerSW} from 'virtual:pwa-register';
+import '@fontsource/amiri/arabic-400.css';
+import '@fontsource/amiri/arabic-700.css';
+import '@fontsource/noto-naskh-arabic/arabic-400.css';
+import '@fontsource/noto-naskh-arabic/arabic-500.css';
+import '@fontsource/noto-naskh-arabic/arabic-600.css';
+import '@fontsource/noto-naskh-arabic/arabic-700.css';
+import '@fontsource/scheherazade-new/arabic-400.css';
+import '@fontsource/scheherazade-new/arabic-700.css';
 import App from './App.tsx';
 import './index.css';
 import { getApiBase } from './apiBase.ts';

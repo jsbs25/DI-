@@ -189,14 +189,14 @@ const FONT_STACKS: Record<AppleFontId, { label: string; sample: string; family: 
     family: 'Georgia, "Iowan Old Style", "Palatino Linotype", "Songti SC", serif',
   },
   amiri: {
-    label: '典籍纳斯赫',
+    label: 'Amiri 古典阿语',
     sample: 'ع',
-    family: '"Scheherazade New", "Amiri", "Noto Naskh Arabic", "Traditional Arabic", serif',
+    family: '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif',
   },
   naskh: {
     label: 'Naskh 阿语清晰',
     sample: 'ن',
-    family: '"Noto Naskh Arabic", "Amiri", "Geeza Pro", "Segoe UI", sans-serif',
+    family: '"Noto Naskh Arabic", "Amiri", "Scheherazade New", "Geeza Pro", serif',
   },
 };
 
@@ -1727,7 +1727,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         style={{
           fontFamily:
             rtl && prefs.font !== 'amiri' && prefs.font !== 'naskh'
-              ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
+              ? '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif'
               : fontMeta.family,
           fontSize: `${rtl ? Math.max(prefs.fontSize + 4, 22) : prefs.fontSize}px`,
           lineHeight: rtl ? Math.max(prefs.lineHeight, 2.3) : prefs.lineHeight,
@@ -1747,7 +1747,11 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               {isZh ? `第 ${chapterIndex + 1} 章` : `Chapter ${chapterIndex + 1}`}
             </div>
             <h1
-              className="text-2xl sm:text-[26px] font-semibold tracking-tight leading-snug"
+              className={`font-semibold ${
+                rtl || containsArabic(activeChapter.title)
+                  ? 'text-2xl sm:text-[28px] leading-[1.85]'
+                  : 'text-2xl sm:text-[26px] tracking-tight leading-snug'
+              }`}
               style={{ color: theme.ink }}
             >
               {containsArabic(activeChapter.title) ? normalizeArabicProse(activeChapter.title) : activeChapter.title}
@@ -1891,7 +1895,15 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
 
         {/* Center: Clean Book Title */}
         <div className="min-w-0 flex-1 text-center px-2">
-          <div className="truncate text-xs sm:text-[13px] font-semibold tracking-tight">{book.title}</div>
+          <div
+            dir={rtl || containsArabic(book.title) ? 'rtl' : 'auto'}
+            lang={rtl || containsArabic(book.title) ? 'ar' : undefined}
+            className={`truncate font-semibold ${
+              rtl || containsArabic(book.title) ? 'font-arabic-ui text-sm' : 'text-xs sm:text-[13px] tracking-tight'
+            }`}
+          >
+            {book.title}
+          </div>
           <div className="truncate text-[10px]" style={{ color: theme.muted }}>
             {activeChapter.title} · {isZh ? '点任意单词可查词' : 'Tap any word to look up'}
           </div>
@@ -2508,7 +2520,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                 style={{
                   fontFamily:
                     rtl && prefs.font !== 'amiri' && prefs.font !== 'naskh'
-                      ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
+                      ? '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif'
                       : fontMeta.family,
                   fontSize: `${rtl ? Math.max(prefs.fontSize + 4, 22) : prefs.fontSize}px`,
                   lineHeight: rtl ? Math.max(prefs.lineHeight, 2.3) : prefs.lineHeight,
@@ -2570,7 +2582,13 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
                                 ? `第 ${seg.chapterIndex + 1} 章 / 共 ${chapters.length} 章`
                                 : `Chapter ${seg.chapterIndex + 1} of ${chapters.length}`}
                             </div>
-                            <h1 className="mt-1.5 text-2xl sm:text-3xl font-semibold tracking-tight">{seg.chapterTitle}</h1>
+                            <h1
+                              className={`mt-1.5 text-2xl sm:text-3xl font-semibold ${
+                                rtl || containsArabic(seg.chapterTitle) ? 'leading-[1.85]' : 'tracking-tight'
+                              }`}
+                            >
+                              {seg.chapterTitle}
+                            </h1>
                           </header>
                         )}
                         {para ? (

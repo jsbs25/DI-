@@ -113,19 +113,19 @@ export const READER_FONT_FAMILIES: Array<{
     id: 'scheherazade_ar',
     label: '典籍纳斯赫',
     langTag: 'العربية',
-    css: '"Scheherazade New", "Amiri", "Noto Naskh Arabic", "Traditional Arabic", serif',
+    css: '"Amiri", "Scheherazade New", "Noto Naskh Arabic", "Traditional Arabic", serif',
   },
   {
     id: 'amiri_ar',
     label: 'Amiri 古典阿语',
     langTag: 'العربية',
-    css: '"Amiri", "Scheherazade New", "Noto Naskh Arabic", "Traditional Arabic", serif',
+    css: '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif',
   },
   {
     id: 'tajawal_ar',
     label: 'Noto Naskh 清晰',
     langTag: 'العربية',
-    css: '"Noto Naskh Arabic", "Geeza Pro", "Segoe UI", sans-serif',
+    css: '"Noto Naskh Arabic", "Amiri", "Scheherazade New", "Geeza Pro", serif',
   },
   {
     id: 'georgia_en',
