@@ -65,7 +65,8 @@ async function fetchKiloCatalog(): Promise<DiscoveredRawModel[]> {
     const id = String(m?.id || '').trim();
     const inPrice = Number(m?.pricing?.prompt || 0) * 1_000_000;
     const outPrice = Number(m?.pricing?.completion || 0) * 1_000_000;
-    const isFree = id.endsWith(':free') || id.includes('/free') || (inPrice === 0 && outPrice === 0);
+    const isKeylessFree = id.endsWith(':free') || id === 'kilo-auto/free' || id === 'openrouter/free';
+    const isFree = isKeylessFree;
     const mayTrain = Boolean(m?.mayTrainOnYourPrompts ?? isFree);
     const inputMods: string[] = Array.isArray(m?.architecture?.input_modalities) ? m.architecture.input_modalities : [];
     const params: string[] = Array.isArray(m?.supported_parameters) ? m.supported_parameters : [];
@@ -304,7 +305,13 @@ export async function probeAndVerifyEndpoint(endpointId: string, adminUserId: st
   }
 
   // Require API key unless Kilo free anonymous probe
-  if (!provider.hasApiKey && !(provider.id === 'kilo' && endpoint.isFreeTier)) {
+  const isKiloAnonymousFree =
+    provider.id === 'kilo' &&
+    endpoint.isFreeTier &&
+    (endpoint.upstreamModelId.endsWith(':free') ||
+      endpoint.upstreamModelId === 'kilo-auto/free' ||
+      endpoint.upstreamModelId === 'openrouter/free');
+  if (!provider.hasApiKey && !isKiloAnonymousFree) {
     return {
       ok: false,
       endpoint,
@@ -346,6 +353,11 @@ export async function probeAndVerifyEndpoint(endpointId: string, adminUserId: st
         errorMessage: chunk.error.rawMessage,
         markOffline: chunk.error.category === 'model_deprecated',
       });
+      if (chunk.error.category === 'model_deprecated' && endpoint.approvalStatus !== 'approved') {
+        oneAiDb.updateEndpointApproval(endpointId, 'retired', adminUserId, false);
+      } else if (chunk.error.category === 'auth_invalid' && endpoint.approvalStatus === 'discovered') {
+        oneAiDb.updateEndpointApproval(endpointId, 'rejected', adminUserId, false);
+      }
       return {
         ok: false,
         endpoint: oneAiDb.getEndpoint(endpointId),
@@ -375,7 +387,7 @@ export async function probeAndVerifyEndpoint(endpointId: string, adminUserId: st
   };
 }
 
-const EXCLUDED_AUTO_PROBE_RE = /tts|image|transcribe|lyria|banana|robotics|computer-use|deep-research|embedding|whisper|moderation|realtime|audio-preview/i;
+const EXCLUDED_AUTO_PROBE_RE = /tts|image|transcribe|lyria|banana|robotics|computer-use|deep-research|embedding|whisper|moderation|realtime|audio-preview|antigravity|customtools|-latest$/i;
 
 /**
  * Automatically discover, run real live HTTP probes, and promote working endpoints
@@ -402,7 +414,9 @@ export async function autoActivateReadyEndpoints(
   };
 
   let alreadyApproved = 0;
+  const approvedCountByProvider = new Map<string, number>();
   const candidatesByProvider = new Map<string, ModelEndpointRecord[]>();
+  const now = Date.now();
 
   for (const ep of allEndpoints) {
     if (targetProviderId && ep.providerId !== targetProviderId) continue;
@@ -410,14 +424,22 @@ export async function autoActivateReadyEndpoints(
 
     const prov = getProv(ep.providerId);
     if (!prov || prov.status !== 'active') continue;
-    const isUsable = prov.hasApiKey || (prov.id === 'kilo' && ep.isFreeTier);
+    const isKiloKeylessSlug =
+      ep.upstreamModelId.endsWith(':free') ||
+      ep.upstreamModelId === 'kilo-auto/free' ||
+      ep.upstreamModelId === 'openrouter/free';
+    const isUsable = prov.hasApiKey || (prov.id === 'kilo' && ep.isFreeTier && isKiloKeylessSlug);
     if (!isUsable) continue;
 
     if (ep.approvalStatus === 'approved') {
       alreadyApproved += 1;
+      approvedCountByProvider.set(ep.providerId, (approvedCountByProvider.get(ep.providerId) || 0) + 1);
       continue;
     }
 
+    // Skip endpoints that are offline, in cooldown, or already failed permanently
+    if (ep.healthStatus === 'offline' || ep.cooldownUntil > now) continue;
+    if (ep.lastErrorCategory === 'model_deprecated' || ep.lastErrorCategory === 'auth_invalid') continue;
     if (EXCLUDED_AUTO_PROBE_RE.test(ep.upstreamModelId)) continue;
     // On openrouter without paid preference, focus on :free models during auto-promotion
     if (prov.id === 'openrouter' && !ep.isFreeTier && prov.billingMode === 'free_only') continue;
@@ -429,6 +451,10 @@ export async function autoActivateReadyEndpoints(
 
   const probeQueue: ModelEndpointRecord[] = [];
   for (const [pid, list] of candidatesByProvider.entries()) {
+    const existingApproved = approvedCountByProvider.get(pid) || 0;
+    // During automatic background startup runs, avoid churning rate limits if provider already has plenty of live engines
+    if (!targetProviderId && existingApproved >= 8) continue;
+
     list.sort((a, b) => {
       if (a.isFreeTier !== b.isFreeTier) return a.isFreeTier ? -1 : 1;
       const aFlagship = /(flash|pro|hydrogen|nemotron|ernie|deepseek|qwen|llama-3\.3|glm-4-flash|north-mini-code|auto\/free)/i.test(a.upstreamModelId) ? 1 : 0;
@@ -436,41 +462,41 @@ export async function autoActivateReadyEndpoints(
       if (aFlagship !== bFlagship) return bFlagship - aFlagship;
       return b.qualityScore - a.qualityScore;
     });
-    const cap = pid === 'kilo' ? 8 : 5;
+    const cap = targetProviderId ? 5 : existingApproved >= 4 ? 2 : 4;
     probeQueue.push(...list.slice(0, cap));
   }
 
   let probed = 0;
   let activated = 0;
   let failed = 0;
+  const rateLimitedProviders = new Set<string>();
   const details: Array<{ endpointId: string; providerId: string; modelId: string; ok: boolean; ttftMs: number; error?: string }> = [];
 
-  const concurrency = 3;
-  for (let i = 0; i < probeQueue.length; i += concurrency) {
-    const batch = probeQueue.slice(i, i + concurrency);
-    const results = await Promise.all(
-      batch.map(async (ep) => {
-        const res = await probeAndVerifyEndpoint(ep.endpointId, adminUserId);
-        return { ep, res };
-      })
-    );
-    for (const { ep, res } of results) {
-      probed += 1;
-      if (res.ok) {
-        oneAiDb.updateEndpointApproval(ep.endpointId, 'approved', adminUserId, true);
-        activated += 1;
-      } else {
-        failed += 1;
+  for (const ep of probeQueue) {
+    if (rateLimitedProviders.has(ep.providerId)) continue;
+
+    const res = await probeAndVerifyEndpoint(ep.endpointId, adminUserId);
+    probed += 1;
+    if (res.ok) {
+      oneAiDb.updateEndpointApproval(ep.endpointId, 'approved', adminUserId, true);
+      activated += 1;
+    } else {
+      failed += 1;
+      if (res.error && /rate_limited|quota_exhausted/i.test(res.error)) {
+        rateLimitedProviders.add(ep.providerId);
       }
-      details.push({
-        endpointId: ep.endpointId,
-        providerId: ep.providerId,
-        modelId: ep.upstreamModelId,
-        ok: res.ok,
-        ttftMs: res.ttftMs,
-        error: res.error,
-      });
     }
+    details.push({
+      endpointId: ep.endpointId,
+      providerId: ep.providerId,
+      modelId: ep.upstreamModelId,
+      ok: res.ok,
+      ttftMs: res.ttftMs,
+      error: res.error,
+    });
+
+    // Brief pacing delay prevents burst 429 rate-limits on free tiers
+    await new Promise((r) => setTimeout(r, 300));
   }
 
   return { probed, activated, alreadyApproved, failed, details };

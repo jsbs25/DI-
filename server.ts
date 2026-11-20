@@ -6784,7 +6784,7 @@ async function startServer() {
       try {
         const res = await autoActivateReadyEndpoints(undefined, 'system_boot');
         console.log(
-          `[ONE AI] Auto-activation complete: probed=${res.probed}, activated=${res.activated}, alreadyApproved=${res.alreadyApproved}, failed=${res.failed}`
+          `[ONE AI] Auto-activation complete: probed=${res.probed}, activated=${res.activated}, alreadyApproved=${res.alreadyApproved}, skipped=${res.failed}`
         );
       } catch (err) {
         console.warn('[ONE AI] Auto-activation background error:', err);
