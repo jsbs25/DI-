@@ -41,6 +41,7 @@ import {
   READER_BG_PRESETS,
   READER_FONT_FAMILIES,
   TEXT_COLOR_PRESETS,
+  isArabicReaderFont,
   loadBookProgress,
   loadReaderPreferences,
   resolveColumnMaxWidth,
@@ -159,11 +160,14 @@ const InlineOriginalPdfPageCanvas: React.FC<{
   pdf: PDFDocumentProxy;
   pageNumber: number;
   isDarkTheme: boolean;
-}> = ({ pdf, pageNumber, isDarkTheme }) => {
+  totalPages?: number;
+  onNextPage?: () => void;
+}> = ({ pdf, pageNumber, isDarkTheme, totalPages, onNextPage }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [rendering, setRendering] = useState(true);
   const [renderFailed, setRenderFailed] = useState(false);
+  const [isBlankPage, setIsBlankPage] = useState(false);
   const [retrySeq, setRetrySeq] = useState(0);
 
   useEffect(() => {
@@ -171,6 +175,7 @@ const InlineOriginalPdfPageCanvas: React.FC<{
     let renderTask: RenderTask | undefined;
     setRendering(true);
     setRenderFailed(false);
+    setIsBlankPage(false);
 
     pdf
       .getPage(pageNumber)
@@ -183,7 +188,7 @@ const InlineOriginalPdfPageCanvas: React.FC<{
         // Cap DPR to 2.0 so tall scanned pages stay well within iOS Safari's canvas pixel memory limit
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d', { alpha: false });
+        const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
         if (!ctx) return;
 
         canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
@@ -192,13 +197,39 @@ const InlineOriginalPdfPageCanvas: React.FC<{
         canvas.style.height = 'auto';
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = '#FCF9F2';
+        ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.restore();
         const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
         renderTask = page.render({ canvas, canvasContext: ctx, viewport, transform });
         return renderTask.promise.then(() => {
-          if (!cancelled) setRendering(false);
+          if (cancelled) return;
+          // Detect blank flyleaf pages (common on Page 1 of archival multi-hundred-page Arabic PDFs)
+          try {
+            const w = canvas.width;
+            const h = canvas.height;
+            const stepX = Math.max(1, Math.floor(w / 24));
+            const stepY = Math.max(1, Math.floor(h / 32));
+            let nonWhite = 0;
+            let sampled = 0;
+            const imgData = ctx.getImageData(0, 0, w, h).data;
+            for (let y = stepY; y < h - stepY; y += stepY) {
+              for (let x = stepX; x < w - stepX; x += stepX) {
+                const idx = (y * w + x) * 4;
+                const r = imgData[idx];
+                const g = imgData[idx + 1];
+                const b = imgData[idx + 2];
+                sampled++;
+                if (r < 238 || g < 238 || b < 238) nonWhite++;
+              }
+            }
+            if (sampled > 40 && nonWhite / sampled < 0.004) {
+              setIsBlankPage(true);
+            }
+          } catch {
+            // ignore security/canvas sampling errors
+          }
+          setRendering(false);
         });
       })
       .catch((err) => {
@@ -215,7 +246,7 @@ const InlineOriginalPdfPageCanvas: React.FC<{
   }, [pdf, pageNumber, retrySeq]);
 
   return (
-    <div ref={containerRef} className="relative mx-auto w-full min-h-[260px] overflow-hidden rounded-lg">
+    <div ref={containerRef} className="relative mx-auto w-full min-h-[220px] overflow-hidden rounded-lg">
       {rendering && (
         <div className="flex items-center justify-center py-20 text-xs opacity-65">
           <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -234,16 +265,34 @@ const InlineOriginalPdfPageCanvas: React.FC<{
           </button>
         </div>
       )}
+      {isBlankPage && !rendering && !renderFailed && (
+        <div className="flex flex-col items-center justify-center gap-3 py-16 px-4 text-center text-xs opacity-80">
+          <p className="font-medium">
+            原书第 {pageNumber} 页为空白扉页{totalPages ? `（全书共 ${totalPages} 页）` : ''}
+          </p>
+          {onNextPage && (
+            <button
+              type="button"
+              onClick={onNextPage}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#247864] px-3.5 py-1.5 text-xs font-medium text-white cursor-pointer hover:opacity-90"
+            >
+              <span>翻至下一页正文</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
       <canvas
         ref={canvasRef}
-        className={rendering || renderFailed ? 'hidden' : 'block w-full h-auto rounded-md'}
+        className={rendering || renderFailed || isBlankPage ? 'hidden' : 'block w-full h-auto rounded-md'}
         style={
           isDarkTheme
             ? {
                 filter: 'invert(0.9) hue-rotate(180deg) contrast(1.06)',
               }
             : {
-                filter: 'sepia(0.08) contrast(1.04)',
+                mixBlendMode: 'multiply',
+                filter: 'contrast(1.05)',
               }
         }
       />
@@ -1337,11 +1386,12 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     >
       {/* Minimal Apple Books-Grade Top Navigation Bar */}
       <header
-        className="shrink-0 z-20 flex items-center justify-between gap-2 px-3 sm:px-5 h-13 border-b backdrop-blur-xl transition-colors"
+        className="shrink-0 z-20 flex items-center justify-between gap-2 px-3 sm:px-5 min-h-[52px] border-b backdrop-blur-xl transition-colors"
         style={{
           backgroundColor: palette.isDark ? 'rgba(18,21,27,0.9)' : 'rgba(255,255,255,0.88)',
           borderColor: palette.border,
-          paddingTop: 'env(safe-area-inset-top)',
+          paddingTop: 'max(0.4rem, env(safe-area-inset-top))',
+          paddingBottom: '0.4rem',
         }}
       >
         <div className="flex items-center gap-1.5 min-w-0">
@@ -1756,27 +1806,54 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
               </div>
             </div>
 
-            {/* Font Family (Chinese, Arabic, English) */}
-            <div>
-              <div className="text-[11px] mb-1.5" style={{ color: palette.muted }}>{isZh ? '阅读字体（中 / 阿 / 英）' : 'Font Family'}</div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {READER_FONT_FAMILIES.map((f) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => updatePrefs({ fontFamily: f.id })}
-                    className="flex items-center justify-between rounded-xl border px-2.5 py-1.5 text-left text-xs transition cursor-pointer"
-                    style={{
-                      fontFamily: f.css,
-                      borderColor: prefs.fontFamily === f.id ? '#247864' : palette.border,
-                      backgroundColor: prefs.fontFamily === f.id ? 'rgba(36,120,100,0.14)' : palette.surface,
-                    }}
-                  >
-                    <span className="truncate">{f.label}</span>
-                    <span className="text-[10px] opacity-60 shrink-0">{f.langTag}</span>
-                  </button>
-                ))}
-              </div>
+            {/* Font Family — Cleanly Grouped by Script (Chinese / Arabic / English) */}
+            <div className="space-y-3">
+              {([
+                { script: 'zh' as const, title: isZh ? '中文字体' : 'Chinese' },
+                { script: 'ar' as const, title: isZh ? '阿拉伯语字体 · العربية' : 'Arabic · العربية' },
+                { script: 'en' as const, title: isZh ? '英文字体' : 'English' },
+              ]).map((group) => (
+                <div key={group.script}>
+                  <div className="text-[11px] font-medium mb-1.5" style={{ color: palette.muted }}>
+                    {group.title}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {READER_FONT_FAMILIES.filter((f) => f.script === group.script).map((f) => {
+                      const active = prefs.fontFamily === f.id;
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => updatePrefs({ fontFamily: f.id })}
+                          className="flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-left text-xs transition cursor-pointer"
+                          style={{
+                            borderColor: active ? '#247864' : palette.border,
+                            backgroundColor: active ? 'rgba(36,120,100,0.14)' : palette.surface,
+                            color: active ? '#247864' : palette.ink,
+                          }}
+                        >
+                          <span className="truncate font-sans text-[11px]">{f.label}</span>
+                          <span
+                            dir={group.script === 'ar' ? 'rtl' : 'ltr'}
+                            lang={group.script === 'ar' ? 'ar' : undefined}
+                            className="shrink-0 text-sm leading-none"
+                            style={{ fontFamily: f.css }}
+                          >
+                            {f.sample}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {extractedPages[pageNumber]?.isLikelyScanned && (
+                <p className="text-[11px] leading-relaxed" style={{ color: palette.muted }}>
+                  {isZh
+                    ? '当前页为原版扫描图直呈；点击页面下方「整本转电子版」后即可自由切换阿语与中文字体。'
+                    : 'Current page is a scanned image; convert to full ebook to customize typography.'}
+                </p>
+              )}
             </div>
 
             {/* Line Height & Paragraph Spacing */}
@@ -1989,10 +2066,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                   const ep = extractedPages[pNum];
                   const isOcrBusy = ocrLoadingPage === pNum;
                   const isArabicPage = ep?.dir === 'rtl';
-                  const userPickedArabicFont =
-                    prefs.fontFamily === 'scheherazade_ar' ||
-                    prefs.fontFamily === 'amiri_ar' ||
-                    prefs.fontFamily === 'tajawal_ar';
+                  const userPickedArabicFont = isArabicReaderFont(prefs.fontFamily);
                   const effectivePageFont =
                     isArabicPage && !userPickedArabicFont
                       ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
@@ -2097,6 +2171,8 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                           pdf={pdfProxy}
                           pageNumber={pNum}
                           isDarkTheme={palette.isDark}
+                          totalPages={pageCount}
+                          onNextPage={pNum < pageCount ? () => jumpToPage(pNum + 1) : undefined}
                         />
                         <div
                           className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t text-[11px]"

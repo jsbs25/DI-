@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { ParadiseQualityProfile, ProceduralTextureSet } from './paradiseQuality.ts';
-import { gardenPathFactor, terrainHeightAt } from './paradiseTerrain.ts';
+import { BRIDGE_CONFIG, gardenPathFactor, terrainHeightAt } from './paradiseTerrain.ts';
 
 export const PAVILION_WORLD_POS = new THREE.Vector3(12.8, terrainHeightAt(12.8, -7.8) + 0.64, -7.8);
 export const REST_HOUSE_WORLD_POS = new THREE.Vector3(-11.4, terrainHeightAt(-11.4, 5.8) + 0.32, 5.8);
@@ -659,33 +659,124 @@ export function createParadiseArchitecture(
   group.add(pav);
 
   // =========================================================================
-  // 2. Arched Timber & Granite Footbridge (拱桥) across the Stream at (-6.4, -8.4)
+  // 2. Realistic Bank-to-Bank Arched Timber & Granite Bridge (连岸石基木拱桥)
+  // Spans strictly perpendicular across the stream, solidly anchored into BOTH banks
   // =========================================================================
   const bridge = new THREE.Group();
-  const brX = -6.4;
-  const brZ = -8.4;
-  bridge.position.set(brX, 0.18, brZ);
-  bridge.rotation.y = 0.24;
+  bridge.position.set(BRIDGE_CONFIG.centerX, BRIDGE_CONFIG.deckBaseY, BRIDGE_CONFIG.centerZ);
+  bridge.rotation.y = BRIDGE_CONFIG.rotY;
 
-  const span = 7.6;
-  const plankCount = 22;
-  const plankGeo = trackGeo(new THREE.BoxGeometry(2.24, 0.085, 0.31));
-  const postGeo = trackGeo(new THREE.CylinderGeometry(0.055, 0.072, 0.94, 10));
-  const capGeo = trackGeo(new THREE.SphereGeometry(0.085, 10, 8));
+  const span = BRIDGE_CONFIG.span; // 9.4m clear span from bank A to bank B
+  const halfSpan = span * 0.5;
+  const archRise = BRIDGE_CONFIG.archRise; // graceful 1.02m rise over stream
+  const bridgeWidth = 2.42;
+  const railOffset = 1.08;
 
-  for (const endZ of [-span * 0.52, span * 0.52]) {
-    const abutment = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.75, 1.35, 1.25)), graniteMat);
-    abutment.position.set(0, -0.35, endZ);
+  const evalArchY = (t: number) => Math.cos(t * Math.PI) * archRise; // t in [-0.5, 0.5]
+  const evalArchSlope = (t: number) => -Math.sin(t * Math.PI) * ((archRise * Math.PI) / span);
+
+  // 2a. Deep Ashlar Masonry Abutments + Flared Wing-Walls + Granite Approach Steps on BOTH banks
+  const abutmentMainGeo = trackGeo(new THREE.BoxGeometry(bridgeWidth + 0.68, 2.35, 1.85));
+  const copingGeo = trackGeo(new THREE.BoxGeometry(bridgeWidth + 0.86, 0.16, 1.98));
+  const wingWallGeo = trackGeo(new THREE.BoxGeometry(0.42, 1.95, 1.75));
+  const approachStepGeo = trackGeo(new THREE.BoxGeometry(bridgeWidth + 0.14, 0.16, 0.44));
+  const entryCurbGeo = trackGeo(new THREE.BoxGeometry(0.24, 0.52, 1.65));
+
+  for (const dir of [-1, 1]) {
+    // Solid stone masonry pier anchored deep into the earth/riverbank (-2.2m below deck)
+    const abutment = new THREE.Mesh(abutmentMainGeo, graniteMat);
+    abutment.position.set(0, -1.16, dir * (halfSpan + 0.58));
     abutment.castShadow = quality.enableShadows;
     abutment.receiveShadow = quality.enableShadows;
     bridge.add(abutment);
+
+    // Dressed stone top coping cap slab flush with bank approach
+    const coping = new THREE.Mesh(copingGeo, plinthStoneMat);
+    coping.position.set(0, 0.04, dir * (halfSpan + 0.62));
+    coping.castShadow = quality.enableShadows;
+    coping.receiveShadow = quality.enableShadows;
+    bridge.add(coping);
+
+    // Flared left & right stone retaining wing-walls gripping into the sloping riverbank earth
+    for (const side of [-1, 1]) {
+      const wing = new THREE.Mesh(wingWallGeo, graniteMat);
+      wing.position.set(side * (bridgeWidth * 0.5 + 0.48), -0.84, dir * (halfSpan + 0.92));
+      wing.rotation.y = side * dir * -0.44;
+      wing.castShadow = quality.enableShadows;
+      wing.receiveShadow = quality.enableShadows;
+      bridge.add(wing);
+
+      // Low granite approach entry curb flanking the steps
+      const curb = new THREE.Mesh(entryCurbGeo, plinthStoneMat);
+      curb.position.set(side * (bridgeWidth * 0.5 + 0.12), 0.12, dir * (halfSpan + 1.38));
+      curb.rotation.x = dir * 0.18;
+      curb.castShadow = quality.enableShadows;
+      curb.receiveShadow = quality.enableShadows;
+      bridge.add(curb);
+    }
+
+    // 3 Wide carved granite approach steps seamlessly bridging abutment down onto garden footpath
+    for (let s = 0; s < 3; s++) {
+      const step = new THREE.Mesh(approachStepGeo, plinthStoneMat);
+      step.position.set(0, -0.02 - s * 0.12, dir * (halfSpan + 1.15 + s * 0.42));
+      step.receiveShadow = quality.enableShadows;
+      bridge.add(step);
+    }
   }
 
+  // 2b. Twin Heavy Curved Arch Ribs + Center Keel Beam + Cross Joists supporting the deck
+  const crossJoistGeo = trackGeo(new THREE.BoxGeometry(bridgeWidth + 0.08, 0.14, 0.14));
+  for (const xBeam of [-0.94, 0.0, 0.94]) {
+    const ribPts: THREE.Vector3[] = [];
+    for (let k = 0; k <= 26; k++) {
+      const t = k / 26 - 0.5;
+      const z = t * (span + 0.9);
+      const tClamped = Math.max(-0.5, Math.min(0.5, z / span));
+      const y = evalArchY(tClamped) - (xBeam === 0 ? 0.18 : 0.16);
+      ribPts.push(new THREE.Vector3(xBeam, y, z));
+    }
+    const ribGeo = trackGeo(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(ribPts), 28, xBeam === 0 ? 0.105 : 0.115, 8, false));
+    const rib = new THREE.Mesh(ribGeo, charredCedarMat);
+    rib.castShadow = quality.enableShadows;
+    rib.receiveShadow = quality.enableShadows;
+    bridge.add(rib);
+  }
+
+  // Structural lower diagonal timber struts bracing arch ribs into stone abutments
+  const braceGeo = trackGeo(new THREE.BoxGeometry(0.14, 0.16, 1.95));
+  for (const dir of [-1, 1]) {
+    for (const side of [-0.92, 0.92]) {
+      const brace = new THREE.Mesh(braceGeo, charredCedarMat);
+      brace.position.set(side, -0.26, dir * (halfSpan - 0.72));
+      brace.rotation.x = dir * -0.44;
+      brace.castShadow = quality.enableShadows;
+      bridge.add(brace);
+    }
+  }
+
+  // 2c. 28 Individual Weathered Cedar Deck Planks + Closely Spaced Balusters + 6 Carved Newel Posts
+  const plankCount = 28;
+  const plankGeo = trackGeo(new THREE.BoxGeometry(bridgeWidth, 0.095, 0.315));
+  const postGeo = trackGeo(new THREE.BoxGeometry(0.135, 1.04, 0.135));
+  const postBaseGeo = trackGeo(new THREE.BoxGeometry(0.18, 0.12, 0.18));
+  const balusterGeo = trackGeo(new THREE.BoxGeometry(0.052, 0.74, 0.052));
+  const giboshiProfile = [
+    new THREE.Vector2(0.0, 0.0),
+    new THREE.Vector2(0.088, 0.0),
+    new THREE.Vector2(0.082, 0.04),
+    new THREE.Vector2(0.055, 0.07),
+    new THREE.Vector2(0.082, 0.13),
+    new THREE.Vector2(0.048, 0.19),
+    new THREE.Vector2(0.0, 0.24),
+  ];
+  const giboshiGeo = trackGeo(new THREE.LatheGeometry(giboshiProfile, 12));
+
+  const newelIndices = new Set([0, 6, 13, 14, 21, plankCount - 1]);
   for (let i = 0; i < plankCount; i++) {
     const t = i / (plankCount - 1) - 0.5;
     const zPos = t * span;
-    const archY = Math.cos(t * Math.PI) * 0.96;
-    const slope = -Math.sin(t * Math.PI) * ((0.96 * Math.PI) / span);
+    const archY = evalArchY(t);
+    const slope = evalArchSlope(t);
 
     const plank = new THREE.Mesh(plankGeo, cedarDeckMat);
     plank.position.set(0, archY, zPos);
@@ -694,43 +785,68 @@ export function createParadiseArchitecture(
     plank.receiveShadow = quality.enableShadows;
     bridge.add(plank);
 
-    if (i === 0 || i === 5 || i === 10 || i === 16 || i === plankCount - 1) {
-      for (const side of [-1.02, 1.02]) {
+    if (i % 3 === 1) {
+      const joist = new THREE.Mesh(crossJoistGeo, charredCedarMat);
+      joist.position.set(0, archY - 0.12, zPos);
+      joist.rotation.x = -slope;
+      bridge.add(joist);
+    }
+
+    if (newelIndices.has(i) && i !== 14) {
+      for (const side of [-railOffset, railOffset]) {
+        const pBase = new THREE.Mesh(postBaseGeo, plinthStoneMat);
+        pBase.position.set(side, archY + 0.06, zPos);
+        bridge.add(pBase);
+
         const post = new THREE.Mesh(postGeo, rosewoodMat);
-        post.position.set(side, archY + 0.45, zPos);
+        post.position.set(side, archY + 0.52, zPos);
         post.castShadow = quality.enableShadows;
         bridge.add(post);
 
-        const cap = new THREE.Mesh(capGeo, bronzeMat);
-        cap.position.set(side, archY + 0.94, zPos);
+        const cap = new THREE.Mesh(giboshiGeo, bronzeMat);
+        cap.position.set(side, archY + 1.03, zPos);
         bridge.add(cap);
+      }
+    } else if (i % 2 === 0 && i > 0 && i < plankCount - 1) {
+      for (const side of [-railOffset, railOffset]) {
+        const bal = new THREE.Mesh(balusterGeo, cedarDeckMat);
+        bal.position.set(side, archY + 0.44, zPos);
+        bal.castShadow = quality.enableShadows;
+        bridge.add(bal);
       }
     }
   }
 
-  for (const side of [-1.02, 1.02]) {
-    const railPts: THREE.Vector3[] = [];
-    const archPts: THREE.Vector3[] = [];
-    for (let k = 0; k <= 20; k++) {
-      const t = k / 20 - 0.5;
-      const z = t * span;
-      const y = Math.cos(t * Math.PI) * 0.96;
-      railPts.push(new THREE.Vector3(side, y + 0.84, z));
-      archPts.push(new THREE.Vector3(side * 0.9, y - 0.14, z));
+  // 2d. Continuous Double Curved Timber Handrails (top + mid + kickboard) flaring onto both abutments
+  for (const side of [-railOffset, railOffset]) {
+    const topRailPts: THREE.Vector3[] = [];
+    const midRailPts: THREE.Vector3[] = [];
+    const curbRailPts: THREE.Vector3[] = [];
+    for (let k = 0; k <= 26; k++) {
+      const t = k / 26 - 0.5;
+      const z = t * (span + 0.45);
+      const tClamped = Math.max(-0.5, Math.min(0.5, z / span));
+      const y = evalArchY(tClamped);
+      topRailPts.push(new THREE.Vector3(side, y + 0.91, z));
+      midRailPts.push(new THREE.Vector3(side, y + 0.52, z));
+      curbRailPts.push(new THREE.Vector3(side * 0.96, y + 0.09, z));
     }
-    const railGeo = trackGeo(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(railPts), 24, 0.044, 8, false));
-    bridge.add(new THREE.Mesh(railGeo, rosewoodMat));
+    const topGeo = trackGeo(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(topRailPts), 28, 0.056, 8, false));
+    const topMesh = new THREE.Mesh(topGeo, rosewoodMat);
+    topMesh.castShadow = quality.enableShadows;
+    bridge.add(topMesh);
 
-    const archBeamGeo = trackGeo(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(archPts), 24, 0.095, 8, false));
-    const archBeam = new THREE.Mesh(archBeamGeo, rosewoodMat);
-    archBeam.castShadow = quality.enableShadows;
-    bridge.add(archBeam);
+    const midGeo = trackGeo(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(midRailPts), 28, 0.036, 8, false));
+    bridge.add(new THREE.Mesh(midGeo, rosewoodMat));
+
+    const curbGeo = trackGeo(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(curbRailPts), 28, 0.048, 6, false));
+    bridge.add(new THREE.Mesh(curbGeo, charredCedarMat));
   }
 
   group.add(bridge);
 
   // =========================================================================
-  // 3. Carved Traditional Granite Garden Lanterns (石灯笼) along Path
+  // 3. Carved Traditional Granite Garden Lanterns (石灯笼) framing Bridge & Path
   // =========================================================================
   const buildStoneLantern = (lx: number, lz: number) => {
     const lg = new THREE.Group();
@@ -766,7 +882,15 @@ export function createParadiseArchitecture(
     group.add(lg);
   };
 
-  buildStoneLantern(-4.2, -4.1);
+  // Place warm stone lanterns flanking both ends of the bridge and the pavilion approach
+  buildStoneLantern(
+    BRIDGE_CONFIG.bankAX + BRIDGE_CONFIG.axisZ * 2.1 - BRIDGE_CONFIG.axisX * 0.9,
+    BRIDGE_CONFIG.bankAZ - BRIDGE_CONFIG.axisX * 2.1 - BRIDGE_CONFIG.axisZ * 0.9
+  );
+  buildStoneLantern(
+    BRIDGE_CONFIG.bankBX - BRIDGE_CONFIG.axisZ * 2.0 + BRIDGE_CONFIG.axisX * 0.9,
+    BRIDGE_CONFIG.bankBZ + BRIDGE_CONFIG.axisX * 2.0 + BRIDGE_CONFIG.axisZ * 0.9
+  );
   buildStoneLantern(8.8, -8.2);
 
   // =========================================================================

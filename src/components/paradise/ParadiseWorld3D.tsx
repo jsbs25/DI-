@@ -25,7 +25,7 @@ import {
   type TimePreset,
   type WeatherKind,
 } from './paradiseEnvironment.ts';
-import { createParadiseTerrain, terrainHeightAt } from './paradiseTerrain.ts';
+import { BRIDGE_CONFIG, createParadiseTerrain, terrainHeightAt } from './paradiseTerrain.ts';
 import { createParadiseArchitecture } from './paradiseArchitecture.ts';
 import { createParadiseFlora } from './paradiseFlora.ts';
 import { createParadiseFauna } from './paradiseFauna.ts';
@@ -48,7 +48,13 @@ interface CameraPreset {
 
 const CAMERA_PRESETS: CameraPreset[] = [
   { id: 'overlook', zh: '全景', en: 'Overlook', pos: [-4.5, 8.2, 23.5], target: [2.5, 1.8, -2.5] },
-  { id: 'bridge', zh: '溪桥', en: 'Bridge', pos: [-2.2, 4.2, 5.8], target: [-6.4, 1.3, -8.4] },
+  {
+    id: 'bridge',
+    zh: '溪桥',
+    en: 'Bridge',
+    pos: [BRIDGE_CONFIG.centerX + 5.8, 3.9, BRIDGE_CONFIG.centerZ + 11.4],
+    target: [BRIDGE_CONFIG.centerX, 1.25, BRIDGE_CONFIG.centerZ],
+  },
   { id: 'blossoms', zh: '银杏樱林', en: 'Ginkgo & Sakura', pos: [-11.2, 3.8, 15.2], target: [3.2, 2.2, 1.2] },
   { id: 'pavilion', zh: '亭台', en: 'Pavilion', pos: [3.2, 4.2, 5.2], target: [12.8, 2.6, -7.8] },
 ];
@@ -166,6 +172,30 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // Sync browser status-bar theme-color & document backdrop while 3D Garden is active
+  // so iPhone / iPad top notch safe-area matches the deep sky and NEVER flashes white glare.
+  const isGardenDayTheme = agentSnap.gardenDaylight > 0.44;
+  useEffect(() => {
+    const skyColor = isGardenDayTheme ? '#1e4f94' : '#091322';
+    const metaTags = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'));
+    const prevMetaValues = metaTags.map((m) => m.getAttribute('content'));
+    metaTags.forEach((m) => m.setAttribute('content', skyColor));
+
+    const prevHtmlBg = document.documentElement.style.backgroundColor;
+    const prevBodyBg = document.body.style.backgroundColor;
+    document.documentElement.style.backgroundColor = skyColor;
+    document.body.style.backgroundColor = skyColor;
+
+    return () => {
+      metaTags.forEach((m, idx) => {
+        const orig = prevMetaValues[idx];
+        if (orig !== null) m.setAttribute('content', orig);
+      });
+      document.documentElement.style.backgroundColor = prevHtmlBg;
+      document.body.style.backgroundColor = prevBodyBg;
+    };
+  }, [isGardenDayTheme]);
 
   // Real-time external weather & standard location fetcher (GPS -> saved -> IP -> IANA timezone)
   const fetchLiveWeather = async (useGeoPrompt = false, customCity?: string) => {
@@ -584,9 +614,14 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     scene.add(weatherFX.group);
 
     // 4. Volumetric God-Rays + Depth-Aware DOF + Subtle Bloom Post-Processing
-    // Always create on hardware GL for clarity pass (crisp detail on mobile/tablet even without bloom/rays)
+    // Skip HalfFloat EffectComposer on touch devices (phones/tablets) & when all post FX are off:
+    // direct MSAA rendering eliminates mobile Safari/iPadOS HalfFloat FBO white glare at the top sky!
     let postPipeline: ParadisePostPipeline | null = null;
-    if (!quality.isSoftwareGl) {
+    if (
+      !quality.isSoftwareGl &&
+      !quality.isTouch &&
+      (quality.enableBloom || quality.enableGodRays || dynDofEnabled)
+    ) {
       postPipeline = createParadisePostPipeline(
         renderer,
         scene,
@@ -1205,9 +1240,10 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const currentClockLabel = formatClockTime(timeOfDay);
   const activeWeatherMeta = WEATHER_OPTIONS.find((w) => w.id === activeWeather) || WEATHER_OPTIONS[0];
   const isDayUi = agentSnap.gardenDaylight > 0.44;
+  // Glare-free natural stone/obsidian surfaces (no backdrop-blur or bright white rings over WebGL)
   const dockShellCls = isDayUi
-    ? 'border-white/35 sm:border-white/55 bg-[#f7f3eb]/62 sm:bg-[#f7f3eb]/72 text-[#223029] shadow-[0_4px_12px_rgba(24,36,28,0.08)] sm:shadow-[0_10px_28px_rgba(24,36,28,0.14)]'
-    : 'border-white/10 sm:border-white/14 bg-[#141d29]/68 sm:bg-[#141d29]/64 text-[#f2eee6] shadow-[0_6px_14px_rgba(4,8,14,0.18)] sm:shadow-[0_12px_32px_rgba(4,8,14,0.34)]';
+    ? 'border-[#1d2d25]/14 bg-[#f3eee4]/92 text-[#1d2b24] shadow-[0_6px_18px_rgba(16,28,22,0.14)]'
+    : 'border-white/12 bg-[#0f1722]/88 text-[#f2eee6] shadow-[0_8px_22px_rgba(4,8,14,0.34)]';
   const dockBorderCls = isDayUi ? 'border-black/10' : 'border-white/10';
   const dockDividerCls = isDayUi ? 'divide-black/10' : 'divide-white/12';
   const dockPillCls = isDayUi
@@ -1290,7 +1326,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       <div
         className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.4rem+env(safe-area-inset-top))] sm:top-[calc(3.25rem+env(safe-area-inset-top))] lg:top-[max(0.65rem,env(safe-area-inset-top))] z-[54] flex flex-col items-center gap-2 max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)] lg:max-w-[calc(100vw-22rem)]"
       >
-        <div className={`pointer-events-auto inline-flex h-8 sm:h-9 max-w-full items-center rounded-full border divide-x overflow-hidden transition-colors backdrop-blur-md sm:backdrop-blur-xl lg:backdrop-blur-2xl ring-1 ring-inset ${isDayUi ? 'ring-white/30 sm:ring-white/55' : 'ring-white/[0.05] sm:ring-white/[0.08]'} ${dockShellCls} ${dockDividerCls}`}>
+        <div className={`pointer-events-auto inline-flex h-8 sm:h-9 max-w-full items-center rounded-full border divide-x overflow-hidden transition-colors ${dockShellCls} ${dockDividerCls}`}>
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
@@ -1356,7 +1392,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
 
         {controlsOpen && (
-          <div className={`pointer-events-auto w-[min(92vw,372px)] max-h-[calc(100dvh-11.5rem)] overflow-y-auto overscroll-contain rounded-[22px] border p-3.5 text-xs transition-colors backdrop-blur-xl sm:backdrop-blur-2xl ${dockShellCls}`}>
+          <div className={`pointer-events-auto w-[min(92vw,372px)] max-h-[calc(100dvh-11.5rem)] overflow-y-auto overscroll-contain rounded-[22px] border p-3.5 text-xs transition-colors ${dockShellCls}`}>
 
             <div className={`mb-2.5 space-y-2 rounded-xl border px-2.5 py-2 ${dockBorderCls} ${isDayUi ? 'bg-white/48' : 'bg-white/[0.04]'}`}>
               <div className="flex items-center justify-between gap-2">

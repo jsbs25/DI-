@@ -308,15 +308,15 @@ export class ParadiseEnvironmentEngine {
   // Zero-GC pre-allocated palette stops (avoid pink filters; natural golden sunlight vs scotopic Purkinje blue night)
   private readonly cNightZenith = new THREE.Color(0x060c1a);
   private readonly cEveningZenith = new THREE.Color(0x162447);
-  private readonly cDawnZenith = new THREE.Color(0x2d4a7a);
-  private readonly cDayZenith = new THREE.Color(0x3272c4);
-  private readonly cDuskZenith = new THREE.Color(0x253966);
+  private readonly cDawnZenith = new THREE.Color(0x274574);
+  private readonly cDayZenith = new THREE.Color(0x1d4f94);
+  private readonly cDuskZenith = new THREE.Color(0x233864);
 
   private readonly cNightHorizon = new THREE.Color(0x111e38);
-  private readonly cEveningHorizon = new THREE.Color(0x39456c);
-  private readonly cDawnHorizon = new THREE.Color(0xeba175);
-  private readonly cDayHorizon = new THREE.Color(0xbce0f7);
-  private readonly cDuskHorizon = new THREE.Color(0xdf8252);
+  private readonly cEveningHorizon = new THREE.Color(0x364368);
+  private readonly cDawnHorizon = new THREE.Color(0xdf976c);
+  private readonly cDayHorizon = new THREE.Color(0x8cb8dc);
+  private readonly cDuskHorizon = new THREE.Color(0xd57b4e);
 
   private readonly cOvercastSky = new THREE.Color(0x667686);
   private readonly cOvercastNight = new THREE.Color(0x0d1422);
@@ -496,7 +496,7 @@ export class ParadiseEnvironmentEngine {
       .lerp(this.cGroundDay, dayFactor);
 
     this.state.exposure =
-      THREE.MathUtils.lerp(0.88, 1.06, dayFactor) * THREE.MathUtils.lerp(1.0, 0.84, stormShade);
+      THREE.MathUtils.lerp(0.84, 0.94, dayFactor) * THREE.MathUtils.lerp(1.0, 0.86, stormShade);
     this.state.lanternGlow = THREE.MathUtils.smoothstep(0.18 - elev, 0, 0.34);
   }
 }
@@ -508,8 +508,8 @@ export function createParadiseSkyDome(): SkyDomeHandle {
     uTime: { value: 0 },
     uSunDir: { value: new THREE.Vector3(0.4, 0.7, -0.5).normalize() },
     uMoonDir: { value: new THREE.Vector3(-0.4, -0.7, 0.5).normalize() },
-    uZenithColor: { value: new THREE.Color(0x3272c4) },
-    uHorizonColor: { value: new THREE.Color(0xbce0f7) },
+    uZenithColor: { value: new THREE.Color(0x1d4f94) },
+    uHorizonColor: { value: new THREE.Color(0x8cb8dc) },
     uCloudCover: { value: 0.25 },
     uCloudDarkness: { value: 0.05 },
     uDayFactor: { value: 1.0 },
@@ -603,9 +603,11 @@ export function createParadiseSkyDome(): SkyDomeHandle {
         vec3 dir = normalize(vWorldDir);
         float h = clamp(dir.y, 0.0, 1.0);
 
-        // Rayleigh optical airmass + aerosol horizon band (non-linear limb brightening)
-        float horizonCurve = pow(1.0 - h, 2.35);
+        // Rayleigh optical airmass + calm horizon band (rich photographic sky without top-edge washout)
+        float horizonCurve = pow(1.0 - h, 2.55);
         vec3 sky = mix(uZenithColor, uHorizonColor, horizonCurve);
+        // Deepen upper zenith subtly so high-FOV portrait phone/tablet viewports stay rich & glare-free
+        sky *= mix(1.0, 0.84, smoothstep(0.32, 0.85, h) * uDayFactor);
 
         // Subtle atmospheric airglow near 15 deg horizon at night (real Purkinje scotopic blue-teal tint)
         if (uNightFactor > 0.05) {
@@ -613,14 +615,14 @@ export function createParadiseSkyDome(): SkyDomeHandle {
           sky += vec3(0.015, 0.032, 0.048) * airglowBand * uNightFactor;
         }
 
-        // Mie forward scattering solar aureole + crisp telephoto solar disc
+        // Restrained Mie forward scattering solar aureole + crisp solar disc (never bleaches sky white)
         vec3 sDir = normalize(uSunDir);
         float sunCos = max(dot(dir, sDir), 0.0);
         float sunVis = smoothstep(-0.08, 0.08, sDir.y) * (1.0 - uCloudDarkness * 0.88);
-        float mieAureole = hgPhase(sunCos, 0.72) * 0.32 + pow(sunCos, 6.0) * 0.18;
-        float sunDisc = smoothstep(0.99928, 0.99972, sunCos);
-        vec3 sunCol = mix(vec3(1.0, 0.52, 0.24), vec3(1.0, 0.96, 0.88), smoothstep(-0.02, 0.35, sDir.y));
-        sky += sunCol * (mieAureole + sunDisc * 2.55) * sunVis;
+        float mieAureole = min(0.38, hgPhase(sunCos, 0.74) * 0.13 + pow(sunCos, 9.0) * 0.08);
+        float sunDisc = smoothstep(0.99935, 0.99975, sunCos);
+        vec3 sunCol = mix(vec3(1.0, 0.56, 0.28), vec3(1.0, 0.95, 0.86), smoothstep(-0.02, 0.35, sDir.y));
+        sky += sunCol * (mieAureole + sunDisc * 1.45) * sunVis;
 
         // Moonlit silver halo & cratered lunar disc
         vec3 mDir = normalize(uMoonDir);
@@ -703,25 +705,28 @@ export function createParadiseSkyDome(): SkyDomeHandle {
           vec2 cirrusUv = dir.xz * (1.0 / (dir.y + 0.22)) * 2.6 + windDrift * 1.35;
           float cirrus = smoothstep(0.56, 0.84, fbm(vec2(cirrusUv.x * 0.65, cirrusUv.y * 1.8))) * smoothstep(0.04, 0.3, dir.y);
 
-          float sunSilver = hgPhase(sunCos, 0.68) * 0.45 * sunVis;
-          float moonSilver = hgPhase(moonCos, 0.62) * 0.28 * moonVis;
+          float sunSilver = min(0.28, hgPhase(sunCos, 0.68) * 0.18 * sunVis);
+          float moonSilver = min(0.22, hgPhase(moonCos, 0.62) * 0.18 * moonVis);
 
-          vec3 cloudBright = mix(vec3(0.16, 0.22, 0.34), vec3(0.98, 0.98, 0.99), uDayFactor);
-          cloudBright = mix(cloudBright, vec3(1.0, 0.72, 0.52), uTwilightFactor * 0.82);
+          vec3 cloudBright = mix(vec3(0.16, 0.22, 0.34), vec3(0.86, 0.88, 0.91), uDayFactor);
+          cloudBright = mix(cloudBright, vec3(0.95, 0.68, 0.48), uTwilightFactor * 0.82);
           cloudBright += sunCol * sunSilver + vec3(0.72, 0.84, 1.0) * moonSilver;
 
-          vec3 cloudShadow = mix(vec3(0.05, 0.08, 0.15), vec3(0.29, 0.33, 0.40), uDayFactor);
+          vec3 cloudShadow = mix(vec3(0.05, 0.08, 0.15), vec3(0.32, 0.38, 0.48), uDayFactor);
           vec3 cloudFinal = mix(cloudShadow, cloudBright, litDepth * (0.45 + 0.55 * powder));
           cloudFinal = mix(cloudFinal, cloudShadow * 0.78, clamp(uCloudDarkness * 0.85, 0.0, 1.0));
           cloudFinal += vec3(0.65, 0.78, 1.0) * uLightningFlash * (0.45 + cDetail * 0.5);
 
-          float totalAlpha = clamp(cloudMask * mix(0.72, 0.96, uCloudCover) + cirrus * 0.24 * (1.0 - uCloudDarkness * 0.7), 0.0, 0.98);
+          float totalAlpha = clamp(cloudMask * mix(0.64, 0.92, uCloudCover) + cirrus * 0.18 * (1.0 - uCloudDarkness * 0.7), 0.0, 0.95);
           sky = mix(sky, cloudFinal, totalAlpha);
         }
 
         if (dir.y < 0.0) {
           sky = mix(uHorizonColor, uHorizonColor * 0.82, clamp(-dir.y * 4.0, 0.0, 1.0));
         }
+
+        // Soft highlight roll-off so sky never clips to harsh white glare on mobile/tablet displays
+        sky = sky / (1.0 + max(vec3(0.0), sky - vec3(0.86)) * 0.65);
 
         gl_FragColor = vec4(sky, 1.0);
       }

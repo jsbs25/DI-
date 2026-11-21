@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import * as THREE from 'three';
 import {
   AlertCircle,
   Brain,
@@ -11,7 +10,6 @@ import {
   Maximize2,
   Mic,
   MicOff,
-  Minimize2,
   Pause,
   Play,
   Send,
@@ -295,6 +293,84 @@ function buildUnifiedEmbedUrl(rawUrl: string | undefined, isPlaying: boolean): s
   }
 }
 
+const GardenSpiritEmblem: React.FC<{
+  size?: number;
+  isGardenHome: boolean;
+  isGardenDay: boolean;
+  isDarkSurface: boolean;
+  voiceActive: boolean;
+  phase: VoicePhase;
+  energy?: number;
+}> = ({ size = 32, isGardenHome, isGardenDay, isDarkSurface, voiceActive, phase, energy = 0 }) => {
+  const petalFill = isGardenHome
+    ? isGardenDay
+      ? '#f3b7ca'
+      : '#f4c7d6'
+    : isDarkSurface
+      ? '#e6cca0'
+      : '#2d7a64';
+  const petalInner = isGardenHome
+    ? isGardenDay
+      ? '#fbe6ee'
+      : '#fff1e0'
+    : isDarkSurface
+      ? '#f7e9cc'
+      : '#8fd1ba';
+  const coreFill =
+    phase === 'listening'
+      ? '#34b88c'
+      : phase === 'speaking'
+        ? '#e8b354'
+        : phase === 'error'
+          ? '#e06370'
+          : isGardenHome
+            ? isGardenDay
+              ? '#d49b46'
+              : '#f6cb78'
+            : isDarkSurface
+              ? '#dfb872'
+              : '#c99342';
+  const ringStroke = isGardenHome
+    ? isGardenDay
+      ? 'rgba(182, 138, 76, 0.45)'
+      : 'rgba(244, 203, 130, 0.55)'
+    : isDarkSurface
+      ? 'rgba(214, 183, 127, 0.42)'
+      : 'rgba(36, 120, 100, 0.32)';
+  const pulseScale = voiceActive ? 1 + Math.min(0.18, energy * 0.25) : 1;
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 40 40"
+      fill="none"
+      aria-hidden="true"
+      className="pointer-events-none shrink-0 transition-transform duration-150"
+      style={{ transform: `scale(${pulseScale.toFixed(3)})` }}
+    >
+      <circle cx="20" cy="20" r="18" stroke={ringStroke} strokeWidth="1.1" strokeDasharray={voiceActive ? '3 2.5' : undefined} />
+      {[0, 72, 144, 216, 288].map((deg) => (
+        <g key={deg} transform={`rotate(${deg} 20 20)`}>
+          <path
+            d="M20 19.2 C16.4 15.6 15.8 9.8 18.6 7.5 L20 9.4 L21.4 7.5 C24.2 9.8 23.6 15.6 20 19.2 Z"
+            fill={petalFill}
+            fillOpacity={isGardenHome ? '0.92' : '0.86'}
+          />
+          <path
+            d="M20 18.4 C18.1 15.6 17.8 12.2 20 10.6 C22.2 12.2 21.9 15.6 20 18.4 Z"
+            fill={petalInner}
+            fillOpacity="0.62"
+          />
+        </g>
+      ))}
+      <circle cx="20" cy="20" r="5.4" fill={coreFill} fillOpacity="0.26" />
+      <circle cx="20" cy="20" r="3.4" fill={coreFill} />
+      <circle cx="19.1" cy="19.1" r="1.15" fill="#fffaf0" fillOpacity="0.88" />
+    </svg>
+  );
+};
+
 export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (props) => {
   const {
     lang,
@@ -393,8 +469,6 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
   const speechRecRef = useRef<any>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
-  const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const hudOrbCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const voiceNameRef = useRef(voiceName);
   voiceNameRef.current = voiceName;
   const currentOutputTurnIdRef = useRef<string | null>(null);
@@ -1574,146 +1648,8 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
     };
   }, [clampLauncherPos]);
 
-  // Living 3D Emotion-Reactive WebGL Orb renderer
-  useEffect(() => {
-    if (!showLauncher) return;
-    const mountOrb = (canvas: HTMLCanvasElement | null, size: number) => {
-      if (!canvas) return () => {};
-      canvas.width = size;
-      canvas.height = size;
-
-      const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
-      camera.position.z = 2.45;
-
-      let renderer: THREE.WebGLRenderer;
-      try {
-        renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-      } catch {
-        return () => {};
-      }
-      renderer.setSize(size, size);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-
-      const coreGeo = new THREE.IcosahedronGeometry(0.72, 2);
-      const coreMat = new THREE.MeshBasicMaterial({
-        color: 0x8ecfff,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.9,
-      });
-      const coreMesh = new THREE.Mesh(coreGeo, coreMat);
-      scene.add(coreMesh);
-
-      const nucGeo = new THREE.SphereGeometry(0.34, 20, 20);
-      const nucMat = new THREE.MeshBasicMaterial({
-        color: 0xe5c17d,
-        transparent: true,
-        opacity: 0.92,
-      });
-      const nucMesh = new THREE.Mesh(nucGeo, nucMat);
-      scene.add(nucMesh);
-
-      const ringGeo = new THREE.TorusGeometry(0.95, 0.018, 8, 48);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0x8ecfff,
-        transparent: true,
-        opacity: 0.45,
-      });
-      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-      ringMesh.rotation.x = Math.PI * 0.36;
-      scene.add(ringMesh);
-
-      const colorTarget = new THREE.Color(0x8ecfff);
-      const nucColorTarget = new THREE.Color(0xe5c17d);
-      let rafId = 0;
-      let t = 0;
-      let alive = true;
-
-      const animate = () => {
-        if (!alive || document.hidden) return;
-        rafId = requestAnimationFrame(animate);
-
-        const curPhase = phaseRef.current;
-        const curEmotion = emotionRef.current;
-        const emoMeta = EMOTION_META[curEmotion] || EMOTION_META.calm;
-        const energies = audioClientRef.current?.getEnergies() || { input: 0, output: 0 };
-
-        colorTarget.setHex(emoMeta.hex);
-        if (curPhase === 'listening') {
-          nucColorTarget.setHex(0x34d399);
-        } else if (curPhase === 'speaking') {
-          nucColorTarget.setHex(0xf5c451);
-        } else if (curPhase === 'error') {
-          colorTarget.setHex(0xf87171);
-          nucColorTarget.setHex(0xfca5a5);
-        } else {
-          nucColorTarget.setHex(emoMeta.hex);
-        }
-
-        coreMat.color.lerp(colorTarget, 0.14);
-        ringMat.color.lerp(colorTarget, 0.14);
-        nucMat.color.lerp(nucColorTarget, 0.14);
-
-        const audioEnergy = Math.max(energies.input, energies.output);
-        const emotionBoost =
-          curEmotion === 'excited'
-            ? 1.5
-            : curEmotion === 'playful'
-              ? 1.35
-              : curEmotion === 'thinking'
-                ? 1.25
-                : curEmotion === 'concerned'
-                  ? 0.85
-                  : 1.0;
-
-        const speed = (voiceActiveRef.current ? 1.35 : 0.9) * emotionBoost + audioEnergy * 2.2;
-        t += 0.024 * speed;
-
-        coreMesh.rotation.y += 0.015 * speed;
-        coreMesh.rotation.x += 0.007 * speed;
-        ringMesh.rotation.z += 0.018 * speed;
-        ringMesh.rotation.y = Math.sin(t * 0.6) * 0.45;
-
-        const nucScale = 1 + Math.sin(t * 2.4) * 0.08 + audioEnergy * 0.42;
-        nucMesh.scale.set(nucScale, nucScale, nucScale);
-
-        const shellScale = 1 + audioEnergy * 0.16 * emotionIntensityRef.current;
-        coreMesh.scale.set(shellScale, shellScale, shellScale);
-
-        renderer.render(scene, camera);
-      };
-
-      const onVis = () => {
-        if (!document.hidden && alive) {
-          cancelAnimationFrame(rafId);
-          animate();
-        }
-      };
-      document.addEventListener('visibilitychange', onVis);
-      animate();
-
-      return () => {
-        alive = false;
-        document.removeEventListener('visibilitychange', onVis);
-        cancelAnimationFrame(rafId);
-        coreGeo.dispose();
-        coreMat.dispose();
-        nucGeo.dispose();
-        nucMat.dispose();
-        ringGeo.dispose();
-        ringMat.dispose();
-        renderer.dispose();
-      };
-    };
-
-    const cleanMain = mountOrb(orbCanvasRef.current, placement === 'center-bottom' ? 38 : 44);
-    const cleanHud = mountOrb(hudOrbCanvasRef.current, 36);
-    return () => {
-      cleanMain();
-      cleanHud();
-    };
-  }, [showLauncher, placement, hudOpen]);
+  // Lightweight botanical SVG lantern emblem replaces redundant secondary WebGLRenderer
+  // so mobile/tablet GPUs stay dedicated to the main 3D garden scene.
 
   const handleLauncherClick = () => {
     if (suppressClickRef.current) return;
@@ -1789,18 +1725,26 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
   if (!showLauncher && !canRunAudioSession) return null;
 
   const emotionInfo = EMOTION_META[emotion] || EMOTION_META.calm;
-  const glowColors = [
-    'shadow-[0_0_24px_rgba(56,189,248,0.48)]',
-    'shadow-[0_0_24px_rgba(192,132,252,0.48)]',
-    'shadow-[0_0_24px_rgba(244,114,182,0.48)]',
-    'shadow-[0_0_24px_rgba(251,191,36,0.48)]',
-    'shadow-[0_0_24px_rgba(52,211,153,0.48)]',
-  ];
-  const activeBorderClass = voiceActive
-    ? emotionInfo.ringClass
-    : showUnifiedMusicControls && isMusicPlaying
-      ? `border-white/25 ${glowColors[auroraIdx]}`
-      : 'border-white/18 shadow-[0_14px_38px_rgba(0,0,0,0.68)] hover:border-[#8ECFFF]/60';
+  const isDarkSurface = isGardenHome ? !isGardenDay : theme === 'dark';
+  const launcherShellClass = isGardenHome
+    ? isGardenDay
+      ? voiceActive
+        ? 'border-[#247864]/45 bg-[#f5efe4]/95 text-[#1d2d25] shadow-[0_10px_28px_rgba(36,120,100,0.26)]'
+        : 'border-[#b69260]/36 bg-[#f5efe4]/93 text-[#1d2d25] shadow-[0_8px_24px_rgba(18,30,24,0.18)] hover:border-[#b69260]/60'
+      : voiceActive
+        ? 'border-[#e6c07b]/55 bg-[#101a26]/94 text-[#f6eee0] shadow-[0_12px_32px_rgba(230,192,123,0.24)]'
+        : 'border-[#dfb878]/32 bg-[#101a26]/90 text-[#f6eee0] shadow-[0_10px_28px_rgba(2,6,14,0.46)] hover:border-[#dfb878]/58'
+    : isDarkSurface
+      ? voiceActive
+        ? 'border-[#d6b77f]/55 bg-[#121c27]/96 text-[#f4efe4] shadow-[0_12px_30px_rgba(0,0,0,0.48)]'
+        : 'border-[#d6b77f]/26 bg-[#121c27]/94 text-[#f4efe4] shadow-[0_10px_26px_rgba(0,0,0,0.42)] hover:border-[#d6b77f]/50'
+      : voiceActive
+        ? 'border-[#247864]/50 bg-[#faf7f0] text-[#1c2b24] shadow-[0_10px_26px_rgba(36,120,100,0.20)]'
+        : 'border-[#247864]/22 bg-[#faf7f0]/96 text-[#1c2b24] shadow-[0_8px_22px_rgba(20,34,27,0.12)] hover:border-[#247864]/45';
+  const musicCtrlBtnClass = isDarkSurface
+    ? 'bg-white/10 text-[#f5efe2] hover:bg-white/20'
+    : 'bg-[#1d2d25]/[0.07] text-[#1d2d25] hover:bg-[#1d2d25]/[0.14]';
+  const activeBorderClass = launcherShellClass;
 
   const phaseLabel = (() => {
     switch (phase) {
@@ -1998,7 +1942,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
         </div>
       )}
 
-      {/* Floating Launcher Orb + Embedded Music Pill */}
+      {/* Scene-Integrated Floating Sakura Lantern / Botanical Medallion AI Launcher */}
       {showLauncher && (
         placement === 'center-bottom' ? (
           <div
@@ -2006,95 +1950,83 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             className="fixed bottom-[calc(5.1rem+env(safe-area-inset-bottom))] md:bottom-7 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center select-none"
           >
             {renderMusicPopover()}
-            <div className="flex items-center gap-1.5">
-              <div
-                className={`inline-flex min-h-[46px] items-center gap-1.5 rounded-full border bg-[#070B16]/88 backdrop-blur-2xl p-1 transition-all duration-500 ${activeBorderClass}`}
-              >
-                <button
-                  type="button"
-                  onClick={handleLauncherClick}
-                  aria-label="One."
-                  aria-pressed={voiceActive}
-                  title={activePillLabel}
-                  className="group relative inline-flex h-9 items-center gap-2 rounded-full pl-1 pr-3 transition-transform cursor-pointer hover:scale-[1.02] active:scale-95"
-                >
-                  <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.04] border border-white/12">
-                    {showUnifiedMusicControls && (
-                      <span
-                        className={`one-wrist-aurora absolute -inset-[2px] rounded-full opacity-90 pointer-events-none ${
-                          isMusicPlaying ? '' : '[animation-play-state:paused] opacity-40'
-                        }`}
-                      />
-                    )}
-                    <canvas ref={orbCanvasRef} className="relative z-10 pointer-events-none h-7 w-7 rounded-full" />
-                  </span>
-                  <span className="max-w-[155px] truncate text-xs font-semibold tracking-[0.08em] text-[#F7F5F0]">
-                    {activePillLabel}
-                  </span>
-                </button>
-                {showUnifiedMusicControls && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        explicitStopMusicRef.current = false;
-                        pausedMusicForVoiceRef.current = false;
-                        player?.unlockAudio();
-                        void player?.resumeAudioContext();
-                        player?.togglePlay();
-                      }}
-                      title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
-                    >
-                      {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        explicitStopMusicRef.current = false;
-                        pausedMusicForVoiceRef.current = false;
-                        player?.playNext();
-                      }}
-                      title={isZh ? '换下一首' : 'Next song'}
-                      className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
-                    >
-                      <SkipForward className="h-3.5 w-3.5 fill-current" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMusicPopoverOpen((o) => !o)}
-                      title={isZh ? '音乐详情' : 'Music details'}
-                      className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
-                    >
-                      {trackCover ? (
-                        <img
-                          src={trackCover}
-                          alt=""
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            if (!e.currentTarget.dataset.fallback) {
-                              e.currentTarget.dataset.fallback = '1';
-                              e.currentTarget.src = DEFAULT_MUSIC_COVER;
-                            }
-                          }}
-                          className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
-                        />
-                      ) : (
-                        <Disc3 className={`h-4 w-4 text-sky-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
-                      )}
-                    </button>
-                  </>
-                )}
-              </div>
+            <div
+              className={`inline-flex min-h-[46px] items-center gap-1.5 rounded-full border p-1 transition-all duration-300 ${activeBorderClass}`}
+            >
               <button
                 type="button"
-                onClick={() => setHudOpen((v) => !v)}
-                title={hudOpen ? (isZh ? '收起面板' : 'Collapse') : (isZh ? '展开 One. 智能面板' : 'Open One. HUD')}
-                aria-label={hudOpen ? 'Collapse AI HUD' : 'Expand AI HUD'}
-                className="flex h-11 w-11 items-center justify-center rounded-full border border-white/18 bg-[#070B16]/88 text-[#F7F5F0] backdrop-blur-2xl transition-all hover:border-[#8ECFFF]/60 hover:scale-105 active:scale-95 cursor-pointer shadow-[0_14px_38px_rgba(0,0,0,0.55)]"
+                onClick={handleLauncherClick}
+                aria-label="One."
+                aria-pressed={voiceActive}
+                title={activePillLabel}
+                className="group relative inline-flex h-9 items-center gap-2 rounded-full pl-1 pr-3 transition-transform cursor-pointer hover:scale-[1.02] active:scale-95"
               >
-                {hudOpen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                <GardenSpiritEmblem
+                  size={32}
+                  isGardenHome={isGardenHome}
+                  isGardenDay={isGardenDay}
+                  isDarkSurface={isDarkSurface}
+                  voiceActive={voiceActive}
+                  phase={phase}
+                  energy={activeLevel}
+                />
+                <span className="max-w-[155px] truncate text-xs font-semibold tracking-[0.06em]">
+                  {activePillLabel}
+                </span>
               </button>
+              {showUnifiedMusicControls && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      explicitStopMusicRef.current = false;
+                      pausedMusicForVoiceRef.current = false;
+                      player?.unlockAudio();
+                      void player?.resumeAudioContext();
+                      player?.togglePlay();
+                    }}
+                    title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
+                    className={`flex h-8 w-8 items-center justify-center rounded-full transition cursor-pointer ${musicCtrlBtnClass}`}
+                  >
+                    {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      explicitStopMusicRef.current = false;
+                      pausedMusicForVoiceRef.current = false;
+                      player?.playNext();
+                    }}
+                    title={isZh ? '换下一首' : 'Next song'}
+                    className={`flex h-8 w-8 items-center justify-center rounded-full transition cursor-pointer ${musicCtrlBtnClass}`}
+                  >
+                    <SkipForward className="h-3.5 w-3.5 fill-current" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMusicPopoverOpen((o) => !o)}
+                    title={isZh ? '音乐详情' : 'Music details'}
+                    className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-black/15 dark:border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
+                  >
+                    {trackCover ? (
+                      <img
+                        src={trackCover}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          if (!e.currentTarget.dataset.fallback) {
+                            e.currentTarget.dataset.fallback = '1';
+                            e.currentTarget.src = DEFAULT_MUSIC_COVER;
+                          }
+                        }}
+                        className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
+                      />
+                    ) : (
+                      <Disc3 className={`h-4 w-4 text-amber-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
+                    )}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ) : (
@@ -2104,100 +2036,88 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             className="fixed z-40 flex flex-col items-start select-none"
           >
             {renderMusicPopover()}
-            <div className="flex items-center gap-1.5">
-              <div
-                className={`inline-flex items-center gap-1 rounded-full border bg-[#070B16]/88 backdrop-blur-2xl p-1 transition-all duration-500 ${activeBorderClass}`}
+            <div
+              className={`inline-flex items-center gap-1 rounded-full border p-1 transition-all duration-300 ${activeBorderClass}`}
+            >
+              <button
+                type="button"
+                onPointerDown={handleOrbPointerDown}
+                onPointerMove={handleOrbPointerMove}
+                onPointerUp={finishOrbDrag}
+                onPointerCancel={finishOrbDrag}
+                onClick={handleLauncherClick}
+                style={{ touchAction: 'none' }}
+                aria-label={isZh ? '唤醒灵犀花灯 AI 伴侣' : 'Wake ONE Garden Companion'}
+                aria-pressed={voiceActive}
+                title={activePillLabel}
+                className={`group relative flex h-10 w-10 items-center justify-center rounded-full transition-transform ${
+                  isDragging
+                    ? 'scale-110 cursor-grabbing ring-2 ring-[#d4a45a]/60'
+                    : 'cursor-pointer hover:scale-105 active:scale-95'
+                }`}
               >
-                <button
-                  type="button"
-                  onPointerDown={handleOrbPointerDown}
-                  onPointerMove={handleOrbPointerMove}
-                  onPointerUp={finishOrbDrag}
-                  onPointerCancel={finishOrbDrag}
-                  onClick={handleLauncherClick}
-                  style={{ touchAction: 'none' }}
-                  aria-label="One."
-                  aria-pressed={voiceActive}
-                  title={activePillLabel}
-                  className={`group relative flex h-10 w-10 items-center justify-center rounded-full transition-transform ${
-                    isDragging
-                      ? 'scale-110 cursor-grabbing ring-2 ring-[#8ECFFF]/60'
-                      : 'cursor-pointer hover:scale-105 active:scale-95'
-                  }`}
-                >
-                  {showUnifiedMusicControls && (
-                    <span
-                      className={`one-wrist-aurora absolute inset-0 rounded-full opacity-95 pointer-events-none ${
-                        isMusicPlaying ? '' : '[animation-play-state:paused] opacity-40'
-                      }`}
-                    />
-                  )}
-                  <canvas ref={orbCanvasRef} className="relative z-10 pointer-events-none h-9 w-9 rounded-full" />
-                </button>
-                {showUnifiedMusicControls && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        explicitStopMusicRef.current = false;
-                        pausedMusicForVoiceRef.current = false;
-                        player?.unlockAudio();
-                        void player?.resumeAudioContext();
-                        player?.togglePlay();
-                      }}
-                      title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
-                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
-                    >
-                      {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        explicitStopMusicRef.current = false;
-                        pausedMusicForVoiceRef.current = false;
-                        player?.playNext();
-                      }}
-                      title={isZh ? '换下一首' : 'Next song'}
-                      className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/90 transition hover:bg-white/20 cursor-pointer"
-                    >
-                      <SkipForward className="h-3.5 w-3.5 fill-current" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMusicPopoverOpen((o) => !o)}
-                      title={trackTitle}
-                      className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
-                    >
-                      {trackCover ? (
-                        <img
-                          src={trackCover}
-                          alt=""
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            if (!e.currentTarget.dataset.fallback) {
-                              e.currentTarget.dataset.fallback = '1';
-                              e.currentTarget.src = DEFAULT_MUSIC_COVER;
-                            }
-                          }}
-                          className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
-                        />
-                      ) : (
-                        <Disc3 className={`h-4 w-4 text-sky-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
-                      )}
-                    </button>
-                  </>
-                )}
-              </div>
-              {!hudOpen && (
-                <button
-                  type="button"
-                  onClick={() => setHudOpen(true)}
-                  title={isZh ? '展开 One. 面板' : 'Open One. HUD'}
-                  aria-label="Open One. Companion HUD"
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-[#070B16]/85 text-slate-300 hover:text-white hover:border-[#8ECFFF]/50 backdrop-blur-xl shadow-lg transition-all cursor-pointer"
-                >
-                  <Maximize2 className="h-3.5 w-3.5" />
-                </button>
+                <GardenSpiritEmblem
+                  size={34}
+                  isGardenHome={isGardenHome}
+                  isGardenDay={isGardenDay}
+                  isDarkSurface={isDarkSurface}
+                  voiceActive={voiceActive}
+                  phase={phase}
+                  energy={activeLevel}
+                />
+              </button>
+              {showUnifiedMusicControls && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      explicitStopMusicRef.current = false;
+                      pausedMusicForVoiceRef.current = false;
+                      player?.unlockAudio();
+                      void player?.resumeAudioContext();
+                      player?.togglePlay();
+                    }}
+                    title={isMusicPlaying ? (isZh ? '暂停音乐' : 'Pause') : (isZh ? '播放音乐' : 'Play')}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${musicCtrlBtnClass}`}
+                  >
+                    {isMusicPlaying ? <Pause className="h-3.5 w-3.5 fill-current" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      explicitStopMusicRef.current = false;
+                      pausedMusicForVoiceRef.current = false;
+                      player?.playNext();
+                    }}
+                    title={isZh ? '换下一首' : 'Next song'}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full transition cursor-pointer ${musicCtrlBtnClass}`}
+                  >
+                    <SkipForward className="h-3.5 w-3.5 fill-current" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMusicPopoverOpen((o) => !o)}
+                    title={trackTitle}
+                    className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-black/15 dark:border-white/15 bg-slate-900 cursor-pointer hover:scale-105 transition"
+                  >
+                    {trackCover ? (
+                      <img
+                        src={trackCover}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          if (!e.currentTarget.dataset.fallback) {
+                            e.currentTarget.dataset.fallback = '1';
+                            e.currentTarget.src = DEFAULT_MUSIC_COVER;
+                          }
+                        }}
+                        className={`h-full w-full object-cover ${isMusicPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`}
+                      />
+                    ) : (
+                      <Disc3 className={`h-4 w-4 text-amber-300 ${isMusicPlaying ? 'animate-spin' : ''}`} />
+                    )}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -2212,23 +2132,33 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
           className={`fixed z-[65] flex flex-col overflow-hidden rounded-2xl border transition-all duration-200 ${
             isGardenHome
               ? isGardenDay
-                ? 'border-white/55 bg-[#f7f3eb]/86 text-[#223029] shadow-[0_14px_40px_rgba(24,36,28,0.16)]'
-                : 'border-white/14 bg-[#141d29]/82 text-[#f2eee6] shadow-[0_18px_46px_rgba(4,8,14,0.45)]'
-              : `bg-[#0B101D]/95 text-slate-100 shadow-[0_24px_70px_rgba(0,0,0,0.65)] backdrop-blur-2xl ${emotionInfo.ringClass}`
+                ? 'border-[#1d2d25]/16 bg-[#f5efe4]/95 text-[#1d2b24] shadow-[0_14px_40px_rgba(20,34,27,0.20)]'
+                : 'border-[#dfb878]/26 bg-[#101a26]/94 text-[#f4eee2] shadow-[0_18px_46px_rgba(4,8,14,0.52)]'
+              : isDarkSurface
+                ? 'border-white/14 bg-[#101824]/96 text-[#f4efe4] shadow-[0_22px_60px_rgba(0,0,0,0.62)]'
+                : 'border-[#23362c]/14 bg-[#faf7f0]/98 text-[#1d2b24] shadow-[0_18px_50px_rgba(20,34,27,0.16)]'
           } ${
             placement === 'center-bottom'
               ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-[4.5rem] left-1/2 -translate-x-1/2'
               : 'bottom-[calc(5.2rem+env(safe-area-inset-bottom))] md:bottom-20 right-3 md:right-6'
           } w-[calc(100vw-1.5rem)] max-w-[360px] max-h-[64dvh]`}
         >
-          {/* Header with Living Orb + Emotion Status + Controls */}
-          <div className={`flex items-center justify-between gap-2 border-b px-3.5 py-2.5 ${isGardenDay ? 'border-black/10' : 'border-white/10'}`}>
+          {/* Header with Garden Spirit Emblem + Emotion Status + Controls */}
+          <div className={`flex items-center justify-between gap-2 border-b px-3.5 py-2.5 ${isDarkSurface ? 'border-white/10' : 'border-black/10'}`}>
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className={`relative h-8 w-8 shrink-0 rounded-full border flex items-center justify-center ${isGardenDay ? 'border-black/12 bg-black/[0.04]' : 'border-white/12 bg-white/[0.04]'}`}>
-                <canvas ref={hudOrbCanvasRef} className="h-8 w-8 rounded-full pointer-events-none" />
+              <div className={`relative h-8 w-8 shrink-0 rounded-full flex items-center justify-center ${isDarkSurface ? 'bg-white/[0.05]' : 'bg-[#247864]/[0.07]'}`}>
+                <GardenSpiritEmblem
+                  size={28}
+                  isGardenHome={isGardenHome}
+                  isGardenDay={isGardenDay}
+                  isDarkSurface={isDarkSurface}
+                  voiceActive={voiceActive}
+                  phase={phase}
+                  energy={activeLevel}
+                />
               </div>
               <div className="min-w-0">
-                <div className={`flex items-center gap-1.5 text-xs font-semibold tracking-wide ${isGardenDay ? 'text-[#1d2a23]' : 'text-white'}`}>
+                <div className={`flex items-center gap-1.5 text-xs font-semibold tracking-wide ${isDarkSurface ? 'text-white' : 'text-[#1d2a23]'}`}>
                   <span>{aiName}</span>
                   <span className="opacity-45">·</span>
                   <span className="inline-flex items-center gap-1 font-medium opacity-85 truncate">

@@ -1405,8 +1405,10 @@ export function registerNoorIslamicLibraryRoutes(
 
   // 6. AI Page Tutor ("读到这一页不会讲，让 AI 分析这一页怎么讲") — supports both PDF text & scanned image pages!
   app.post('/api/library/ai/explain-page', async (req: Request, res: Response) => {
-    const { title, pageNumber, pageText, pageImageBase64, question, lang } = req.body || {};
-    const cleanText = typeof pageText === 'string' ? pageText.trim().slice(0, 6500) : '';
+    const { title, bookTitle, pageNumber, pageText, passage, text, pageImageBase64, question, lang } = req.body || {};
+    const resolvedTitle = String(title || bookTitle || '原版书籍').slice(0, 140);
+    const rawText = typeof pageText === 'string' ? pageText : typeof passage === 'string' ? passage : typeof text === 'string' ? text : '';
+    const cleanText = rawText.trim().slice(0, 6500);
     const hasImage = typeof pageImageBase64 === 'string' && pageImageBase64.length > 200;
 
     if (!cleanText && !hasImage) {
@@ -1415,13 +1417,13 @@ export function registerNoorIslamicLibraryRoutes(
 
     const replyZh = lang !== 'en';
     const systemInstruction = replyZh
-      ? '你是博学、温和、表达清晰的资深双语（阿拉伯语/英语/汉语）典籍讲师。用户正在阅读一本书的某一页，可能不知道这一页该怎么理解或怎么讲给别人听。请用清晰、自然、易懂的中文分点讲解：1)「本页核心大意」（用大白话讲明白）；2)「这一页该怎么讲」（帮你梳理讲解逻辑和逐段要点）；3)「重点外语/阿语词句解析」（挑出 3-5 个关键原词，给读音/标音与释义）。如果用户提了具体问题，请优先直接回答该问题。不要输出多余寒暄。'
-      : 'You are an expert bilingual book tutor (Arabic/English/Chinese). Clearly explain the current page so the reader understands it deeply and knows how to explain it to others: 1) Core meaning, 2) How to explain this page step-by-step, 3) Key vocabulary with pronunciation and meaning.';
+      ? '你是博学、温和、表达清晰的资深双语（阿拉伯语/英语/汉语）典籍讲师。请用干净、自然、层次分明的中文为读者讲解当前页内容，直接用小标题分段（不要使用 1. 2. 3. 4. 机械编号）：\n【本页大意】用通俗流畅的话讲清这一页的核心内容\n【讲解脉络】梳理逐段逻辑，帮助读者读懂并能清晰转述\n【关键词句】挑选 3–5 个关键外语/阿语词句，给出读音与精准释义\n如果用户提出了具体问题，优先直接回答该问题。不要输出多余寒暄。'
+      : 'You are an expert bilingual book tutor (Arabic/English/Chinese). Explain the current page with clean unnumbered headings: Core Meaning, Walkthrough, and Key Vocabulary (with pronunciation and meaning). If the reader asked a specific question, answer it directly first.';
 
     const prompt = [
-      `书名：${String(title || '原版书籍').slice(0, 140)}`,
+      `书名：${resolvedTitle}`,
       pageNumber ? `页码：第 ${pageNumber} 页` : '',
-      question ? `读者追问：${String(question).slice(0, 400)}` : '请帮我分析这一页在讲什么，以及我该怎么把它讲清楚。',
+      question ? `读者追问：${String(question).slice(0, 400)}` : '请帮我分析这一页在讲什么，以及核心脉络与关键表达。',
       cleanText ? `本页原文内容：\n"""\n${cleanText}\n"""` : '（本页为扫描图像页，请直接识读附图中的全部原文并进行精讲）',
     ]
       .filter(Boolean)
@@ -1433,9 +1435,10 @@ export function registerNoorIslamicLibraryRoutes(
         systemInstruction,
         prompt,
         1500,
-        cleanText.length < 40 && hasImage ? pageImageBase64 : undefined
+        cleanText.length < 40 && hasImage ? pageImageBase64 : undefined,
+        'fast'
       );
-      return res.json({ success: true, explanation });
+      return res.json({ success: true, explanation, answer: explanation });
     } catch (err: any) {
       return res.status(503).json({
         success: false,
@@ -1651,51 +1654,106 @@ export function registerNoorIslamicLibraryRoutes(
     }
   });
 
-  // 10. AI Deep Explanation (AI 精讲：内容背景 · 核心观点 · 重点词汇 · 句子结构 · 难点分析 · 延伸知识)
+  // 10. AI Deep Explanation (AI 精讲：支持 PdfDocumentViewer 与 AppleBookReader 双向字段)
   app.post('/api/library/ai/deep-explain', async (req: Request, res: Response) => {
-    const { text, bookTitle, chapterTitle, lang } = req.body || {};
-    const cleanText = typeof text === 'string' ? text.trim().slice(0, 5000) : '';
-    if (!cleanText) {
-      return res.status(400).json({ success: false, error: '请选择需要 AI 精讲的段落内容。' });
+    const {
+      text,
+      passage,
+      pageText,
+      bookTitle,
+      title,
+      chapterTitle,
+      pageNumber,
+      question,
+      pageImageBase64,
+      lang,
+    } = req.body || {};
+    const rawText =
+      typeof text === 'string' && text.trim()
+        ? text
+        : typeof passage === 'string' && passage.trim()
+          ? passage
+          : typeof pageText === 'string' && pageText.trim()
+            ? pageText
+            : '';
+    const cleanText = rawText.trim().slice(0, 5200);
+    const hasImage = typeof pageImageBase64 === 'string' && pageImageBase64.length > 200;
+    if (!cleanText && !hasImage) {
+      return res.status(400).json({ success: false, error: '请选择需要 AI 精讲的段落或书页内容。' });
     }
+    const resolvedTitle = String(bookTitle || title || '原版书籍').slice(0, 140);
+    const resolvedSection = chapterTitle
+      ? String(chapterTitle).slice(0, 120)
+      : pageNumber
+        ? `第 ${Number(pageNumber)} 页`
+        : '';
     const replyZh = lang !== 'en';
     const systemInstruction = replyZh
-      ? '你是 ONE AI 资深人文与学术伴读导师。请对读者选中的书页段落进行深度精讲，严格按以下 6 个清晰小节组织（简明精炼、切中要害，避免空话）：\n1. **内容背景**：出处语境与历史/思想背景\n2. **核心观点**：作者最核心的论点与表达意图\n3. **重点词汇**：挑选 3-5 个关键原词或术语，附读音与准确释义\n4. **句子结构**：拆解难句的语法主干与修辞逻辑\n5. **难点分析**：点破读者容易误解或晦涩之处\n6. **延伸知识**：关联相关思想、典故或现实启发'
-      : 'You are ONE AI scholarly reading mentor. Provide a structured deep explanation of the passage in 6 clear sections: 1. Context & Background, 2. Core Thesis, 3. Key Vocabulary, 4. Sentence Structure, 5. Difficult Nuances, 6. Extended Knowledge.';
+      ? '你是 ONE AI 资深人文与学术伴读导师。请对读者正在阅读的书页或段落进行清晰、有深度的讲解。排版干净克制，直接用小标题分段（不要使用 1. 2. 3. 4. 5. 6. 机械编号）：\n【核心大意】概括本段/本页的核心思想与出处语境\n【重点词句】挑选 3–5 个关键词语或原语表达，给出读音与准确释义\n【深度剖析】拆解长难句结构、深层逻辑与容易忽略的细微含义\n【延伸启发】关联相关思想或阅读建议\n如果读者提出了具体追问，优先直接回应其问题。'
+      : 'You are ONE AI scholarly reading mentor. Explain the passage with clean, unnumbered sections: Core Meaning, Key Vocabulary, Deeper Analysis, and Reading Takeaways. If the reader asked a specific question, answer it first.';
 
     const prompt = [
-      bookTitle ? `书名：《${String(bookTitle).slice(0, 140)}》` : '',
-      chapterTitle ? `章节：${String(chapterTitle).slice(0, 120)}` : '',
-      `选中原文：\n"""\n${cleanText}\n"""`,
+      resolvedTitle ? `书名：《${resolvedTitle}》` : '',
+      resolvedSection ? `位置：${resolvedSection}` : '',
+      question ? `读者追问：${String(question).slice(0, 400)}` : '',
+      cleanText ? `原文内容：\n"""\n${cleanText}\n"""` : '（请直接识读附图书页文字并进行精讲）',
     ]
       .filter(Boolean)
       .join('\n\n');
     try {
-      const explanation = await runFastLibraryAiText(req, systemInstruction, prompt, 1800, undefined, 'deep');
-      return res.json({ success: true, explanation });
+      const explanation = await runFastLibraryAiText(
+        req,
+        systemInstruction,
+        prompt,
+        1800,
+        !cleanText && hasImage ? pageImageBase64 : undefined,
+        'fast'
+      );
+      return res.json({ success: true, explanation, answer: explanation });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'AI 精讲暂时不可用。' });
     }
   });
 
-  // 11. Whole-Book Context AI Q&A (结合整本书检索相关上下文回答，而不只看当前屏幕)
+  // 11. Whole-Book Context AI Q&A (结合整本书检索相关上下文回答，兼容 PdfDocumentViewer 与 AppleBookReader)
   app.post('/api/library/ai/book-qa', async (req: Request, res: Response) => {
-    const { question, bookTitle, author, currentSectionText, fullBookChunks, history, lang } = req.body || {};
+    const {
+      question,
+      bookTitle,
+      title,
+      author,
+      currentSectionText,
+      currentPageText,
+      fullBookChunks,
+      bookChunks,
+      history,
+      lang,
+    } = req.body || {};
     const cleanQuestion = typeof question === 'string' ? question.trim().slice(0, 800) : '';
     if (!cleanQuestion) {
       return res.status(400).json({ success: false, error: '请输入你想围绕本书提出的问题。' });
     }
+    const resolvedBookTitle = String(bookTitle || title || '当前书籍').slice(0, 140);
+    const resolvedCurrentSection =
+      typeof currentSectionText === 'string' && currentSectionText.trim()
+        ? currentSectionText
+        : typeof currentPageText === 'string'
+          ? currentPageText
+          : '';
+    const rawChunks = Array.isArray(fullBookChunks)
+      ? fullBookChunks
+      : Array.isArray(bookChunks)
+        ? bookChunks
+        : [];
 
     // Retrieve top relevant excerpts across the ENTIRE extracted book using lexical/BM25-style scoring
-    const chunks: Array<{ label: string; text: string }> = Array.isArray(fullBookChunks)
-      ? fullBookChunks
-          .filter((c: any) => typeof c?.text === 'string' && c.text.trim().length > 12)
-          .slice(0, 400)
-          .map((c: any, i: number) => ({
-            label: String(c.label || `第 ${i + 1} 节`).slice(0, 80),
-            text: String(c.text).trim().slice(0, 2600),
-          }))
-      : [];
+    const chunks: Array<{ label: string; text: string }> = rawChunks
+      .filter((c: any) => typeof c?.text === 'string' && c.text.trim().length > 12)
+      .slice(0, 400)
+      .map((c: any, i: number) => ({
+        label: String(c.label || (c.page ? `第 ${c.page} 章` : `第 ${i + 1} 节`)).slice(0, 80),
+        text: String(c.text).trim().slice(0, 2600),
+      }));
 
     const tokens = cleanQuestion
       .toLowerCase()
@@ -1751,9 +1809,9 @@ export function registerNoorIslamicLibraryRoutes(
       .join('\n\n---\n\n');
 
     const prompt = [
-      `书名：《${String(bookTitle || '当前书籍').slice(0, 140)}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
+      `书名：《${resolvedBookTitle}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
       `全书覆盖片段数：共检索 ${chunks.length} 个章节/页面，命中 ${pickedExcerpts.length} 处关键上下文。`,
-      currentSectionText ? `【当前正在阅读的位置】\n${String(currentSectionText).trim().slice(0, 1600)}` : '',
+      resolvedCurrentSection ? `【当前正在阅读的位置】\n${String(resolvedCurrentSection).trim().slice(0, 1600)}` : '',
       excerptsBlock ? `【全书相关上下文】\n${excerptsBlock}` : '',
       `读者提问：${cleanQuestion}`,
     ]
@@ -1788,23 +1846,32 @@ export function registerNoorIslamicLibraryRoutes(
     }
   });
 
-  // 12. AI Summary (支持：段落总结 · 章节总结 · 整本书总结)
+  // 12. AI Summary (支持：段落总结 · 章节总结 · 整本书总结，兼容 PdfDocumentViewer 与 AppleBookReader)
   app.post('/api/library/ai/summarize', async (req: Request, res: Response) => {
-    const { scope = 'chapter', bookTitle, author, sectionTitle, content, lang } = req.body || {};
-    const cleanContent = typeof content === 'string' ? content.trim().slice(0, 14000) : '';
+    const { scope = 'chapter', bookTitle, title, author, sectionTitle, chapterTitle, content, text, passage, lang } = req.body || {};
+    const rawContent =
+      typeof content === 'string' && content.trim()
+        ? content
+        : typeof text === 'string' && text.trim()
+          ? text
+          : typeof passage === 'string'
+            ? passage
+            : '';
+    const cleanContent = rawContent.trim().slice(0, 14000);
     if (!cleanContent) {
       return res.status(400).json({ success: false, error: '暂无可用于总结的文本内容。' });
     }
 
+    const resolvedTitle = String(bookTitle || title || '书籍').slice(0, 140);
     const scopeLabel = scope === 'book' ? '整本书' : scope === 'paragraph' ? '当前段落' : '当前章节';
     const replyZh = lang !== 'en';
     const systemInstruction = replyZh
-      ? `你是 ONE AI 精炼图书总结专家。请针对「${scopeLabel}」生成清晰、高密度的中文总结：先用 1-2 句话概括核心主旨，再列出 3-5 条关键要点，最后提炼一句值得记住的精华启发。排版干净利落。`
-      : `You are ONE AI book summarizer. Summarize the ${scope} clearly: 1-2 sentence core thesis, 3-5 key takeaways, and 1 memorable insight.`;
+      ? `你是 ONE AI 精炼图书总结专家。请针对「${scopeLabel}」生成干净利落的中文总结（不要使用 1. 2. 3. 机械编号）：先用 1–2 句话点出核心主旨，再用简短要点提炼关键脉络，最后附一句值得回味的启发。`
+      : `You are ONE AI book summarizer. Summarize the ${scope} clearly with clean prose: a 1–2 sentence thesis, concise bullet takeaways, and one memorable insight.`;
 
     const prompt = [
-      `书名：《${String(bookTitle || '书籍').slice(0, 140)}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
-      sectionTitle ? `范围：${String(sectionTitle).slice(0, 120)}` : `范围：${scopeLabel}`,
+      `书名：《${resolvedTitle}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
+      sectionTitle || chapterTitle ? `范围：${String(sectionTitle || chapterTitle).slice(0, 120)}` : `范围：${scopeLabel}`,
       `原文素材：\n"""\n${cleanContent}\n"""`,
     ].join('\n\n');
 

@@ -3,6 +3,7 @@ import { Tree } from '@dgreenheck/ez-tree';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { ParadiseQualityProfile, ProceduralTextureSet } from './paradiseQuality.ts';
 import {
+  BRIDGE_CONFIG,
   gardenPathFactor,
   lakeSignedDist,
   sampleTerrainBiome,
@@ -189,8 +190,9 @@ function createCuppedSprayRosette(
   const planes: THREE.BufferGeometry[] = [];
   const angles: Array<[number, number, number]> = [
     [(rand() - 0.5) * 0.55, rand() * Math.PI, (rand() - 0.5) * 0.45],
-    [0.35 + (rand() - 0.5) * 0.45, Math.PI / 3 + rand() * 0.4, (rand() - 0.5) * 0.45],
-    [-0.32 + (rand() - 0.5) * 0.45, (2 * Math.PI) / 3 + rand() * 0.4, (rand() - 0.5) * 0.45],
+    [0.36 + (rand() - 0.5) * 0.42, Math.PI / 3 + rand() * 0.4, (rand() - 0.5) * 0.42],
+    [-0.34 + (rand() - 0.5) * 0.42, (2 * Math.PI) / 3 + rand() * 0.4, (rand() - 0.5) * 0.42],
+    [Math.PI * 0.42 + (rand() - 0.5) * 0.25, rand() * Math.PI * 2, (rand() - 0.5) * 0.35],
   ];
 
   const distFromCore = center.distanceTo(crownCenter);
@@ -588,6 +590,7 @@ export function createParadiseFlora(
       pointerReactive?: boolean;
       nightBloomGlow?: boolean;
       translucencyColor?: string;
+      verticalBladeAO?: boolean;
       cacheKey: string;
     }
   ) => {
@@ -600,11 +603,14 @@ export function createParadiseFlora(
       shader.uniforms.uPointerStrength = uniforms.uPointerStrength;
 
       shader.vertexShader =
-        `uniform float uTime;\nuniform float uWindStrength;\nuniform vec3 uPointerPos;\nuniform float uPointerStrength;\n` +
+        `uniform float uTime;\nuniform float uWindStrength;\nuniform vec3 uPointerPos;\nuniform float uPointerStrength;\n${
+          cfg.verticalBladeAO ? 'varying float vBladeT;\n' : ''
+        }` +
         shader.vertexShader.replace(
           '#include <begin_vertex>',
           /* glsl */ `
           #include <begin_vertex>
+          ${cfg.verticalBladeAO ? 'vBladeT = clamp(uv.y, 0.0, 1.0);' : ''}
           #ifdef USE_INSTANCING
             vec4 instWorld = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
             float phase = instWorld.x * 0.045 + instWorld.z * 0.032;
@@ -643,8 +649,24 @@ export function createParadiseFlora(
         );
 
       shader.fragmentShader =
-        `uniform float uWetness;\nuniform float uNightFactor;\n` +
+        `uniform float uWetness;\nuniform float uNightFactor;\n${
+          cfg.verticalBladeAO ? 'varying float vBladeT;\n' : ''
+        }` +
         shader.fragmentShader
+          .replace(
+            '#include <color_fragment>',
+            /* glsl */ `
+            #include <color_fragment>
+            ${
+              cfg.verticalBladeAO
+                ? `
+            float rootAo = mix(0.46, 1.14, smoothstep(0.0, 0.88, vBladeT));
+            diffuseColor.rgb *= vec3(rootAo * mix(0.92, 1.06, vBladeT), rootAo, rootAo * mix(0.95, 0.88, vBladeT));
+            `
+                : ''
+            }
+            `
+          )
           .replace(
             '#include <roughnessmap_fragment>',
             /* glsl */ `
@@ -795,9 +817,11 @@ export function createParadiseFlora(
     const st = streamDistanceAndFlow(x, z);
     if (st.dist < st.width * 1.45) return false;
     if (gardenPathFactor(x, z) > minPathDist) return false;
-    // Keep pavilion, bridge plazas, and Spirit Rest Cottage clear
+    // Keep pavilion, bank-to-bank bridge span/abutments, and Spirit Rest Cottage clear
     if (Math.hypot(x - 12.8, z + 7.8) < 5.2) return false;
-    if (Math.hypot(x + 6.4, z + 8.4) < 5.0) return false;
+    if (Math.hypot(x - BRIDGE_CONFIG.centerX, z - BRIDGE_CONFIG.centerZ) < 5.6) return false;
+    if (Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ) < 4.2) return false;
+    if (Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ) < 4.2) return false;
     if (Math.hypot(x + 11.4, z - 5.8) < 4.9) return false;
     // Keep panoramic Overlook camera sightline corridor [-4.5, 23.5] -> [2.5, -1.5] open
     const camX = -4.5;
@@ -815,15 +839,24 @@ export function createParadiseFlora(
     return true;
   };
 
+  // Dedicated overhanging riverside/bridge-framing Sakura trees (just outside bridgeheads so blossoms drift directly onto the stream)
+  const riversideHeroSakura: Array<[number, number, number]> = [
+    [BRIDGE_CONFIG.bankBX + 3.6, BRIDGE_CONFIG.bankBZ - 2.6, 1.12],
+    [BRIDGE_CONFIG.bankAX - 3.9, BRIDGE_CONFIG.bankAZ - 3.2, 1.06],
+    [10.2, -13.2, 1.12],
+    [14.8, -1.2, 1.14],
+    [13.6, 4.4, 1.12],
+  ];
+
   const heroSakuraCoords: Array<[number, number, number]> = [
-    [17.4, -5.2, 1.12],
+    ...riversideHeroSakura,
+    [17.4, -5.2, 1.14],
     [18.2, -10.6, 1.18],
-    [10.2, -13.2, 1.08],
     [15.4, 5.8, 1.15],
     [11.8, 10.6, 1.08],
     [16.8, 12.2, 1.16],
     [-2.4, -13.6, 1.12],
-    [3.8, -12.8, 1.06],
+    [3.8, -12.8, 1.08],
     [13.4, 17.8, 1.12],
     [19.2, 1.5, 1.16],
   ];
@@ -1042,7 +1075,9 @@ export function createParadiseFlora(
     const sample = sampleTerrainBiome(x, z);
     if (sample.height < 0.2 || sample.height > 4.6 || sample.pathWeight > 0.38) continue;
     if (Math.hypot(x - 12.8, z + 7.8) < 3.6) continue;
-    if (Math.hypot(x + 6.4, z + 8.4) < 3.4) continue;
+    if (Math.hypot(x - BRIDGE_CONFIG.centerX, z - BRIDGE_CONFIG.centerZ) < 4.6) continue;
+    if (Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ) < 3.0) continue;
+    if (Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ) < 3.0) continue;
     if (Math.hypot(x + 11.4, z - 5.8) < 3.7) continue;
 
     dummy.position.set(x, sample.height - 0.06, z);
@@ -1091,7 +1126,8 @@ export function createParadiseFlora(
     amp: 0.24,
     heightFactor: 1.8,
     pointerReactive: true,
-    cacheKey: 'paradise-grass-wind-v2',
+    verticalBladeAO: true,
+    cacheKey: 'paradise-grass-wind-v3',
   });
 
   const bladeGeo = buildCurvedGrassGeo(0.088, 0.56);

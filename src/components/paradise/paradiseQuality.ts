@@ -106,9 +106,9 @@ export function detectParadiseQuality(
         fireflyCount: 80,
         koiCount: 7,
         rainCount: 560,
-        // Keep falling petals/leaves serene & sparse (only 1-2 drifting at a time)
-        petalCount: 4,
-        ginkgoLeafCount: 3,
+        // Poetic drifting & river-floating sakura petals / ginkgo leaves
+        petalCount: 34,
+        ginkgoLeafCount: 12,
         mistCount: 14,
       };
 
@@ -145,8 +145,8 @@ export function detectParadiseQuality(
         fireflyCount: 72,
         koiCount: 6,
         rainCount: 620,
-        petalCount: 4,
-        ginkgoLeafCount: 3,
+        petalCount: 44,
+        ginkgoLeafCount: 14,
         mistCount: 12,
       };
 
@@ -183,8 +183,8 @@ export function detectParadiseQuality(
         fireflyCount: 115,
         koiCount: 8,
         rainCount: 980,
-        petalCount: 5,
-        ginkgoLeafCount: 4,
+        petalCount: 64,
+        ginkgoLeafCount: 20,
         mistCount: 16,
       };
 
@@ -222,8 +222,8 @@ export function detectParadiseQuality(
         fireflyCount: 160,
         koiCount: 10,
         rainCount: 1450,
-        petalCount: 6,
-        ginkgoLeafCount: 4,
+        petalCount: 88,
+        ginkgoLeafCount: 26,
         mistCount: 20,
       };
   }
@@ -409,43 +409,43 @@ function drawSakuraFlower(
   ctx.rotate(rot);
 
   const outerHex =
-    tintVariant < 0.32 ? '#fff6f8' : tintVariant < 0.7 ? '#fde0e9' : '#f8c2d3';
+    tintVariant < 0.34 ? '#f9eef2' : tintVariant < 0.72 ? '#f6d8e3' : '#efb8ca';
   const midHex =
-    tintVariant < 0.32 ? '#fce5ec' : tintVariant < 0.7 ? '#f8c5d6' : '#f1a7bf';
-  const centerHex = '#cc4e77';
+    tintVariant < 0.34 ? '#f5dce6' : tintVariant < 0.72 ? '#efb9cc' : '#e59bb5';
+  const centerHex = '#b8496e';
 
-  ctx.shadowColor = 'rgba(72, 24, 42, 0.22)';
-  ctx.shadowBlur = Math.max(2, radius * 0.14);
-  ctx.shadowOffsetY = Math.max(1, radius * 0.05);
+  ctx.shadowColor = 'rgba(56, 22, 36, 0.16)';
+  ctx.shadowBlur = Math.max(2, radius * 0.16);
+  ctx.shadowOffsetY = Math.max(1, radius * 0.06);
 
   for (let p = 0; p < 5; p++) {
     ctx.save();
-    ctx.rotate((p * Math.PI * 2) / 5);
+    ctx.rotate((p * Math.PI * 2) / 5 + (p % 2 === 0 ? 0.04 : -0.03));
 
-    const grad = ctx.createRadialGradient(0, -radius * 0.08, radius * 0.05, 0, -radius * 0.56, radius);
+    const grad = ctx.createRadialGradient(0, -radius * 0.08, radius * 0.04, 0, -radius * 0.56, radius);
     grad.addColorStop(0.0, centerHex);
-    grad.addColorStop(0.22, midHex);
-    grad.addColorStop(0.8, outerHex);
-    grad.addColorStop(1.0, '#fffbfd');
+    grad.addColorStop(0.18, midHex);
+    grad.addColorStop(0.76, outerHex);
+    grad.addColorStop(1.0, '#fbf4f7');
 
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.bezierCurveTo(-radius * 0.48, -radius * 0.25, -radius * 0.56, -radius * 0.85, -radius * 0.14, -radius * 0.98);
+    ctx.bezierCurveTo(-radius * 0.46, -radius * 0.24, -radius * 0.54, -radius * 0.84, -radius * 0.13, -radius * 0.98);
     ctx.lineTo(0, -radius * 0.82);
-    ctx.lineTo(radius * 0.14, -radius * 0.98);
-    ctx.bezierCurveTo(radius * 0.56, -radius * 0.85, radius * 0.48, -radius * 0.25, 0, 0);
+    ctx.lineTo(radius * 0.13, -radius * 0.98);
+    ctx.bezierCurveTo(radius * 0.54, -radius * 0.84, radius * 0.46, -radius * 0.24, 0, 0);
     ctx.closePath();
     ctx.fill();
 
-    // Subtle petal vein & soft rim shadow
+    // Soft natural translucent petal veining without harsh cartoon outlines
     ctx.shadowColor = 'transparent';
-    ctx.strokeStyle = 'rgba(182, 82, 118, 0.28)';
-    ctx.lineWidth = Math.max(0.9, radius * 0.032);
+    ctx.strokeStyle = 'rgba(176, 92, 124, 0.14)';
+    ctx.lineWidth = Math.max(0.6, radius * 0.02);
     ctx.stroke();
 
-    ctx.strokeStyle = 'rgba(204, 110, 145, 0.2)';
-    ctx.lineWidth = Math.max(0.6, radius * 0.02);
+    ctx.strokeStyle = 'rgba(196, 114, 144, 0.15)';
+    ctx.lineWidth = Math.max(0.5, radius * 0.016);
     ctx.beginPath();
     ctx.moveTo(0, -radius * 0.12);
     ctx.lineTo(-radius * 0.1, -radius * 0.72);
@@ -459,34 +459,34 @@ function drawSakuraFlower(
   }
   ctx.shadowColor = 'transparent';
 
-  // Soft depth darkening for inner blossoms
+  // Soft organic interior depth shading for back-layer blossoms
   if (depthShade < 0.98) {
-    ctx.fillStyle = `rgba(68, 28, 46, ${(1 - depthShade) * 0.28})`;
+    ctx.fillStyle = `rgba(64, 28, 44, ${(1 - depthShade) * 0.34})`;
     ctx.beginPath();
     ctx.arc(0, 0, radius * 0.96, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  ctx.fillStyle = '#8b2449';
+  ctx.fillStyle = '#7e2444';
   ctx.beginPath();
-  ctx.arc(0, 0, radius * 0.14, 0, Math.PI * 2);
+  ctx.arc(0, 0, radius * 0.12, 0, Math.PI * 2);
   ctx.fill();
 
-  for (let s = 0; s < 12; s++) {
-    const a = (s * Math.PI * 2) / 12 + 0.15;
-    const len = radius * (0.28 + (s % 2) * 0.12);
+  for (let s = 0; s < 10; s++) {
+    const a = (s * Math.PI * 2) / 10 + 0.18;
+    const len = radius * (0.26 + (s % 2) * 0.11);
     const sx = Math.cos(a) * len;
     const sy = Math.sin(a) * len;
-    ctx.strokeStyle = 'rgba(246, 188, 200, 0.9)';
-    ctx.lineWidth = Math.max(0.8, radius * 0.032);
+    ctx.strokeStyle = 'rgba(240, 184, 198, 0.78)';
+    ctx.lineWidth = Math.max(0.65, radius * 0.025);
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(sx, sy);
     ctx.stroke();
 
-    ctx.fillStyle = '#f8d362';
+    ctx.fillStyle = '#ecc55d';
     ctx.beginPath();
-    ctx.arc(sx, sy, Math.max(1.2, radius * 0.055), 0, Math.PI * 2);
+    ctx.arc(sx, sy, Math.max(1.0, radius * 0.045), 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -584,85 +584,106 @@ function buildSakuraClusterTexture(maxAniso: number): THREE.CanvasTexture {
     ctx.stroke();
   }
 
-  // Subtle young bronze-green spring sakura leaves tucked behind blossoms
-  for (let b = 0; b < 16; b++) {
-    const lx = 210 + rand() * 604;
-    const ly = 200 + rand() * 580;
+  // Young olive-bronze spring cherry leaves tucked realistically behind blossoms
+  for (let b = 0; b < 24; b++) {
+    const lx = 185 + rand() * 654;
+    const ly = 180 + rand() * 620;
     ctx.save();
     ctx.translate(lx, ly);
-    ctx.rotate((rand() - 0.5) * 2.6);
-    ctx.fillStyle = rand() > 0.5 ? '#5e7d40' : '#7b934d';
+    ctx.rotate((rand() - 0.5) * 2.8);
+    ctx.fillStyle = rand() > 0.5 ? '#557039' : rand() > 0.35 ? '#6d8242' : '#7a5d42';
     ctx.beginPath();
-    ctx.ellipse(0, -28, 12, 34, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -24, 10, 29, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = 'rgba(42, 54, 28, 0.32)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(0, 4);
+    ctx.lineTo(0, -46);
+    ctx.stroke();
     ctx.restore();
   }
 
-  // Deep inner blossom buds & rear blossoms first for 3D depth
-  for (let b = 0; b < 18; b++) {
-    const bx = 220 + rand() * 584;
-    const by = 180 + rand() * 620;
-    drawSakuraFlower(ctx, bx, by, 58 + rand() * 24, rand() * Math.PI * 2, rand(), 0.72);
+  // Deep shaded back-layer blossom spray (dense photographic multi-depth volume)
+  for (let b = 0; b < 30; b++) {
+    const a = rand() * Math.PI * 2;
+    const rad = Math.sqrt(rand()) * 320;
+    const bx = 512 + Math.cos(a) * rad;
+    const by = 490 + Math.sin(a) * rad * 0.9;
+    drawSakuraFlower(ctx, bx, by, 44 + rand() * 22, rand() * Math.PI * 2, rand(), 0.64);
   }
 
-  // Crisp foreground 5-petal blossom clusters
+  // Mid-layer natural umbel sprays
+  for (let b = 0; b < 26; b++) {
+    const a = rand() * Math.PI * 2;
+    const rad = Math.sqrt(rand()) * 355;
+    const bx = 512 + Math.cos(a) * rad;
+    const by = 485 + Math.sin(a) * rad * 0.88;
+    drawSakuraFlower(ctx, bx, by, 48 + rand() * 24, rand() * Math.PI * 2, rand(), 0.82);
+  }
+
+  // Crisp sunlit foreground botanical blossom sprays (delicate natural scale, not giant cartoon flowers)
   const spots: Array<[number, number, number]> = [
-    [512, 512, 92],
-    [376, 560, 84],
-    [654, 550, 84],
-    [418, 396, 82],
-    [624, 392, 82],
-    [516, 268, 78],
-    [258, 470, 72],
-    [762, 456, 74],
-    [304, 310, 70],
-    [720, 298, 70],
-    [514, 700, 78],
-    [372, 726, 68],
-    [658, 718, 70],
-    [512, 430, 74],
-    [426, 492, 72],
-    [598, 488, 72],
-    [328, 638, 66],
-    [702, 628, 66],
-    [216, 368, 60],
-    [806, 356, 60],
-    [418, 212, 64],
-    [616, 206, 64],
-    [514, 166, 58],
-    [244, 594, 60],
-    [784, 584, 60],
-    [512, 818, 62],
+    [512, 512, 70],
+    [388, 554, 64],
+    [640, 544, 64],
+    [422, 404, 62],
+    [612, 400, 62],
+    [514, 282, 58],
+    [276, 474, 56],
+    [746, 464, 56],
+    [318, 326, 54],
+    [706, 314, 54],
+    [512, 682, 60],
+    [382, 706, 54],
+    [644, 702, 54],
+    [512, 434, 58],
+    [438, 492, 56],
+    [588, 488, 56],
+    [340, 626, 52],
+    [690, 616, 52],
+    [226, 382, 46],
+    [796, 372, 46],
+    [426, 224, 50],
+    [608, 218, 50],
+    [514, 178, 46],
+    [258, 584, 48],
+    [768, 574, 48],
+    [512, 792, 48],
+    [464, 344, 52],
+    [568, 340, 52],
+    [354, 476, 54],
+    [668, 472, 54],
   ];
 
   for (const [fx, fy, fr] of spots) {
     drawSakuraFlower(
       ctx,
-      fx + (rand() - 0.5) * 24,
-      fy + (rand() - 0.5) * 24,
-      fr,
+      fx + (rand() - 0.5) * 26,
+      fy + (rand() - 0.5) * 26,
+      fr * (0.9 + rand() * 0.2),
       rand() * Math.PI * 2,
       rand(),
       1.0
     );
   }
 
-  // Unopened rose-pink blossom buds along outer tips
-  for (let i = 0; i < 18; i++) {
+  // Unopened rose-pink blossom buds along fine outer twig tips
+  for (let i = 0; i < 24; i++) {
     const a = rand() * Math.PI * 2;
-    const rad = 280 + rand() * 145;
+    const rad = 275 + rand() * 155;
     const bx = 512 + Math.cos(a) * rad;
     const by = 480 + Math.sin(a) * rad * 0.85;
     ctx.save();
     ctx.translate(bx, by);
     ctx.rotate(a + Math.PI * 0.5);
-    ctx.fillStyle = '#e56f97';
+    ctx.fillStyle = '#dd6e93';
     ctx.beginPath();
-    ctx.ellipse(0, 0, 11, 20, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, 9, 17, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#5a4435';
+    ctx.fillStyle = '#533e30';
     ctx.beginPath();
-    ctx.arc(0, 16, 6, 0, Math.PI);
+    ctx.arc(0, 14, 5, 0, Math.PI);
     ctx.fill();
     ctx.restore();
   }
@@ -793,21 +814,40 @@ function buildShrubClusterTexture(maxAniso: number): THREE.CanvasTexture {
   const rand = makeSeededRand(3391);
   ctx.clearRect(0, 0, 512, 512);
 
-  for (let i = 0; i < 110; i++) {
-    const lx = 88 + rand() * 336;
-    const ly = 88 + rand() * 352;
+  // Subtle woody shrub stems inside foliage cluster
+  ctx.strokeStyle = '#3b2d22';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 4;
+  for (let s = 0; s < 5; s++) {
+    ctx.beginPath();
+    ctx.moveTo(256, 445);
+    ctx.quadraticCurveTo(256 + (s - 2) * 48, 320, 140 + s * 58, 175 + (s % 2) * 40);
+    ctx.stroke();
+  }
+
+  for (let i = 0; i < 145; i++) {
+    const lx = 78 + rand() * 356;
+    const ly = 78 + rand() * 366;
     const ang = rand() * Math.PI * 2;
-    const rx = 18 + rand() * 14;
-    const ry = 36 + rand() * 18;
+    const rx = 14 + rand() * 12;
+    const ry = 28 + rand() * 16;
     ctx.save();
     ctx.translate(lx, ly);
     ctx.rotate(ang);
-    ctx.fillStyle = rand() > 0.5 ? '#2d572c' : rand() > 0.4 ? '#3b6d38' : '#244725';
+    const leafGrad = ctx.createLinearGradient(0, -ry, 0, ry);
+    if (rand() > 0.5) {
+      leafGrad.addColorStop(0, '#3e6e36');
+      leafGrad.addColorStop(1, '#234422');
+    } else {
+      leafGrad.addColorStop(0, '#4c7b3e');
+      leafGrad.addColorStop(1, '#2c5128');
+    }
+    ctx.fillStyle = leafGrad;
     ctx.beginPath();
     ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(130, 175, 105, 0.28)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(138, 178, 108, 0.24)';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(0, -ry * 0.78);
     ctx.lineTo(0, ry * 0.78);
@@ -818,7 +858,7 @@ function buildShrubClusterTexture(maxAniso: number): THREE.CanvasTexture {
   for (let b = 0; b < 14; b++) {
     const bx = 110 + rand() * 290;
     const by = 100 + rand() * 290;
-    drawSakuraFlower(ctx, bx, by, 24 + rand() * 12, rand() * Math.PI * 2, rand() * 0.4);
+    drawSakuraFlower(ctx, bx, by, 18 + rand() * 10, rand() * Math.PI * 2, rand() * 0.45, 0.92);
   }
 
   const tex = new THREE.CanvasTexture(canvas);

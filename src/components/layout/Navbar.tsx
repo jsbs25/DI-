@@ -176,15 +176,15 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const surfaceChip = isGardenHome
     ? isGardenDay
-      ? 'border-white/75 bg-[#fcfaf5]/84 text-[#1b2b23] hover:bg-[#fcfaf5]/96 shadow-[0_8px_24px_rgba(20,34,27,0.12)] backdrop-blur-2xl ring-1 ring-inset ring-white/55'
-      : 'border-white/16 bg-[#101924]/74 text-[#f5f1e8] hover:bg-[#101924]/90 shadow-[0_10px_28px_rgba(2,6,12,0.40)] backdrop-blur-2xl ring-1 ring-inset ring-white/[0.06]'
-    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/92 dark:bg-[#101924]/90 text-[#1b2b23] dark:text-[#f5f1e8] hover:bg-white dark:hover:bg-[#182534] shadow-[0_6px_20px_rgba(20,34,27,0.08)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.38)] backdrop-blur-2xl ring-1 ring-inset ring-white/50 dark:ring-white/[0.05]';
+      ? 'border-[#1d2d25]/14 bg-[#f3eee4]/92 text-[#1b2b23] hover:bg-[#f8f4ec] shadow-[0_6px_18px_rgba(16,28,22,0.14)]'
+      : 'border-white/12 bg-[#0f1722]/88 text-[#f5f1e8] hover:bg-[#162231]/94 shadow-[0_8px_22px_rgba(2,6,12,0.38)]'
+    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/95 dark:bg-[#101924]/94 text-[#1b2b23] dark:text-[#f5f1e8] hover:bg-white dark:hover:bg-[#182534] shadow-[0_6px_18px_rgba(20,34,27,0.08)] dark:shadow-[0_10px_24px_rgba(0,0,0,0.36)]';
 
   const dockShell = isGardenHome
     ? isGardenDay
-      ? 'border-white/75 bg-[#fcfaf5]/86 text-[#1b2b23] shadow-[0_14px_38px_rgba(20,34,27,0.16),0_2px_8px_rgba(20,34,27,0.06)] backdrop-blur-2xl ring-1 ring-inset ring-white/60'
-      : 'border-white/16 bg-[#0f1722]/80 text-[#f5f1e8] shadow-[0_18px_46px_rgba(2,6,12,0.52)] backdrop-blur-2xl ring-1 ring-inset ring-white/[0.07]'
-    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/94 dark:bg-[#0f1722]/92 text-[#1b2b23] dark:text-[#f5f1e8] shadow-[0_14px_36px_rgba(20,34,27,0.12)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.50)] backdrop-blur-2xl ring-1 ring-inset ring-white/60 dark:ring-white/[0.06]';
+      ? 'border-[#1d2d25]/14 bg-[#f3eee4]/94 text-[#1b2b23] shadow-[0_12px_32px_rgba(16,28,22,0.18)]'
+      : 'border-white/12 bg-[#0f1722]/90 text-[#f5f1e8] shadow-[0_16px_40px_rgba(2,6,12,0.50)]'
+    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/96 dark:bg-[#0f1722]/94 text-[#1b2b23] dark:text-[#f5f1e8] shadow-[0_12px_32px_rgba(20,34,27,0.12)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.48)]';
 
   return (
     <>
@@ -261,7 +261,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <ChevronDown className="h-3 w-3 opacity-70" />
               </button>
               {langMenuOpen && (
-                <div role="menu" className="absolute right-0 z-[60] mt-2 w-40 rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/96 dark:bg-[#111b26]/96 py-1.5 shadow-2xl backdrop-blur-2xl">
+                <div role="menu" className="absolute right-0 z-[60] mt-2 w-40 rounded-2xl border border-[#23362c]/14 dark:border-white/[0.14] bg-[#f8f5ee] dark:bg-[#111b26] py-1.5 shadow-2xl">
                   {languages.map(l => (
                     <button
                       key={l.code}
@@ -300,7 +300,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <ChevronDown className="hidden md:inline h-3 w-3 opacity-65" />
                 </button>
                 {userDropdownOpen && (
-                  <div role="menu" className="absolute right-0 mt-2 w-60 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/96 dark:bg-[#111b26]/96 py-2 text-xs shadow-2xl backdrop-blur-2xl">
+                  <div role="menu" className="absolute right-0 mt-2 w-60 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-[#23362c]/14 dark:border-white/[0.14] bg-[#f8f5ee] dark:bg-[#111b26] py-2 text-xs shadow-2xl">
                     <div className="mb-1 flex items-center gap-2.5 border-b border-[#23362c]/10 dark:border-white/[0.1] px-3.5 py-2.5">
                       <img src={currentUser.avatar} alt={currentUser.displayName} className="h-9 w-9 rounded-full object-cover shrink-0" />
                       <div className="min-w-0">

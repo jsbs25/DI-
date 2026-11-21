@@ -58,18 +58,71 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
  * Winding stream & river path:
  * Starts at waterfall plunge pool (-19.5, -20.5) -> meanders toward lake center (5, -2) -> exits east
  */
+const STREAM_AX = -20;
+const STREAM_AZ = -21;
+const STREAM_BX = 5;
+const STREAM_BZ = -2;
+const STREAM_DX = STREAM_BX - STREAM_AX;
+const STREAM_DZ = STREAM_BZ - STREAM_AZ;
+const STREAM_LEN2 = STREAM_DX * STREAM_DX + STREAM_DZ * STREAM_DZ;
+const STREAM_LEN = Math.sqrt(STREAM_LEN2);
+
+/**
+ * Evaluates the exact stream centerline point at normalized progress p in [0, 1]
+ */
+export function streamCenterAt(proj: number): { x: number; z: number } {
+  const p = Math.max(0, Math.min(1, proj));
+  const meander = Math.sin(p * Math.PI * 2.2) * 2.1;
+  return {
+    x: STREAM_AX + STREAM_DX * p - STREAM_DZ * (meander / STREAM_LEN),
+    z: STREAM_AZ + STREAM_DZ * p + STREAM_DX * (meander / STREAM_LEN),
+  };
+}
+
+/**
+ * Exact bank-to-bank bridge geometry computed strictly perpendicular to the stream centerline,
+ * anchoring both left & right abutments solidly into dry opposite riverbanks.
+ */
+const BRIDGE_PROJ = 0.56;
+const BRIDGE_CENTER = streamCenterAt(BRIDGE_PROJ);
+const BRIDGE_P_PREV = streamCenterAt(BRIDGE_PROJ - 0.004);
+const BRIDGE_P_NEXT = streamCenterAt(BRIDGE_PROJ + 0.004);
+const BRIDGE_TANGENT_LEN = Math.hypot(BRIDGE_P_NEXT.x - BRIDGE_P_PREV.x, BRIDGE_P_NEXT.z - BRIDGE_P_PREV.z) || 1;
+const BRIDGE_TX = (BRIDGE_P_NEXT.x - BRIDGE_P_PREV.x) / BRIDGE_TANGENT_LEN;
+const BRIDGE_TZ = (BRIDGE_P_NEXT.z - BRIDGE_P_PREV.z) / BRIDGE_TANGENT_LEN;
+// Perpendicular axis pointing from foreground/SW bank (-span/2) across stream to pavilion/NE bank (+span/2)
+const BRIDGE_AXIS_X = BRIDGE_TZ;
+const BRIDGE_AXIS_Z = -BRIDGE_TX;
+const BRIDGE_SPAN = 9.4;
+const BRIDGE_BANK_DIST = 4.95;
+
+export const BRIDGE_CONFIG = {
+  centerX: BRIDGE_CENTER.x,
+  centerZ: BRIDGE_CENTER.z,
+  deckBaseY: 0.44,
+  span: BRIDGE_SPAN,
+  archRise: 1.02,
+  axisX: BRIDGE_AXIS_X,
+  axisZ: BRIDGE_AXIS_Z,
+  // Maps local +Z axis to (axisX, 0, axisZ)
+  rotY: Math.atan2(BRIDGE_AXIS_X, BRIDGE_AXIS_Z),
+  // Left/SW foreground bank landing (connects from meadow path)
+  bankAX: BRIDGE_CENTER.x - BRIDGE_AXIS_X * BRIDGE_BANK_DIST,
+  bankAZ: BRIDGE_CENTER.z - BRIDGE_AXIS_Z * BRIDGE_BANK_DIST,
+  // Right/NE pavilion bank landing (connects toward lakeside pavilion)
+  bankBX: BRIDGE_CENTER.x + BRIDGE_AXIS_X * BRIDGE_BANK_DIST,
+  bankBZ: BRIDGE_CENTER.z + BRIDGE_AXIS_Z * BRIDGE_BANK_DIST,
+};
+
+/**
+ * Winding stream & river path:
+ * Starts at waterfall plunge pool (-19.5, -20.5) -> meanders toward lake center (5, -2) -> exits east
+ */
 export function streamDistanceAndFlow(x: number, z: number): { dist: number; width: number; isPlungePool: boolean } {
-  const ax = -20;
-  const az = -21;
-  const bx = 5;
-  const bz = -2;
-  const dx = bx - ax;
-  const dz = bz - az;
-  const len2 = dx * dx + dz * dz;
-  const proj = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
+  const proj = Math.max(0, Math.min(1, ((x - STREAM_AX) * STREAM_DX + (z - STREAM_AZ) * STREAM_DZ) / STREAM_LEN2));
   const meander = Math.sin(proj * Math.PI * 2.2) * 2.1;
-  const cx = ax + dx * proj - dz * (meander / Math.sqrt(len2));
-  const cz = az + dz * proj + dx * (meander / Math.sqrt(len2));
+  const cx = STREAM_AX + STREAM_DX * proj - STREAM_DZ * (meander / STREAM_LEN);
+  const cz = STREAM_AZ + STREAM_DZ * proj + STREAM_DX * (meander / STREAM_LEN);
   const distStream = Math.hypot(x - cx, z - cz);
 
   const distPool = Math.hypot(x - -19.5, z - -20.5);
@@ -88,12 +141,48 @@ export function streamDistanceAndFlow(x: number, z: number): { dist: number; wid
   const ocz = oz + odz * oproj + odx * (oMeander / Math.sqrt(olen2));
   const distOutlet = Math.hypot(x - ocx, z - ocz);
 
-  const width = distPool < 5.0 ? 4.35 : 2.45;
+  const width = distPool < 5.0 ? 4.35 : 2.35;
   return {
     dist: Math.min(distStream, distPool * 0.72, distOutlet),
     width,
     isPlungePool,
   };
+}
+
+/**
+ * Returns real downstream surface water velocity (m/s) at (x, z) so fallen sakura petals
+ * glide naturally along the stream under the bridge and gently circulate across the lake.
+ */
+export function streamVelocityAt(x: number, z: number, out: THREE.Vector2): THREE.Vector2 {
+  const proj = Math.max(0, Math.min(1, ((x - STREAM_AX) * STREAM_DX + (z - STREAM_AZ) * STREAM_DZ) / STREAM_LEN2));
+  const c0 = streamCenterAt(Math.max(0, proj - 0.01));
+  const c1 = streamCenterAt(Math.min(1, proj + 0.01));
+  const tx = c1.x - c0.x;
+  const tz = c1.z - c0.z;
+  const tLen = Math.hypot(tx, tz) || 1;
+  const cur = streamCenterAt(proj);
+  const dStream = Math.hypot(x - cur.x, z - cur.z);
+
+  if (dStream < 4.2 && proj < 0.96) {
+    // Pull gently toward channel center while gliding downstream
+    const speed = 0.62 + (1 - Math.min(1, dStream / 4.2)) * 0.34;
+    const pullX = (cur.x - x) * 0.14;
+    const pullZ = (cur.z - z) * 0.14;
+    return out.set((tx / tLen) * speed + pullX, (tz / tLen) * speed + pullZ);
+  }
+
+  // Inside the lake: slow poetic clockwise eddy + gentle drift toward eastern outlet
+  const lx = x - 5.5;
+  const lz = z + 1.8;
+  const lr = Math.hypot(lx, lz) || 1;
+  if (lr < 13.5) {
+    const swirlX = (-lz / lr) * 0.16 + 0.14;
+    const swirlZ = (lx / lr) * 0.12 + 0.04;
+    return out.set(swirlX, swirlZ);
+  }
+
+  // Eastern outlet stream
+  return out.set(0.45, 0.16);
 }
 
 /**
@@ -107,31 +196,37 @@ export function lakeSignedDist(x: number, z: number): number {
 }
 
 /**
- * Curved natural garden stone footpath: foreground meadow -> arched bridge -> pavilion terrace
+ * Curved natural garden stone footpath: foreground meadow -> SW bridgehead -> NE bridgehead -> pavilion terrace
  */
 export function gardenPathFactor(x: number, z: number): number {
-  const p0x = 0.5;
-  const p0z = 19.0;
-  const p1x = -7.8;
-  const p1z = -4.0;
+  // Segment 1: Foreground meadow -> SW bridge landing (bankA)
+  const p0x = -1.2;
+  const p0z = 17.5;
+  const p1x = BRIDGE_CONFIG.bankAX;
+  const p1z = BRIDGE_CONFIG.bankAZ;
   const dx1 = p1x - p0x;
   const dz1 = p1z - p0z;
   const t1 = Math.max(0, Math.min(1, ((x - p0x) * dx1 + (z - p0z) * dz1) / (dx1 * dx1 + dz1 * dz1)));
-  const sway1 = Math.sin(t1 * Math.PI) * 3.1;
+  const sway1 = Math.sin(t1 * Math.PI) * 2.2;
   const d1 = Math.hypot(x - (p0x + dx1 * t1 + sway1), z - (p0z + dz1 * t1));
 
-  const p2x = -5.4;
-  const p2z = -12.6;
+  // Segment 2: NE bridge landing (bankB) -> lakeside pavilion terrace
+  const p2x = BRIDGE_CONFIG.bankBX;
+  const p2z = BRIDGE_CONFIG.bankBZ;
   const p3x = 12.6;
   const p3z = -7.8;
   const dx2 = p3x - p2x;
   const dz2 = p3z - p2z;
   const t2 = Math.max(0, Math.min(1, ((x - p2x) * dx2 + (z - p2z) * dz2) / (dx2 * dx2 + dz2 * dz2)));
-  const sway2 = Math.sin(t2 * Math.PI) * -1.4;
+  const sway2 = Math.sin(t2 * Math.PI) * -1.35;
   const d2 = Math.hypot(x - (p2x + dx2 * t2), z - (p2z + dz2 * t2 + sway2));
 
-  const d = Math.min(d1, d2);
-  return 1 - smoothstep(0.68, 1.95, d);
+  // Landing aprons right at both ends of the bridge
+  const dBankA = Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ) * 0.85;
+  const dBankB = Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ) * 0.85;
+
+  const d = Math.min(d1, d2, dBankA, dBankB);
+  return 1 - smoothstep(0.72, 2.05, d);
 }
 
 export interface TerrainBiomeSample {
@@ -171,10 +266,22 @@ export function sampleTerrainBiome(x: number, z: number): TerrainBiomeSample {
   h = THREE.MathUtils.lerp(h, 1.38, restFlat);
 
   const stream = streamDistanceAndFlow(x, z);
-  const streamCarve = 1 - smoothstep(stream.width * 0.48, stream.width * 1.5, stream.dist);
+  const streamCarve = 1 - smoothstep(stream.width * 0.48, stream.width * 1.46, stream.dist);
   if (streamCarve > 0) {
     const streamBottom = stream.isPlungePool ? -1.55 : -0.84;
     h = THREE.MathUtils.lerp(h, streamBottom, streamCarve);
+  }
+
+  // Sculpt solid natural dry-earth bridgehead embankments on BOTH left & right riverbanks
+  // so the arched bridge connects shore-to-shore with zero gap or floating abutments
+  const dryBankMask = smoothstep(stream.width * 1.02, stream.width * 1.44, stream.dist) * (1 - lakeCarve * 0.9);
+  if (dryBankMask > 0.001) {
+    const dHeadA = Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ);
+    const dHeadB = Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ);
+    const headFlat = Math.max(1 - smoothstep(1.9, 4.6, dHeadA), 1 - smoothstep(1.9, 4.6, dHeadB));
+    if (headFlat > 0.001) {
+      h = THREE.MathUtils.lerp(h, BRIDGE_CONFIG.deckBaseY + 0.02, headFlat * dryBankMask * 0.92);
+    }
   }
 
   const cliffDx = (x + 23.0) / 9.2;
