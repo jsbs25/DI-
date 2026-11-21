@@ -231,6 +231,8 @@ export function detectParadiseQuality(
 
 export interface ProceduralTextureSet {
   terrainDetail: THREE.CanvasTexture;
+  terrainNormalMap: THREE.DataTexture;
+  terrainRoughnessMap: THREE.DataTexture;
   barkMap: THREE.CanvasTexture;
   sakuraBarkMap: THREE.CanvasTexture;
   ginkgoBarkMap: THREE.CanvasTexture;
@@ -869,52 +871,104 @@ function buildShrubClusterTexture(maxAniso: number): THREE.CanvasTexture {
 }
 
 function buildWildflowerTexture(maxAniso: number): THREE.CanvasTexture {
-  const [canvas, ctx] = makeCanvas(256, 256);
-  ctx.clearRect(0, 0, 256, 256);
+  const size = 512;
+  const [canvas, ctx] = makeCanvas(size, size);
+  const rand = makeSeededRand(4817);
+  ctx.clearRect(0, 0, size, size);
 
-  ctx.strokeStyle = '#3d6931';
+  // Lush layered basal botanical foliage rosette (soft serrated meadow leaves)
+  for (let i = 0; i < 11; i++) {
+    const t = (i / 10) * 2 - 1;
+    const baseX = 256 + t * 52;
+    const ang = t * 0.92 + (rand() - 0.5) * 0.16;
+    const leafLen = 118 + (1 - Math.abs(t)) * 56 + rand() * 24;
+    const leafW = 19 + rand() * 9;
+    ctx.save();
+    ctx.translate(baseX, 492);
+    ctx.rotate(ang);
+    const lGrad = ctx.createLinearGradient(0, 0, 0, -leafLen);
+    lGrad.addColorStop(0, '#2a4d24');
+    lGrad.addColorStop(0.55, '#467438');
+    lGrad.addColorStop(1, '#68994c');
+    ctx.fillStyle = lGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.bezierCurveTo(-leafW, -leafLen * 0.34, -leafW * 0.88, -leafLen * 0.78, 0, -leafLen);
+    ctx.bezierCurveTo(leafW * 0.88, -leafLen * 0.78, leafW, -leafLen * 0.34, 0, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(166, 206, 128, 0.34)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(0, -leafLen * 0.86);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Graceful curving botanical flower stems + multi-layered 6-petal garden blooms
+  const blooms: Array<{ bx: number; tx: number; ty: number; r: number; petals: number; rot: number }> = [
+    { bx: 244, tx: 146, ty: 246, r: 58, petals: 6, rot: 0.2 },
+    { bx: 268, tx: 368, ty: 236, r: 60, petals: 6, rot: 0.55 },
+    { bx: 252, tx: 196, ty: 152, r: 66, petals: 7, rot: 0.12 },
+    { bx: 264, tx: 322, ty: 164, r: 64, petals: 7, rot: 0.42 },
+    { bx: 256, tx: 256, ty: 112, r: 74, petals: 8, rot: 0.3 },
+  ];
+
+  // Draw curved stems first so blossoms sit naturally in front
   ctx.lineCap = 'round';
-  ctx.lineWidth = 7;
-  ctx.beginPath();
-  ctx.moveTo(128, 248);
-  ctx.quadraticCurveTo(122, 176, 128, 96);
-  ctx.stroke();
-
-  for (const side of [-1, 1]) {
-    ctx.save();
-    ctx.translate(128, 192);
-    ctx.rotate(side * 0.58);
-    ctx.fillStyle = '#477838';
+  for (const b of blooms) {
+    ctx.strokeStyle = '#3b6630';
+    ctx.lineWidth = 7.5;
     ctx.beginPath();
-    ctx.ellipse(0, -28, 11, 32, 0, 0, Math.PI * 2);
+    ctx.moveTo(b.bx, 490);
+    ctx.quadraticCurveTo((b.bx + b.tx) * 0.5 + (b.tx - 256) * 0.14, (490 + b.ty) * 0.5, b.tx, b.ty + b.r * 0.22);
+    ctx.stroke();
+  }
+
+  // Draw layered shaded blossoms (white-base tinted cleanly via InstancedMesh instanceColor)
+  for (const b of blooms) {
+    ctx.save();
+    ctx.translate(b.tx, b.ty);
+    ctx.rotate(b.rot);
+
+    ctx.shadowColor = 'rgba(26, 44, 24, 0.22)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 5;
+
+    for (let p = 0; p < b.petals; p++) {
+      ctx.save();
+      ctx.rotate((p * Math.PI * 2) / b.petals);
+      const grad = ctx.createRadialGradient(0, -b.r * 0.16, 4, 0, -b.r * 0.56, b.r * 0.85);
+      grad.addColorStop(0, '#fff4cf');
+      grad.addColorStop(0.24, '#ffffff');
+      grad.addColorStop(0.84, '#f7f5f7');
+      grad.addColorStop(1, '#e6e4ea');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(0, -4);
+      ctx.bezierCurveTo(-b.r * 0.36, -b.r * 0.24, -b.r * 0.42, -b.r * 0.82, 0, -b.r * 0.96);
+      ctx.bezierCurveTo(b.r * 0.42, -b.r * 0.82, b.r * 0.36, -b.r * 0.24, 0, -4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.shadowColor = 'transparent';
+    const centerGrad = ctx.createRadialGradient(-3, -3, 2, 0, 0, b.r * 0.25);
+    centerGrad.addColorStop(0, '#ffe878');
+    centerGrad.addColorStop(0.7, '#e29e20');
+    centerGrad.addColorStop(1, '#a96b14');
+    ctx.fillStyle = centerGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r * 0.22, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
-
-  ctx.save();
-  ctx.translate(128, 88);
-  for (let p = 0; p < 6; p++) {
-    ctx.save();
-    ctx.rotate((p * Math.PI * 2) / 6);
-    const grad = ctx.createRadialGradient(0, -12, 4, 0, -40, 52);
-    grad.addColorStop(0, '#ffe89c');
-    grad.addColorStop(0.28, '#ffffff');
-    grad.addColorStop(1, '#f4f4f6');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.ellipse(0, -34, 15, 32, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-  ctx.fillStyle = '#e5a922';
-  ctx.beginPath();
-  ctx.arc(0, 0, 12.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = Math.min(8, maxAniso);
+  tex.anisotropy = Math.min(16, maxAniso);
   tex.needsUpdate = true;
   return tex;
 }
@@ -1301,22 +1355,125 @@ function buildArchitectureTextures(maxAniso: number): {
 export function createParadiseTextures(maxAniso: number): ProceduralTextureSet {
   const rand = makeSeededRand(1337);
 
-  // 1. Crisp 512x512 terrain micro-detail noise
-  const [tCanvas, tCtx] = makeCanvas(512, 512);
-  const imgData = tCtx.createImageData(512, 512);
-  for (let i = 0; i < imgData.data.length; i += 4) {
-    const v = 216 + Math.floor((rand() - 0.5) * 44);
-    imgData.data[i] = v;
-    imgData.data[i + 1] = Math.min(255, v + 3);
-    imgData.data[i + 2] = Math.max(0, v - 4);
-    imgData.data[i + 3] = 255;
+  // 1. Photorealistic 1024x1024 Seamless Botanical Meadow Turf, Clover & Moss PBR Texture Set
+  //    (Neutral-bright natural weave multiplied cleanly with biome vertex colors + matching Normal & Roughness maps)
+  const tSize = 1024;
+  const [tCanvas, tCtx] = makeCanvas(tSize, tSize);
+  tCtx.fillStyle = '#c5cdb6';
+  tCtx.fillRect(0, 0, tSize, tSize);
+
+  // Soft seamless moss & soil undertones (wrapped across tile borders for zero visible seams)
+  const drawWrapped = (fn: (ox: number, oy: number) => void) => {
+    for (const ox of [-tSize, 0, tSize]) {
+      for (const oy of [-tSize, 0, tSize]) {
+        fn(ox, oy);
+      }
+    }
+  };
+
+  for (let i = 0; i < 420; i++) {
+    const cx = rand() * tSize;
+    const cy = rand() * tSize;
+    const rad = 22 + rand() * 58;
+    const tone = rand();
+    const fill =
+      tone < 0.34
+        ? 'rgba(154, 174, 134, 0.24)'
+        : tone < 0.68
+          ? 'rgba(208, 222, 184, 0.22)'
+          : 'rgba(136, 132, 108, 0.16)';
+    drawWrapped((ox, oy) => {
+      if (cx + ox + rad < 0 || cx + ox - rad > tSize || cy + oy + rad < 0 || cy + oy - rad > tSize) return;
+      const g = tCtx.createRadialGradient(cx + ox, cy + oy, 2, cx + ox, cy + oy, rad);
+      g.addColorStop(0, fill);
+      g.addColorStop(1, 'rgba(180,192,162,0)');
+      tCtx.fillStyle = g;
+      tCtx.beginPath();
+      tCtx.arc(cx + ox, cy + oy, rad, 0, Math.PI * 2);
+      tCtx.fill();
+    });
   }
-  tCtx.putImageData(imgData, 0, 0);
+
+  // Thousands of fine interlocking natural botanical lawn blades & moss tufts
+  tCtx.lineCap = 'round';
+  for (let i = 0; i < 5200; i++) {
+    const x = rand() * tSize;
+    const y = rand() * tSize;
+    const ang = rand() * Math.PI * 2;
+    const len = 8 + rand() * 20;
+    const bend = (rand() - 0.5) * 9;
+    const shade = 166 + Math.floor(rand() * 78);
+    const warm = Math.floor((rand() - 0.45) * 18);
+    const lw = 1.1 + rand() * 1.9;
+    const stroke = `rgba(${Math.min(255, shade + warm)}, ${Math.min(255, shade + 16)}, ${Math.max(110, shade - 16)}, ${0.42 + rand() * 0.34})`;
+
+    const ex = Math.cos(ang) * len;
+    const ey = Math.sin(ang) * len;
+    const mx = ex * 0.5 - Math.sin(ang) * bend;
+    const my = ey * 0.5 + Math.cos(ang) * bend;
+
+    drawWrapped((ox, oy) => {
+      const px = x + ox;
+      const py = y + oy;
+      if (px < -24 || px > tSize + 24 || py < -24 || py > tSize + 24) return;
+      tCtx.strokeStyle = stroke;
+      tCtx.lineWidth = lw;
+      tCtx.beginPath();
+      tCtx.moveTo(px, py);
+      tCtx.quadraticCurveTo(px + mx, py + my, px + ex, py + ey);
+      tCtx.stroke();
+    });
+  }
+
+  // Delicate ground-cover clover rosettes & scattered micro-petals woven into turf
+  for (let i = 0; i < 420; i++) {
+    const x = rand() * tSize;
+    const y = rand() * tSize;
+    const r = 3.2 + rand() * 3.8;
+    const rot = rand() * Math.PI * 2;
+    const isBlossom = rand() < 0.24;
+    const col = isBlossom
+      ? rand() < 0.55
+        ? 'rgba(255, 250, 238, 0.62)'
+        : 'rgba(255, 224, 234, 0.58)'
+      : 'rgba(182, 212, 152, 0.52)';
+    drawWrapped((ox, oy) => {
+      const px = x + ox;
+      const py = y + oy;
+      if (px < -14 || px > tSize + 14 || py < -14 || py > tSize + 14) return;
+      tCtx.fillStyle = col;
+      const leaves = isBlossom ? 4 : 3;
+      for (let k = 0; k < leaves; k++) {
+        const a = rot + (k * Math.PI * 2) / leaves;
+        tCtx.beginPath();
+        tCtx.arc(px + Math.cos(a) * r * 0.72, py + Math.sin(a) * r * 0.72, r * 0.56, 0, Math.PI * 2);
+        tCtx.fill();
+      }
+    });
+  }
+
   const terrainDetail = new THREE.CanvasTexture(tCanvas);
   terrainDetail.wrapS = terrainDetail.wrapT = THREE.RepeatWrapping;
-  terrainDetail.repeat.set(40, 40);
+  terrainDetail.repeat.set(34, 34);
   terrainDetail.colorSpace = THREE.SRGBColorSpace;
   terrainDetail.anisotropy = Math.min(16, maxAniso);
+
+  // Derive seamless normal & organic roughness maps directly from the meadow turf luminance
+  const tnSize = 512;
+  const [tnCanvas, tnCtx] = makeCanvas(tnSize, tnSize);
+  tnCtx.drawImage(tCanvas, 0, 0, tnSize, tnSize);
+  const tnData = tnCtx.getImageData(0, 0, tnSize, tnSize).data;
+  const turfHeights = new Float32Array(tnSize * tnSize);
+  const turfRough = new Float32Array(tnSize * tnSize);
+  for (let i = 0; i < tnSize * tnSize; i++) {
+    const lum = (tnData[i * 4] * 0.299 + tnData[i * 4 + 1] * 0.587 + tnData[i * 4 + 2] * 0.114) / 255;
+    turfHeights[i] = lum;
+    turfRough[i] = Math.max(0.68, Math.min(0.96, 0.94 - (lum - 0.5) * 0.34));
+  }
+  const terrainNormalMap = buildNormalFromHeight(turfHeights, tnSize, 2.6);
+  terrainNormalMap.repeat.set(34, 34);
+  terrainNormalMap.anisotropy = Math.min(16, maxAniso);
+  const terrainRoughnessMap = buildLinearDataMap(turfRough, tnSize, 34, 34, maxAniso);
 
   const {
     barkMap,
@@ -1372,6 +1529,8 @@ export function createParadiseTextures(maxAniso: number): ProceduralTextureSet {
 
   return {
     terrainDetail,
+    terrainNormalMap,
+    terrainRoughnessMap,
     barkMap,
     sakuraBarkMap,
     ginkgoBarkMap,
@@ -1402,6 +1561,8 @@ export function createParadiseTextures(maxAniso: number): ProceduralTextureSet {
     mistPuff,
     dispose: () => {
       terrainDetail.dispose();
+      terrainNormalMap.dispose();
+      terrainRoughnessMap.dispose();
       barkMap.dispose();
       sakuraBarkMap.dispose();
       ginkgoBarkMap.dispose();

@@ -210,11 +210,11 @@ export function gardenPathFactor(x: number, z: number): number {
   const sway1 = Math.sin(t1 * Math.PI) * 2.2;
   const d1 = Math.hypot(x - (p0x + dx1 * t1 + sway1), z - (p0z + dz1 * t1));
 
-  // Segment 2: NE bridge landing (bankB) -> lakeside pavilion terrace
+  // Segment 2: NE bridge landing (bankB) -> lakeside Music Hall pavilion terrace (13.2, -7.6)
   const p2x = BRIDGE_CONFIG.bankBX;
   const p2z = BRIDGE_CONFIG.bankBZ;
-  const p3x = 12.6;
-  const p3z = -7.8;
+  const p3x = 13.0;
+  const p3z = -7.6;
   const dx2 = p3x - p2x;
   const dz2 = p3z - p2z;
   const t2 = Math.max(0, Math.min(1, ((x - p2x) * dx2 + (z - p2z) * dz2) / (dx2 * dx2 + dz2 * dz2)));
@@ -225,21 +225,22 @@ export function gardenPathFactor(x: number, z: number): number {
   const dBankA = Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ) * 0.85;
   const dBankB = Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ) * 0.85;
 
-  // Gentle stone spur trails connecting Library (-11.4, 5.8), Language Center (7.8, 9.4),
-  // Phone Booth (-1.4, 8.2), and AI Center (1.8, -12.6) to the main garden footpath
+  // Graceful stone spur trails branching cleanly off the main footpath to each building's terrace
+  // (Telephone Booth sits in its own roadside alcove at (-5.6, 11.8), 4.3m off the main road!)
   const segDist = (ax: number, az: number, bx: number, bz: number) => {
     const sdx = bx - ax;
     const sdz = bz - az;
     const st = Math.max(0, Math.min(1, ((x - ax) * sdx + (z - az) * sdz) / (sdx * sdx + sdz * sdz || 1)));
     return Math.hypot(x - (ax + sdx * st), z - (az + sdz * st));
   };
-  const dSpurLib = segDist(-3.2, 8.2, -9.8, 6.4) + 0.18;
-  const dSpurLang = segDist(-1.2, 10.6, 6.4, 9.4) + 0.18;
-  const dSpurAi = segDist(BRIDGE_CONFIG.bankBX, BRIDGE_CONFIG.bankBZ, 1.8, -10.8) + 0.15;
-  const dBoothPad = Math.hypot(x + 1.4, z - 8.2) * 0.85;
+  const dSpurLib = segDist(-2.5, 6.8, -10.4, 6.4) + 0.22;
+  const dSpurBooth = segDist(-1.3, 11.8, -4.3, 11.8) + 0.28;
+  const dBoothAlcove = Math.hypot(x + 5.6, z - 11.8) * 0.88;
+  const dSpurLang = segDist(-1.0, 11.2, 7.6, 9.6) + 0.22;
+  const dSpurAi = segDist(BRIDGE_CONFIG.bankBX, BRIDGE_CONFIG.bankBZ, 1.4, -11.2) + 0.18;
 
-  const d = Math.min(d1, d2, dBankA, dBankB, dSpurLib, dSpurLang, dSpurAi, dBoothPad);
-  return 1 - smoothstep(0.72, 2.05, d);
+  const d = Math.min(d1, d2, dBankA, dBankB, dSpurLib, dSpurBooth, dBoothAlcove, dSpurLang, dSpurAi);
+  return 1 - smoothstep(0.68, 1.92, d);
 }
 
 export interface TerrainBiomeSample {
@@ -270,26 +271,26 @@ export function sampleTerrainBiome(x: number, z: number): TerrainBiomeSample {
     h = THREE.MathUtils.lerp(h, basinBottom, lakeCarve);
   }
 
-  const pavDist = Math.hypot(x - 12.8, z + 7.8);
-  const pavFlat = 1 - smoothstep(2.8, 6.0, pavDist);
+  const pavDist = Math.hypot(x - 13.2, z + 7.6);
+  const pavFlat = 1 - smoothstep(2.9, 6.1, pavDist);
   h = THREE.MathUtils.lerp(h, 0.94, pavFlat);
 
-  const restDist = Math.hypot(x + 11.4, z - 5.8);
-  const restFlat = 1 - smoothstep(2.1, 4.4, restDist);
-  h = THREE.MathUtils.lerp(h, 1.38, restFlat);
+  const restDist = Math.hypot(x + 12.2, z - 6.4);
+  const restFlat = 1 - smoothstep(2.3, 4.7, restDist);
+  h = THREE.MathUtils.lerp(h, 1.36, restFlat);
 
-  // Flattened terrace pads for Language Center (7.8, 9.4), AI Center (1.8, -12.6), and Phone Booth (-1.4, 8.2)
-  const langDist = Math.hypot(x - 7.8, z - 9.4);
-  const langFlat = 1 - smoothstep(2.2, 4.7, langDist);
+  // Flattened terrace pads for Language Center (9.4, 9.6), AI Center (1.4, -13.2), and Roadside Phone Booth Alcove (-5.6, 11.8)
+  const langDist = Math.hypot(x - 9.4, z - 9.6);
+  const langFlat = 1 - smoothstep(2.4, 4.9, langDist);
   h = THREE.MathUtils.lerp(h, 1.24, langFlat);
 
-  const aiDist = Math.hypot(x - 1.8, z + 12.6);
-  const aiFlat = 1 - smoothstep(2.5, 5.2, aiDist);
-  h = THREE.MathUtils.lerp(h, 1.06, aiFlat);
+  const aiDist = Math.hypot(x - 1.4, z + 13.2);
+  const aiFlat = 1 - smoothstep(2.7, 5.4, aiDist);
+  h = THREE.MathUtils.lerp(h, 1.08, aiFlat);
 
-  const boothDist = Math.hypot(x + 1.4, z - 8.2);
-  const boothFlat = 1 - smoothstep(1.2, 2.6, boothDist);
-  h = THREE.MathUtils.lerp(h, 0.78, boothFlat);
+  const boothDist = Math.hypot(x + 5.6, z - 11.8);
+  const boothFlat = 1 - smoothstep(1.6, 3.3, boothDist);
+  h = THREE.MathUtils.lerp(h, 0.92, boothFlat);
 
   const stream = streamDistanceAndFlow(x, z);
   const streamCarve = 1 - smoothstep(stream.width * 0.48, stream.width * 1.46, stream.dist);
@@ -381,12 +382,13 @@ export function createParadiseTerrain(
   const colors = new Float32Array(count * 3);
 
   const cDeepBed = new THREE.Color(0x1f2d32);
-  const cShoreSand = new THREE.Color(0x7c745e);
-  const cMeadow = new THREE.Color(0x3a6133);
-  const cMeadowRich = new THREE.Color(0x284d28);
-  const cPathStone = new THREE.Color(0x8c877c);
+  const cShoreSand = new THREE.Color(0x887f68);
+  const cMeadow = new THREE.Color(0x4e7540);
+  const cMeadowRich = new THREE.Color(0x345b32);
+  const cMeadowSun = new THREE.Color(0x618748);
+  const cPathStone = new THREE.Color(0x9a9386);
   const cCliffRock = new THREE.Color(0x555b62);
-  const cFarMountain = new THREE.Color(0x294437);
+  const cFarMountain = new THREE.Color(0x2a4638);
   const tmpColor = new THREE.Color();
 
   for (let i = 0; i < count; i++) {
@@ -395,17 +397,18 @@ export function createParadiseTerrain(
     const sample = sampleTerrainBiome(x, z);
     posAttr.setY(i, sample.height);
 
-    const n = noise2(x * 0.16 + 7.2, z * 0.16 - 3.4);
-    tmpColor.copy(cMeadow).lerp(cMeadowRich, n);
+    const n = noise2(x * 0.14 + 7.2, z * 0.14 - 3.4);
+    const n2 = noise2(x * 0.06 - 2.8, z * 0.06 + 5.1);
+    tmpColor.copy(cMeadow).lerp(cMeadowRich, n * 0.85).lerp(cMeadowSun, smoothstep(0.54, 0.86, n2) * 0.48);
 
     if (sample.height < 0.05) {
       tmpColor.lerp(cDeepBed, smoothstep(0.05, -0.85, sample.height));
     }
     if (sample.shoreWeight > 0) {
-      tmpColor.lerp(cShoreSand, sample.shoreWeight * 0.8);
+      tmpColor.lerp(cShoreSand, sample.shoreWeight * 0.78);
     }
     if (sample.pathWeight > 0) {
-      tmpColor.lerp(cPathStone, sample.pathWeight * 0.86);
+      tmpColor.lerp(cPathStone, sample.pathWeight * 0.9);
     }
     if (sample.rockWeight > 0) {
       tmpColor.lerp(cCliffRock, sample.rockWeight * 0.88);
@@ -431,7 +434,10 @@ export function createParadiseTerrain(
   const terrainMat = new THREE.MeshStandardMaterial({
     vertexColors: true,
     map: textures.terrainDetail,
-    roughness: 0.9,
+    normalMap: textures.terrainNormalMap,
+    normalScale: new THREE.Vector2(0.72, 0.72),
+    roughnessMap: textures.terrainRoughnessMap,
+    roughness: 0.92,
     metalness: 0.02,
   });
 
@@ -506,10 +512,21 @@ export function createParadiseTerrain(
 
           float sakuraZone = smoothstep(-10.0, 18.0, wp.x) * smoothstep(0.18, 0.65, wy) * smoothstep(0.76, 0.94, upDot);
           float sakuraPatch = smoothstep(0.46, 0.76, tFbm(wp * 0.32 - 6.7)) * smoothstep(0.36, 0.82, detailMicro);
-          vec3 petalCarpetCol = mix(vec3(0.78, 0.55, 0.62), vec3(0.95, 0.78, 0.84), detailMicro);
-          diffuseColor.rgb = mix(diffuseColor.rgb, petalCarpetCol, sakuraZone * sakuraPatch * 0.56);
+          vec3 petalCarpetCol = mix(vec3(0.82, 0.59, 0.67), vec3(0.96, 0.82, 0.88), detailMicro);
+          diffuseColor.rgb = mix(diffuseColor.rgb, petalCarpetCol, sakuraZone * sakuraPatch * 0.48);
 
-          diffuseColor.rgb *= mix(0.86, 1.14, detailMicro);
+          // Organic sunlit meadow clover variation & subtle cobblestone joint articulation on stone paths
+          float isStonePath = smoothstep(0.06, 0.22, diffuseColor.r - diffuseColor.g * 0.92) * smoothstep(0.24, 0.55, wy) * smoothstep(0.84, 0.96, upDot);
+          vec2 cobbleUv = wp * 1.65;
+          vec2 cobbleCell = fract(cobbleUv + vec2(floor(cobbleUv.y) * 0.45, 0.0));
+          float mortar = smoothstep(0.05, 0.14, min(min(cobbleCell.x, 1.0 - cobbleCell.x), min(cobbleCell.y, 1.0 - cobbleCell.y)));
+          float stoneVar = mix(0.88, 1.12, tHash(floor(cobbleUv)));
+          vec3 flagstoneCol = mix(vec3(0.29, 0.36, 0.25), diffuseColor.rgb * stoneVar, mortar);
+          diffuseColor.rgb = mix(diffuseColor.rgb, flagstoneCol, isStonePath * 0.68);
+
+          // Rich sunlit turf macro variation so open lawn reads like a living botanical estate
+          float meadowPatch = tFbm(wp * 0.11 - vec2(4.2, 7.1));
+          diffuseColor.rgb *= mix(0.90, 1.12, detailMicro * 0.55 + meadowPatch * 0.45);
 
           float shorelineWet = 1.0 - smoothstep(-0.08, 0.34, wy);
           float totalWet = clamp(max(uWetness * 0.85, shorelineWet * 0.9), 0.0, 1.0);
@@ -526,7 +543,7 @@ export function createParadiseTerrain(
           `
         );
   };
-  terrainMat.customProgramCacheKey = () => 'paradise-terrain-pbr-v3';
+  terrainMat.customProgramCacheKey = () => 'paradise-terrain-pbr-v4';
 
   const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
   terrainMesh.receiveShadow = quality.enableShadows;

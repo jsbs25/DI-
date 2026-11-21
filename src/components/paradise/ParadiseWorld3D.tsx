@@ -36,7 +36,7 @@ import { createParadiseCat } from './paradiseCat.ts';
 import { triggerImageDownload } from './SpiritSpeechBubble.tsx';
 import { LiveLanguageStudio } from '../learning/LiveLanguageStudio.tsx';
 
-type CameraPresetId = 'overlook' | 'bridge' | 'library' | 'pavilion' | 'aihub';
+type CameraPresetId = 'overlook' | 'bridge' | 'library' | 'pavilion' | 'aihub' | 'language';
 
 interface CameraPreset {
   id: CameraPresetId;
@@ -47,7 +47,7 @@ interface CameraPreset {
 }
 
 const CAMERA_PRESETS: CameraPreset[] = [
-  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [-0.6, 9.6, 27.6], target: [0.8, 1.7, -1.6] },
+  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [0.0, 10.4, 28.4], target: [0.5, 1.8, -1.5] },
   {
     id: 'bridge',
     zh: '溪桥',
@@ -55,9 +55,23 @@ const CAMERA_PRESETS: CameraPreset[] = [
     pos: [BRIDGE_CONFIG.centerX + 5.8, 3.9, BRIDGE_CONFIG.centerZ + 11.4],
     target: [BRIDGE_CONFIG.centerX, 1.25, BRIDGE_CONFIG.centerZ],
   },
-  { id: 'library', zh: '图书馆', en: 'Library', pos: [-4.8, 4.4, 14.2], target: [-11.4, 2.2, 5.8] },
-  { id: 'pavilion', zh: '音乐馆', en: 'Music Hall', pos: [4.2, 4.4, 4.8], target: [12.8, 2.6, -7.8] },
-  { id: 'aihub', zh: 'AI 中心', en: 'AI Center', pos: [1.2, 4.8, -1.8], target: [1.8, 2.5, -12.6] },
+  { id: 'library', zh: '图书馆', en: 'Library', pos: [-6.8, 4.2, 15.8], target: [-12.2, 2.2, 6.4] },
+  { id: 'language', zh: '语言中心', en: 'Language', pos: [4.6, 4.2, 18.2], target: [9.4, 2.2, 9.6] },
+  { id: 'pavilion', zh: '音乐馆', en: 'Music Hall', pos: [6.4, 4.6, 4.8], target: [13.2, 2.6, -7.6] },
+  { id: 'aihub', zh: 'AI 中心', en: 'AI Center', pos: [1.0, 4.8, -2.0], target: [1.4, 2.5, -13.2] },
+];
+
+const BUILDING_LANDMARKS: ReadonlyArray<{
+  id: 'library' | 'chat' | 'aihub' | 'venus' | 'arabic-learning';
+  zh: string;
+  en: string;
+  ar: string;
+}> = [
+  { id: 'library', zh: '图书馆', en: 'Library', ar: 'المكتبة' },
+  { id: 'chat', zh: '通讯 · 电话亭', en: 'Telephone', ar: 'الهاتف' },
+  { id: 'aihub', zh: 'AI 中心', en: 'ONE AI', ar: 'الذكاء' },
+  { id: 'venus', zh: '音乐馆', en: 'Music Hall', ar: 'الموسيقى' },
+  { id: 'arabic-learning', zh: '语言中心', en: 'Language Center', ar: 'اللغات' },
 ];
 
 function getResponsiveCameraConfig(aspect: number): { fov: number; distScale: number } {
@@ -136,6 +150,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const spiritStateRef = useRef(agentSnap.spiritState);
   spiritStateRef.current = agentSnap.spiritState;
   const spiritBubbleRef = useRef<HTMLDivElement | null>(null);
+  const portalLabelRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const lastHandledEnvSeqRef = useRef<number>(0);
 
   const persistedRef = useRef<{
@@ -152,8 +167,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     weather: 'clear',
     autoWeather: false,
     hasCam: false,
-    camPos: new THREE.Vector3(-0.6, 9.6, 27.6),
-    camTarget: new THREE.Vector3(0.8, 1.7, -1.6),
+    camPos: new THREE.Vector3(0.0, 10.4, 28.4),
+    camTarget: new THREE.Vector3(0.5, 1.8, -1.5),
   });
 
   const cameraMoveRef = useRef<{
@@ -162,8 +177,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     targetLook: THREE.Vector3;
   }>({
     active: false,
-    targetPos: new THREE.Vector3(-0.6, 9.6, 27.6),
-    targetLook: new THREE.Vector3(0.8, 1.7, -1.6),
+    targetPos: new THREE.Vector3(0.0, 10.4, 28.4),
+    targetLook: new THREE.Vector3(0.5, 1.8, -1.5),
   });
 
   const [locating, setLocating] = useState(false);
@@ -986,7 +1001,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       }
       for (const portal of architecture.portals) {
         const isHovered = hoveredPortalId === portal.id;
-        portal.signMat.emissiveIntensity = (isHovered ? 0.96 : 0.48) + st.lanternGlow * 0.42;
+        portal.signMat.emissiveIntensity = (isHovered ? 0.66 : 0.3) + st.lanternGlow * 0.44;
       }
       architecture.aiCrownGroup.rotation.y = elapsed * 0.42;
       for (const mat of architecture.wettableMaterials) {
@@ -1124,6 +1139,29 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           sy = Math.max(rect.top + topSafe, Math.min(rect.top + vh - bottomSafe, sy));
         }
         bubbleEl.style.transform = `translate3d(${Math.round(sx)}px, ${Math.round(sy)}px, 0)`;
+      }
+
+      // Project crisp clickable 2D DOM architectural waypoint tags cleanly over each of the 5 buildings
+      // (GPU translate3d direct DOM updates — zero React re-renders per frame)
+      const labelRect = container.getBoundingClientRect();
+      const lvw = labelRect.width || window.innerWidth;
+      const lvh = labelRect.height || window.innerHeight;
+      for (const portal of architecture.portals) {
+        const tagEl = portalLabelRefs.current[portal.id];
+        if (!tagEl) continue;
+        tmpKeyWorld.copy(portal.labelPos).project(camera);
+        const inFront = tmpKeyWorld.z >= -1 && tmpKeyWorld.z <= 1;
+        const px = (tmpKeyWorld.x * 0.5 + 0.5) * lvw;
+        const py = (-tmpKeyWorld.y * 0.5 + 0.5) * lvh;
+        const visible = inFront && px > 36 && px < lvw - 36 && py > 62 && py < lvh - 32;
+        if (visible) {
+          tagEl.style.opacity = '1';
+          tagEl.style.pointerEvents = 'auto';
+          tagEl.style.transform = `translate3d(${Math.round(px)}px, ${Math.round(py)}px, 0) translate(-50%, -100%)`;
+        } else {
+          tagEl.style.opacity = '0';
+          tagEl.style.pointerEvents = 'none';
+        }
       }
 
       // Persist state continuously in case quality tier is switched seamlessly
@@ -1346,11 +1384,44 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
+      {/* Crisp 3D-Tracked Architectural Building Labels — razor-sharp vector text pinned above each of the 5 landmarks */}
+      {webglReady && !contextLost && !immersive && (
+        <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+          {BUILDING_LANDMARKS.map((lm) => {
+            const labelText = lang === 'ar' ? lm.ar : lang === 'en' ? lm.en : lm.zh;
+            const isHovered = hoveredLandmark?.id === lm.id;
+            return (
+              <button
+                key={lm.id}
+                ref={(el) => {
+                  portalLabelRefs.current[lm.id] = el;
+                }}
+                type="button"
+                onClick={() => onSelectTabRef.current?.(lm.id)}
+                onMouseEnter={() => setHoveredLandmark({ id: lm.id, label: labelText })}
+                onMouseLeave={() => setHoveredLandmark((prev) => (prev?.id === lm.id ? null : prev))}
+                style={{ opacity: 0, willChange: 'transform, opacity' }}
+                className={`absolute left-0 top-0 inline-flex items-center whitespace-nowrap rounded-lg border px-2.5 py-1 text-[12px] sm:text-[13px] font-semibold tracking-wide transition-colors duration-150 cursor-pointer ${
+                  isDayUi
+                    ? isHovered
+                      ? 'border-[#1d2d25]/45 bg-[#1b2b23] text-[#fffaf0] shadow-[0_6px_18px_rgba(12,24,18,0.32)]'
+                      : 'border-[#1d2d25]/25 bg-[#1b2b23]/84 text-[#fcf8ef] hover:bg-[#1b2b23] shadow-[0_4px_14px_rgba(12,24,18,0.28)]'
+                    : isHovered
+                      ? 'border-[#e8cc82]/60 bg-[#0d1724] text-[#fff8e6] shadow-[0_8px_22px_rgba(0,0,0,0.48)]'
+                      : 'border-white/22 bg-[#0d1724]/86 text-[#f6f1e6] hover:bg-[#152436] shadow-[0_6px_16px_rgba(0,0,0,0.42)]'
+                }`}
+              >
+                <span>{labelText}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Subtle Hover Prompt ONLY while pointing at one of the 5 clickable 3D buildings */}
       {hoveredLandmark && (
         <div className="pointer-events-none fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-[52] -translate-x-1/2">
-          <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-medium tracking-wide transition-all ${dockShellCls}`}>
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <div className={`inline-flex items-center rounded-full border px-4 py-1.5 text-xs font-medium tracking-wide transition-all ${dockShellCls}`}>
             <span>
               {isZh ? `点击进入 · ${hoveredLandmark.label}` : `Click to enter · ${hoveredLandmark.label}`}
             </span>

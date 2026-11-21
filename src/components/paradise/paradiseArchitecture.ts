@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import type { ParadiseQualityProfile, ProceduralTextureSet } from './paradiseQuality.ts';
 import { BRIDGE_CONFIG, gardenPathFactor, terrainHeightAt } from './paradiseTerrain.ts';
 
-export const PAVILION_WORLD_POS = new THREE.Vector3(12.8, terrainHeightAt(12.8, -7.8) + 0.64, -7.8);
-export const REST_HOUSE_WORLD_POS = new THREE.Vector3(-11.4, terrainHeightAt(-11.4, 5.8) + 0.32, 5.8);
-export const LANGUAGE_HOUSE_WORLD_POS = new THREE.Vector3(7.8, terrainHeightAt(7.8, 9.4) + 0.32, 9.4);
-export const AI_HOUSE_WORLD_POS = new THREE.Vector3(1.8, terrainHeightAt(1.8, -12.6) + 0.36, -12.6);
-export const PHONE_BOOTH_WORLD_POS = new THREE.Vector3(-1.4, terrainHeightAt(-1.4, 8.2) + 0.22, 8.2);
+export const PAVILION_WORLD_POS = new THREE.Vector3(13.2, terrainHeightAt(13.2, -7.6) + 0.64, -7.6);
+export const REST_HOUSE_WORLD_POS = new THREE.Vector3(-12.2, terrainHeightAt(-12.2, 6.4) + 0.32, 6.4);
+export const LANGUAGE_HOUSE_WORLD_POS = new THREE.Vector3(9.4, terrainHeightAt(9.4, 9.6) + 0.32, 9.6);
+export const AI_HOUSE_WORLD_POS = new THREE.Vector3(1.4, terrainHeightAt(1.4, -13.2) + 0.36, -13.2);
+export const PHONE_BOOTH_WORLD_POS = new THREE.Vector3(-5.6, terrainHeightAt(-5.6, 11.8) + 0.22, 11.8);
 
 export type ArchitecturePortalId = 'library' | 'arabic-learning' | 'aihub' | 'chat' | 'venus';
 
@@ -18,6 +18,7 @@ export interface ArchitecturePortal {
   group: THREE.Group;
   signMat: THREE.MeshStandardMaterial;
   worldPos: THREE.Vector3;
+  labelPos: THREE.Vector3;
 }
 
 export interface ParadiseArchitectureHandle {
@@ -398,70 +399,76 @@ export function createParadiseArchitecture(
     emissiveHex: number;
   }): { group: THREE.Group; faceMat: THREE.MeshStandardMaterial } => {
     const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = 384;
+    canvas.width = 2048;
+    canvas.height = 640;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      // Rich subtle vertical lacquered gradient background
+      // Rich matte dark architectural lacquer gradient for maximum foreground text contrast
       const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
       grad.addColorStop(0, opts.bgHex);
-      grad.addColorStop(1, '#121010');
+      grad.addColorStop(1, '#09090b');
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Outer & inner gilded architectural double-border
+      // Crisp double gilded architectural frame
       ctx.strokeStyle = opts.borderHex;
-      ctx.lineWidth = 14;
-      ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
-      ctx.lineWidth = 4;
-      ctx.globalAlpha = 0.72;
-      ctx.strokeRect(38, 38, canvas.width - 76, canvas.height - 76);
+      ctx.lineWidth = 22;
+      ctx.strokeRect(30, 30, canvas.width - 60, canvas.height - 60);
+      ctx.lineWidth = 7;
+      ctx.globalAlpha = 0.8;
+      ctx.strokeRect(60, 60, canvas.width - 120, canvas.height - 120);
       ctx.globalAlpha = 1;
 
-      // Delicate corner ornament dots
+      // Delicate corner rivets
       ctx.fillStyle = opts.borderHex;
       for (const [cx, cy] of [
-        [56, 56],
-        [canvas.width - 56, 56],
-        [56, canvas.height - 56],
-        [canvas.width - 56, canvas.height - 56],
+        [92, 92],
+        [canvas.width - 92, 92],
+        [92, canvas.height - 92],
+        [canvas.width - 92, canvas.height - 92],
       ]) {
         ctx.beginPath();
-        ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.arc(cx, cy, 12, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // Bold, unmistakable Chinese building title
+      // Ultra-sharp heavy Chinese title with crisp dark halo stroke for razor legibility from afar
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.shadowColor = 'rgba(0,0,0,0.55)';
-      ctx.shadowBlur = 12;
-      ctx.shadowOffsetY = 4;
+      const fontSize = opts.titleZh.length >= 6 ? 228 : opts.titleZh.length >= 4 ? 268 : 300;
+      ctx.font = `800 ${fontSize}px "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif`;
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 18;
+      ctx.strokeStyle = 'rgba(6, 6, 8, 0.85)';
+      ctx.strokeText(opts.titleZh, canvas.width / 2, canvas.height * 0.43);
       ctx.fillStyle = opts.textHex;
-      const fontSize = opts.titleZh.length >= 6 ? 128 : opts.titleZh.length >= 4 ? 148 : 168;
-      ctx.font = `700 ${fontSize}px "Noto Serif SC", "Songti SC", "PingFang SC", "Microsoft YaHei", serif`;
-      ctx.fillText(opts.titleZh, canvas.width / 2, canvas.height * 0.44);
+      ctx.fillText(opts.titleZh, canvas.width / 2, canvas.height * 0.43);
 
-      // Crisp English architectural subtitle
-      ctx.shadowBlur = 4;
+      // Clean high-contrast English subtitle
+      ctx.font = '700 72px "Plus Jakarta Sans", "Helvetica Neue", system-ui, sans-serif';
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = 'rgba(6, 6, 8, 0.72)';
+      ctx.strokeText(opts.subtitle.toUpperCase(), canvas.width / 2, canvas.height * 0.79);
       ctx.fillStyle = opts.subHex;
-      ctx.font = '600 42px "Inter", "Helvetica Neue", system-ui, sans-serif';
       ctx.fillText(opts.subtitle.toUpperCase(), canvas.width / 2, canvas.height * 0.79);
     }
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
+    tex.anisotropy = 16;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
     tex.needsUpdate = true;
     signTextures.push(tex);
 
+    // Matte anti-glare finish so sunlight never reflects white washout across the lettering
     const faceMat = new THREE.MeshStandardMaterial({
       map: tex,
       emissiveMap: tex,
       emissive: new THREE.Color(opts.emissiveHex),
-      emissiveIntensity: 0.48,
-      roughness: 0.36,
-      metalness: 0.14,
+      emissiveIntensity: 0.36,
+      roughness: 0.86,
+      metalness: 0.02,
     });
     materials.push(faceMat);
 
@@ -501,14 +508,14 @@ export function createParadiseArchitecture(
   };
 
   // =========================================================================
-  // 1. Waterside Double-Eave Timber Pavilion (临水重檐飞檐亭) at (12.8, y, -7.8)
+  // 1. Waterside Double-Eave Timber Pavilion (音乐馆) at (13.2, y, -7.6)
   // =========================================================================
   const pav = new THREE.Group();
-  const pavX = 12.8;
-  const pavZ = -7.8;
+  const pavX = 13.2;
+  const pavZ = -7.6;
   const pavBaseY = terrainHeightAt(pavX, pavZ);
   pav.position.set(pavX, pavBaseY, pavZ);
-  pav.rotation.y = -0.58; // face lake & arched bridge gracefully
+  pav.rotation.y = -0.34; // angled cleanly toward lake & Overlook viewer so plaque reads sharply
 
   // Lower carved stone terrace plinth (seats cleanly below terrain)
   const lowerPlinth = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(5.26, 0.58, 5.26)), graniteMat);
@@ -817,16 +824,16 @@ export function createParadiseArchitecture(
   const musicPlaque = createArchitecturalPlaque({
     titleZh: '音乐馆',
     subtitle: 'Music Hall',
-    width: 2.65,
-    height: 0.88,
-    bgHex: '#3b151a',
-    borderHex: '#e7c36a',
-    textHex: '#fff5d6',
-    subHex: '#e4c788',
-    emissiveHex: 0xffd78a,
+    width: 3.15,
+    height: 1.02,
+    bgHex: '#331015',
+    borderHex: '#f0cf78',
+    textHex: '#ffffff',
+    subHex: '#f2d99b',
+    emissiveHex: 0xffe4a8,
   });
-  musicPlaque.group.position.set(0, 3.24, 1.88);
-  musicPlaque.group.rotation.x = 0.08;
+  musicPlaque.group.position.set(0, 3.28, 1.94);
+  musicPlaque.group.rotation.x = 0.05;
   pav.add(musicPlaque.group);
 
   group.add(pav);
@@ -1136,14 +1143,14 @@ export function createParadiseArchitecture(
   }
 
   // =========================================================================
-  // 5. Realistic East-Asian Spirit Rest Cottage (江南白墙黛瓦木屋) at (-11.4, y, 5.8)
+  // 5. Realistic East-Asian Library Cottage (图书馆) at (-12.2, y, 6.4)
   // =========================================================================
   const restHouseGroup = new THREE.Group();
-  const rhX = -11.4;
-  const rhZ = 5.8;
+  const rhX = -12.2;
+  const rhZ = 6.4;
   const rhBaseY = terrainHeightAt(rhX, rhZ);
   restHouseGroup.position.set(rhX, rhBaseY, rhZ);
-  restHouseGroup.rotation.y = 0.72; // face southeast toward meadow, bridge & pavilion
+  restHouseGroup.rotation.y = 0.36; // face southeast cleanly toward viewer & main meadow
 
   const restWindowMat = new THREE.MeshStandardMaterial({
     color: 0xffe4b3,
@@ -1440,16 +1447,16 @@ export function createParadiseArchitecture(
   const libraryPlaque = createArchitecturalPlaque({
     titleZh: '图书馆',
     subtitle: 'Library',
-    width: 2.35,
-    height: 0.82,
-    bgHex: '#2b1812',
-    borderHex: '#e4be6c',
-    textHex: '#fff6de',
-    subHex: '#dcc28a',
-    emissiveHex: 0xffd896,
+    width: 2.68,
+    height: 0.88,
+    bgHex: '#24120c',
+    borderHex: '#f0cc75',
+    textHex: '#ffffff',
+    subHex: '#edd69d',
+    emissiveHex: 0xffe2a4,
   });
-  libraryPlaque.group.position.set(0, 2.68, 1.78);
-  libraryPlaque.group.rotation.x = 0.07;
+  libraryPlaque.group.position.set(0, 2.74, 1.82);
+  libraryPlaque.group.rotation.x = 0.05;
   restHouseGroup.add(libraryPlaque.group);
 
   group.add(restHouseGroup);
@@ -1459,14 +1466,14 @@ export function createParadiseArchitecture(
 
   // =========================================================================
   // 6. NEW House #1: Warm Sand-Plaster & Arched Language Center Hall (语言中心)
-  //    at (7.8, y, 9.4) — right-foreground meadow facing lake & path
+  //    at (9.4, y, 9.6) — right-foreground meadow facing camera & path
   // =========================================================================
   const langHouseGroup = new THREE.Group();
-  const lhX = 7.8;
-  const lhZ = 9.4;
+  const lhX = 9.4;
+  const lhZ = 9.6;
   const lhBaseY = terrainHeightAt(lhX, lhZ);
   langHouseGroup.position.set(lhX, lhBaseY, lhZ);
-  langHouseGroup.rotation.y = -0.64; // face northwest toward camera, path & lake
+  langHouseGroup.rotation.y = -0.34; // angled cleanly toward viewer & foreground path
 
   const terracottaTileMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -1626,30 +1633,30 @@ export function createParadiseArchitecture(
   const languagePlaque = createArchitecturalPlaque({
     titleZh: '语言中心',
     subtitle: 'Language Center',
-    width: 2.42,
-    height: 0.82,
-    bgHex: '#12382e',
-    borderHex: '#e6c572',
-    textHex: '#fff9ea',
-    subHex: '#bfe6d4',
-    emissiveHex: 0xffe3a3,
+    width: 2.74,
+    height: 0.9,
+    bgHex: '#0d2e25',
+    borderHex: '#f0cf7b',
+    textHex: '#ffffff',
+    subHex: '#d0f2e3',
+    emissiveHex: 0xffe8ad,
   });
-  languagePlaque.group.position.set(0, 2.66, 1.82);
-  languagePlaque.group.rotation.x = 0.07;
+  languagePlaque.group.position.set(0, 2.72, 1.86);
+  languagePlaque.group.rotation.x = 0.05;
   langHouseGroup.add(languagePlaque.group);
 
   group.add(langHouseGroup);
 
   // =========================================================================
   // 7. NEW House #2: Starlight Timber-and-Glass AI Atelier (AI 中心)
-  //    at (1.8, y, -12.6) — hero north lakeside terrace across the lake
+  //    at (1.4, y, -13.2) — hero north lakeside terrace across the lake
   // =========================================================================
   const aiHouseGroup = new THREE.Group();
-  const aiX = 1.8;
-  const aiZ = -12.6;
+  const aiX = 1.4;
+  const aiZ = -13.2;
   const aiBaseY = terrainHeightAt(aiX, aiZ);
   aiHouseGroup.position.set(aiX, aiBaseY, aiZ);
-  aiHouseGroup.rotation.y = 0.08; // face south straight across lake toward viewer
+  aiHouseGroup.rotation.y = 0.04; // face south straight across lake toward viewer
 
   const aiGlassMat = new THREE.MeshStandardMaterial({
     color: 0xdff5ff,
@@ -1753,34 +1760,34 @@ export function createParadiseArchitecture(
   aiHouseGroup.add(aiHouseLight);
   extraLights.push(aiHouseLight);
 
-  // Obsidian & Champagne-Gold Architectural Plaque — 「AI 中心 · ONE AI」
+  // Obsidian & Sky-Gold Architectural Plaque — 「AI 中心 · ONE AI」
   const aiPlaque = createArchitecturalPlaque({
     titleZh: 'AI 中心',
     subtitle: 'ONE AI',
-    width: 2.9,
-    height: 0.96,
-    bgHex: '#0d1e30',
-    borderHex: '#7ad8ff',
-    textHex: '#f5fbff',
-    subHex: '#9ae2ff',
-    emissiveHex: 0x9ce2ff,
+    width: 3.45,
+    height: 1.12,
+    bgHex: '#0a1828',
+    borderHex: '#8ce0ff',
+    textHex: '#ffffff',
+    subHex: '#b8ecff',
+    emissiveHex: 0xb0e8ff,
   });
-  aiPlaque.group.position.set(0, 3.16, 1.88);
-  aiPlaque.group.rotation.x = 0.08;
+  aiPlaque.group.position.set(0, 3.24, 1.94);
+  aiPlaque.group.rotation.x = 0.05;
   aiHouseGroup.add(aiPlaque.group);
 
   group.add(aiHouseGroup);
 
   // =========================================================================
   // 8. NEW Classic Heritage Red Telephone Booth (通讯 · 电话亭)
-  //    at (-1.4, y, 8.2) — right beside the central foreground garden footpath!
+  //    at (-5.6, y, 11.8) — nestled in a landscaped roadside cobblestone bay 4.3m off the footpath!
   // =========================================================================
   const phoneBoothGroup = new THREE.Group();
-  const pbX = -1.4;
-  const pbZ = 8.2;
+  const pbX = -5.6;
+  const pbZ = 11.8;
   const pbBaseY = terrainHeightAt(pbX, pbZ);
   phoneBoothGroup.position.set(pbX, pbBaseY, pbZ);
-  phoneBoothGroup.rotation.y = 0.22; // face viewer naturally beside stone path
+  phoneBoothGroup.rotation.y = 0.24; // face viewer & lane gracefully from its dedicated side alcove
 
   const boothRedMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -1810,16 +1817,42 @@ export function createParadiseArchitecture(
   materials.push(boothLampMat);
   extraWindowMats.push(boothLampMat);
 
-  // Dressed Granite Square Curb Plinth
+  // Landscaped Round Cobblestone Alcove Pad + Dressed Granite Curb Plinth
+  const pbAlcovePad = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(1.78, 1.88, 0.14, 24)), plinthStoneMat);
+  pbAlcovePad.position.y = -0.02;
+  pbAlcovePad.receiveShadow = quality.enableShadows;
+  phoneBoothGroup.add(pbAlcovePad);
+
   const pbBase = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.64, 0.24, 1.64)), graniteMat);
-  pbBase.position.y = 0.04;
+  pbBase.position.y = 0.08;
   pbBase.castShadow = quality.enableShadows;
   pbBase.receiveShadow = quality.enableShadows;
   phoneBoothGroup.add(pbBase);
 
   const pbFloor = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.36, 0.08, 1.36)), plinthStoneMat);
-  pbFloor.position.y = 0.18;
+  pbFloor.position.y = 0.22;
   phoneBoothGroup.add(pbFloor);
+
+  // Twin carved stone planter urns with floral accents flanking the Telephone Booth doorway
+  const planterPotGeo = trackGeo(new THREE.CylinderGeometry(0.24, 0.17, 0.34, 12));
+  const planterBushGeo = trackGeo(new THREE.IcosahedronGeometry(0.24, 1));
+  const planterBloomMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xf4b6c8,
+      roughness: 0.6,
+      metalness: 0.02,
+    })
+  );
+  for (const px of [-1.18, 1.18]) {
+    const pot = new THREE.Mesh(planterPotGeo, graniteMat);
+    pot.position.set(px, 0.2, 0.64);
+    pot.castShadow = quality.enableShadows;
+    phoneBoothGroup.add(pot);
+    const bush = new THREE.Mesh(planterBushGeo, planterBloomMat);
+    bush.position.set(px, 0.48, 0.64);
+    bush.scale.set(1.12, 0.85, 1.12);
+    phoneBoothGroup.add(bush);
+  }
 
   // 4 Sturdy Heritage Red Corner Pilasters
   const pbHalf = 0.62;
@@ -1934,16 +1967,16 @@ export function createParadiseArchitecture(
   const phonePlaque = createArchitecturalPlaque({
     titleZh: '通讯 · 电话亭',
     subtitle: 'Telephone',
-    width: 1.72,
-    height: 0.62,
-    bgHex: '#7d171a',
-    borderHex: '#f0cf7b',
-    textHex: '#fff9eb',
-    subHex: '#f5dcb0',
-    emissiveHex: 0xffe0a6,
+    width: 1.96,
+    height: 0.68,
+    bgHex: '#691014',
+    borderHex: '#f5d682',
+    textHex: '#ffffff',
+    subHex: '#fae2b6',
+    emissiveHex: 0xffe4ad,
   });
-  phonePlaque.group.position.set(0, 3.04, 0.82);
-  phonePlaque.group.rotation.x = 0.06;
+  phonePlaque.group.position.set(0, 3.06, 0.86);
+  phonePlaque.group.rotation.x = 0.04;
   phoneBoothGroup.add(phonePlaque.group);
 
   group.add(phoneBoothGroup);
@@ -1957,6 +1990,7 @@ export function createParadiseArchitecture(
       group: restHouseGroup,
       signMat: libraryPlaque.faceMat,
       worldPos: REST_HOUSE_WORLD_POS.clone(),
+      labelPos: new THREE.Vector3(rhX, rhBaseY + 4.35, rhZ),
     },
     {
       id: 'venus',
@@ -1966,6 +2000,7 @@ export function createParadiseArchitecture(
       group: pav,
       signMat: musicPlaque.faceMat,
       worldPos: PAVILION_WORLD_POS.clone(),
+      labelPos: new THREE.Vector3(pavX, pavBaseY + 6.45, pavZ),
     },
     {
       id: 'arabic-learning',
@@ -1975,6 +2010,7 @@ export function createParadiseArchitecture(
       group: langHouseGroup,
       signMat: languagePlaque.faceMat,
       worldPos: LANGUAGE_HOUSE_WORLD_POS.clone(),
+      labelPos: new THREE.Vector3(lhX, lhBaseY + 4.75, lhZ),
     },
     {
       id: 'aihub',
@@ -1984,15 +2020,17 @@ export function createParadiseArchitecture(
       group: aiHouseGroup,
       signMat: aiPlaque.faceMat,
       worldPos: AI_HOUSE_WORLD_POS.clone(),
+      labelPos: new THREE.Vector3(aiX, aiBaseY + 6.05, aiZ),
     },
     {
       id: 'chat',
       labelZh: '通讯 · 电话亭',
-      labelEn: 'Telephone · Messages',
+      labelEn: 'Telephone',
       labelAr: 'الهاتف والتواصل',
       group: phoneBoothGroup,
       signMat: phonePlaque.faceMat,
       worldPos: PHONE_BOOTH_WORLD_POS.clone(),
+      labelPos: new THREE.Vector3(pbX, pbBaseY + 4.05, pbZ),
     },
   ];
 
