@@ -461,83 +461,158 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, quic
   return (
     <section
       dir={isRtl ? 'rtl' : 'ltr'}
-      className="min-h-[calc(100vh-4rem)] w-full px-4 pb-16 pt-5 text-[color:var(--color-one-text)] sm:px-6 lg:px-10"
+      className="min-h-[calc(100vh-4rem)] w-full px-4 pb-16 pt-6 text-[color:var(--color-one-text)] sm:px-6 lg:px-10"
       style={{ background: 'transparent' }}
     >
-      <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-6">
-        {/* Serene Editorial Masthead — Zero Box Clutter, Hairline Divider */}
-        <header className="flex flex-col gap-4 border-b border-[var(--color-one-border)] pb-5">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs text-[color:var(--color-one-text-dim)]">
-                <span>{lang === 'zh' ? '语言中心' : 'Language Studio'}</span>
-                <span aria-hidden="true">·</span>
-                <span>EN / AR / 中文 / ES / FR</span>
+      <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6">
+        {/* Clean Pure Language Center Header */}
+        <header className="one-surface-elevated relative overflow-hidden px-5 py-6 sm:px-7 sm:py-7">
+          <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex max-w-3xl items-start gap-4">
+              <div
+                className="mt-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border"
+                style={{
+                  borderColor: 'rgba(127,212,255,0.28)',
+                  background: 'rgba(127,212,255,0.1)',
+                  color: 'var(--color-one-accent)',
+                }}
+              >
+                <Languages className="h-6 w-6" />
               </div>
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-[color:var(--color-one-text)] text-balance sm:text-[30px]">
-                {t.title}
-              </h1>
-              <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-[color:var(--color-one-text-muted)]">
-                {t.subtitle}
-              </p>
+              <div>
+                <div className="mb-1 flex items-center gap-2 text-xs font-medium text-[color:var(--color-one-gold)]">
+                  <span>{lang === 'zh' ? 'EARTH ONE · 纯净语言精研中心' : 'EARTH ONE · LANGUAGE STUDIO'}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-[color:var(--color-one-text-dim)]">Cambridge · Oxford · EN / AR / 中文 / ES / FR / JA / KO</span>
+                </div>
+                <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--color-one-text)] sm:text-3xl">
+                  {t.title}
+                </h1>
+                <p className="mt-1.5 max-w-2xl text-sm leading-6 text-[color:var(--color-one-text-muted)]">
+                  {t.subtitle}
+                </p>
+              </div>
             </div>
           </div>
-
-          {/* Clean Underline Navigation Tabs */}
-          <nav
-            aria-label={t.title}
-            className="-mb-5 flex items-center gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {[
-              {
-                id: 'dictionary' as const,
-                label: lang === 'zh' ? '权威词典' : 'Dictionary',
-                icon: BookMarked,
-              },
-              {
-                id: 'live_studio' as const,
-                label: lang === 'zh' ? '实景口语' : 'Spoken Studio',
-                icon: Sparkles,
-              },
-              {
-                id: 'english_engine' as const,
-                label: lang === 'zh' ? '英语精研' : 'English',
-                icon: Headphones,
-              },
-              {
-                id: 'duolingo_platform' as const,
-                label: lang === 'zh' ? '多语课程' : 'Courses',
-                icon: GraduationCap,
-              },
-              {
-                id: 'letters' as const,
-                label: lang === 'zh' ? '阿语字母' : t.alphabet,
-                icon: BookOpen,
-              },
-            ].map((item) => {
-              const Icon = item.icon;
-              const active = mainTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setMainTab(item.id);
-                    if (item.id === 'letters') setView('home');
-                  }}
-                  className={`inline-flex min-h-[44px] items-center gap-2 border-b-2 pb-3 pt-1 text-sm font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    active
-                      ? 'border-[#247864] text-[color:var(--color-one-text)] dark:border-[#e5d9be]'
-                      : 'border-transparent text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)]'
-                  }`}
-                >
-                  <Icon className="h-4 w-4 opacity-75" />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
         </header>
+
+        {/* Pure Language Center Tabs (Zero Library Tabs) */}
+        <div className="one-surface-subtle flex flex-col gap-3 p-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:pb-0">
+            <button
+              type="button"
+              onClick={() => setMainTab('dictionary')}
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                mainTab === 'dictionary'
+                  ? ''
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
+              }`}
+              style={
+                mainTab === 'dictionary'
+                  ? {
+                      background: 'rgba(215, 182, 118, 0.16)',
+                      border: '1px solid rgba(215, 182, 118, 0.38)',
+                      color: 'var(--color-one-gold)',
+                    }
+                  : { border: '1px solid transparent' }
+              }
+            >
+              <BookMarked className="h-4 w-4" />
+              <span>{lang === 'zh' ? '剑桥双解权威词典' : 'Cambridge Dictionary'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMainTab('live_studio')}
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                mainTab === 'live_studio'
+                  ? ''
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
+              }`}
+              style={
+                mainTab === 'live_studio'
+                  ? {
+                      background: 'rgba(127, 212, 255, 0.15)',
+                      border: '1px solid rgba(127, 212, 255, 0.36)',
+                      color: 'var(--color-one-accent)',
+                    }
+                  : { border: '1px solid transparent' }
+              }
+            >
+              <Sparkles className="h-4 w-4" />
+              <span>{lang === 'zh' ? 'AI 实景口语与出题' : 'Live Spoken Roleplay & Quiz'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMainTab('english_engine')}
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                mainTab === 'english_engine'
+                  ? ''
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
+              }`}
+              style={
+                mainTab === 'english_engine'
+                  ? {
+                      background: 'rgba(127,212,255,0.14)',
+                      border: '1px solid rgba(127,212,255,0.32)',
+                      color: 'var(--color-one-accent)',
+                    }
+                  : { border: '1px solid transparent' }
+              }
+            >
+              <Headphones className="h-4 w-4" />
+              <span>{lang === 'zh' ? '英语精研引擎' : 'English Engine'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMainTab('duolingo_platform')}
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                mainTab === 'duolingo_platform'
+                  ? ''
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
+              }`}
+              style={
+                mainTab === 'duolingo_platform'
+                  ? {
+                      background: 'rgba(16, 185, 129, 0.14)',
+                      border: '1px solid rgba(16, 185, 129, 0.34)',
+                      color: 'var(--color-one-success)',
+                    }
+                  : { border: '1px solid transparent' }
+              }
+            >
+              <GraduationCap className="h-4 w-4" />
+              <span>{lang === 'zh' ? '多语沉浸课程' : 'Multi-Language Immersion'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMainTab('letters');
+                setView('home');
+              }}
+              className={`inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                mainTab === 'letters'
+                  ? ''
+                  : 'text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] hover:bg-[rgba(244,243,238,0.04)]'
+              }`}
+              style={
+                mainTab === 'letters'
+                  ? {
+                      background: 'rgba(215,182,118,0.14)',
+                      border: '1px solid rgba(215,182,118,0.32)',
+                      color: 'var(--color-one-gold)',
+                    }
+                  : { border: '1px solid transparent' }
+              }
+            >
+              <BookOpen className="h-4 w-4" />
+              <span>{lang === 'zh' ? '阿语字母与复习' : `${t.alphabet} · ${t.practice}`}</span>
+            </button>
+          </div>
+        </div>
 
         {/* TAB 0: AUTHORITATIVE CAMBRIDGE / OXFORD BILINGUAL DICTIONARY */}
         {mainTab === 'dictionary' && <AuthoritativeDictionaryStudio lang={lang} />}
@@ -560,29 +635,32 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, quic
 
         {/* TAB 4: ARABIC LETTERS & SPACED REPETITION */}
         {mainTab === 'letters' && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             {view === 'home' && (
               <>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <StatCard icon={<GraduationCap className="h-4 w-4" />} label={t.letters} value={`${introducedCount} / ${ARABIC_LETTERS.length}`} />
-                  <StatCard icon={<RotateCcw className="h-4 w-4" />} label={t.due} value={String(dueCount)} />
-                  <StatCard icon={<Flame className="h-4 w-4" />} label={t.streak} value={String(streak)} />
-                  <StatCard icon={<Check className="h-4 w-4" />} label={t.mastered} value={`${masteredCount} / ${ARABIC_LETTERS.length}`} />
+                  <StatCard icon={<GraduationCap className="h-4 w-4" />} label={t.letters} value={`${introducedCount}/${ARABIC_LETTERS.length}`} />
+                  <StatCard icon={<RotateCcw className="h-4 w-4" />} label={t.due} value={String(dueCount)} accent="var(--color-one-gold)" />
+                  <StatCard icon={<Flame className="h-4 w-4" />} label={t.streak} value={String(streak)} accent="var(--color-one-warning)" />
+                  <StatCard icon={<Check className="h-4 w-4" />} label={t.mastered} value={`${masteredCount}/${ARABIC_LETTERS.length}`} accent="var(--color-one-success)" />
                 </div>
 
-                <section className="rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] overflow-hidden">
-                  <div className="border-b border-[var(--color-one-border)] px-5 py-5 sm:px-6">
-                    <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <section className="one-surface-elevated overflow-hidden">
+                  <div className="border-b px-5 py-5 sm:px-6" style={{ borderColor: 'var(--color-one-border)' }}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <p className="text-xs text-[color:var(--color-one-text-dim)]">{t.practice}</p>
-                        <h2 className="mt-0.5 text-lg font-semibold text-[color:var(--color-one-text)]">{t.dailyGoal}</h2>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em]" style={{ color: 'var(--color-one-accent)' }}>
+                          {t.practice}
+                        </p>
+                        <h2 className="mt-1 text-xl font-semibold text-[color:var(--color-one-text)]">{t.dailyGoal}</h2>
                       </div>
-                      <span className="text-sm font-medium tabular-nums text-[color:var(--color-one-text-muted)]">
+                      <span className="one-badge one-badge-neutral font-mono normal-case tracking-normal">
                         {practicedToday} / {DAILY_GOAL}
                       </span>
                     </div>
                     <div
-                      className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--color-one-border)]"
+                      className="mt-4 h-2 overflow-hidden rounded-full"
+                      style={{ background: 'rgba(244,243,238,0.08)' }}
                       role="progressbar"
                       aria-label={t.dailyGoal}
                       aria-valuenow={practicedToday}
@@ -590,47 +668,39 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, quic
                       aria-valuemax={DAILY_GOAL}
                     >
                       <div
-                        className="h-full rounded-full bg-[#247864] dark:bg-[#e5d9be] transition-all"
-                        style={{ width: `${goalProgress}%` }}
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${goalProgress}%`,
+                          background: 'linear-gradient(90deg, var(--color-one-accent), var(--color-one-gold))',
+                        }}
                       />
                     </div>
-                    <p className="mt-3 text-xs leading-5 text-[color:var(--color-one-text-muted)]">{t.dailyLimit}</p>
+                    <p className="mt-3 text-xs leading-5 text-[color:var(--color-one-text-dim)]">{t.dailyLimit}</p>
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6">
-                    <div className="flex flex-wrap items-center gap-2.5">
-                      <button
-                        type="button"
-                        onClick={startPractice}
-                        className="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-[#247864] px-4 py-2 text-xs font-medium text-white hover:bg-[#1d6251] dark:bg-[#e5d9be] dark:text-[#141d28] transition-colors cursor-pointer"
-                      >
-                        <Headphones className="h-4 w-4" />
-                        <span>{t.startPractice}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={openAlphabet}
-                        className="inline-flex min-h-[40px] items-center gap-2 rounded-xl border border-[var(--color-one-border)] bg-transparent px-4 py-2 text-xs font-medium text-[color:var(--color-one-text)] hover:bg-[var(--color-one-surface-soft)] transition-colors cursor-pointer"
-                      >
-                        <span>{t.alphabet}</span>
-                      </button>
-                    </div>
-                    <span className="text-xs text-[color:var(--color-one-text-dim)]">{t.localOnly}</span>
+                  <div className="flex flex-wrap items-center gap-3 px-5 py-5 sm:px-6">
+                    <button type="button" className="one-btn one-btn-md one-btn-primary" onClick={startPractice}>
+                      <Headphones className="h-4 w-4" />
+                      {t.startPractice}
+                    </button>
+                    <button type="button" className="one-btn one-btn-md one-btn-secondary" onClick={openAlphabet}>
+                      {t.alphabet}
+                    </button>
                   </div>
+                  <p className="px-5 pb-5 text-xs text-[color:var(--color-one-text-dim)] sm:px-6">{t.localOnly}</p>
                 </section>
 
-                <section className="rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 sm:p-6">
-                  <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+                <section className="one-surface p-5 sm:p-6">
+                  <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                     <div>
-                      <h2 className="text-base font-semibold text-[color:var(--color-one-text)]">
-                        {t.alphabet}
-                        <span className="ml-2 text-xs font-normal tabular-nums text-[color:var(--color-one-text-dim)]">
-                          {ARABIC_LETTERS.length}
-                        </span>
-                      </h2>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--color-one-text-dim)]">
+                        28 · ARABIC LETTERS
+                      </p>
+                      <h2 className="mt-1 text-lg font-semibold text-[color:var(--color-one-text)]">{t.alphabet}</h2>
                     </div>
                     <button
                       type="button"
-                      className="text-xs font-medium text-[#247864] dark:text-[#e5d9be] hover:underline cursor-pointer"
+                      className="text-xs font-semibold transition hover:opacity-80 cursor-pointer"
+                      style={{ color: 'var(--color-one-accent)' }}
                       onClick={openAlphabet}
                     >
                       {t.selectLetter}
@@ -651,15 +721,15 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, quic
               <>
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] cursor-pointer"
+                  className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] cursor-pointer"
                   onClick={returnHome}
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  <span>{t.back}</span>
+                  {t.back}
                 </button>
-                <div className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
-                  <section className="rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 sm:p-6">
-                    <h2 className="mb-4 text-base font-semibold text-[color:var(--color-one-text)]">{t.alphabet}</h2>
+                <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+                  <section className="one-surface p-5 sm:p-6">
+                    <h2 className="mb-4 text-lg font-semibold text-[color:var(--color-one-text)]">{t.alphabet}</h2>
                     <LetterGrid selectedId={selectedLetterId} onSelect={setSelectedLetterId} />
                   </section>
                   <LetterDetail letter={selectedLetter} t={t} lang={lang} onSpeak={speak} voiceMessage={voiceMessage} />
@@ -671,53 +741,53 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, quic
               <>
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] cursor-pointer"
+                  className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] cursor-pointer"
                   onClick={returnHome}
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  <span>{t.returnHome}</span>
+                  {t.returnHome}
                 </button>
                 {sessionDone ? (
-                  <section className="mx-auto max-w-xl rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-7 text-center sm:p-10">
-                    <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-[#247864]/30 bg-[#247864]/10 text-[#247864] dark:border-[#e5d9be]/30 dark:text-[#e5d9be]">
-                      <Check className="h-6 w-6" />
+                  <section className="one-surface-elevated mx-auto max-w-2xl p-6 text-center sm:p-10">
+                    <div
+                      className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full border"
+                      style={{
+                        borderColor: 'rgba(76,195,138,0.3)',
+                        background: 'rgba(76,195,138,0.1)',
+                        color: 'var(--color-one-success)',
+                      }}
+                    >
+                      <Check className="h-7 w-7" />
                     </div>
-                    <h2 className="text-xl font-semibold text-[color:var(--color-one-text)]">
+                    <h2 className="text-2xl font-semibold text-[color:var(--color-one-text)]">
                       {queue.length ? t.sessionDone : t.caughtUp}
                     </h2>
-                    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[color:var(--color-one-text-muted)]">
+                    <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-[color:var(--color-one-text-muted)]">
                       {queue.length ? t.sessionDoneHint : t.caughtUpHint}
                     </p>
-                    <div className="mt-6 flex flex-wrap justify-center gap-2.5">
+                    <div className="mt-6 flex flex-wrap justify-center gap-3">
                       {queue.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={startPractice}
-                          className="rounded-xl bg-[#247864] px-4 py-2 text-xs font-medium text-white hover:bg-[#1d6251] dark:bg-[#e5d9be] dark:text-[#141d28] cursor-pointer"
-                        >
+                        <button type="button" className="one-btn one-btn-md one-btn-primary" onClick={startPractice}>
                           {t.nextSession}
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={openAlphabet}
-                        className="rounded-xl border border-[var(--color-one-border)] px-4 py-2 text-xs font-medium text-[color:var(--color-one-text)] hover:bg-[var(--color-one-surface-soft)] cursor-pointer"
-                      >
+                      <button type="button" className="one-btn one-btn-md one-btn-secondary" onClick={openAlphabet}>
                         {t.alphabet}
                       </button>
-                      <button
-                        type="button"
-                        onClick={returnHome}
-                        className="rounded-xl px-4 py-2 text-xs font-medium text-[color:var(--color-one-text-muted)] hover:text-[color:var(--color-one-text)] cursor-pointer"
-                      >
+                      <button type="button" className="one-btn one-btn-md one-btn-ghost" onClick={returnHome}>
                         {t.returnHome}
                       </button>
                     </div>
                   </section>
                 ) : activeLetter ? (
-                  <section className="mx-auto max-w-xl rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] overflow-hidden">
-                    <div className="flex items-center justify-between border-b border-[var(--color-one-border)] px-5 py-3.5 sm:px-6">
-                      <span className="text-xs font-medium text-[color:var(--color-one-text-muted)]">{t.practice}</span>
+                  <section className="one-surface-elevated mx-auto max-w-2xl overflow-hidden">
+                    <div
+                      className="flex items-center justify-between border-b px-5 py-4 sm:px-7"
+                      style={{ borderColor: 'var(--color-one-border)' }}
+                    >
+                      <span className="text-xs font-semibold uppercase tracking-[0.15em]" style={{ color: 'var(--color-one-accent)' }}>
+                        {t.practice}
+                      </span>
                       <span className="text-xs tabular-nums text-[color:var(--color-one-text-dim)]">
                         {queueIndex + 1} / {queue.length}
                       </span>
@@ -727,22 +797,24 @@ export const ArabicLearningHub: React.FC<ArabicLearningHubProps> = ({ lang, quic
                       <div
                         dir="rtl"
                         lang="ar"
-                        style={{ fontFamily: '"Amiri", "Scheherazade New", "Noto Naskh Arabic", serif' }}
-                        className="my-6 text-8xl leading-none text-[color:var(--color-one-text)] sm:text-9xl"
+                        className="my-5 font-serif text-8xl leading-none text-[color:var(--color-one-text)] sm:text-9xl"
                       >
                         {activeLetter.id}
                       </div>
                       {!revealed ? (
                         <button
                           type="button"
+                          className="one-btn one-btn-md one-btn-primary"
                           onClick={() => setRevealed(true)}
-                          className="rounded-xl bg-[#247864] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#1d6251] dark:bg-[#e5d9be] dark:text-[#141d28] cursor-pointer"
                         >
                           {t.reveal}
                         </button>
                       ) : (
-                        <div className="mx-auto max-w-lg text-left">
-                          <p className="mb-3 text-center text-xs font-medium text-[color:var(--color-one-text-muted)]">
+                        <div className="mx-auto max-w-xl text-left">
+                          <p
+                            className="mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.15em]"
+                            style={{ color: 'var(--color-one-accent)' }}
+                          >
                             {t.answer}
                           </p>
                           <LetterDetail
@@ -777,15 +849,17 @@ function StatCard({
   icon,
   label,
   value,
+  accent,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
+  accent?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-4">
-      <div className="mb-2 flex items-center gap-2 text-xs text-[color:var(--color-one-text-dim)]">
-        <span className="opacity-75">{icon}</span>
+    <div className="one-surface p-4">
+      <div className="mb-3 flex items-center gap-2 text-xs font-medium text-[color:var(--color-one-text-dim)]">
+        <span style={accent ? { color: accent } : undefined}>{icon}</span>
         <span>{label}</span>
       </div>
       <div className="text-2xl font-semibold tabular-nums text-[color:var(--color-one-text)]">{value}</div>
@@ -805,21 +879,25 @@ function LetterGrid({ selectedId, onSelect }: { selectedId: string; onSelect: (i
             onClick={() => onSelect(letter.id)}
             aria-label={`${letter.id} ${letter.nameLatin}`}
             aria-pressed={active}
-            className={`flex aspect-square flex-col items-center justify-center rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 cursor-pointer ${
+            className="flex aspect-square flex-col items-center justify-center rounded-xl border transition focus-visible:outline-none focus-visible:ring-2 cursor-pointer"
+            style={
               active
-                ? 'border-[#247864] bg-[#247864]/12 text-[#247864] dark:border-[#e5d9be] dark:bg-[#e5d9be]/12 dark:text-[#e5d9be]'
-                : 'border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)]/50 text-[color:var(--color-one-text)] hover:border-[var(--color-one-border-strong)]'
-            }`}
+                ? {
+                    borderColor: 'rgba(127,212,255,0.45)',
+                    background: 'rgba(127,212,255,0.12)',
+                    color: 'var(--color-one-accent)',
+                  }
+                : {
+                    borderColor: 'var(--color-one-border)',
+                    background: 'var(--color-one-surface-soft)',
+                    color: 'var(--color-one-text)',
+                  }
+            }
           >
-            <span
-              dir="rtl"
-              lang="ar"
-              style={{ fontFamily: '"Amiri", "Scheherazade New", "Noto Naskh Arabic", serif' }}
-              className="text-3xl leading-none"
-            >
+            <span dir="rtl" lang="ar" className="font-serif text-3xl leading-none">
               {letter.id}
             </span>
-            <span className="mt-1 text-[10px] text-[color:var(--color-one-text-dim)]">{letter.nameLatin}</span>
+            <span className="mt-1 text-[9px] text-[color:var(--color-one-text-dim)]">{letter.nameLatin}</span>
           </button>
         );
       })}
@@ -845,41 +923,33 @@ function LetterDetail({
   const soundHint = lang === 'zh' ? letter.soundZh : letter.soundEn;
   const meaning = lang === 'zh' ? letter.meaningZh : letter.meaningEn;
   return (
-    <div className={`rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] ${compact ? 'p-4' : 'p-5 sm:p-6'}`}>
+    <div className={`one-surface ${compact ? 'p-4' : 'p-5 sm:p-6'}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <span
             dir="rtl"
             lang="ar"
-            style={{ fontFamily: '"Amiri", "Scheherazade New", "Noto Naskh Arabic", serif' }}
-            className={`leading-none text-[color:var(--color-one-text)] ${compact ? 'text-5xl' : 'text-6xl'}`}
+            className={`font-serif leading-none text-[color:var(--color-one-text)] ${compact ? 'text-5xl' : 'text-6xl'}`}
           >
             {letter.id}
           </span>
           <div>
-            <p
-              dir="rtl"
-              lang="ar"
-              style={{ fontFamily: '"Amiri", "Noto Naskh Arabic", serif' }}
-              className="text-xl font-semibold text-[color:var(--color-one-text)]"
-            >
+            <p dir="rtl" lang="ar" className="text-xl font-semibold text-[color:var(--color-one-text)]">
               {letter.nameArabic}
             </p>
-            <p className="mt-0.5 text-xs text-[color:var(--color-one-text-dim)]">{letter.nameLatin}</p>
+            <p className="mt-1 text-xs text-[color:var(--color-one-text-dim)]">{letter.nameLatin}</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => onSpeak(letter.id)}
-          className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-[var(--color-one-border)] px-3 py-1.5 text-xs font-medium text-[color:var(--color-one-text)] hover:bg-[var(--color-one-surface-soft)] transition-colors cursor-pointer"
-        >
-          <Volume2 className="h-3.5 w-3.5" />
-          <span>{t.listen}</span>
+        <button type="button" className="one-btn one-btn-sm one-btn-secondary" onClick={() => onSpeak(letter.id)}>
+          <Volume2 className="h-4 w-4" />
+          {t.listen}
         </button>
       </div>
       <p className="mt-4 text-sm leading-6 text-[color:var(--color-one-text-muted)]">{soundHint}</p>
       <div className="mt-4">
-        <p className="mb-2 text-xs font-medium text-[color:var(--color-one-text-dim)]">{t.forms}</p>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-one-text-dim)]">
+          {t.forms}
+        </p>
         <div className="grid grid-cols-4 gap-2">
           {([
             ['isolated', t.isolated, letter.forms.isolated],
@@ -889,30 +959,26 @@ function LetterDetail({
           ] as const).map(([key, label, form]) => (
             <div
               key={key}
-              className="rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)]/60 p-2.5 text-center"
+              className="rounded-xl border p-2 text-center"
+              style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
             >
-              <span className="block text-[10px] text-[color:var(--color-one-text-dim)]">{label}</span>
-              <span
-                dir="rtl"
-                lang="ar"
-                style={{ fontFamily: '"Amiri", "Scheherazade New", "Noto Naskh Arabic", serif' }}
-                className="mt-1.5 block text-2xl text-[color:var(--color-one-text)]"
-              >
+              <span className="block text-[9px] text-[color:var(--color-one-text-dim)]">{label}</span>
+              <span dir="rtl" lang="ar" className="mt-1 block font-serif text-2xl text-[color:var(--color-one-text)]">
                 {form}
               </span>
             </div>
           ))}
         </div>
       </div>
-      <div className="mt-4 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)]/50 p-3.5">
-        <p className="text-xs text-[color:var(--color-one-text-dim)]">{t.example}</p>
+      <div
+        className="mt-4 rounded-xl border p-3"
+        style={{ borderColor: 'var(--color-one-border)', background: 'var(--color-one-surface-soft)' }}
+      >
+        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-one-text-dim)]">
+          {t.example}
+        </p>
         <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span
-            dir="rtl"
-            lang="ar"
-            style={{ fontFamily: '"Amiri", "Noto Naskh Arabic", serif' }}
-            className="text-2xl text-[#247864] dark:text-[#e5d9be]"
-          >
+          <span dir="rtl" lang="ar" className="font-serif text-2xl" style={{ color: 'var(--color-one-accent)' }}>
             {letter.exampleArabic}
           </span>
           <span className="text-xs text-[color:var(--color-one-text-dim)]">{letter.exampleLatin}</span>
@@ -920,7 +986,7 @@ function LetterDetail({
         </div>
       </div>
       {voiceMessage && (
-        <p role="status" className="mt-3 text-xs text-amber-600 dark:text-amber-300">
+        <p role="status" className="mt-3 text-xs" style={{ color: 'var(--color-one-warning)' }}>
           {voiceMessage}
         </p>
       )}
@@ -938,16 +1004,18 @@ function RatingButton({
   onClick: () => void;
 }) {
   const tones = {
-    danger: 'border-rose-300/60 bg-rose-500/10 text-rose-700 dark:border-rose-400/30 dark:text-rose-300',
-    warning: 'border-amber-300/60 bg-amber-500/10 text-amber-700 dark:border-amber-400/30 dark:text-amber-300',
-    accent: 'border-[#247864]/40 bg-[#247864]/10 text-[#247864] dark:border-[#e5d9be]/35 dark:text-[#e5d9be]',
-    success: 'border-emerald-300/60 bg-emerald-500/10 text-emerald-700 dark:border-emerald-400/30 dark:text-emerald-300',
+    danger: { border: 'rgba(224,122,122,0.32)', bg: 'rgba(224,122,122,0.12)', color: 'var(--color-one-danger)' },
+    warning: { border: 'rgba(227,179,65,0.32)', bg: 'rgba(227,179,65,0.12)', color: 'var(--color-one-warning)' },
+    accent: { border: 'rgba(127,212,255,0.32)', bg: 'rgba(127,212,255,0.12)', color: 'var(--color-one-accent)' },
+    success: { border: 'rgba(76,195,138,0.32)', bg: 'rgba(76,195,138,0.12)', color: 'var(--color-one-success)' },
   } as const;
+  const t = tones[tone];
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`min-h-11 rounded-xl border px-2 py-2 text-xs font-medium transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 cursor-pointer ${tones[tone]}`}
+      className="min-h-11 rounded-xl border px-2 py-2 text-xs font-semibold transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 cursor-pointer"
+      style={{ borderColor: t.border, background: t.bg, color: t.color }}
     >
       {label}
     </button>

@@ -12,7 +12,34 @@ import App from './App.tsx';
 import './index.css';
 import { getApiBase } from './apiBase.ts';
 
-registerSW({ immediate: true });
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    void updateSW(true);
+  },
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return;
+    registration.update().catch(() => {});
+    window.setInterval(() => {
+      registration.update().catch(() => {});
+    }, 5 * 60 * 1000);
+  },
+});
+
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    try {
+      const key = 'one_sw_reloaded_at';
+      const last = Number(sessionStorage.getItem(key) || 0);
+      if (Date.now() - last < 10_000) return;
+      sessionStorage.setItem(key, String(Date.now()));
+    } catch {}
+    reloading = true;
+    window.location.reload();
+  });
+}
 
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeinstallprompt', (e) => {

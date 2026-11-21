@@ -1,14 +1,5 @@
 export type ReaderBgPresetId = 'white' | 'warm' | 'cream' | 'night' | 'custom';
-export type ReaderFontFamilyId =
-  | 'serif_zh'
-  | 'sans_zh'
-  | 'kai_zh'
-  | 'amiri_ar'
-  | 'scheherazade_ar'
-  | 'tajawal_ar'
-  | 'plex_ar'
-  | 'georgia_en'
-  | 'sf_en';
+export type ReaderFontFamilyId = 'serif_zh' | 'sans_zh' | 'kai_zh' | 'scheherazade_ar' | 'amiri_ar' | 'tajawal_ar' | 'georgia_en' | 'sf_en';
 export type ReaderAlignMode = 'left' | 'justify';
 export type ReaderMarginMode = 'compact' | 'standard' | 'generous';
 export type ReaderWidthMode = 'narrow' | 'standard' | 'wide';
@@ -97,93 +88,58 @@ export const READER_BG_PRESETS: Record<
 export const READER_FONT_FAMILIES: Array<{
   id: ReaderFontFamilyId;
   label: string;
-  script: 'zh' | 'ar' | 'en';
   langTag: string;
-  sample: string;
   css: string;
 }> = [
   {
     id: 'serif_zh',
     label: '人文宋体',
-    script: 'zh',
     langTag: '中文',
-    sample: '宋',
     css: '"Songti SC", "Noto Serif SC", "Source Han Serif SC", STSong, Georgia, serif',
   },
   {
     id: 'sans_zh',
     label: '苹方黑体',
-    script: 'zh',
     langTag: '中文',
-    sample: '黑',
     css: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans CJK SC", "Hiragino Sans GB", sans-serif',
   },
   {
     id: 'kai_zh',
     label: '书卷楷体',
-    script: 'zh',
     langTag: '中文',
-    sample: '楷',
     css: '"Kaiti SC", STKaiti, "FangSong", "Noto Serif SC", serif',
   },
   {
-    id: 'amiri_ar',
-    label: 'Amiri 古典',
-    script: 'ar',
+    id: 'scheherazade_ar',
+    label: '典籍纳斯赫',
     langTag: 'العربية',
-    sample: 'أبجد',
-    css: '"Amiri", "Traditional Arabic", serif',
+    css: '"Amiri", "Scheherazade New", "Noto Naskh Arabic", "Traditional Arabic", serif',
   },
   {
-    id: 'scheherazade_ar',
-    label: 'Scheherazade 典籍',
-    script: 'ar',
+    id: 'amiri_ar',
+    label: 'Amiri 古典阿语',
     langTag: 'العربية',
-    sample: 'أبجد',
-    css: '"Scheherazade New", "Traditional Arabic", serif',
+    css: '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif',
   },
   {
     id: 'tajawal_ar',
-    label: 'Noto Naskh 纳斯赫',
-    script: 'ar',
+    label: 'Noto Naskh 清晰',
     langTag: 'العربية',
-    sample: 'أبجد',
-    css: '"Noto Naskh Arabic", "Geeza Pro", serif',
-  },
-  {
-    id: 'plex_ar',
-    label: 'IBM Plex 现代阿语',
-    script: 'ar',
-    langTag: 'العربية',
-    sample: 'أبجد',
-    css: '"IBM Plex Sans Arabic", "Cairo", sans-serif',
+    css: '"Noto Naskh Arabic", "Amiri", "Scheherazade New", "Geeza Pro", serif',
   },
   {
     id: 'georgia_en',
-    label: 'Georgia',
-    script: 'en',
+    label: 'Georgia Serif',
     langTag: 'EN',
-    sample: 'Aa',
     css: 'Georgia, "Iowan Old Style", "New York", "Times New Roman", serif',
   },
   {
     id: 'sf_en',
-    label: 'SF Pro',
-    script: 'en',
+    label: 'SF Pro Clean',
     langTag: 'EN',
-    sample: 'Aa',
     css: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Plus Jakarta Sans", system-ui, sans-serif',
   },
 ];
-
-export function isArabicReaderFont(fontId: ReaderFontFamilyId): boolean {
-  return (
-    fontId === 'amiri_ar' ||
-    fontId === 'scheherazade_ar' ||
-    fontId === 'tajawal_ar' ||
-    fontId === 'plex_ar'
-  );
-}
 
 export const TEXT_COLOR_PRESETS: Array<{ label: string; value: string }> = [
   { label: '默认', value: '' },
@@ -205,7 +161,7 @@ export const DEFAULT_READER_PREFS: ReaderPreferences = {
   marginMode: 'standard',
   widthMode: 'standard',
   align: 'justify',
-  layoutMode: 'paged',
+  layoutMode: 'scroll',
 };
 
 const PREFS_KEY = 'earth_one_reader_prefs:v2';

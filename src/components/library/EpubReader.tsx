@@ -204,33 +204,6 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
     rendition?.display(href);
     setShowToc(false);
   };
-
-  const touchStartXRef = useRef<number | null>(null);
-  const touchStartYRef = useRef<number | null>(null);
-
-  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (showToc) return;
-    const t = e.touches[0];
-    if (!t) return;
-    touchStartXRef.current = t.clientX;
-    touchStartYRef.current = t.clientY;
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (showToc) return;
-    const startX = touchStartXRef.current;
-    const startY = touchStartYRef.current;
-    touchStartXRef.current = null;
-    touchStartYRef.current = null;
-    if (startX == null || startY == null) return;
-    const t = e.changedTouches[0];
-    if (!t) return;
-    const dx = t.clientX - startX;
-    const dy = t.clientY - startY;
-    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
-    if (dx < 0) next();
-    else prev();
-  };
   const adjustFont = (delta: number) => {
     const nextSize = Math.max(70, Math.min(160, fontSize + delta));
     setFontSize(nextSize);
@@ -306,14 +279,7 @@ export const EpubReader: React.FC<EpubReaderProps> = ({ book, onClose, initialCf
           </aside>
         )}
 
-        <div
-          className="flex-1 bg-[#f5f1e8] flex items-center justify-center relative"
-          dir={isRtl ? 'rtl' : 'ltr'}
-          lang={book.language || undefined}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-          style={{ touchAction: 'pan-y' }}
-        >
+        <div className="flex-1 bg-[#f5f1e8] flex items-center justify-center relative" dir={isRtl ? 'rtl' : 'ltr'} lang={book.language || undefined}>
           {loading && (
               <div role="status" aria-live="polite" className="text-slate-600 text-sm flex items-center space-x-2">
               <BookOpen className="w-5 h-5 animate-pulse" />

@@ -37,7 +37,7 @@ const VolumetricAndDOFShader = {
     uFocusDist: { value: 24.0 },
     uCameraNear: { value: 0.2 },
     uCameraFar: { value: 260.0 },
-    uClarity: { value: 0.28 },
+    uClarity: { value: 0.22 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -123,12 +123,12 @@ const VolumetricAndDOFShader = {
         }
       }
 
-      // 2. Volumetric Screen-Space Crepuscular Light Shafts (God Rays)
+      // 2. Volumetric Screen-Space Crepuscular Light Shafts (God Rays, localized near solar disc only)
       if (uHasDepth > 0.5 && uGodRayIntensity > 0.005) {
         vec2 delta = (vUv - uLightScreenPos);
         float lightDist = length(delta);
-        if (lightDist < 1.35) {
-          vec2 stepUv = delta * (0.72 / 14.0);
+        if (lightDist < 0.92) {
+          vec2 stepUv = delta * (0.62 / 14.0);
           float jitter = igNoise(gl_FragCoord.xy);
           vec2 sampleUv = vUv - stepUv * jitter;
           float illuminationDecay = 1.0;
@@ -140,12 +140,12 @@ const VolumetricAndDOFShader = {
             float d = texture2D(tDepth, clampedUv).x;
             float skyTransmission = smoothstep(0.992, 0.9992, d);
             float sampleLuma = dot(texture2D(tDiffuse, clampedUv).rgb, vec3(0.299, 0.587, 0.114));
-            rayAccum += skyTransmission * min(1.8, sampleLuma) * illuminationDecay;
-            illuminationDecay *= 0.91;
+            rayAccum += skyTransmission * min(0.95, sampleLuma) * illuminationDecay;
+            illuminationDecay *= 0.89;
           }
 
-          float radialMask = 1.0 - smoothstep(0.08, 1.35, lightDist);
-          col += uGodRayColor * (rayAccum / 14.0) * uGodRayIntensity * radialMask;
+          float radialMask = pow(1.0 - smoothstep(0.02, 0.92, lightDist), 1.65);
+          col += uGodRayColor * (rayAccum / 14.0) * (uGodRayIntensity * 0.72) * radialMask;
         }
       }
 
@@ -193,11 +193,10 @@ export function createParadisePostPipeline(
   const volDofPass = new ShaderPass(VolumetricAndDOFShader);
   volDofPass.uniforms.uHasDepth.value = supportsDepthTex ? 1.0 : 0.0;
   volDofPass.uniforms.uResolution.value.set(rtWidth, rtHeight);
-  volDofPass.uniforms.uDofIntensity.value = initial.enableDOF ? 0.14 : 0;
-  volDofPass.enabled = true;
+  volDofPass.enabled = initial.enableGodRays || initial.enableDOF;
   composer.addPass(volDofPass);
 
-  const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.11, 0.28, 0.93);
+  const bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.085, 0.22, 1.14);
   bloomPass.enabled = initial.enableBloom;
   composer.addPass(bloomPass);
 

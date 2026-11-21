@@ -29,11 +29,7 @@ import {
   Download,
   Loader2,
   Trash2,
-  Upload,
-  FileUp,
-  Layers,
 } from 'lucide-react';
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import { Book, Chapter, BookAnnotation, BookChapterOutline, BookSegmentItem, BookShelfItem, BookshelfStatus, Language } from '../../types/index.ts';
 import { EpubReader } from './EpubReader.tsx';
 import { AppleBookReader, type ReadingProgressDetail } from './AppleBookReader.tsx';
@@ -43,9 +39,7 @@ import { AdminLibrary } from './AdminLibrary.tsx';
 import { filterLibrarySearchResults, getLibrarySearchFilterOptions, LIBRARY_RIGHTS_FILTER_LABELS } from './searchFilters.ts';
 import type { LibraryAgentAction } from '../../utils/oneAgentController.ts';
 import { listRecentReadingHistory, type BookProgressRecord } from '../../utils/readerPreferences.ts';
-import { convertPdfDocumentToEbook, type WholePdfConversionProgress } from '../../utils/pdfEbookExtractor.ts';
-
-GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+import { containsArabic } from '../../utils/arabicTextNormalize.ts';
 
 interface DigitalLibraryProps {
   lang: Language;
@@ -248,20 +242,6 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const savingProgressRef = useRef(false);
   const savingAnnotationRef = useRef(false);
   const mountedRef = useRef(true);
-
-  // ---- External Local PDF / Text Auto-Ebook Importer ----
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isDraggingFile, setIsDraggingFile] = useState(false);
-  const [pdfImportState, setPdfImportState] = useState<{
-    filename: string;
-    stage: WholePdfConversionProgress['stage'] | 'reading' | 'uploading' | 'error';
-    currentPage: number;
-    totalPages: number;
-    message: string;
-    coverPreview?: string;
-    error?: string;
-  } | null>(null);
-  const [homeCategoryTab, setHomeCategoryTab] = useState<string>('all');
 
   // =========================================================================
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -792,32 +772,24 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   }, []);
 
   const openReader = async (book: Book) => {
-    // EPUB books use epub.js; converted or native text books open directly in segmented AppleBookReader;
-    // raw unconverted PDFs open in PdfDocumentViewer with instant whole-book conversion & visual translation.
+    // EPUB books use the epub.js reader; PDF books use PdfDocumentViewer; text books use segmented AppleBookReader
     if (book.epubUrl) {
       setReadingEpub(book);
       await ensureShelfForReading(book);
       return;
     }
-
-    const isElectronicTextBook =
-      book.formatType === 'text' ||
-      (Array.isArray(book.chapters) && book.chapters.some((ch) => ch.content && ch.content.trim().length > 40));
-
-    if (!isElectronicTextBook) {
-      const pdf = getBookPdfUrl(book as any) || (book.formatType === 'pdf' ? (book as any).textUrl || book.externalReadUrl : null);
-      if (pdf) {
-        const shelfItem = shelf.find(item => item.bookId === book.id) || (await fetchServerReadingProgress(book.id)) || undefined;
-        setPdfReader({
-          url: pdf,
-          title: book.title,
-          sourceUrl: book.sourceUrl || book.externalReadUrl || pdf,
-          bookId: book.id,
-          initialPage: shelfItem?.lastReadPage,
-        });
-        await ensureShelfForReading(book);
-        return;
-      }
+    const pdf = getBookPdfUrl(book as any) || (book.formatType === 'pdf' ? (book as any).textUrl || book.externalReadUrl : null);
+    if (pdf) {
+      const shelfItem = shelf.find(item => item.bookId === book.id) || (await fetchServerReadingProgress(book.id)) || undefined;
+      setPdfReader({
+        url: pdf,
+        title: book.title,
+        sourceUrl: book.sourceUrl || book.externalReadUrl || pdf,
+        bookId: book.id,
+        initialPage: shelfItem?.lastReadPage,
+      });
+      await ensureShelfForReading(book);
+      return;
     }
 
     // Attempt fast segmented initial load from server first (returns outline + first 40 segments + server reading progress)
@@ -1328,231 +1300,6 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   };
 
   // =========================================================================
-  // External Local PDF / TXT / MD Import -> Automatic Whole-Book Ebook Conversion
-  // =========================================================================
-  const handleImportLocalFile = useCallback(async (file: File) => {
-    if (!file) return;
-    const rawName = file.name || '未命名书籍.pdf';
-    const lowerName = rawName.toLowerCase();
-    const isPdf = lowerName.endsWith('.pdf') || file.type === 'application/pdf';
-    const isTextLike = lowerName.endsWith('.txt') || lowerName.endsWith('.md') || lowerName.endsWith('.markdown');
-
-    if (!isPdf && !isTextLike) {
-      setPdfImportState({
-        filename: rawName,
-        stage: 'error',
-        currentPage: 0,
-        totalPages: 0,
-        message: '暂仅支持 PDF、TXT 或 Markdown 文件。',
-        error: '请选择 .pdf / .txt / .md 电子书文件。',
-      });
-      return;
-    }
-
-    if (file.size > 48 * 1024 * 1024) {
-      setPdfImportState({
-        filename: rawName,
-        stage: 'error',
-        currentPage: 0,
-        totalPages: 0,
-        message: '文件体积超过 48MB 上限。',
-        error: '单个文件最大支持 48MB，请压缩后重试。',
-      });
-      return;
-    }
-
-    const derivedTitle = rawName.replace(/\.(pdf|txt|md|markdown)$/i, '').replace(/[_-]+/g, ' ').trim() || '未命名书籍';
-
-    setPdfImportState({
-      filename: rawName,
-      stage: 'reading',
-      currentPage: 0,
-      totalPages: 0,
-      message: isPdf ? '正在读取本地 PDF 文件…' : '正在读取文本文档…',
-    });
-
-    const readFileAsBase64 = (blob: File): Promise<string> =>
-      new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = String(reader.result || '');
-          const idx = result.indexOf(',');
-          resolve(idx >= 0 ? result.slice(idx + 1) : result);
-        };
-        reader.onerror = () => reject(new Error('读取本地文件失败'));
-        reader.readAsDataURL(blob);
-      });
-
-    try {
-      const [arrayBuffer, fileBase64] = await Promise.all([file.arrayBuffer(), readFileAsBase64(file)]);
-
-      let chapters: Array<{ id: string; title: string; content: string }> = [];
-      let coverImageBase64: string | undefined;
-      let detectedLanguage = /[\u0600-\u06FF]/.test(derivedTitle)
-        ? 'ar'
-        : /[\u4E00-\u9FFF]/.test(derivedTitle)
-          ? 'zh'
-          : 'en';
-      let pageCount = 0;
-
-      let cleanPages = 0;
-
-      if (isPdf) {
-        const loadingTask = getDocument({
-          data: new Uint8Array(arrayBuffer),
-          cMapUrl: '/pdfjs-assets/cmaps/',
-          cMapPacked: true,
-          standardFontDataUrl: '/pdfjs-assets/standard_fonts/',
-          wasmUrl: '/pdfjs-assets/wasm/',
-          iccUrl: '/pdfjs-assets/iccs/',
-        });
-        const pdfDoc = await loadingTask.promise;
-        try {
-          pageCount = pdfDoc.numPages;
-          const conversion = await convertPdfDocumentToEbook(pdfDoc, derivedTitle, {
-            maxAutoOcrPages: 0,
-            onProgress: (p) => {
-              if (!mountedRef.current) return;
-              setPdfImportState((prev) => ({
-                filename: rawName,
-                stage: p.stage,
-                currentPage: p.currentPage,
-                totalPages: p.totalPages,
-                message: p.message,
-                coverPreview: prev?.coverPreview,
-              }));
-            },
-          });
-          cleanPages = conversion.cleanPages;
-          // Only save as pure-text electronic book when the vast majority of ALL pages
-          // extracted cleanly as real text. Otherwise preserve the FULL original multi-page PDF
-          // so a 100+ page scanned/special-font book never gets truncated to 2 chapters!
-          chapters = conversion.isFullElectronicCoverage ? conversion.chapters : [];
-          coverImageBase64 = conversion.coverImage;
-          detectedLanguage = conversion.language || detectedLanguage;
-          if (coverImageBase64 && mountedRef.current) {
-            setPdfImportState((prev) => (prev ? { ...prev, coverPreview: coverImageBase64 } : prev));
-          }
-        } finally {
-          void loadingTask.destroy().catch(() => {});
-        }
-      } else {
-        const text = new TextDecoder('utf-8').decode(arrayBuffer).trim();
-        const arCount = (text.match(/[\u0600-\u06FF]/g) || []).length;
-        const zhCount = (text.match(/[\u4E00-\u9FFF]/g) || []).length;
-        detectedLanguage = arCount >= 30 ? 'ar' : zhCount >= 20 ? 'zh' : 'en';
-        const rawParas = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-        const units = rawParas.length >= 3 ? rawParas : text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
-        let buf = '';
-        let chIdx = 1;
-        for (const u of units) {
-          if (buf.length > 0 && buf.length + u.length > 2800) {
-            chapters.push({
-              id: `ch_${chIdx}`,
-              title: `第 ${chIdx} 节`,
-              content: buf.trim(),
-            });
-            chIdx += 1;
-            buf = u;
-          } else {
-            buf = buf ? `${buf}\n\n${u}` : u;
-          }
-        }
-        if (buf.trim()) {
-          chapters.push({
-            id: `ch_${chIdx}`,
-            title: chIdx === 1 ? derivedTitle : `第 ${chIdx} 节`,
-            content: buf.trim(),
-          });
-        }
-        cleanPages = Math.max(1, chapters.length);
-        pageCount = Math.max(1, chapters.length);
-      }
-
-      if (mountedRef.current) {
-        setPdfImportState((prev) => ({
-          filename: rawName,
-          stage: 'uploading',
-          currentPage: pageCount,
-          totalPages: pageCount,
-          message: chapters.length > 0
-            ? `已自动整本编排 ${chapters.length} 章电子版（全书 ${pageCount} 页），正在存入书架…`
-            : `已保留全书共 ${pageCount} 页高清原版，正在快速存入书架…`,
-          coverPreview: coverImageBase64 || prev?.coverPreview,
-        }));
-      }
-
-      const res = await fetch('/api/library/upload-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...libraryAuthHeaders() },
-        body: JSON.stringify({
-          filename: rawName,
-          title: derivedTitle,
-          author: '本地导入',
-          language: detectedLanguage,
-          category: detectedLanguage === 'ar' ? 'islamic_studies' : 'literature',
-          fileBase64,
-          chapters,
-          coverImageBase64,
-          pageCount,
-          cleanPages,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.success || !data.book) {
-        throw new Error(data?.error || '导入电子书失败');
-      }
-
-      const importedBook: Book = data.book;
-      if (mountedRef.current) {
-        setBooks((prev) => [importedBook, ...prev.filter((b) => b.id !== importedBook.id)]);
-        setShelf((prev) => {
-          const existing = prev.find((i) => i.bookId === importedBook.id);
-          const entry: BookShelfItem & { book: Book } = {
-            id: existing?.id || `shelf_${importedBook.id}`,
-            userId: existing?.userId || currentUser?.id || 'guest',
-            bookId: importedBook.id,
-            status: 'reading' as BookshelfStatus,
-            progress: existing?.progress || 0,
-            savedAt: existing?.savedAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            book: importedBook,
-          };
-          return existing ? prev.map((i) => (i.bookId === importedBook.id ? entry : i)) : [entry, ...prev];
-        });
-        setPdfImportState(null);
-      }
-
-      // Immediately open the newly imported whole electronic book for seamless reading!
-      await openReader(importedBook);
-    } catch (err: any) {
-      if (mountedRef.current) {
-        setPdfImportState({
-          filename: rawName,
-          stage: 'error',
-          currentPage: 0,
-          totalPages: 0,
-          message: '导入未能完成',
-          error: err?.message || '解析或上传 PDF 时发生错误，请重试。',
-        });
-      }
-    }
-  }, [currentUser?.id]);
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (file) void handleImportLocalFile(file);
-  };
-
-  const handleDropPdf = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDraggingFile(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) void handleImportLocalFile(file);
-  };
-
-  // =========================================================================
   // Derived data
   // =========================================================================
   const activeChapter: Chapter | undefined = readingBook?.chapters[activeChapterIndex];
@@ -1562,72 +1309,6 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   }, [books]);
 
   const booksByCategory = (category: string) => books.filter(b => b.category === category);
-
-  const visibleHomeCatalogBooks = useMemo(() => {
-    if (homeCategoryTab === 'all') return books;
-    return books.filter((b) => b.category === homeCategoryTab);
-  }, [books, homeCategoryTab]);
-
-  const activeCategoryTabs = useMemo(() => {
-    const present = new Set<string>(books.map((b) => b.category).filter(Boolean));
-    return CATEGORIES.filter((c) => present.has(c.id));
-  }, [books]);
-
-  const continueReadingList = useMemo(() => {
-    const items: Array<{
-      key: string;
-      title: string;
-      author?: string;
-      coverImage?: string;
-      progressPct: number;
-      subtitle: string;
-      book?: Book;
-      sourceUrl?: string;
-    }> = [];
-    const seen = new Set<string>();
-
-    // Prefer server-synced shelf items currently in progress
-    for (const entry of shelf) {
-      if (!entry.book) continue;
-      if (entry.progress > 0 || entry.status === 'reading') {
-        seen.add(entry.book.id);
-        seen.add(entry.book.title);
-        const pageLabel = entry.lastReadPage
-          ? `第 ${entry.lastReadPage}${entry.totalPages ? `/${entry.totalPages}` : ''} 页`
-          : entry.book.formatType === 'text'
-            ? '电子版'
-            : '在读';
-        items.push({
-          key: `shelf:${entry.book.id}`,
-          title: entry.book.title,
-          author: entry.book.author,
-          coverImage: entry.book.coverImage,
-          progressPct: Math.max(1, Math.min(100, entry.progress || 1)),
-          subtitle: `${pageLabel} · ${entry.progress || 0}%`,
-          book: entry.book,
-        });
-      }
-    }
-
-    // Supplement with local recent reading history
-    for (const rec of recentHistory) {
-      if (seen.has(rec.title) || seen.has(rec.bookKey)) continue;
-      seen.add(rec.title);
-      const matched = books.find((b) => b.id === rec.bookKey || b.title === rec.title);
-      items.push({
-        key: rec.bookKey,
-        title: rec.title,
-        author: matched?.author,
-        coverImage: matched?.coverImage,
-        progressPct: rec.progressPct,
-        subtitle: `第 ${rec.pageNumber}/${rec.totalPages} 页 · ${rec.progressPct}%`,
-        book: matched,
-        sourceUrl: rec.sourceUrl,
-      });
-    }
-
-    return items.slice(0, 6);
-  }, [shelf, recentHistory, books]);
 
   const shelfBooks = useMemo(() => {
     if (shelfTab === 'all') return shelf;
@@ -1648,304 +1329,240 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
   const readerLineHeight = { lineHeight: lineHeight };
 
   return (
-    <div
-      className="flex min-h-[calc(100dvh-4rem)] flex-1 flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]"
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (!isDraggingFile) setIsDraggingFile(true);
-      }}
-      onDragLeave={(e) => {
-        if (e.currentTarget === e.target) setIsDraggingFile(false);
-      }}
-      onDrop={handleDropPdf}
-    >
-      {/* Hidden native file input — works across iPhone Files, Android Files, iPad, Mac & Windows */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf,application/pdf,.md,.markdown,.txt,text/plain"
-        onChange={handleFileInputChange}
-        className="hidden"
-      />
+    <div className="flex min-h-[calc(100dvh-4rem)] flex-1 flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+      {/* ONE LIBRARY unified header */}
+      <header className="sticky top-[52px] z-30 border-b border-[var(--color-one-border)] bg-[var(--color-one-surface)]/88 backdrop-blur-xl md:top-16">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-3 sm:px-8 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-accent)]">
+              <Library className="h-4.5 w-4.5" />
+            </div>
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--color-one-text-dim)]">ONE LIBRARY</p>
+              <h1 className="text-base font-semibold leading-tight tracking-tight text-[var(--color-one-text)]">世界图书馆</h1>
+            </div>
+          </div>
 
-      {/* Minimal 3-Zone Editorial Header — scrolls naturally with page */}
-      <header className="border-b border-[var(--color-one-border)] bg-[var(--color-one-bg)]">
-        <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-8">
-          {/* Zone 1: Clean single-line brand wordmark */}
-          <button
-            type="button"
-            onClick={() => setView('home')}
-            className="flex shrink-0 cursor-pointer items-center gap-2 text-left"
-          >
-            <Library className="h-4 w-4 text-[var(--color-one-accent)]" />
-            <span className="font-serif text-[16px] font-semibold tracking-tight text-[var(--color-one-text)]">
-              世界图书馆
-            </span>
-          </button>
-
-          {/* Zone 2: Minimalist underline navigation tabs */}
-          <nav className="flex h-full items-center gap-5 overflow-x-auto text-[13px] no-scrollbar" aria-label="世界图书馆导航">
+          <nav className="flex items-center gap-1 overflow-x-auto rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-1 text-xs font-medium" aria-label="世界图书馆导航">
             {[
-              { id: 'home', label: '馆藏' },
-              { id: 'shelf', label: shelf.length > 0 ? `书架 ${shelf.length}` : '书架' },
+              { id: 'home', label: '馆藏首页' },
+              { id: 'shelf', label: `我的书架${shelf.length > 0 ? ` (${shelf.length})` : ''}` },
               { id: 'vocab', label: '生词本' },
               { id: 'admin', label: '管理' },
-            ].map((n) => {
-              const active = view === n.id || (n.id === 'home' && (view === 'category' || view === 'detail'));
-              return (
-                <button
-                  key={n.id}
-                  type="button"
-                  onClick={() => setView(n.id as any)}
-                  aria-current={active ? 'page' : undefined}
-                  className={`relative flex h-full shrink-0 cursor-pointer items-center whitespace-nowrap font-medium transition-colors ${
-                    active
-                      ? 'text-[var(--color-one-text)]'
-                      : 'text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
-                  }`}
-                >
-                  <span className="tabular-nums">{n.label}</span>
-                  {active && (
-                    <span className="absolute inset-x-0 bottom-0 h-[2px] bg-[var(--color-one-accent)]" />
-                  )}
-                </button>
-              );
-            })}
+            ].map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => setView(n.id as any)}
+                aria-current={view === n.id ? 'page' : undefined}
+                className={`whitespace-nowrap rounded-lg px-3 py-1.5 transition-colors cursor-pointer ${
+                  view === n.id
+                    ? 'bg-[var(--color-one-surface)] font-semibold text-[var(--color-one-text)] shadow-xs'
+                    : 'text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
+                }`}
+              >
+                {n.label}
+              </button>
+            ))}
           </nav>
-
-          {/* Zone 3: Single clear primary action — Import Local PDF */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={Boolean(pdfImportState && pdfImportState.stage !== 'error')}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
-          >
-            <Upload className="h-3.5 w-3.5" />
-            <span className="whitespace-nowrap">导入 PDF</span>
-          </button>
         </div>
       </header>
 
-      {/* Drag-and-drop overlay feedback on desktop */}
-      {isDraggingFile && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-one-bg)]/85 backdrop-blur-sm">
-          <div className="rounded-2xl border border-dashed border-[var(--color-one-accent)] bg-[var(--color-one-surface)] px-10 py-8 text-center">
-            <FileUp className="mx-auto mb-3 h-8 w-8 text-[var(--color-one-accent)]" />
-            <p className="font-serif text-base font-semibold text-[var(--color-one-text)]">松手导入 PDF，整本自动转为电子版</p>
-            <p className="mt-1 text-xs text-[var(--color-one-text-muted)]">支持中文、英文、阿拉伯语 PDF、TXT、Markdown</p>
-          </div>
-        </div>
-      )}
-
-      {/* Live Whole-Book PDF Conversion Progress Banner */}
-      {pdfImportState && (
-        <div className="mx-auto mt-4 w-full max-w-6xl px-4 sm:px-8">
-          <div className="flex items-start gap-4 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] p-4">
-            {pdfImportState.coverPreview ? (
-              <img
-                src={pdfImportState.coverPreview}
-                alt=""
-                className="h-16 w-11 shrink-0 rounded-md border border-[var(--color-one-border)] object-cover"
-              />
-            ) : (
-              <div className="flex h-16 w-11 shrink-0 items-center justify-center rounded-md border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-accent)]">
-                {pdfImportState.stage === 'error' ? <X className="h-4 w-4 text-rose-500" /> : <Loader2 className="h-4 w-4 animate-spin" />}
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-sm font-medium text-[var(--color-one-text)]">{pdfImportState.filename}</p>
-                {pdfImportState.stage === 'error' ? (
-                  <button
-                    type="button"
-                    onClick={() => setPdfImportState(null)}
-                    className="cursor-pointer p-1 text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                ) : pdfImportState.totalPages > 0 ? (
-                  <span className="shrink-0 font-mono text-xs tabular-nums text-[var(--color-one-text-muted)]">
-                    {pdfImportState.currentPage} / {pdfImportState.totalPages}
-                  </span>
-                ) : null}
-              </div>
-              <p className={`mt-1 text-xs ${pdfImportState.stage === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-[var(--color-one-text-muted)]'}`}>
-                {pdfImportState.error || pdfImportState.message}
-              </p>
-              {pdfImportState.stage !== 'error' && (
-                <div className="mt-2.5 h-[3px] w-full overflow-hidden rounded-full bg-[var(--color-one-border)]">
-                  <div
-                    className="h-full bg-[var(--color-one-accent)] transition-all duration-300"
-                    style={{
-                      width: `${
-                        pdfImportState.totalPages > 0
-                          ? Math.max(8, Math.round((pdfImportState.currentPage / pdfImportState.totalPages) * 100))
-                          : 20
-                      }%`,
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {readerNotice && (
         <div role="status" className="mx-auto mt-3 w-full max-w-6xl px-4 sm:px-8">
-          <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-[var(--color-one-text)]">
+          <div className="flex items-start justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-[var(--color-one-text)]">
             <p className="leading-relaxed"><span className="font-semibold text-amber-700 dark:text-amber-300">阅读提示：</span>{readerNotice}</p>
-            <button type="button" onClick={() => setReaderNotice(null)} className="shrink-0 cursor-pointer rounded-lg p-1 text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]"><X className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setReaderNotice(null)} className="shrink-0 rounded-lg p-1 text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]"><X className="h-4 w-4" /></button>
           </div>
         </div>
       )}
 
       {/* ===================================================================== */}
-      {/* HOME VIEW — Readest / Foliate / BookLore Editorial Sanctuary          */}
+      {/* HOME VIEW                                                            */}
       {/* ===================================================================== */}
       {view === 'home' && (
-        <div className="mx-auto w-full max-w-6xl space-y-10 px-4 py-8 sm:px-8 sm:py-10">
-          {/* Editorial Masthead & Unified Global Search */}
-          <section className="mx-auto max-w-3xl text-center">
-            <h1 className="font-serif text-3xl font-semibold tracking-tight text-[var(--color-one-text)] sm:text-4xl">
-              静心阅读，万卷同源
-            </h1>
-            <p className="mt-2.5 text-sm leading-relaxed text-[var(--color-one-text-muted)]">
-              直通全球公开典籍与阿拉伯语原版书库，亦可一键导入手机本地 PDF 自动整本转为精排电子版。
-            </p>
+        <div className="mx-auto w-full max-w-6xl space-y-10 px-4 py-7 sm:px-8 sm:py-9">
+          {/* Serene Apple-style Library Hero */}
+          <section className="grid grid-cols-1 items-center gap-8 lg:grid-cols-[1.25fr_0.75fr] lg:gap-12">
+            <div>
+              <p className="text-[11px] font-medium tracking-[0.18em] uppercase text-[var(--color-one-accent)]">
+                WORLD DIGITAL LIBRARY
+              </p>
+              <h2 className="mt-2 max-w-2xl font-serif text-3xl font-semibold leading-[1.14] tracking-tight text-[var(--color-one-text)] sm:text-4xl">
+                一个世界，无数典籍。
+              </h2>
+              <p className="mt-3 max-w-xl text-sm leading-relaxed text-[var(--color-one-text-muted)]">
+                一个搜索框直通全球公开书库（世界名著、学术原典、伊斯兰经典书籍、PDF 电子书）。搜索即达，一键下载 PDF 到书架并以典籍精排电子书阅读，支持点击查词与 AI 精讲注解。
+              </p>
 
-            {/* Clean Single Search Field */}
-            <div className="mt-6">
-              <div className="relative flex items-center rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] transition focus-within:border-[var(--color-one-accent)]">
-                <Search className="pointer-events-none ml-3.5 h-4 w-4 shrink-0 text-[var(--color-one-text-dim)]" />
-                <label htmlFor="world-library-search" className="sr-only">搜索全球馆藏</label>
-                <input
-                  id="world-library-search"
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleUnifiedSearch()}
-                  placeholder="搜索书名、作者、伊斯兰典籍（如 صحيح البخاري、道德经）或 ISBN…"
-                  className="w-full bg-transparent py-3 pl-2.5 pr-3 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:outline-none"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchQuery('');
-                      setIslamicResults([]);
-                      setCrawlResults([]);
-                      setOnlineResults([]);
-                    }}
-                    aria-label="清空搜索"
-                    className="mr-1 cursor-pointer rounded-md p-1.5 text-[var(--color-one-text-dim)] hover:text-[var(--color-one-text)]"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleUnifiedSearch()}
-                  disabled={(isSearchingOnline && isCrawling && isSearchingIslamic) || !searchQuery.trim()}
-                  className="mr-1.5 inline-flex h-8 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-[var(--color-one-accent)] px-4 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-40"
-                >
-                  {isSearchingOnline || isCrawling || isSearchingIslamic ? '检索中…' : '搜索'}
-                </button>
-              </div>
-
-              {/* Quiet inline text examples (zero pill boxes) */}
-              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-xs text-[var(--color-one-text-muted)]">
-                <span className="text-[var(--color-one-text-dim)]">试搜：</span>
-                {[
-                  { label: 'صحيح البخاري', q: 'صحيح البخاري' },
-                  { label: 'تفسير ابن كثير', q: 'تفسير ابن كثير' },
-                  { label: '道德经', q: '道德经' },
-                  { label: 'The Time Machine', q: 'The Time Machine' },
-                ].map((item, idx) => (
-                  <React.Fragment key={item.label}>
-                    {idx > 0 && <span className="text-[var(--color-one-border-strong)]">·</span>}
+              {/* Single Unified Search Box */}
+              <div className="mt-6 rounded-2xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] p-3 shadow-xs sm:p-3.5">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-one-text-dim)]" />
+                  <label htmlFor="world-library-search" className="sr-only">搜索全球馆藏</label>
+                  <input
+                    id="world-library-search"
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleUnifiedSearch()}
+                    dir={containsArabic(searchQuery) ? 'rtl' : 'auto'}
+                    placeholder="搜索任何书籍（如：صحيح البخاري、تفسير ابن كثير、道德经、Principia、作者或 ISBN）…"
+                    aria-describedby="world-library-search-help"
+                    className={`w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] py-3 pl-10 pr-4 text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] focus:border-[var(--color-one-accent)] focus:outline-none sm:pr-28 ${containsArabic(searchQuery) ? 'font-arabic-ui' : ''}`}
+                  />
+                  <div className="mt-2 flex items-center gap-2 sm:absolute sm:right-1.5 sm:top-1/2 sm:mt-0 sm:-translate-y-1/2">
                     <button
                       type="button"
-                      onClick={() => handleUnifiedSearch(item.q)}
-                      className="cursor-pointer transition hover:text-[var(--color-one-accent)]"
+                      onClick={() => handleUnifiedSearch()}
+                      disabled={(isSearchingOnline && isCrawling && isSearchingIslamic) || !searchQuery.trim()}
+                      className="inline-flex min-h-9 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-[var(--color-one-accent)] px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-40 sm:flex-none"
                     >
-                      {item.label}
+                      <Search className="h-3.5 w-3.5" />
+                      <span>{isSearchingOnline || isCrawling || isSearchingIslamic ? '检索中…' : '全库搜索'}</span>
                     </button>
-                  </React.Fragment>
-                ))}
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                  <span className="text-[11px] text-[var(--color-one-text-dim)]">热搜示例</span>
+                  {[
+                    { label: 'صحيح البخاري', q: 'صحيح البخاري' },
+                    { label: 'تفسير ابن كثير', q: 'تفسير ابن كثير' },
+                    { label: '道德经', q: '道德经' },
+                    { label: 'The Time Machine', q: 'The Time Machine' },
+                    { label: 'Principia', q: 'Philosophiae Naturalis Principia' },
+                  ].map((chip) => {
+                    const chipIsAr = containsArabic(chip.label);
+                    return (
+                      <button
+                        key={chip.label}
+                        type="button"
+                        dir={chipIsAr ? 'rtl' : 'auto'}
+                        lang={chipIsAr ? 'ar' : undefined}
+                        onClick={() => handleUnifiedSearch(chip.q)}
+                        className={`cursor-pointer text-[var(--color-one-text-muted)] underline-offset-4 transition hover:text-[var(--color-one-accent)] hover:underline ${
+                          chipIsAr ? 'font-arabic-ui text-sm' : 'text-xs'
+                        }`}
+                      >
+                        {chip.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p id="world-library-search-help" className="sr-only">统一检索全球开放图书馆与伊斯兰原版 PDF 书库</p>
               </div>
             </div>
 
-            {/* Tactile Local PDF Auto-Ebook Drop & Tap Bar */}
-            <div className="mt-5">
+            {/* Featured real book */}
+            {featuredBook && (
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={Boolean(pdfImportState && pdfImportState.stage !== 'error')}
-                className="group flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)]/70 px-4 py-3 text-left transition hover:border-[var(--color-one-accent)] hover:bg-[var(--color-one-surface)] disabled:opacity-50"
+                onClick={() => openBookDetail(featuredBook)}
+                aria-label={`查看《${featuredBook.title}》详情`}
+                className="group flex cursor-pointer justify-center rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-one-accent)] lg:justify-end"
               >
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-one-surface-soft)] text-[var(--color-one-accent)]">
-                    <FileUp className="h-4 w-4" />
+                <div className="relative w-full max-w-xs rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 shadow-xs transition hover:border-[var(--color-one-border-strong)]">
+                  <p className="mb-3 text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--color-one-text-dim)]">馆藏精选</p>
+                  <div className="mx-auto aspect-[2/3] w-40 overflow-hidden rounded-xl border border-[var(--color-one-border)] shadow-sm transition duration-300 group-hover:scale-[1.02] sm:w-44">
+                    <img
+                      src={featuredBook.coverImage || '/assets/library/cover-little-prince.jpg'}
+                      alt={featuredBook.title}
+                      className="h-full w-full object-cover"
+                    />
                   </div>
-                  <div className="min-w-0">
-                    <div className="truncate text-xs font-semibold text-[var(--color-one-text)]">
-                      导入手机 / 本地 PDF，整本自动转为电子版
-                    </div>
-                    <div className="mt-0.5 truncate text-[11px] text-[var(--color-one-text-muted)]">
-                      支持拖拽或手机文件选取 · 自动拆章精排与扫描页识字 · 无需逐页点击
-                    </div>
+                  <div className="mt-4">
+                    {(() => {
+                      const featIsAr = isRtlLanguage(featuredBook.language) || containsArabic(featuredBook.title);
+                      return (
+                        <>
+                          <h3
+                            dir={featIsAr ? 'rtl' : 'auto'}
+                            lang={featIsAr ? 'ar' : undefined}
+                            className={`text-sm font-semibold text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)] ${
+                              featIsAr ? 'font-arabic-book text-right text-base leading-[1.85]' : 'leading-snug'
+                            }`}
+                          >
+                            {featuredBook.title}
+                          </h3>
+                          <p
+                            dir={featIsAr ? 'rtl' : 'auto'}
+                            lang={featIsAr ? 'ar' : undefined}
+                            className={`mt-0.5 text-xs text-[var(--color-one-text-muted)] ${featIsAr ? 'font-arabic-ui text-right' : ''}`}
+                          >
+                            {featuredBook.author}
+                          </p>
+                          {featuredBook.description && (
+                            <p
+                              dir={featIsAr ? 'rtl' : 'auto'}
+                              lang={featIsAr ? 'ar' : undefined}
+                              className={`mt-2 line-clamp-2 text-xs text-[var(--color-one-text-dim)] ${
+                                featIsAr ? 'font-arabic-ui text-right leading-[1.85]' : 'leading-relaxed'
+                              }`}
+                            >
+                              {featuredBook.description}
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
-                <span className="shrink-0 text-xs font-medium text-[var(--color-one-accent)] transition group-hover:translate-x-0.5">
-                  选择文件 →
-                </span>
               </button>
-            </div>
+            )}
           </section>
 
-          {/* Continue Reading Strip (Readest / BookLore style) */}
-          {continueReadingList.length > 0 && (
+          {/* Continue Reading (Recent Reading History from readerPreferences) */}
+          {recentHistory.length > 0 && (
             <section>
-              <div className="mb-4 flex items-baseline justify-between border-b border-[var(--color-one-border)] pb-2.5">
-                <h2 className="font-serif text-base font-semibold text-[var(--color-one-text)]">继续阅读</h2>
+              <div className="mb-3.5 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-one-text)]">
+                  <Clock className="h-4 w-4 text-[var(--color-one-accent)]" />
+                  <span>继续阅读</span>
+                </h3>
                 <button
                   type="button"
                   onClick={() => setView('shelf')}
-                  className="cursor-pointer text-xs text-[var(--color-one-text-muted)] transition hover:text-[var(--color-one-accent)]"
+                  className="cursor-pointer text-xs font-medium text-[var(--color-one-accent)] hover:underline"
                 >
-                  全部书架 →
+                  我的书架
                 </button>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {continueReadingList.map((item) => (
+                {recentHistory.map((rec) => (
                   <button
-                    key={item.key}
+                    key={rec.bookKey}
                     type="button"
                     onClick={() => {
-                      if (item.book) {
-                        void openShelfBook(item.book);
-                      } else if (item.sourceUrl) {
-                        setPdfReader({ url: item.sourceUrl, title: item.title });
+                      if (rec.sourceUrl) {
+                        setPdfReader({ url: rec.sourceUrl, title: rec.title });
+                      } else {
+                        const match = books.find((b) => b.id === rec.bookKey || b.title === rec.title);
+                        if (match) void openShelfBook(match);
                       }
                     }}
-                    className="group flex cursor-pointer items-center gap-3.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-3 text-left transition hover:border-[var(--color-one-border-strong)]"
+                    className="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-4 py-3 text-left transition hover:border-[var(--color-one-border-strong)]"
                   >
-                    <BookCoverThumb src={item.coverImage} title={item.title} size="sm" />
                     <div className="min-w-0 flex-1">
-                      <div className="line-clamp-1 text-sm font-medium text-[var(--color-one-text)] group-hover:text-[var(--color-one-accent)]">
-                        {item.title}
+                      <div
+                        dir={containsArabic(rec.title) ? 'rtl' : 'auto'}
+                        lang={containsArabic(rec.title) ? 'ar' : undefined}
+                        className={`truncate text-sm font-medium text-[var(--color-one-text)] ${
+                          containsArabic(rec.title) ? 'font-arabic-ui text-right text-[15px]' : ''
+                        }`}
+                      >
+                        {rec.title}
                       </div>
-                      {item.author && (
-                        <div className="mt-0.5 truncate text-[11px] text-[var(--color-one-text-dim)]">{item.author}</div>
-                      )}
-                      <div className="mt-2 flex items-center justify-between text-[11px] tabular-nums text-[var(--color-one-text-muted)]">
-                        <span>{item.subtitle}</span>
+                      <div className="mt-1 flex items-center gap-2 text-[11px] text-[var(--color-one-text-muted)]">
+                        <span>第 {rec.pageNumber}/{rec.totalPages} 页</span>
+                        <span>·</span>
+                        <span className="font-mono">{rec.progressPct}%</span>
                       </div>
-                      <div className="mt-1.5 h-[2px] w-full overflow-hidden rounded-full bg-[var(--color-one-border)]">
-                        <div className="h-full bg-[var(--color-one-accent)]" style={{ width: `${item.progressPct}%` }} />
+                      <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-[var(--color-one-border)]">
+                        <div className="h-full rounded-full bg-[var(--color-one-accent)]" style={{ width: `${rec.progressPct}%` }} />
                       </div>
                     </div>
+                    <BookOpen className="h-4 w-4 shrink-0 text-[var(--color-one-accent)]" />
                   </button>
                 ))}
               </div>
@@ -1954,18 +1571,23 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
           {/* Unified Original PDF & Islamic / Global Book Search Results */}
           {(islamicResults.length > 0 || isSearchingIslamic) && (
-            <section aria-labelledby="library-pdf-results-title" aria-busy={isSearchingIslamic} className="space-y-4">
-              <div className="flex items-baseline justify-between border-b border-[var(--color-one-border)] pb-2.5">
-                <h2 id="library-pdf-results-title" className="font-serif text-base font-semibold text-[var(--color-one-text)]">
-                  原版典籍与伊斯兰 / 全球 PDF 检索
-                </h2>
+            <section aria-labelledby="library-pdf-results-title" aria-busy={isSearchingIslamic} className="rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 shadow-xs">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div>
+                  <h3 id="library-pdf-results-title" className="text-sm font-semibold text-[var(--color-one-text)]">
+                    原版典籍与伊斯兰 / 全球 PDF 书库检索结果
+                  </h3>
+                  <p className="mt-0.5 text-xs text-[var(--color-one-text-muted)]">
+                    自动匹配 IslamHouse、Internet Archive、Project Gutenberg 等全球原版书籍，支持一键下载 PDF 到我的书架并以典籍精排模式阅读。
+                  </p>
+                </div>
                 {islamicResults.length > 0 && (
-                  <span className="font-mono text-xs tabular-nums text-[var(--color-one-text-dim)]">{islamicResults.length} 部</span>
+                  <span className="shrink-0 font-mono text-xs text-[var(--color-one-text-dim)]">{islamicResults.length} 部</span>
                 )}
               </div>
 
               {isSearchingIslamic ? (
-                <div role="status" className="flex items-center justify-center gap-2 py-8 text-xs text-[var(--color-one-text-muted)]">
+                <div role="status" className="flex items-center justify-center gap-2 py-6 text-xs text-[var(--color-one-text-muted)]">
                   <Loader2 className="h-4 w-4 animate-spin text-[var(--color-one-accent)]" />
                   <span>正在检索全球原版 PDF 书库…</span>
                 </div>
@@ -1977,33 +1599,47 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     return (
                       <div
                         key={item.id}
-                        className="flex flex-col justify-between gap-3 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-4 transition hover:border-[var(--color-one-border-strong)]"
+                        className="flex flex-col justify-between gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-4 transition hover:border-[var(--color-one-border-strong)]"
                       >
                         <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 text-[11px] text-[var(--color-one-text-dim)]">
+                          <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--color-one-text-dim)]">
                             <span className="truncate font-medium text-[var(--color-one-accent)]">{item.sourceName || '全球原版库'}</span>
-                            <span>·</span>
-                            <span className="uppercase">{item.language || 'PDF'}</span>
+                            <span className="shrink-0 uppercase">{item.language || 'BOOK'}</span>
                           </div>
                           <h4
                             dir={isAr ? 'rtl' : 'auto'}
-                            className={`mt-1.5 line-clamp-2 text-sm font-semibold leading-snug text-[var(--color-one-text)] ${isAr ? 'font-serif text-base' : ''}`}
+                            lang={isAr ? 'ar' : undefined}
+                            className={`mt-1.5 line-clamp-2 font-semibold text-[var(--color-one-text)] ${
+                              isAr ? 'font-arabic-book text-right text-[17px] leading-[1.9]' : 'text-sm leading-snug'
+                            }`}
                           >
                             {item.title}
                           </h4>
                           {item.author && (
-                            <p dir={isAr ? 'rtl' : 'auto'} className="mt-1 truncate text-xs text-[var(--color-one-text-muted)]">
+                            <p
+                              dir={isAr ? 'rtl' : 'auto'}
+                              lang={isAr ? 'ar' : undefined}
+                              className={`mt-1 truncate text-xs text-[var(--color-one-text-muted)] ${
+                                isAr ? 'font-arabic-ui text-right text-[13px]' : ''
+                              }`}
+                            >
                               {item.author}
                             </p>
                           )}
                           {item.description && (
-                            <p dir={isAr ? 'rtl' : 'auto'} className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-[var(--color-one-text-dim)]">
+                            <p
+                              dir={isAr ? 'rtl' : 'auto'}
+                              lang={isAr ? 'ar' : undefined}
+                              className={`mt-1.5 line-clamp-2 text-[var(--color-one-text-dim)] ${
+                                isAr ? 'font-arabic-ui text-right text-xs leading-[1.85]' : 'text-[11px] leading-relaxed'
+                              }`}
+                            >
                               {item.description}
                             </p>
                           )}
                         </div>
 
-                        <div className="flex items-center gap-2 border-t border-[var(--color-one-border)] pt-3">
+                        <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--color-one-border)] pt-2.5">
                           {(item.pdfUrl || item.textUrl) && (
                             <button
                               type="button"
@@ -2014,10 +1650,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                                   void handleSaveIslamicBookToShelf(item, true);
                                 }
                               }}
-                              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-[var(--color-one-accent)] px-3 text-xs font-medium text-white transition hover:opacity-90"
+                              className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90"
                             >
-                              <BookOpen className="h-3.5 w-3.5" />
-                              <span>立即阅读</span>
+                              <BookOpen className="h-3 w-3" />
+                              <span>电子书阅读</span>
                             </button>
                           )}
 
@@ -2026,16 +1662,16 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                               type="button"
                               disabled={saving}
                               onClick={() => void handleSaveIslamicBookToShelf(item, false)}
-                              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--color-one-border-strong)] px-3 text-xs text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)] disabled:opacity-50"
+                              className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)] disabled:opacity-50"
                             >
                               {saving ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                <Loader2 className="h-3 w-3 animate-spin" />
                               ) : item.onShelf ? (
-                                <Check className="h-3.5 w-3.5 text-emerald-500" />
+                                <Check className="h-3 w-3 text-emerald-500" />
                               ) : (
-                                <Download className="h-3.5 w-3.5" />
+                                <Download className="h-3 w-3" />
                               )}
-                              <span>{saving ? '下载中…' : item.onShelf ? '已在书架' : '存入书架'}</span>
+                              <span>{saving ? '下载中…' : item.onShelf ? '已在书架' : '下载 PDF 到书架'}</span>
                             </button>
                           )}
                         </div>
@@ -2047,13 +1683,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             </section>
           )}
 
-          {/* Multi-engine open book search results */}
+          {/* Multi-engine open book search results (books only) */}
           {(crawlResults.length > 0 || isCrawling) && (
-            <section aria-labelledby="library-crawl-results-title" aria-busy={isCrawling} className="space-y-4">
-              <div className="flex items-baseline justify-between border-b border-[var(--color-one-border)] pb-2.5">
-                <h2 id="library-crawl-results-title" className="font-serif text-base font-semibold text-[var(--color-one-text)]">全球开放书籍检索</h2>
-                <span className="text-xs text-[var(--color-one-text-dim)]">Gutenberg · Open Library · Internet Archive</span>
-              </div>
+            <section aria-labelledby="library-crawl-results-title" aria-busy={isCrawling} className="rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 shadow-xs">
+              <h3 id="library-crawl-results-title" className="mb-1 text-sm font-semibold text-[var(--color-one-text)]">全球开放书籍检索结果</h3>
+              <p className="mb-3 text-xs text-[var(--color-one-text-muted)]">汇聚 Gutenberg、Open Library、Internet Archive、Wikisource、Google Books 公开图书资源。</p>
               {isCrawling ? (
                 <div role="status" className="py-6 text-center text-xs text-[var(--color-one-text-muted)]">正在检索全球开放图书…</div>
               ) : (
@@ -2063,15 +1697,38 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     .map((r: any) => {
                       const embedInfo = getBookEmbedUrl(r);
                       return (
-                        <div key={r.id} className="flex items-start gap-3 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-3.5 transition hover:border-[var(--color-one-border-strong)]">
-                          <BookCoverThumb src={r.coverImage} title={r.title} size="sm" />
+                        <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-3.5 transition hover:border-[var(--color-one-border-strong)]">
+                          {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
                           <div className="min-w-0 flex-1">
-                            <h4 className="line-clamp-1 text-sm font-medium text-[var(--color-one-text)]">{r.title}</h4>
-                            <p className="mt-0.5 truncate text-[11px] text-[var(--color-one-text-muted)]">{r.author} · {(r.language || '').toUpperCase()} · {r.source}{r.year ? ` · ${r.year}` : ''}</p>
-                            <p className="mt-1.5 line-clamp-2 text-xs text-[var(--color-one-text-dim)]">{r.description}</p>
-                            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                            {(() => {
+                              const isAr = r.language === 'ar' || containsArabic(String(r.title || ''));
+                              return (
+                                <>
+                                  <h4
+                                    dir={isAr ? 'rtl' : 'auto'}
+                                    lang={isAr ? 'ar' : undefined}
+                                    className={`line-clamp-1 font-semibold text-[var(--color-one-text)] ${
+                                      isAr ? 'font-arabic-book text-right text-sm leading-[1.85]' : 'text-xs'
+                                    }`}
+                                  >
+                                    {r.title}
+                                  </h4>
+                                  <p className="mb-1 text-[11px] text-[var(--color-one-accent)]">{r.author} · {(r.language || '').toUpperCase()} · {r.source}{r.year ? ` · ${r.year}` : ''}</p>
+                                  <p
+                                    dir={isAr ? 'rtl' : 'auto'}
+                                    lang={isAr ? 'ar' : undefined}
+                                    className={`mb-2.5 line-clamp-2 text-[var(--color-one-text-muted)] ${
+                                      isAr ? 'font-arabic-ui text-right text-xs leading-[1.8]' : 'text-[11px]'
+                                    }`}
+                                  >
+                                    {r.description}
+                                  </p>
+                                </>
+                              );
+                            })()}
+                            <div className="flex flex-wrap items-center gap-1.5">
                               {r.canImport && (
-                                <button type="button" onClick={() => handleIngestCrawledBook(r)} disabled={ingestingId === r.id} className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-2.5 text-[11px] font-medium text-white transition hover:opacity-90 disabled:opacity-50">
+                                <button type="button" onClick={() => handleIngestCrawledBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50">
                                   {ingestingId === r.id ? <span>保存中…</span> : <><BookOpen className="h-3 w-3" /><span>加入并阅读</span></>}
                                 </button>
                               )}
@@ -2086,14 +1743,14 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                                     setReaderNotice(getOnlineReaderReason(r));
                                     if (r.sourceUrl) window.open(r.sourceUrl, '_blank', 'noopener,noreferrer');
                                   }}
-                                  className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-[var(--color-one-border-strong)] px-2.5 text-[11px] text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
+                                  className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-3 py-1.5 text-[11px] font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
                                 >
-                                  <span>阅读</span>
+                                  <BookOpen className="h-3 w-3" /><span>阅读</span>
                                 </button>
                               )}
                               {r.sourceUrl && (
-                                <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[var(--color-one-text-dim)] hover:text-[var(--color-one-text)]">
-                                  来源 ↗
+                                <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--color-one-border)] px-2.5 py-1.5 text-[11px] text-[var(--color-one-text-muted)] transition hover:text-[var(--color-one-text)]">
+                                  <ExternalLink className="h-3 w-3" /><span>来源</span>
                                 </a>
                               )}
                             </div>
@@ -2108,32 +1765,39 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 
           {/* Online search results */}
           {(onlineResults.length > 0 || isSearchingOnline || ingestError) && (
-            <section aria-labelledby="library-online-results-title" aria-busy={isSearchingOnline} className="space-y-4">
-              <div className="flex items-baseline justify-between border-b border-[var(--color-one-border)] pb-2.5">
-                <h2 id="library-online-results-title" className="font-serif text-base font-semibold text-[var(--color-one-text)]">全球馆藏索引</h2>
-                {onlineResults.length > 0 && (
-                  <span className="font-mono text-xs tabular-nums text-[var(--color-one-text-dim)]">{visibleOnlineResults.length} 条</span>
-                )}
-              </div>
-              {ingestError && <div role="status" aria-live="polite" className="text-xs text-rose-600 dark:text-rose-400">{ingestError}</div>}
+            <section aria-labelledby="library-online-results-title" aria-busy={isSearchingOnline} className="rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-5 shadow-xs">
+              <h3 id="library-online-results-title" className="mb-3 text-sm font-semibold text-[var(--color-one-text)]">全球馆藏索引</h3>
+              {ingestError && <div role="status" aria-live="polite" className="mb-3 text-xs text-rose-600 dark:text-rose-400">{ingestError}</div>}
               {!isSearchingOnline && onlineResults.length > 0 && (
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-                  <select aria-label="按来源筛选" value={onlineSourceFilter} onChange={(e) => setOnlineSourceFilter(e.target.value)} className="h-9 rounded-lg border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-2.5 text-xs text-[var(--color-one-text)]">
-                    <option value="all">全部来源（{onlineResults.length}）</option>
-                    {onlineFilterOptions.sources.map((option) => (<option key={option.source} value={option.source}>{option.name}（{option.count}）</option>))}
-                  </select>
-                  <select aria-label="按语言筛选" value={onlineLanguageFilter} onChange={(e) => setOnlineLanguageFilter(e.target.value)} className="h-9 rounded-lg border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-2.5 text-xs text-[var(--color-one-text)]">
-                    <option value="all">全部语言</option>
-                    {onlineFilterOptions.languages.map((option) => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
-                  </select>
-                  <select aria-label="按年份筛选" value={onlineYearFilter} onChange={(e) => setOnlineYearFilter(e.target.value)} className="h-9 rounded-lg border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-2.5 text-xs text-[var(--color-one-text)]">
-                    <option value="all">全部年份</option>
-                    {onlineFilterOptions.years.map((option) => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
-                  </select>
-                  <select aria-label="按权利状态筛选" value={onlineRightsFilter} onChange={(e) => setOnlineRightsFilter(e.target.value)} className="h-9 rounded-lg border border-[var(--color-one-border)] bg-[var(--color-one-surface)] px-2.5 text-xs text-[var(--color-one-text)]">
-                    <option value="all">全部权利</option>
-                    {onlineFilterOptions.rights.map((option) => (<option key={option.value} value={option.value}>{LIBRARY_RIGHTS_FILTER_LABELS[option.value]}（{option.count}）</option>))}
-                  </select>
+                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <label className="block text-[11px] text-[var(--color-one-text-muted)]">
+                    <span className="mb-1 block">来源</span>
+                    <select aria-label="按来源筛选" value={onlineSourceFilter} onChange={(e) => setOnlineSourceFilter(e.target.value)} className="min-h-10 w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] px-3 py-2 text-xs text-[var(--color-one-text)]">
+                      <option value="all">全部来源（{onlineResults.length}）</option>
+                      {onlineFilterOptions.sources.map((option) => (<option key={option.source} value={option.source}>{option.name}（{option.count}）</option>))}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-[var(--color-one-text-muted)]">
+                    <span className="mb-1 block">语言</span>
+                    <select aria-label="按语言筛选" value={onlineLanguageFilter} onChange={(e) => setOnlineLanguageFilter(e.target.value)} className="min-h-10 w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] px-3 py-2 text-xs text-[var(--color-one-text)]">
+                      <option value="all">全部语言（{onlineResults.length}）</option>
+                      {onlineFilterOptions.languages.map((option) => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-[var(--color-one-text-muted)]">
+                    <span className="mb-1 block">年份</span>
+                    <select aria-label="按年份筛选" value={onlineYearFilter} onChange={(e) => setOnlineYearFilter(e.target.value)} className="min-h-10 w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] px-3 py-2 text-xs text-[var(--color-one-text)]">
+                      <option value="all">全部年份（{onlineResults.length}）</option>
+                      {onlineFilterOptions.years.map((option) => (<option key={option.value} value={option.value}>{option.label}（{option.count}）</option>))}
+                    </select>
+                  </label>
+                  <label className="block text-[11px] text-[var(--color-one-text-muted)]">
+                    <span className="mb-1 block">权利状态</span>
+                    <select aria-label="按权利状态筛选" value={onlineRightsFilter} onChange={(e) => setOnlineRightsFilter(e.target.value)} className="min-h-10 w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-bg)] px-3 py-2 text-xs text-[var(--color-one-text)]">
+                      <option value="all">全部权利状态</option>
+                      {onlineFilterOptions.rights.map((option) => (<option key={option.value} value={option.value}>{LIBRARY_RIGHTS_FILTER_LABELS[option.value]}（{option.count}）</option>))}
+                    </select>
+                  </label>
                 </div>
               )}
               {isSearchingOnline ? (
@@ -2146,21 +1810,44 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                       const canImport = r.canImport === true;
                       const sourceName = r.sourceName || r.source;
                       return (
-                        <div key={r.id} className="flex items-start gap-3 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-3.5 transition hover:border-[var(--color-one-border-strong)]">
-                          <BookCoverThumb src={r.coverImage} title={r.title} size="sm" />
+                        <div key={r.id} className="flex items-start gap-3 rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface-soft)] p-3.5 transition hover:border-[var(--color-one-border-strong)]">
+                          {r.coverImage && <img src={r.coverImage} alt={r.title} className="h-16 w-12 shrink-0 rounded-lg object-cover" />}
                           <div className="min-w-0 flex-1">
-                            <h4 className="line-clamp-1 text-sm font-medium text-[var(--color-one-text)]">{r.title}</h4>
-                            <p className="mt-0.5 truncate text-[11px] text-[var(--color-one-text-muted)]">{r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}</p>
-                            <p className="mt-1.5 line-clamp-2 text-xs text-[var(--color-one-text-dim)]">{r.description}</p>
-                            <div className="mt-2.5 flex items-center gap-2">
+                            {(() => {
+                              const isAr = r.language === 'ar' || containsArabic(String(r.title || ''));
+                              return (
+                                <>
+                                  <h4
+                                    dir={isAr ? 'rtl' : 'auto'}
+                                    lang={isAr ? 'ar' : undefined}
+                                    className={`line-clamp-1 font-semibold text-[var(--color-one-text)] ${
+                                      isAr ? 'font-arabic-book text-right text-sm leading-[1.85]' : 'text-xs'
+                                    }`}
+                                  >
+                                    {r.title}
+                                  </h4>
+                                  <p className="mb-1 text-[11px] text-[var(--color-one-accent)]">{r.author} · {r.language?.toUpperCase()} · {sourceName}{r.year ? ` · ${r.year}` : ''}</p>
+                                  <p
+                                    dir={isAr ? 'rtl' : 'auto'}
+                                    lang={isAr ? 'ar' : undefined}
+                                    className={`mb-2.5 line-clamp-2 text-[var(--color-one-text-muted)] ${
+                                      isAr ? 'font-arabic-ui text-right text-xs leading-[1.8]' : 'text-[11px]'
+                                    }`}
+                                  >
+                                    {r.description}
+                                  </p>
+                                </>
+                              );
+                            })()}
+                            <div className="flex flex-wrap items-center gap-1.5">
                               {canImport && (
-                                <button type="button" onClick={() => handleIngestBook(r)} disabled={ingestingId === r.id} className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-2.5 text-[11px] font-medium text-white transition hover:opacity-90 disabled:opacity-50">
+                                <button type="button" onClick={() => handleIngestBook(r)} disabled={ingestingId === r.id} className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg bg-[var(--color-one-accent)] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50">
                                   {ingestingId === r.id ? <span>保存中…</span> : <><BookOpen className="h-3 w-3" /><span>加入并阅读</span></>}
                                 </button>
                               )}
                               {r.sourceUrl && (
-                                <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-[var(--color-one-text-dim)] hover:text-[var(--color-one-text)]">
-                                  来源页 ↗
+                                <a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--color-one-border)] px-2.5 py-1.5 text-[11px] text-[var(--color-one-text-muted)] transition hover:text-[var(--color-one-text)]">
+                                  <ExternalLink className="h-3 w-3" /><span>来源页</span>
                                 </a>
                               )}
                             </div>
@@ -2173,62 +1860,41 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             </section>
           )}
 
-          {/* Unified Curated Library Shelf with Clean Category Underline Tabs */}
-          <section>
-            <div className="mb-5 flex flex-col gap-3 border-b border-[var(--color-one-border)] pb-2.5 sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex items-center gap-5 overflow-x-auto text-xs no-scrollbar">
-                <button
-                  type="button"
-                  onClick={() => setHomeCategoryTab('all')}
-                  className={`relative shrink-0 cursor-pointer pb-1 font-medium transition-colors ${
-                    homeCategoryTab === 'all'
-                      ? 'text-[var(--color-one-text)]'
-                      : 'text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
-                  }`}
-                >
-                  全部馆藏
-                  {homeCategoryTab === 'all' && <span className="absolute inset-x-0 -bottom-[11px] h-[2px] bg-[var(--color-one-accent)]" />}
-                </button>
-                {activeCategoryTabs.map((cat) => (
+          {/* Category sections */}
+          {CATEGORIES.filter((c) => booksByCategory(c.id).length > 0).map((cat) => {
+            const catBooks = booksByCategory(cat.id);
+            return (
+              <section key={cat.id}>
+                <div className="mb-4 flex items-end justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold tracking-tight text-[var(--color-one-text)]">{cat.label}</h3>
+                    <p className="mt-0.5 text-xs text-[var(--color-one-text-dim)]">{cat.description}</p>
+                  </div>
                   <button
-                    key={cat.id}
                     type="button"
-                    onClick={() => setHomeCategoryTab(cat.id)}
-                    className={`relative shrink-0 cursor-pointer pb-1 font-medium transition-colors ${
-                      homeCategoryTab === cat.id
-                        ? 'text-[var(--color-one-text)]'
-                        : 'text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
-                    }`}
+                    onClick={() => { setActiveCategory(cat.id); setView('category'); }}
+                    className="flex cursor-pointer items-center gap-1 text-xs font-medium text-[var(--color-one-accent)] transition hover:underline"
                   >
-                    {cat.label}
-                    {homeCategoryTab === cat.id && <span className="absolute inset-x-0 -bottom-[11px] h-[2px] bg-[var(--color-one-accent)]" />}
+                    <span>查看全部</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
                   </button>
-                ))}
-              </div>
-              <span className="shrink-0 font-mono text-[11px] tabular-nums text-[var(--color-one-text-dim)]">
-                共 {visibleHomeCatalogBooks.length} 部典籍
-              </span>
-            </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+                  {catBooks.slice(0, 6).map((book) => (
+                    <BookCard key={book.id} book={book} onClick={() => openBookDetail(book)} />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
 
-            {visibleHomeCatalogBooks.length > 0 ? (
-              <div className="grid grid-cols-2 gap-x-5 gap-y-7 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                {visibleHomeCatalogBooks.map((book) => (
-                  <BookCard key={book.id} book={book} onClick={() => openBookDetail(book)} />
-                ))}
-              </div>
-            ) : !isLoading ? (
-              <div className="rounded-xl border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] py-16 text-center text-[var(--color-one-text-muted)]">
-                <Library className="mx-auto mb-3 h-8 w-8 text-[var(--color-one-text-dim)]" />
-                <p className="text-sm font-medium text-[var(--color-one-text)]">该分类暂无典籍</p>
-                <p className="mt-1 text-xs">可搜索全球公开书库，或点击上方「导入 PDF」将本地书籍转为电子版。</p>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center gap-2 py-16 text-xs text-[var(--color-one-text-muted)]">
-                <Loader2 className="h-4 w-4 animate-spin text-[var(--color-one-accent)]" />
-                <span>正在加载世界图书馆馆藏…</span>
-              </div>
-            )}
-          </section>
+          {!isLoading && books.length === 0 && (
+            <div className="rounded-[24px] border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] py-16 text-center text-[var(--color-one-text-muted)]">
+              <Library className="mx-auto mb-3 h-9 w-9 text-[var(--color-one-text-dim)]" />
+              <p className="text-sm font-medium text-[var(--color-one-text)]">世界图书馆正在加载馆藏</p>
+              <p className="mt-1 text-xs">使用上方统一搜索框检索全球公开书籍、学术原著或伊斯兰典籍。</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -2237,28 +1903,27 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {/* ===================================================================== */}
       {view === 'category' && (
         <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8">
-          <button type="button" onClick={() => setView('home')} className="mb-6 flex cursor-pointer items-center gap-1 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
+          <button type="button" onClick={() => setView('home')} className="mb-6 flex cursor-pointer items-center space-x-1 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
             <ChevronLeft className="h-4 w-4" />
-            <span>返回馆藏</span>
+            <span>返回首页</span>
           </button>
-          <div className="mb-6 flex items-center gap-5 overflow-x-auto border-b border-[var(--color-one-border)] pb-2.5 text-xs no-scrollbar">
+          <div className="mb-6 flex items-center space-x-2 overflow-x-auto pb-2">
             {CATEGORIES.map((cat) => (
               <button
                 key={cat.id}
                 type="button"
                 onClick={() => setActiveCategory(cat.id)}
-                className={`relative shrink-0 cursor-pointer pb-1 font-medium transition-colors ${
+                className={`whitespace-nowrap rounded-xl px-4 py-2 text-xs font-medium transition cursor-pointer ${
                   activeCategory === cat.id
-                    ? 'text-[var(--color-one-text)]'
-                    : 'text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
+                    ? 'bg-[var(--color-one-accent)] text-white'
+                    : 'border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
                 }`}
               >
                 {cat.label}
-                {activeCategory === cat.id && <span className="absolute inset-x-0 -bottom-[11px] h-[2px] bg-[var(--color-one-accent)]" />}
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-x-5 gap-y-7 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
             {books.map((book) => (
               <BookCard key={book.id} book={book} onClick={() => openBookDetail(book)} />
             ))}
@@ -2272,23 +1937,29 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       {/* ===================================================================== */}
       {view === 'detail' && selectedBook && (
         <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8">
-          <button type="button" onClick={() => setView('home')} className="mb-6 flex cursor-pointer items-center gap-1 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
+          <button type="button" onClick={() => setView('home')} className="mb-6 flex cursor-pointer items-center space-x-1 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
             <ChevronLeft className="h-4 w-4" />
-            <span>返回馆藏</span>
+            <span>返回</span>
           </button>
 
           <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
             <div>
-              <BookCoverThumb src={selectedBook.coverImage} title={selectedBook.title} size="lg" />
+              <div className="aspect-[2/3] w-full max-w-xs overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] shadow-sm">
+                <img
+                  src={selectedBook.coverImage || '/assets/library/cover-little-prince.jpg'}
+                  alt={selectedBook.title}
+                  className="h-full w-full object-cover"
+                />
+              </div>
               <div className="mt-4 space-y-2">
                 {(selectedBook.chapters?.some((c) => c.content?.trim()) || selectedBook.epubUrl || getBookPdfUrl(selectedBook as any) || getBookEmbedUrl(selectedBook as any) || selectedBook.sourceUrl || selectedBook.externalReadUrl) ? (
                   <button
                     type="button"
                     onClick={() => openReader(selectedBook)}
-                    className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[var(--color-one-accent)] py-3 text-sm font-medium text-white transition hover:opacity-90"
+                    className="flex w-full cursor-pointer items-center justify-center space-x-2 rounded-xl bg-[var(--color-one-accent)] py-3 text-sm font-semibold text-white transition hover:opacity-90"
                   >
                     <BookOpen className="h-4 w-4" />
-                    <span>{selectedBook.formatType === 'text' ? '电子版阅读' : '立即阅读'}</span>
+                    <span>立即阅读</span>
                   </button>
                 ) : (
                   <div className="w-full rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] py-3 text-center text-xs text-[var(--color-one-text-muted)]">该记录无可用阅读入口。</div>
@@ -2297,7 +1968,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   <button
                     type="button"
                     onClick={() => isOnShelf(selectedBook.id) ? removeFromShelf(selectedBook.id) : addToShelf(selectedBook, 'want_to_read')}
-                    className={`flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition ${
+                    className={`flex min-h-10 cursor-pointer items-center justify-center space-x-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition ${
                       isOnShelf(selectedBook.id)
                         ? 'border-[var(--color-one-accent)]/40 bg-[var(--color-one-accent)]/10 text-[var(--color-one-accent)]'
                         : 'border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] text-[var(--color-one-text)]'
@@ -2309,7 +1980,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   <button
                     type="button"
                     onClick={() => addToShelf(selectedBook, 'favorite')}
-                    className="flex min-h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-2 py-2 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
+                    className="flex min-h-10 cursor-pointer items-center justify-center space-x-1.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-2 py-2 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
                   >
                     <Heart className="h-3.5 w-3.5 text-rose-500" />
                     <span>收藏</span>
@@ -2319,43 +1990,81 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
             </div>
 
             <div className="md:col-span-2">
-              <p className="mb-1 text-xs text-[var(--color-one-accent)]">
-                {selectedBook.source}
-                {selectedBook.language ? ` · ${selectedBook.language.toUpperCase()}` : ''}
-                {selectedBook.formatType === 'text' ? ' · 电子版' : ''}
-              </p>
-              <h1 className="font-serif text-2xl font-semibold leading-tight text-[var(--color-one-text)] sm:text-3xl">{selectedBook.title}</h1>
-              <p className="mt-2 text-sm text-[var(--color-one-text-muted)]">{selectedBook.author}</p>
+              {(() => {
+                const detailIsAr = isRtlLanguage(selectedBook.language) || containsArabic(selectedBook.title);
+                return (
+                  <>
+                    <p className="mb-1 text-xs font-medium text-[var(--color-one-accent)]">{selectedBook.source}</p>
+                    <h1
+                      dir={detailIsAr ? 'rtl' : 'auto'}
+                      lang={detailIsAr ? 'ar' : undefined}
+                      className={`font-bold text-[var(--color-one-text)] ${
+                        detailIsAr
+                          ? 'font-arabic-book text-right text-3xl leading-[1.8] sm:text-4xl'
+                          : 'font-serif text-2xl leading-tight sm:text-3xl'
+                      }`}
+                    >
+                      {selectedBook.title}
+                    </h1>
+                    <p
+                      dir={detailIsAr || containsArabic(selectedBook.author) ? 'rtl' : 'auto'}
+                      lang={detailIsAr || containsArabic(selectedBook.author) ? 'ar' : undefined}
+                      className={`mt-2 text-sm text-[var(--color-one-text-muted)] ${
+                        detailIsAr || containsArabic(selectedBook.author) ? 'font-arabic-ui text-right text-base' : ''
+                      }`}
+                    >
+                      {selectedBook.author}
+                    </p>
 
-              <div className="mt-6 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
-                {selectedBook.year && <MetaItem label="出版年份" value={selectedBook.year} />}
-                {selectedBook.publisher && <MetaItem label="出版社" value={selectedBook.publisher} />}
-                {selectedBook.isbn && <MetaItem label="ISBN" value={selectedBook.isbn} />}
-                {selectedBook.language && <MetaItem label="语言" value={selectedBook.language.toUpperCase()} />}
-                {selectedBook.originalLanguage && <MetaItem label="原始语言" value={selectedBook.originalLanguage} />}
-                <MetaItem label="章节" value={`${selectedBook.chapters.length} 章`} />
-              </div>
+                    <div className="mt-6 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
+                      {selectedBook.year && <MetaItem label="出版年份" value={selectedBook.year} />}
+                      {selectedBook.publisher && <MetaItem label="出版社" value={selectedBook.publisher} />}
+                      {selectedBook.isbn && <MetaItem label="ISBN" value={selectedBook.isbn} />}
+                      {selectedBook.language && <MetaItem label="语言" value={selectedBook.language.toUpperCase()} />}
+                      {selectedBook.originalLanguage && <MetaItem label="原始语言" value={selectedBook.originalLanguage} />}
+                      <MetaItem label="章节" value={`${selectedBook.chapters.length} 章`} />
+                    </div>
 
-              {selectedBook.description && (
-                <div className="mt-6">
-                  <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">内容简介</h3>
-                  <p className="text-sm leading-relaxed text-[var(--color-one-text-muted)]">{selectedBook.description}</p>
-                </div>
-              )}
+                    {selectedBook.description && (
+                      <div className="mt-6">
+                        <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">内容简介</h3>
+                        <p
+                          dir={containsArabic(selectedBook.description) ? 'rtl' : 'auto'}
+                          lang={containsArabic(selectedBook.description) ? 'ar' : undefined}
+                          className={`text-sm text-[var(--color-one-text-muted)] ${
+                            containsArabic(selectedBook.description) ? 'font-arabic-book text-right text-base leading-[1.95]' : 'leading-relaxed'
+                          }`}
+                        >
+                          {selectedBook.description}
+                        </p>
+                      </div>
+                    )}
 
-              {selectedBook.chapters.length > 0 && (
-                <div className="mt-6">
-                  <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">目录</h3>
-                  <ol className="space-y-1.5 text-xs text-[var(--color-one-text-muted)]">
-                    {selectedBook.chapters.slice(0, 10).map((ch, i) => (
-                      <li key={ch.id} className="flex items-center gap-2">
-                        <span className="font-mono tabular-nums text-[var(--color-one-text-dim)]">{i + 1}.</span>
-                        <span className="truncate">{ch.title}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              )}
+                    {selectedBook.chapters.length > 0 && (
+                      <div className="mt-6">
+                        <h3 className="mb-2 text-sm font-semibold text-[var(--color-one-text)]">目录</h3>
+                        <ol className="space-y-1.5 text-xs text-[var(--color-one-text-muted)]">
+                          {selectedBook.chapters.slice(0, 8).map((ch, i) => {
+                            const chIsAr = containsArabic(ch.title);
+                            return (
+                              <li key={ch.id} className="flex items-baseline gap-2">
+                                <span className="font-mono text-[var(--color-one-text-dim)]">{i + 1}.</span>
+                                <span
+                                  dir={chIsAr ? 'rtl' : 'auto'}
+                                  lang={chIsAr ? 'ar' : undefined}
+                                  className={chIsAr ? 'font-arabic-ui text-sm leading-[1.8]' : ''}
+                                >
+                                  {ch.title}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               <div className="mt-8 flex flex-wrap gap-3">
                 {(selectedBook.sourceUrl || selectedBook.externalReadUrl) && (
@@ -2363,10 +2072,10 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                     href={selectedBook.sourceUrl || selectedBook.externalReadUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex min-h-10 items-center gap-2 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-4 py-2 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
+                    className="flex min-h-10 items-center space-x-2 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] px-4 py-2 text-xs font-medium text-[var(--color-one-text)] transition hover:border-[var(--color-one-accent)]"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                    <span>原始文件 / 来源</span>
+                    <span>资源来源</span>
                   </a>
                 )}
               </div>
@@ -2376,87 +2085,87 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
       )}
 
       {/* ===================================================================== */}
-      {/* SHELF VIEW — Tactile Personal Library Shelf + Quick PDF Import Slot   */}
+      {/* SHELF VIEW                                                           */}
       {/* ===================================================================== */}
       {view === 'shelf' && (
         <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8">
-          <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3 border-b border-[var(--color-one-border)] pb-3">
-            <div className="flex items-center gap-5 overflow-x-auto text-xs no-scrollbar">
-              {SHELF_TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setShelfTab(tab.id)}
-                  className={`relative shrink-0 cursor-pointer pb-1 font-medium transition-colors ${
-                    shelfTab === tab.id
-                      ? 'text-[var(--color-one-text)]'
-                      : 'text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
-                  }`}
-                >
-                  {tab.label}
-                  {shelfTab === tab.id && <span className="absolute inset-x-0 -bottom-[13px] h-[2px] bg-[var(--color-one-accent)]" />}
-                </button>
-              ))}
-            </div>
-            <span className="font-mono text-[11px] tabular-nums text-[var(--color-one-text-dim)]">
-              {shelfBooks.length} 本书
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-x-5 gap-y-7 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {/* Tactile Book-Shaped Local PDF Import Card */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="group flex w-full cursor-pointer flex-col text-left focus-visible:outline-none"
-            >
-              <div className="flex aspect-[2/3] w-full flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] p-4 text-center transition group-hover:border-[var(--color-one-accent)]">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-one-surface-soft)] text-[var(--color-one-accent)]">
-                  <Upload className="h-4 w-4" />
-                </div>
-                <div className="text-xs font-medium text-[var(--color-one-text)]">导入本地 PDF</div>
-                <div className="text-[11px] leading-relaxed text-[var(--color-one-text-dim)]">整本自动转为电子版阅读</div>
-              </div>
-              <span className="mt-2.5 text-[13px] font-medium text-[var(--color-one-accent)]">+ 添加手机 / 电脑书籍</span>
-              <span className="mt-0.5 text-[11px] text-[var(--color-one-text-dim)]">PDF · TXT · Markdown</span>
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="font-serif text-xl font-semibold text-[var(--color-one-text)]">我的书架</h2>
+            <button type="button" onClick={() => setView('home')} className="flex min-h-10 cursor-pointer items-center space-x-1 rounded-lg px-3 text-xs text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]">
+              <ChevronLeft className="h-4 w-4" />
+              <span>返回首页</span>
             </button>
-
-            {shelfBooks.map((item) => {
-              const localPdf = getBookPdfUrl(item.book as any);
-              const isElectronic =
-                item.book.formatType === 'text' ||
-                (Array.isArray(item.book.chapters) && item.book.chapters.some((c) => c.content?.trim()));
-              return (
-                <div key={item.id} className="flex flex-col">
-                  <BookCard
-                    book={item.book}
-                    progress={item.progress}
-                    formatHint={isElectronic ? '电子版' : localPdf ? 'PDF' : undefined}
-                    onClick={() => openShelfBook(item.book)}
-                  />
-                  {localPdf && (
-                    <div className="mt-2 flex items-center justify-between text-[11px] text-[var(--color-one-text-muted)]">
-                      <button
-                        type="button"
-                        onClick={() => openShelfBook(item.book)}
-                        className="cursor-pointer font-medium text-[var(--color-one-accent)] hover:underline"
-                      >
-                        {isElectronic ? '电子版阅读' : '打开阅读'}
-                      </button>
-                      <a
-                        href={localPdf.includes('?') ? `${localPdf}&download=1` : `${localPdf}?download=1&filename=${encodeURIComponent(item.book.title)}`}
-                        download
-                        className="hover:text-[var(--color-one-text)]"
-                        title="下载原始 PDF"
-                      >
-                        原件 ↓
-                      </a>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
           </div>
+
+          <div className="mb-6 flex items-center space-x-2 overflow-x-auto pb-2">
+            {SHELF_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setShelfTab(tab.id)}
+                className={`whitespace-nowrap rounded-xl px-4 py-2 text-xs font-medium transition cursor-pointer ${
+                  shelfTab === tab.id
+                    ? 'bg-[var(--color-one-accent)] text-white'
+                    : 'border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {shelfBooks.length === 0 ? (
+            <div className="rounded-[24px] border border-dashed border-[var(--color-one-border-strong)] bg-[var(--color-one-surface)] py-16 text-center text-[var(--color-one-text-muted)]">
+              <BookMarked className="mx-auto mb-3 h-9 w-9 text-[var(--color-one-text-dim)]" />
+              <p className="text-sm font-medium text-[var(--color-one-text)]">书架还是空的</p>
+              <p className="mt-1 text-xs">前往全球统一书库搜索原版图书，下载后自动转为电子书重排阅读。</p>
+              <button
+                type="button"
+                onClick={() => setView('home')}
+                className="mt-4 inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[var(--color-one-accent)] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90"
+              >
+                <BookOpen className="h-3.5 w-3.5" />
+                <span>去全球书库找书</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 sm:gap-5">
+              {shelfBooks.map((item) => {
+                const localPdf = getBookPdfUrl(item.book as any);
+                return (
+                  <div key={item.id} className="relative flex flex-col">
+                    <div className="relative">
+                      <BookCard book={item.book} onClick={() => openShelfBook(item.book)} />
+                      {item.progress > 0 && (
+                        <div className="pointer-events-none absolute inset-x-2 bottom-[3.25rem] h-1 overflow-hidden rounded-full bg-black/30">
+                          <div className="h-full rounded-full bg-[var(--color-one-accent)]" style={{ width: `${item.progress}%` }} />
+                        </div>
+                      )}
+                    </div>
+                    {localPdf && (
+                      <div className="mt-2 flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openShelfBook(item.book)}
+                          className="flex-1 cursor-pointer rounded-lg bg-[var(--color-one-accent)]/12 px-2 py-1.5 text-[11px] font-medium text-[var(--color-one-accent)] transition hover:bg-[var(--color-one-accent)]/20"
+                        >
+                          电子书阅读
+                        </button>
+                        <a
+                          href={localPdf.includes('?') ? `${localPdf}&download=1` : `${localPdf}?download=1&filename=${encodeURIComponent(item.book.title)}`}
+                          download
+                          className="rounded-lg border border-[var(--color-one-border)] px-2 py-1.5 text-[11px] text-[var(--color-one-text-muted)] transition hover:text-[var(--color-one-text)]"
+                          title="下载原始 PDF"
+                        >
+                          下载
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -2663,18 +2372,6 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
                   }
                 : undefined
             }
-            onConvertedToEbook={(convertedBook) => {
-              setBooks((prev) =>
-                prev.some((b) => b.id === convertedBook.id)
-                  ? prev.map((b) => (b.id === convertedBook.id ? convertedBook : b))
-                  : [convertedBook, ...prev]
-              );
-              setShelf((prev) =>
-                prev.map((item) => (item.bookId === convertedBook.id ? { ...item, book: convertedBook } : item))
-              );
-              setPdfReader(null);
-              void openReader(convertedBook);
-            }}
             onClose={() => {
               setPdfReader(null);
               refreshRecentHistory();
@@ -2687,102 +2384,44 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
 };
 
 // ===========================================================================
-// Tactile Book Cover Thumbnail with Graceful Editorial Fallback (Zero Broken Images)
+// Book card (ONE LIBRARY)
 // ===========================================================================
-function BookCoverThumb({ src, title, size = 'md' }: { src?: string; title: string; size?: 'sm' | 'md' | 'lg' }) {
-  const [failed, setFailed] = useState(false);
-  const showFallback = !src || failed;
-  const isAr = /[\u0600-\u06FF]/.test(title || '');
-  const dims =
-    size === 'sm'
-      ? 'h-16 w-11 rounded-md'
-      : size === 'lg'
-        ? 'aspect-[2/3] w-full max-w-xs rounded-xl'
-        : 'aspect-[2/3] w-full rounded-xl';
-
-  return (
-    <div
-      className={`relative shrink-0 overflow-hidden border border-[var(--color-one-border)] bg-[var(--color-one-surface)] ${dims}`}
-    >
-      {/* Subtle book spine crease highlight */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-[5px] bg-gradient-to-r from-black/15 via-white/10 to-transparent" />
-      {showFallback ? (
-        <div
-          dir={isAr ? 'rtl' : 'auto'}
-          className="flex h-full w-full flex-col justify-between bg-[var(--color-one-surface-soft)] p-3 text-left"
-        >
-          <span className="h-[2px] w-5 bg-[var(--color-one-accent)]/60" />
-          <span
-            className={`line-clamp-4 font-serif font-semibold leading-snug text-[var(--color-one-text)] ${
-              size === 'sm' ? 'text-[9px]' : size === 'lg' ? 'text-lg' : 'text-xs'
-            }`}
-          >
-            {title}
-          </span>
-          <span className="text-[9px] uppercase tracking-widest text-[var(--color-one-text-dim)]">EDITION</span>
-        </div>
-      ) : (
-        <img
-          src={src}
-          alt=""
-          loading="lazy"
-          onError={() => setFailed(true)}
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-        />
-      )}
-    </div>
-  );
-}
-
-// ===========================================================================
-// Book card (Readest / Foliate Editorial Proportion)
-// ===========================================================================
-function BookCard({
-  book,
-  onClick,
-  progress,
-  formatHint,
-}: {
-  book: Book;
-  onClick: () => void;
-  progress?: number;
-  formatHint?: string;
-}) {
-  const isAr = book.language === 'ar' || /[\u0600-\u06FF]/.test(book.title || '');
-  const metaText = [
-    formatHint || (book.formatType === 'text' ? '电子版' : book.formatType === 'pdf' ? 'PDF' : ''),
-    book.language ? book.language.toUpperCase() : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
+function BookCard({ book, onClick }: { book: Book; onClick: () => void }) {
+  const isArTitle = isRtlLanguage(book.language) || containsArabic(book.title);
+  const isArAuthor = isArTitle || containsArabic(book.author);
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={`打开《${book.title}》`}
-      className="group flex w-full cursor-pointer flex-col text-left focus-visible:outline-none"
+      aria-label={`打开《${book.title}》详情`}
+      className="group flex w-full cursor-pointer flex-col rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-one-accent)]"
     >
-      <div className="relative w-full transition-transform duration-300 group-hover:-translate-y-0.5">
-        <BookCoverThumb src={book.coverImage} title={book.title} size="md" />
-        {typeof progress === 'number' && progress > 0 && (
-          <div className="mt-1.5 h-[2px] w-full overflow-hidden rounded-full bg-[var(--color-one-border)]">
-            <div className="h-full bg-[var(--color-one-accent)]" style={{ width: `${Math.min(100, progress)}%` }} />
-          </div>
-        )}
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-2xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] shadow-xs transition-all duration-300 group-hover:-translate-y-0.5 group-hover:border-[var(--color-one-border-strong)] group-hover:shadow-md">
+        <img
+          src={book.coverImage || '/assets/library/cover-little-prince.jpg'}
+          alt=""
+          loading="lazy"
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+        />
       </div>
       <h3
-        dir={isAr ? 'rtl' : 'auto'}
-        className={`mt-2.5 line-clamp-2 text-[13px] font-medium leading-snug text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)] ${
-          isAr ? 'font-serif text-[14px]' : ''
+        dir={isArTitle ? 'rtl' : 'auto'}
+        lang={isArTitle ? 'ar' : undefined}
+        className={`mt-2.5 line-clamp-2 w-full font-medium text-[var(--color-one-text)] transition-colors group-hover:text-[var(--color-one-accent)] ${
+          isArTitle ? 'font-arabic-book text-right text-[15px] leading-[1.85]' : 'text-[13px] leading-snug'
         }`}
       >
         {book.title}
       </h3>
-      <p className="mt-0.5 line-clamp-1 text-[11px] text-[var(--color-one-text-muted)]">{book.author}</p>
-      {metaText && (
-        <p className="mt-0.5 text-[10px] tracking-wide text-[var(--color-one-text-dim)]">{metaText}</p>
-      )}
+      <p
+        dir={isArAuthor ? 'rtl' : 'auto'}
+        lang={isArAuthor ? 'ar' : undefined}
+        className={`mt-0.5 line-clamp-1 w-full text-[var(--color-one-text-muted)] ${
+          isArAuthor ? 'font-arabic-ui text-right text-xs leading-[1.7]' : 'text-[11px]'
+        }`}
+      >
+        {book.author}
+      </p>
     </button>
   );
 }

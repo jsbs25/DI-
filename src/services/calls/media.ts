@@ -245,8 +245,7 @@ export async function probeIceConnectivity(
   const servers: RTCIceServer[] = iceServers?.length
     ? iceServers
     : [
-        { urls: 'stun:stun.qq.com:3478' },
-        { urls: 'stun:stun.miwifi.com:3478' },
+        { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' },
       ];
   let pc: RTCPeerConnection | null = null;
@@ -897,8 +896,8 @@ export class WebRTCCallSession implements ICallMediaSession {
       iceServers: this.opts?.iceServers?.length
         ? this.opts.iceServers
         : [
-            { urls: 'stun:stun.qq.com:3478' },
-            { urls: 'stun:stun.miwifi.com:3478' },
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun.cloudflare.com:3478' },
           ],
       iceTransportPolicy: this.iceTransportPolicy,
@@ -1750,8 +1749,8 @@ export class WebRTCCallSession implements ICallMediaSession {
             iceServers: this.opts?.iceServers?.length
               ? this.opts.iceServers
               : [
-                  { urls: 'stun:stun.qq.com:3478' },
-                  { urls: 'stun:stun.miwifi.com:3478' },
+                  { urls: 'stun:stun.l.google.com:19302' },
+                  { urls: 'stun:stun1.l.google.com:19302' },
                   { urls: 'stun:stun.cloudflare.com:3478' },
                 ],
             iceTransportPolicy: policy,

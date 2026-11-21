@@ -595,7 +595,7 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                     <h3
                       dir={isArabic ? 'rtl' : 'ltr'}
                       lang={item.language}
-                      className={`line-clamp-2 min-h-[4.4rem] font-semibold text-[var(--color-one-text)] ${
+                      className={`line-clamp-2 font-semibold text-[var(--color-one-text)] ${
                         isArabic ? 'font-arabic-book text-right text-[18px] leading-[1.9]' : 'text-[15px] leading-snug'
                       }`}
                     >
@@ -605,22 +605,24 @@ export const NoorIslamicPdfPortal: React.FC<NoorIslamicPdfPortalProps> = ({
                     <p
                       dir={isArabic ? 'rtl' : 'ltr'}
                       lang={isArabic ? 'ar' : undefined}
-                      className={`mt-1 line-clamp-1 min-h-[1.5rem] text-[var(--color-one-text-muted)] ${
+                      className={`mt-1 line-clamp-1 text-[var(--color-one-text-muted)] ${
                         isArabic ? 'font-arabic-ui text-right text-[13px] leading-[1.75]' : 'text-xs'
                       }`}
                     >
-                      {item.author || '\u00A0'}
+                      {item.author}
                     </p>
 
-                    <p
-                      dir={isArabic ? 'rtl' : 'ltr'}
-                      lang={isArabic ? 'ar' : undefined}
-                      className={`mt-2 line-clamp-3 min-h-[4.6rem] text-[var(--color-one-text-dim)] ${
-                        isArabic ? 'font-arabic-ui text-right text-[13px] leading-[1.85]' : 'text-xs leading-relaxed'
-                      } ${item.description ? '' : 'invisible'}`}
-                    >
-                      {item.description || ''}
-                    </p>
+                    {item.description && (
+                      <p
+                        dir={isArabic ? 'rtl' : 'ltr'}
+                        lang={isArabic ? 'ar' : undefined}
+                        className={`mt-2 line-clamp-3 text-[var(--color-one-text-dim)] ${
+                          isArabic ? 'font-arabic-ui text-right text-[13px] leading-[1.85]' : 'text-xs leading-relaxed'
+                        }`}
+                      >
+                        {item.description}
+                      </p>
+                    )}
                   </div>
 
                   <div className="mt-4 space-y-2.5 border-t border-[var(--color-one-border)] pt-3.5">

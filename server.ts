@@ -15,7 +15,6 @@ import { aiGateway } from './server/aiGateway.ts';
 import { createOneAiAdminRouter } from './server/oneAi/adminRoutes.ts';
 import { createOneAiAgentRouter } from './server/oneAi/agentOrchestrator.ts';
 import { handleEnvironmentWeatherRoute } from './server/environmentWeather.ts';
-import { handleReaderFontAssetRoute, handleReaderFontsCssRoute } from './server/chinaFontProxy.ts';
 import { oneAiDb } from './server/oneAi/db.ts';
 import { autoActivateReadyEndpoints, runGlobalModelDiscovery } from './server/oneAi/discovery.ts';
 import { oneAiRouter } from './server/oneAi/router.ts';
@@ -212,11 +211,7 @@ app.use((req, res, next) => {
 
 app.use((req, res, next) => {
   if (req.path === '/api/messenger/upload/stream') return next();
-  if (
-    req.path === '/api/library/islamic/upload-pdf' ||
-    req.path === '/api/library/upload-pdf' ||
-    /^\/api\/library\/books\/[^/]+\/ebook-chapters$/.test(req.path)
-  ) {
+  if (req.path === '/api/library/islamic/upload-pdf') {
     return express.json({ limit: '65mb' })(req, res, next);
   }
   return express.json({ limit: '20mb' })(req, res, next);
@@ -3185,8 +3180,6 @@ app.get('/api/games/rooms', (req, res) => {
 // -------------------------------------------------------------
 app.use('/api/admin/ai', createOneAiAdminRouter(getSessionUser));
 app.get('/api/environment/weather', handleEnvironmentWeatherRoute);
-app.get('/api/fonts/reader.css', handleReaderFontsCssRoute);
-app.get('/api/fonts/asset', handleReaderFontAssetRoute);
 app.use(
   '/api/one-ai/agent',
   createOneAiAgentRouter({
@@ -3470,16 +3463,7 @@ app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
       hasUnifiedLiveEngine();
 
     if (useUnifiedCore) {
-      const explicitDeepMode =
-        mode === 'reasoning' ||
-        mode === 'deep' ||
-        mode === 'code' ||
-        mode === 'research' ||
-        mode === 'writer' ||
-        mode === 'tutor';
-      const fastMode =
-        !explicitDeepMode &&
-        (mode === 'search' || mode === 'browser' || mode === 'voice-agent' || mode === 'quick' || userPrompt.length < 90);
+      const fastMode = mode === 'search' || mode === 'browser' || mode === 'voice-agent' || mode === 'quick' || userPrompt.length < 180;
       const unifiedRes = await runUnifiedAiTurn({
         prompt: userPrompt,
         systemInstruction: ctx.systemPrompt,
@@ -6748,12 +6732,27 @@ async function startServer() {
   const isProd = process.env.NODE_ENV === 'production' || process.env.EARTH_ONE_SERVE_DIST === 'true';
   if (isProd) {
     const distDir = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distDir));
+    app.use(
+      express.static(distDir, {
+        setHeaders: (res, filePath) => {
+          if (
+            filePath.endsWith('index.html') ||
+            filePath.endsWith('sw.js') ||
+            filePath.endsWith('manifest.webmanifest')
+          ) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          }
+        },
+      })
+    );
     // SPA fallback for client routes (do not intercept API, websocket, or pdfjs asset paths)
     app.get(/^(?!\/api|\/ws|\/pdfjs-assets).*/, (req, res, next) => {
       if (req.method !== 'GET') return next();
       const indexPath = path.join(distDir, 'index.html');
-      if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
+      if (fs.existsSync(indexPath)) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        return res.sendFile(indexPath);
+      }
       return next();
     });
   } else {

@@ -109,11 +109,6 @@ html.dark {
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
   }
-  @media (display-mode: standalone), (display-mode: fullscreen) {
-    html, body {
-      background-color: #05070b;
-    }
-  }
   @media (max-width: 768px) {
     input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),
     textarea,

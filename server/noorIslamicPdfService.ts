@@ -1144,27 +1144,13 @@ export function registerNoorIslamicLibraryRoutes(
   app.post('/api/library/islamic/save-to-shelf', handleSaveToBookshelf);
 
   // 4. Upload Local PDF / Markdown (.md) / Text (.txt) directly into Website Bookshelf
-  //    Supports pre-converted full-book electronic chapters + cover thumbnail so users never click page-by-page!
-  const handleLocalBookUpload = (req: Request, res: Response) => {
+  app.post('/api/library/islamic/upload-pdf', (req: Request, res: Response) => {
     const userId = resolveShelfUserId(req);
-    const {
-      title,
-      author,
-      language,
-      category,
-      fileBase64,
-      filename: originalFilename,
-      chapters: incomingChapters,
-      coverImageBase64,
-      pageCount,
-      cleanPages,
-    } = req.body || {};
-
+    const { title, author, language, fileBase64, filename: originalFilename } = req.body || {};
     if (typeof fileBase64 !== 'string' || fileBase64.length < 16) {
       return res.status(400).json({ success: false, error: '请选择有效的 PDF、Markdown 或 TXT 书籍文件。' });
     }
     try {
-      fs.mkdirSync(PDF_VAULT_DIR, { recursive: true });
       const lowerName = String(originalFilename || '').toLowerCase();
       const isTextOrMd = lowerName.endsWith('.md') || lowerName.endsWith('.markdown') || lowerName.endsWith('.txt');
       const cleanB64 = fileBase64.replace(/^data:[^;]+;base64,/, '').trim();
@@ -1177,91 +1163,37 @@ export function registerNoorIslamicLibraryRoutes(
       const hash = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12);
       const derivedTitle =
         String(title || '').trim() ||
-        String(originalFilename || '导入电子书').replace(/\.(pdf|md|markdown|txt)$/i, '').trim();
-      const cleanLang =
-        language === 'zh' || language === 'en' || language === 'ar'
-          ? language
-          : /[\u0600-\u06FF]/.test(derivedTitle)
-            ? 'ar'
-            : /[\u4E00-\u9FFF]/.test(derivedTitle)
-              ? 'zh'
-              : 'en';
-      const validCategories = ['literature', 'history', 'philosophy', 'science', 'religion', 'islamic_studies', 'education', 'computer_science'];
-      const resolvedCategory: Book['category'] =
-        typeof category === 'string' && validCategories.includes(category)
-          ? (category as Book['category'])
-          : cleanLang === 'ar'
-            ? 'islamic_studies'
-            : 'literature';
-
-      // Save optional Page-1 cover thumbnail to disk so store.json stays lean
-      let coverUrl = cleanLang === 'ar' ? '/assets/library/cover-arabian-nights.jpg' : '/assets/library/cover-little-prince.jpg';
-      if (typeof coverImageBase64 === 'string' && coverImageBase64.startsWith('data:image/')) {
-        try {
-          const imgB64 = coverImageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
-          const imgBuf = Buffer.from(imgB64, 'base64');
-          if (imgBuf.byteLength > 200 && imgBuf.byteLength < 2 * 1024 * 1024) {
-            const coverName = `cover_${hash}.jpg`;
-            fs.writeFileSync(path.join(PDF_VAULT_DIR, coverName), imgBuf);
-            coverUrl = `/api/library/local-covers/${coverName}`;
-          }
-        } catch {
-          // Keep default cover gracefully
-        }
-      }
+        String(originalFilename || 'مكتبة النور · 书籍').replace(/\.(pdf|md|markdown|txt)$/i, '').trim();
+      const cleanLang = language === 'zh' || language === 'en' ? language : 'ar';
 
       if (isTextOrMd) {
         const textContent = buf.toString('utf8').trim();
         if (!textContent) {
           return res.status(400).json({ success: false, error: '文件内容为空。' });
         }
-        const mdSections = textContent.split(/\n(?=#{1,2}\s+)/).filter((s) => s.trim().length > 0);
-        let chapters: Array<{ id: string; title: string; content: string }>;
-        if (mdSections.length >= 2) {
-          chapters = mdSections.slice(0, 200).map((sec, idx) => {
-            const firstLine = sec.split('\n')[0].replace(/^#+\s*/, '').trim();
-            const body = sec.replace(/^#+\s*[^\n]*\n?/, '').trim() || sec.trim();
-            return {
-              id: `ch_${idx + 1}`,
-              title: firstLine || `第 ${idx + 1} 节`,
-              content: body,
-            };
-          });
-        } else {
-          const rawParas = textContent.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-          const units = rawParas.length >= 3 ? rawParas : textContent.split(/\n+/).map((p) => p.trim()).filter(Boolean);
-          chapters = [];
-          let chunk = '';
-          let idx = 1;
-          for (const u of units) {
-            if (chunk.length > 0 && chunk.length + u.length > 2800) {
-              chapters.push({ id: `ch_${idx}`, title: `第 ${idx} 节`, content: chunk.trim() });
-              idx += 1;
-              chunk = u;
-            } else {
-              chunk = chunk ? `${chunk}\n\n${u}` : u;
-            }
-          }
-          if (chunk.trim()) {
-            chapters.push({
-              id: `ch_${idx}`,
-              title: idx === 1 ? derivedTitle : `第 ${idx} 节`,
-              content: chunk.trim(),
-            });
-          }
-        }
+        const sections = textContent.split(/\n(?=#{1,2}\s+)/).filter((s) => s.trim().length > 0);
+        const chapters = sections.slice(0, 60).map((sec, idx) => {
+          const firstLine = sec.split('\n')[0].replace(/^#+\s*/, '').trim();
+          const body = sec.replace(/^#+\s*[^\n]*\n?/, '').trim() || sec.trim();
+          return {
+            id: `ch_${idx + 1}`,
+            title: firstLine || `第 ${idx + 1} 节`,
+            content: body,
+          };
+        });
 
         const newBook: Book = {
-          id: `book_upload_txt_${hash}`,
+          id: `book_noor_md_${hash}`,
           title: derivedTitle.slice(0, 180),
-          author: String(author || '本地导入电子书').trim().slice(0, 120),
-          category: resolvedCategory,
+          author: String(author || 'مكتبة النور · 原文导入').trim().slice(0, 120),
+          category: 'islamic_studies',
           language: cleanLang,
           year: new Date().getFullYear().toString(),
           source: 'Open Access',
+          sourceUrl: 'https://www.noor-book.com/',
           formatType: 'text',
           textAvailability: 'full_text',
-          coverImage: coverUrl,
+          coverImage: '/assets/library/cover-arabian-nights.jpg',
           description: textContent.slice(0, 220),
           readProgress: 0,
           chapters: chapters.length > 0 ? chapters : [{ id: 'ch_1', title: derivedTitle, content: textContent }],
@@ -1285,51 +1217,26 @@ export function registerNoorIslamicLibraryRoutes(
         return res.status(400).json({ success: false, error: '上传的文件不是标准 PDF、Markdown 或 TXT 格式。' });
       }
 
-      const storedFilename = `upload_${hash}.pdf`;
+      const storedFilename = `noor_upload_${hash}.pdf`;
       fs.writeFileSync(path.join(PDF_VAULT_DIR, storedFilename), buf);
+
       const localUrl = `/api/library/local-pdfs/${storedFilename}`;
-
-      // Sanitize pre-converted structured electronic chapters when supplied by automatic converter
-      const sanitizedChapters = Array.isArray(incomingChapters)
-        ? incomingChapters
-            .filter((c: any) => c && typeof c.content === 'string' && c.content.trim().length > 0)
-            .slice(0, 300)
-            .map((c: any, idx: number) => ({
-              id: typeof c.id === 'string' && c.id.trim() ? c.id.trim().slice(0, 64) : `ch_${idx + 1}`,
-              title: typeof c.title === 'string' && c.title.trim() ? c.title.trim().slice(0, 140) : `第 ${idx + 1} 章`,
-              content: String(c.content).trim(),
-            }))
-        : [];
-
-      const totalPagesNum = Number.isFinite(Number(pageCount)) && Number(pageCount) > 0 ? Math.floor(Number(pageCount)) : undefined;
-      const cleanPagesNum = Number.isFinite(Number(cleanPages)) && Number(cleanPages) >= 0 ? Math.floor(Number(cleanPages)) : undefined;
-      const hasFullEbookChapters =
-        sanitizedChapters.length > 0 &&
-        (!totalPagesNum ||
-          totalPagesNum <= 4 ||
-          (cleanPagesNum !== undefined
-            ? cleanPagesNum >= Math.ceil(totalPagesNum * 0.7)
-            : sanitizedChapters.length >= Math.min(3, Math.ceil(totalPagesNum / 15))));
-
-      const finalChapters = hasFullEbookChapters ? sanitizedChapters : [];
-
       const newBook: Book = {
-        id: `book_pdf_${hash}`,
+        id: `book_noor_${hash}`,
         title: derivedTitle.slice(0, 180),
-        author: String(author || '本地 PDF 导入').trim().slice(0, 120),
-        category: resolvedCategory,
+        author: String(author || 'مكتبة النور · 已导入书架').trim().slice(0, 120),
+        category: 'islamic_studies',
         language: cleanLang,
         year: new Date().getFullYear().toString(),
         source: 'Open Access',
+        sourceUrl: 'https://www.noor-book.com/',
         externalReadUrl: localUrl,
-        formatType: hasFullEbookChapters ? 'text' : 'pdf',
+        formatType: 'pdf',
         textAvailability: 'full_text',
-        coverImage: coverUrl,
-        description: hasFullEbookChapters
-          ? `已自动整本转为精排电子版（共 ${finalChapters.length} 章${totalPagesNum ? ` · 原书 ${totalPagesNum} 页` : ''}），支持全书分段阅读、点词查义、AI 翻译与进度自动云端保存。`
-          : `已完整导入本地 PDF 典籍${totalPagesNum ? `（全书共 ${totalPagesNum} 页）` : ''}，支持高清原版逐页直呈、AI 本页讲解、识字与翻译。`,
+        coverImage: '/assets/library/cover-arabian-nights.jpg',
+        description: '已导入 ONE 网站书架的原版 PDF 典籍，支持 AI 逐页讲解与点词查义。',
         readProgress: 0,
-        chapters: finalChapters,
+        chapters: [],
       };
 
       const existingIdx = store.books.findIndex((b: Book) => b.id === newBook.id);
@@ -1342,83 +1249,15 @@ export function registerNoorIslamicLibraryRoutes(
         success: true,
         book: newBook,
         shelfItem,
-        isTextBook: hasFullEbookChapters,
         localPdfUrl: localUrl,
         downloadUrl: `${localUrl}?download=1&filename=${encodeURIComponent(newBook.title)}`,
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message || '文件导入书架失败' });
     }
-  };
-
-  app.post('/api/library/islamic/upload-pdf', handleLocalBookUpload);
-  app.post('/api/library/upload-pdf', handleLocalBookUpload);
-
-  // 4b. Persist whole-book converted electronic chapters back onto an existing PDF book
-  app.post('/api/library/books/:id/ebook-chapters', (req: Request, res: Response) => {
-    const book = store.books.find((b: Book) => b.id === req.params.id);
-    if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
-
-    const { chapters, language, coverImageBase64, pageCount } = req.body || {};
-    if (!Array.isArray(chapters) || chapters.length === 0) {
-      return res.status(400).json({ success: false, error: '没有可保存的电子书章节内容。' });
-    }
-
-    const sanitizedChapters = chapters
-      .filter((c: any) => c && typeof c.content === 'string' && c.content.trim().length > 0)
-      .slice(0, 300)
-      .map((c: any, idx: number) => ({
-        id: typeof c.id === 'string' && c.id.trim() ? c.id.trim().slice(0, 64) : `ch_${idx + 1}`,
-        title: typeof c.title === 'string' && c.title.trim() ? c.title.trim().slice(0, 140) : `第 ${idx + 1} 章`,
-        content: String(c.content).trim(),
-      }));
-
-    if (sanitizedChapters.length === 0) {
-      return res.status(400).json({ success: false, error: '转换结果为空，请尝试使用 AI 识字模式。' });
-    }
-
-    book.chapters = sanitizedChapters;
-    book.formatType = 'text';
-    book.textAvailability = 'full_text';
-    if (language === 'ar' || language === 'zh' || language === 'en') {
-      book.language = language;
-    }
-    const totalPagesNum = Number.isFinite(Number(pageCount)) && Number(pageCount) > 0 ? Math.floor(Number(pageCount)) : undefined;
-    book.description = `已自动整本转为精排电子版（共 ${sanitizedChapters.length} 章${totalPagesNum ? ` · 原书 ${totalPagesNum} 页` : ''}），支持全书虚拟滚动、点词查义、翻译与服务器进度同步。`;
-
-    if (typeof coverImageBase64 === 'string' && coverImageBase64.startsWith('data:image/')) {
-      try {
-        fs.mkdirSync(PDF_VAULT_DIR, { recursive: true });
-        const imgB64 = coverImageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
-        const imgBuf = Buffer.from(imgB64, 'base64');
-        if (imgBuf.byteLength > 200 && imgBuf.byteLength < 2 * 1024 * 1024) {
-          const safeId = book.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
-          const coverName = `cover_${safeId}.jpg`;
-          fs.writeFileSync(path.join(PDF_VAULT_DIR, coverName), imgBuf);
-          book.coverImage = `/api/library/local-covers/${coverName}`;
-        }
-      } catch {}
-    }
-
-    store.saveToDisk();
-    return res.json({ success: true, book, chapterCount: sanitizedChapters.length });
   });
 
-  // 5. Serve Locally Saved Vault PDFs & Cover Thumbnails
-  app.get('/api/library/local-covers/:filename', (req: Request, res: Response) => {
-    const rawName = String(req.params.filename || '');
-    if (!/^[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/.test(rawName)) {
-      return res.status(400).json({ success: false, error: 'Invalid cover filename' });
-    }
-    const filePath = path.join(PDF_VAULT_DIR, rawName);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ success: false, error: 'Cover not found' });
-    }
-    res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=604800');
-    return res.sendFile(filePath);
-  });
-
+  // 5. Serve Locally Saved Vault PDFs
   app.get('/api/library/local-pdfs/:filename', (req: Request, res: Response) => {
     const rawName = String(req.params.filename || '');
     if (!/^[a-zA-Z0-9_-]+\.pdf$/.test(rawName)) {
@@ -1440,10 +1279,8 @@ export function registerNoorIslamicLibraryRoutes(
 
   // 6. AI Page Tutor ("读到这一页不会讲，让 AI 分析这一页怎么讲") — supports both PDF text & scanned image pages!
   app.post('/api/library/ai/explain-page', async (req: Request, res: Response) => {
-    const { title, bookTitle, pageNumber, pageText, passage, text, pageImageBase64, question, lang } = req.body || {};
-    const resolvedTitle = String(title || bookTitle || '原版书籍').slice(0, 140);
-    const rawText = typeof pageText === 'string' ? pageText : typeof passage === 'string' ? passage : typeof text === 'string' ? text : '';
-    const cleanText = rawText.trim().slice(0, 6500);
+    const { title, pageNumber, pageText, pageImageBase64, question, lang } = req.body || {};
+    const cleanText = typeof pageText === 'string' ? pageText.trim().slice(0, 6500) : '';
     const hasImage = typeof pageImageBase64 === 'string' && pageImageBase64.length > 200;
 
     if (!cleanText && !hasImage) {
@@ -1452,13 +1289,13 @@ export function registerNoorIslamicLibraryRoutes(
 
     const replyZh = lang !== 'en';
     const systemInstruction = replyZh
-      ? '你是博学、温和、表达清晰的资深双语（阿拉伯语/英语/汉语）典籍讲师。请用干净、自然、层次分明的中文为读者讲解当前页内容，直接用小标题分段（不要使用 1. 2. 3. 4. 机械编号）：\n【本页大意】用通俗流畅的话讲清这一页的核心内容\n【讲解脉络】梳理逐段逻辑，帮助读者读懂并能清晰转述\n【关键词句】挑选 3–5 个关键外语/阿语词句，给出读音与精准释义\n如果用户提出了具体问题，优先直接回答该问题。不要输出多余寒暄。'
-      : 'You are an expert bilingual book tutor (Arabic/English/Chinese). Explain the current page with clean unnumbered headings: Core Meaning, Walkthrough, and Key Vocabulary (with pronunciation and meaning). If the reader asked a specific question, answer it directly first.';
+      ? '你是博学、温和、表达清晰的资深双语（阿拉伯语/英语/汉语）典籍讲师。用户正在阅读一本书的某一页，可能不知道这一页该怎么理解或怎么讲给别人听。请用清晰、自然、易懂的中文分点讲解：1)「本页核心大意」（用大白话讲明白）；2)「这一页该怎么讲」（帮你梳理讲解逻辑和逐段要点）；3)「重点外语/阿语词句解析」（挑出 3-5 个关键原词，给读音/标音与释义）。如果用户提了具体问题，请优先直接回答该问题。不要输出多余寒暄。'
+      : 'You are an expert bilingual book tutor (Arabic/English/Chinese). Clearly explain the current page so the reader understands it deeply and knows how to explain it to others: 1) Core meaning, 2) How to explain this page step-by-step, 3) Key vocabulary with pronunciation and meaning.';
 
     const prompt = [
-      `书名：${resolvedTitle}`,
+      `书名：${String(title || '原版书籍').slice(0, 140)}`,
       pageNumber ? `页码：第 ${pageNumber} 页` : '',
-      question ? `读者追问：${String(question).slice(0, 400)}` : '请帮我分析这一页在讲什么，以及核心脉络与关键表达。',
+      question ? `读者追问：${String(question).slice(0, 400)}` : '请帮我分析这一页在讲什么，以及我该怎么把它讲清楚。',
       cleanText ? `本页原文内容：\n"""\n${cleanText}\n"""` : '（本页为扫描图像页，请直接识读附图中的全部原文并进行精讲）',
     ]
       .filter(Boolean)
@@ -1470,10 +1307,9 @@ export function registerNoorIslamicLibraryRoutes(
         systemInstruction,
         prompt,
         1500,
-        cleanText.length < 40 && hasImage ? pageImageBase64 : undefined,
-        'fast'
+        cleanText.length < 40 && hasImage ? pageImageBase64 : undefined
       );
-      return res.json({ success: true, explanation, answer: explanation });
+      return res.json({ success: true, explanation });
     } catch (err: any) {
       return res.status(503).json({
         success: false,
@@ -1636,159 +1472,72 @@ export function registerNoorIslamicLibraryRoutes(
     }
   });
 
-  // 9. Inline Paragraph / Selection / Scanned-Page Vision Translation (NEVER translates garbled numbers!)
+  // 9. Inline Paragraph / Selection Translation
   app.post('/api/library/ai/translate', async (req: Request, res: Response) => {
-    const { text, pageImageBase64, targetLang = 'zh', bookTitle, pageNumber } = req.body || {};
+    const { text, targetLang = 'zh', bookTitle } = req.body || {};
     const cleanText = typeof text === 'string' ? text.trim().slice(0, 4500) : '';
-    const hasImage = typeof pageImageBase64 === 'string' && pageImageBase64.length > 200;
-
-    if (!cleanText && !hasImage) {
-      return res.status(400).json({ success: false, error: '请选中需要翻译的段落或使用整页视觉翻译。' });
+    if (!cleanText) {
+      return res.status(400).json({ success: false, error: '请选中需要翻译的段落或句子。' });
     }
-
-    // Reject garbled numeric-only CID dumps when no page image is supplied (prevents translating Arabic PDFs into a string of numbers!)
-    if (!hasImage && cleanText.length >= 16) {
-      const compact = cleanText.replace(/\s+/g, '');
-      const digits = (compact.match(/[0-9\u0660-\u0669]/g) || []).length;
-      const realLetters = (compact.match(/[\u0621-\u064A\u4E00-\u9FFFA-Za-z]/g) || []).length;
-      if (/(?:\(cid:\d+\)|\bcid:\d+\b)/i.test(cleanText) || (digits / compact.length >= 0.45 && realLetters / compact.length < 0.35)) {
-        return res.status(422).json({
-          success: false,
-          error: '检测到该页 PDF 原文本层为损坏的字体编码/数字流，请点击「AI 翻译本页」直接识别书页图像进行精准翻译。',
-        });
-      }
-    }
-
     const targetLabel =
       targetLang === 'en' ? '流畅自然的英文' : targetLang === 'ar' ? '地道典雅的现代标准阿拉伯语' : '精准流畅、富有书卷气的简体中文';
-    const systemInstruction = hasImage
-      ? `你是 ONE AI 专业多语图书翻译专家（精通阿拉伯语古典/现代典籍、英语、汉语）。请直接识读附图中的书页原文，并将其忠实、自然、完整地翻译为${targetLabel}。保留自然段落与小标题，不要输出乱码或页码数字串，也不要添加寒暄或解释性前缀。`
-      : `你是 ONE AI 专业图书翻译专家。请将读者选中的原文忠实、自然地翻译为${targetLabel}。保留原有段落结构，不遗漏关键术语，直接输出译文，不要加多余寒暄或标题。`;
-
-    const prompt = [
-      bookTitle ? `书名：《${String(bookTitle).slice(0, 120)}》` : '',
-      pageNumber ? `页码：第 ${Number(pageNumber)} 页` : '',
-      hasImage
-        ? '请直接识读图片中的完整书页文字并忠实翻译。'
-        : `待翻译原文：\n"""\n${cleanText}\n"""`,
-    ]
+    const systemInstruction = `你是 ONE AI 专业图书翻译专家。请将读者选中的原文忠实、自然地翻译为${targetLabel}。保留原有段落结构，不遗漏关键术语，直接输出译文，不要加多余寒暄或标题。`;
+    const prompt = [bookTitle ? `书名：《${String(bookTitle).slice(0, 120)}》` : '', `待翻译原文：\n"""\n${cleanText}\n"""`]
       .filter(Boolean)
       .join('\n\n');
     try {
-      const translation = await runFastLibraryAiText(
-        req,
-        systemInstruction,
-        prompt,
-        1800,
-        hasImage ? pageImageBase64 : undefined,
-        'fast'
-      );
+      const translation = await runFastLibraryAiText(req, systemInstruction, prompt, 1400, undefined, 'fast');
       return res.json({ success: true, translation });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || '段落翻译暂时不可用。' });
     }
   });
 
-  // 10. AI Deep Explanation (AI 精讲：支持 PdfDocumentViewer 与 AppleBookReader 双向字段)
+  // 10. AI Deep Explanation (AI 精讲：内容背景 · 核心观点 · 重点词汇 · 句子结构 · 难点分析 · 延伸知识)
   app.post('/api/library/ai/deep-explain', async (req: Request, res: Response) => {
-    const {
-      text,
-      passage,
-      pageText,
-      bookTitle,
-      title,
-      chapterTitle,
-      pageNumber,
-      question,
-      pageImageBase64,
-      lang,
-    } = req.body || {};
-    const rawText =
-      typeof text === 'string' && text.trim()
-        ? text
-        : typeof passage === 'string' && passage.trim()
-          ? passage
-          : typeof pageText === 'string' && pageText.trim()
-            ? pageText
-            : '';
-    const cleanText = rawText.trim().slice(0, 5200);
-    const hasImage = typeof pageImageBase64 === 'string' && pageImageBase64.length > 200;
-    if (!cleanText && !hasImage) {
-      return res.status(400).json({ success: false, error: '请选择需要 AI 精讲的段落或书页内容。' });
+    const { text, bookTitle, chapterTitle, lang } = req.body || {};
+    const cleanText = typeof text === 'string' ? text.trim().slice(0, 5000) : '';
+    if (!cleanText) {
+      return res.status(400).json({ success: false, error: '请选择需要 AI 精讲的段落内容。' });
     }
-    const resolvedTitle = String(bookTitle || title || '原版书籍').slice(0, 140);
-    const resolvedSection = chapterTitle
-      ? String(chapterTitle).slice(0, 120)
-      : pageNumber
-        ? `第 ${Number(pageNumber)} 页`
-        : '';
     const replyZh = lang !== 'en';
     const systemInstruction = replyZh
-      ? '你是 ONE AI 资深人文与学术伴读导师。请对读者正在阅读的书页或段落进行清晰、有深度的讲解。排版干净克制，直接用小标题分段（不要使用 1. 2. 3. 4. 5. 6. 机械编号）：\n【核心大意】概括本段/本页的核心思想与出处语境\n【重点词句】挑选 3–5 个关键词语或原语表达，给出读音与准确释义\n【深度剖析】拆解长难句结构、深层逻辑与容易忽略的细微含义\n【延伸启发】关联相关思想或阅读建议\n如果读者提出了具体追问，优先直接回应其问题。'
-      : 'You are ONE AI scholarly reading mentor. Explain the passage with clean, unnumbered sections: Core Meaning, Key Vocabulary, Deeper Analysis, and Reading Takeaways. If the reader asked a specific question, answer it first.';
+      ? '你是 ONE AI 资深人文与学术伴读导师。请对读者选中的书页段落进行深度精讲，严格按以下 6 个清晰小节组织（简明精炼、切中要害，避免空话）：\n1. **内容背景**：出处语境与历史/思想背景\n2. **核心观点**：作者最核心的论点与表达意图\n3. **重点词汇**：挑选 3-5 个关键原词或术语，附读音与准确释义\n4. **句子结构**：拆解难句的语法主干与修辞逻辑\n5. **难点分析**：点破读者容易误解或晦涩之处\n6. **延伸知识**：关联相关思想、典故或现实启发'
+      : 'You are ONE AI scholarly reading mentor. Provide a structured deep explanation of the passage in 6 clear sections: 1. Context & Background, 2. Core Thesis, 3. Key Vocabulary, 4. Sentence Structure, 5. Difficult Nuances, 6. Extended Knowledge.';
 
     const prompt = [
-      resolvedTitle ? `书名：《${resolvedTitle}》` : '',
-      resolvedSection ? `位置：${resolvedSection}` : '',
-      question ? `读者追问：${String(question).slice(0, 400)}` : '',
-      cleanText ? `原文内容：\n"""\n${cleanText}\n"""` : '（请直接识读附图书页文字并进行精讲）',
+      bookTitle ? `书名：《${String(bookTitle).slice(0, 140)}》` : '',
+      chapterTitle ? `章节：${String(chapterTitle).slice(0, 120)}` : '',
+      `选中原文：\n"""\n${cleanText}\n"""`,
     ]
       .filter(Boolean)
       .join('\n\n');
     try {
-      const explanation = await runFastLibraryAiText(
-        req,
-        systemInstruction,
-        prompt,
-        1800,
-        !cleanText && hasImage ? pageImageBase64 : undefined,
-        'fast'
-      );
-      return res.json({ success: true, explanation, answer: explanation });
+      const explanation = await runFastLibraryAiText(req, systemInstruction, prompt, 1800, undefined, 'deep');
+      return res.json({ success: true, explanation });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'AI 精讲暂时不可用。' });
     }
   });
 
-  // 11. Whole-Book Context AI Q&A (结合整本书检索相关上下文回答，兼容 PdfDocumentViewer 与 AppleBookReader)
+  // 11. Whole-Book Context AI Q&A (结合整本书检索相关上下文回答，而不只看当前屏幕)
   app.post('/api/library/ai/book-qa', async (req: Request, res: Response) => {
-    const {
-      question,
-      bookTitle,
-      title,
-      author,
-      currentSectionText,
-      currentPageText,
-      fullBookChunks,
-      bookChunks,
-      history,
-      lang,
-    } = req.body || {};
+    const { question, bookTitle, author, currentSectionText, fullBookChunks, history, lang } = req.body || {};
     const cleanQuestion = typeof question === 'string' ? question.trim().slice(0, 800) : '';
     if (!cleanQuestion) {
       return res.status(400).json({ success: false, error: '请输入你想围绕本书提出的问题。' });
     }
-    const resolvedBookTitle = String(bookTitle || title || '当前书籍').slice(0, 140);
-    const resolvedCurrentSection =
-      typeof currentSectionText === 'string' && currentSectionText.trim()
-        ? currentSectionText
-        : typeof currentPageText === 'string'
-          ? currentPageText
-          : '';
-    const rawChunks = Array.isArray(fullBookChunks)
-      ? fullBookChunks
-      : Array.isArray(bookChunks)
-        ? bookChunks
-        : [];
 
     // Retrieve top relevant excerpts across the ENTIRE extracted book using lexical/BM25-style scoring
-    const chunks: Array<{ label: string; text: string }> = rawChunks
-      .filter((c: any) => typeof c?.text === 'string' && c.text.trim().length > 12)
-      .slice(0, 400)
-      .map((c: any, i: number) => ({
-        label: String(c.label || (c.page ? `第 ${c.page} 章` : `第 ${i + 1} 节`)).slice(0, 80),
-        text: String(c.text).trim().slice(0, 2600),
-      }));
+    const chunks: Array<{ label: string; text: string }> = Array.isArray(fullBookChunks)
+      ? fullBookChunks
+          .filter((c: any) => typeof c?.text === 'string' && c.text.trim().length > 12)
+          .slice(0, 400)
+          .map((c: any, i: number) => ({
+            label: String(c.label || `第 ${i + 1} 节`).slice(0, 80),
+            text: String(c.text).trim().slice(0, 2600),
+          }))
+      : [];
 
     const tokens = cleanQuestion
       .toLowerCase()
@@ -1844,9 +1593,9 @@ export function registerNoorIslamicLibraryRoutes(
       .join('\n\n---\n\n');
 
     const prompt = [
-      `书名：《${resolvedBookTitle}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
+      `书名：《${String(bookTitle || '当前书籍').slice(0, 140)}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
       `全书覆盖片段数：共检索 ${chunks.length} 个章节/页面，命中 ${pickedExcerpts.length} 处关键上下文。`,
-      resolvedCurrentSection ? `【当前正在阅读的位置】\n${String(resolvedCurrentSection).trim().slice(0, 1600)}` : '',
+      currentSectionText ? `【当前正在阅读的位置】\n${String(currentSectionText).trim().slice(0, 1600)}` : '',
       excerptsBlock ? `【全书相关上下文】\n${excerptsBlock}` : '',
       `读者提问：${cleanQuestion}`,
     ]
@@ -1881,32 +1630,23 @@ export function registerNoorIslamicLibraryRoutes(
     }
   });
 
-  // 12. AI Summary (支持：段落总结 · 章节总结 · 整本书总结，兼容 PdfDocumentViewer 与 AppleBookReader)
+  // 12. AI Summary (支持：段落总结 · 章节总结 · 整本书总结)
   app.post('/api/library/ai/summarize', async (req: Request, res: Response) => {
-    const { scope = 'chapter', bookTitle, title, author, sectionTitle, chapterTitle, content, text, passage, lang } = req.body || {};
-    const rawContent =
-      typeof content === 'string' && content.trim()
-        ? content
-        : typeof text === 'string' && text.trim()
-          ? text
-          : typeof passage === 'string'
-            ? passage
-            : '';
-    const cleanContent = rawContent.trim().slice(0, 14000);
+    const { scope = 'chapter', bookTitle, author, sectionTitle, content, lang } = req.body || {};
+    const cleanContent = typeof content === 'string' ? content.trim().slice(0, 14000) : '';
     if (!cleanContent) {
       return res.status(400).json({ success: false, error: '暂无可用于总结的文本内容。' });
     }
 
-    const resolvedTitle = String(bookTitle || title || '书籍').slice(0, 140);
     const scopeLabel = scope === 'book' ? '整本书' : scope === 'paragraph' ? '当前段落' : '当前章节';
     const replyZh = lang !== 'en';
     const systemInstruction = replyZh
-      ? `你是 ONE AI 精炼图书总结专家。请针对「${scopeLabel}」生成干净利落的中文总结（不要使用 1. 2. 3. 机械编号）：先用 1–2 句话点出核心主旨，再用简短要点提炼关键脉络，最后附一句值得回味的启发。`
-      : `You are ONE AI book summarizer. Summarize the ${scope} clearly with clean prose: a 1–2 sentence thesis, concise bullet takeaways, and one memorable insight.`;
+      ? `你是 ONE AI 精炼图书总结专家。请针对「${scopeLabel}」生成清晰、高密度的中文总结：先用 1-2 句话概括核心主旨，再列出 3-5 条关键要点，最后提炼一句值得记住的精华启发。排版干净利落。`
+      : `You are ONE AI book summarizer. Summarize the ${scope} clearly: 1-2 sentence core thesis, 3-5 key takeaways, and 1 memorable insight.`;
 
     const prompt = [
-      `书名：《${resolvedTitle}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
-      sectionTitle || chapterTitle ? `范围：${String(sectionTitle || chapterTitle).slice(0, 120)}` : `范围：${scopeLabel}`,
+      `书名：《${String(bookTitle || '书籍').slice(0, 140)}》${author ? ` · 作者：${String(author).slice(0, 80)}` : ''}`,
+      sectionTitle ? `范围：${String(sectionTitle).slice(0, 120)}` : `范围：${scopeLabel}`,
       `原文素材：\n"""\n${cleanContent}\n"""`,
     ].join('\n\n');
 

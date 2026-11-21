@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { ParadiseQualityProfile, ProceduralTextureSet } from './paradiseQuality.ts';
 import { sampleWindField } from './paradiseEnvironment.ts';
-import { streamCenterAt, streamVelocityAt, terrainHeightAt } from './paradiseTerrain.ts';
+import { terrainHeightAt } from './paradiseTerrain.ts';
 import type { TreeCanopySource } from './paradiseFlora.ts';
 
 export interface ParadiseWeatherFXHandle {
@@ -31,7 +31,6 @@ interface LeafParticle {
   phase: number;
   burst: boolean;
   resting: boolean;
-  onWater: boolean;
   restTimer: number;
 }
 
@@ -170,58 +169,24 @@ export function createParadiseWeatherFX(
   const spawnInCanopy = (
     p: LeafParticle,
     sources: TreeCanopySource[],
-    initialSpread: boolean,
-    preferWaterside = false
+    initialSpread: boolean
   ) => {
-    // Bias ~55% of sakura petals to detach from overhanging riverside & lakeside trees so petals land on the river
-    let src = sources[Math.floor(Math.random() * sources.length)];
-    if (preferWaterside && sources.length > 3 && Math.random() < 0.62) {
-      const riverside = sources.filter(
-        (s) => Math.hypot(s.x + 5.0, s.z + 9.0) < 13.5 || Math.hypot(s.x - 5.5, s.z + 1.8) < 15.5
-      );
-      if (riverside.length > 0) {
-        src = riverside[Math.floor(Math.random() * riverside.length)];
-      }
-    }
-
+    const src = sources[Math.floor(Math.random() * sources.length)];
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
     const rad = src.radius * (0.35 + Math.pow(Math.random(), 0.65) * 0.72);
     const sinPhi = Math.sin(phi);
     const sx = src.x + Math.cos(theta) * sinPhi * rad;
-    const sy = Math.max(2.1, src.y + Math.cos(phi) * rad * 0.55);
+    const sy = Math.max(2.0, src.y + Math.cos(phi) * rad * 0.55);
     const sz = src.z + Math.sin(theta) * sinPhi * rad;
 
-    p.pos.set(sx, initialSpread ? Math.max(0.55, sy - Math.random() * 4.8) : sy, sz);
-    p.vel.set(0.24 + Math.random() * 0.42, -0.14 - Math.random() * 0.2, (Math.random() - 0.5) * 0.3);
+    p.pos.set(sx, initialSpread ? Math.max(0.6, sy - Math.random() * 4.5) : sy, sz);
+    p.vel.set(0.3 + Math.random() * 0.5, -0.18 - Math.random() * 0.25, (Math.random() - 0.5) * 0.35);
     p.rot.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
     p.scale = p.baseScale;
     p.burst = false;
     p.resting = false;
-    p.onWater = false;
     p.restTimer = 0;
-  };
-
-  const spawnOnRiverSurface = (p: LeafParticle) => {
-    // Seed gentle floating sakura petals along the stream (from waterfall -> under bridge -> lake)
-    const r = Math.random();
-    if (r < 0.64) {
-      const proj = 0.16 + Math.random() * 0.82;
-      const c = streamCenterAt(proj);
-      const jitter = (Math.random() - 0.5) * 2.6;
-      p.pos.set(c.x + jitter, 0.028, c.z - jitter * 0.6);
-    } else {
-      const ang = Math.random() * Math.PI * 2;
-      const rad = 1.2 + Math.random() * 7.2;
-      p.pos.set(5.5 + Math.cos(ang) * rad, 0.028, -1.8 + Math.sin(ang) * rad * 0.65);
-    }
-    p.vel.set(0, 0, 0);
-    p.rot.set(-Math.PI * 0.5, Math.random() * Math.PI * 2, 0);
-    p.scale = p.baseScale;
-    p.burst = false;
-    p.resting = true;
-    p.onWater = true;
-    p.restTimer = 8.0 + Math.random() * 14.0;
   };
 
   const initField = (
@@ -230,42 +195,35 @@ export function createParadiseWeatherFX(
     count: number,
     palette: number[],
     baseScale: number,
-    sources: TreeCanopySource[],
-    isSakura: boolean
+    sources: TreeCanopySource[]
   ) => {
-    const initialAirborne = isSakura ? Math.max(6, Math.floor(count * 0.48)) : Math.max(2, Math.floor(count * 0.35));
-    const initialFloating = isSakura ? Math.floor(count * 0.32) : 0;
-
     for (let i = 0; i < count; i++) {
-      const s = baseScale * (0.72 + Math.random() * 0.56);
+      const s = baseScale * (0.72 + Math.random() * 0.64);
       const particle: LeafParticle = {
         pos: new THREE.Vector3(),
         vel: new THREE.Vector3(),
         rot: new THREE.Euler(),
         spin: new THREE.Vector3(
-          (Math.random() - 0.5) * 2.2,
           (Math.random() - 0.5) * 2.4,
-          (Math.random() - 0.5) * 2.0
+          (Math.random() - 0.5) * 2.8,
+          (Math.random() - 0.5) * 2.2
         ),
         scale: s,
         baseScale: s,
         phase: Math.random() * Math.PI * 2,
         burst: false,
         resting: false,
-        onWater: false,
         restTimer: 0,
       };
-      if (i < initialAirborne) {
-        spawnInCanopy(particle, sources, true, isSakura);
-      } else if (i < initialAirborne + initialFloating) {
-        spawnOnRiverSurface(particle);
+      if (i < 2) {
+        // Only 1-2 petals/leaves begin airborne; others wait quietly before occasionally drifting
+        spawnInCanopy(particle, sources, true);
       } else {
         particle.pos.set(0, -60, 0);
         particle.vel.set(0, 0, 0);
         particle.scale = 0.001;
         particle.resting = true;
-        particle.onWater = false;
-        particle.restTimer = 1.2 + (i - initialAirborne) * 0.45 + Math.random() * 2.5;
+        particle.restTimer = 2.5 + i * 2.8 + Math.random() * 4.5;
       }
       list.push(particle);
       tmpColor.setHex(palette[i % palette.length]);
@@ -275,8 +233,8 @@ export function createParadiseWeatherFX(
     group.add(mesh);
   };
 
-  initField(petals, petalMesh, petalCount, sakuraColors, 0.96, activeSakuraSources, true);
-  initField(ginkgoLeaves, ginkgoMesh, ginkgoCount, ginkgoColors, 1.02, activeGinkgoSources, false);
+  initField(petals, petalMesh, petalCount, sakuraColors, 1.0, activeSakuraSources);
+  initField(ginkgoLeaves, ginkgoMesh, ginkgoCount, ginkgoColors, 1.05, activeGinkgoSources);
 
   let burstCursorP = 0;
   let burstCursorG = 0;
@@ -357,7 +315,6 @@ export function createParadiseWeatherFX(
 
   const dummy = new THREE.Object3D();
   const tmpWind = new THREE.Vector3();
-  const tmpFlow = new THREE.Vector2();
 
   const stepLeafLayer = (
     list: LeafParticle[],
@@ -370,8 +327,7 @@ export function createParadiseWeatherFX(
     windStrength: number,
     rainIntensity: number,
     gravityTerminal: number,
-    pavilionSwirl = 0,
-    isSakura = false
+    pavilionSwirl = 0
   ) => {
     const activeCount = Math.min(totalCount, Math.floor(totalCount * activeFraction));
     mesh.count = totalCount;
@@ -390,40 +346,26 @@ export function createParadiseWeatherFX(
       if (p.resting) {
         p.restTimer -= dt;
         if (p.pos.y > -20) {
-          // Settle softly flat against terrain or float gracefully along the stream & lake surface
+          // Settle softly flat against terrain or drift gently on lake surface
           p.rot.x = THREE.MathUtils.damp(p.rot.x, -Math.PI * 0.5, 6, dt);
           p.rot.z = THREE.MathUtils.damp(p.rot.z, 0, 6, dt);
-
-          if (p.onWater) {
-            streamVelocityAt(p.pos.x, p.pos.z, tmpFlow);
-            p.pos.x += (tmpFlow.x + windStrength * 0.12) * dt;
-            p.pos.z += (tmpFlow.y + Math.sin(elapsed * 0.9 + p.phase) * 0.04) * dt;
-            p.pos.y = 0.026 + Math.sin(elapsed * 2.4 + p.phase) * 0.007;
-            p.rot.y += (0.22 + Math.sin(elapsed + p.phase) * 0.16) * dt;
-
-            // Keep floating petals on water; softly dissolve if they wash onto bank or expire
-            const bedH = terrainHeightAt(p.pos.x, p.pos.z);
-            if (bedH > 0.04 || p.pos.x > 24 || p.pos.z > 15) {
-              p.restTimer = Math.min(p.restTimer, 0.8);
-            }
-            const fadeOut = THREE.MathUtils.clamp(p.restTimer / 1.8, 0.001, 1.0);
+          if (p.pos.y <= 0.08) {
+            p.pos.x += (0.12 + windStrength * 0.22) * dt;
+          }
+          // Stay visible briefly on ground (~2s), then hide cleanly while waiting for next gentle drift
+          if (p.restTimer > 5.0) {
+            const fadeOut = THREE.MathUtils.clamp((p.restTimer - 5.0) / 0.8, 0.001, 1.0);
             p.scale = p.baseScale * fadeOut;
           } else {
-            // Landed on mossy ground / stone path: linger gently then softly fade
-            if (p.restTimer > 3.0) {
-              const fadeOut = THREE.MathUtils.clamp((p.restTimer - 3.0) / 1.2, 0.001, 1.0);
-              p.scale = p.baseScale * fadeOut;
-            } else {
-              p.pos.set(0, -60, 0);
-              p.scale = 0.001;
-            }
+            p.pos.set(0, -60, 0);
+            p.scale = 0.001;
           }
         } else {
           p.scale = 0.001;
         }
 
         if (p.restTimer <= 0) {
-          spawnInCanopy(p, sources, false, isSakura);
+          spawnInCanopy(p, sources, false);
         }
       } else {
         sampleWindField(p.pos.x, p.pos.y, p.pos.z, elapsed, windStrength, tmpWind);
@@ -481,20 +423,17 @@ export function createParadiseWeatherFX(
         p.rot.y += p.spin.y * aeroSpinScale * dt;
         p.rot.z += (p.spin.z * aeroSpinScale + Math.cos(elapsed * 2.6 + p.phase) * 0.9) * dt;
 
-        const groundY = terrainHeightAt(p.pos.x, p.pos.z);
-        const floorY = Math.max(0.026, groundY + 0.028);
+        const floorY = Math.max(0.03, terrainHeightAt(p.pos.x, p.pos.z) + 0.03);
         if (p.pos.y <= floorY) {
           p.pos.y = floorY;
           p.resting = true;
-          p.onWater = groundY < 0.015;
-          // Petals landing on the river/lake glide downstream for 14-22s; ground petals rest ~3s
-          p.restTimer = p.onWater ? 14.0 + Math.random() * 8.0 : 5.2 + Math.random() * 3.8;
+          // 1.5-2.0s visible on ground, then 5-8s quiet pause before next occasional leaf
+          p.restTimer = 6.5 + Math.random() * 6.5;
         } else if (Math.abs(p.pos.x) > 35 || p.pos.z < -30 || p.pos.z > 35) {
           p.pos.set(0, -60, 0);
           p.scale = 0.001;
           p.resting = true;
-          p.onWater = false;
-          p.restTimer = 2.0 + Math.random() * 3.0;
+          p.restTimer = 4.5 + Math.random() * 6.0;
         }
       }
 
@@ -553,41 +492,37 @@ export function createParadiseWeatherFX(
       rainMesh.visible = false;
     }
 
-    // 2. Poetic Drifting Sakura Petals (floating downstream on river) & Golden Ginkgo Leaves
-    const rainSuppress = 1 - rainIntensity * 0.35;
-    const sakuraFrac = THREE.MathUtils.clamp((0.74 + windStrength * 0.24) * rainSuppress, 0.55, 1.0);
-    const ginkgoFrac = THREE.MathUtils.clamp((0.55 + windStrength * 0.35) * rainSuppress, 0.35, 0.95);
+    // 2. Occasional Sparse Sakura Petals & Golden Ginkgo Leaves (1-2 at a time)
+    const rainSuppress = 1 - rainIntensity * 0.45;
+    const activeFrac = THREE.MathUtils.clamp((0.4 + windStrength * 0.35) * rainSuppress, 0.25, 0.75);
     stepLeafLayer(
       petals,
       petalMesh,
       activeSakuraSources,
       petalCount,
-      sakuraFrac,
+      activeFrac,
       elapsed,
       dt,
       windStrength,
       rainIntensity,
-      0.42,
-      pavilionSwirl,
-      true
+      0.52,
+      pavilionSwirl
     );
     stepLeafLayer(
       ginkgoLeaves,
       ginkgoMesh,
       activeGinkgoSources,
       ginkgoCount,
-      ginkgoFrac,
+      activeFrac,
       elapsed,
       dt,
       windStrength,
       rainIntensity,
-      0.56,
-      0,
-      false
+      0.62
     );
 
     // 3. Soft Morning Fog, Light Mist & Waterfall Plunge Spray
-    const mistStrength = THREE.MathUtils.clamp((fogDensity - 0.004) * 55, 0.08, 1.0);
+    const mistStrength = THREE.MathUtils.clamp((fogDensity - 0.0055) * 65, 0.0, 1.0);
     for (const m of mistPuffs) {
       const sp = m.sprite;
       const mat = sp.material as THREE.SpriteMaterial;
@@ -602,10 +537,13 @@ export function createParadiseWeatherFX(
         mat.opacity = (0.14 + rainIntensity * 0.14) * fade;
         mat.color.copy(fogColor).lerp(new THREE.Color(0xffffff), 0.55);
       } else {
-        sp.position.x = m.baseX + Math.sin(elapsed * m.driftSpeed + m.phase) * 3.8;
-        sp.position.z = m.baseZ + Math.cos(elapsed * m.driftSpeed * 0.8 + m.phase) * 2.2;
-        mat.opacity = mistStrength * (0.12 + 0.16 * (1 - dayFactor * 0.4));
-        mat.color.copy(fogColor).lerp(new THREE.Color(0xffffff), 0.3);
+        sp.visible = mistStrength > 0.015;
+        if (sp.visible) {
+          sp.position.x = m.baseX + Math.sin(elapsed * m.driftSpeed + m.phase) * 3.8;
+          sp.position.z = m.baseZ + Math.cos(elapsed * m.driftSpeed * 0.8 + m.phase) * 2.2;
+          mat.opacity = mistStrength * (0.12 + 0.15 * (1 - dayFactor * 0.4));
+          mat.color.copy(fogColor).lerp(new THREE.Color(0xffffff), 0.26);
+        }
       }
     }
   };

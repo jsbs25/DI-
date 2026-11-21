@@ -124,29 +124,22 @@ function buildGeminiContents(req: UnifiedAiRequest): Array<{ role: 'user' | 'mod
   return contents;
 }
 
-function buildModelConfig(
-  model: string,
-  req: UnifiedAiRequest,
-  maxOutputTokens: number,
-  abortSignal?: AbortSignal
-): Record<string, any> {
+function buildModelConfig(model: string, req: UnifiedAiRequest, maxOutputTokens: number): Record<string, any> {
   const isGemini4 = model.startsWith('gemini-4-');
-  const config: Record<string, any> = {};
+  const config: Record<string, any> = {
+    maxOutputTokens,
+  };
   if (req.systemInstruction) {
     config.systemInstruction = req.systemInstruction;
   }
-  if (abortSignal) {
-    config.abortSignal = abortSignal;
-  }
 
   if (isGemini4) {
-    // Gemini 4 includes thinking tokens inside maxOutputTokens; omit maxOutputTokens & sampling params
+    // Gemini 4 models do NOT support ThinkingLevel.MINIMAL or deprecated sampling params (temperature/topP/topK)
     config.thinkingConfig = {
       thinkingLevel: req.speed === 'deep' ? ThinkingLevel.MEDIUM : ThinkingLevel.LOW,
     };
   } else {
     // gemini-3.1-flash-lite supports ThinkingLevel.MINIMAL for ultra-fast responses
-    config.maxOutputTokens = Math.min(4096, Math.max(256, maxOutputTokens));
     config.thinkingConfig = {
       thinkingLevel: req.speed === 'deep' ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL,
     };
@@ -165,24 +158,16 @@ function buildModelConfig(
  */
 export async function runUnifiedAiTurn(req: UnifiedAiRequest): Promise<UnifiedAiResponse> {
   const gemini = getGeminiClient();
-  const hasVisualInput = Boolean(
-    req.imageBase64 || (Array.isArray(req.attachments) && req.attachments.length > 0)
-  );
-  const maxOutputTokens = req.maxTokens ?? (req.speed === 'deep' ? 2000 : 1200);
-  // Generous timeouts so Vision OCR/translation and Gemini 4 thinking never abort prematurely at 14s
-  const perAttemptTimeoutMs = hasVisualInput
-    ? 48_000
-    : req.speed === 'deep'
-      ? 42_000
-      : 30_000;
+  const maxOutputTokens = req.maxTokens ?? (req.speed === 'deep' ? 1800 : 900);
+  const perAttemptTimeoutMs = req.speed === 'deep' ? 24_000 : 14_000;
   let sawQuotaExhausted = false;
 
   if (gemini) {
     const contents = buildGeminiContents(req);
-    // Prefer gemini-3.1-flash-lite first for fast interactive/vision requests (lowest latency),
-    // and use gemini-4-hydrogen first for deep/general reasoning tasks.
+    // Prefer gemini-3.1-flash-lite first for fast interactive/dictionary requests to preserve
+    // gemini-4-hydrogen's stricter free-tier daily quota, and use gemini-4-hydrogen first for deep/general tasks.
     const preferredOrder =
-      req.speed === 'fast' || hasVisualInput
+      req.speed === 'fast'
         ? [UNIFIED_LITE_MODEL, UNIFIED_PRIMARY_MODEL]
         : [UNIFIED_PRIMARY_MODEL, UNIFIED_LITE_MODEL];
 
@@ -195,28 +180,35 @@ export async function runUnifiedAiTurn(req: UnifiedAiRequest): Promise<UnifiedAi
         abortErr.name = 'AbortError';
         throw abortErr;
       }
-      const attemptController = new AbortController();
-      const onParentAbort = () => attemptController.abort();
-      if (req.signal) {
-        req.signal.addEventListener('abort', onParentAbort, { once: true });
-      }
-      const timeoutHandle = setTimeout(() => attemptController.abort(), perAttemptTimeoutMs);
-
       try {
-        const config = buildModelConfig(model, req, maxOutputTokens, attemptController.signal);
+        const config = buildModelConfig(model, req, maxOutputTokens);
+
+        const withTimeout = <T,>(promise: Promise<T>): Promise<T> =>
+          new Promise<T>((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error(`Gemini timeout (${perAttemptTimeoutMs}ms)`)), perAttemptTimeoutMs);
+            promise.then(
+              (v) => {
+                clearTimeout(t);
+                resolve(v);
+              },
+              (e) => {
+                clearTimeout(t);
+                reject(e);
+              }
+            );
+          });
 
         if (req.onDelta) {
-          const stream = await gemini.models.generateContentStream({
-            model,
-            contents,
-            config,
-          });
+          const stream = await withTimeout(
+            gemini.models.generateContentStream({
+              model,
+              contents,
+              config,
+            })
+          );
           let fullText = '';
           for await (const chunk of stream) {
             if (req.signal?.aborted) break;
-            if (attemptController.signal.aborted) {
-              throw new Error(`Gemini timeout (${perAttemptTimeoutMs}ms)`);
-            }
             const piece = chunk.text || '';
             if (piece) {
               fullText += piece;
@@ -232,11 +224,13 @@ export async function runUnifiedAiTurn(req: UnifiedAiRequest): Promise<UnifiedAi
             };
           }
         } else {
-          const resp = await gemini.models.generateContent({
-            model,
-            contents,
-            config,
-          });
+          const resp = await withTimeout(
+            gemini.models.generateContent({
+              model,
+              contents,
+              config,
+            })
+          );
           const text = (resp.text || '').trim();
           if (text) {
             const totalTokens =
@@ -251,28 +245,10 @@ export async function runUnifiedAiTurn(req: UnifiedAiRequest): Promise<UnifiedAi
           }
         }
       } catch (err: any) {
-        if (req.signal?.aborted) {
-          const abortErr = new Error('Aborted');
-          abortErr.name = 'AbortError';
-          throw abortErr;
-        }
-        const effectiveErr = attemptController.signal.aborted
-          ? new Error(`Gemini timeout (${perAttemptTimeoutMs}ms)`)
-          : err;
-        const { isQuotaError } = recordGeminiModelFailure(model, effectiveErr);
+        if (err?.name === 'AbortError' || req.signal?.aborted) throw err;
+        const { isQuotaError } = recordGeminiModelFailure(model, err);
         if (isQuotaError) sawQuotaExhausted = true;
-        const isLast = model === modelsToTry[modelsToTry.length - 1];
-        if (isLast) {
-          console.warn(
-            `[UnifiedAI:${model}] failover (${isQuotaError ? 'quota-cooldown' : 'error'}):`,
-            effectiveErr?.message || effectiveErr
-          );
-        }
-      } finally {
-        clearTimeout(timeoutHandle);
-        if (req.signal) {
-          req.signal.removeEventListener('abort', onParentAbort);
-        }
+        console.warn(`[UnifiedAI:${model}] failover (${isQuotaError ? 'quota-cooldown' : 'error'}):`, err?.message || err);
       }
     }
   }

@@ -2372,134 +2372,94 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
   return (
     <div className={isVisible ? (workspaceClassName || 'w-full h-full min-h-0 flex flex-col') : 'hidden'} aria-hidden={!isVisible}>
     <div className={drawerMode ? 'w-full h-full min-h-0 p-0' : 'w-full h-full min-h-0 p-0 sm:p-4 lg:p-5'}>
-      <div className={drawerMode ? 'h-full min-h-0 bg-[var(--color-one-surface)] overflow-hidden flex flex-col text-[var(--color-one-text)]' : 'mx-auto h-full min-h-0 max-w-[1440px] rounded-none sm:rounded-2xl border-0 sm:border border-[var(--color-one-border)] bg-[var(--color-one-surface)] overflow-hidden flex flex-col lg:flex-row text-[var(--color-one-text)]'}>
-      {/* Left rail / Contacts & Conversations */}
-      <aside className={drawerMode ? `w-full border-b-0 bg-[var(--color-one-bg)] p-3.5 flex-col min-h-0 ${mobileShowChat ? 'hidden' : 'flex flex-1'}` : `w-full lg:w-[360px] xl:w-[390px] border-b lg:border-b-0 lg:border-r border-[var(--color-one-border)] bg-[var(--color-one-bg)]/60 p-3.5 sm:p-4 flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex lg:shrink-0" : "flex flex-1 lg:flex-initial lg:shrink-0"}`}>
-        {/* Clean Single-Row Masthead */}
-        <div className="flex items-center justify-between pb-3 mb-2 gap-2">
+      <div className={drawerMode ? 'h-full min-h-0 bg-white dark:bg-[#0f172a] overflow-hidden flex flex-col text-slate-900 dark:text-slate-100' : 'mx-auto h-full min-h-0 max-w-[1680px] rounded-none sm:rounded-[28px] border-0 sm:border border-slate-200/90 dark:border-white/10 bg-white/95 dark:bg-[#0f172a]/92 backdrop-blur-xl shadow-lg dark:shadow-[0_24px_80px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col lg:flex-row text-slate-900 dark:text-slate-100'}>
+      {/* Left rail / list */}
+      <aside className={drawerMode ? `w-full border-b-0 bg-slate-50/85 dark:bg-[#111b2e]/90 p-3 flex-col min-h-0 ${mobileShowChat ? 'hidden' : 'flex flex-1'}` : `w-full lg:w-[390px] xl:w-[430px] border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-white/10 bg-slate-50/85 dark:bg-[#111b2e]/90 p-3 sm:p-4 flex-col min-h-0 ${mobileShowChat ? "hidden lg:flex lg:shrink-0" : "flex flex-1 lg:flex-initial lg:shrink-0"}`}>
+        <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10 mb-3 gap-2">
           <div className="flex items-center gap-2 min-w-0">
             {onBackToHome && (
               <button
                 type="button"
                 onClick={onBackToHome}
-                className={`${drawerMode ? 'inline-flex' : 'md:hidden inline-flex'} rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text)] hover:opacity-80 shrink-0 min-h-[36px] px-2.5 items-center gap-0.5 text-xs font-medium cursor-pointer`}
+                className={`${drawerMode ? 'inline-flex' : 'md:hidden inline-flex'} rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.06] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10 shrink-0 min-h-[38px] px-2.5 items-center gap-0.5 text-xs font-medium cursor-pointer`}
                 aria-label={drawerMode ? '收起抽屉' : '返回'}
               >
                 <ChevronLeft className="w-4 h-4" />
                 <span>{drawerMode ? '收起' : '返回'}</span>
               </button>
             )}
-            <h2 className="font-semibold text-base tracking-tight text-[var(--color-one-text)] truncate">
-              {lang === 'ar' ? 'جهات الاتصال والرسائل' : lang === 'en' ? 'Contacts & Chats' : '通讯录与消息'}
-            </h2>
+            <div className="w-9 h-9 rounded-xl border border-sky-200 dark:border-sky-400/20 bg-sky-50 dark:bg-sky-400/10 flex items-center justify-center shrink-0"><MessageCircle className="w-4 h-4 text-sky-600 dark:text-sky-300" /></div>
+            <div className="min-w-0">
+              <h2 className="font-semibold text-sm sm:text-[15px] tracking-tight text-slate-900 dark:text-slate-100 truncate">信息与聊天</h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">对话、联系人与通知</p>
+            </div>
           </div>
-
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => { setTab('search'); setMobileShowChat(false); }}
-              className="inline-flex h-8 items-center gap-1 rounded-xl bg-[#247864] hover:bg-[#1d6251] dark:bg-[#e5d9be] dark:text-[#141d28] px-2.5 text-xs font-medium text-white transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 rounded-full bg-sky-600 hover:bg-sky-500 px-2.5 py-1.5 text-[11px] font-semibold text-white shadow-xs transition"
               title="添加注册用户为好友"
             >
               <UserPlus className="w-3.5 h-3.5" />
               <span>加好友</span>
             </button>
-            <button
-              type="button"
-              onClick={() => { setShowCreateGroup(true); void loadFriends(); }}
-              title="创建群聊"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface)] hover:text-[var(--color-one-text)] transition-colors cursor-pointer"
-            >
-              <Users className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab(t => t === 'msgsearch' ? 'chats' : 'msgsearch')}
-              title={lang==='ar'?'بحث الرسائل':lang==='en'?'Search messages':'搜索消息'}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl transition-colors cursor-pointer ${tab==='msgsearch' ? 'bg-[#247864]/12 text-[#247864] dark:text-[#e5d9be]' : 'text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface)] hover:text-[var(--color-one-text)]'}`}
-            >
-              <Search className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => { setTab(t => t === 'privacy' ? 'chats' : 'privacy'); void loadPrivacy(); void loadBlocked(); }}
-              title={lang==='ar'?'الخصوصية':lang==='en'?'Privacy':'隐私与安全'}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl transition-colors cursor-pointer ${tab==='privacy' ? 'bg-[#247864]/12 text-[#247864] dark:text-[#e5d9be]' : 'text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface)] hover:text-[var(--color-one-text)]'}`}
-            >
-              <Shield className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void openMyProfile()}
-              title={lang==='ar'?'ملفي الشخصي':lang==='en'?'My profile':'我的资料'}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface)] hover:text-[var(--color-one-text)] transition-colors cursor-pointer"
-            >
-              <UserIcon className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowIntegrations(v => !v)}
-              title="官方接入"
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl transition-colors cursor-pointer ${showIntegrations ? 'bg-[#247864]/12 text-[#247864] dark:text-[#e5d9be]' : 'text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface)] hover:text-[var(--color-one-text)]'}`}
-            >
-              <Plug className="w-4 h-4" />
-            </button>
+            <span className={`inline-flex items-center gap-1 text-[10px] sm:text-[11px] px-2 py-1 rounded-full border shrink-0 ${wsStatus==='open'?'text-emerald-700 border-emerald-200 bg-emerald-50 dark:text-emerald-300 dark:border-emerald-500/30 dark:bg-emerald-500/10':'text-amber-700 border-amber-200 bg-amber-50 dark:text-amber-300 dark:border-amber-500/30 dark:bg-amber-500/10'}`}>
+              {wsStatus==='open' ? <Wifi className="w-3 h-3"/> : <WifiOff className="w-3 h-3"/>}{wsStatus==='open'?'实时':'同步'}
+            </span>
           </div>
         </div>
+        <div className="flex items-center gap-1.5 mb-3 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button type="button" onClick={()=>setTab(t => t === 'msgsearch' ? 'chats' : 'msgsearch')} title={lang==='ar'?'بحث الرسائل':lang==='en'?'Search messages':'搜索消息'} className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border transition-colors ${tab==='msgsearch'?'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/40 dark:bg-sky-400/12 dark:text-sky-100':'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/10'}`}><Search className="w-4 h-4"/></button>
+          <button type="button" onClick={()=>{ setTab(t => t === 'privacy' ? 'chats' : 'privacy'); void loadPrivacy(); void loadBlocked(); }} title={lang==='ar'?'الخصوصية':lang==='en'?'Privacy':'隐私与安全'} className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border transition-colors ${tab==='privacy'?'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/40 dark:bg-sky-400/12 dark:text-sky-100':'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/10'}`}><Shield className="w-4 h-4"/></button>
+          <button type="button" onClick={()=>{ setShowCreateGroup(true); void loadFriends(); }} title="创建群聊" className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/10"><Users className="w-4 h-4"/></button>
+          <button type="button" onClick={()=>void openMyProfile()} title={lang==='ar'?'ملفي الشخصي':lang==='en'?'My profile':'我的资料'} className="min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/10"><UserIcon className="w-4 h-4"/></button>
+          <button type="button" onClick={() => setShowIntegrations(v=>!v)} title="官方接入" className={`min-h-[38px] min-w-[38px] inline-flex items-center justify-center rounded-xl border transition-colors ${showIntegrations?'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/40 dark:bg-sky-400/12 dark:text-sky-100':'border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/10'}`}><Plug className="w-4 h-4"/></button>
+        </div>
 
-        {notice && <div className="mb-2.5 rounded-xl border border-[#247864]/30 bg-[#247864]/10 px-3 py-2 text-xs text-[var(--color-one-text)] flex items-center justify-between gap-2"><span className="min-w-0">{notice}</span><button onClick={()=>setNotice(null)} className="opacity-70 hover:opacity-100 p-1 shrink-0 cursor-pointer">×</button></div>}
-
-        {/* Clean Underline Navigation Tabs */}
-        <div className="flex items-center gap-4 border-b border-[var(--color-one-border)] mb-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {notice && <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800 dark:border-sky-400/25 dark:bg-sky-400/10 dark:text-sky-100 flex items-center justify-between gap-2"><span className="min-w-0">{notice}</span><button onClick={()=>setNotice(null)} className="text-sky-600 dark:text-sky-200 p-1 shrink-0">×</button></div>}
+        <div className="grid grid-cols-6 gap-1 mb-2.5 text-xs">
           {([
             { k: 'chats', label: lang==='ar'?'المحادثات':lang==='en'?'Chats':'会话' },
-            { k: 'friends', label: lang==='ar'?'الأصدقاء':lang==='en'?'Contacts':'通讯录', badge: friends.length > 0 ? friends.length : 0, tone: 'muted' },
             { k: 'calls', label: lang==='ar'?'المكالمات':lang==='en'?'Calls':'通话', badge: missedUnreadCount, tone: 'rose' },
+            { k: 'friends', label: lang==='ar'?'الأصدقاء':lang==='en'?'Friends':'好友', badge: friends.length > 0 ? friends.length : 0, tone: 'slate' },
             { k: 'requests', label: lang==='ar'?'الطلبات':lang==='en'?'Requests':'申请', badge: incomingReqs.length, tone: 'rose' },
-            { k: 'notifs', label: lang==='ar'?'الإشعارات':lang==='en'?'Alerts':'通知', badge: notifUnread, tone: 'rose' },
-          ] as const).map(item => {
-            const active = tab === item.k;
-            const badgeVal = (item as any).badge || 0;
-            return (
-              <button
-                key={item.k}
-                type="button"
-                onClick={() => {
-                  setTab(item.k);
-                  if (item.k === 'calls') { void loadCallLogs(); void loadCallCapabilities(); }
-                  if (item.k === 'notifs') void loadNotifications();
-                  if (item.k === 'requests') void loadRequests();
-                  if (item.k === 'friends') void loadFriends();
-                }}
-                className={`relative pb-2.5 pt-1 text-xs font-medium whitespace-nowrap shrink-0 border-b-2 transition-colors cursor-pointer inline-flex items-center gap-1 ${
-                  active
-                    ? 'border-[#247864] text-[var(--color-one-text)] dark:border-[#e5d9be]'
-                    : 'border-transparent text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
-                }`}
-              >
-                <span>{item.label}</span>
-                {badgeVal > 0 && (
-                  <span className={`tabular-nums text-[10px] font-semibold ${(item as any).tone === 'rose' ? 'text-rose-500' : 'text-[var(--color-one-text-dim)]'}`}>
-                    {badgeVal > 99 ? '99+' : badgeVal}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+            { k: 'search', label: lang==='ar'?'إضافة':lang==='en'?'Add':'找人' },
+            { k: 'notifs', label: lang==='ar'?'الإشعارات':lang==='en'?'Notifs':'通知', badge: notifUnread, tone: 'rose' },
+          ] as const).map(item => (
+            <button
+              key={item.k}
+              onClick={()=>{
+                setTab(item.k);
+                if (item.k === 'calls') { void loadCallLogs(); void loadCallCapabilities(); }
+                if (item.k === 'notifs') void loadNotifications();
+                if (item.k === 'requests') void loadRequests();
+                if (item.k === 'friends') void loadFriends();
+              }}
+              className={`relative min-h-[38px] px-0.5 py-1.5 rounded-xl border font-medium whitespace-nowrap transition-colors flex items-center justify-center ${tab===item.k?'bg-sky-600 border-sky-600 text-white shadow-xs dark:bg-sky-500/25 dark:border-sky-400/45 dark:text-sky-50':'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:bg-white/[0.03] dark:border-white/10 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-white/[0.06]'}`}
+            >
+              <span>{item.label}</span>
+              {!!(item as any).badge && (item as any).badge > 0 && (
+                <span className={`ml-0.5 min-w-[15px] h-4 px-1 rounded-full text-[10px] leading-4 font-semibold ${(item as any).tone === 'rose' ? 'bg-rose-500 text-white' : (tab===item.k ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-700 dark:bg-white/[0.08] dark:text-slate-300')}`}>
+                  {(item as any).badge > 99 ? '99+' : (item as any).badge}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
 
         {showIntegrations && (
-          <div className="mb-3 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-3 space-y-2">
-            <p className="text-[11px] text-[var(--color-one-text-muted)] leading-relaxed">官方接口接入；不支持个人微信/WhatsApp 聊天同步或非官方自动化。</p>
+          <div className="mb-2 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-2.5 space-y-2">
+            <p className="text-[10px] text-slate-500 leading-relaxed">官方接口接入；不支持个人微信/WhatsApp 聊天同步或非官方自动化。</p>
             <div className="space-y-1.5 max-h-40 overflow-y-auto">
               {integrations.map(it => (
-                <div key={it.id} className="rounded-lg border border-[var(--color-one-border)] bg-[var(--color-one-bg)]/50 p-2 text-[11px]">
-                  <div className="flex items-center justify-between gap-2"><span className="font-medium text-[var(--color-one-text)]">{it.name}</span>
-                    {it.id==='google' ? <button onClick={connectGoogle} className="px-2.5 py-1 rounded-lg bg-[#247864] text-white font-medium cursor-pointer">Google</button>
-                    : it.id==='wechat' ? <button onClick={connectWechat} disabled={it.status!=='available'} className={`px-2.5 py-1 rounded-lg font-medium ${it.status==='available'?'bg-[#247864] text-white cursor-pointer':'bg-[var(--color-one-surface-soft)] text-[var(--color-one-text-dim)]'}`}>{it.status==='available'?'微信登录':'未配置'}</button>
-                    : <span className="text-[11px] text-[var(--color-one-text-dim)]">{it.status}</span>}
+                <div key={it.id} className="rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.04] p-2 text-[10px]">
+                  <div className="flex items-center justify-between gap-2"><span className="font-semibold text-slate-800 dark:text-slate-200">{it.name}</span>
+                    {it.id==='google' ? <button onClick={connectGoogle} className="px-2 py-1 rounded bg-sky-600 text-white font-semibold">Google</button>
+                    : it.id==='wechat' ? <button onClick={connectWechat} disabled={it.status!=='available'} className={`px-2 py-1 rounded font-semibold ${it.status==='available'?'bg-emerald-500 text-white':'bg-slate-200 text-slate-500 dark:bg-white/[0.06] dark:text-slate-400'}`}>{it.status==='available'?'微信登录':'未配置'}</button>
+                    : <span className={`px-1.5 py-0.5 rounded border ${it.status==='available'?'text-emerald-700 border-emerald-300 dark:text-emerald-300 dark:border-emerald-700':'text-amber-700 border-amber-300 dark:text-amber-300 dark:border-amber-700'}`}>{it.status}</span>}
                   </div>
-                  {it.limitations?.[0] && <p className="mt-1 text-amber-600 dark:text-amber-300/80 flex gap-1"><ShieldAlert className="w-3 h-3 mt-0.5 shrink-0"/>{it.limitations[0]}</p>}
+                  {it.limitations?.[0] && <p className="mt-1 text-amber-600 dark:text-amber-300/80 flex gap-1"><ShieldAlert className="w-3 h-3 mt-0.5"/>{it.limitations[0]}</p>}
                 </div>
               ))}
             </div>
@@ -2508,73 +2468,22 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
 
         {tab === 'chats' && (
           <>
-            <div className="relative mb-3">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-[var(--color-one-text-dim)]" />
-              <input
-                value={convQuery}
-                onChange={e=>setConvQuery(e.target.value)}
-                placeholder="搜索会话或联系人…"
-                className="w-full min-h-[38px] pl-9 pr-3 py-1.5 rounded-xl bg-[var(--color-one-surface)] border border-[var(--color-one-border)] text-sm text-[var(--color-one-text)] placeholder:text-[var(--color-one-text-dim)] outline-none focus:border-[#247864] transition-colors"
-              />
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-1 min-h-0 pr-0.5">
-              {sorted.map(conv => {
-                const isSelected = conv.id === activeConv?.id;
-                return (
-                  <button
-                    key={conv.id}
-                    onClick={() => { onSelectConversation(conv.id); setMobileShowChat(true); }}
-                    className={`w-full min-h-[60px] flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#247864]/10 dark:bg-[#e5d9be]/12'
-                        : 'hover:bg-[var(--color-one-surface)]'
-                    }`}
-                  >
-                    {conv.type==='global_channel' ? (
-                      <div className="w-10 h-10 rounded-full bg-[#247864]/12 border border-[#247864]/25 flex items-center justify-center text-[#247864] dark:text-[#e5d9be] shrink-0">
-                        <Globe className="w-4 h-4" />
-                      </div>
-                    ) : (
-                      <div className="relative shrink-0">
-                        <img
-                          src={conv.otherUser?.avatar || conv.avatar || '/earth-one-cover.jpg'}
-                          alt={conv.name}
-                          className="w-10 h-10 rounded-full object-cover border border-[var(--color-one-border)]"
-                        />
-                        {(conv.isOnline || conv.otherUser?.isOnline) && (
-                          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-[var(--color-one-surface)]" />
-                        )}
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`text-sm truncate ${isSelected ? 'font-semibold text-[#247864] dark:text-[#e5d9be]' : 'font-medium text-[var(--color-one-text)]'}`}>
-                          {conv.name}
-                        </span>
-                        {(conv.unreadCount||0)>0 && (
-                          <span className="text-[11px] tabular-nums px-1.5 min-w-[18px] text-center rounded-full bg-[#247864] text-white font-semibold">
-                            {conv.unreadCount}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-[var(--color-one-text-muted)] truncate mt-0.5">{conv.lastMessage || '点击开始对话'}</p>
+            <div className="relative mb-2"><Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" /><input value={convQuery} onChange={e=>setConvQuery(e.target.value)} placeholder="搜索会话…" className="w-full min-h-[42px] pl-9 pr-3 py-2 rounded-xl bg-white dark:bg-black/20 border border-slate-200 dark:border-white/10 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none focus:border-sky-400 transition-colors" /></div>
+            <div className="flex-1 overflow-y-auto space-y-2 min-h-0 pr-0.5">
+              {sorted.map(conv => (
+                <button key={conv.id} onClick={()=>{onSelectConversation(conv.id); setMobileShowChat(true);}} className={`w-full min-h-[62px] flex items-center gap-3 p-3 rounded-xl text-left transition-colors ${conv.id===activeConv?.id?'bg-sky-50 border border-sky-300 dark:bg-sky-500/15 dark:border-sky-400/35':'bg-white border border-slate-200/80 hover:bg-slate-50 dark:bg-white/[0.02] dark:border-white/10 dark:hover:bg-white/[0.05]'}`}>
+                  {conv.type==='global_channel' ? <div className="w-11 h-11 rounded-full bg-sky-50 dark:bg-sky-950 border border-sky-200 dark:border-sky-400/30 flex items-center justify-center text-sky-600 dark:text-sky-200 shrink-0"><Globe className="w-5 h-5"/></div>
+                  : <div className="relative shrink-0"><img src={conv.otherUser?.avatar || conv.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-11 h-11 rounded-full object-cover border border-slate-200 dark:border-white/10"/>{(conv.isOnline || conv.otherUser?.isOnline) && <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-slate-950"/>}</div>}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-sm sm:text-xs truncate text-slate-900 dark:text-slate-100">{conv.name}</span>
+                      {(conv.unreadCount||0)>0 && <span className="text-[11px] px-1.5 min-w-[20px] text-center rounded-full bg-sky-600 text-white font-bold">{conv.unreadCount}</span>}
                     </div>
-                  </button>
-                );
-              })}
-              {sorted.length===0 && (
-                <div className="rounded-xl border border-dashed border-[var(--color-one-border)] px-4 py-10 text-center text-sm text-[var(--color-one-text-muted)] space-y-3">
-                  <p>暂无会话</p>
-                  <button
-                    type="button"
-                    onClick={()=>setTab('search')}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#247864] px-3.5 py-2 text-xs font-medium text-white cursor-pointer"
-                  >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    <span>去添加好友聊天</span>
-                  </button>
-                </div>
-              )}
+                    <p className="text-xs sm:text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">{conv.lastMessage || '点击开始对话'}</p>
+                  </div>
+                </button>
+              ))}
+              {sorted.length===0 && <div className="rounded-2xl border border-dashed border-slate-200 dark:border-white/10 bg-white/70 dark:bg-white/[0.02] px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400 space-y-2"><p>暂无会话</p><button type="button" onClick={()=>setTab('search')} className="inline-flex items-center gap-1 rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white"><UserPlus className="w-3.5 h-3.5"/>去添加好友聊天</button></div>}
             </div>
           </>
         )}
@@ -2607,48 +2516,48 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         )}
 
         {tab === 'friends' && (
-          <div className="flex-1 overflow-y-auto space-y-2 min-h-0 pr-0.5">
-            <div className="flex items-center justify-between gap-2 pb-1">
-              <p className="text-xs text-[var(--color-one-text-muted)] tabular-nums">联系人 · {friends.length}</p>
+          <div className="flex-1 overflow-y-auto space-y-2.5 min-h-0 pr-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-slate-500 dark:text-slate-400">好友 ({friends.length})</p>
               <div className="flex items-center gap-2">
-                <button onClick={()=>setTab('search')} className="px-2.5 py-1 rounded-lg bg-[#247864] text-white text-xs font-medium inline-flex items-center gap-1 cursor-pointer"><UserPlus className="w-3.5 h-3.5"/>加好友</button>
-                <button onClick={()=>{void loadFriends(); void loadRecent();}} className="px-2 py-1 rounded-lg border border-[var(--color-one-border)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)] text-xs cursor-pointer">刷新</button>
+                <button onClick={()=>setTab('search')} className="px-2.5 py-1.5 rounded-lg bg-sky-600 text-white text-xs font-medium inline-flex items-center gap-1"><UserPlus className="w-3.5 h-3.5"/>加好友</button>
+                <button onClick={()=>{void loadFriends(); void loadRecent();}} className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-transparent text-slate-600 dark:text-slate-300 text-xs">刷新</button>
               </div>
             </div>
             {friends.map(f => (
-              <div key={f.id} className="p-3 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] space-y-2.5">
+              <div key={f.id} className="p-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] space-y-2.5 shadow-2xs">
                 <div className="flex items-center gap-3">
-                  <button onClick={()=>void openProfile(f.id)} className="relative shrink-0 cursor-pointer">
-                    <img src={f.avatar} alt={f.displayName} className="w-10 h-10 rounded-full object-cover border border-[var(--color-one-border)]"/>
-                    {f.isOnline && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-[var(--color-one-surface)]"/>}
+                  <button onClick={()=>void openProfile(f.id)} className="relative shrink-0">
+                    <img src={f.avatar} className="w-11 h-11 rounded-full object-cover border border-slate-200 dark:border-white/10"/>
+                    {f.isOnline && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-slate-950"/>}
                   </button>
-                  <button onClick={()=>void openProfile(f.id)} className="flex-1 min-w-0 text-left cursor-pointer">
-                    <p className="text-sm font-semibold text-[var(--color-one-text)] truncate">{f.displayName}</p>
-                    <p className="text-xs text-[var(--color-one-text-muted)] truncate">@{f.username}{f.earthId ? ` · ${f.earthId}` : ''} · {f.isOnline ? '在线' : (f.lastActiveAt ? `最近 ${new Date(f.lastActiveAt).toLocaleDateString()}` : '离线')}</p>
+                  <button onClick={()=>void openProfile(f.id)} className="flex-1 min-w-0 text-left">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{f.displayName}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">@{f.username}{f.earthId ? ` · ${f.earthId}` : ''} · {f.isOnline ? '在线' : (f.lastActiveAt ? `最近 ${new Date(f.lastActiveAt).toLocaleDateString()}` : '离线')}</p>
                   </button>
                 </div>
                 <div className="grid grid-cols-5 gap-1.5">
-                  <button onClick={()=>void openDirect(f.id)} className="col-span-2 min-h-[36px] px-2 rounded-lg bg-[#247864] hover:bg-[#1d6251] text-white text-xs font-medium inline-flex items-center justify-center gap-1.5 cursor-pointer"><MessageCircle className="w-3.5 h-3.5"/>发消息</button>
-                  <button onClick={()=>void startCall('audio', { targetUserId: f.id })} disabled={!!callAction} className="min-h-[36px] px-2 rounded-lg border border-[var(--color-one-border)] text-[var(--color-one-text)] hover:bg-[var(--color-one-surface-soft)] text-xs font-medium inline-flex items-center justify-center gap-1 cursor-pointer" title="语音通话"><Phone className="w-3.5 h-3.5"/><span>语音</span></button>
-                  <button onClick={()=>void startCall('video', { targetUserId: f.id })} disabled={!!callAction} className="min-h-[36px] px-2 rounded-lg border border-[var(--color-one-border)] text-[var(--color-one-text)] hover:bg-[var(--color-one-surface-soft)] text-xs font-medium inline-flex items-center justify-center gap-1 cursor-pointer" title="视频通话"><Video className="w-3.5 h-3.5"/><span>视频</span></button>
-                  <button onClick={()=>void removeFriend(f.id)} className="min-h-[36px] px-1 rounded-lg border border-[var(--color-one-border)] text-[var(--color-one-text-dim)] hover:text-rose-600 text-xs inline-flex items-center justify-center cursor-pointer" title="删除好友"><Trash2 className="w-3.5 h-3.5"/></button>
+                  <button onClick={()=>void openDirect(f.id)} className="col-span-2 min-h-[38px] px-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium inline-flex items-center justify-center gap-1.5"><MessageCircle className="w-3.5 h-3.5"/>发消息</button>
+                  <button onClick={()=>void startCall('audio', { targetUserId: f.id })} disabled={!!callAction} className="min-h-[38px] px-2 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/35 text-xs font-medium inline-flex items-center justify-center gap-1" title="语音通话"><Phone className="w-3.5 h-3.5"/><span>语音</span></button>
+                  <button onClick={()=>void startCall('video', { targetUserId: f.id })} disabled={!!callAction} className="min-h-[38px] px-2 rounded-lg bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-500/15 dark:text-sky-300 dark:border-sky-500/35 text-xs font-medium inline-flex items-center justify-center gap-1" title="视频通话"><Video className="w-3.5 h-3.5"/><span>视频</span></button>
+                  <button onClick={()=>void removeFriend(f.id)} className="min-h-[38px] px-1 rounded-lg bg-slate-100 text-rose-600 hover:bg-rose-50 dark:bg-white/[0.06] dark:text-rose-300 text-xs inline-flex items-center justify-center" title="删除好友"><Trash2 className="w-3.5 h-3.5"/></button>
                 </div>
               </div>
             ))}
-            {recentConvs.length>0 && <div className="pt-2.5 border-t border-[var(--color-one-border)] space-y-1.5"><p className="text-xs text-[var(--color-one-text-muted)]">最近联系</p>{recentConvs.slice(0,8).map(c => (
-              <button key={c.id} onClick={()=>{ onSelectConversation(c.id); setTab('chats'); setMobileShowChat(true); }} className="w-full min-h-[46px] flex items-center gap-2.5 px-2.5 py-2 rounded-xl hover:bg-[var(--color-one-surface)] text-left cursor-pointer">
-                <img src={c.otherUser?.avatar || c.avatar || '/earth-one-cover.jpg'} alt={c.name} className="w-8 h-8 rounded-full object-cover shrink-0 border border-[var(--color-one-border)]"/>
-                <div className="flex-1 min-w-0"><p className="text-xs font-medium text-[var(--color-one-text)] truncate">{c.name}</p><p className="text-[11px] text-[var(--color-one-text-muted)] truncate">{c.lastMessage || ''}</p></div>
-                {(c.unreadCount||0)>0 && <span className="text-[10px] tabular-nums px-1.5 rounded-full bg-[#247864] text-white font-semibold">{c.unreadCount}</span>}
+            {recentConvs.length>0 && <div className="pt-2.5 border-t border-slate-200 dark:border-white/10 space-y-1.5"><p className="text-xs text-slate-500 dark:text-slate-400">最近联系人</p>{recentConvs.slice(0,8).map(c => (
+              <button key={c.id} onClick={()=>{ onSelectConversation(c.id); setTab('chats'); setMobileShowChat(true); }} className="w-full min-h-[48px] flex items-center gap-2.5 p-2.5 rounded-xl bg-white dark:bg-white/[0.02] border border-slate-200 dark:border-white/10 text-left">
+                <img src={c.otherUser?.avatar || c.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-8 h-8 rounded-full object-cover shrink-0"/>
+                <div className="flex-1 min-w-0"><p className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">{c.name}</p><p className="text-[11px] text-slate-500 truncate">{c.lastMessage || ''}</p></div>
+                {(c.unreadCount||0)>0 && <span className="text-[10px] px-1.5 rounded-full bg-sky-600 text-white font-bold">{c.unreadCount}</span>}
               </button>
             ))}</div>}
-            {blocked.length>0 && <div className="pt-2.5 border-t border-[var(--color-one-border)]"><p className="text-xs text-[var(--color-one-text-muted)] mb-1.5">已屏蔽用户</p>{blocked.map(b => (
-              <div key={b.id} className="flex items-center justify-between p-2.5 rounded-xl border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-xs"><span className="text-[var(--color-one-text)]">{b.displayName}</span><button onClick={()=>unblockUser(b.id)} className="text-[#247864] dark:text-[#e5d9be] px-2 py-1 cursor-pointer">解除屏蔽</button></div>
+            {blocked.length>0 && <div className="pt-2.5 border-t border-slate-200 dark:border-white/10"><p className="text-xs text-slate-500 dark:text-slate-400 mb-1.5">已屏蔽用户</p>{blocked.map(b => (
+              <div key={b.id} className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-white/[0.02] border border-slate-200 dark:border-white/10 text-xs"><span className="text-slate-700 dark:text-slate-300">{b.displayName}</span><button onClick={()=>unblockUser(b.id)} className="text-sky-600 dark:text-sky-300 px-2 py-1">解除屏蔽</button></div>
             ))}</div>}
             {friends.length===0 && (
-              <div className="text-xs text-[var(--color-one-text-muted)] text-center py-8 space-y-3">
-                <p>暂无联系人</p>
-                <button onClick={()=>setTab('search')} className="px-4 py-2 rounded-xl bg-[#247864] text-white font-medium inline-flex items-center gap-1.5 cursor-pointer"><UserPlus className="w-4 h-4"/>去添加注册用户</button>
+              <div className="text-xs text-slate-500 dark:text-slate-400 text-center py-8 space-y-3">
+                <p>暂无好友</p>
+                <button onClick={()=>setTab('search')} className="px-4 py-2 rounded-xl bg-sky-600 text-white font-semibold inline-flex items-center gap-1.5"><UserPlus className="w-4 h-4"/>去添加注册用户</button>
               </div>
             )}
           </div>
@@ -3009,43 +2918,38 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
         )}
       </aside>
 
-      {/* Right: Clean Chat Stage */}
-      <main className={`flex-1 bg-[var(--color-one-bg)]/35 flex-col overflow-hidden min-h-0 ${drawerMode ? (mobileShowChat ? 'flex' : 'hidden') : (mobileShowChat ? 'flex' : 'hidden lg:flex')}`}>
-        <div className="px-3 py-2.5 sm:px-5 sm:py-3 border-b border-[var(--color-one-border)] flex items-center justify-between gap-2 bg-[var(--color-one-surface)] shrink-0">
-          <div className="min-w-0 flex items-center gap-2.5 flex-1">
-            <button type="button" onClick={()=>setMobileShowChat(false)} className={`${drawerMode ? '' : 'lg:hidden'} rounded-xl border border-[var(--color-one-border)] text-[var(--color-one-text)] hover:bg-[var(--color-one-surface-soft)] shrink-0 min-h-[38px] min-w-[38px] inline-flex items-center justify-center cursor-pointer`} aria-label="Back"><ChevronLeft className="w-5 h-5"/></button>
+      {/* Right: chat */}
+      <main className={`flex-1 bg-slate-50/40 dark:bg-[#0b1220]/70 flex-col overflow-hidden min-h-0 ${drawerMode ? (mobileShowChat ? 'flex' : 'hidden') : (mobileShowChat ? 'flex' : 'hidden lg:flex')}`}>
+        <div className="px-2.5 py-2 sm:px-4 sm:py-3 border-b border-slate-200 dark:border-white/10 flex items-center justify-between gap-2 bg-white/90 dark:bg-white/[0.02] shrink-0">
+          <div className="min-w-0 flex items-center gap-2 flex-1">
+            <button type="button" onClick={()=>setMobileShowChat(false)} className={`${drawerMode ? '' : 'lg:hidden'} rounded-xl border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/[0.06] shrink-0 min-h-[40px] min-w-[40px] inline-flex items-center justify-center cursor-pointer`} aria-label="Back"><ChevronLeft className="w-5 h-5"/></button>
             {activeConv?.type !== 'global_channel' && (
               <div className="relative shrink-0 hidden xs:block sm:block">
-                <img src={activeConv?.otherUser?.avatar || activeConv?.avatar || '/earth-one-cover.jpg'} alt={activeConv?.name || 'Chat'} className="w-9 h-9 rounded-full object-cover border border-[var(--color-one-border)]" />
-                {(activeConv?.otherUser?.isOnline || activeConv?.isOnline) && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-[var(--color-one-surface)]" />}
+                <img src={activeConv?.otherUser?.avatar || activeConv?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100'} className="w-9 h-9 rounded-full object-cover border border-slate-200 dark:border-white/10" />
+                {(activeConv?.otherUser?.isOnline || activeConv?.isOnline) && <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-slate-950" />}
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <h3 className="font-semibold text-sm text-[var(--color-one-text)] truncate flex items-center gap-2">
-                <span className="truncate">{activeConv?.name || 'Chat'}</span>
-                {activeConv?.type==='group' && <span className="text-[11px] font-normal text-[var(--color-one-text-dim)] shrink-0">· 群聊</span>}
-              </h3>
-              <p className="text-[11px] text-[var(--color-one-text-muted)] truncate">
-                {typingNames ? `${typingNames} 正在输入…` : (activeConv?.otherUser?.isOnline || activeConv?.isOnline ? '在线' : wsStatus === 'open' ? '实时连接' : '同步就绪')}
-              </p>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 truncate flex items-center gap-1.5">{activeConv?.name || 'Chat'} {activeConv?.type==='group' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-white/[0.06] text-slate-600 dark:text-slate-300 shrink-0">群聊</span>}</h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{typingNames ? `${typingNames} 正在输入…` : (activeConv?.otherUser?.isOnline || activeConv?.isOnline ? '在线' : 'Earth One Messenger')}</p>
             </div>
           </div>
           <div className="flex items-center gap-1 sm:gap-1.5 text-xs shrink-0">
             {canStartCallHere && (
               <>
-                <button type="button" onClick={()=>void startCall('audio')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="min-h-[36px] min-w-[36px] sm:px-2.5 rounded-xl border border-[var(--color-one-border)] text-[var(--color-one-text)] hover:bg-[var(--color-one-surface-soft)] disabled:opacity-40 inline-flex items-center justify-center gap-1 cursor-pointer" title={lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话'}><Phone className="w-4 h-4"/><span className="hidden md:inline text-xs font-medium">语音</span></button>
-                <button type="button" onClick={()=>void startCall('video')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="min-h-[36px] min-w-[36px] sm:px-2.5 rounded-xl border border-[var(--color-one-border)] text-[var(--color-one-text)] hover:bg-[var(--color-one-surface-soft)] disabled:opacity-40 inline-flex items-center justify-center gap-1 cursor-pointer" title={lang==='ar'?'مكالمة فيديو':lang==='en'?'Video call':'视频通话'}><Video className="w-4 h-4"/><span className="hidden md:inline text-xs font-medium">视频</span></button>
+                <button type="button" onClick={()=>void startCall('audio')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="min-h-[38px] min-w-[38px] sm:px-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25 disabled:opacity-40 inline-flex items-center justify-center gap-1" title={lang==='ar'?'مكالمة صوتية':lang==='en'?'Audio call':'语音通话'}><Phone className="w-4 h-4"/><span className="hidden md:inline text-xs font-medium">语音</span></button>
+                <button type="button" onClick={()=>void startCall('video')} disabled={!!callAction || (activeCall && ['ringing','connecting','active','reconnecting'].includes(activeCall.status))} className="min-h-[38px] min-w-[38px] sm:px-2.5 rounded-xl border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-200 dark:hover:bg-sky-300/25 disabled:opacity-40 inline-flex items-center justify-center gap-1" title={lang==='ar'?'مكالمة فيديو':lang==='en'?'Video call':'视频通话'}><Video className="w-4 h-4"/><span className="hidden md:inline text-xs font-medium">视频</span></button>
               </>
             )}
-            {activeConv?.type === 'group' && <button type="button" onClick={()=>{ setShowGroupPanel(v=>!v); if (!showGroupPanel) void loadGroupDetail(activeConv.id); }} className="min-h-[36px] min-w-[36px] rounded-xl text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface-soft)] hover:text-[var(--color-one-text)] inline-flex items-center justify-center cursor-pointer" title="群信息"><Info className="w-4 h-4"/></button>}
-            <button type="button" onClick={()=>{ setInChatSearchOpen(v=>!v); setInChatResults([]); }} className={`min-h-[36px] min-w-[36px] rounded-xl inline-flex items-center justify-center cursor-pointer ${inChatSearchOpen ? 'bg-[#247864]/12 text-[#247864] dark:text-[#e5d9be]' : 'text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface-soft)] hover:text-[var(--color-one-text)]'}`} title="会话内查找"><Search className="w-4 h-4"/></button>
-            <button type="button" onClick={()=>setShowTranslateBar(v=>!v)} className={`sm:hidden min-h-[36px] min-w-[36px] rounded-xl inline-flex items-center justify-center cursor-pointer ${autoTranslate ? 'bg-[#247864]/12 text-[#247864] dark:text-[#e5d9be]' : 'text-[var(--color-one-text-muted)]'}`} title="实时翻译"><Languages className="w-4 h-4"/></button>
-            <div className="hidden sm:flex items-center gap-1.5 pl-1">
-              <Languages className="w-3.5 h-3.5 text-[var(--color-one-text-dim)]" />
-              <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-transparent border border-[var(--color-one-border)] rounded-lg px-2 py-1 text-[var(--color-one-text)] text-xs outline-none"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
-              <button type="button" onClick={()=>setAutoTranslate(v=>!v)} className={`px-2 py-1 rounded-lg text-[11px] border font-medium cursor-pointer ${autoTranslate ? 'bg-[#247864] text-white border-[#247864] dark:bg-[#e5d9be] dark:text-[#141d28] dark:border-[#e5d9be]' : 'border-[var(--color-one-border)] text-[var(--color-one-text-muted)]'}`}>{autoTranslate ? '自动译' : '关闭'}</button>
+            {activeConv?.type === 'group' && <button type="button" onClick={()=>{ setShowGroupPanel(v=>!v); if (!showGroupPanel) void loadGroupDetail(activeConv.id); }} className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center" title="群信息"><Info className="w-4 h-4"/></button>}
+            <button type="button" onClick={()=>{ setInChatSearchOpen(v=>!v); setInChatResults([]); }} className={`min-h-[38px] min-w-[38px] rounded-xl border inline-flex items-center justify-center ${inChatSearchOpen?'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-200':'border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06]'}`} title="会话内查找"><Search className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>setShowTranslateBar(v=>!v)} className={`sm:hidden min-h-[38px] min-w-[38px] rounded-xl border inline-flex items-center justify-center ${autoTranslate?'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-200':'border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400'}`} title="实时翻译"><Languages className="w-4 h-4"/></button>
+            <div className="hidden sm:flex items-center gap-1.5">
+              <Languages className="w-4 h-4 text-sky-600 dark:text-sky-300" />
+              <select value={targetTranslateLang} onChange={e=>setTargetTranslateLang(e.target.value)} className="bg-white dark:bg-white/[0.06] border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1 text-slate-700 dark:text-slate-200 text-xs"><option value="Chinese">中文</option><option value="English">English</option><option value="Arabic">العربية</option><option value="Spanish">Español</option><option value="French">Français</option><option value="Russian">Русский</option></select>
+              <button type="button" onClick={()=>setAutoTranslate(v=>!v)} className={`px-2 py-1 rounded text-[11px] border ${autoTranslate?'bg-sky-600 text-white border-sky-600 dark:bg-sky-400/15 dark:text-sky-200 dark:border-sky-400/35':'bg-slate-100 text-slate-500 border-slate-200 dark:bg-white/[0.06] dark:text-slate-400 dark:border-white/10'}`}>{autoTranslate?'AUTO':'OFF'}</button>
             </div>
-            <button type="button" onClick={()=>void fetchMessages(false)} className="min-h-[36px] min-w-[36px] rounded-xl text-[var(--color-one-text-muted)] hover:bg-[var(--color-one-surface-soft)] hover:text-[var(--color-one-text)] inline-flex items-center justify-center cursor-pointer" title="刷新"><RefreshCw className="w-4 h-4"/></button>
+            <button type="button" onClick={()=>void fetchMessages(false)} className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/[0.06] inline-flex items-center justify-center" title="刷新"><RefreshCw className="w-4 h-4"/></button>
           </div>
         </div>
 
@@ -3104,7 +3008,7 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
                 <img src={msg.senderAvatar} className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-white/10 mt-1"/>
                 <div className={`max-w-[min(42rem,88%)] sm:max-w-[min(42rem,85%)] ${isMe?'items-end':'items-start'}`}>
                   <div className={`flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 mb-1 ${isMe?'justify-end':''}`}><span className="font-semibold text-slate-700 dark:text-slate-300">{msg.senderName}</span><span>{new Date(msg.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span></div>
-                  <div className={`p-3 rounded-2xl text-sm leading-relaxed space-y-2 ${isMe ? 'bg-[#247864] dark:bg-[#223544] text-white rounded-tr-sm' : 'bg-[var(--color-one-surface)] text-[var(--color-one-text)] border border-[var(--color-one-border)] rounded-tl-sm'}`}>
+                  <div className={`p-3 rounded-2xl text-sm leading-relaxed shadow-xs space-y-2 ${isMe?'bg-gradient-to-r from-sky-600 to-cyan-600 text-white rounded-tr-none':'bg-white dark:bg-white/[0.08] text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-white/10 rounded-tl-none'}`}>
                     {msg.replyToId && (
                       <button
                         type="button"
@@ -3201,10 +3105,10 @@ export const GlobalMessenger: React.FC<GlobalMessengerProps> = ({
             );
           })}
           {messages.length===0 && (
-            <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-[var(--color-one-text-muted)] gap-3">
-              <MessageCircle className="w-9 h-9 opacity-30" />
-              <p className="text-sm">选择左侧会话，或搜索并添加好友开始对话</p>
-              <button type="button" onClick={() => { setTab('search'); setMobileShowChat(false); }} className="inline-flex items-center gap-1.5 rounded-xl bg-[#247864] hover:bg-[#1d6251] px-4 py-2 text-xs font-medium text-white transition-colors cursor-pointer">
+            <div className="h-full min-h-[220px] flex flex-col items-center justify-center text-center text-slate-500 dark:text-slate-400 gap-3">
+              <MessageCircle className="w-10 h-10 text-slate-300 dark:text-slate-600"/>
+              <p className="text-sm">选择左侧会话，或搜索并添加好友开始一对一聊天</p>
+              <button type="button" onClick={() => { setTab('search'); setMobileShowChat(false); }} className="inline-flex items-center gap-1.5 rounded-full bg-sky-600 hover:bg-sky-500 px-4 py-2 text-xs font-semibold text-white shadow-xs transition">
                 <UserPlus className="w-3.5 h-3.5" />
                 <span>查找并添加好友</span>
               </button>
