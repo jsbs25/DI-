@@ -47,18 +47,18 @@ interface CameraPreset {
 }
 
 const CAMERA_PRESETS: CameraPreset[] = [
-  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [0.0, 10.4, 28.4], target: [0.5, 1.8, -1.5] },
+  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [0.0, 7.6, 20.4], target: [0.0, 2.2, 0.0] },
   {
     id: 'bridge',
     zh: '溪桥',
     en: 'Bridge',
-    pos: [BRIDGE_CONFIG.centerX + 5.8, 3.9, BRIDGE_CONFIG.centerZ + 11.4],
+    pos: [BRIDGE_CONFIG.centerX + 5.4, 3.8, BRIDGE_CONFIG.centerZ + 10.6],
     target: [BRIDGE_CONFIG.centerX, 1.25, BRIDGE_CONFIG.centerZ],
   },
-  { id: 'library', zh: '图书馆', en: 'Library', pos: [-6.8, 4.2, 15.8], target: [-12.2, 2.2, 6.4] },
-  { id: 'language', zh: '语言中心', en: 'Language', pos: [4.6, 4.2, 18.2], target: [9.4, 2.2, 9.6] },
-  { id: 'pavilion', zh: '音乐馆', en: 'Music Hall', pos: [6.4, 4.6, 4.8], target: [13.2, 2.6, -7.6] },
-  { id: 'aihub', zh: 'AI 中心', en: 'AI Center', pos: [1.0, 4.8, -2.0], target: [1.4, 2.5, -13.2] },
+  { id: 'library', zh: '图书馆', en: 'Library', pos: [-2.8, 4.2, 8.8], target: [-7.0, 2.4, -0.4] },
+  { id: 'language', zh: '语言中心', en: 'Language', pos: [1.4, 4.0, 14.6], target: [5.4, 2.3, 6.0] },
+  { id: 'pavilion', zh: '音乐馆', en: 'Music Hall', pos: [2.2, 4.6, 3.6], target: [7.0, 2.9, -5.8] },
+  { id: 'aihub', zh: 'AI 中心', en: 'AI Center', pos: [-0.2, 4.8, 1.2], target: [-0.2, 2.8, -9.0] },
 ];
 
 const BUILDING_LANDMARKS: ReadonlyArray<{
@@ -76,15 +76,15 @@ const BUILDING_LANDMARKS: ReadonlyArray<{
 
 function getResponsiveCameraConfig(aspect: number): { fov: number; distScale: number } {
   if (aspect < 0.72) {
-    // Portrait phone
-    return { fov: 52, distScale: 1.24 };
+    // Portrait phone: wide enough to show all 5 enlarged houses simultaneously at close-up scale
+    return { fov: 60, distScale: 1.2 };
   }
   if (aspect < 1.05) {
     // Portrait / square tablet (e.g. iPad portrait)
-    return { fov: 46, distScale: 1.12 };
+    return { fov: 48, distScale: 1.08 };
   }
-  // Landscape tablet / desktop
-  return { fov: 40, distScale: 1.0 };
+  // Landscape tablet / desktop: close-up enlarged courtyard presence
+  return { fov: 42, distScale: 1.0 };
 }
 
 const QUALITY_OPTIONS: Array<{ id: UserQualityChoice; zh: string; en: string }> = [
@@ -167,8 +167,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     weather: 'clear',
     autoWeather: false,
     hasCam: false,
-    camPos: new THREE.Vector3(0.0, 10.4, 28.4),
-    camTarget: new THREE.Vector3(0.5, 1.8, -1.5),
+    camPos: new THREE.Vector3(0.0, 7.6, 20.4),
+    camTarget: new THREE.Vector3(0.0, 2.2, 0.0),
   });
 
   const cameraMoveRef = useRef<{
@@ -177,8 +177,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     targetLook: THREE.Vector3;
   }>({
     active: false,
-    targetPos: new THREE.Vector3(0.0, 10.4, 28.4),
-    targetLook: new THREE.Vector3(0.5, 1.8, -1.5),
+    targetPos: new THREE.Vector3(0.0, 7.6, 20.4),
+    targetLook: new THREE.Vector3(0.0, 2.2, 0.0),
   });
 
   const [locating, setLocating] = useState(false);
@@ -529,8 +529,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     if (persistedRef.current.hasCam) {
       camera.position.copy(persistedRef.current.camPos);
     } else {
-      const baseTarget = new THREE.Vector3(0.8, 1.7, -1.6);
-      const basePos = new THREE.Vector3(-0.6, 9.6, 27.6);
+      const baseTarget = new THREE.Vector3(0.0, 2.2, 0.0);
+      const basePos = new THREE.Vector3(0.0, 7.6, 20.4);
       basePos.sub(baseTarget).multiplyScalar(camCfg.distScale).add(baseTarget);
       camera.position.copy(basePos);
     }
@@ -546,14 +546,14 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       ONE: THREE.TOUCH.ROTATE,
       TWO: THREE.TOUCH.DOLLY_PAN,
     };
-    controls.minDistance = 5.5;
-    controls.maxDistance = 44.0;
+    controls.minDistance = 5.0;
+    controls.maxDistance = 38.0;
     controls.minPolarAngle = Math.PI * 0.14;
     controls.maxPolarAngle = Math.PI * 0.465;
     if (persistedRef.current.hasCam) {
       controls.target.copy(persistedRef.current.camTarget);
     } else {
-      controls.target.set(0.8, 1.7, -1.6);
+      controls.target.set(0.0, 2.2, 0.0);
     }
     controls.update();
 
@@ -1401,14 +1401,14 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
                 onMouseEnter={() => setHoveredLandmark({ id: lm.id, label: labelText })}
                 onMouseLeave={() => setHoveredLandmark((prev) => (prev?.id === lm.id ? null : prev))}
                 style={{ opacity: 0, willChange: 'transform, opacity' }}
-                className={`absolute left-0 top-0 inline-flex items-center whitespace-nowrap rounded-lg border px-2.5 py-1 text-[12px] sm:text-[13px] font-semibold tracking-wide transition-colors duration-150 cursor-pointer ${
+                className={`absolute left-0 top-0 inline-flex items-center whitespace-nowrap rounded-lg border px-2.5 sm:px-3 py-1 sm:py-1.5 text-[12.5px] sm:text-[14px] font-semibold tracking-wide transition-colors duration-150 cursor-pointer ${
                   isDayUi
                     ? isHovered
-                      ? 'border-[#1d2d25]/45 bg-[#1b2b23] text-[#fffaf0] shadow-[0_6px_18px_rgba(12,24,18,0.32)]'
-                      : 'border-[#1d2d25]/25 bg-[#1b2b23]/84 text-[#fcf8ef] hover:bg-[#1b2b23] shadow-[0_4px_14px_rgba(12,24,18,0.28)]'
+                      ? 'border-[#1d2d25]/45 bg-[#1b2b23] text-[#fffaf0] shadow-[0_6px_18px_rgba(12,24,18,0.34)]'
+                      : 'border-[#1d2d25]/28 bg-[#1b2b23]/88 text-[#fcf8ef] hover:bg-[#1b2b23] shadow-[0_5px_16px_rgba(12,24,18,0.3)]'
                     : isHovered
                       ? 'border-[#e8cc82]/60 bg-[#0d1724] text-[#fff8e6] shadow-[0_8px_22px_rgba(0,0,0,0.48)]'
-                      : 'border-white/22 bg-[#0d1724]/86 text-[#f6f1e6] hover:bg-[#152436] shadow-[0_6px_16px_rgba(0,0,0,0.42)]'
+                      : 'border-white/24 bg-[#0d1724]/88 text-[#f6f1e6] hover:bg-[#152436] shadow-[0_6px_18px_rgba(0,0,0,0.44)]'
                 }`}
               >
                 <span>{labelText}</span>

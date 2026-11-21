@@ -594,7 +594,6 @@ export default function App() {
       <Navbar
         currentTab={currentTab}
         immersive={immersive}
-        hideBottomNav={isMobileKeyboardOpen || (isNarrowViewport && currentTab === 'chat' && mobileChatOpen)}
         onSelectTab={navigateToTab}
         lang={lang}
         onSelectLang={setLang}

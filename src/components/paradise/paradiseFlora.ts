@@ -817,63 +817,54 @@ export function createParadiseFlora(
     const st = streamDistanceAndFlow(x, z);
     if (st.dist < st.width * 1.45) return false;
     if (gardenPathFactor(x, z) > minPathDist) return false;
-    // Keep all 5 buildings, bridge span/abutments, and roadside Phone Booth alcove clear of trees
-    if (Math.hypot(x - 13.2, z + 7.6) < 5.4) return false;
+    // Keep all 5 enlarged courtyard buildings & bridgehead clear of trees
+    if (Math.hypot(x - 7.0, z + 5.8) < 6.4) return false;
     if (Math.hypot(x - BRIDGE_CONFIG.centerX, z - BRIDGE_CONFIG.centerZ) < 5.6) return false;
     if (Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ) < 4.2) return false;
     if (Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ) < 4.2) return false;
-    if (Math.hypot(x + 12.2, z - 6.4) < 5.2) return false;
-    if (Math.hypot(x - 9.4, z - 9.6) < 5.3) return false;
-    if (Math.hypot(x - 1.4, z + 13.2) < 5.6) return false;
-    if (Math.hypot(x + 5.6, z - 11.8) < 3.6) return false;
-    // Keep panoramic Overlook camera sightline corridor [-4.5, 23.5] -> [2.5, -1.5] open
-    const camX = -4.5;
-    const camZ = 23.5;
-    const dirX = 7.0;
-    const dirZ = -25.0;
-    const tProj = ((x - camX) * dirX + (z - camZ) * dirZ) / (dirX * dirX + dirZ * dirZ);
-    if (tProj >= -0.15 && tProj <= 1.05) {
-      const cx = camX + dirX * tProj;
-      const cz = camZ + dirZ * tProj;
-      const corridorHalfWidth = 9.2 - tProj * 1.4;
-      if (Math.hypot(x - cx, z - cz) < corridorHalfWidth) return false;
-    }
-    if (z > 14 && Math.abs(x + 2.0) < 11.5) return false;
+    if (Math.hypot(x + 7.0, z + 0.4) < 6.0) return false;
+    if (Math.hypot(x - 5.4, z - 6.0) < 6.0) return false;
+    if (Math.hypot(x + 0.2, z + 9.0) < 6.6) return false;
+    if (Math.hypot(x + 2.2, z - 8.4) < 4.4) return false;
+    // Keep the entire foreground & central amphitheater sightline completely open
+    // so ALL 5 buildings are 100% unobstructed on first load (trees richly frame left, right & rear hills!)
+    if (z > -10.8 && z < 26.0 && Math.abs(x) < 11.4) return false;
+    if (z > 8.5 && Math.abs(x) < 15.0) return false;
     return true;
   };
 
-  // Dedicated overhanging riverside/bridge-framing Sakura trees (just outside bridgeheads so blossoms drift directly onto the stream)
+  // Dedicated framing Sakura trees on outer right/rear/waterside slopes (never obstructing the 5 houses!)
   const riversideHeroSakura: Array<[number, number, number]> = [
-    [BRIDGE_CONFIG.bankBX + 3.6, BRIDGE_CONFIG.bankBZ - 2.6, 1.12],
-    [BRIDGE_CONFIG.bankAX - 3.9, BRIDGE_CONFIG.bankAZ - 3.2, 1.06],
-    [10.2, -13.2, 1.12],
-    [14.8, -1.2, 1.14],
-    [13.6, 4.4, 1.12],
+    [13.4, -5.2, 1.16],
+    [13.8, -11.4, 1.18],
+    [6.4, -13.6, 1.14],
+    [12.8, 1.4, 1.16],
+    [13.6, 6.8, 1.14],
   ];
 
   const heroSakuraCoords: Array<[number, number, number]> = [
     ...riversideHeroSakura,
-    [17.4, -5.2, 1.14],
-    [18.2, -10.6, 1.18],
-    [15.4, 5.8, 1.15],
-    [11.8, 10.6, 1.08],
-    [16.8, 12.2, 1.16],
-    [-2.4, -13.6, 1.12],
-    [3.8, -12.8, 1.08],
-    [13.4, 17.8, 1.12],
-    [19.2, 1.5, 1.16],
+    [16.8, -3.2, 1.18],
+    [17.6, -9.8, 1.2],
+    [16.2, 4.6, 1.16],
+    [15.8, 11.2, 1.14],
+    [18.4, 15.2, 1.16],
+    [-4.8, -15.4, 1.14],
+    [2.2, -15.8, 1.14],
+    [16.2, 17.8, 1.12],
+    [19.4, 1.5, 1.18],
   ];
 
   const heroGinkgoCoords: Array<[number, number, number]> = [
-    [-12.8, -4.8, 1.16],
-    [-13.4, -11.2, 1.12],
-    [-15.8, 2.6, 1.2],
-    [-14.2, 8.6, 1.14],
-    [-17.4, 12.8, 1.18],
-    [-19.2, 6.4, 1.22],
-    [-18.8, -5.8, 1.18],
-    [-15.4, -16.8, 1.14],
-    [-15.8, 18.2, 1.12],
+    [-13.2, -3.6, 1.18],
+    [-13.4, -10.8, 1.16],
+    [-13.6, 2.8, 1.2],
+    [-14.2, 8.2, 1.16],
+    [-17.2, 12.6, 1.18],
+    [-18.8, 5.8, 1.22],
+    [-18.4, -5.8, 1.18],
+    [-15.4, -16.8, 1.16],
+    [-16.4, 17.6, 1.14],
   ];
 
   const sakuraBuckets: PlacementItem[][] = sakuraProtos.map(() => []);
@@ -1077,14 +1068,14 @@ export function createParadiseFlora(
     const z = -22 + rand() * 42;
     const sample = sampleTerrainBiome(x, z);
     if (sample.height < 0.2 || sample.height > 4.6 || sample.pathWeight > 0.38) continue;
-    if (Math.hypot(x - 13.2, z + 7.6) < 3.9) continue;
+    if (Math.hypot(x - 7.0, z + 5.8) < 4.5) continue;
     if (Math.hypot(x - BRIDGE_CONFIG.centerX, z - BRIDGE_CONFIG.centerZ) < 4.6) continue;
     if (Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ) < 3.0) continue;
     if (Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ) < 3.0) continue;
-    if (Math.hypot(x + 12.2, z - 6.4) < 3.9) continue;
-    if (Math.hypot(x - 9.4, z - 9.6) < 4.0) continue;
-    if (Math.hypot(x - 1.4, z + 13.2) < 4.4) continue;
-    if (Math.hypot(x + 5.6, z - 11.8) < 2.6) continue;
+    if (Math.hypot(x + 7.0, z + 0.4) < 4.3) continue;
+    if (Math.hypot(x - 5.4, z - 6.0) < 4.3) continue;
+    if (Math.hypot(x + 0.2, z + 9.0) < 4.8) continue;
+    if (Math.hypot(x + 2.2, z - 8.4) < 3.0) continue;
 
     dummy.position.set(x, sample.height - 0.06, z);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
@@ -1109,27 +1100,33 @@ export function createParadiseFlora(
   const gColor = new THREE.Color();
   const flowerSpots: THREE.Vector3[] = [];
 
-  // Natural botanical drift centers along stream banks, meadows & beneath trees
+  // Rich botanical flower-sea drift centers carpeting the entire courtyard, slopes & building edges ("花重满")
   const driftCenters: Array<{ x: number; z: number; r: number; palette: number[] }> = [
-    { x: -13.5, z: 7.5, r: 6.2, palette: [0xf7bed0, 0xfef4dc, 0xf5d6e1, 0xffffff] },
-    { x: -6.8, z: 11.2, r: 6.5, palette: [0xfce7a2, 0xfef8e6, 0xf8c3d4, 0xffffff] },
-    { x: 4.5, z: 10.8, r: 6.8, palette: [0xc9bbf4, 0x9fcaf2, 0xffffff, 0xf5d8e6] },
-    { x: 12.2, z: 5.2, r: 6.0, palette: [0xf8c2d2, 0xfee9aa, 0xffffff, 0xe8d5f7] },
-    { x: -15.0, z: -4.2, r: 6.5, palette: [0xfbe29b, 0xf7c5d2, 0xfef8e8, 0xffffff] },
-    { x: -4.2, z: -10.5, r: 6.4, palette: [0xb4d4f6, 0xd4c4f7, 0xffffff, 0xf9cbd8] },
-    { x: 9.8, z: -9.8, r: 6.2, palette: [0xf9c2d1, 0xfef5df, 0xfce198, 0xffffff] },
-    { x: 16.5, z: -2.4, r: 5.8, palette: [0xd2c0f6, 0xa8cef4, 0xffffff, 0xf7c7d6] },
-    { x: -0.8, z: 15.6, r: 6.2, palette: [0xf8c4d4, 0xfef6e2, 0xfcd88a, 0xcabaf4] },
+    { x: -7.2, z: 4.8, r: 5.8, palette: [0xf7b2c8, 0xfef4dc, 0xf5cddc, 0xffffff] },
+    { x: -4.2, z: 10.6, r: 6.2, palette: [0xfce28d, 0xfef8e6, 0xf8b6cc, 0xffffff] },
+    { x: 0.4, z: 12.8, r: 6.4, palette: [0xf8b8cd, 0xfef4d8, 0xcab8f5, 0x9bc8f4] },
+    { x: 5.6, z: 11.4, r: 6.0, palette: [0xc6b6f5, 0x99c6f4, 0xffffff, 0xf8c2d4] },
+    { x: 9.8, z: 6.4, r: 5.8, palette: [0xf8b9ce, 0xfee59b, 0xffffff, 0xe2ccf8] },
+    { x: -11.4, z: 0.6, r: 5.8, palette: [0xfbe090, 0xf7bccd, 0xfef8e8, 0xffffff] },
+    { x: -9.6, z: 9.2, r: 6.0, palette: [0xf9b8cd, 0xd1bef6, 0xfef5de, 0x9fcaf4] },
+    { x: -3.2, z: 5.2, r: 5.2, palette: [0xf9c0d2, 0xfee8a4, 0xffffff, 0xcbbaf5] },
+    { x: 2.8, z: 5.0, r: 4.8, palette: [0x9fcbf4, 0xf8bfd0, 0xfef5df, 0xd4c0f6] },
+    { x: 10.2, z: -1.4, r: 5.6, palette: [0xd0bdf6, 0xa2cbf4, 0xffffff, 0xf8bfd2] },
+    { x: 11.4, z: -6.8, r: 5.8, palette: [0xf9bcd0, 0xfef5df, 0xfce198, 0xffffff] },
+    { x: 4.2, z: -9.8, r: 5.6, palette: [0xb0d2f6, 0xd4c2f7, 0xffffff, 0xf9c5d5] },
+    { x: -5.4, z: -8.6, r: 5.6, palette: [0xf8bfd2, 0xfee7a0, 0xfef8e8, 0xcbb9f5] },
+    { x: -0.4, z: 16.4, r: 6.5, palette: [0xf8b8cd, 0xfef5dd, 0xfcd580, 0xc7b5f4] },
+    { x: 6.8, z: 15.8, r: 6.2, palette: [0x9ec9f5, 0xf9bdd0, 0xfef5e0, 0xd6c2f6] },
   ];
 
-  // 3a. Soft Painterly Multi-Petal Wildflower Drifts (higher density, clustered)
+  // 3a. Soft Painterly Multi-Petal Wildflower Drifts (ultra-dense, overflowing floral meadow)
   const flowerGeo = trackGeo(createCrossWildflowerGeo());
   const flowerMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.wildflowerTex,
-      alphaTest: 0.34,
+      alphaTest: 0.32,
       color: 0xffffff,
-      roughness: 0.54,
+      roughness: 0.52,
       metalness: 0.02,
       side: THREE.DoubleSide,
     })
@@ -1143,9 +1140,9 @@ export function createParadiseFlora(
     cacheKey: 'paradise-flower-wind-v3',
   });
 
-  const targetFlowerCount = Math.round(quality.flowerCount * 1.48);
+  const targetFlowerCount = Math.round(quality.flowerCount * 1.85);
   const flowerMesh = new THREE.InstancedMesh(flowerGeo, flowerMat, targetFlowerCount);
-  const defaultFlowerPalette = [0xf8bfd0, 0xfef6e0, 0xcbb9f5, 0xfcdc8a, 0xffffff, 0xa2cdf2];
+  const defaultFlowerPalette = [0xf7b4ca, 0xfef4d8, 0xc8b4f5, 0xfcd67c, 0xffffff, 0x99c8f4];
   let fPlaced = 0;
   let fAttempts = 0;
   while (fPlaced < targetFlowerCount && fAttempts < targetFlowerCount * 7) {
@@ -1154,8 +1151,8 @@ export function createParadiseFlora(
     let z: number;
     let palette = defaultFlowerPalette;
 
-    // 72% grow in natural organic floral drifts; 28% scatter softly across open sunlit meadow
-    if (rand() < 0.72) {
+    // 78% grow in lush courtyard & foreground floral drifts; 22% blanket the surrounding meadow
+    if (rand() < 0.78) {
       const drift = driftCenters[Math.floor(rand() * driftCenters.length)];
       const ang = rand() * Math.PI * 2;
       const dist = Math.pow(rand(), 0.72) * drift.r;
@@ -1163,29 +1160,29 @@ export function createParadiseFlora(
       z = drift.z + Math.sin(ang) * dist;
       palette = drift.palette;
     } else {
-      x = (rand() - 0.5) * 52;
-      z = (rand() - 0.5) * 46;
+      x = (rand() - 0.5) * 44;
+      z = (rand() - 0.5) * 40 + 2.0;
     }
 
     const sample = sampleTerrainBiome(x, z);
-    if (sample.height < 0.2 || sample.height > 4.6 || sample.pathWeight > 0.3) continue;
-    if (Math.hypot(x + 12.2, z - 6.4) < 3.25) continue;
-    if (Math.hypot(x - 9.4, z - 9.6) < 3.55) continue;
-    if (Math.hypot(x - 1.4, z + 13.2) < 3.85) continue;
-    if (Math.hypot(x + 5.6, z - 11.8) < 2.15) continue;
-    if (Math.hypot(x - 13.2, z + 7.6) < 3.35) continue;
+    if (sample.height < 0.18 || sample.height > 4.8 || sample.pathWeight > 0.36) continue;
+    if (Math.hypot(x + 7.0, z + 0.4) < 3.45) continue;
+    if (Math.hypot(x - 5.4, z - 6.0) < 3.55) continue;
+    if (Math.hypot(x + 0.2, z + 9.0) < 4.1) continue;
+    if (Math.hypot(x + 2.2, z - 8.4) < 2.25) continue;
+    if (Math.hypot(x - 7.0, z + 5.8) < 3.85) continue;
 
     dummy.position.set(x, sample.height - 0.025, z);
     dummy.rotation.set((rand() - 0.5) * 0.14, rand() * Math.PI * 2, (rand() - 0.5) * 0.14);
-    const sc = 0.72 + rand() * 0.85;
-    dummy.scale.set(sc * (0.9 + rand() * 0.22), sc * (0.85 + rand() * 0.26), sc * (0.9 + rand() * 0.22));
+    const sc = 0.92 + rand() * 0.98;
+    dummy.scale.set(sc * (0.92 + rand() * 0.24), sc * (0.88 + rand() * 0.28), sc * (0.92 + rand() * 0.24));
     dummy.updateMatrix();
     flowerMesh.setMatrixAt(fPlaced, dummy.matrix);
 
     gColor.setHex(palette[Math.floor(rand() * palette.length)]);
     flowerMesh.setColorAt(fPlaced, gColor);
-    if (flowerSpots.length < 64) {
-      flowerSpots.push(new THREE.Vector3(x, sample.height + 0.42, z));
+    if (flowerSpots.length < 72) {
+      flowerSpots.push(new THREE.Vector3(x, sample.height + 0.44, z));
     }
     fPlaced++;
   }
@@ -1289,7 +1286,7 @@ export function createParadiseFlora(
     cacheKey: 'paradise-bloom-cluster-wind-v1',
   });
 
-  const bloomClusterCount = Math.max(150, Math.min(340, Math.round(quality.flowerCount * 0.52)));
+  const bloomClusterCount = Math.max(280, Math.min(680, Math.round(quality.flowerCount * 0.52)));
   const bloomClusterMesh = new THREE.InstancedMesh(bloomClusterGeo, bloomClusterMat, bloomClusterCount);
   bloomClusterMesh.receiveShadow = quality.enableShadows;
   let bcPlaced = 0;
@@ -1298,20 +1295,20 @@ export function createParadiseFlora(
     bcAttempts++;
     const drift = driftCenters[Math.floor(rand() * driftCenters.length)];
     const ang = rand() * Math.PI * 2;
-    const dist = Math.pow(rand(), 0.68) * (drift.r * 1.05);
+    const dist = Math.pow(rand(), 0.68) * (drift.r * 1.08);
     const x = drift.x + Math.cos(ang) * dist;
     const z = drift.z + Math.sin(ang) * dist;
     const sample = sampleTerrainBiome(x, z);
-    if (sample.height < 0.22 || sample.height > 4.2 || sample.pathWeight > 0.28) continue;
-    if (Math.hypot(x + 12.2, z - 6.4) < 3.35) continue;
-    if (Math.hypot(x - 9.4, z - 9.6) < 3.6) continue;
-    if (Math.hypot(x - 1.4, z + 13.2) < 3.9) continue;
-    if (Math.hypot(x + 5.6, z - 11.8) < 2.2) continue;
-    if (Math.hypot(x - 13.2, z + 7.6) < 3.45) continue;
+    if (sample.height < 0.2 || sample.height > 4.4 || sample.pathWeight > 0.34) continue;
+    if (Math.hypot(x + 7.0, z + 0.4) < 3.5) continue;
+    if (Math.hypot(x - 5.4, z - 6.0) < 3.6) continue;
+    if (Math.hypot(x + 0.2, z + 9.0) < 4.15) continue;
+    if (Math.hypot(x + 2.2, z - 8.4) < 2.3) continue;
+    if (Math.hypot(x - 7.0, z + 5.8) < 3.9) continue;
 
     dummy.position.set(x, sample.height - 0.02, z);
     dummy.rotation.set((rand() - 0.5) * 0.1, rand() * Math.PI * 2, (rand() - 0.5) * 0.1);
-    const sc = 0.85 + rand() * 0.65;
+    const sc = 1.05 + rand() * 0.8;
     dummy.scale.setScalar(sc);
     dummy.updateMatrix();
     bloomClusterMesh.setMatrixAt(bcPlaced, dummy.matrix);
@@ -1403,46 +1400,95 @@ export function createParadiseFlora(
     cacheKey: 'paradise-hydrangea-wind-v1',
   });
 
-  // Intentionally landscaped floral border beds hugging the 5 buildings & framing the main garden lane
+  // Richly landscaped floral border beds & lush flower-sea mounds filling the entire visible courtyard ("花重满")
   const curatedFlowerbedSpots: Array<[number, number, number, number]> = [
-    // Flanking Telephone Booth cobblestone alcove (-5.6, 11.8)
-    [-7.3, 10.7, 0.88, 0xf6b8cc],
-    [-7.4, 12.7, 0.94, 0xa8c8f5],
-    [-5.8, 13.7, 0.85, 0xfdf2d6],
-    [-4.1, 10.4, 0.78, 0xd4bdf5],
-    [-4.2, 13.2, 0.82, 0xf6b8cc],
-    // Framing Library Cottage terrace (-12.2, 6.4)
-    [-9.5, 8.6, 0.96, 0xf8c2d2],
-    [-10.2, 4.1, 0.92, 0xfee5a2],
-    [-14.6, 8.2, 1.05, 0xc8b8f2],
-    [-14.8, 5.0, 0.95, 0xfdf5e2],
-    // Framing Language Center Hall terrace (9.4, 9.6)
-    [6.6, 11.4, 0.96, 0xf7bfd0],
-    [7.2, 7.2, 0.92, 0x9ecbf4],
-    [11.8, 11.8, 1.04, 0xfee49e],
-    [12.4, 8.0, 0.98, 0xd4c2f6],
-    // Framing Music Hall waterside pavilion (13.2, -7.6)
-    [10.2, -5.2, 0.92, 0xf8bfd2],
-    [15.6, -4.8, 0.98, 0xfdf4de],
-    [16.0, -9.8, 1.05, 0xaacbf5],
-    [10.8, -10.8, 0.94, 0xf7c5d4],
-    // Framing AI Center north lakeside terrace (1.4, -13.2)
-    [-2.0, -11.4, 0.96, 0xa2cef6],
-    [4.6, -11.4, 0.96, 0xcabaf5],
-    [-2.4, -14.8, 1.04, 0xf8c6d6],
-    [5.0, -14.8, 1.02, 0xfef5df],
-    // Lush foreground garden lane floral borders
-    [1.6, 15.6, 0.96, 0xf8c0d0],
-    [2.8, 13.4, 0.88, 0xa8ccf5],
-    [3.8, 11.6, 0.92, 0xfee5a2],
-    [-3.6, 15.8, 0.94, 0xcabaf4],
-    [-3.8, 14.2, 0.86, 0xfef5e0],
-    [-4.8, 7.6, 0.9, 0xf6bcd0],
-    [-6.2, 4.8, 0.95, 0xa8cbf4],
-    [0.8, 7.8, 0.88, 0xd2c0f6],
-    [3.4, 6.8, 0.94, 0xf8c2d2],
-    [5.4, 12.6, 0.98, 0xfef2d4],
-    [-8.6, 12.4, 1.02, 0xf7c4d4],
+    // Flanking Telephone Booth cobblestone alcove (-2.2, 8.4)
+    [-4.3, 7.6, 0.96, 0xf6b2c8],
+    [-4.4, 9.6, 1.02, 0x9ec6f5],
+    [-2.4, 10.6, 0.95, 0xfdf2d6],
+    [-0.4, 10.2, 0.92, 0xd4bdf5],
+    [-0.2, 6.8, 0.88, 0xf7b8cd],
+    [-4.0, 11.4, 1.06, 0xfee39a],
+    // Framing Library Cottage terrace (-7.0, -0.4)
+    [-4.4, 2.4, 1.04, 0xf8bad0],
+    [-6.6, 3.2, 1.06, 0xfee5a2],
+    [-9.8, 2.4, 1.12, 0xc8b4f2],
+    [-10.4, -0.4, 1.08, 0xfdf5e2],
+    [-9.6, -3.4, 1.06, 0xf7b6cc],
+    [-5.2, -3.6, 0.96, 0x9ecaf5],
+    [-8.6, 4.6, 1.14, 0xf8c0d4],
+    [-6.2, 5.4, 1.04, 0xd2bff6],
+    // Framing Language Center Hall terrace (5.4, 6.0)
+    [2.6, 7.6, 1.02, 0xf7b9ce],
+    [3.4, 3.6, 0.98, 0x9ac8f4],
+    [8.2, 8.2, 1.14, 0xfee49e],
+    [8.8, 5.2, 1.12, 0xd4c0f6],
+    [7.8, 2.8, 1.04, 0xf8bdd2],
+    [5.4, 9.4, 1.08, 0xfdf4dd],
+    [3.6, 9.8, 1.02, 0xf8b6cc],
+    [8.6, 10.4, 1.16, 0x9fcaf5],
+    // Framing Music Hall waterside pavilion (7.0, -5.8)
+    [4.4, -4.6, 0.96, 0xf8bad0],
+    [9.8, -3.4, 1.08, 0xfdf4de],
+    [10.6, -6.2, 1.14, 0xa2c8f5],
+    [9.6, -9.2, 1.12, 0xf7bfd2],
+    [4.8, -9.2, 1.02, 0xfee49c],
+    [10.8, -1.0, 1.1, 0xcbb8f4],
+    [10.4, 1.8, 1.12, 0xf8b8ce],
+    // Framing AI Center north lakeside terrace (-0.2, -9.0)
+    [-3.6, -7.8, 1.04, 0x9ccbf6],
+    [3.2, -8.2, 1.06, 0xcab8f5],
+    [-3.8, -11.4, 1.1, 0xf8c0d2],
+    [3.4, -11.6, 1.1, 0xfef5df],
+    [-1.2, -12.6, 1.08, 0xf8bad0],
+    [1.6, -12.8, 1.08, 0xa2cbf5],
+    // Overflowing foreground flower-sea framing the camera entry view (z: 10..17)
+    [-8.8, 12.2, 1.18, 0xf8b8cd],
+    [-7.2, 13.8, 1.14, 0xa4c9f5],
+    [-5.6, 12.6, 1.08, 0xfee5a0],
+    [-4.8, 14.8, 1.16, 0xcab6f5],
+    [-3.0, 13.4, 1.06, 0xfef5e0],
+    [-1.6, 15.2, 1.14, 0xf7b6cc],
+    [-0.2, 12.6, 1.02, 0x9ecaf5],
+    [0.2, 15.8, 1.14, 0xfee296],
+    [2.8, 14.8, 1.12, 0xf8bad0],
+    [3.4, 12.2, 1.04, 0xd2bff6],
+    [4.8, 13.8, 1.14, 0xa2ccf5],
+    [6.4, 12.6, 1.12, 0xfee59e],
+    [7.6, 14.6, 1.18, 0xf8bad2],
+    [9.4, 12.4, 1.16, 0xc9b7f4],
+    [10.6, 8.8, 1.14, 0xfef5df],
+    [-10.6, 7.6, 1.18, 0xf8bdd2],
+    [-9.8, 10.2, 1.15, 0xfee398],
+    [-7.6, 8.4, 1.08, 0xa0c9f5],
+    [-6.0, 6.8, 1.02, 0xf8b8cd],
+    [-5.6, 10.8, 1.08, 0xcfbef6],
+    [-8.0, 15.4, 1.2, 0xf8bad0],
+    [-3.4, 16.4, 1.18, 0xa2cbf5],
+    [1.2, 17.0, 1.16, 0xf8bad2],
+    [5.2, 16.2, 1.18, 0xfee49c],
+    [8.8, 16.0, 1.2, 0xd0bcf6],
+    // Central courtyard shoreline flower ribbons (between buildings and water)
+    [-2.4, 4.4, 0.96, 0xf8b8ce],
+    [-0.6, 4.2, 0.94, 0xfee5a2],
+    [1.6, 4.0, 0.94, 0xa2cbf5],
+    [3.8, 3.0, 0.92, 0xf8bad0],
+    [-5.8, 3.6, 0.98, 0xcab8f5],
+    [-7.4, 5.8, 1.04, 0xfef4de],
+    [9.4, 4.2, 1.08, 0xf8bad0],
+    [9.6, 0.4, 1.06, 0xfee398],
+    [-10.6, 4.6, 1.12, 0xa4caf5],
+    [-11.2, -2.4, 1.14, 0xf8bcd0],
+    [11.4, -3.6, 1.14, 0xf7b8cd],
+    [11.6, 6.8, 1.16, 0xd2bff6],
+    [-3.4, 11.8, 1.06, 0xf8bad0],
+    [-1.2, 11.4, 1.02, 0xfee49c],
+    [2.6, 10.6, 1.04, 0xa0c9f5],
+    [6.6, 10.8, 1.1, 0xf8b8ce],
+    [-6.6, 11.4, 1.12, 0xfdf5e2],
+    [-9.2, 14.0, 1.16, 0xcab6f5],
+    [10.2, 14.2, 1.18, 0xf8bad2],
+    [0.0, 13.8, 1.06, 0xd0bdf6],
   ];
 
   const hydrangeaMesh = new THREE.InstancedMesh(hydrangeaGeo, hydrangeaMat, curatedFlowerbedSpots.length);
@@ -1451,7 +1497,7 @@ export function createParadiseFlora(
   let hPlaced = 0;
   for (const [hx, hz, hScale, hHex] of curatedFlowerbedSpots) {
     const sample = sampleTerrainBiome(hx, hz);
-    if (sample.height < 0.22 || sample.pathWeight > 0.42) continue;
+    if (sample.height < 0.2 || sample.pathWeight > 0.48) continue;
     dummy.position.set(hx, sample.height - 0.04, hz);
     dummy.rotation.set(0, rand() * Math.PI * 2, 0);
     dummy.scale.set(hScale * 1.08, hScale * 0.92, hScale * 1.08);

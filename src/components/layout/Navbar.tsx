@@ -25,7 +25,6 @@ import { useAgentUiState } from '../../agent/uiStateManager.ts';
 interface NavbarProps {
   currentTab: string;
   immersive?: boolean;
-  hideBottomNav?: boolean;
   onSelectTab: (tab: string) => void;
   lang: Language;
   onSelectLang: (lang: Language) => void;
@@ -197,26 +196,26 @@ export const Navbar: React.FC<NavbarProps> = ({
             : 'pointer-events-auto border-b border-[#23362c]/10 dark:border-white/[0.1] bg-[#faf7f0]/92 dark:bg-[#0d141e]/92 backdrop-blur-md pb-2 sm:pb-2.5'
         }`}
       >
-        <div className="mx-auto flex h-8 sm:h-9 w-full max-w-[1380px] items-center justify-between gap-1.5 sm:gap-2">
-          {/* Top-Left: Home Brand Medallion on Garden Home; Clear Return-Home + Active Module Title inside Subpages */}
-          {isGardenHome ? (
-            <button
-              type="button"
-              onClick={() => onSelectTab('globe')}
-              title={lang === 'zh' ? 'EARTH ONE 主页' : 'EARTH ONE Home'}
-              className={`pointer-events-auto flex h-8 w-8 sm:h-9 sm:w-9 lg:w-auto items-center justify-center lg:justify-start gap-1.5 rounded-full border p-0.5 lg:pl-0.5 lg:pr-2.5 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
-            >
-              <ParadiseBrandEmblem
-                surface={isGardenDay ? 'garden-day' : 'garden-night'}
-                variant="medallion"
-                size={20}
-              />
-              <span className="hidden lg:inline whitespace-nowrap text-[10px] font-semibold tracking-[0.16em]">
-                EARTH ONE
-              </span>
-            </button>
-          ) : (
-            <div className="pointer-events-auto flex min-w-0 items-center gap-1.5 sm:gap-2">
+        <div className="mx-auto grid h-8 sm:h-9 w-full max-w-[1380px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5 sm:gap-2.5">
+          {/* Column 1 (Left): Brand Medallion on Garden Home; Single Return-Home Control inside Sub-Modules */}
+          <div className="pointer-events-auto flex min-w-0 items-center justify-self-start">
+            {isGardenHome ? (
+              <button
+                type="button"
+                onClick={() => onSelectTab('globe')}
+                title={lang === 'zh' ? 'EARTH ONE 主页' : 'EARTH ONE Home'}
+                className={`flex h-8 w-8 sm:h-9 sm:w-9 lg:w-auto items-center justify-center lg:justify-start gap-1.5 rounded-full border p-0.5 lg:pl-0.5 lg:pr-2.5 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
+              >
+                <ParadiseBrandEmblem
+                  surface={isGardenDay ? 'garden-day' : 'garden-night'}
+                  variant="medallion"
+                  size={20}
+                />
+                <span className="hidden lg:inline whitespace-nowrap text-[10px] font-semibold tracking-[0.16em]">
+                  EARTH ONE
+                </span>
+              </button>
+            ) : (
               <button
                 type="button"
                 onClick={() => onSelectTab('globe')}
@@ -228,23 +227,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '返回主页'}
                 </span>
               </button>
-              {SUBPAGE_TITLES[currentTab] && (
-                <div className="flex min-w-0 items-center gap-1.5 text-[12px] sm:text-[13px] font-semibold text-[#1b2b23] dark:text-[#f5f1e8]">
-                  <span className="opacity-25">/</span>
-                  <span className="truncate max-w-[6.5rem] sm:max-w-[14rem]">
-                    {lang === 'ar'
-                      ? SUBPAGE_TITLES[currentTab].ar
-                      : lang === 'en'
-                        ? SUBPAGE_TITLES[currentTab].en
-                        : SUBPAGE_TITLES[currentTab].zh}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* Top-Right: Minimal Utilities & Profile Avatar */}
-          <div className="pointer-events-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
+          {/* Column 2 (Center): Reserved for Garden Live Clock on Home; Centered Active Workspace Title in Sub-Modules (Zero Sub-Module Navigation Links) */}
+          <div className="flex min-w-0 items-center justify-center justify-self-center">
+            {!isGardenHome && SUBPAGE_TITLES[currentTab] && (
+              <h1 className="truncate max-w-[8.5rem] sm:max-w-[16rem] md:max-w-[22rem] text-center text-[13px] sm:text-[14px] font-semibold tracking-tight text-[#1b2b23] dark:text-[#f5f1e8]">
+                {lang === 'ar'
+                  ? SUBPAGE_TITLES[currentTab].ar
+                  : lang === 'en'
+                    ? SUBPAGE_TITLES[currentTab].en
+                    : SUBPAGE_TITLES[currentTab].zh}
+              </h1>
+            )}
+          </div>
+
+          {/* Column 3 (Right): Minimal Utilities & Profile Avatar */}
+          <div className="pointer-events-auto flex shrink-0 items-center justify-self-end gap-1 sm:gap-1.5">
             {batteryState && (
               <div
                 title={

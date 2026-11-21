@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import type { ParadiseQualityProfile, ProceduralTextureSet } from './paradiseQuality.ts';
 import { BRIDGE_CONFIG, gardenPathFactor, terrainHeightAt } from './paradiseTerrain.ts';
 
-export const PAVILION_WORLD_POS = new THREE.Vector3(13.2, terrainHeightAt(13.2, -7.6) + 0.64, -7.6);
-export const REST_HOUSE_WORLD_POS = new THREE.Vector3(-12.2, terrainHeightAt(-12.2, 6.4) + 0.32, 6.4);
-export const LANGUAGE_HOUSE_WORLD_POS = new THREE.Vector3(9.4, terrainHeightAt(9.4, 9.6) + 0.32, 9.6);
-export const AI_HOUSE_WORLD_POS = new THREE.Vector3(1.4, terrainHeightAt(1.4, -13.2) + 0.36, -13.2);
-export const PHONE_BOOTH_WORLD_POS = new THREE.Vector3(-5.6, terrainHeightAt(-5.6, 11.8) + 0.22, 11.8);
+export const PAVILION_WORLD_POS = new THREE.Vector3(7.0, terrainHeightAt(7.0, -5.8) + 0.82, -5.8);
+export const REST_HOUSE_WORLD_POS = new THREE.Vector3(-7.0, terrainHeightAt(-7.0, -0.4) + 0.42, -0.4);
+export const LANGUAGE_HOUSE_WORLD_POS = new THREE.Vector3(5.4, terrainHeightAt(5.4, 6.0) + 0.42, 6.0);
+export const AI_HOUSE_WORLD_POS = new THREE.Vector3(-0.2, terrainHeightAt(-0.2, -9.0) + 0.48, -9.0);
+export const PHONE_BOOTH_WORLD_POS = new THREE.Vector3(-2.2, terrainHeightAt(-2.2, 8.4) + 0.28, 8.4);
 
 export type ArchitecturePortalId = 'library' | 'arabic-learning' | 'aihub' | 'chat' | 'venus';
 
@@ -508,14 +508,16 @@ export function createParadiseArchitecture(
   };
 
   // =========================================================================
-  // 1. Waterside Double-Eave Timber Pavilion (音乐馆) at (13.2, y, -7.6)
+  // 1. Waterside Double-Eave Timber Pavilion (音乐馆) at (7.0, y, -5.8)
   // =========================================================================
   const pav = new THREE.Group();
-  const pavX = 13.2;
-  const pavZ = -7.6;
+  const pavX = 7.0;
+  const pavZ = -5.8;
+  const pavScale = 1.3;
   const pavBaseY = terrainHeightAt(pavX, pavZ);
   pav.position.set(pavX, pavBaseY, pavZ);
-  pav.rotation.y = -0.34; // angled cleanly toward lake & Overlook viewer so plaque reads sharply
+  pav.rotation.y = -0.36; // angled cleanly toward lake & Overlook viewer so plaque reads sharply
+  pav.scale.setScalar(pavScale);
 
   // Lower carved stone terrace plinth (seats cleanly below terrain)
   const lowerPlinth = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(5.26, 0.58, 5.26)), graniteMat);
@@ -1082,14 +1084,13 @@ export function createParadiseArchitecture(
     [-23.6, -19.2, 2.2, 1.7, 2.0],
     [-16.2, -19.0, 1.85, 1.35, 0.8],
     [-11.5, -13.0, 1.65, 1.15, 1.7],
-    [-8.8, -6.5, 1.35, 0.88, 2.3],
-    [-3.5, -10.8, 1.3, 0.9, 0.4],
-    [0.8, -6.5, 1.25, 0.82, 1.9],
-    [13.4, -3.2, 1.4, 0.85, 2.8],
-    [14.8, 1.2, 1.5, 0.92, 0.6],
-    [11.2, 5.2, 1.3, 0.78, 1.5],
-    [-2.8, 3.6, 1.25, 0.76, 2.1],
-    [4.4, 5.8, 1.2, 0.72, 0.9],
+    [-10.8, -6.5, 1.35, 0.88, 2.3],
+    [-4.8, -11.4, 1.25, 0.86, 0.4],
+    [10.8, -2.6, 1.4, 0.85, 2.8],
+    [12.2, 1.6, 1.5, 0.92, 0.6],
+    [10.2, 5.2, 1.3, 0.78, 1.5],
+    [-4.2, 2.4, 1.1, 0.68, 2.1],
+    [4.6, 2.4, 1.15, 0.68, 0.9],
   ];
 
   for (let idx = 0; idx < rockDefs.length; idx++) {
@@ -1143,14 +1144,16 @@ export function createParadiseArchitecture(
   }
 
   // =========================================================================
-  // 5. Realistic East-Asian Library Cottage (图书馆) at (-12.2, y, 6.4)
+  // 5. Realistic East-Asian Library Cottage (图书馆) at (-7.0, y, -0.4)
   // =========================================================================
   const restHouseGroup = new THREE.Group();
-  const rhX = -12.2;
-  const rhZ = 6.4;
+  const rhX = -7.0;
+  const rhZ = -0.4;
+  const rhScale = 1.28;
   const rhBaseY = terrainHeightAt(rhX, rhZ);
   restHouseGroup.position.set(rhX, rhBaseY, rhZ);
-  restHouseGroup.rotation.y = 0.36; // face southeast cleanly toward viewer & main meadow
+  restHouseGroup.rotation.y = 0.38; // face southeast cleanly toward viewer & main courtyard
+  restHouseGroup.scale.setScalar(rhScale);
 
   const restWindowMat = new THREE.MeshStandardMaterial({
     color: 0xffe4b3,
@@ -1465,15 +1468,17 @@ export function createParadiseArchitecture(
   const extraWindowMats: THREE.MeshStandardMaterial[] = [];
 
   // =========================================================================
-  // 6. NEW House #1: Warm Sand-Plaster & Arched Language Center Hall (语言中心)
-  //    at (9.4, y, 9.6) — right-foreground meadow facing camera & path
+  // 6. Warm Sand-Plaster & Arched Language Center Hall (语言中心)
+  //    at (5.4, y, 6.0) — right-foreground flower terrace facing camera & path
   // =========================================================================
   const langHouseGroup = new THREE.Group();
-  const lhX = 9.4;
-  const lhZ = 9.6;
+  const lhX = 5.4;
+  const lhZ = 6.0;
+  const lhScale = 1.28;
   const lhBaseY = terrainHeightAt(lhX, lhZ);
   langHouseGroup.position.set(lhX, lhBaseY, lhZ);
   langHouseGroup.rotation.y = -0.34; // angled cleanly toward viewer & foreground path
+  langHouseGroup.scale.setScalar(lhScale);
 
   const terracottaTileMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -1648,15 +1653,17 @@ export function createParadiseArchitecture(
   group.add(langHouseGroup);
 
   // =========================================================================
-  // 7. NEW House #2: Starlight Timber-and-Glass AI Atelier (AI 中心)
-  //    at (1.4, y, -13.2) — hero north lakeside terrace across the lake
+  // 7. Starlight Timber-and-Glass AI Atelier (AI 中心)
+  //    at (-0.2, y, -9.0) — hero north lakeside terrace right across the mirror-lake
   // =========================================================================
   const aiHouseGroup = new THREE.Group();
-  const aiX = 1.4;
-  const aiZ = -13.2;
+  const aiX = -0.2;
+  const aiZ = -9.0;
+  const aiScale = 1.34;
   const aiBaseY = terrainHeightAt(aiX, aiZ);
   aiHouseGroup.position.set(aiX, aiBaseY, aiZ);
-  aiHouseGroup.rotation.y = 0.04; // face south straight across lake toward viewer
+  aiHouseGroup.rotation.y = 0.02; // face south straight across lake toward viewer
+  aiHouseGroup.scale.setScalar(aiScale);
 
   const aiGlassMat = new THREE.MeshStandardMaterial({
     color: 0xdff5ff,
@@ -1779,15 +1786,17 @@ export function createParadiseArchitecture(
   group.add(aiHouseGroup);
 
   // =========================================================================
-  // 8. NEW Classic Heritage Red Telephone Booth (通讯 · 电话亭)
-  //    at (-5.6, y, 11.8) — nestled in a landscaped roadside cobblestone bay 4.3m off the footpath!
+  // 8. Classic Heritage Red Telephone Booth (通讯 · 电话亭)
+  //    at (-2.2, y, 8.4) — nestled in a landscaped roadside cobblestone flower alcove 3.6m off the footpath!
   // =========================================================================
   const phoneBoothGroup = new THREE.Group();
-  const pbX = -5.6;
-  const pbZ = 11.8;
+  const pbX = -2.2;
+  const pbZ = 8.4;
+  const pbScale = 1.24;
   const pbBaseY = terrainHeightAt(pbX, pbZ);
   phoneBoothGroup.position.set(pbX, pbBaseY, pbZ);
-  phoneBoothGroup.rotation.y = 0.24; // face viewer & lane gracefully from its dedicated side alcove
+  phoneBoothGroup.rotation.y = 0.2; // face viewer & lane gracefully from its dedicated side alcove
+  phoneBoothGroup.scale.setScalar(pbScale);
 
   const boothRedMat = trackMat(
     new THREE.MeshStandardMaterial({
@@ -1990,7 +1999,7 @@ export function createParadiseArchitecture(
       group: restHouseGroup,
       signMat: libraryPlaque.faceMat,
       worldPos: REST_HOUSE_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(rhX, rhBaseY + 4.35, rhZ),
+      labelPos: new THREE.Vector3(rhX, rhBaseY + 4.35 * rhScale, rhZ),
     },
     {
       id: 'venus',
@@ -2000,7 +2009,7 @@ export function createParadiseArchitecture(
       group: pav,
       signMat: musicPlaque.faceMat,
       worldPos: PAVILION_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(pavX, pavBaseY + 6.45, pavZ),
+      labelPos: new THREE.Vector3(pavX, pavBaseY + 6.45 * pavScale, pavZ),
     },
     {
       id: 'arabic-learning',
@@ -2010,7 +2019,7 @@ export function createParadiseArchitecture(
       group: langHouseGroup,
       signMat: languagePlaque.faceMat,
       worldPos: LANGUAGE_HOUSE_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(lhX, lhBaseY + 4.75, lhZ),
+      labelPos: new THREE.Vector3(lhX, lhBaseY + 4.75 * lhScale, lhZ),
     },
     {
       id: 'aihub',
@@ -2020,7 +2029,7 @@ export function createParadiseArchitecture(
       group: aiHouseGroup,
       signMat: aiPlaque.faceMat,
       worldPos: AI_HOUSE_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(aiX, aiBaseY + 6.05, aiZ),
+      labelPos: new THREE.Vector3(aiX, aiBaseY + 6.05 * aiScale, aiZ),
     },
     {
       id: 'chat',
@@ -2030,7 +2039,7 @@ export function createParadiseArchitecture(
       group: phoneBoothGroup,
       signMat: phonePlaque.faceMat,
       worldPos: PHONE_BOOTH_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(pbX, pbBaseY + 4.05, pbZ),
+      labelPos: new THREE.Vector3(pbX, pbBaseY + 4.05 * pbScale, pbZ),
     },
   ];
 
