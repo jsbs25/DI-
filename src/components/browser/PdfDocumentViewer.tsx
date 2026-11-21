@@ -20,6 +20,7 @@ import {
   Eye,
   FileText,
   Languages,
+  Layers,
   List,
   Loader2,
   MessageSquare,
@@ -34,7 +35,7 @@ import {
   Volume2,
   X,
 } from 'lucide-react';
-import { Language } from '../../types/index.ts';
+import { type Book, Language } from '../../types/index.ts';
 import {
   DEFAULT_READER_PREFS,
   READER_BG_PRESETS,
@@ -53,12 +54,14 @@ import {
   type ReaderPreferences,
 } from '../../utils/readerPreferences.ts';
 import {
+  convertPdfDocumentToEbook,
   extractPdfToc,
   extractStructuredPdfPage,
   parseOcrMarkdownToBlocks,
   renderPdfPageToJpegDataUrl,
   type ExtractedEbookPage,
   type PdfTocItem,
+  type WholePdfConversionProgress,
 } from '../../utils/pdfEbookExtractor.ts';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
@@ -112,6 +115,8 @@ export interface PdfDocumentViewerProps {
     scrollRatio: number;
     keepalive?: boolean;
   }) => void;
+  /** Optional callback when the entire PDF has been converted into a structured electronic book. */
+  onConvertedToEbook?: (book: Book) => void;
   /** Callback to return to Bookshelf / Library. */
   onClose?: () => void;
 }
@@ -254,6 +259,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
   initialPage,
   originPageUrl,
   onServerSaveProgress,
+  onConvertedToEbook,
   onClose,
 }) => {
   const isZh = lang === 'zh';
@@ -296,6 +302,11 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
 
   // Inline Paragraph Translations (blockId -> translated string)
   const [inlineTranslations, setInlineTranslations] = useState<Record<string, { loading?: boolean; text?: string; error?: string }>>({});
+  // Page-level Visual/Clean AI Translations (pageNumber -> translation)
+  const [pageTranslations, setPageTranslations] = useState<Record<number, { loading?: boolean; text?: string; error?: string }>>({});
+  // Whole-PDF to Electronic Book Conversion Progress
+  const [convertingEbook, setConvertingEbook] = useState<WholePdfConversionProgress | null>(null);
+  const [convertEbookError, setConvertEbookError] = useState('');
 
   // Floating Text Selection Action Bar
   const [selectionAction, setSelectionAction] = useState<{ text: string; blockId?: string } | null>(null);
@@ -724,27 +735,25 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [prefs.layoutMode, viewMode, pageCount]);
 
-  // Swipe to turn pages on mobile/tablet (paged reflow and original views)
   const pageTouchStartXRef = useRef<number | null>(null);
   const pageTouchStartYRef = useRef<number | null>(null);
 
-  const handlePageTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    if (settingsOpen || tocOpen || aiDrawerOpen || wordCard) return;
-    if (!(prefs.layoutMode === 'paged' || viewMode === 'original')) return;
-    const t = e.touches[0];
-    if (!t) return;
-    pageTouchStartXRef.current = t.clientX;
-    pageTouchStartYRef.current = t.clientY;
+  const handlePageTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    if (prefs.layoutMode !== 'paged' && viewMode !== 'original') return;
+    if (aiDrawerOpen || settingsOpen || tocOpen || wordCard) return;
+    pageTouchStartXRef.current = e.touches[0].clientX;
+    pageTouchStartYRef.current = e.touches[0].clientY;
   }, [aiDrawerOpen, prefs.layoutMode, settingsOpen, tocOpen, viewMode, wordCard]);
 
-  const handlePageTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    if (settingsOpen || tocOpen || aiDrawerOpen || wordCard) return;
-    if (!(prefs.layoutMode === 'paged' || viewMode === 'original')) return;
+  const handlePageTouchEnd = useCallback((e: React.TouchEvent) => {
     const startX = pageTouchStartXRef.current;
     const startY = pageTouchStartYRef.current;
     pageTouchStartXRef.current = null;
     pageTouchStartYRef.current = null;
     if (startX == null || startY == null) return;
+    if (prefs.layoutMode !== 'paged' && viewMode !== 'original') return;
+    if (aiDrawerOpen || settingsOpen || tocOpen || wordCard) return;
     const t = e.changedTouches[0];
     if (!t) return;
     const dx = t.clientX - startX;
@@ -865,38 +874,184 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
     [lang, title]
   );
 
-  // AI Deep Explanation (6-dimension mentor breakdown)
-  const handleDeepExplain = useCallback(
-    async (passageText?: string) => {
-      const currentText = passageText?.trim() || extractedPages[pageNumber]?.plainText || '';
-      if (!currentText) return;
-      setSelectionAction(null);
-      setAiDrawerOpen(true);
-      setAiTab('explain');
-      setDeepExplainTarget(currentText.slice(0, 140));
-      setDeepExplainLoading(true);
-      setDeepExplainError('');
+  // Page-Level Vision / Clean AI Translation (never sends garbled numbers or broken Arabic to translator)
+  const handleTranslatePageVisual = useCallback(
+    async (targetPage: number) => {
+      if (!pdfProxy) return;
+      setPageTranslations((prev) => ({ ...prev, [targetPage]: { loading: true } }));
       try {
-        const res = await fetch('/api/library/ai/deep-explain', {
+        const ep = extractedPages[targetPage];
+        const targetLang = lang === 'en' ? 'en' : 'zh';
+        const useVisual = !ep || ep.isLikelyScanned || !ep.plainText.trim();
+        let body: Record<string, unknown>;
+        if (useVisual) {
+          const pageImageBase64 = await renderPdfPageToJpegDataUrl(pdfProxy, targetPage, 1.45);
+          body = {
+            pageImageBase64,
+            pageNumber: targetPage,
+            bookTitle: title,
+            targetLang,
+          };
+        } else {
+          body = {
+            text: ep.plainText.slice(0, 4200),
+            pageNumber: targetPage,
+            bookTitle: title,
+            targetLang,
+          };
+        }
+        const res = await fetch('/api/library/ai/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.success) throw new Error(data?.error || '本页翻译失败');
+        setPageTranslations((prev) => ({ ...prev, [targetPage]: { text: data.translation } }));
+      } catch (err: any) {
+        setPageTranslations((prev) => ({
+          ...prev,
+          [targetPage]: { error: err?.message || '本页翻译暂不可用，请稍后重试' },
+        }));
+      }
+    },
+    [pdfProxy, extractedPages, lang, title]
+  );
+
+  // Convert ENTIRE PDF document into a Reflowable Electronic Book in one shot (no clicking page by page)
+  const handleConvertWholePdfToEbook = useCallback(async () => {
+    if (!pdfProxy || convertingEbook) return;
+    setConvertEbookError('');
+    setConvertingEbook({
+      stage: 'extracting',
+      currentPage: 0,
+      totalPages: pdfProxy.numPages,
+      cleanPages: 0,
+      ocrPages: 0,
+      message: isZh ? '正在解析整本 PDF 结构与章节…' : 'Analyzing full PDF structure…',
+    });
+    try {
+      const result = await convertPdfDocumentToEbook(pdfProxy, title, {
+        maxAutoOcrPages: 20,
+        onProgress: (p) => setConvertingEbook(p),
+      });
+
+      if (!result.chapters.length) {
+        throw new Error(isZh ? '未能从该 PDF 提取有效正文，请继续使用高清原版直呈或单页 AI 翻译。' : 'No readable text could be extracted.');
+      }
+
+      if (bookId) {
+        setConvertingEbook({
+          stage: 'finalizing',
+          currentPage: pdfProxy.numPages,
+          totalPages: pdfProxy.numPages,
+          cleanPages: result.cleanPages,
+          ocrPages: result.ocrPages,
+          message: isZh ? '正在保存整本电子版到世界图书馆…' : 'Saving electronic edition…',
+        });
+        const res = await fetch(`/api/library/books/${encodeURIComponent(bookId)}/ebook-chapters`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: currentText.slice(0, 4800),
-            bookTitle: title,
-            chapterTitle: `第 ${pageNumber} 页`,
-            lang,
+            chapters: result.chapters,
+            language: result.language,
+            coverImageBase64: result.coverImage,
+            pageCount: result.pageCount,
           }),
         });
         const data = await res.json();
-        if (!res.ok || !data?.success) throw new Error(data?.error || 'AI 精讲失败');
-        setDeepExplainText(data.explanation || '');
+        if (!res.ok || !data?.success || !data.book) {
+          throw new Error(data?.error || '保存电子版失败');
+        }
+        setConvertingEbook(null);
+        if (onConvertedToEbook) {
+          onConvertedToEbook(data.book as Book);
+          return;
+        }
+      }
+
+      // If no bookId or no callback, synthesize a full electronic Book object for immediate reading
+      const syntheticBook: Book = {
+        id: bookId || `ebook_${Date.now()}`,
+        title,
+        author: isZh ? 'PDF 电子版' : 'PDF Electronic Edition',
+        language: result.language,
+        category: result.language === 'ar' ? 'islamic_studies' : 'literature',
+        coverImage: result.coverImage || '/assets/library/cover-little-prince.jpg',
+        description: isZh
+          ? `共 ${result.pageCount} 页 · 已整本自动转为 ${result.chapters.length} 章节电子版`
+          : `${result.pageCount} pages · Converted into ${result.chapters.length} electronic chapters`,
+        source: 'Open Access',
+        formatType: 'text',
+        externalReadUrl: sourceUrl,
+        readProgress: 0,
+        chapters: result.chapters,
+      };
+      setConvertingEbook(null);
+      if (onConvertedToEbook) {
+        onConvertedToEbook(syntheticBook);
+      }
+    } catch (err: any) {
+      setConvertingEbook(null);
+      setConvertEbookError(err?.message || (isZh ? '整本转换暂不可用' : 'Conversion unavailable'));
+    }
+  }, [pdfProxy, convertingEbook, title, bookId, sourceUrl, isZh, onConvertedToEbook]);
+
+  // AI Deep Explanation (6-dimension mentor breakdown, with Vision fallback for scanned/broken-encoding pages)
+  const handleDeepExplain = useCallback(
+    async (passageText?: string, targetPageNum?: number) => {
+      const pNum = targetPageNum ?? pageNumber;
+      const ep = extractedPages[pNum];
+      const currentText = passageText?.trim() || (!ep?.isLikelyScanned ? ep?.plainText : '') || '';
+      if (!currentText && !pdfProxy) return;
+
+      setSelectionAction(null);
+      setAiDrawerOpen(true);
+      setAiTab('explain');
+      setDeepExplainTarget(
+        currentText ? currentText.slice(0, 140) : isZh ? `第 ${pNum} 页原版图像视觉精讲` : `Visual analysis of page ${pNum}`
+      );
+      setDeepExplainLoading(true);
+      setDeepExplainError('');
+      try {
+        if (currentText) {
+          const res = await fetch('/api/library/ai/deep-explain', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: currentText.slice(0, 4800),
+              bookTitle: title,
+              chapterTitle: `第 ${pNum} 页`,
+              lang,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data?.success) throw new Error(data?.error || 'AI 精讲失败');
+          setDeepExplainText(data.explanation || '');
+        } else if (pdfProxy) {
+          const pageImageBase64 = await renderPdfPageToJpegDataUrl(pdfProxy, pNum, 1.4);
+          const res = await fetch('/api/library/ai/explain-page', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              pageImageBase64,
+              pageNumber: pNum,
+              bookTitle: title,
+              question: isZh ? '请准确识别本页核心内容并用中文进行精讲与翻译要点总结。' : 'Please transcribe key points and explain this page clearly.',
+              lang,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data?.success) throw new Error(data?.error || '视觉精讲失败');
+          setDeepExplainText(data.answer || data.explanation || '');
+        }
       } catch (err: any) {
         setDeepExplainError(err?.message || 'AI 精讲暂不可用');
       } finally {
         setDeepExplainLoading(false);
       }
     },
-    [extractedPages, pageNumber, title, lang]
+    [extractedPages, pageNumber, pdfProxy, title, lang, isZh]
   );
 
   // Whole-Book AI Q&A
@@ -1840,7 +1995,7 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                     prefs.fontFamily === 'tajawal_ar';
                   const effectivePageFont =
                     isArabicPage && !userPickedArabicFont
-                      ? '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif'
+                      ? '"Scheherazade New", "Amiri", "Noto Naskh Arabic", serif'
                       : fontCss;
                   const effectivePageLineHeight = isArabicPage
                     ? Math.max(prefs.lineHeight, 2.25)
@@ -1898,7 +2053,19 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                             onClick={(e) => {
                               e.stopPropagation();
                               setPageNumber(pNum);
-                              void handleDeepExplain(ep?.plainText);
+                              void handleTranslatePageVisual(pNum);
+                            }}
+                            className="hover:opacity-100 opacity-75 transition cursor-pointer"
+                          >
+                            {isZh ? '翻译' : 'Translate'}
+                          </button>
+                          <span className="opacity-45">·</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setPageNumber(pNum);
+                              void handleDeepExplain(ep?.plainText, pNum);
                             }}
                             className="hover:opacity-100 opacity-75 transition cursor-pointer"
                           >
@@ -1932,27 +2099,55 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                           isDarkTheme={palette.isDark}
                         />
                         <div
-                          className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t text-[11px]"
+                          className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t text-[11px]"
                           style={{ borderColor: palette.border, color: palette.muted }}
                         >
                           <span>
                             {isOcrBusy
                               ? isZh
-                                ? '正在通过 ONE AI 视觉识别原页阿拉伯语文字…'
+                                ? '正在通过视觉引擎识别原页文字…'
                                 : 'Recognizing authentic text via Vision OCR…'
-                              : isZh
-                                ? '高清原版直呈 · 确保阿文零错字'
-                                : 'HD authentic edition · zero glyph errors'}
+                              : ep.extractionIssue === 'garbled_numeric'
+                                ? isZh
+                                  ? '高清原版直呈 · 已自动拦截数字乱码字体'
+                                  : 'HD authentic page · blocked garbled numeric font'
+                                : ep.extractionIssue === 'garbled_arabic'
+                                  ? isZh
+                                    ? '高清原版直呈 · 已拦截损坏阿文编码，确保零错字'
+                                    : 'HD authentic page · zero Arabic glyph corruption'
+                                  : isZh
+                                    ? '高清原版直呈 · 支持 AI 视觉翻译与整本转电子版'
+                                    : 'HD authentic edition · Vision translate & full ebook conversion'}
                           </span>
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={Boolean(pageTranslations[pNum]?.loading)}
+                              onClick={() => void handleTranslatePageVisual(pNum)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-[#247864] px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-50 cursor-pointer"
+                            >
+                              {pageTranslations[pNum]?.loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Languages className="h-3 w-3" />}
+                              <span>{pageTranslations[pNum]?.loading ? (isZh ? '翻译中…' : 'Translating…') : isZh ? 'AI 翻译本页' : 'Translate Page'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={Boolean(convertingEbook)}
+                              onClick={() => void handleConvertWholePdfToEbook()}
+                              className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-medium cursor-pointer disabled:opacity-50"
+                              style={{ borderColor: palette.border, color: palette.ink }}
+                            >
+                              {convertingEbook ? <Loader2 className="h-3 w-3 animate-spin" /> : <Layers className="h-3 w-3" />}
+                              <span>{isZh ? '整本转电子版' : 'Full Ebook'}</span>
+                            </button>
                             <button
                               type="button"
                               disabled={isOcrBusy}
                               onClick={() => void ensurePageExtracted(pNum, true)}
-                              className="inline-flex items-center gap-1 rounded-lg bg-[#247864] px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-50 cursor-pointer"
+                              className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-medium cursor-pointer disabled:opacity-50"
+                              style={{ borderColor: palette.border, color: palette.ink }}
                             >
                               {isOcrBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ScanText className="h-3 w-3" />}
-                              <span>{isOcrBusy ? (isZh ? '识别中…' : 'Recognizing…') : isZh ? 'AI 识字可点查' : 'Vision OCR'}</span>
+                              <span>{isOcrBusy ? (isZh ? '识别中…' : 'OCR…') : isZh ? '单页识字' : 'OCR Page'}</span>
                             </button>
                             <button
                               type="button"
@@ -1964,10 +2159,71 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                               style={{ borderColor: palette.border, color: palette.ink }}
                             >
                               <Eye className="h-3 w-3" />
-                              <span>{isZh ? '自由缩放' : 'Zoom'}</span>
+                              <span>{isZh ? '缩放' : 'Zoom'}</span>
                             </button>
                           </div>
                         </div>
+
+                        {convertingEbook && (
+                          <div
+                            className="rounded-xl border p-3 text-xs space-y-2"
+                            style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium" style={{ color: palette.ink }}>{convertingEbook.message}</span>
+                              <span className="tabular-nums opacity-70">
+                                {convertingEbook.currentPage} / {convertingEbook.totalPages}
+                              </span>
+                            </div>
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/10">
+                              <div
+                                className="h-full rounded-full bg-[#247864] transition-all duration-300"
+                                style={{
+                                  width: `${Math.max(4, Math.round((convertingEbook.currentPage / Math.max(1, convertingEbook.totalPages)) * 100))}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {convertEbookError && (
+                          <p className="text-xs text-rose-600 dark:text-rose-400">{convertEbookError}</p>
+                        )}
+
+                        {pageTranslations[pNum] && (
+                          <div
+                            className="rounded-xl border p-3.5 text-[13px] leading-relaxed"
+                            style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                          >
+                            <div className="flex items-center justify-between mb-1.5 text-[11px]" style={{ color: palette.muted }}>
+                              <span>{isZh ? `第 ${pNum} 页 · AI 视觉直译` : `Page ${pNum} · AI Translation`}</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPageTranslations((prev) => {
+                                    const copy = { ...prev };
+                                    delete copy[pNum];
+                                    return copy;
+                                  })
+                                }
+                                className="opacity-65 hover:opacity-100 cursor-pointer"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            {pageTranslations[pNum].loading ? (
+                              <div className="flex items-center gap-2 py-2 text-xs" style={{ color: palette.muted }}>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#247864]" />
+                                <span>{isZh ? '正在识别原页并生成准确译文…' : 'Reading authentic page & translating…'}</span>
+                              </div>
+                            ) : pageTranslations[pNum].error ? (
+                              <p className="text-xs text-rose-500">{pageTranslations[pNum].error}</p>
+                            ) : (
+                              <div className="whitespace-pre-wrap" style={{ color: palette.ink }}>
+                                {pageTranslations[pNum].text}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div>
@@ -2123,6 +2379,42 @@ export const PdfDocumentViewer: React.FC<PdfDocumentViewerProps> = ({
                             </div>
                           );
                         })}
+                        {pageTranslations[pNum] && (
+                          <div
+                            dir="auto"
+                            className="mt-4 rounded-xl border p-3.5 text-[13px] leading-relaxed font-sans"
+                            style={{ borderColor: palette.border, backgroundColor: palette.surface }}
+                          >
+                            <div className="flex items-center justify-between mb-1.5 text-[11px]" style={{ color: palette.muted }}>
+                              <span>{isZh ? `第 ${pNum} 页 · AI 整页译文` : `Page ${pNum} · AI Translation`}</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPageTranslations((prev) => {
+                                    const copy = { ...prev };
+                                    delete copy[pNum];
+                                    return copy;
+                                  })
+                                }
+                                className="opacity-65 hover:opacity-100 cursor-pointer"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            {pageTranslations[pNum].loading ? (
+                              <div className="flex items-center gap-2 py-2 text-xs" style={{ color: palette.muted }}>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#247864]" />
+                                <span>{isZh ? '正在生成本页准确译文…' : 'Translating page…'}</span>
+                              </div>
+                            ) : pageTranslations[pNum].error ? (
+                              <p className="text-xs text-rose-500">{pageTranslations[pNum].error}</p>
+                            ) : (
+                              <div className="whitespace-pre-wrap" style={{ color: palette.ink }}>
+                                {pageTranslations[pNum].text}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </section>

@@ -1144,13 +1144,26 @@ export function registerNoorIslamicLibraryRoutes(
   app.post('/api/library/islamic/save-to-shelf', handleSaveToBookshelf);
 
   // 4. Upload Local PDF / Markdown (.md) / Text (.txt) directly into Website Bookshelf
-  app.post('/api/library/islamic/upload-pdf', (req: Request, res: Response) => {
+  //    Supports pre-converted full-book electronic chapters + cover thumbnail so users never click page-by-page!
+  const handleLocalBookUpload = (req: Request, res: Response) => {
     const userId = resolveShelfUserId(req);
-    const { title, author, language, fileBase64, filename: originalFilename } = req.body || {};
+    const {
+      title,
+      author,
+      language,
+      category,
+      fileBase64,
+      filename: originalFilename,
+      chapters: incomingChapters,
+      coverImageBase64,
+      pageCount,
+    } = req.body || {};
+
     if (typeof fileBase64 !== 'string' || fileBase64.length < 16) {
       return res.status(400).json({ success: false, error: '请选择有效的 PDF、Markdown 或 TXT 书籍文件。' });
     }
     try {
+      fs.mkdirSync(PDF_VAULT_DIR, { recursive: true });
       const lowerName = String(originalFilename || '').toLowerCase();
       const isTextOrMd = lowerName.endsWith('.md') || lowerName.endsWith('.markdown') || lowerName.endsWith('.txt');
       const cleanB64 = fileBase64.replace(/^data:[^;]+;base64,/, '').trim();
@@ -1163,8 +1176,38 @@ export function registerNoorIslamicLibraryRoutes(
       const hash = crypto.createHash('sha1').update(buf).digest('hex').slice(0, 12);
       const derivedTitle =
         String(title || '').trim() ||
-        String(originalFilename || 'مكتبة النور · 书籍').replace(/\.(pdf|md|markdown|txt)$/i, '').trim();
-      const cleanLang = language === 'zh' || language === 'en' ? language : 'ar';
+        String(originalFilename || '导入电子书').replace(/\.(pdf|md|markdown|txt)$/i, '').trim();
+      const cleanLang =
+        language === 'zh' || language === 'en' || language === 'ar'
+          ? language
+          : /[\u0600-\u06FF]/.test(derivedTitle)
+            ? 'ar'
+            : /[\u4E00-\u9FFF]/.test(derivedTitle)
+              ? 'zh'
+              : 'en';
+      const validCategories = ['literature', 'history', 'philosophy', 'science', 'religion', 'islamic_studies', 'education', 'computer_science'];
+      const resolvedCategory: Book['category'] =
+        typeof category === 'string' && validCategories.includes(category)
+          ? (category as Book['category'])
+          : cleanLang === 'ar'
+            ? 'islamic_studies'
+            : 'literature';
+
+      // Save optional Page-1 cover thumbnail to disk so store.json stays lean
+      let coverUrl = cleanLang === 'ar' ? '/assets/library/cover-arabian-nights.jpg' : '/assets/library/cover-little-prince.jpg';
+      if (typeof coverImageBase64 === 'string' && coverImageBase64.startsWith('data:image/')) {
+        try {
+          const imgB64 = coverImageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+          const imgBuf = Buffer.from(imgB64, 'base64');
+          if (imgBuf.byteLength > 200 && imgBuf.byteLength < 2 * 1024 * 1024) {
+            const coverName = `cover_${hash}.jpg`;
+            fs.writeFileSync(path.join(PDF_VAULT_DIR, coverName), imgBuf);
+            coverUrl = `/api/library/local-covers/${coverName}`;
+          }
+        } catch {
+          // Keep default cover gracefully
+        }
+      }
 
       if (isTextOrMd) {
         const textContent = buf.toString('utf8').trim();
@@ -1172,7 +1215,7 @@ export function registerNoorIslamicLibraryRoutes(
           return res.status(400).json({ success: false, error: '文件内容为空。' });
         }
         const sections = textContent.split(/\n(?=#{1,2}\s+)/).filter((s) => s.trim().length > 0);
-        const chapters = sections.slice(0, 60).map((sec, idx) => {
+        const chapters = sections.slice(0, 120).map((sec, idx) => {
           const firstLine = sec.split('\n')[0].replace(/^#+\s*/, '').trim();
           const body = sec.replace(/^#+\s*[^\n]*\n?/, '').trim() || sec.trim();
           return {
@@ -1183,17 +1226,16 @@ export function registerNoorIslamicLibraryRoutes(
         });
 
         const newBook: Book = {
-          id: `book_noor_md_${hash}`,
+          id: `book_upload_txt_${hash}`,
           title: derivedTitle.slice(0, 180),
-          author: String(author || 'مكتبة النور · 原文导入').trim().slice(0, 120),
-          category: 'islamic_studies',
+          author: String(author || '本地导入电子书').trim().slice(0, 120),
+          category: resolvedCategory,
           language: cleanLang,
           year: new Date().getFullYear().toString(),
           source: 'Open Access',
-          sourceUrl: 'https://www.noor-book.com/',
           formatType: 'text',
           textAvailability: 'full_text',
-          coverImage: '/assets/library/cover-arabian-nights.jpg',
+          coverImage: coverUrl,
           description: textContent.slice(0, 220),
           readProgress: 0,
           chapters: chapters.length > 0 ? chapters : [{ id: 'ch_1', title: derivedTitle, content: textContent }],
@@ -1217,26 +1259,42 @@ export function registerNoorIslamicLibraryRoutes(
         return res.status(400).json({ success: false, error: '上传的文件不是标准 PDF、Markdown 或 TXT 格式。' });
       }
 
-      const storedFilename = `noor_upload_${hash}.pdf`;
+      const storedFilename = `upload_${hash}.pdf`;
       fs.writeFileSync(path.join(PDF_VAULT_DIR, storedFilename), buf);
-
       const localUrl = `/api/library/local-pdfs/${storedFilename}`;
+
+      // Sanitize pre-converted structured electronic chapters when supplied by automatic converter
+      const sanitizedChapters = Array.isArray(incomingChapters)
+        ? incomingChapters
+            .filter((c: any) => c && typeof c.content === 'string' && c.content.trim().length > 0)
+            .slice(0, 300)
+            .map((c: any, idx: number) => ({
+              id: typeof c.id === 'string' && c.id.trim() ? c.id.trim().slice(0, 64) : `ch_${idx + 1}`,
+              title: typeof c.title === 'string' && c.title.trim() ? c.title.trim().slice(0, 140) : `第 ${idx + 1} 章`,
+              content: String(c.content).trim(),
+            }))
+        : [];
+
+      const hasFullEbookChapters = sanitizedChapters.length > 0;
+      const totalPagesNum = Number.isFinite(Number(pageCount)) && Number(pageCount) > 0 ? Math.floor(Number(pageCount)) : undefined;
+
       const newBook: Book = {
-        id: `book_noor_${hash}`,
+        id: `book_pdf_${hash}`,
         title: derivedTitle.slice(0, 180),
-        author: String(author || 'مكتبة النور · 已导入书架').trim().slice(0, 120),
-        category: 'islamic_studies',
+        author: String(author || '本地 PDF 导入').trim().slice(0, 120),
+        category: resolvedCategory,
         language: cleanLang,
         year: new Date().getFullYear().toString(),
         source: 'Open Access',
-        sourceUrl: 'https://www.noor-book.com/',
         externalReadUrl: localUrl,
-        formatType: 'pdf',
+        formatType: hasFullEbookChapters ? 'text' : 'pdf',
         textAvailability: 'full_text',
-        coverImage: '/assets/library/cover-arabian-nights.jpg',
-        description: '已导入 ONE 网站书架的原版 PDF 典籍，支持 AI 逐页讲解与点词查义。',
+        coverImage: coverUrl,
+        description: hasFullEbookChapters
+          ? `已自动整本转为精排电子版（共 ${sanitizedChapters.length} 章${totalPagesNum ? ` · 原书 ${totalPagesNum} 页` : ''}），支持全书分段阅读、点词查义、AI 翻译与进度自动云端保存。`
+          : `已导入本地 PDF 典籍${totalPagesNum ? `（共 ${totalPagesNum} 页）` : ''}，支持高清原版直呈、AI 识字与整本转电子版。`,
         readProgress: 0,
-        chapters: [],
+        chapters: sanitizedChapters,
       };
 
       const existingIdx = store.books.findIndex((b: Book) => b.id === newBook.id);
@@ -1249,15 +1307,83 @@ export function registerNoorIslamicLibraryRoutes(
         success: true,
         book: newBook,
         shelfItem,
+        isTextBook: hasFullEbookChapters,
         localPdfUrl: localUrl,
         downloadUrl: `${localUrl}?download=1&filename=${encodeURIComponent(newBook.title)}`,
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message || '文件导入书架失败' });
     }
+  };
+
+  app.post('/api/library/islamic/upload-pdf', handleLocalBookUpload);
+  app.post('/api/library/upload-pdf', handleLocalBookUpload);
+
+  // 4b. Persist whole-book converted electronic chapters back onto an existing PDF book
+  app.post('/api/library/books/:id/ebook-chapters', (req: Request, res: Response) => {
+    const book = store.books.find((b: Book) => b.id === req.params.id);
+    if (!book) return res.status(404).json({ success: false, error: 'Book not found' });
+
+    const { chapters, language, coverImageBase64, pageCount } = req.body || {};
+    if (!Array.isArray(chapters) || chapters.length === 0) {
+      return res.status(400).json({ success: false, error: '没有可保存的电子书章节内容。' });
+    }
+
+    const sanitizedChapters = chapters
+      .filter((c: any) => c && typeof c.content === 'string' && c.content.trim().length > 0)
+      .slice(0, 300)
+      .map((c: any, idx: number) => ({
+        id: typeof c.id === 'string' && c.id.trim() ? c.id.trim().slice(0, 64) : `ch_${idx + 1}`,
+        title: typeof c.title === 'string' && c.title.trim() ? c.title.trim().slice(0, 140) : `第 ${idx + 1} 章`,
+        content: String(c.content).trim(),
+      }));
+
+    if (sanitizedChapters.length === 0) {
+      return res.status(400).json({ success: false, error: '转换结果为空，请尝试使用 AI 识字模式。' });
+    }
+
+    book.chapters = sanitizedChapters;
+    book.formatType = 'text';
+    book.textAvailability = 'full_text';
+    if (language === 'ar' || language === 'zh' || language === 'en') {
+      book.language = language;
+    }
+    const totalPagesNum = Number.isFinite(Number(pageCount)) && Number(pageCount) > 0 ? Math.floor(Number(pageCount)) : undefined;
+    book.description = `已自动整本转为精排电子版（共 ${sanitizedChapters.length} 章${totalPagesNum ? ` · 原书 ${totalPagesNum} 页` : ''}），支持全书虚拟滚动、点词查义、翻译与服务器进度同步。`;
+
+    if (typeof coverImageBase64 === 'string' && coverImageBase64.startsWith('data:image/')) {
+      try {
+        fs.mkdirSync(PDF_VAULT_DIR, { recursive: true });
+        const imgB64 = coverImageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+        const imgBuf = Buffer.from(imgB64, 'base64');
+        if (imgBuf.byteLength > 200 && imgBuf.byteLength < 2 * 1024 * 1024) {
+          const safeId = book.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
+          const coverName = `cover_${safeId}.jpg`;
+          fs.writeFileSync(path.join(PDF_VAULT_DIR, coverName), imgBuf);
+          book.coverImage = `/api/library/local-covers/${coverName}`;
+        }
+      } catch {}
+    }
+
+    store.saveToDisk();
+    return res.json({ success: true, book, chapterCount: sanitizedChapters.length });
   });
 
-  // 5. Serve Locally Saved Vault PDFs
+  // 5. Serve Locally Saved Vault PDFs & Cover Thumbnails
+  app.get('/api/library/local-covers/:filename', (req: Request, res: Response) => {
+    const rawName = String(req.params.filename || '');
+    if (!/^[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp)$/.test(rawName)) {
+      return res.status(400).json({ success: false, error: 'Invalid cover filename' });
+    }
+    const filePath = path.join(PDF_VAULT_DIR, rawName);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, error: 'Cover not found' });
+    }
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+    return res.sendFile(filePath);
+  });
+
   app.get('/api/library/local-pdfs/:filename', (req: Request, res: Response) => {
     const rawName = String(req.params.filename || '');
     if (!/^[a-zA-Z0-9_-]+\.pdf$/.test(rawName)) {
@@ -1472,21 +1598,53 @@ export function registerNoorIslamicLibraryRoutes(
     }
   });
 
-  // 9. Inline Paragraph / Selection Translation
+  // 9. Inline Paragraph / Selection / Scanned-Page Vision Translation (NEVER translates garbled numbers!)
   app.post('/api/library/ai/translate', async (req: Request, res: Response) => {
-    const { text, targetLang = 'zh', bookTitle } = req.body || {};
+    const { text, pageImageBase64, targetLang = 'zh', bookTitle, pageNumber } = req.body || {};
     const cleanText = typeof text === 'string' ? text.trim().slice(0, 4500) : '';
-    if (!cleanText) {
-      return res.status(400).json({ success: false, error: '请选中需要翻译的段落或句子。' });
+    const hasImage = typeof pageImageBase64 === 'string' && pageImageBase64.length > 200;
+
+    if (!cleanText && !hasImage) {
+      return res.status(400).json({ success: false, error: '请选中需要翻译的段落或使用整页视觉翻译。' });
     }
+
+    // Reject garbled numeric-only CID dumps when no page image is supplied (prevents translating Arabic PDFs into a string of numbers!)
+    if (!hasImage && cleanText.length >= 16) {
+      const compact = cleanText.replace(/\s+/g, '');
+      const digits = (compact.match(/[0-9\u0660-\u0669]/g) || []).length;
+      const realLetters = (compact.match(/[\u0621-\u064A\u4E00-\u9FFFA-Za-z]/g) || []).length;
+      if (/(?:\(cid:\d+\)|\bcid:\d+\b)/i.test(cleanText) || (digits / compact.length >= 0.45 && realLetters / compact.length < 0.35)) {
+        return res.status(422).json({
+          success: false,
+          error: '检测到该页 PDF 原文本层为损坏的字体编码/数字流，请点击「AI 翻译本页」直接识别书页图像进行精准翻译。',
+        });
+      }
+    }
+
     const targetLabel =
       targetLang === 'en' ? '流畅自然的英文' : targetLang === 'ar' ? '地道典雅的现代标准阿拉伯语' : '精准流畅、富有书卷气的简体中文';
-    const systemInstruction = `你是 ONE AI 专业图书翻译专家。请将读者选中的原文忠实、自然地翻译为${targetLabel}。保留原有段落结构，不遗漏关键术语，直接输出译文，不要加多余寒暄或标题。`;
-    const prompt = [bookTitle ? `书名：《${String(bookTitle).slice(0, 120)}》` : '', `待翻译原文：\n"""\n${cleanText}\n"""`]
+    const systemInstruction = hasImage
+      ? `你是 ONE AI 专业多语图书翻译专家（精通阿拉伯语古典/现代典籍、英语、汉语）。请直接识读附图中的书页原文，并将其忠实、自然、完整地翻译为${targetLabel}。保留自然段落与小标题，不要输出乱码或页码数字串，也不要添加寒暄或解释性前缀。`
+      : `你是 ONE AI 专业图书翻译专家。请将读者选中的原文忠实、自然地翻译为${targetLabel}。保留原有段落结构，不遗漏关键术语，直接输出译文，不要加多余寒暄或标题。`;
+
+    const prompt = [
+      bookTitle ? `书名：《${String(bookTitle).slice(0, 120)}》` : '',
+      pageNumber ? `页码：第 ${Number(pageNumber)} 页` : '',
+      hasImage
+        ? '请直接识读图片中的完整书页文字并忠实翻译。'
+        : `待翻译原文：\n"""\n${cleanText}\n"""`,
+    ]
       .filter(Boolean)
       .join('\n\n');
     try {
-      const translation = await runFastLibraryAiText(req, systemInstruction, prompt, 1400, undefined, 'fast');
+      const translation = await runFastLibraryAiText(
+        req,
+        systemInstruction,
+        prompt,
+        1800,
+        hasImage ? pageImageBase64 : undefined,
+        'fast'
+      );
       return res.json({ success: true, translation });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || '段落翻译暂时不可用。' });

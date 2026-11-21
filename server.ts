@@ -211,7 +211,11 @@ app.use((req, res, next) => {
 
 app.use((req, res, next) => {
   if (req.path === '/api/messenger/upload/stream') return next();
-  if (req.path === '/api/library/islamic/upload-pdf') {
+  if (
+    req.path === '/api/library/islamic/upload-pdf' ||
+    req.path === '/api/library/upload-pdf' ||
+    /^\/api\/library\/books\/[^/]+\/ebook-chapters$/.test(req.path)
+  ) {
     return express.json({ limit: '65mb' })(req, res, next);
   }
   return express.json({ limit: '20mb' })(req, res, next);
