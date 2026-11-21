@@ -4,15 +4,34 @@ import { BRIDGE_CONFIG, gardenPathFactor, terrainHeightAt } from './paradiseTerr
 
 export const PAVILION_WORLD_POS = new THREE.Vector3(12.8, terrainHeightAt(12.8, -7.8) + 0.64, -7.8);
 export const REST_HOUSE_WORLD_POS = new THREE.Vector3(-11.4, terrainHeightAt(-11.4, 5.8) + 0.32, 5.8);
+export const LANGUAGE_HOUSE_WORLD_POS = new THREE.Vector3(7.8, terrainHeightAt(7.8, 9.4) + 0.32, 9.4);
+export const AI_HOUSE_WORLD_POS = new THREE.Vector3(1.8, terrainHeightAt(1.8, -12.6) + 0.36, -12.6);
+export const PHONE_BOOTH_WORLD_POS = new THREE.Vector3(-1.4, terrainHeightAt(-1.4, 8.2) + 0.22, 8.2);
+
+export type ArchitecturePortalId = 'library' | 'arabic-learning' | 'aihub' | 'chat' | 'venus';
+
+export interface ArchitecturePortal {
+  id: ArchitecturePortalId;
+  labelZh: string;
+  labelEn: string;
+  labelAr: string;
+  group: THREE.Group;
+  signMat: THREE.MeshStandardMaterial;
+  worldPos: THREE.Vector3;
+}
 
 export interface ParadiseArchitectureHandle {
   group: THREE.Group;
   pavilionGroup: THREE.Group;
   restHouseGroup: THREE.Group;
+  portals: ArchitecturePortal[];
   lanternLight: THREE.PointLight;
   lanternGlassMat: THREE.MeshStandardMaterial;
   restHouseLight: THREE.PointLight;
   restWindowMat: THREE.MeshStandardMaterial;
+  extraLights: THREE.PointLight[];
+  extraWindowMats: THREE.MeshStandardMaterial[];
+  aiCrownGroup: THREE.Group;
   wettableMaterials: THREE.MeshStandardMaterial[];
   dispose: () => void;
 }
@@ -218,6 +237,7 @@ export function createParadiseArchitecture(
   const wettableMaterials: THREE.MeshStandardMaterial[] = [];
   const geometries: THREE.BufferGeometry[] = [];
   const materials: THREE.Material[] = [];
+  const signTextures: THREE.CanvasTexture[] = [];
 
   const trackGeo = <T extends THREE.BufferGeometry>(g: T): T => {
     if (g.attributes.uv && !g.attributes.uv2) {
@@ -360,6 +380,125 @@ export function createParadiseArchitecture(
     metalness: 0.04,
   });
   materials.push(lanternGlassMat);
+
+  /**
+   * Builds a crisp, physical 3D framed architectural plaque/signboard (牌匾) with
+   * high-DPI canvas typography, brass border molding, and warm subtle backlighting
+   * so every building's identity is unmistakable day & night.
+   */
+  const createArchitecturalPlaque = (opts: {
+    titleZh: string;
+    subtitle: string;
+    width: number;
+    height: number;
+    bgHex: string;
+    borderHex: string;
+    textHex: string;
+    subHex: string;
+    emissiveHex: number;
+  }): { group: THREE.Group; faceMat: THREE.MeshStandardMaterial } => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 384;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      // Rich subtle vertical lacquered gradient background
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, opts.bgHex);
+      grad.addColorStop(1, '#121010');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Outer & inner gilded architectural double-border
+      ctx.strokeStyle = opts.borderHex;
+      ctx.lineWidth = 14;
+      ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
+      ctx.lineWidth = 4;
+      ctx.globalAlpha = 0.72;
+      ctx.strokeRect(38, 38, canvas.width - 76, canvas.height - 76);
+      ctx.globalAlpha = 1;
+
+      // Delicate corner ornament dots
+      ctx.fillStyle = opts.borderHex;
+      for (const [cx, cy] of [
+        [56, 56],
+        [canvas.width - 56, 56],
+        [56, canvas.height - 56],
+        [canvas.width - 56, canvas.height - 56],
+      ]) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Bold, unmistakable Chinese building title
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 4;
+      ctx.fillStyle = opts.textHex;
+      const fontSize = opts.titleZh.length >= 6 ? 128 : opts.titleZh.length >= 4 ? 148 : 168;
+      ctx.font = `700 ${fontSize}px "Noto Serif SC", "Songti SC", "PingFang SC", "Microsoft YaHei", serif`;
+      ctx.fillText(opts.titleZh, canvas.width / 2, canvas.height * 0.44);
+
+      // Crisp English architectural subtitle
+      ctx.shadowBlur = 4;
+      ctx.fillStyle = opts.subHex;
+      ctx.font = '600 42px "Inter", "Helvetica Neue", system-ui, sans-serif';
+      ctx.fillText(opts.subtitle.toUpperCase(), canvas.width / 2, canvas.height * 0.79);
+    }
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    tex.needsUpdate = true;
+    signTextures.push(tex);
+
+    const faceMat = new THREE.MeshStandardMaterial({
+      map: tex,
+      emissiveMap: tex,
+      emissive: new THREE.Color(opts.emissiveHex),
+      emissiveIntensity: 0.48,
+      roughness: 0.36,
+      metalness: 0.14,
+    });
+    materials.push(faceMat);
+
+    const pGroup = new THREE.Group();
+    const depth = 0.09;
+    // Solid carved backing board
+    const board = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(opts.width, opts.height, depth)), rosewoodMat);
+    board.castShadow = quality.enableShadows;
+    pGroup.add(board);
+
+    // Gilded bronze trim bars framing all 4 edges
+    const rimT = 0.055;
+    const topRim = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(opts.width + rimT * 1.4, rimT, depth + 0.03)), bronzeMat);
+    topRim.position.y = opts.height * 0.5 + rimT * 0.35;
+    const botRim = topRim.clone();
+    botRim.position.y = -opts.height * 0.5 - rimT * 0.35;
+    const leftRim = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(rimT, opts.height + rimT * 1.4, depth + 0.03)), bronzeMat);
+    leftRim.position.x = -opts.width * 0.5 - rimT * 0.35;
+    const rightRim = leftRim.clone();
+    rightRim.position.x = opts.width * 0.5 + rimT * 0.35;
+    pGroup.add(topRim, botRim, leftRim, rightRim);
+
+    // High-resolution front face plane (+Z)
+    const face = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(opts.width - 0.04, opts.height - 0.04)), faceMat);
+    face.position.z = depth * 0.5 + 0.008;
+    pGroup.add(face);
+
+    // Brass hanging mount rods attaching top of plaque to building beam
+    const rodGeo = trackGeo(new THREE.CylinderGeometry(0.018, 0.018, 0.24, 6));
+    for (const rx of [-opts.width * 0.32, opts.width * 0.32]) {
+      const rod = new THREE.Mesh(rodGeo, bronzeMat);
+      rod.position.set(rx, opts.height * 0.5 + 0.12, 0);
+      pGroup.add(rod);
+    }
+
+    return { group: pGroup, faceMat };
+  };
 
   // =========================================================================
   // 1. Waterside Double-Eave Timber Pavilion (临水重檐飞檐亭) at (12.8, y, -7.8)
@@ -655,6 +794,40 @@ export function createParadiseArchitecture(
   const lanternLight = new THREE.PointLight(0xffb45c, 0.0, 16, 1.65);
   lanternLight.position.set(0, 2.7, 0);
   pav.add(lanternLight);
+
+  // Classical Music Stage inside Pavilion: Carved Guqin Table & 7-String Zither
+  const musicTableTop = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.52, 0.07, 0.58)), rosewoodMat);
+  musicTableTop.position.set(0, 1.32, -0.32);
+  musicTableTop.castShadow = quality.enableShadows;
+  pav.add(musicTableTop);
+  const tableLegGeo = trackGeo(new THREE.BoxGeometry(0.07, 0.62, 0.48));
+  for (const tx of [-0.62, 0.62]) {
+    const leg = new THREE.Mesh(tableLegGeo, rosewoodMat);
+    leg.position.set(tx, 1.0, -0.32);
+    pav.add(leg);
+  }
+  const guqinBody = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.18, 0.055, 0.22)), charredCedarMat);
+  guqinBody.position.set(0, 1.385, -0.32);
+  pav.add(guqinBody);
+  const guqinTrim = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.06, 0.014, 0.14)), bronzeMat);
+  guqinTrim.position.set(0, 1.42, -0.32);
+  pav.add(guqinTrim);
+
+  // Traditional Gilded Pavilion Plaque (匾额) — 「音乐馆 · MUSIC HALL」
+  const musicPlaque = createArchitecturalPlaque({
+    titleZh: '音乐馆',
+    subtitle: 'Music Hall',
+    width: 2.65,
+    height: 0.88,
+    bgHex: '#3b151a',
+    borderHex: '#e7c36a',
+    textHex: '#fff5d6',
+    subHex: '#e4c788',
+    emissiveHex: 0xffd78a,
+  });
+  musicPlaque.group.position.set(0, 3.24, 1.88);
+  musicPlaque.group.rotation.x = 0.08;
+  pav.add(musicPlaque.group);
 
   group.add(pav);
 
@@ -1263,20 +1436,583 @@ export function createParadiseArchitecture(
   restHouseLight.position.set(0, 1.35, 1.35);
   restHouseGroup.add(restHouseLight);
 
+  // Carved Walnut & Gold Architectural Plaque — 「图书馆 · LIBRARY」
+  const libraryPlaque = createArchitecturalPlaque({
+    titleZh: '图书馆',
+    subtitle: 'Library',
+    width: 2.35,
+    height: 0.82,
+    bgHex: '#2b1812',
+    borderHex: '#e4be6c',
+    textHex: '#fff6de',
+    subHex: '#dcc28a',
+    emissiveHex: 0xffd896,
+  });
+  libraryPlaque.group.position.set(0, 2.68, 1.78);
+  libraryPlaque.group.rotation.x = 0.07;
+  restHouseGroup.add(libraryPlaque.group);
+
   group.add(restHouseGroup);
+
+  const extraLights: THREE.PointLight[] = [];
+  const extraWindowMats: THREE.MeshStandardMaterial[] = [];
+
+  // =========================================================================
+  // 6. NEW House #1: Warm Sand-Plaster & Arched Language Center Hall (语言中心)
+  //    at (7.8, y, 9.4) — right-foreground meadow facing lake & path
+  // =========================================================================
+  const langHouseGroup = new THREE.Group();
+  const lhX = 7.8;
+  const lhZ = 9.4;
+  const lhBaseY = terrainHeightAt(lhX, lhZ);
+  langHouseGroup.position.set(lhX, lhBaseY, lhZ);
+  langHouseGroup.rotation.y = -0.64; // face northwest toward camera, path & lake
+
+  const terracottaTileMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x7c4a38,
+      roughness: 0.82,
+      metalness: 0.08,
+      map: textures.slateRoofMap,
+      normalMap: textures.slateNormalMap,
+      normalScale: new THREE.Vector2(0.95, 0.95),
+      aoMap: textures.slateAoMap,
+      aoMapIntensity: 0.85,
+      side: THREE.DoubleSide,
+    })
+  );
+  const warmSandWallMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xf4e7d2,
+      roughness: 0.86,
+      metalness: 0.01,
+      map: textures.plasterWallMap,
+      normalMap: textures.rockNormalMap,
+      normalScale: new THREE.Vector2(0.22, 0.22),
+      aoMap: textures.plasterAoMap,
+      aoMapIntensity: 0.65,
+    })
+  );
+  const emeraldTrimMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x1e4c3f,
+      roughness: 0.56,
+      metalness: 0.14,
+    })
+  );
+  const langWindowMat = new THREE.MeshStandardMaterial({
+    color: 0xffe6b8,
+    emissive: new THREE.Color(0xffb452),
+    emissiveIntensity: 0.28,
+    roughness: 0.28,
+    metalness: 0.05,
+  });
+  materials.push(langWindowMat);
+  extraWindowMats.push(langWindowMat);
+
+  // Stone terrace plinth + entry steps
+  const lhPlinth = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.42, 0.48, 3.86)), graniteMat);
+  lhPlinth.position.set(0, 0.04, 0.06);
+  lhPlinth.castShadow = quality.enableShadows;
+  lhPlinth.receiveShadow = quality.enableShadows;
+  langHouseGroup.add(lhPlinth);
+
+  const lhDeck = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.12, 0.12, 3.58)), plinthStoneMat);
+  lhDeck.position.set(0, 0.32, 0.06);
+  lhDeck.receiveShadow = quality.enableShadows;
+  langHouseGroup.add(lhDeck);
+
+  for (let s = 0; s < 2; s++) {
+    const step = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.62, 0.13, 0.36)), plinthStoneMat);
+    step.position.set(0, 0.24 - s * 0.12, 1.98 + s * 0.32);
+    step.receiveShadow = quality.enableShadows;
+    langHouseGroup.add(step);
+  }
+
+  // Main Sand-Plaster Academy Hall walls + decorative emerald waist & cornice bands
+  const lhBody = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.48, 2.18, 2.52)), warmSandWallMat);
+  lhBody.position.set(0, 1.46, -0.22);
+  lhBody.castShadow = quality.enableShadows;
+  lhBody.receiveShadow = quality.enableShadows;
+  langHouseGroup.add(lhBody);
+
+  const lhCornice = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.72, 0.14, 2.74)), emeraldTrimMat);
+  lhCornice.position.set(0, 2.56, -0.22);
+  langHouseGroup.add(lhCornice);
+
+  // Front Porch Colonnade (4 timber-and-brass columns supporting porch arch beam)
+  const lhColGeo = trackGeo(new THREE.CylinderGeometry(0.095, 0.115, 2.16, 12));
+  for (const [cx, cz] of [
+    [-1.68, 1.56],
+    [-0.78, 1.56],
+    [0.78, 1.56],
+    [1.68, 1.56],
+  ] as Array<[number, number]>) {
+    const col = new THREE.Mesh(lhColGeo, rosewoodMat);
+    col.position.set(cx, 1.44, cz);
+    col.castShadow = quality.enableShadows;
+    langHouseGroup.add(col);
+    const colRing = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.13, 0.13, 0.08, 12)), bronzeMat);
+    colRing.position.set(cx, 2.46, cz);
+    langHouseGroup.add(colRing);
+  }
+  const lhPorchBeam = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.68, 0.18, 0.18)), emeraldTrimMat);
+  lhPorchBeam.position.set(0, 2.54, 1.56);
+  langHouseGroup.add(lhPorchBeam);
+
+  // Signature Arched Entryway + Flanking Arched Windows with Warm Glow & Brass Lattice
+  const addArchedWindow = (wx: number, wy: number, wz: number, rotY: number, w: number, h: number) => {
+    const wg = new THREE.Group();
+    wg.position.set(wx, wy, wz);
+    wg.rotation.y = rotY;
+    const frame = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(w + 0.12, h, 0.1)), emeraldTrimMat);
+    wg.add(frame);
+    const archTop = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(w * 0.56, w * 0.56, 0.1, 14, 1, false, 0, Math.PI)), emeraldTrimMat);
+    archTop.rotation.z = Math.PI / 2;
+    archTop.rotation.y = Math.PI / 2;
+    archTop.position.y = h * 0.5;
+    wg.add(archTop);
+
+    const glass = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(w - 0.04, h - 0.04)), langWindowMat);
+    glass.position.z = 0.056;
+    wg.add(glass);
+    const archGlass = new THREE.Mesh(trackGeo(new THREE.CircleGeometry(w * 0.48, 14, 0, Math.PI)), langWindowMat);
+    archGlass.position.set(0, h * 0.5 - 0.02, 0.056);
+    wg.add(archGlass);
+
+    // Subtle brass vertical + horizontal lattice mullions
+    const vBar = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.026, h + w * 0.42, 0.025)), bronzeMat);
+    vBar.position.set(0, w * 0.18, 0.065);
+    wg.add(vBar);
+    const hBar = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(w - 0.04, 0.026, 0.025)), bronzeMat);
+    hBar.position.set(0, 0.05, 0.065);
+    wg.add(hBar);
+    langHouseGroup.add(wg);
+  };
+
+  // Front grand arched doorway + 2 flanking front arched windows + 2 side arched windows
+  addArchedWindow(0, 1.18, 1.04, 0, 1.02, 1.46);
+  addArchedWindow(-1.18, 1.42, 1.04, 0, 0.64, 0.88);
+  addArchedWindow(1.18, 1.42, 1.04, 0, 0.64, 0.88);
+  addArchedWindow(-1.74, 1.42, -0.22, -Math.PI / 2, 0.96, 0.94);
+  addArchedWindow(1.74, 1.42, -0.22, Math.PI / 2, 0.96, 0.94);
+
+  // Sweeping Terracotta-Clay Curved Roof + Sculpted Bronze Finial Dome
+  const lhRoofGeo = trackGeo(createSweepingPagodaRoofGeo(2.65, 1.32, 0.34, 16, 18));
+  const lhRoof = new THREE.Mesh(lhRoofGeo, terracottaTileMat);
+  lhRoof.position.set(0, 2.52, 0.24);
+  lhRoof.castShadow = quality.enableShadows;
+  lhRoof.receiveShadow = quality.enableShadows;
+  langHouseGroup.add(lhRoof);
+
+  const lhRidgeGeo = trackGeo(createHipRidgeGeo(2.65, 1.32, 0.34, 0.048));
+  for (let q = 0; q < 4; q++) {
+    const ridge = new THREE.Mesh(lhRidgeGeo, ridgeStoneMat);
+    ridge.position.set(0, 2.52, 0.24);
+    ridge.rotation.y = q * (Math.PI / 2);
+    langHouseGroup.add(ridge);
+  }
+  const lhFinial = new THREE.Mesh(trackGeo(new THREE.LatheGeometry(finialProfile, 14)), bronzeMat);
+  lhFinial.position.set(0, 3.78, 0.24);
+  lhFinial.scale.setScalar(0.82);
+  langHouseGroup.add(lhFinial);
+
+  const langHouseLight = new THREE.PointLight(0xffbb66, 0.28, 11, 1.6);
+  langHouseLight.position.set(0, 1.7, 1.45);
+  langHouseGroup.add(langHouseLight);
+  extraLights.push(langHouseLight);
+
+  // Emerald & Gold Plaque — 「语言中心 · LANGUAGE CENTER」
+  const languagePlaque = createArchitecturalPlaque({
+    titleZh: '语言中心',
+    subtitle: 'Language Center',
+    width: 2.42,
+    height: 0.82,
+    bgHex: '#12382e',
+    borderHex: '#e6c572',
+    textHex: '#fff9ea',
+    subHex: '#bfe6d4',
+    emissiveHex: 0xffe3a3,
+  });
+  languagePlaque.group.position.set(0, 2.66, 1.82);
+  languagePlaque.group.rotation.x = 0.07;
+  langHouseGroup.add(languagePlaque.group);
+
+  group.add(langHouseGroup);
+
+  // =========================================================================
+  // 7. NEW House #2: Starlight Timber-and-Glass AI Atelier (AI 中心)
+  //    at (1.8, y, -12.6) — hero north lakeside terrace across the lake
+  // =========================================================================
+  const aiHouseGroup = new THREE.Group();
+  const aiX = 1.8;
+  const aiZ = -12.6;
+  const aiBaseY = terrainHeightAt(aiX, aiZ);
+  aiHouseGroup.position.set(aiX, aiBaseY, aiZ);
+  aiHouseGroup.rotation.y = 0.08; // face south straight across lake toward viewer
+
+  const aiGlassMat = new THREE.MeshStandardMaterial({
+    color: 0xdff5ff,
+    emissive: new THREE.Color(0x74d4ff),
+    emissiveIntensity: 0.42,
+    roughness: 0.16,
+    metalness: 0.18,
+  });
+  materials.push(aiGlassMat);
+  extraWindowMats.push(aiGlassMat);
+
+  const aiSlateRoofMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x2a3644,
+      roughness: 0.72,
+      metalness: 0.24,
+      map: textures.slateRoofMap,
+      normalMap: textures.slateNormalMap,
+      normalScale: new THREE.Vector2(0.95, 0.95),
+      side: THREE.DoubleSide,
+    })
+  );
+
+  // Stepped dark ashlar stone terrace + broad steps
+  const aiPlinthLower = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(5.2, 0.56, 4.4)), graniteMat);
+  aiPlinthLower.position.set(0, 0.04, 0);
+  aiPlinthLower.castShadow = quality.enableShadows;
+  aiPlinthLower.receiveShadow = quality.enableShadows;
+  aiHouseGroup.add(aiPlinthLower);
+
+  const aiPlinthTop = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.74, 0.16, 3.96)), plinthStoneMat);
+  aiPlinthTop.position.set(0, 0.36, 0);
+  aiPlinthTop.receiveShadow = quality.enableShadows;
+  aiHouseGroup.add(aiPlinthTop);
+
+  for (let s = 0; s < 3; s++) {
+    const step = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(2.15, 0.13, 0.38)), plinthStoneMat);
+    step.position.set(0, 0.3 - s * 0.12, 2.18 + s * 0.34);
+    step.receiveShadow = quality.enableShadows;
+    aiHouseGroup.add(step);
+  }
+
+  // Luminous Floor-to-Ceiling Gallery Glass Core framed by Sleek Charred-Cedar & Bronze Columns
+  const aiCoreGlass = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(3.72, 2.42, 2.86)), aiGlassMat);
+  aiCoreGlass.position.set(0, 1.65, -0.1);
+  aiHouseGroup.add(aiCoreGlass);
+
+  // Exterior structural timber & bronze columns + architectural mullions
+  const aiPostGeo = trackGeo(new THREE.BoxGeometry(0.16, 2.52, 0.16));
+  for (const px of [-2.02, -0.95, 0.95, 2.02]) {
+    for (const pz of [-1.62, 1.48]) {
+      const post = new THREE.Mesh(aiPostGeo, charredCedarMat);
+      post.position.set(px, 1.68, pz);
+      post.castShadow = quality.enableShadows;
+      aiHouseGroup.add(post);
+    }
+  }
+  // Horizontal fascia beams & slim bronze mullions across glass front
+  const aiFasciaX = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.42, 0.22, 3.48)), charredCedarMat);
+  aiFasciaX.position.set(0, 2.94, -0.06);
+  aiHouseGroup.add(aiFasciaX);
+  const aiBronzeBand = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(4.48, 0.06, 3.54)), bronzeMat);
+  aiBronzeBand.position.set(0, 2.82, -0.06);
+  aiHouseGroup.add(aiBronzeBand);
+
+  // Double-tier Modernist-Kyoto Cantilevered Slate Roof
+  const aiLowerRoof = new THREE.Mesh(
+    trackGeo(createSweepingPagodaRoofGeo(3.05, 1.12, 0.32, 16, 18)),
+    aiSlateRoofMat
+  );
+  aiLowerRoof.position.set(0, 2.94, -0.06);
+  aiLowerRoof.castShadow = quality.enableShadows;
+  aiLowerRoof.receiveShadow = quality.enableShadows;
+  aiHouseGroup.add(aiLowerRoof);
+
+  // Upper luminous clerestory lantern skylight + upper cap roof
+  const aiSkylight = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.74, 0.56, 1.54)), aiGlassMat);
+  aiSkylight.position.set(0, 4.02, -0.06);
+  aiHouseGroup.add(aiSkylight);
+  const aiUpperRoof = new THREE.Mesh(
+    trackGeo(createSweepingPagodaRoofGeo(1.62, 0.72, 0.24, 12, 14)),
+    aiSlateRoofMat
+  );
+  aiUpperRoof.position.set(0, 4.24, -0.06);
+  aiUpperRoof.castShadow = quality.enableShadows;
+  aiHouseGroup.add(aiUpperRoof);
+
+  // Sculpted Gilded Bronze Astrolabe / Star-Ring Crown Finial (gently rotates in animation loop!)
+  const aiCrownGroup = new THREE.Group();
+  aiCrownGroup.position.set(0, 5.28, -0.06);
+  const ring1 = new THREE.Mesh(trackGeo(new THREE.TorusGeometry(0.42, 0.032, 8, 28)), bronzeMat);
+  const ring2 = new THREE.Mesh(trackGeo(new THREE.TorusGeometry(0.3, 0.026, 8, 24)), bronzeMat);
+  ring2.rotation.y = Math.PI / 3;
+  ring2.rotation.x = Math.PI / 4;
+  const starCore = new THREE.Mesh(trackGeo(new THREE.OctahedronGeometry(0.14, 0)), aiGlassMat);
+  aiCrownGroup.add(ring1, ring2, starCore);
+  aiHouseGroup.add(aiCrownGroup);
+
+  const aiHouseLight = new THREE.PointLight(0x88dcff, 0.42, 14, 1.55);
+  aiHouseLight.position.set(0, 2.2, 1.4);
+  aiHouseGroup.add(aiHouseLight);
+  extraLights.push(aiHouseLight);
+
+  // Obsidian & Champagne-Gold Architectural Plaque — 「AI 中心 · ONE AI」
+  const aiPlaque = createArchitecturalPlaque({
+    titleZh: 'AI 中心',
+    subtitle: 'ONE AI',
+    width: 2.9,
+    height: 0.96,
+    bgHex: '#0d1e30',
+    borderHex: '#7ad8ff',
+    textHex: '#f5fbff',
+    subHex: '#9ae2ff',
+    emissiveHex: 0x9ce2ff,
+  });
+  aiPlaque.group.position.set(0, 3.16, 1.88);
+  aiPlaque.group.rotation.x = 0.08;
+  aiHouseGroup.add(aiPlaque.group);
+
+  group.add(aiHouseGroup);
+
+  // =========================================================================
+  // 8. NEW Classic Heritage Red Telephone Booth (通讯 · 电话亭)
+  //    at (-1.4, y, 8.2) — right beside the central foreground garden footpath!
+  // =========================================================================
+  const phoneBoothGroup = new THREE.Group();
+  const pbX = -1.4;
+  const pbZ = 8.2;
+  const pbBaseY = terrainHeightAt(pbX, pbZ);
+  phoneBoothGroup.position.set(pbX, pbBaseY, pbZ);
+  phoneBoothGroup.rotation.y = 0.22; // face viewer naturally beside stone path
+
+  const boothRedMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xa42225,
+      roughness: 0.34,
+      metalness: 0.28,
+    })
+  );
+  const boothGlassMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xdff1f8,
+      emissive: new THREE.Color(0xffdfa8),
+      emissiveIntensity: 0.16,
+      roughness: 0.12,
+      metalness: 0.1,
+      transparent: true,
+      opacity: 0.42,
+    })
+  );
+  const boothLampMat = new THREE.MeshStandardMaterial({
+    color: 0xfff3d4,
+    emissive: new THREE.Color(0xffc96b),
+    emissiveIntensity: 0.72,
+    roughness: 0.25,
+    metalness: 0.04,
+  });
+  materials.push(boothLampMat);
+  extraWindowMats.push(boothLampMat);
+
+  // Dressed Granite Square Curb Plinth
+  const pbBase = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.64, 0.24, 1.64)), graniteMat);
+  pbBase.position.y = 0.04;
+  pbBase.castShadow = quality.enableShadows;
+  pbBase.receiveShadow = quality.enableShadows;
+  phoneBoothGroup.add(pbBase);
+
+  const pbFloor = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.36, 0.08, 1.36)), plinthStoneMat);
+  pbFloor.position.y = 0.18;
+  phoneBoothGroup.add(pbFloor);
+
+  // 4 Sturdy Heritage Red Corner Pilasters
+  const pbHalf = 0.62;
+  const pbPostGeo = trackGeo(new THREE.BoxGeometry(0.14, 2.52, 0.14));
+  for (const sx of [-pbHalf, pbHalf]) {
+    for (const sz of [-pbHalf, pbHalf]) {
+      const p = new THREE.Mesh(pbPostGeo, boothRedMat);
+      p.position.set(sx, 1.46, sz);
+      p.castShadow = quality.enableShadows;
+      phoneBoothGroup.add(p);
+    }
+  }
+
+  // Lower iron kick-panels around all 4 sides + brass door handle on front (+Z)
+  const kickXGeo = trackGeo(new THREE.BoxGeometry(1.16, 0.52, 0.08));
+  const kickZGeo = trackGeo(new THREE.BoxGeometry(0.08, 0.52, 1.16));
+  for (const sz of [-pbHalf, pbHalf]) {
+    const k = new THREE.Mesh(kickXGeo, boothRedMat);
+    k.position.set(0, 0.48, sz);
+    phoneBoothGroup.add(k);
+  }
+  for (const sx of [-pbHalf, pbHalf]) {
+    const k = new THREE.Mesh(kickZGeo, boothRedMat);
+    k.position.set(sx, 0.48, 0);
+    phoneBoothGroup.add(k);
+  }
+
+  // Multi-pane Glass Panels & Classic Red Mullion Grids on all 4 sides
+  const glassPaneGeo = trackGeo(new THREE.PlaneGeometry(1.1, 1.72));
+  const hBarGeo = trackGeo(new THREE.BoxGeometry(1.12, 0.036, 0.045));
+  const vBarGeo = trackGeo(new THREE.BoxGeometry(0.036, 1.74, 0.045));
+
+  for (let side = 0; side < 4; side++) {
+    const sGroup = new THREE.Group();
+    sGroup.rotation.y = side * (Math.PI / 2);
+
+    const gPane = new THREE.Mesh(glassPaneGeo, boothGlassMat);
+    gPane.position.set(0, 1.62, pbHalf);
+    sGroup.add(gPane);
+
+    // 2 vertical mullions + 4 horizontal muntin bars = iconic 3x5 phone booth panes
+    for (const mx of [-0.28, 0.28]) {
+      const vb = new THREE.Mesh(vBarGeo, boothRedMat);
+      vb.position.set(mx, 1.62, pbHalf);
+      sGroup.add(vb);
+    }
+    for (let row = 0; row < 4; row++) {
+      const hb = new THREE.Mesh(hBarGeo, boothRedMat);
+      hb.position.set(0, 0.94 + row * 0.42, pbHalf);
+      sGroup.add(hb);
+    }
+    phoneBoothGroup.add(sGroup);
+  }
+
+  // Polished Brass Door Handle on Front Door (+Z)
+  const doorHandle = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.022, 0.022, 0.26, 8)), bronzeMat);
+  doorHandle.position.set(0.42, 1.24, pbHalf + 0.07);
+  phoneBoothGroup.add(doorHandle);
+
+  // Sculpted Interior: Cedar Shelf, Classic Wall Payphone Box, Silver Keypad & Curved Handset
+  const pbShelf = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.96, 0.06, 0.34)), cedarDeckMat);
+  pbShelf.position.set(0, 1.12, -0.38);
+  phoneBoothGroup.add(pbShelf);
+
+  const phoneBody = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.32, 0.44, 0.16)), charredCedarMat);
+  phoneBody.position.set(0, 1.48, -0.46);
+  phoneBoothGroup.add(phoneBody);
+
+  const phoneDial = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.18, 0.18, 0.03)), bronzeMat);
+  phoneDial.position.set(0, 1.44, -0.37);
+  phoneBoothGroup.add(phoneDial);
+
+  const handsetBar = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.024, 0.024, 0.28, 8)), charredCedarMat);
+  handsetBar.position.set(-0.2, 1.52, -0.44);
+  phoneBoothGroup.add(handsetBar);
+
+  // Warm Glowing Interior Ceiling Dome Lamp + PointLight
+  const ceilingLamp = new THREE.Mesh(trackGeo(new THREE.SphereGeometry(0.16, 12, 8)), boothLampMat);
+  ceilingLamp.position.set(0, 2.52, 0);
+  phoneBoothGroup.add(ceilingLamp);
+
+  const phoneBoothLight = new THREE.PointLight(0xffcb74, 0.45, 9, 1.6);
+  phoneBoothLight.position.set(0, 2.32, 0);
+  phoneBoothGroup.add(phoneBoothLight);
+  extraLights.push(phoneBoothLight);
+
+  // Upper Cornice Transom Box + Domed Cupola Roof + Bronze Crown Finial
+  const pbCornice = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.52, 0.34, 1.52)), boothRedMat);
+  pbCornice.position.y = 2.74;
+  pbCornice.castShadow = quality.enableShadows;
+  phoneBoothGroup.add(pbCornice);
+
+  // Illuminated ivory top transom strip around all 4 sides
+  const transomGlow = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.56, 0.15, 1.56)), boothLampMat);
+  transomGlow.position.y = 2.74;
+  phoneBoothGroup.add(transomGlow);
+
+  const pbDome = new THREE.Mesh(
+    trackGeo(new THREE.SphereGeometry(0.84, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.48)),
+    boothRedMat
+  );
+  pbDome.scale.set(0.95, 0.62, 0.95);
+  pbDome.position.y = 2.86;
+  pbDome.castShadow = quality.enableShadows;
+  phoneBoothGroup.add(pbDome);
+
+  const pbCrown = new THREE.Mesh(trackGeo(new THREE.SphereGeometry(0.11, 10, 8)), bronzeMat);
+  pbCrown.position.y = 3.42;
+  phoneBoothGroup.add(pbCrown);
+
+  // Crisp Heritage Crimson & Gold Plaque atop front cornice — 「通讯 · 电话亭」
+  const phonePlaque = createArchitecturalPlaque({
+    titleZh: '通讯 · 电话亭',
+    subtitle: 'Telephone',
+    width: 1.72,
+    height: 0.62,
+    bgHex: '#7d171a',
+    borderHex: '#f0cf7b',
+    textHex: '#fff9eb',
+    subHex: '#f5dcb0',
+    emissiveHex: 0xffe0a6,
+  });
+  phonePlaque.group.position.set(0, 3.04, 0.82);
+  phonePlaque.group.rotation.x = 0.06;
+  phoneBoothGroup.add(phonePlaque.group);
+
+  group.add(phoneBoothGroup);
+
+  const portals: ArchitecturePortal[] = [
+    {
+      id: 'library',
+      labelZh: '图书馆',
+      labelEn: 'Library',
+      labelAr: 'المكتبة',
+      group: restHouseGroup,
+      signMat: libraryPlaque.faceMat,
+      worldPos: REST_HOUSE_WORLD_POS.clone(),
+    },
+    {
+      id: 'venus',
+      labelZh: '音乐馆',
+      labelEn: 'Music Hall',
+      labelAr: 'قاعة الموسيقى',
+      group: pav,
+      signMat: musicPlaque.faceMat,
+      worldPos: PAVILION_WORLD_POS.clone(),
+    },
+    {
+      id: 'arabic-learning',
+      labelZh: '语言中心',
+      labelEn: 'Language Center',
+      labelAr: 'مركز اللغات',
+      group: langHouseGroup,
+      signMat: languagePlaque.faceMat,
+      worldPos: LANGUAGE_HOUSE_WORLD_POS.clone(),
+    },
+    {
+      id: 'aihub',
+      labelZh: 'AI 中心',
+      labelEn: 'ONE AI Center',
+      labelAr: 'مركز الذكاء',
+      group: aiHouseGroup,
+      signMat: aiPlaque.faceMat,
+      worldPos: AI_HOUSE_WORLD_POS.clone(),
+    },
+    {
+      id: 'chat',
+      labelZh: '通讯 · 电话亭',
+      labelEn: 'Telephone · Messages',
+      labelAr: 'الهاتف والتواصل',
+      group: phoneBoothGroup,
+      signMat: phonePlaque.faceMat,
+      worldPos: PHONE_BOOTH_WORLD_POS.clone(),
+    },
+  ];
 
   return {
     group,
     pavilionGroup: pav,
     restHouseGroup,
+    portals,
     lanternLight,
     lanternGlassMat,
     restHouseLight,
     restWindowMat,
+    extraLights,
+    extraWindowMats,
+    aiCrownGroup,
     wettableMaterials,
     dispose: () => {
       geometries.forEach((g) => g.dispose());
       materials.forEach((m) => m.dispose());
+      signTextures.forEach((t) => t.dispose());
     },
   };
 }

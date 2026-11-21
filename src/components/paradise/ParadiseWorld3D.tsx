@@ -36,7 +36,7 @@ import { createParadiseCat } from './paradiseCat.ts';
 import { triggerImageDownload } from './SpiritSpeechBubble.tsx';
 import { LiveLanguageStudio } from '../learning/LiveLanguageStudio.tsx';
 
-type CameraPresetId = 'overlook' | 'bridge' | 'blossoms' | 'pavilion';
+type CameraPresetId = 'overlook' | 'bridge' | 'library' | 'pavilion' | 'aihub';
 
 interface CameraPreset {
   id: CameraPresetId;
@@ -47,7 +47,7 @@ interface CameraPreset {
 }
 
 const CAMERA_PRESETS: CameraPreset[] = [
-  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [-4.5, 8.2, 23.5], target: [2.5, 1.8, -2.5] },
+  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [-0.6, 9.6, 27.6], target: [0.8, 1.7, -1.6] },
   {
     id: 'bridge',
     zh: '溪桥',
@@ -55,8 +55,9 @@ const CAMERA_PRESETS: CameraPreset[] = [
     pos: [BRIDGE_CONFIG.centerX + 5.8, 3.9, BRIDGE_CONFIG.centerZ + 11.4],
     target: [BRIDGE_CONFIG.centerX, 1.25, BRIDGE_CONFIG.centerZ],
   },
-  { id: 'blossoms', zh: '银杏樱林', en: 'Ginkgo & Sakura', pos: [-11.2, 3.8, 15.2], target: [3.2, 2.2, 1.2] },
-  { id: 'pavilion', zh: '亭台', en: 'Pavilion', pos: [3.2, 4.2, 5.2], target: [12.8, 2.6, -7.8] },
+  { id: 'library', zh: '图书馆', en: 'Library', pos: [-4.8, 4.4, 14.2], target: [-11.4, 2.2, 5.8] },
+  { id: 'pavilion', zh: '音乐馆', en: 'Music Hall', pos: [4.2, 4.4, 4.8], target: [12.8, 2.6, -7.8] },
+  { id: 'aihub', zh: 'AI 中心', en: 'AI Center', pos: [1.2, 4.8, -1.8], target: [1.8, 2.5, -12.6] },
 ];
 
 function getResponsiveCameraConfig(aspect: number): { fov: number; distScale: number } {
@@ -98,17 +99,22 @@ function readStoredQuality(): UserQualityChoice {
 
 interface ParadiseWorld3DProps {
   lang: Language;
+  onSelectTab?: (tab: string) => void;
   immersive?: boolean;
   onImmersiveChange?: (v: boolean) => void;
 }
 
 export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   lang,
+  onSelectTab,
   immersive = false,
   onImmersiveChange,
 }) => {
   const isZh = lang === 'zh';
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const onSelectTabRef = useRef(onSelectTab);
+  onSelectTabRef.current = onSelectTab;
+  const [hoveredLandmark, setHoveredLandmark] = useState<{ id: string; label: string } | null>(null);
 
   const agentSnap = useAgentUiState();
   const [webglReady, setWebglReady] = useState<boolean>(() => detectWebGLSupport());
@@ -146,8 +152,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     weather: 'clear',
     autoWeather: false,
     hasCam: false,
-    camPos: new THREE.Vector3(-4.5, 8.2, 23.5),
-    camTarget: new THREE.Vector3(2.5, 1.4, -2.5),
+    camPos: new THREE.Vector3(-0.6, 9.6, 27.6),
+    camTarget: new THREE.Vector3(0.8, 1.7, -1.6),
   });
 
   const cameraMoveRef = useRef<{
@@ -156,8 +162,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     targetLook: THREE.Vector3;
   }>({
     active: false,
-    targetPos: new THREE.Vector3(-4.5, 8.2, 23.5),
-    targetLook: new THREE.Vector3(2.5, 1.4, -2.5),
+    targetPos: new THREE.Vector3(-0.6, 9.6, 27.6),
+    targetLook: new THREE.Vector3(0.8, 1.7, -1.6),
   });
 
   const [locating, setLocating] = useState(false);
@@ -382,29 +388,29 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   useEffect(() => {
     const promptsZh = [
       {
-        text: '图书馆收录了全球典籍，点上方即可静心阅读。',
-        quickActions: [{ label: '去图书馆', action: 'open_library' as const }],
+        text: '点击花园里的「图书馆」木屋，就能直接进去静心读书。',
+        quickActions: [{ label: '进图书馆', action: 'open_library' as const }],
       },
       {
-        text: '想听歌随时告诉我，我会直接在这里为你播放。',
+        text: '湖畔飞檐亭是「音乐馆」，点一下亭子或直接跟我说都能听歌。',
         quickActions: [{ label: '听轻音乐', action: 'play_music' as const }],
       },
       {
-        text: '上方可随时进入语言学习中心、通讯或音乐空间。',
+        text: '花园里的图书馆、语言中心、AI 中心、音乐馆和红色电话亭，点哪座就能进哪座。',
         quickActions: [],
       },
     ];
     const promptsEn = [
       {
-        text: 'World Library is right above whenever you want to read.',
+        text: 'Click the Library house on the left meadow anytime to read.',
         quickActions: [{ label: 'Library', action: 'open_library' as const }],
       },
       {
-        text: 'Ask for music anytime and I will play it right here.',
+        text: 'The lakeside pavilion is our Music Hall — tap it or ask me for music.',
         quickActions: [{ label: 'Play Music', action: 'play_music' as const }],
       },
       {
-        text: 'Use the top bar for Library, Language, Comm, or Music.',
+        text: 'Click any labeled building or the red Telephone Booth in the garden to enter.',
         quickActions: [],
       },
     ];
@@ -508,8 +514,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     if (persistedRef.current.hasCam) {
       camera.position.copy(persistedRef.current.camPos);
     } else {
-      const baseTarget = new THREE.Vector3(2.5, 1.4, -2.5);
-      const basePos = new THREE.Vector3(-4.5, 8.2, 23.5);
+      const baseTarget = new THREE.Vector3(0.8, 1.7, -1.6);
+      const basePos = new THREE.Vector3(-0.6, 9.6, 27.6);
       basePos.sub(baseTarget).multiplyScalar(camCfg.distScale).add(baseTarget);
       camera.position.copy(basePos);
     }
@@ -532,7 +538,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     if (persistedRef.current.hasCam) {
       controls.target.copy(persistedRef.current.camTarget);
     } else {
-      controls.target.set(2.5, 1.4, -2.5);
+      controls.target.set(0.8, 1.7, -1.6);
     }
     controls.update();
 
@@ -670,11 +676,50 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       return null;
     };
 
+    const portalGroups = architecture.portals.map((p) => p.group);
+    let hoveredPortalId: string | null = null;
+
+    const findHitPortal = () => {
+      raycaster.setFromCamera(pointerNdc, camera);
+      const hits = raycaster.intersectObjects(portalGroups, true);
+      if (hits.length === 0) return null;
+      let obj: THREE.Object3D | null = hits[0].object;
+      while (obj) {
+        const match = architecture.portals.find((p) => p.group === obj);
+        if (match) return match;
+        obj = obj.parent;
+      }
+      return null;
+    };
+
     const onPointerMove = (e: PointerEvent) => {
       const now = performance.now();
       if (now - lastRaycastMs < 40) return;
       lastRaycastMs = now;
       updateNdc(e.clientX, e.clientY);
+
+      if (e.pointerType !== 'touch') {
+        const hoveredPortal = findHitPortal();
+        const nextId = hoveredPortal ? hoveredPortal.id : null;
+        if (nextId !== hoveredPortalId) {
+          hoveredPortalId = nextId;
+          if (renderer) {
+            renderer.domElement.style.cursor = hoveredPortal ? 'pointer' : '';
+          }
+          if (hoveredPortal) {
+            const label =
+              lang === 'ar'
+                ? hoveredPortal.labelAr
+                : lang === 'en'
+                  ? hoveredPortal.labelEn
+                  : hoveredPortal.labelZh;
+            setHoveredLandmark({ id: hoveredPortal.id, label });
+          } else {
+            setHoveredLandmark(null);
+          }
+        }
+      }
+
       const hit = raycastGroundOrWater();
       if (hit) {
         pointerWorld.copy(hit.point);
@@ -701,14 +746,15 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       updateNdc(e.clientX, e.clientY);
 
       raycaster.setFromCamera(pointerNdc, camera);
-      const actorHits = raycaster.intersectObjects([spirit.hitTarget, cat.hitTarget, architecture.pavilionGroup], true);
+
+      // 1. Check Spirit Butterfly & Garden Cat first
+      const actorHits = raycaster.intersectObjects([spirit.hitTarget, cat.hitTarget], true);
       if (actorHits.length > 0) {
         const hitObj = actorHits[0].object;
         if (hitObj === cat.hitTarget) {
           weatherFX.emitPetalBurst(cat.group.position);
           return;
         }
-        // Clicked Spirit or Waterside Pavilion: wake Spirit & speak ONLY inside the overhead bubble (no duplicate HUD!)
         uiStateManager.setPavilionHudOpen(false);
         if (spiritStateRef.current === 'idle_explore' || spiritStateRef.current === 'sleeping_in_house' || spiritStateRef.current === 'returning_to_rest') {
           uiStateManager.setSpiritState('woken_approaching');
@@ -720,10 +766,19 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           badge: lang === 'zh' ? '花径伴侣' : 'Garden Companion',
           text:
             lang === 'zh'
-              ? `我在呢！你可以直接打字，或点下方「实时语音」跟我一对一聊天、练英语口语，或者让我帮你画图。`
-              : `I'm right here! Type below or tap Live Voice to talk with ${aiName}, practice speaking, or paint an image.`,
+              ? `我在呢！点击花园里的图书馆、音乐馆、语言中心、AI 中心或红色电话亭都可以直接进入，也可以直接和我聊天。`
+              : `I'm right here! Click any labeled building or the red Phone Booth to enter, or chat directly with ${aiName}.`,
         });
         weatherFX.emitPetalBurst(spirit.spiritPos);
+        return;
+      }
+
+      // 2. Check ALL 5 Permanent Labeled Architectural Landmarks (click directly to enter!)
+      const clickedPortal = findHitPortal();
+      if (clickedPortal) {
+        weatherFX.emitPetalBurst(clickedPortal.worldPos);
+        setHoveredLandmark(null);
+        onSelectTabRef.current?.(clickedPortal.id);
         return;
       }
 
@@ -738,6 +793,11 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
     const onPointerLeave = () => {
       pointerActive = 0;
+      if (hoveredPortalId !== null) {
+        hoveredPortalId = null;
+        if (renderer) renderer.domElement.style.cursor = '';
+        setHoveredLandmark(null);
+      }
     };
 
     renderer.domElement.addEventListener('pointermove', onPointerMove);
@@ -912,12 +972,23 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       lightningLight.intensity = st.lightningFlash * 3.4;
       lightningLight.position.set(st.lightningAzimuth * 30, 32, -36);
 
-      // Warm lakeside pavilion lantern, Spirit Rest Cottage hearth & rain material wetness
+      // Warm lakeside Music Pavilion lantern, Library hearth, Language Hall, AI Center & Red Phone Booth glow
       architecture.lanternLight.intensity = st.lanternGlow * 2.2;
       architecture.lanternGlassMat.emissiveIntensity = 0.12 + st.lanternGlow * 1.85;
       const spiritSleeping = spiritStateRef.current === 'sleeping_in_house' || spiritStateRef.current === 'returning_to_rest';
       architecture.restHouseLight.intensity = 0.25 + st.lanternGlow * 1.5 + (spiritSleeping ? 0.85 : 0);
       architecture.restWindowMat.emissiveIntensity = 0.18 + st.lanternGlow * 1.35 + (spiritSleeping ? 0.55 : 0);
+      for (const lgt of architecture.extraLights) {
+        lgt.intensity = 0.35 + st.lanternGlow * 1.75;
+      }
+      for (const wMat of architecture.extraWindowMats) {
+        wMat.emissiveIntensity = 0.28 + st.lanternGlow * 1.25;
+      }
+      for (const portal of architecture.portals) {
+        const isHovered = hoveredPortalId === portal.id;
+        portal.signMat.emissiveIntensity = (isHovered ? 0.96 : 0.48) + st.lanternGlow * 0.42;
+      }
+      architecture.aiCrownGroup.rotation.y = elapsed * 0.42;
       for (const mat of architecture.wettableMaterials) {
         const baseR = typeof mat.userData.baseRoughness === 'number' ? mat.userData.baseRoughness : 0.7;
         mat.roughness = THREE.MathUtils.lerp(baseR, Math.max(0.14, baseR * 0.36), st.wetness);
@@ -1272,6 +1343,18 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           <p className="mt-1.5 text-xs text-white/80">
             {isZh ? '3D 实时花园环境（需要启用 WebGL 渲染支持）' : 'Interactive 3D Paradise Garden (WebGL required)'}
           </p>
+        </div>
+      )}
+
+      {/* Subtle Hover Prompt ONLY while pointing at one of the 5 clickable 3D buildings */}
+      {hoveredLandmark && (
+        <div className="pointer-events-none fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-[52] -translate-x-1/2">
+          <div className={`inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-medium tracking-wide transition-all ${dockShellCls}`}>
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            <span>
+              {isZh ? `点击进入 · ${hoveredLandmark.label}` : `Click to enter · ${hoveredLandmark.label}`}
+            </span>
+          </div>
         </div>
       )}
 

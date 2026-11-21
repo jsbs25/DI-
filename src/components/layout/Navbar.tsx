@@ -11,13 +11,8 @@ import {
   LogOut,
   ChevronDown,
   Sparkles,
-  BookOpen,
   Sun,
   Moon,
-  GraduationCap,
-  MessageCircle,
-  Music2,
-  Bot,
   BatteryCharging,
   BatteryFull,
   BatteryMedium,
@@ -51,14 +46,6 @@ interface NavbarProps {
   onOpenCommand?: () => void;
 }
 
-const BOTTOM_PORTALS = [
-  { id: 'library', icon: BookOpen, labelZh: '图书馆', shortZh: '图书馆', labelEn: 'Library', labelAr: 'المكتبة' },
-  { id: 'arabic-learning', icon: GraduationCap, labelZh: '语言中心', shortZh: '语言', labelEn: 'Language', labelAr: 'اللغات' },
-  { id: 'aihub', icon: Bot, labelZh: 'ONE AI', shortZh: 'AI', labelEn: 'ONE AI', labelAr: 'الذكاء' },
-  { id: 'chat', icon: MessageCircle, labelZh: '通讯中心', shortZh: '通讯', labelEn: 'Messages', labelAr: 'التواصل' },
-  { id: 'venus', icon: Music2, labelZh: '音乐中心', shortZh: '音乐', labelEn: 'Music', labelAr: 'الموسيقى' },
-] as const;
-
 const SUBPAGE_TITLES: Record<string, { zh: string; en: string; ar: string }> = {
   library: { zh: '图书馆', en: 'Library', ar: 'المكتبة' },
   'arabic-learning': { zh: '语言中心', en: 'Language Center', ar: 'مركز اللغات' },
@@ -82,7 +69,6 @@ const SUBPAGE_TITLES: Record<string, { zh: string; en: string; ar: string }> = {
 export const Navbar: React.FC<NavbarProps> = ({
   currentTab,
   immersive = false,
-  hideBottomNav = false,
   onSelectTab,
   lang,
   onSelectLang,
@@ -200,12 +186,6 @@ export const Navbar: React.FC<NavbarProps> = ({
       ? 'border-[#1d2d25]/14 bg-[#f3eee4]/92 text-[#1b2b23] hover:bg-[#f8f4ec] shadow-[0_6px_18px_rgba(16,28,22,0.14)]'
       : 'border-white/12 bg-[#0f1722]/88 text-[#f5f1e8] hover:bg-[#162231]/94 shadow-[0_8px_22px_rgba(2,6,12,0.38)]'
     : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/95 dark:bg-[#101924]/94 text-[#1b2b23] dark:text-[#f5f1e8] hover:bg-white dark:hover:bg-[#182534] shadow-[0_6px_18px_rgba(20,34,27,0.08)] dark:shadow-[0_10px_24px_rgba(0,0,0,0.36)]';
-
-  const dockShell = isGardenHome
-    ? isGardenDay
-      ? 'border-[#1d2d25]/14 bg-[#f3eee4]/94 text-[#1b2b23] shadow-[0_12px_32px_rgba(16,28,22,0.18)]'
-      : 'border-white/12 bg-[#0f1722]/90 text-[#f5f1e8] shadow-[0_16px_40px_rgba(2,6,12,0.50)]'
-    : 'border-[#23362c]/12 dark:border-white/[0.14] bg-[#fcfaf5]/96 dark:bg-[#0f1722]/94 text-[#1b2b23] dark:text-[#f5f1e8] shadow-[0_12px_32px_rgba(20,34,27,0.12)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.48)]';
 
   return (
     <>
@@ -412,46 +392,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* Primary 5-Portal Dock: Exclusively on 3D Garden Home; completely hidden inside every subpage */}
-      {isGardenHome && !hideBottomNav && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[55] flex justify-center px-3 pb-[max(0.7rem,env(safe-area-inset-bottom))] pt-1">
-          <nav
-            aria-label={lang === 'zh' ? '底部主导航' : 'Bottom Primary Navigation'}
-            className={`pointer-events-auto grid w-full max-w-[420px] grid-cols-5 items-center gap-1 rounded-[24px] border p-1.5 transition-all sm:w-auto sm:min-w-[540px] sm:max-w-[600px] sm:gap-1.5 sm:rounded-full sm:p-1.5 ${dockShell}`}
-          >
-            {BOTTOM_PORTALS.map((item) => {
-              const Icon = item.icon;
-              const isCenterAi = item.id === 'aihub';
-              const fullLabel = lang === 'ar' ? item.labelAr : lang === 'en' ? item.labelEn : item.labelZh;
-              const compactLabel = lang === 'zh' ? item.shortZh : fullLabel;
-
-              const portalCls = isGardenDay
-                ? isCenterAi
-                  ? 'bg-black/[0.055] text-[#1b2e26] hover:bg-black/[0.095]'
-                  : 'text-[#2b3f36]/90 hover:bg-black/[0.055] hover:text-[#14221c]'
-                : isCenterAi
-                  ? 'bg-white/[0.09] text-[#f6f1e6] hover:bg-white/[0.15]'
-                  : 'text-[#e8e2d5]/85 hover:bg-white/[0.09] hover:text-white';
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onSelectTab(item.id)}
-                  className={`group flex min-h-[48px] flex-col items-center justify-center gap-1 rounded-[20px] px-1.5 py-1.5 text-[10.5px] font-medium tracking-[0.015em] whitespace-nowrap transition-all duration-200 active:scale-[0.96] cursor-pointer sm:min-h-[40px] sm:flex-row sm:gap-2 sm:rounded-full sm:px-4 sm:py-1.5 sm:text-[12.5px] ${portalCls}`}
-                >
-                  <Icon
-                    className="h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:scale-[1.06] sm:h-[16px] sm:w-[16px]"
-                    strokeWidth={1.85}
-                  />
-                  <span className="hidden sm:inline">{fullLabel}</span>
-                  <span className="sm:hidden leading-none">{compactLabel}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-      )}
     </>
   );
 };

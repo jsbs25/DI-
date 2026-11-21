@@ -225,7 +225,20 @@ export function gardenPathFactor(x: number, z: number): number {
   const dBankA = Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ) * 0.85;
   const dBankB = Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ) * 0.85;
 
-  const d = Math.min(d1, d2, dBankA, dBankB);
+  // Gentle stone spur trails connecting Library (-11.4, 5.8), Language Center (7.8, 9.4),
+  // Phone Booth (-1.4, 8.2), and AI Center (1.8, -12.6) to the main garden footpath
+  const segDist = (ax: number, az: number, bx: number, bz: number) => {
+    const sdx = bx - ax;
+    const sdz = bz - az;
+    const st = Math.max(0, Math.min(1, ((x - ax) * sdx + (z - az) * sdz) / (sdx * sdx + sdz * sdz || 1)));
+    return Math.hypot(x - (ax + sdx * st), z - (az + sdz * st));
+  };
+  const dSpurLib = segDist(-3.2, 8.2, -9.8, 6.4) + 0.18;
+  const dSpurLang = segDist(-1.2, 10.6, 6.4, 9.4) + 0.18;
+  const dSpurAi = segDist(BRIDGE_CONFIG.bankBX, BRIDGE_CONFIG.bankBZ, 1.8, -10.8) + 0.15;
+  const dBoothPad = Math.hypot(x + 1.4, z - 8.2) * 0.85;
+
+  const d = Math.min(d1, d2, dBankA, dBankB, dSpurLib, dSpurLang, dSpurAi, dBoothPad);
   return 1 - smoothstep(0.72, 2.05, d);
 }
 
@@ -264,6 +277,19 @@ export function sampleTerrainBiome(x: number, z: number): TerrainBiomeSample {
   const restDist = Math.hypot(x + 11.4, z - 5.8);
   const restFlat = 1 - smoothstep(2.1, 4.4, restDist);
   h = THREE.MathUtils.lerp(h, 1.38, restFlat);
+
+  // Flattened terrace pads for Language Center (7.8, 9.4), AI Center (1.8, -12.6), and Phone Booth (-1.4, 8.2)
+  const langDist = Math.hypot(x - 7.8, z - 9.4);
+  const langFlat = 1 - smoothstep(2.2, 4.7, langDist);
+  h = THREE.MathUtils.lerp(h, 1.24, langFlat);
+
+  const aiDist = Math.hypot(x - 1.8, z + 12.6);
+  const aiFlat = 1 - smoothstep(2.5, 5.2, aiDist);
+  h = THREE.MathUtils.lerp(h, 1.06, aiFlat);
+
+  const boothDist = Math.hypot(x + 1.4, z - 8.2);
+  const boothFlat = 1 - smoothstep(1.2, 2.6, boothDist);
+  h = THREE.MathUtils.lerp(h, 0.78, boothFlat);
 
   const stream = streamDistanceAndFlow(x, z);
   const streamCarve = 1 - smoothstep(stream.width * 0.48, stream.width * 1.46, stream.dist);

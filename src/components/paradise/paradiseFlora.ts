@@ -823,6 +823,9 @@ export function createParadiseFlora(
     if (Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ) < 4.2) return false;
     if (Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ) < 4.2) return false;
     if (Math.hypot(x + 11.4, z - 5.8) < 4.9) return false;
+    if (Math.hypot(x - 7.8, z - 9.4) < 5.0) return false;
+    if (Math.hypot(x - 1.8, z + 12.6) < 5.4) return false;
+    if (Math.hypot(x + 1.4, z - 8.2) < 3.0) return false;
     // Keep panoramic Overlook camera sightline corridor [-4.5, 23.5] -> [2.5, -1.5] open
     const camX = -4.5;
     const camZ = 23.5;
@@ -1164,6 +1167,9 @@ export function createParadiseFlora(
     const sample = sampleTerrainBiome(x, z);
     if (sample.height < 0.2 || sample.height > 4.6 || sample.pathWeight > 0.3) continue;
     if (Math.hypot(x + 11.4, z - 5.8) < 3.15) continue;
+    if (Math.hypot(x - 7.8, z - 9.4) < 3.35) continue;
+    if (Math.hypot(x - 1.8, z + 12.6) < 3.7) continue;
+    if (Math.hypot(x + 1.4, z - 8.2) < 1.85) continue;
 
     dummy.position.set(x, sample.height - 0.025, z);
     dummy.rotation.set((rand() - 0.5) * 0.14, rand() * Math.PI * 2, (rand() - 0.5) * 0.14);
@@ -1294,6 +1300,9 @@ export function createParadiseFlora(
     const sample = sampleTerrainBiome(x, z);
     if (sample.height < 0.22 || sample.height > 4.2 || sample.pathWeight > 0.28) continue;
     if (Math.hypot(x + 11.4, z - 5.8) < 3.2) continue;
+    if (Math.hypot(x - 7.8, z - 9.4) < 3.45) continue;
+    if (Math.hypot(x - 1.8, z + 12.6) < 3.75) continue;
+    if (Math.hypot(x + 1.4, z - 8.2) < 1.95) continue;
 
     dummy.position.set(x, sample.height - 0.02, z);
     dummy.rotation.set((rand() - 0.5) * 0.1, rand() * Math.PI * 2, (rand() - 0.5) * 0.1);
