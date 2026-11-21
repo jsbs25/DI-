@@ -226,13 +226,33 @@ async function detectLocationByIp(ip: string): Promise<{ lat: number; lon: numbe
   try {
     const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`, {
       headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(2800),
     });
     if (res.ok) {
       const d: any = await res.json();
       if (d?.success !== false && typeof d?.latitude === 'number' && typeof d?.longitude === 'number') {
         const label = [d.city || d.region, d.country].filter(Boolean).slice(0, 2).join(' · ') || 'Local';
         const hit = { lat: d.latitude, lon: d.longitude, label };
+        IP_GEO_CACHE.set(ip, { expiresAt: Date.now() + GEO_TTL_MS, ...hit });
+        return hit;
+      }
+    }
+  } catch {
+    // fall through to secondary IP geo provider
+  }
+  try {
+    const res = await fetch(
+      `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,regionName,city,lat,lon&lang=zh-CN`,
+      {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(2500),
+      }
+    );
+    if (res.ok) {
+      const d: any = await res.json();
+      if (d?.status === 'success' && typeof d?.lat === 'number' && typeof d?.lon === 'number') {
+        const label = [d.city || d.regionName, d.country].filter(Boolean).slice(0, 2).join(' · ') || 'Local';
+        const hit = { lat: d.lat, lon: d.lon, label };
         IP_GEO_CACHE.set(ip, { expiresAt: Date.now() + GEO_TTL_MS, ...hit });
         return hit;
       }

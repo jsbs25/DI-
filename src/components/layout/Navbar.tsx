@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { User, Language } from '../../types/index.ts';
 import { translations } from '../../i18n/translations.ts';
 import {
+  ArrowLeft,
   User as UserIcon,
   MapPin,
   ShieldCheck,
@@ -57,6 +58,26 @@ const BOTTOM_PORTALS = [
   { id: 'chat', icon: MessageCircle, labelZh: '通讯中心', shortZh: '通讯', labelEn: 'Messages', labelAr: 'التواصل' },
   { id: 'venus', icon: Music2, labelZh: '音乐中心', shortZh: '音乐', labelEn: 'Music', labelAr: 'الموسيقى' },
 ] as const;
+
+const SUBPAGE_TITLES: Record<string, { zh: string; en: string; ar: string }> = {
+  library: { zh: '图书馆', en: 'Library', ar: 'المكتبة' },
+  'arabic-learning': { zh: '语言中心', en: 'Language Center', ar: 'مركز اللغات' },
+  aihub: { zh: 'ONE AI', en: 'ONE AI', ar: 'الذكاء' },
+  chat: { zh: '通讯中心', en: 'Messages', ar: 'التواصل' },
+  venus: { zh: '音乐中心', en: 'Music', ar: 'الموسيقى' },
+  knowledge: { zh: '知识星图', en: 'Knowledge', ar: 'المعرفة' },
+  browser: { zh: '浏览器', en: 'Browser', ar: 'المتصفح' },
+  feed: { zh: '全球动态', en: 'Feed', ar: 'الأخبار' },
+  saturn: { zh: '影音空间', en: 'Cinema', ar: 'السينما' },
+  mercury: { zh: '全网探索', en: 'Explore', ar: 'استكشاف' },
+  moon: { zh: '天文观星', en: 'Observatory', ar: 'المرصد' },
+  academy: { zh: '学院', en: 'Academy', ar: 'الأكاديمية' },
+  network: { zh: '网络中心', en: 'Network', ar: 'الشبكة' },
+  brand: { zh: '品牌理念', en: 'Brand', ar: 'الهوية' },
+  settings: { zh: '设置与安全', en: 'Settings', ar: 'الإعدادات' },
+  profile: { zh: '个人主页', en: 'Profile', ar: 'الملف' },
+  call: { zh: '实时通话', en: 'Calls', ar: 'المكالمات' },
+};
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentTab,
@@ -191,22 +212,50 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Minimal Top Floating Corners: Brand Home Return (Left) + Theme/Lang/Profile (Right) */}
       <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-2.5 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.65rem,env(safe-area-inset-top))]">
         <div className="mx-auto flex h-8 sm:h-9 w-full max-w-[1380px] items-center justify-between gap-1.5 sm:gap-2">
-          {/* Top-Left: Compact Brand Home Button */}
-          <button
-            type="button"
-            onClick={() => onSelectTab('globe')}
-            title={lang === 'zh' ? '返回 EARTH ONE 首页' : 'Return to EARTH ONE Home'}
-            className={`pointer-events-auto flex h-8 w-8 sm:h-9 sm:w-auto items-center justify-center sm:justify-start gap-1 sm:gap-1.5 rounded-full border p-0.5 sm:pl-0.5 sm:pr-2 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
-          >
-            <ParadiseBrandEmblem
-              surface={isGardenHome ? (isGardenDay ? 'garden-day' : 'garden-night') : theme === 'dark' ? 'dark' : 'light'}
-              variant="medallion"
-              size={20}
-            />
-            <span className="hidden md:inline whitespace-nowrap text-[10px] font-semibold tracking-[0.16em]">
-              EARTH ONE
-            </span>
-          </button>
+          {/* Top-Left: Home Brand Medallion on Garden Home; Clear Return-Home + Active Module Title inside Subpages */}
+          {isGardenHome ? (
+            <button
+              type="button"
+              onClick={() => onSelectTab('globe')}
+              title={lang === 'zh' ? 'EARTH ONE 主页' : 'EARTH ONE Home'}
+              className={`pointer-events-auto flex h-8 w-8 sm:h-9 sm:w-9 lg:w-auto items-center justify-center lg:justify-start gap-1.5 rounded-full border p-0.5 lg:pl-0.5 lg:pr-2.5 transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
+            >
+              <ParadiseBrandEmblem
+                surface={isGardenDay ? 'garden-day' : 'garden-night'}
+                variant="medallion"
+                size={20}
+              />
+              <span className="hidden lg:inline whitespace-nowrap text-[10px] font-semibold tracking-[0.16em]">
+                EARTH ONE
+              </span>
+            </button>
+          ) : (
+            <div className="pointer-events-auto flex min-w-0 items-center gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => onSelectTab('globe')}
+                title={lang === 'zh' ? '返回主界面' : 'Return Home'}
+                className={`flex h-8 sm:h-9 items-center gap-1.5 rounded-full border pl-2 pr-2.5 sm:pl-2.5 sm:pr-3 text-[11.5px] sm:text-xs font-medium transition-all active:scale-[0.97] cursor-pointer shrink-0 ${surfaceChip}`}
+              >
+                <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
+                <span className="whitespace-nowrap">
+                  {lang === 'ar' ? 'الرئيسية' : lang === 'en' ? 'Home' : '返回主页'}
+                </span>
+              </button>
+              {SUBPAGE_TITLES[currentTab] && (
+                <div className="flex min-w-0 items-center gap-1.5 text-[12px] sm:text-[13px] font-semibold text-[#1b2b23] dark:text-[#f5f1e8]">
+                  <span className="opacity-25">/</span>
+                  <span className="truncate max-w-[6.5rem] sm:max-w-[14rem]">
+                    {lang === 'ar'
+                      ? SUBPAGE_TITLES[currentTab].ar
+                      : lang === 'en'
+                        ? SUBPAGE_TITLES[currentTab].en
+                        : SUBPAGE_TITLES[currentTab].zh}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Top-Right: Minimal Utilities & Profile Avatar */}
           <div className="pointer-events-auto flex shrink-0 items-center gap-1 sm:gap-1.5">
@@ -222,7 +271,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       : `Battery ${batteryState.level}%`
                 }
                 aria-label={`Battery ${batteryState.level}%${batteryState.charging ? ' charging' : ''}`}
-                className={`hidden sm:flex h-9 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium tabular-nums transition-all ${surfaceChip}`}
+                className={`${isGardenHome ? 'hidden lg:flex' : 'hidden sm:flex'} h-9 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium tabular-nums transition-all ${surfaceChip}`}
               >
                 {batteryState.charging ? (
                   <BatteryCharging className="h-4 w-4 text-emerald-500 dark:text-emerald-400" />
@@ -243,7 +292,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={onToggleTheme}
                 title={theme === 'dark' ? (lang === 'zh' ? '切换明亮模式' : 'Switch to Light mode') : (lang === 'zh' ? '切换深色模式' : 'Switch to Dark mode')}
                 aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                className={`flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full border transition-all active:scale-[0.96] cursor-pointer ${surfaceChip}`}
+                className={`${isGardenHome ? 'hidden md:flex' : 'flex'} h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-full border transition-all active:scale-[0.96] cursor-pointer ${surfaceChip}`}
               >
                 {theme === 'dark' ? <Sun className="h-4 w-4 text-[#d6b77f]" /> : <Moon className="h-4 w-4 text-[#247864]" />}
               </button>
@@ -288,16 +337,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                   aria-expanded={userDropdownOpen}
                   aria-haspopup="menu"
                   onClick={() => { setUserDropdownOpen(v => !v); setLangMenuOpen(false); }}
-                  className={`flex h-8 sm:h-9 items-center gap-2 rounded-full border p-0.5 sm:pr-2.5 transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
+                  className={`flex h-8 sm:h-9 items-center gap-2 rounded-full border p-0.5 ${isGardenHome ? 'lg:pr-2.5' : 'sm:pr-2.5'} transition-all active:scale-[0.97] cursor-pointer ${surfaceChip}`}
                   title={currentUser.displayName}
                 >
                   <span className="relative h-6 w-6 sm:h-7 sm:w-7 shrink-0">
                     <img src={currentUser.avatar} alt={currentUser.displayName} className="h-full w-full rounded-full object-cover" />
                   </span>
-                  <span className="hidden md:inline max-w-[84px] truncate text-xs font-medium">
+                  <span className={`${isGardenHome ? 'hidden lg:inline' : 'hidden md:inline'} max-w-[84px] truncate text-xs font-medium`}>
                     {currentUser.displayName}
                   </span>
-                  <ChevronDown className="hidden md:inline h-3 w-3 opacity-65" />
+                  <ChevronDown className={`${isGardenHome ? 'hidden lg:inline' : 'hidden md:inline'} h-3 w-3 opacity-65`} />
                 </button>
                 {userDropdownOpen && (
                   <div role="menu" className="absolute right-0 mt-2 w-60 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-[#23362c]/14 dark:border-white/[0.14] bg-[#f8f5ee] dark:bg-[#111b26] py-2 text-xs shadow-2xl">
@@ -357,8 +406,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* Unified Apple-Grade Symmetrical Floating Glass Bottom Navigation Dock */}
-      {!hideBottomNav && (
+      {/* Primary 5-Portal Dock: Exclusively on 3D Garden Home; completely hidden inside every subpage */}
+      {isGardenHome && !hideBottomNav && (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[55] flex justify-center px-3 pb-[max(0.7rem,env(safe-area-inset-bottom))] pt-1">
           <nav
             aria-label={lang === 'zh' ? '底部主导航' : 'Bottom Primary Navigation'}
@@ -366,42 +415,28 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             {BOTTOM_PORTALS.map((item) => {
               const Icon = item.icon;
-              const active = currentTab === item.id;
               const isCenterAi = item.id === 'aihub';
               const fullLabel = lang === 'ar' ? item.labelAr : lang === 'en' ? item.labelEn : item.labelZh;
               const compactLabel = lang === 'zh' ? item.shortZh : fullLabel;
 
-              const activeTabCls = isGardenHome
-                ? isGardenDay
-                  ? 'bg-[#1d352c] text-[#faf7f0] shadow-[0_4px_12px_rgba(20,38,30,0.24)]'
-                  : 'bg-[#ede3ce] text-[#131d27] shadow-[0_4px_14px_rgba(0,0,0,0.28)]'
-                : 'bg-[#1f6250] text-[#faf7f0] dark:bg-[#ede3ce] dark:text-[#131d27] shadow-[0_4px_12px_rgba(20,56,45,0.20)]';
-
-              const inactiveTabCls = isGardenHome
-                ? isGardenDay
-                  ? isCenterAi
-                    ? 'bg-black/[0.045] text-[#1b2e26] hover:bg-black/[0.08]'
-                    : 'text-[#2b3f36]/90 hover:bg-black/[0.055] hover:text-[#14221c]'
-                  : isCenterAi
-                    ? 'bg-white/[0.08] text-[#f6f1e6] hover:bg-white/[0.14]'
-                    : 'text-[#e8e2d5]/85 hover:bg-white/[0.09] hover:text-white'
+              const portalCls = isGardenDay
+                ? isCenterAi
+                  ? 'bg-black/[0.055] text-[#1b2e26] hover:bg-black/[0.095]'
+                  : 'text-[#2b3f36]/90 hover:bg-black/[0.055] hover:text-[#14221c]'
                 : isCenterAi
-                  ? 'bg-[#1f6250]/[0.08] text-[#1c4b3d] dark:bg-white/[0.09] dark:text-[#efe7d6] hover:bg-[#1f6250]/[0.14] dark:hover:bg-white/[0.15]'
-                  : 'text-[#31453b]/90 dark:text-[#d8d3c8]/88 hover:bg-black/[0.05] dark:hover:bg-white/[0.08] hover:text-[#16241d] dark:hover:text-white';
+                  ? 'bg-white/[0.09] text-[#f6f1e6] hover:bg-white/[0.15]'
+                  : 'text-[#e8e2d5]/85 hover:bg-white/[0.09] hover:text-white';
 
               return (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => onSelectTab(item.id)}
-                  aria-current={active ? 'page' : undefined}
-                  className={`group flex min-h-[48px] flex-col items-center justify-center gap-1 rounded-[20px] px-1.5 py-1.5 text-[10.5px] font-medium tracking-[0.015em] whitespace-nowrap transition-all duration-200 active:scale-[0.96] cursor-pointer sm:min-h-[40px] sm:flex-row sm:gap-2 sm:rounded-full sm:px-4 sm:py-1.5 sm:text-[12.5px] ${
-                    active ? activeTabCls : inactiveTabCls
-                  }`}
+                  className={`group flex min-h-[48px] flex-col items-center justify-center gap-1 rounded-[20px] px-1.5 py-1.5 text-[10.5px] font-medium tracking-[0.015em] whitespace-nowrap transition-all duration-200 active:scale-[0.96] cursor-pointer sm:min-h-[40px] sm:flex-row sm:gap-2 sm:rounded-full sm:px-4 sm:py-1.5 sm:text-[12.5px] ${portalCls}`}
                 >
                   <Icon
                     className="h-[18px] w-[18px] shrink-0 transition-transform duration-200 group-hover:scale-[1.06] sm:h-[16px] sm:w-[16px]"
-                    strokeWidth={active ? 2.15 : 1.75}
+                    strokeWidth={1.85}
                   />
                   <span className="hidden sm:inline">{fullLabel}</span>
                   <span className="sm:hidden leading-none">{compactLabel}</span>

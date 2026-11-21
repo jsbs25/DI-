@@ -582,7 +582,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   ];
 
   return (
-    <div className="flex h-[calc(100dvh-8.4rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-h-[500px] flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+    <div className="flex h-[calc(100dvh-3.75rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-h-[500px] flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
       {/* Clean Editorial Hairline Top Bar with Underline Mode Tabs */}
       <div className="mx-auto flex w-full max-w-[820px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--color-one-border)] px-3 pb-0 pt-1 sm:px-6">
         <div className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none]">

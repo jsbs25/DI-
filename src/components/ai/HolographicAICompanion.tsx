@@ -2140,7 +2140,9 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
           } ${
             placement === 'center-bottom'
               ? 'bottom-[calc(4.5rem+env(safe-area-inset-bottom))] md:bottom-[4.5rem] left-1/2 -translate-x-1/2'
-              : 'bottom-[calc(5.2rem+env(safe-area-inset-bottom))] md:bottom-20 right-3 md:right-6'
+              : isGardenHome
+                ? 'bottom-[calc(5.2rem+env(safe-area-inset-bottom))] md:bottom-20 right-3 md:right-6'
+                : 'bottom-[calc(1.25rem+env(safe-area-inset-bottom))] md:bottom-6 right-3 md:right-6'
           } w-[calc(100vw-1.5rem)] max-w-[360px] max-h-[64dvh]`}
         >
           {/* Header with Garden Spirit Emblem + Emotion Status + Controls */}

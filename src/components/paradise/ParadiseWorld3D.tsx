@@ -1322,24 +1322,24 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Top-Center Clock, Location & Live Weather Pill — compact, below navbar on mobile/tablet */}
+      {/* Top-Center Clock, Location & Live Weather Pill — strictly aligned on the same row as top navbar on phone, tablet & desktop */}
       <div
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.4rem+env(safe-area-inset-top))] sm:top-[calc(3.25rem+env(safe-area-inset-top))] lg:top-[max(0.65rem,env(safe-area-inset-top))] z-[54] flex flex-col items-center gap-2 max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)] lg:max-w-[calc(100vw-22rem)]"
+        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[max(0.5rem,env(safe-area-inset-top))] sm:top-[max(0.65rem,env(safe-area-inset-top))] z-[56] flex flex-col items-center gap-2 max-w-[calc(100vw-11.25rem)] sm:max-w-[calc(100vw-13.5rem)] md:max-w-[calc(100vw-18.5rem)] lg:max-w-[calc(100vw-25rem)]"
       >
         <div className={`pointer-events-auto inline-flex h-8 sm:h-9 max-w-full items-center rounded-full border divide-x overflow-hidden transition-colors ${dockShellCls} ${dockDividerCls}`}>
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
-            className="inline-flex h-8 sm:h-9 min-w-0 max-w-full items-center justify-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 text-[11px] sm:text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
+            className="inline-flex h-8 sm:h-9 min-w-0 max-w-full items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 text-[11px] sm:text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
             title={isZh ? '实时时间、定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
           >
-            <span className="tabular-nums text-[11px] sm:text-[13px] font-semibold tracking-tight leading-none shrink-0">
+            <span className="tabular-nums text-[11px] sm:text-[12.5px] font-semibold tracking-tight leading-none shrink-0">
               {agentSnap.realtimeSync
                 ? `${String(liveClockNow.getHours()).padStart(2, '0')}:${String(liveClockNow.getMinutes()).padStart(2, '0')}`
                 : currentClockLabel}
             </span>
             <span className="opacity-35 leading-none shrink-0">·</span>
-            <span className="inline-flex items-center min-w-0 max-w-[7rem] sm:max-w-[11rem] lg:max-w-[180px] truncate opacity-90">
+            <span className="inline-flex items-center min-w-0 max-w-[5.25rem] sm:max-w-[8.5rem] md:max-w-[10.5rem] lg:max-w-[175px] truncate opacity-90">
               <span className="truncate leading-none">
                 {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable
                   ? agentSnap.liveWeather.locationName
@@ -1350,8 +1350,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             </span>
             {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && (
               <>
-                <span className="hidden sm:inline opacity-35 leading-none shrink-0">·</span>
-                <span className="hidden sm:inline opacity-85 leading-none shrink-0">
+                <span className="hidden md:inline opacity-35 leading-none shrink-0">·</span>
+                <span className="hidden md:inline opacity-85 leading-none shrink-0">
                   {Math.round(agentSnap.liveWeather.temperatureC)}°C {isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}
                 </span>
               </>
@@ -1363,7 +1363,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             type="button"
             onClick={() => void fetchLiveWeather(true)}
             disabled={locating}
-            className="hidden sm:inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
+            className="hidden md:inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45 shrink-0"
             title={isZh ? '高精度 GPS 重新定位' : 'Refresh precise GPS location'}
             aria-label={isZh ? '高精度定位' : 'Locate'}
           >
@@ -1373,7 +1373,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           <button
             type="button"
             onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
-            className="hidden sm:inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
+            className="hidden md:inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer shrink-0"
             title={isZh ? '重置视角' : 'Reset View'}
             aria-label={isZh ? '重置视角' : 'Reset View'}
           >

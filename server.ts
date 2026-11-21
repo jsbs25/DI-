@@ -15,6 +15,7 @@ import { aiGateway } from './server/aiGateway.ts';
 import { createOneAiAdminRouter } from './server/oneAi/adminRoutes.ts';
 import { createOneAiAgentRouter } from './server/oneAi/agentOrchestrator.ts';
 import { handleEnvironmentWeatherRoute } from './server/environmentWeather.ts';
+import { handleReaderFontAssetRoute, handleReaderFontsCssRoute } from './server/chinaFontProxy.ts';
 import { oneAiDb } from './server/oneAi/db.ts';
 import { autoActivateReadyEndpoints, runGlobalModelDiscovery } from './server/oneAi/discovery.ts';
 import { oneAiRouter } from './server/oneAi/router.ts';
@@ -3184,6 +3185,8 @@ app.get('/api/games/rooms', (req, res) => {
 // -------------------------------------------------------------
 app.use('/api/admin/ai', createOneAiAdminRouter(getSessionUser));
 app.get('/api/environment/weather', handleEnvironmentWeatherRoute);
+app.get('/api/fonts/reader.css', handleReaderFontsCssRoute);
+app.get('/api/fonts/asset', handleReaderFontAssetRoute);
 app.use(
   '/api/one-ai/agent',
   createOneAiAgentRouter({
