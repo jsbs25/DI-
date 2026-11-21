@@ -42,8 +42,11 @@ interface ButterflyAgent {
 
 interface BirdAgent {
   group: THREE.Group;
-  leftWing: THREE.Mesh;
-  rightWing: THREE.Mesh;
+  bodyPivot: THREE.Group;
+  leftInnerWing: THREE.Group;
+  leftOuterWing: THREE.Group;
+  rightInnerWing: THREE.Group;
+  rightOuterWing: THREE.Group;
   center: THREE.Vector3;
   rx: number;
   rz: number;
@@ -51,6 +54,8 @@ interface BirdAgent {
   omega: number;
   angle: number;
   flapPhase: number;
+  glideOffset: number;
+  scale: number;
 }
 
 interface KoiAgent {
@@ -257,41 +262,204 @@ export function createParadiseFauna(
   let nextCameraVisitAt = 5.5;
 
   // =========================================================================
-  // 2. Soaring Garden Songbirds / Swallows
+  // 2. Graceful Soaring White Egrets (白鹭) with Articulated 2-Joint Cambered Wings
   // =========================================================================
-  const wingGeo = trackGeo(new THREE.PlaneGeometry(0.45, 0.14));
-  wingGeo.translate(0.22, 0, 0);
-  const bodyGeo = trackGeo(new THREE.ConeGeometry(0.05, 0.34, 5).rotateX(Math.PI / 2));
-  const birdMat = trackMat(
+  const buildCamberedWingSegment = (
+    span: number,
+    rootChord: number,
+    tipChord: number,
+    sweepBack: number,
+    camber: number,
+    isOuter: boolean
+  ): THREE.BufferGeometry => {
+    const segsX = 6;
+    const segsZ = 3;
+    const positions: number[] = [];
+    const uvs: number[] = [];
+    const indices: number[] = [];
+
+    for (let ix = 0; ix <= segsX; ix++) {
+      const u = ix / segsX; // 0 = root/wrist, 1 = wrist/wingtip
+      const x = u * span;
+      // Smoothly tapered airfoil chord, tapering to feathered wingtip on outer segment
+      const tipTaper = isOuter ? Math.pow(1 - u, 0.72) : 1 - u * 0.24;
+      const chord = THREE.MathUtils.lerp(rootChord, tipChord, u) * (isOuter ? Math.max(0.12, tipTaper) : 1.0);
+      const zCenter = -sweepBack * Math.pow(u, isOuter ? 1.35 : 1.15);
+      // Slight graceful arch along wingspan
+      const archY = isOuter ? -Math.pow(u, 1.8) * 0.045 : Math.sin(u * Math.PI * 0.65) * 0.032;
+
+      for (let iz = 0; iz <= segsZ; iz++) {
+        const v = iz / segsZ; // 0 = leading edge (+z), 1 = trailing edge (-z)
+        const z = zCenter + (0.5 - v) * chord;
+        // Airfoil camber dome + slight trailing-edge feather notch wave on outer primaries
+        const notch = isOuter && iz === segsZ && u > 0.35 ? Math.sin(u * Math.PI * 5) * 0.02 : 0;
+        const y = archY + Math.sin(v * Math.PI) * camber * (1 - u * 0.45);
+        positions.push(x, y, z - notch);
+        uvs.push(u, v);
+      }
+    }
+
+    const row = segsZ + 1;
+    for (let ix = 0; ix < segsX; ix++) {
+      for (let iz = 0; iz < segsZ; iz++) {
+        const a = ix * row + iz;
+        const b = (ix + 1) * row + iz;
+        const c = (ix + 1) * row + (iz + 1);
+        const d = ix * row + (iz + 1);
+        indices.push(a, d, b, b, d, c);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    return trackGeo(geo);
+  };
+
+  // Sculpted anatomical bird geometries (forward along +Z)
+  const egretTorsoGeo = trackGeo(new THREE.SphereGeometry(0.088, 12, 8));
+  egretTorsoGeo.scale(0.86, 0.72, 2.35);
+
+  const egretNeckCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0.02, 0.16),
+    new THREE.Vector3(0, 0.065, 0.25),
+    new THREE.Vector3(0, 0.035, 0.32),
+    new THREE.Vector3(0, 0.072, 0.41),
+  ]);
+  const egretNeckGeo = trackGeo(new THREE.TubeGeometry(egretNeckCurve, 8, 0.024, 6, false));
+
+  const egretHeadGeo = trackGeo(new THREE.SphereGeometry(0.036, 8, 7));
+  egretHeadGeo.scale(0.85, 0.82, 1.32);
+  egretHeadGeo.translate(0, 0.078, 0.44);
+
+  const egretBeakGeo = trackGeo(new THREE.ConeGeometry(0.012, 0.11, 5));
+  egretBeakGeo.rotateX(Math.PI / 2);
+  egretBeakGeo.translate(0, 0.074, 0.535);
+
+  const egretTailGeo = trackGeo(new THREE.PlaneGeometry(0.18, 0.22, 2, 1));
+  egretTailGeo.rotateX(-Math.PI / 2);
+  {
+    const tp = egretTailGeo.attributes.position as THREE.BufferAttribute;
+    for (let k = 0; k < tp.count; k++) {
+      const z = tp.getZ(k);
+      if (z > 0) tp.setX(k, tp.getX(k) * 0.32); // narrow at tail root, fanned at back (-z)
+    }
+    egretTailGeo.translate(0, 0.01, -0.26);
+    egretTailGeo.computeVertexNormals();
+  }
+
+  const egretLegGeo = trackGeo(new THREE.CylinderGeometry(0.005, 0.004, 0.34, 4));
+  egretLegGeo.rotateX(Math.PI / 2);
+
+  const innerWingSpan = 0.46;
+  const outerWingSpan = 0.56;
+  const innerWingGeo = buildCamberedWingSegment(innerWingSpan, 0.25, 0.21, 0.06, 0.032, false);
+  const outerWingGeo = buildCamberedWingSegment(outerWingSpan, 0.21, 0.055, 0.16, 0.02, true);
+
+  const egretPlumageMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x3b424d,
-      roughness: 0.72,
-      metalness: 0.05,
+      color: 0xf6f4ee,
+      emissive: 0x262930,
+      emissiveIntensity: 0.12,
+      roughness: 0.62,
+      metalness: 0.02,
       side: THREE.DoubleSide,
+    })
+  );
+  const egretPrimaryMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xd8dfe8,
+      emissive: 0x1d232b,
+      emissiveIntensity: 0.1,
+      roughness: 0.65,
+      metalness: 0.02,
+      side: THREE.DoubleSide,
+    })
+  );
+  const egretBeakMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xd99b38,
+      roughness: 0.45,
+      metalness: 0.05,
+    })
+  );
+  const egretLegMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x3b4046,
+      roughness: 0.72,
+      metalness: 0.04,
     })
   );
 
   const birds: BirdAgent[] = [];
-  for (let i = 0; i < quality.birdCount; i++) {
+  const egretCount = Math.min(Math.max(4, quality.birdCount), 7);
+  for (let i = 0; i < egretCount; i++) {
     const bGroup = new THREE.Group();
-    const body = new THREE.Mesh(bodyGeo, birdMat);
-    const lw = new THREE.Mesh(wingGeo, birdMat);
-    const rw = new THREE.Mesh(wingGeo, birdMat);
-    rw.scale.x = -1;
-    bGroup.add(body, lw, rw);
+    const bodyPivot = new THREE.Group();
+    bGroup.add(bodyPivot);
+
+    const torso = new THREE.Mesh(egretTorsoGeo, egretPlumageMat);
+    const neck = new THREE.Mesh(egretNeckGeo, egretPlumageMat);
+    const head = new THREE.Mesh(egretHeadGeo, egretPlumageMat);
+    const beak = new THREE.Mesh(egretBeakGeo, egretBeakMat);
+    const tail = new THREE.Mesh(egretTailGeo, egretPlumageMat);
+
+    const leftLeg = new THREE.Mesh(egretLegGeo, egretLegMat);
+    leftLeg.position.set(0.026, -0.024, -0.34);
+    const rightLeg = new THREE.Mesh(egretLegGeo, egretLegMat);
+    rightLeg.position.set(-0.026, -0.024, -0.34);
+
+    // Left 2-joint wing (+X side)
+    const leftInnerWing = new THREE.Group();
+    leftInnerWing.position.set(0.055, 0.028, 0.04);
+    leftInnerWing.add(new THREE.Mesh(innerWingGeo, egretPlumageMat));
+
+    const leftOuterWing = new THREE.Group();
+    leftOuterWing.position.set(innerWingSpan, 0.008, -0.06);
+    leftOuterWing.add(new THREE.Mesh(outerWingGeo, egretPrimaryMat));
+    leftInnerWing.add(leftOuterWing);
+
+    // Right 2-joint wing (-X side mirrored cleanly)
+    const rightInnerWing = new THREE.Group();
+    rightInnerWing.position.set(-0.055, 0.028, 0.04);
+    const rInnerMesh = new THREE.Mesh(innerWingGeo, egretPlumageMat);
+    rInnerMesh.scale.x = -1;
+    rightInnerWing.add(rInnerMesh);
+
+    const rightOuterWing = new THREE.Group();
+    rightOuterWing.position.set(-innerWingSpan, 0.008, -0.06);
+    const rOuterMesh = new THREE.Mesh(outerWingGeo, egretPrimaryMat);
+    rOuterMesh.scale.x = -1;
+    rightOuterWing.add(rOuterMesh);
+    rightInnerWing.add(rightOuterWing);
+
+    bodyPivot.add(torso, neck, head, beak, tail, leftLeg, rightLeg, leftInnerWing, rightInnerWing);
+    const sc = 0.88 + (i % 3) * 0.14;
+    bodyPivot.scale.setScalar(sc);
     group.add(bGroup);
 
     birds.push({
       group: bGroup,
-      leftWing: lw,
-      rightWing: rw,
-      center: new THREE.Vector3((Math.random() - 0.5) * 14, 10 + i * 1.6, -8 + (Math.random() - 0.5) * 16),
-      rx: 14 + i * 3.2,
-      rz: 11 + i * 2.5,
-      alt: 9.5 + (i % 4) * 2.6,
-      omega: 0.22 + (i % 3) * 0.06,
-      angle: (i / Math.max(1, quality.birdCount)) * Math.PI * 2,
-      flapPhase: Math.random() * Math.PI * 2,
+      bodyPivot,
+      leftInnerWing,
+      leftOuterWing,
+      rightInnerWing,
+      rightOuterWing,
+      center: new THREE.Vector3(
+        (i % 2 === 0 ? -1 : 1) * (4 + i * 1.4),
+        14.2 + (i % 4) * 1.8,
+        -10 + (i - egretCount * 0.5) * 3.8
+      ),
+      rx: 17 + i * 3.4,
+      rz: 13 + i * 2.6,
+      alt: 13.5 + (i % 4) * 2.1,
+      omega: (i % 2 === 0 ? 1 : -1) * (0.14 + (i % 3) * 0.028),
+      angle: (i / Math.max(1, egretCount)) * Math.PI * 2,
+      flapPhase: i * 1.37 + Math.random() * 1.5,
+      glideOffset: i * 2.1,
+      scale: sc,
     });
   }
 
@@ -564,26 +732,50 @@ export function createParadiseFauna(
       }
     }
 
-    // 2. Update soaring birds across valley sky
-    const birdVis = THREE.MathUtils.clamp((dayFactor * 1.1 + 0.2 - nightFactor * 0.9) * (1 - rainIntensity * 0.8), 0, 1);
+    // 2. Update graceful soaring White Egrets across valley sky
+    const birdVis = THREE.MathUtils.clamp((dayFactor * 1.15 + 0.22 - nightFactor * 0.92) * (1 - rainIntensity * 0.85), 0, 1);
     for (const bird of birds) {
       bird.group.visible = birdVis > 0.05;
       if (!bird.group.visible) continue;
 
-      bird.angle += bird.omega * dt * (1 + windStrength * 0.25);
+      bird.angle += bird.omega * dt * (1 + windStrength * 0.18);
       const bx = bird.center.x + Math.cos(bird.angle) * bird.rx;
       const bz = bird.center.z + Math.sin(bird.angle) * bird.rz;
-      const by = bird.alt + Math.sin(bird.angle * 2 + bird.flapPhase) * 1.15;
+      const by = bird.alt + Math.sin(bird.angle * 1.5 + bird.flapPhase) * 1.35;
 
-      const nx = bird.center.x + Math.cos(bird.angle + 0.05) * bird.rx;
-      const nz = bird.center.z + Math.sin(bird.angle + 0.05) * bird.rz;
+      const step = bird.omega >= 0 ? 0.045 : -0.045;
+      const nx = bird.center.x + Math.cos(bird.angle + step) * bird.rx;
+      const nz = bird.center.z + Math.sin(bird.angle + step) * bird.rz;
+      const ny = bird.alt + Math.sin((bird.angle + step) * 1.5 + bird.flapPhase) * 1.35;
+
       bird.group.position.set(bx, by, bz);
-      bird.group.lookAt(nx, by, nz);
+      bird.group.lookAt(nx, ny, nz);
 
-      const glideCycle = Math.sin(elapsed * 0.45 + bird.flapPhase);
-      const flap = glideCycle > -0.2 ? Math.sin(elapsed * 9.5 + bird.flapPhase) * 0.48 : Math.sin(elapsed * 1.8) * 0.08;
-      bird.leftWing.rotation.z = flap;
-      bird.rightWing.rotation.z = -flap;
+      // Gentle inward bank angle during curved soaring path
+      const bankSign = bird.omega >= 0 ? -1 : 1;
+      bird.bodyPivot.rotation.z = bankSign * 0.24 + Math.sin(elapsed * 0.7 + bird.glideOffset) * 0.05;
+
+      // Natural soaring rhythm: ~70% effortless thermal glide, ~30% slow measured 2-joint wingbeats (~3.2 rad/s)
+      const cycle = Math.sin(elapsed * 0.36 + bird.glideOffset);
+      const flapBlend = THREE.MathUtils.smoothstep(cycle, 0.28, 0.72);
+      const beatPhase = elapsed * 3.25 + bird.flapPhase;
+      const innerBeat = Math.sin(beatPhase) * 0.34;
+      const outerBeat = Math.sin(beatPhase - 0.62) * 0.44; // realistic wrist-joint lag
+
+      // Subtle serene dihedral angle during glide
+      const glideInner = 0.09 + Math.sin(elapsed * 1.1 + bird.flapPhase) * 0.025;
+      const glideOuter = -0.06 + Math.sin(elapsed * 1.1 + bird.flapPhase) * 0.02;
+
+      const innerAngle = THREE.MathUtils.lerp(glideInner, innerBeat, flapBlend);
+      const outerAngle = THREE.MathUtils.lerp(glideOuter, outerBeat, flapBlend);
+
+      bird.leftInnerWing.rotation.z = innerAngle;
+      bird.leftOuterWing.rotation.z = outerAngle;
+      bird.rightInnerWing.rotation.z = -innerAngle;
+      bird.rightOuterWing.rotation.z = -outerAngle;
+
+      // Subtle aerodynamic body bob during wingbeats
+      bird.bodyPivot.position.y = -Math.sin(beatPhase) * 0.035 * flapBlend;
     }
 
     // 3. Update Fireflies at dusk / evening / night

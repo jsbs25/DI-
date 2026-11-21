@@ -554,15 +554,17 @@ export interface WholePdfConversionResult {
   pageCount: number;
   cleanPages: number;
   ocrPages: number;
+  coverageRatio: number;
+  isFullElectronicCoverage: boolean;
   needsFurtherOcrPages: number[];
   coverImage?: string;
 }
 
 /**
  * Converts an ENTIRE PDF document into clean, structured electronic book chapters in one pass:
- *  - Extracts clean Unicode pages immediately across the whole book (auto-detecting chapters from PDF TOC or headings)
+ *  - Extracts clean Unicode pages in parallel batches (8 pages at once) across the whole book
  *  - Detects scanned / garbled-number / broken-Arabic pages automatically (NEVER leaking raw numbers)
- *  - Optionally runs batch Vision OCR on scanned/garbled pages automatically (no manual page-by-page clicking!)
+ *  - Computes exact full-book coverageRatio so partial/scanned 100+ page PDFs are NEVER truncated to 2 chapters
  */
 export async function convertPdfDocumentToEbook(
   pdf: PDFDocumentProxy,
@@ -575,7 +577,7 @@ export async function convertPdfDocumentToEbook(
   }
 ): Promise<WholePdfConversionResult> {
   const totalPages = pdf.numPages;
-  const maxAutoOcrPages = options?.maxAutoOcrPages ?? 18;
+  const maxAutoOcrPages = options?.maxAutoOcrPages ?? 0;
   const onProgress = options?.onProgress;
 
   onProgress?.({
@@ -584,7 +586,7 @@ export async function convertPdfDocumentToEbook(
     totalPages,
     cleanPages: 0,
     ocrPages: 0,
-    message: `正在解析目录与封面（共 ${totalPages} 页）…`,
+    message: `正在快速解析目录与封面（共 ${totalPages} 页）…`,
   });
 
   const [toc, coverImage] = await Promise.all([
@@ -599,49 +601,63 @@ export async function convertPdfDocumentToEbook(
   let enCharTotal = 0;
   let cleanPages = 0;
 
-  // Pass 1: Fast local geometry extraction across ALL pages
-  for (let p = 1; p <= totalPages; p++) {
+  // Pass 1: High-speed parallel local geometry extraction across ALL pages (8 pages per batch)
+  const BATCH_SIZE = 8;
+  for (let start = 1; start <= totalPages; start += BATCH_SIZE) {
     if (options?.signal?.aborted) break;
-    const ep = await extractStructuredPdfPage(pdf, p);
-    if (!ep.isLikelyScanned && ep.plainText.trim().length >= 24) {
-      const formatted = ep.blocks
-        .map((b) => {
-          if (b.kind === 'h1') return `【${b.text}】`;
-          if (b.kind === 'h2') return b.text;
-          return b.text;
-        })
-        .join('\n\n')
-        .trim();
-      if (formatted) {
-        pageTexts.set(p, formatted);
-        cleanPages += 1;
-        arCharTotal += (formatted.match(/[\u0600-\u06FF]/g) || []).length;
-        zhCharTotal += (formatted.match(/[\u4E00-\u9FFF]/g) || []).length;
-        enCharTotal += (formatted.match(/[A-Za-z]/g) || []).length;
+    const end = Math.min(totalPages, start + BATCH_SIZE - 1);
+    const batchNums: number[] = [];
+    for (let p = start; p <= end; p++) batchNums.push(p);
+
+    const results = await Promise.all(
+      batchNums.map(async (p) => {
+        try {
+          const ep = await extractStructuredPdfPage(pdf, p);
+          return { p, ep };
+        } catch {
+          return { p, ep: null };
+        }
+      })
+    );
+
+    for (const { p, ep } of results) {
+      if (ep && !ep.isLikelyScanned && ep.plainText.trim().length >= 24) {
+        const formatted = ep.blocks
+          .map((b) => {
+            if (b.kind === 'h1') return `【${b.text}】`;
+            if (b.kind === 'h2') return b.text;
+            return b.text;
+          })
+          .join('\n\n')
+          .trim();
+        if (formatted) {
+          pageTexts.set(p, formatted);
+          cleanPages += 1;
+          arCharTotal += (formatted.match(/[\u0600-\u06FF]/g) || []).length;
+          zhCharTotal += (formatted.match(/[\u4E00-\u9FFF]/g) || []).length;
+          enCharTotal += (formatted.match(/[A-Za-z]/g) || []).length;
+        } else {
+          scannedOrGarbledPages.push(p);
+        }
       } else {
         scannedOrGarbledPages.push(p);
       }
-    } else {
-      scannedOrGarbledPages.push(p);
     }
 
-    if (p === 1 || p % 5 === 0 || p === totalPages) {
-      onProgress?.({
-        stage: 'extracting',
-        currentPage: p,
-        totalPages,
-        cleanPages,
-        ocrPages: 0,
-        message: `正在全本转为电子版：第 ${p} / ${totalPages} 页…`,
-      });
-    }
+    onProgress?.({
+      stage: 'extracting',
+      currentPage: end,
+      totalPages,
+      cleanPages,
+      ocrPages: 0,
+      message: `正在极速解析全书文字：第 ${end} / ${totalPages} 页…`,
+    });
   }
 
-  // Pass 2: If PDF has scanned or broken-encoding pages (e.g. Arabic PDFs with garbled numbers),
-  // automatically run Vision OCR in clean batches so the user NEVER has to click page by page!
+  // Pass 2: Optional Vision OCR only when explicitly requested (maxAutoOcrPages > 0)
   let ocrPages = 0;
   const remainingOcrPages: number[] = [];
-  if (scannedOrGarbledPages.length > 0 && !options?.signal?.aborted) {
+  if (scannedOrGarbledPages.length > 0 && maxAutoOcrPages > 0 && !options?.signal?.aborted) {
     const pagesToOcrNow = scannedOrGarbledPages.slice(0, maxAutoOcrPages);
     remainingOcrPages.push(...scannedOrGarbledPages.slice(maxAutoOcrPages));
 
@@ -700,7 +716,6 @@ export async function convertPdfDocumentToEbook(
         remainingOcrPages.push(pNum);
       }
 
-      // Stop early if AI OCR service is temporarily rate-limited so import never hangs
       if (consecutiveErrors >= 2) {
         remainingOcrPages.push(...pagesToOcrNow.slice(i + 1));
         break;
@@ -711,6 +726,8 @@ export async function convertPdfDocumentToEbook(
         options.onBatchReady(partialChapters, cleanPages + ocrPages, totalPages);
       }
     }
+  } else if (scannedOrGarbledPages.length > 0) {
+    remainingOcrPages.push(...scannedOrGarbledPages);
   }
 
   onProgress?.({
@@ -719,10 +736,18 @@ export async function convertPdfDocumentToEbook(
     totalPages,
     cleanPages,
     ocrPages,
-    message: '正在整理电子书章节并保存到书架…',
+    message: '正在整理电子书目录并保存到书架…',
   });
 
-  const chapters = assemblePagesIntoChapters(pageTexts, toc, totalPages, bookTitle);
+  const extractedTotal = cleanPages + ocrPages;
+  const coverageRatio = totalPages > 0 ? extractedTotal / totalPages : 0;
+  const isFullElectronicCoverage =
+    totalPages > 0 && (totalPages <= 3 ? extractedTotal >= 1 : coverageRatio >= 0.72);
+
+  const chapters = isFullElectronicCoverage
+    ? assemblePagesIntoChapters(pageTexts, toc, totalPages, bookTitle)
+    : [];
+
   const detectedLang: 'ar' | 'zh' | 'en' =
     arCharTotal >= Math.max(zhCharTotal, enCharTotal) && (arCharTotal > 20 || /[\u0600-\u06FF]/.test(bookTitle))
       ? 'ar'
@@ -736,6 +761,8 @@ export async function convertPdfDocumentToEbook(
     pageCount: totalPages,
     cleanPages,
     ocrPages,
+    coverageRatio,
+    isFullElectronicCoverage,
     needsFurtherOcrPages: remainingOcrPages,
     coverImage,
   };
@@ -750,7 +777,8 @@ function assemblePagesIntoChapters(
   const sortedPageNums = Array.from(pageTexts.keys()).sort((a, b) => a - b);
   if (sortedPageNums.length === 0) return [];
 
-  // Use embedded PDF TOC bookmarks when they cover distinct pages
+  // Use embedded PDF TOC bookmarks only when they provide genuine multi-chapter coverage
+  // (avoid collapsing a 100-page PDF into 2 giant chapters if TOC only has 2 top-level bookmarks)
   const topToc = toc
     .filter((t) => t.level <= 1 && t.pageNumber >= 1 && t.pageNumber <= totalPages)
     .reduce<PdfTocItem[]>((acc, item) => {
@@ -759,9 +787,8 @@ function assemblePagesIntoChapters(
     }, [])
     .sort((a, b) => a.pageNumber - b.pageNumber);
 
-  if (topToc.length >= 2) {
+  if (topToc.length >= 3 || (topToc.length >= 2 && totalPages <= 25)) {
     const chapters: ConvertedPdfChapter[] = [];
-    // Include any preface pages before first TOC entry
     const prePages = sortedPageNums.filter((p) => p < topToc[0].pageNumber);
     if (prePages.length > 0) {
       chapters.push({
@@ -774,20 +801,36 @@ function assemblePagesIntoChapters(
       const startP = topToc[i].pageNumber;
       const endP = i + 1 < topToc.length ? topToc[i + 1].pageNumber - 1 : totalPages;
       const chPages = sortedPageNums.filter((p) => p >= startP && p <= endP);
-      const body = chPages.map((p) => pageTexts.get(p) || '').filter(Boolean).join('\n\n').trim();
-      if (body) {
-        chapters.push({
-          id: `ch_${chapters.length + 1}`,
-          title: topToc[i].title.slice(0, 120),
-          content: body,
-        });
+      if (chPages.length === 0) continue;
+
+      // Subdivide overly long TOC ranges (> 25 pages) into readable ~12-page sections
+      if (chPages.length > 25) {
+        for (let k = 0; k < chPages.length; k += 12) {
+          const sub = chPages.slice(k, k + 12);
+          const body = sub.map((p) => pageTexts.get(p) || '').filter(Boolean).join('\n\n').trim();
+          if (!body) continue;
+          chapters.push({
+            id: `ch_${chapters.length + 1}`,
+            title: `${topToc[i].title.slice(0, 90)}（第 ${sub[0]}–${sub[sub.length - 1]} 页）`,
+            content: body,
+          });
+        }
+      } else {
+        const body = chPages.map((p) => pageTexts.get(p) || '').filter(Boolean).join('\n\n').trim();
+        if (body) {
+          chapters.push({
+            id: `ch_${chapters.length + 1}`,
+            title: topToc[i].title.slice(0, 120),
+            content: body,
+          });
+        }
       }
     }
     if (chapters.length > 0) return chapters;
   }
 
-  // Fallback: Group cleanly into well-proportioned electronic chapters (10 pages per chapter)
-  const PAGES_PER_CHAPTER = sortedPageNums.length <= 16 ? 5 : 10;
+  // Fallback: Group cleanly into well-proportioned electronic chapters covering ALL extracted pages
+  const PAGES_PER_CHAPTER = sortedPageNums.length <= 16 ? 4 : 8;
   const chapters: ConvertedPdfChapter[] = [];
   for (let i = 0; i < sortedPageNums.length; i += PAGES_PER_CHAPTER) {
     const slice = sortedPageNums.slice(i, i + PAGES_PER_CHAPTER);
@@ -795,14 +838,13 @@ function assemblePagesIntoChapters(
     const lastP = slice[slice.length - 1];
     const body = slice.map((p) => pageTexts.get(p) || '').filter(Boolean).join('\n\n').trim();
     if (!body) continue;
-    // Try extracting a natural short heading from the first line if present
     const firstLine = body.split('\n')[0]?.replace(/^【|】$/g, '').trim() || '';
     const useHeading = firstLine.length >= 3 && firstLine.length <= 42 && !/[。！？.!?]$/.test(firstLine);
     const chNum = chapters.length + 1;
     chapters.push({
       id: `ch_${chNum}`,
       title: useHeading
-        ? `${firstLine}`
+        ? `${firstLine}（第 ${firstP}–${lastP} 页）`
         : firstP === lastP
           ? `${bookTitle.slice(0, 24)} · 第 ${firstP} 页`
           : `第 ${chNum} 部分（第 ${firstP}–${lastP} 页）`,

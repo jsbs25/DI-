@@ -743,7 +743,7 @@ export const UniverseEngine: React.FC<UniverseEngineProps> = ({
       >
         <button onClick={onSwitchToEarthWorld} className="one-btn one-btn-sm one-btn-primary shrink-0 whitespace-nowrap">
           <Globe2 className="h-4 w-4" />
-          <span>返回地球世界</span>
+          <span>返回主界面</span>
         </button>
 
         <div className="mx-0.5 h-5 w-px shrink-0" style={{ background: 'var(--color-one-border)' }} />

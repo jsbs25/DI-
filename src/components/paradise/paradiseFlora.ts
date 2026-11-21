@@ -1097,150 +1097,85 @@ export function createParadiseFlora(
   group.add(shrubMesh);
 
   // =========================================================================
-  // 3. Multi-Height Interactive Wind-Swept Meadow Grass & Tall Sedge Tufts
+  // 3. Organic Wildflower Drifts & Sculpted 3D Cupped Meadow Blossoms
+  //    (Replaces spiky grass blades with lush, natural floral clusters)
   // =========================================================================
-  const buildCurvedGrassGeo = (w: number, h: number) => {
-    const geo = trackGeo(new THREE.PlaneGeometry(w, h, 1, 4));
-    geo.translate(0, h * 0.5, 0);
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i);
-      const t = Math.max(0, Math.min(1, y / h));
-      pos.setX(i, pos.getX(i) * (1 - t * 0.86));
-      pos.setZ(i, Math.pow(t, 1.8) * (h * 0.24));
-    }
-    geo.computeVertexNormals();
-    return geo;
-  };
-
-  const grassMat = trackMat(
-    new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.78,
-      metalness: 0.02,
-      side: THREE.DoubleSide,
-    })
-  );
-  applyBotanicalWind(grassMat, {
-    freq: 2.35,
-    amp: 0.24,
-    heightFactor: 1.8,
-    pointerReactive: true,
-    verticalBladeAO: true,
-    cacheKey: 'paradise-grass-wind-v3',
-  });
-
-  const bladeGeo = buildCurvedGrassGeo(0.088, 0.56);
-  const grassMesh = new THREE.InstancedMesh(bladeGeo, grassMat, quality.grassCount);
-  grassMesh.receiveShadow = quality.enableShadows;
   const gColor = new THREE.Color();
-  let gPlaced = 0;
-  let attempts = 0;
-
-  while (gPlaced < quality.grassCount && attempts < quality.grassCount * 5) {
-    attempts++;
-    const x = (rand() - 0.5) * 64;
-    const z = (rand() - 0.5) * 58;
-    const sample = sampleTerrainBiome(x, z);
-    if (sample.height < 0.16 || sample.height > 7.0 || sample.pathWeight > 0.34) continue;
-    if (Math.hypot(x + 11.4, z - 5.8) < 3.25) continue;
-
-    dummy.position.set(x, sample.height - 0.03, z);
-    dummy.rotation.set((rand() - 0.5) * 0.16, rand() * Math.PI * 2, (rand() - 0.5) * 0.16);
-    const sc = 0.72 + rand() * 0.92;
-    dummy.scale.set(sc * (0.8 + rand() * 0.4), sc, sc);
-    dummy.updateMatrix();
-    grassMesh.setMatrixAt(gPlaced, dummy.matrix);
-
-    if (x < -4 && rand() > 0.56) {
-      gColor.setHSL(0.14 + rand() * 0.08, 0.52, 0.32 + rand() * 0.12);
-    } else {
-      gColor.setHSL(0.24 + (rand() - 0.5) * 0.06, 0.45 + rand() * 0.15, 0.23 + rand() * 0.14);
-    }
-    grassMesh.setColorAt(gPlaced, gColor);
-    gPlaced++;
-  }
-  grassMesh.count = gPlaced;
-  grassMesh.instanceMatrix.needsUpdate = true;
-  if (grassMesh.instanceColor) grassMesh.instanceColor.needsUpdate = true;
-  grassMesh.computeBoundingSphere();
-  group.add(grassMesh);
-
-  const tallBladeGeo = buildCurvedGrassGeo(0.095, 1.08);
-  const tallGrassMesh = new THREE.InstancedMesh(tallBladeGeo, grassMat, quality.tallGrassCount);
-  tallGrassMesh.receiveShadow = quality.enableShadows;
-  let tgPlaced = 0;
-  let tgAttempts = 0;
-  while (tgPlaced < quality.tallGrassCount && tgAttempts < quality.tallGrassCount * 7) {
-    tgAttempts++;
-    const x = -22 + rand() * 48;
-    const z = -22 + rand() * 44;
-    const sample = sampleTerrainBiome(x, z);
-    if (sample.height < 0.06 || sample.height > 2.4 || sample.pathWeight > 0.28) continue;
-    if (Math.hypot(x + 11.4, z - 5.8) < 3.35) continue;
-
-    dummy.position.set(x, sample.height - 0.04, z);
-    dummy.rotation.set((rand() - 0.5) * 0.18, rand() * Math.PI * 2, (rand() - 0.5) * 0.18);
-    const sc = 0.78 + rand() * 0.62;
-    dummy.scale.set(sc, sc, sc);
-    dummy.updateMatrix();
-    tallGrassMesh.setMatrixAt(tgPlaced, dummy.matrix);
-    gColor.setHSL(0.23 + (rand() - 0.5) * 0.05, 0.44 + rand() * 0.14, 0.26 + rand() * 0.12);
-    tallGrassMesh.setColorAt(tgPlaced, gColor);
-    tgPlaced++;
-  }
-  tallGrassMesh.count = tgPlaced;
-  tallGrassMesh.instanceMatrix.needsUpdate = true;
-  if (tallGrassMesh.instanceColor) tallGrassMesh.instanceColor.needsUpdate = true;
-  tallGrassMesh.computeBoundingSphere();
-  group.add(tallGrassMesh);
-
-  // =========================================================================
-  // 4. Multi-Petal Botanical Wildflowers
-  // =========================================================================
   const flowerSpots: THREE.Vector3[] = [];
-  const flowerGeo = trackGeo(createCrossWildflowerGeo());
 
+  // Natural botanical drift centers along stream banks, meadows & beneath trees
+  const driftCenters: Array<{ x: number; z: number; r: number; palette: number[] }> = [
+    { x: -13.5, z: 7.5, r: 6.2, palette: [0xf7bed0, 0xfef4dc, 0xf5d6e1, 0xffffff] },
+    { x: -6.8, z: 11.2, r: 6.5, palette: [0xfce7a2, 0xfef8e6, 0xf8c3d4, 0xffffff] },
+    { x: 4.5, z: 10.8, r: 6.8, palette: [0xc9bbf4, 0x9fcaf2, 0xffffff, 0xf5d8e6] },
+    { x: 12.2, z: 5.2, r: 6.0, palette: [0xf8c2d2, 0xfee9aa, 0xffffff, 0xe8d5f7] },
+    { x: -15.0, z: -4.2, r: 6.5, palette: [0xfbe29b, 0xf7c5d2, 0xfef8e8, 0xffffff] },
+    { x: -4.2, z: -10.5, r: 6.4, palette: [0xb4d4f6, 0xd4c4f7, 0xffffff, 0xf9cbd8] },
+    { x: 9.8, z: -9.8, r: 6.2, palette: [0xf9c2d1, 0xfef5df, 0xfce198, 0xffffff] },
+    { x: 16.5, z: -2.4, r: 5.8, palette: [0xd2c0f6, 0xa8cef4, 0xffffff, 0xf7c7d6] },
+    { x: -0.8, z: 15.6, r: 6.2, palette: [0xf8c4d4, 0xfef6e2, 0xfcd88a, 0xcabaf4] },
+  ];
+
+  // 3a. Soft Painterly Multi-Petal Wildflower Drifts (higher density, clustered)
+  const flowerGeo = trackGeo(createCrossWildflowerGeo());
   const flowerMat = trackMat(
     new THREE.MeshStandardMaterial({
       map: textures.wildflowerTex,
-      alphaTest: 0.36,
+      alphaTest: 0.34,
       color: 0xffffff,
-      roughness: 0.56,
+      roughness: 0.54,
       metalness: 0.02,
       side: THREE.DoubleSide,
     })
   );
   applyBotanicalWind(flowerMat, {
-    freq: 2.2,
-    amp: 0.22,
-    heightFactor: 1.6,
+    freq: 1.95,
+    amp: 0.16,
+    heightFactor: 1.4,
     pointerReactive: true,
     nightBloomGlow: true,
-    cacheKey: 'paradise-flower-wind-v2',
+    cacheKey: 'paradise-flower-wind-v3',
   });
 
-  const flowerMesh = new THREE.InstancedMesh(flowerGeo, flowerMat, quality.flowerCount);
-  const flowerPalette = [0xf8b9cb, 0xfef5dc, 0xcab6f4, 0xfcd77c, 0xffffff, 0x99c6f0];
+  const targetFlowerCount = Math.round(quality.flowerCount * 1.48);
+  const flowerMesh = new THREE.InstancedMesh(flowerGeo, flowerMat, targetFlowerCount);
+  const defaultFlowerPalette = [0xf8bfd0, 0xfef6e0, 0xcbb9f5, 0xfcdc8a, 0xffffff, 0xa2cdf2];
   let fPlaced = 0;
   let fAttempts = 0;
-  while (fPlaced < quality.flowerCount && fAttempts < quality.flowerCount * 6) {
+  while (fPlaced < targetFlowerCount && fAttempts < targetFlowerCount * 7) {
     fAttempts++;
-    const x = (rand() - 0.5) * 48;
-    const z = (rand() - 0.5) * 44;
-    const sample = sampleTerrainBiome(x, z);
-    if (sample.height < 0.22 || sample.height > 4.2 || sample.pathWeight > 0.32) continue;
+    let x: number;
+    let z: number;
+    let palette = defaultFlowerPalette;
 
-    dummy.position.set(x, sample.height - 0.03, z);
-    dummy.rotation.set((rand() - 0.5) * 0.16, rand() * Math.PI * 2, (rand() - 0.5) * 0.16);
-    dummy.scale.setScalar(0.8 + rand() * 0.8);
+    // 72% grow in natural organic floral drifts; 28% scatter softly across open sunlit meadow
+    if (rand() < 0.72) {
+      const drift = driftCenters[Math.floor(rand() * driftCenters.length)];
+      const ang = rand() * Math.PI * 2;
+      const dist = Math.pow(rand(), 0.72) * drift.r;
+      x = drift.x + Math.cos(ang) * dist;
+      z = drift.z + Math.sin(ang) * dist;
+      palette = drift.palette;
+    } else {
+      x = (rand() - 0.5) * 52;
+      z = (rand() - 0.5) * 46;
+    }
+
+    const sample = sampleTerrainBiome(x, z);
+    if (sample.height < 0.2 || sample.height > 4.6 || sample.pathWeight > 0.3) continue;
+    if (Math.hypot(x + 11.4, z - 5.8) < 3.15) continue;
+
+    dummy.position.set(x, sample.height - 0.025, z);
+    dummy.rotation.set((rand() - 0.5) * 0.14, rand() * Math.PI * 2, (rand() - 0.5) * 0.14);
+    const sc = 0.72 + rand() * 0.85;
+    dummy.scale.set(sc * (0.9 + rand() * 0.22), sc * (0.85 + rand() * 0.26), sc * (0.9 + rand() * 0.22));
     dummy.updateMatrix();
     flowerMesh.setMatrixAt(fPlaced, dummy.matrix);
 
-    gColor.setHex(flowerPalette[Math.floor(rand() * flowerPalette.length)]);
+    gColor.setHex(palette[Math.floor(rand() * palette.length)]);
     flowerMesh.setColorAt(fPlaced, gColor);
-    if (flowerSpots.length < 56) {
-      flowerSpots.push(new THREE.Vector3(x, sample.height + 0.45, z));
+    if (flowerSpots.length < 64) {
+      flowerSpots.push(new THREE.Vector3(x, sample.height + 0.42, z));
     }
     fPlaced++;
   }
@@ -1250,40 +1185,168 @@ export function createParadiseFlora(
   flowerMesh.computeBoundingSphere();
   group.add(flowerMesh);
 
+  // 3b. Sculpted 3D Cupped Multi-Petal Blossom Clusters (hero foreground florals)
+  const buildSculptedMeadowBloomGeo = (): THREE.BufferGeometry => {
+    const parts: THREE.BufferGeometry[] = [];
+    const addPart = (g: THREE.BufferGeometry, tintHex: number) => {
+      const nonIdx = g.index ? g.toNonIndexed() : g;
+      const count = nonIdx.attributes.position.count;
+      const colors = new Float32Array(count * 3);
+      const col = new THREE.Color(tintHex);
+      for (let i = 0; i < count; i++) {
+        colors[i * 3] = col.r;
+        colors[i * 3 + 1] = col.g;
+        colors[i * 3 + 2] = col.b;
+      }
+      nonIdx.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      if (!nonIdx.attributes.uv) {
+        nonIdx.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+      }
+      parts.push(nonIdx);
+    };
+
+    // Soft rounded botanical foliage cushion at base
+    const leafOffsets: Array<[number, number, number, number]> = [
+      [0.0, 0.04, 0.0, 0.15],
+      [0.11, 0.035, 0.06, 0.12],
+      [-0.1, 0.035, 0.07, 0.12],
+      [0.03, 0.035, -0.11, 0.12],
+    ];
+    for (const [lx, ly, lz, lr] of leafOffsets) {
+      const leaf = new THREE.SphereGeometry(lr, 7, 5);
+      leaf.scale(1.25, 0.45, 1.1);
+      leaf.translate(lx, ly, lz);
+      addPart(leaf, 0x487642);
+    }
+
+    // 3 sculpted cupped blooms per cluster at varied heights & tilts
+    const heads: Array<{ x: number; y: number; z: number; scale: number; tiltX: number; tiltZ: number }> = [
+      { x: 0.0, y: 0.25, z: 0.0, scale: 1.05, tiltX: 0.06, tiltZ: -0.04 },
+      { x: 0.12, y: 0.19, z: 0.07, scale: 0.84, tiltX: 0.18, tiltZ: -0.22 },
+      { x: -0.11, y: 0.17, z: -0.06, scale: 0.78, tiltX: -0.16, tiltZ: 0.2 },
+    ];
+
+    for (const h of heads) {
+      // Slender botanical stem
+      const stem = new THREE.CylinderGeometry(0.008, 0.013, h.y, 4);
+      stem.translate(h.x * 0.7, h.y * 0.5, h.z * 0.7);
+      addPart(stem, 0x4f7c44);
+
+      // 5 softly cupped 3D petals (tinted white so instanceColor controls blossom hue!)
+      const petalCount = 5;
+      for (let p = 0; p < petalCount; p++) {
+        const a = (p / petalCount) * Math.PI * 2;
+        const petal = new THREE.SphereGeometry(0.058 * h.scale, 6, 5);
+        petal.scale(0.85, 0.28, 1.48);
+        petal.rotateX(-0.34);
+        petal.translate(0, 0.012 * h.scale, 0.055 * h.scale);
+        petal.rotateY(a);
+        petal.rotateX(h.tiltX);
+        petal.rotateZ(h.tiltZ);
+        petal.translate(h.x, h.y, h.z);
+        addPart(petal, 0xffffff);
+      }
+
+      // Warm golden stamen center
+      const stamen = new THREE.SphereGeometry(0.028 * h.scale, 6, 5);
+      stamen.scale(1, 0.65, 1);
+      stamen.translate(h.x, h.y + 0.018 * h.scale, h.z);
+      addPart(stamen, 0xf7cf52);
+    }
+
+    const merged = mergeGeometries(parts, false);
+    for (const part of parts) part.dispose();
+    if (!merged) return new THREE.SphereGeometry(0.12, 6, 5);
+    merged.computeVertexNormals();
+    return merged;
+  };
+
+  const bloomClusterGeo = trackGeo(buildSculptedMeadowBloomGeo());
+  const bloomClusterMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      roughness: 0.52,
+      metalness: 0.02,
+    })
+  );
+  applyBotanicalWind(bloomClusterMat, {
+    freq: 1.8,
+    amp: 0.14,
+    heightFactor: 1.5,
+    pointerReactive: true,
+    nightBloomGlow: true,
+    cacheKey: 'paradise-bloom-cluster-wind-v1',
+  });
+
+  const bloomClusterCount = Math.max(150, Math.min(340, Math.round(quality.flowerCount * 0.52)));
+  const bloomClusterMesh = new THREE.InstancedMesh(bloomClusterGeo, bloomClusterMat, bloomClusterCount);
+  bloomClusterMesh.receiveShadow = quality.enableShadows;
+  let bcPlaced = 0;
+  let bcAttempts = 0;
+  while (bcPlaced < bloomClusterCount && bcAttempts < bloomClusterCount * 8) {
+    bcAttempts++;
+    const drift = driftCenters[Math.floor(rand() * driftCenters.length)];
+    const ang = rand() * Math.PI * 2;
+    const dist = Math.pow(rand(), 0.68) * (drift.r * 1.05);
+    const x = drift.x + Math.cos(ang) * dist;
+    const z = drift.z + Math.sin(ang) * dist;
+    const sample = sampleTerrainBiome(x, z);
+    if (sample.height < 0.22 || sample.height > 4.2 || sample.pathWeight > 0.28) continue;
+    if (Math.hypot(x + 11.4, z - 5.8) < 3.2) continue;
+
+    dummy.position.set(x, sample.height - 0.02, z);
+    dummy.rotation.set((rand() - 0.5) * 0.1, rand() * Math.PI * 2, (rand() - 0.5) * 0.1);
+    const sc = 0.85 + rand() * 0.65;
+    dummy.scale.setScalar(sc);
+    dummy.updateMatrix();
+    bloomClusterMesh.setMatrixAt(bcPlaced, dummy.matrix);
+
+    gColor.setHex(drift.palette[Math.floor(rand() * drift.palette.length)]);
+    bloomClusterMesh.setColorAt(bcPlaced, gColor);
+    bcPlaced++;
+  }
+  bloomClusterMesh.count = bcPlaced;
+  bloomClusterMesh.instanceMatrix.needsUpdate = true;
+  if (bloomClusterMesh.instanceColor) bloomClusterMesh.instanceColor.needsUpdate = true;
+  bloomClusterMesh.computeBoundingSphere();
+  group.add(bloomClusterMesh);
+
   // =========================================================================
-  // 5. Shoreline Reeds, Sculpted Multi-Petal Water Lotus & Floating Leaves
+  // 5. Delicate Shoreline Reeds, Sculpted Multi-Petal Water Lotus & Floating Leaves
   // =========================================================================
-  const reedGeo = trackGeo(new THREE.CylinderGeometry(0.014, 0.028, 1.45, 5));
-  reedGeo.translate(0, 0.72, 0);
+  const reedGeo = trackGeo(new THREE.CylinderGeometry(0.009, 0.018, 1.08, 5));
+  reedGeo.translate(0, 0.54, 0);
   const reedMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x4b6e37,
-      roughness: 0.72,
+      color: 0x5b7c46,
+      roughness: 0.7,
       metalness: 0.02,
     })
   );
   applyBotanicalWind(reedMat, {
-    freq: 1.55,
-    amp: 0.26,
-    heightFactor: 0.85,
+    freq: 1.5,
+    amp: 0.22,
+    heightFactor: 0.8,
     pointerReactive: true,
-    cacheKey: 'paradise-reed-wind-v2',
+    cacheKey: 'paradise-reed-wind-v3',
   });
 
-  const reedMesh = new THREE.InstancedMesh(reedGeo, reedMat, quality.reedCount);
+  const targetReedCount = Math.round(quality.reedCount * 0.68);
+  const reedMesh = new THREE.InstancedMesh(reedGeo, reedMat, targetReedCount);
   let rPlaced = 0;
   let rAttempts = 0;
-  while (rPlaced < quality.reedCount && rAttempts < quality.reedCount * 10) {
+  while (rPlaced < targetReedCount && rAttempts < targetReedCount * 10) {
     rAttempts++;
     const x = -18 + rand() * 44;
     const z = -22 + rand() * 34;
     const h = terrainHeightAt(x, z);
-    if (h < -0.25 || h > 0.36) continue;
-    if (gardenPathFactor(x, z) > 0.4) continue;
+    if (h < -0.22 || h > 0.28) continue;
+    if (gardenPathFactor(x, z) > 0.36) continue;
 
     dummy.position.set(x, h - 0.06, z);
     dummy.rotation.set((rand() - 0.5) * 0.14, rand() * Math.PI * 2, (rand() - 0.5) * 0.14);
-    const sc = 0.75 + rand() * 0.65;
+    const sc = 0.72 + rand() * 0.56;
     dummy.scale.set(sc, sc, sc);
     dummy.updateMatrix();
     reedMesh.setMatrixAt(rPlaced, dummy.matrix);

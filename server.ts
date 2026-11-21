@@ -3470,7 +3470,16 @@ app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
       hasUnifiedLiveEngine();
 
     if (useUnifiedCore) {
-      const fastMode = mode === 'search' || mode === 'browser' || mode === 'voice-agent' || mode === 'quick' || userPrompt.length < 180;
+      const explicitDeepMode =
+        mode === 'reasoning' ||
+        mode === 'deep' ||
+        mode === 'code' ||
+        mode === 'research' ||
+        mode === 'writer' ||
+        mode === 'tutor';
+      const fastMode =
+        !explicitDeepMode &&
+        (mode === 'search' || mode === 'browser' || mode === 'voice-agent' || mode === 'quick' || userPrompt.length < 90);
       const unifiedRes = await runUnifiedAiTurn({
         prompt: userPrompt,
         systemInstruction: ctx.systemPrompt,

@@ -210,7 +210,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <>
       {/* Minimal Top Floating Corners: Brand Home Return (Left) + Theme/Lang/Profile (Right) */}
-      <header className="pointer-events-none fixed inset-x-0 top-0 z-[55] px-2.5 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.65rem,env(safe-area-inset-top))]">
+      <header
+        className={`fixed inset-x-0 top-0 z-[55] px-2.5 pt-[max(0.5rem,env(safe-area-inset-top))] sm:px-5 sm:pt-[max(0.65rem,env(safe-area-inset-top))] ${
+          isGardenHome
+            ? 'pointer-events-none'
+            : 'pointer-events-auto border-b border-[#23362c]/10 dark:border-white/[0.1] bg-[#faf7f0]/92 dark:bg-[#0d141e]/92 backdrop-blur-md pb-2 sm:pb-2.5'
+        }`}
+      >
         <div className="mx-auto flex h-8 sm:h-9 w-full max-w-[1380px] items-center justify-between gap-1.5 sm:gap-2">
           {/* Top-Left: Home Brand Medallion on Garden Home; Clear Return-Home + Active Module Title inside Subpages */}
           {isGardenHome ? (
@@ -370,7 +376,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </button>
                     <button type="button" onClick={() => { setUserDropdownOpen(false); onOpenOnboarding(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[#24362d] dark:text-[#ebe5d8] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06] cursor-pointer">
                       <MapPin className="h-4 w-4" />
-                      <span>{t.editGlobeBeacon || 'Beacon'}</span>
+                      <span>{lang === 'zh' ? '编辑个人坐标' : lang === 'ar' ? 'تعديل الموقع' : 'Edit Location'}</span>
                     </button>
                     <button type="button" onClick={() => { setUserDropdownOpen(false); onToggleLocationPrivacy(); }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[#24362d] dark:text-[#ebe5d8] hover:bg-[#23362c]/[0.06] dark:hover:bg-white/[0.06] cursor-pointer">
                       {currentUser.location?.isPublic ? <Eye className="h-4 w-4 text-[#247864] dark:text-emerald-400" /> : <EyeOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />}

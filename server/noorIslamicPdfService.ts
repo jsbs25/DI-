@@ -1157,6 +1157,7 @@ export function registerNoorIslamicLibraryRoutes(
       chapters: incomingChapters,
       coverImageBase64,
       pageCount,
+      cleanPages,
     } = req.body || {};
 
     if (typeof fileBase64 !== 'string' || fileBase64.length < 16) {
@@ -1214,16 +1215,41 @@ export function registerNoorIslamicLibraryRoutes(
         if (!textContent) {
           return res.status(400).json({ success: false, error: '文件内容为空。' });
         }
-        const sections = textContent.split(/\n(?=#{1,2}\s+)/).filter((s) => s.trim().length > 0);
-        const chapters = sections.slice(0, 120).map((sec, idx) => {
-          const firstLine = sec.split('\n')[0].replace(/^#+\s*/, '').trim();
-          const body = sec.replace(/^#+\s*[^\n]*\n?/, '').trim() || sec.trim();
-          return {
-            id: `ch_${idx + 1}`,
-            title: firstLine || `第 ${idx + 1} 节`,
-            content: body,
-          };
-        });
+        const mdSections = textContent.split(/\n(?=#{1,2}\s+)/).filter((s) => s.trim().length > 0);
+        let chapters: Array<{ id: string; title: string; content: string }>;
+        if (mdSections.length >= 2) {
+          chapters = mdSections.slice(0, 200).map((sec, idx) => {
+            const firstLine = sec.split('\n')[0].replace(/^#+\s*/, '').trim();
+            const body = sec.replace(/^#+\s*[^\n]*\n?/, '').trim() || sec.trim();
+            return {
+              id: `ch_${idx + 1}`,
+              title: firstLine || `第 ${idx + 1} 节`,
+              content: body,
+            };
+          });
+        } else {
+          const rawParas = textContent.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+          const units = rawParas.length >= 3 ? rawParas : textContent.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+          chapters = [];
+          let chunk = '';
+          let idx = 1;
+          for (const u of units) {
+            if (chunk.length > 0 && chunk.length + u.length > 2800) {
+              chapters.push({ id: `ch_${idx}`, title: `第 ${idx} 节`, content: chunk.trim() });
+              idx += 1;
+              chunk = u;
+            } else {
+              chunk = chunk ? `${chunk}\n\n${u}` : u;
+            }
+          }
+          if (chunk.trim()) {
+            chapters.push({
+              id: `ch_${idx}`,
+              title: idx === 1 ? derivedTitle : `第 ${idx} 节`,
+              content: chunk.trim(),
+            });
+          }
+        }
 
         const newBook: Book = {
           id: `book_upload_txt_${hash}`,
@@ -1275,8 +1301,17 @@ export function registerNoorIslamicLibraryRoutes(
             }))
         : [];
 
-      const hasFullEbookChapters = sanitizedChapters.length > 0;
       const totalPagesNum = Number.isFinite(Number(pageCount)) && Number(pageCount) > 0 ? Math.floor(Number(pageCount)) : undefined;
+      const cleanPagesNum = Number.isFinite(Number(cleanPages)) && Number(cleanPages) >= 0 ? Math.floor(Number(cleanPages)) : undefined;
+      const hasFullEbookChapters =
+        sanitizedChapters.length > 0 &&
+        (!totalPagesNum ||
+          totalPagesNum <= 4 ||
+          (cleanPagesNum !== undefined
+            ? cleanPagesNum >= Math.ceil(totalPagesNum * 0.7)
+            : sanitizedChapters.length >= Math.min(3, Math.ceil(totalPagesNum / 15))));
+
+      const finalChapters = hasFullEbookChapters ? sanitizedChapters : [];
 
       const newBook: Book = {
         id: `book_pdf_${hash}`,
@@ -1291,10 +1326,10 @@ export function registerNoorIslamicLibraryRoutes(
         textAvailability: 'full_text',
         coverImage: coverUrl,
         description: hasFullEbookChapters
-          ? `已自动整本转为精排电子版（共 ${sanitizedChapters.length} 章${totalPagesNum ? ` · 原书 ${totalPagesNum} 页` : ''}），支持全书分段阅读、点词查义、AI 翻译与进度自动云端保存。`
-          : `已导入本地 PDF 典籍${totalPagesNum ? `（共 ${totalPagesNum} 页）` : ''}，支持高清原版直呈、AI 识字与整本转电子版。`,
+          ? `已自动整本转为精排电子版（共 ${finalChapters.length} 章${totalPagesNum ? ` · 原书 ${totalPagesNum} 页` : ''}），支持全书分段阅读、点词查义、AI 翻译与进度自动云端保存。`
+          : `已完整导入本地 PDF 典籍${totalPagesNum ? `（全书共 ${totalPagesNum} 页）` : ''}，支持高清原版逐页直呈、AI 本页讲解、识字与翻译。`,
         readProgress: 0,
-        chapters: sanitizedChapters,
+        chapters: finalChapters,
       };
 
       const existingIdx = store.books.findIndex((b: Book) => b.id === newBook.id);

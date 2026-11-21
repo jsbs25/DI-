@@ -1395,6 +1395,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           : 'en';
       let pageCount = 0;
 
+      let cleanPages = 0;
+
       if (isPdf) {
         const loadingTask = getDocument({
           data: new Uint8Array(arrayBuffer),
@@ -1408,7 +1410,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         try {
           pageCount = pdfDoc.numPages;
           const conversion = await convertPdfDocumentToEbook(pdfDoc, derivedTitle, {
-            maxAutoOcrPages: 18,
+            maxAutoOcrPages: 0,
             onProgress: (p) => {
               if (!mountedRef.current) return;
               setPdfImportState((prev) => ({
@@ -1421,7 +1423,11 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
               }));
             },
           });
-          chapters = conversion.chapters;
+          cleanPages = conversion.cleanPages;
+          // Only save as pure-text electronic book when the vast majority of ALL pages
+          // extracted cleanly as real text. Otherwise preserve the FULL original multi-page PDF
+          // so a 100+ page scanned/special-font book never gets truncated to 2 chapters!
+          chapters = conversion.isFullElectronicCoverage ? conversion.chapters : [];
           coverImageBase64 = conversion.coverImage;
           detectedLanguage = conversion.language || detectedLanguage;
           if (coverImageBase64 && mountedRef.current) {
@@ -1435,16 +1441,31 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         const arCount = (text.match(/[\u0600-\u06FF]/g) || []).length;
         const zhCount = (text.match(/[\u4E00-\u9FFF]/g) || []).length;
         detectedLanguage = arCount >= 30 ? 'ar' : zhCount >= 20 ? 'zh' : 'en';
-        const paras = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-        const chunkSize = 25;
-        for (let i = 0; i < paras.length; i += chunkSize) {
-          const idx = Math.floor(i / chunkSize) + 1;
+        const rawParas = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+        const units = rawParas.length >= 3 ? rawParas : text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+        let buf = '';
+        let chIdx = 1;
+        for (const u of units) {
+          if (buf.length > 0 && buf.length + u.length > 2800) {
+            chapters.push({
+              id: `ch_${chIdx}`,
+              title: `第 ${chIdx} 节`,
+              content: buf.trim(),
+            });
+            chIdx += 1;
+            buf = u;
+          } else {
+            buf = buf ? `${buf}\n\n${u}` : u;
+          }
+        }
+        if (buf.trim()) {
           chapters.push({
-            id: `ch_${idx}`,
-            title: paras.length <= chunkSize ? derivedTitle : `第 ${idx} 节`,
-            content: paras.slice(i, i + chunkSize).join('\n\n'),
+            id: `ch_${chIdx}`,
+            title: chIdx === 1 ? derivedTitle : `第 ${chIdx} 节`,
+            content: buf.trim(),
           });
         }
+        cleanPages = Math.max(1, chapters.length);
         pageCount = Math.max(1, chapters.length);
       }
 
@@ -1455,8 +1476,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           currentPage: pageCount,
           totalPages: pageCount,
           message: chapters.length > 0
-            ? `已自动整本编排 ${chapters.length} 章电子版，正在存入书架…`
-            : '正在保存原版 PDF 到书架…',
+            ? `已自动整本编排 ${chapters.length} 章电子版（全书 ${pageCount} 页），正在存入书架…`
+            : `已保留全书共 ${pageCount} 页高清原版，正在快速存入书架…`,
           coverPreview: coverImageBase64 || prev?.coverPreview,
         }));
       }
@@ -1474,6 +1495,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           chapters,
           coverImageBase64,
           pageCount,
+          cleanPages,
         }),
       });
       const data = await res.json();
@@ -1646,8 +1668,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         className="hidden"
       />
 
-      {/* Minimal 3-Zone Editorial Header (Readest / Foliate / BookLore inspired) */}
-      <header className="sticky top-[52px] z-30 border-b border-[var(--color-one-border)] bg-[var(--color-one-bg)]/92 backdrop-blur-xl md:top-16">
+      {/* Minimal 3-Zone Editorial Header — scrolls naturally with page */}
+      <header className="border-b border-[var(--color-one-border)] bg-[var(--color-one-bg)]">
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-8">
           {/* Zone 1: Clean single-line brand wordmark */}
           <button

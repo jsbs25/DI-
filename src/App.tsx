@@ -729,10 +729,10 @@ export default function App() {
           <div className="min-h-[100dvh] pt-[calc(3.35rem+env(safe-area-inset-top))] pb-[env(safe-area-inset-bottom)] flex items-center justify-center px-4">
             <div className="max-w-lg w-full rounded-[24px] border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-6 sm:p-8 space-y-4 shadow-sm">
               <h1 className="text-xl font-semibold text-[var(--color-one-text)]">{lang==='zh'?'个人主页':'Profile'}</h1>
-              <p className="text-sm text-[var(--color-one-text-muted)] leading-relaxed">{lang==='zh'?'你的个人资料与地球信标通过资料面板管理。':'Manage your profile and globe beacon from your profile sheet.'}</p>
+              <p className="text-sm text-[var(--color-one-text-muted)] leading-relaxed">{lang==='zh'?'你的个人资料与位置坐标通过资料面板管理。':'Manage your profile and location from your profile sheet.'}</p>
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => { if (currentUser) setProfileModalUser(currentUser); }} className="px-4 py-2.5 rounded-xl bg-[var(--color-one-accent)] text-white text-sm font-medium cursor-pointer">{lang==='zh'?'打开个人资料':'Open profile'}</button>
-                <button onClick={() => setIsOnboardingModalOpen(true)} className="px-4 py-2.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text)] text-sm font-medium cursor-pointer">{lang==='zh'?'编辑地球信标':'Edit beacon'}</button>
+                <button onClick={() => setIsOnboardingModalOpen(true)} className="px-4 py-2.5 rounded-xl border border-[var(--color-one-border-strong)] bg-[var(--color-one-surface-soft)] text-[var(--color-one-text)] text-sm font-medium cursor-pointer">{lang==='zh'?'编辑个人坐标':'Edit location'}</button>
               </div>
             </div>
           </div>
