@@ -11,6 +11,7 @@ import {
   unlockSteadyVoiceAudio,
 } from '../../utils/steadyVoicePlayer.ts';
 import { OneAiAdminConsole } from './OneAiAdminConsole.tsx';
+import { sanitizeAiPlainReply } from '../../utils/aiPlainText.ts';
 import {
   ArrowUp,
   BookOpen,
@@ -84,10 +85,8 @@ function createLocalSessionId(): string {
   return `hub_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
-const stripAiTags = (t: string) =>
-  String(t || '')
-    .replace(/\[\[(?:EMO|EMOTION):[^\]]*\]\]\s*/gi, '')
-    .replace(/\[\[ACTION:[\s\S]*?\]\]\s*/gi, '');
+const stripAiTags = (t: string, preserveCodeBlocks = false) =>
+  sanitizeAiPlainReply(String(t || ''), { preserveCodeBlocks });
 
 /** Clean structured renderer for assistant prose & fenced code blocks (no heavy deps). */
 const FormattedMessageContent: React.FC<{ text: string; isZh: boolean }> = ({ text, isZh }) => {
@@ -443,13 +442,14 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
         { id: activeStreamId!, role: 'assistant', content: '', model: 'ONE AI', mode: activeMode, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
       ]);
       let replyContent = '';
+      const isCodeMode = activeMode === 'code';
       const streamResult = await readAIStream(res, (delta) => {
         setStreamingMessageId(activeStreamId);
         replyContent += delta;
-        const display = stripAiTags(replyContent).replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, '').trimStart();
+        const display = stripAiTags(replyContent, isCodeMode);
         setMessages((prev) => prev.map((m) => (m.id === activeStreamId ? { ...m, content: display } : m)));
       });
-      replyContent = stripAiTags(replyContent).trim();
+      replyContent = stripAiTags(streamResult.reply || replyContent, isCodeMode).trim();
       if (streamResult.sessionId && streamResult.sessionId !== sessionId) setSessionId(streamResult.sessionId);
       setMessages((prev) =>
         prev.map((m) =>
@@ -531,13 +531,14 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
     } catch {}
   };
 
-  const parseThoughtAndAnswer = (content: string) => {
-    const cleaned = stripAiTags(content);
-    const thinkMatch = cleaned.match(/<think>([\s\S]*?)<\/think>/);
+  const parseThoughtAndAnswer = (content: string, mode?: AiCapabilityMode) => {
+    const raw = String(content || '');
+    const thinkMatch = raw.match(/<think>([\s\S]*?)<\/think>/);
+    const cleaned = stripAiTags(raw, mode === 'code');
     if (thinkMatch) {
       return {
         thought: thinkMatch[1].trim(),
-        answer: cleaned.replace(/<think>[\s\S]*?<\/think>/, '').trim(),
+        answer: cleaned,
       };
     }
     return { thought: null, answer: cleaned };
@@ -793,7 +794,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             <div className="space-y-6 pb-4">
               {messages.map((msg) => {
                 const isUser = msg.role === 'user';
-                const { thought, answer } = parseThoughtAndAnswer(msg.content);
+                const { thought, answer } = parseThoughtAndAnswer(msg.content, msg.mode);
                 const isThoughtOpen = expandedThoughts[msg.id] ?? false;
 
                 if (isUser) {

@@ -57,6 +57,7 @@ import {
   stopSteadyVoice,
   unlockSteadyVoiceAudio,
 } from '../../utils/steadyVoicePlayer.ts';
+import { sanitizeAiPlainReply } from '../../utils/aiPlainText.ts';
 
 export type CompanionEmotion =
   | 'calm'
@@ -228,15 +229,7 @@ function mapCompanionToVoiceEmotion(c: CompanionEmotion): VoiceEmotion {
 }
 
 function stripCompanionMarkup(raw: string): string {
-  return (raw || '')
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
-    .replace(/<(?:think|thought)>[\s\S]*$/i, '')
-    .replace(/\[\[(?:EMO|EMOTION):[^\]]*\]\]\s*/gi, '')
-    .replace(/\[\[ACTION:[\s\S]*?\]\]\s*/gi, '')
-    .replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, '')
-    .replace(/\[\[ACTION:[\s\S]*$/i, '')
-    .trim();
+  return sanitizeAiPlainReply(raw, { preserveCodeBlocks: false });
 }
 
 function EmotionIcon({ emotion }: { emotion: CompanionEmotion }) {
@@ -268,23 +261,24 @@ function buildUnifiedEmbedUrl(rawUrl: string | undefined, isPlaying: boolean): s
   try {
     const u = new URL(rawUrl);
     if (u.hostname.includes('youtube')) {
-      if (!u.searchParams.has('autoplay')) {
-        u.searchParams.set('autoplay', isPlaying ? '1' : '0');
-      } else {
-        u.searchParams.set('autoplay', '1');
-      }
+      // Keep YouTube embed URL stable per track so toggling play/pause uses postMessage instead of reloading iframe
+      u.searchParams.set('autoplay', '1');
       u.searchParams.set('enablejsapi', '1');
       u.searchParams.set('playsinline', '1');
       u.searchParams.set('rel', '0');
+      u.searchParams.set('modestbranding', '1');
       if (typeof window !== 'undefined' && window.location?.origin) {
         u.searchParams.set('origin', window.location.origin);
       }
       return u.toString();
     }
     if (u.hostname.includes('bilibili')) {
-      u.searchParams.set('autoplay', isPlaying ? '1' : '0');
+      u.searchParams.set('page', u.searchParams.get('page') || '1');
+      u.searchParams.set('high_quality', '1');
+      u.searchParams.set('as_wide', '1');
       u.searchParams.set('danmaku', '0');
-      u.searchParams.set('muted', '0');
+      u.searchParams.delete('muted');
+      u.searchParams.set('autoplay', isPlaying ? '1' : '0');
       return u.toString();
     }
     return rawUrl;
@@ -603,34 +597,48 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
       setStageRect(null);
       return;
     }
+    const ro = new ResizeObserver(() => measure());
+    let observedTarget: Element | null = null;
     const measure = () => {
       const target = isOnVenus
         ? document.getElementById('venus-stage-slot')
         : musicPopoverOpen && showMiniVideo
           ? popoverStageAnchorRef.current
           : null;
+      if (target && target !== observedTarget) {
+        ro.disconnect();
+        ro.observe(target);
+        observedTarget = target;
+      }
       if (!target) {
         setStageRect(null);
         return;
       }
       const r = target.getBoundingClientRect();
-      if (r.width > 20 && r.height > 20) {
+      if (r.width > 20 && r.height > 20 && r.bottom > 54 && r.top < window.innerHeight) {
         setStageRect({ top: r.top, left: r.left, width: r.width, height: r.height });
       } else {
         setStageRect(null);
       }
     };
     measure();
-    const ro = new ResizeObserver(measure);
-    const slot = document.getElementById('venus-stage-slot');
-    if (slot) ro.observe(slot);
-    if (popoverStageAnchorRef.current) ro.observe(popoverStageAnchorRef.current);
+    const mo = isOnVenus
+      ? new MutationObserver(() => {
+          if (document.getElementById('venus-stage-slot') !== observedTarget) {
+            measure();
+          }
+        })
+      : null;
+    if (mo) {
+      mo.observe(document.body, { childList: true, subtree: true });
+    }
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
     window.addEventListener('one-venus-stage-change', measure);
     const rafTick = setInterval(measure, 250);
     return () => {
       ro.disconnect();
+      mo?.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
       window.removeEventListener('one-venus-stage-change', measure);
@@ -1906,6 +1914,7 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
                   width: `${stageRect.width}px`,
                   height: `${stageRect.height}px`,
                   zIndex: isOnVenus ? 20 : 52,
+                  pointerEvents: 'auto',
                 }
               : {
                   position: 'fixed',
@@ -1927,17 +1936,23 @@ export const HolographicAICompanion: React.FC<HolographicAICompanionProps> = (pr
             src={liveEmbedSrc}
             onLoad={() => {
               if (!liveEmbedSrc || !liveEmbedSrc.includes('youtube')) return;
-              try {
-                const win = embedIframeRef.current?.contentWindow;
-                if (!win) return;
-                win.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
-                sendYouTubeCmd(isMusicPlayingRef.current ? 'playVideo' : 'pauseVideo');
-              } catch {}
+              const bindYtApi = () => {
+                try {
+                  const win = embedIframeRef.current?.contentWindow;
+                  if (!win) return;
+                  win.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*');
+                  win.postMessage(JSON.stringify({ event: 'command', func: 'addEventListener', args: ['onStateChange'] }), '*');
+                  win.postMessage(JSON.stringify({ event: 'command', func: 'addEventListener', args: ['onError'] }), '*');
+                  sendYouTubeCmd(isMusicPlayingRef.current ? 'playVideo' : 'pauseVideo');
+                } catch {}
+              };
+              bindYtApi();
+              setTimeout(bindYtApi, 500);
             }}
             className="h-full w-full border-0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
             allowFullScreen
-            referrerPolicy="strict-origin-when-cross-origin"
+            referrerPolicy={liveEmbedSrc.includes('bilibili') ? 'no-referrer' : 'strict-origin-when-cross-origin'}
           />
         </div>
       )}

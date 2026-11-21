@@ -762,6 +762,7 @@ export default function App() {
         lang={lang}
         theme={theme}
         isAuthenticated={true}
+        currentTab={currentTab}
         userName={currentUser.displayName || currentUser.username}
         userCity={currentUser.location?.cityName}
         showLauncher={currentTab !== 'aihub' && !immersive && !(isNarrowViewport && currentTab === 'chat' && mobileChatOpen)}
@@ -829,7 +830,6 @@ export default function App() {
         onOpenMessages={(cid) => handleOpenConversationFromHome(cid || 'conv_global')}
         onOpenCalls={handleOpenCallCenterFromHome}
         onQuickCall={handleQuickCall}
-        currentTab={currentTab}
       />
 
       {!isSpaceExperience && (

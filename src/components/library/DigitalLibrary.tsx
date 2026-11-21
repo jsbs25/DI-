@@ -44,6 +44,7 @@ import { filterLibrarySearchResults, getLibrarySearchFilterOptions, LIBRARY_RIGH
 import type { LibraryAgentAction } from '../../utils/oneAgentController.ts';
 import { listRecentReadingHistory, type BookProgressRecord } from '../../utils/readerPreferences.ts';
 import { convertPdfDocumentToEbook, type WholePdfConversionProgress } from '../../utils/pdfEbookExtractor.ts';
+import { sanitizeImportedBookText, sanitizeImportedChapterTitle } from '../../utils/bookTextCleaner.ts';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -1437,7 +1438,8 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
           void loadingTask.destroy().catch(() => {});
         }
       } else {
-        const text = new TextDecoder('utf-8').decode(arrayBuffer).trim();
+        const rawDecoded = new TextDecoder('utf-8').decode(arrayBuffer).trim();
+        const text = sanitizeImportedBookText(rawDecoded, { preserveBlankLines: true });
         const arCount = (text.match(/[\u0600-\u06FF]/g) || []).length;
         const zhCount = (text.match(/[\u4E00-\u9FFF]/g) || []).length;
         detectedLanguage = arCount >= 30 ? 'ar' : zhCount >= 20 ? 'zh' : 'en';
@@ -1461,7 +1463,7 @@ export const DigitalLibrary: React.FC<DigitalLibraryProps> = ({ lang, currentUse
         if (buf.trim()) {
           chapters.push({
             id: `ch_${chIdx}`,
-            title: chIdx === 1 ? derivedTitle : `第 ${chIdx} 节`,
+            title: chIdx === 1 ? sanitizeImportedChapterTitle(derivedTitle, derivedTitle) : `第 ${chIdx} 节`,
             content: buf.trim(),
           });
         }

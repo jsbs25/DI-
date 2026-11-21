@@ -288,7 +288,7 @@ export async function executeGeminiToolCall(
         ok: true,
         summary: query
           ? isZh
-            ? `正在播放「${query}」`
+            ? `正在播放 ${query}`
             : `Playing "${query}"`
           : isZh
             ? '已开启音乐播放'
@@ -309,7 +309,7 @@ export async function executeGeminiToolCall(
       }
       return {
         ok: true,
-        summary: isZh ? `星环影院搜索「${query}」` : `Cinema playing "${query}"`,
+        summary: isZh ? `星环影院搜索 ${query}` : `Cinema playing "${query}"`,
         response: { ok: true, query, platform, autoPlay },
       };
     }
@@ -325,7 +325,7 @@ export async function executeGeminiToolCall(
         ok: true,
         summary: query
           ? isZh
-            ? `已在数字图书馆搜索「${query}」`
+            ? `已在数字图书馆搜索 ${query}`
             : `Opened "${query}" in Library`
           : isZh
             ? '已打开世界数字图书馆'
@@ -406,7 +406,7 @@ export async function executeGeminiToolCall(
         h.onGlobalSearchAction?.(query);
         return {
           ok: true,
-          summary: isZh ? `已全站搜索「${query}」` : `Global search "${query}"`,
+          summary: isZh ? `已全站搜索 ${query}` : `Global search "${query}"`,
           response: { ok: true, mode, query },
         };
       }
@@ -417,7 +417,7 @@ export async function executeGeminiToolCall(
       }
       return {
         ok: true,
-        summary: isZh ? `浏览器打开「${query || '主页'}」` : `Browser "${query || 'home'}"`,
+        summary: isZh ? `浏览器打开 ${query || '主页'}` : `Browser "${query || 'home'}"`,
         response: { ok: true, mode, query },
       };
     }
@@ -489,7 +489,7 @@ export async function executeGeminiToolCall(
         h.onNavigateTab?.('creator');
         return {
           ok: true,
-          summary: isZh ? `已发布文章「${title}」` : `Published article "${title}"`,
+          summary: isZh ? `已发布文章 ${title}` : `Published article "${title}"`,
           response: { ok: true, title },
         };
       }
@@ -587,7 +587,7 @@ export async function executeGeminiToolCall(
           ok: res.ok,
           summary: res.ok
             ? isZh
-              ? `已点击「${res.matched}」`
+              ? `已点击 ${res.matched}`
               : `Clicked "${res.matched}"`
             : res.reason || 'Element not found',
           response: res,
@@ -601,7 +601,7 @@ export async function executeGeminiToolCall(
           ok: res.ok,
           summary: res.ok
             ? isZh
-              ? `已在「${res.matched}」填入内容`
+              ? `已在 ${res.matched} 填入内容`
               : `Filled "${res.matched}"`
             : res.reason || 'Input not found',
           response: res,
@@ -679,7 +679,7 @@ export async function executeGeminiToolCall(
           return {
             ok: true,
             summary: isZh
-              ? `已为你生成图片：「${img.captionZh || '画面'}」`
+              ? `已为你生成图片：${img.captionZh || '画面'}`
               : `Generated artwork: "${img.captionZh || 'Artwork'}"`,
             response: { ok: true, captionZh: img.captionZh },
           };
@@ -816,10 +816,10 @@ export function parseInstantAgentAction(
       crawl: true,
       reply: query
         ? isZh
-          ? `好呀！正在打开音乐空间为你找「${query}」来听。`
+          ? `好呀，正在打开音乐空间为你找 ${query} 来听。`
           : `Opening Music Space and playing ${query} for you!`
         : isZh
-          ? '好呀，马上打开音乐空间为你放首歌！'
+          ? '好呀，马上打开音乐空间为你放首歌。'
           : 'Opening Music Space and starting a track for you!',
     };
   }
@@ -833,7 +833,7 @@ export function parseInstantAgentAction(
       platform,
       randomPick: true,
       reply: isZh
-        ? `太棒了！带你去星环影院看「${query}」。`
+        ? `太棒了，带你去星环影院看 ${query}。`
         : `Awesome! Opening Saturn Cinema for ${query}.`,
     };
   }
@@ -846,7 +846,7 @@ export function parseInstantAgentAction(
       return {
         type: 'browser_search',
         query: q,
-        reply: isZh ? `好的，正在空间浏览器里帮你搜索「${q}」。` : `Searching for ${q} in Space Browser.`,
+        reply: isZh ? `好的，正在空间浏览器里帮你搜索 ${q}。` : `Searching for ${q} in Space Browser.`,
       };
     }
     return {

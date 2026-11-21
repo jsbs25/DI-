@@ -683,12 +683,17 @@ export function createParadiseTerrain(
         vec3 shallowColor = mix(vec3(0.04, 0.10, 0.14), vec3(0.16, 0.36, 0.34), uDayFactor);
         albedo = mix(albedo, shallowColor, shallowFactor * 0.38);
 
-        // Gentle lapping shoreline wave foam + plunge pool turbulence foam
+        // Gentle lapping shoreline wave foam + plunge pool turbulence foam & downstream wake
         float shoreWave = sin(waterDepth * 34.0 - time * 2.2) * 0.5 + 0.5;
         float shoreFoam = (1.0 - smoothstep(0.005, 0.08, waterDepth)) * smoothstep(0.45, 0.85, shoreWave);
-        float plungeDist = length(worldPosition.xz - vec2(-18.0, -19.2));
-        float plungeFoam = (1.0 - smoothstep(1.2, 4.4, plungeDist)) * (0.45 + 0.55 * sin(plungeDist * 4.5 - time * 3.8));
-        albedo = mix(albedo, mix(vec3(0.32, 0.42, 0.54), vec3(0.92, 0.96, 0.98), uDayFactor), clamp(shoreFoam * 0.28 + plungeFoam * 0.42, 0.0, 0.65));
+        vec2 plungeOrigin = vec2(-17.92, -19.20);
+        float plungeDist = length(worldPosition.xz - plungeOrigin);
+        float plungeFoam = (1.0 - smoothstep(1.2, 4.6, plungeDist)) * (0.48 + 0.52 * sin(plungeDist * 4.8 - time * 4.1));
+        vec2 toStream = worldPosition.xz - plungeOrigin;
+        float downProj = clamp(dot(toStream, vec2(0.76, 0.65)), 0.0, 9.5);
+        float crossDist = abs(dot(toStream, vec2(-0.65, 0.76)));
+        float wakeFoam = (1.0 - smoothstep(0.45, 2.35, crossDist)) * (1.0 - smoothstep(0.0, 9.5, downProj)) * (0.45 + 0.55 * sin(downProj * 3.6 - time * 3.4));
+        albedo = mix(albedo, mix(vec3(0.32, 0.42, 0.54), vec3(0.92, 0.96, 0.98), uDayFactor), clamp(shoreFoam * 0.28 + plungeFoam * 0.44 + wakeFoam * 0.30, 0.0, 0.68));
 
         albedo *= mix(0.44, 1.0, smoothstep(0.0, 0.7, uDayFactor));
         if (uMoonDir.y > -0.02 && uNightFactor > 0.05) {
@@ -705,28 +710,52 @@ export function createParadiseTerrain(
   group.add(waterMesh);
 
   // -------------------------------------------------------------------------
-  // Realistic Multi-Tiered Rocky Mountain Waterfall, Mossy Basalt Gorge & Mist
+  // Realistic Multi-Tiered Rocky Mountain Waterfall, Upper Tarn, Wet Basalt Gorge & Mist
   // -------------------------------------------------------------------------
   const waterfallGeos: THREE.BufferGeometry[] = [];
   const waterfallMats: THREE.Material[] = [];
 
-  const wfAnchor = new THREE.Group();
-  wfAnchor.position.set(-20.4, 0.0, -22.5);
-  wfAnchor.rotation.y = 0.64;
+  const WF_ANCHOR_X = -20.4;
+  const WF_ANCHOR_Z = -22.5;
+  const WF_ROT_Y = 0.64;
+  const wfCos = Math.cos(WF_ROT_Y);
+  const wfSin = Math.sin(WF_ROT_Y);
+  const wfLocalToWorld = (lx: number, ly: number, lz: number): [number, number, number] => [
+    WF_ANCHOR_X + lx * wfCos + lz * wfSin,
+    ly,
+    WF_ANCHOR_Z - lx * wfSin + lz * wfCos,
+  ];
 
-  // Stratified dark wet basalt & moss-capped cliff rock material (vertex-colored for wet-to-moss gradient)
+  const wfAnchor = new THREE.Group();
+  wfAnchor.position.set(WF_ANCHOR_X, 0.0, WF_ANCHOR_Z);
+  wfAnchor.rotation.y = WF_ROT_Y;
+
+  // Stratified mossy alpine gorge rock material (vertex-colored for wet-to-moss gradient)
   const wetBasaltMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     vertexColors: true,
     map: textures.rockColorMap,
     normalMap: textures.rockNormalMap,
-    normalScale: new THREE.Vector2(1.35, 1.35),
+    normalScale: new THREE.Vector2(1.4, 1.4),
     aoMap: textures.plasterAoMap,
-    aoMapIntensity: 0.78,
-    roughness: 0.34,
+    aoMapIntensity: 0.82,
+    roughness: 0.32,
     metalness: 0.06,
   });
-  waterfallMats.push(wetBasaltMat);
+
+  // Slick darkened wet basalt material for the recessed spray grotto & splash ledges behind water curtains
+  const grottoWetMat = new THREE.MeshStandardMaterial({
+    color: 0xc2ccd4,
+    vertexColors: true,
+    map: textures.rockColorMap,
+    normalMap: textures.rockNormalMap,
+    normalScale: new THREE.Vector2(1.6, 1.6),
+    aoMap: textures.plasterAoMap,
+    aoMapIntensity: 0.92,
+    roughness: 0.14,
+    metalness: 0.09,
+  });
+  waterfallMats.push(wetBasaltMat, grottoWetMat);
 
   /**
    * Builds a stratified flat-topped geological basalt cliff ledge with horizontal bedding
@@ -737,39 +766,40 @@ export function createParadiseTerrain(
     sy: number,
     sz: number,
     seed: number,
-    mossAmount = 0.72
+    mossAmount = 0.72,
+    wetnessBias = 0.85
   ): THREE.BufferGeometry => {
     const geo = new THREE.IcosahedronGeometry(1, 3);
     const pos = geo.attributes.position as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
-    const cDry = new THREE.Color(0x4c545b);
-    const cWet = new THREE.Color(0x212930);
-    const cMoss = new THREE.Color(0x3a5234);
+    const cDry = new THREE.Color(0x4b535b);
+    const cWet = new THREE.Color(0x1b232a);
+    const cMoss = new THREE.Color(0x385233);
     const tmpCol = new THREE.Color();
 
     for (let i = 0; i < pos.count; i++) {
-      let vx = pos.getX(i);
-      let vy = pos.getY(i);
-      let vz = pos.getZ(i);
+      const vx = pos.getX(i);
+      const vy = pos.getY(i);
+      const vz = pos.getZ(i);
 
       // Horizontal sedimentary strata terracing + angular fracture crags
-      const strataStep = Math.sin(vy * 7.5 + seed * 1.7) * 0.085 + Math.cos(vy * 14.0 - seed) * 0.035;
+      const strataStep = Math.sin(vy * 7.8 + seed * 1.7) * 0.09 + Math.cos(vy * 14.5 - seed) * 0.036;
       const crag =
         1.0 +
         0.16 * Math.sin(vx * 3.4 + seed) * Math.cos(vz * 3.1 - seed) +
         0.09 * Math.sin((vx - vz) * 6.2 + vy * 3.0);
 
       // Flatten top slightly so rock shelves look like authentic stepped river ledges
-      const yFlat = vy > 0.35 ? 0.35 + (vy - 0.35) * 0.48 : vy;
+      const yFlat = vy > 0.35 ? 0.35 + (vy - 0.35) * 0.46 : vy;
       const xOut = vx * sx * (crag + strataStep);
       const yOut = yFlat * sy * (0.94 + 0.1 * Math.cos(vx * 4.0 + vz * 3.5 + seed));
       const zOut = vz * sz * (crag - strataStep * 0.6);
       pos.setXYZ(i, xOut, yOut, zOut);
 
       // Vertex shading: dark glistening wet stone toward bottom/front, mossy green on upward faces
-      const wetMask = 1.0 - smoothstep(-0.3, 0.55, vy);
+      const wetMask = 1.0 - smoothstep(-0.35, 0.62, vy);
       const topMoss = smoothstep(0.32, 0.78, vy) * mossAmount * (0.65 + 0.35 * Math.sin(vx * 4.5 + vz * 4.0 + seed));
-      tmpCol.copy(cDry).lerp(cWet, wetMask * 0.85).lerp(cMoss, Math.max(0, Math.min(1, topMoss)));
+      tmpCol.copy(cDry).lerp(cWet, Math.min(1, wetMask * wetnessBias)).lerp(cMoss, Math.max(0, Math.min(1, topMoss)));
       colors[i * 3] = tmpCol.r;
       colors[i * 3 + 1] = tmpCol.g;
       colors[i * 3 + 2] = tmpCol.b;
@@ -782,39 +812,176 @@ export function createParadiseTerrain(
     return geo;
   };
 
-  // Sculpted natural gorge cliff framing: recessed spillway notch, mid-cliff split ledges, flanking gorge walls & plunge rim boulders
-  const gorgeRocks: Array<[number, number, number, number, number, number, number, number]> = [
-    // [x, y, z, sx, sy, sz, rotY, mossAmount]
-    // Backing dark cliff gorge face cradling the waterfall seamlessly into the mountain
-    [0.0, 5.4, -0.6, 5.2, 5.8, 2.5, 0.04, 0.52],
-    // Upper left & right canyon shoulders forming a recessed rocky notch at the crest (eliminates floating top edge!)
-    [-3.15, 8.8, 0.9, 2.35, 3.1, 2.15, 0.25, 0.88],
-    [3.25, 8.5, 0.85, 2.45, 3.0, 2.2, -0.22, 0.85],
-    // Upper recessed spillway sill rock where water smoothly rolls over the crest
-    [0.0, 8.2, 1.05, 2.4, 1.05, 1.45, 0.0, 0.35],
-    // Left & right steep gorge cheek walls enclosing the cascade
-    [-3.65, 3.8, 1.85, 2.2, 4.1, 2.1, 0.32, 0.72],
-    [3.75, 3.5, 1.75, 2.3, 3.9, 2.05, -0.28, 0.7],
-    // Mid-cliff stepped basalt shelf & dividing dark wet boulder splitting water into organic braided streams
-    [-0.15, 4.4, 2.05, 2.55, 1.15, 1.65, 0.08, 0.22],
-    [1.85, 5.1, 2.15, 1.55, 1.25, 1.45, -0.18, 0.4],
-    [-1.75, 2.6, 2.6, 1.55, 1.35, 1.4, 0.22, 0.32],
+  // Sculpted natural gorge cliff framing: upper feeder canyon, slick dark wet grotto recess, dividing rock spurs, stepped shelves & plunge rim boulders
+  const gorgeRocks: Array<[number, number, number, number, number, number, number, number, boolean]> = [
+    // [x, y, z, sx, sy, sz, rotY, mossAmount, isWetGrotto]
+    // Backing dark wet cliff grotto cradling the waterfall seamlessly into the mountain
+    [0.0, 5.25, -0.45, 5.15, 5.9, 2.38, 0.04, 0.28, true],
+    // Upper canyon head ridge framing the mountain tarn & feeder creek behind the crest
+    [-0.1, 9.75, -2.55, 4.45, 2.35, 2.1, 0.06, 0.78, false],
+    // Upper left & right canyon shoulders forming a recessed rocky notch at the crest
+    [-3.18, 9.05, 0.72, 2.35, 3.15, 2.25, 0.26, 0.88, false],
+    [3.28, 8.75, 0.68, 2.45, 3.05, 2.25, -0.22, 0.86, false],
+    // Upper recessed wet spillway sill rock where creek smoothly accelerates & spills over
+    [0.0, 8.26, 0.84, 2.65, 0.94, 1.55, 0.0, 0.16, true],
+    // Wet dark basalt dividing spurs separating the 3 streams cleanly
+    [-0.96, 6.45, 1.24, 0.92, 2.75, 1.22, 0.18, 0.26, true],
+    [0.92, 5.95, 1.38, 1.0, 2.6, 1.28, -0.14, 0.24, true],
+    // Left & right steep mossy gorge cheek walls enclosing the cascade
+    [-3.75, 3.85, 1.85, 2.25, 4.2, 2.15, 0.34, 0.76, false],
+    [3.82, 3.55, 1.75, 2.35, 4.0, 2.1, -0.3, 0.74, false],
+    // Mid-cliff stepped wet basalt shelf & dividing dark boulders aligned with stream rebound ledges
+    [-0.08, 4.34, 1.98, 2.45, 1.06, 1.58, 0.07, 0.18, true],
+    [1.72, 5.12, 2.04, 1.48, 1.2, 1.38, -0.18, 0.34, true],
+    [-1.78, 2.64, 2.55, 1.52, 1.32, 1.38, 0.22, 0.32, true],
     // Lower submerged & shoreline plunge-pool boulders
-    [0.35, 0.95, 3.15, 1.75, 1.15, 1.5, -0.1, 0.18],
-    [-3.2, 0.65, 3.8, 1.95, 1.25, 1.65, 0.42, 0.62],
-    [3.35, 0.55, 3.65, 2.05, 1.2, 1.6, -0.36, 0.58],
+    [0.35, 0.88, 3.1, 1.68, 1.05, 1.42, -0.1, 0.14, true],
+    [-3.25, 0.65, 3.8, 1.95, 1.25, 1.65, 0.42, 0.65, false],
+    [3.38, 0.55, 3.65, 2.05, 1.2, 1.6, -0.36, 0.6, false],
   ];
 
   for (let i = 0; i < gorgeRocks.length; i++) {
-    const [rx, ry, rz, sx, sy, sz, rotY, moss] = gorgeRocks[i];
-    const rGeo = createStratifiedCliffBlock(sx, sy, sz, i * 2.13 + 0.7, moss);
-    const rMesh = new THREE.Mesh(rGeo, wetBasaltMat);
+    const [rx, ry, rz, sx, sy, sz, rotY, moss, isWetGrotto] = gorgeRocks[i];
+    const rGeo = createStratifiedCliffBlock(sx, sy, sz, i * 2.13 + 0.7, moss, isWetGrotto ? 1.0 : 0.82);
+    const rMesh = new THREE.Mesh(rGeo, isWetGrotto ? grottoWetMat : wetBasaltMat);
     rMesh.position.set(rx, ry, rz);
     rMesh.rotation.y = rotY;
     rMesh.castShadow = quality.enableShadows;
     rMesh.receiveShadow = quality.enableShadows;
     wfAnchor.add(rMesh);
   }
+
+  const waterfallUniforms: Record<string, THREE.IUniform> = {
+    uTime: { value: 0 },
+    uDayFactor: { value: 1.0 },
+    uSkyHorizon: { value: new THREE.Color(0xbce0f7) },
+    uSunDir: { value: new THREE.Vector3(0.4, 0.7, -0.5).normalize() },
+    uSunColor: { value: new THREE.Color(0xfff5de) },
+    uRainIntensity: { value: 0.0 },
+    uFogColor: { value: new THREE.Color(0xbce0f7) },
+    uFogDensity: { value: 0.0042 },
+  };
+
+  /**
+   * Generates the upper alpine feeder stream & spillway tarn feeding smoothly over the cliff lip
+   * into both mainChute and leftVeil so water never starts abruptly from a cut rock edge.
+   */
+  const createUpperSpillwayGeo = (): THREE.BufferGeometry => {
+    const segsX = 24;
+    const segsZ = 20;
+    const positions: number[] = [];
+    const uvs: number[] = [];
+    const indices: number[] = [];
+
+    for (let iz = 0; iz <= segsZ; iz++) {
+      const t = iz / segsZ; // 0 = upper mountain tarn back, 1 = curved brink feeding vertical drop
+      const z = THREE.MathUtils.lerp(-2.05, 1.08, t);
+      const lipDrop = Math.pow(smoothstep(0.72, 1.0, t), 1.85) * 0.28;
+      const y = THREE.MathUtils.lerp(9.26, 9.05, t) - lipDrop;
+      const centerX = -0.35 + Math.sin(t * Math.PI * 0.85) * 0.16;
+      const halfW = THREE.MathUtils.lerp(1.45, 1.82, smoothstep(0.15, 0.9, t));
+
+      for (let ix = 0; ix <= segsX; ix++) {
+        const u = ix / segsX;
+        const nx = (u - 0.5) * 2.0;
+        const x = centerX + nx * halfW;
+        const bankUp = Math.pow(Math.abs(nx), 2.4) * 0.04;
+        positions.push(x, y + bankUp, z);
+        uvs.push(u, t);
+      }
+    }
+
+    const row = segsX + 1;
+    for (let iz = 0; iz < segsZ; iz++) {
+      for (let ix = 0; ix < segsX; ix++) {
+        const a = iz * row + ix;
+        const b = a + 1;
+        const c = a + row;
+        const d = c + 1;
+        indices.push(a, c, b, b, c, d);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    waterfallGeos.push(geo);
+    return geo;
+  };
+
+  const upperCreekMat = new THREE.ShaderMaterial({
+    uniforms: waterfallUniforms,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uDayFactor;
+      uniform vec3 uSkyHorizon;
+      uniform vec3 uSunColor;
+      uniform float uRainIntensity;
+      uniform vec3 uFogColor;
+      uniform float uFogDensity;
+      varying vec2 vUv;
+      varying vec3 vWorldPos;
+
+      float cHash(vec2 p) {
+        p = fract(p * vec2(127.1, 311.7));
+        p += dot(p, p + 27.19);
+        return fract(p.x * p.y);
+      }
+      float cNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(cHash(i), cHash(i + vec2(1.0, 0.0)), u.x),
+          mix(cHash(i + vec2(0.0, 1.0)), cHash(i + vec2(1.0, 1.0)), u.x),
+          u.y
+        );
+      }
+
+      void main() {
+        float speed = 1.45 + uRainIntensity * 0.55;
+        float accel = smoothstep(0.45, 1.0, vUv.y);
+        float flow = cNoise(vec2(vUv.x * 10.0, vUv.y * 5.0 - uTime * speed * (1.0 + accel * 0.7)));
+        float fine = cNoise(vec2(vUv.x * 24.0 + flow * 0.8, vUv.y * 12.0 - uTime * speed * 1.8));
+        float bankMask = smoothstep(0.02, 0.24, vUv.x) * (1.0 - smoothstep(0.76, 0.98, vUv.x));
+        float backMask = smoothstep(0.0, 0.22, vUv.y);
+        float lipFoam = smoothstep(0.66, 0.96, vUv.y) * smoothstep(0.42, 0.78, fine * 0.65 + flow * 0.35);
+
+        vec3 tealPool = mix(vec3(0.05, 0.11, 0.17), mix(vec3(0.11, 0.31, 0.35), uSkyHorizon * 0.65, 0.26), uDayFactor);
+        vec3 foamCol = mix(vec3(0.44, 0.54, 0.66), vec3(0.95, 0.98, 1.0), uDayFactor);
+        vec3 col = mix(tealPool, foamCol, clamp(lipFoam * 0.78 + fine * 0.18, 0.0, 1.0));
+        col += uSunColor * smoothstep(0.72, 0.96, fine) * uDayFactor * (1.0 - uRainIntensity * 0.5) * 0.20;
+
+        float distCam = length(cameraPosition - vWorldPos);
+        float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * distCam * distCam);
+        col = mix(col, uFogColor, clamp(fogFactor, 0.0, 1.0));
+
+        float alpha = clamp((0.72 + lipFoam * 0.22) * bankMask * backMask, 0.0, 0.92);
+        if (alpha < 0.02) discard;
+        gl_FragColor = vec4(col, alpha);
+      }
+    `,
+  });
+  waterfallMats.push(upperCreekMat);
+
+  const upperSpillwayMesh = new THREE.Mesh(createUpperSpillwayGeo(), upperCreekMat);
+  upperSpillwayMesh.renderOrder = 3;
+  wfAnchor.add(upperSpillwayMesh);
 
   /**
    * Generates an organic gravity-curved waterfall ribbon geometry from a 3D spine path
@@ -836,8 +1003,8 @@ export function createParadiseTerrain(
     segsX?: number;
     segsY?: number;
   }): THREE.BufferGeometry => {
-    const segsX = cfg.segsX ?? 24;
-    const segsY = cfg.segsY ?? 34;
+    const segsX = cfg.segsX ?? 32;
+    const segsY = cfg.segsY ?? 46;
     const positions: number[] = [];
     const uvs: number[] = [];
     const indices: number[] = [];
@@ -846,29 +1013,30 @@ export function createParadiseTerrain(
       const fallT = iy / segsY; // 0 = top intake crest, 1 = bottom plunge base
       const v = 1.0 - fallT; // UV.y = 1 at top, 0 at bottom
 
-      // Smooth rounded crest lip over the upper rock sill (first 10% curves horizontally forward into vertical drop)
-      const crestCurve = Math.min(1, fallT / 0.11);
-      const yCrestDrop = Math.pow(crestCurve, 1.65) * 0.55;
+      // Smooth rounded crest lip over the upper rock sill (first 12% curves horizontally forward into vertical drop)
+      const crestCurve = Math.min(1, fallT / 0.12);
+      const yCrestDrop = Math.pow(crestCurve, 1.75) * 0.58;
       const yMain = THREE.MathUtils.lerp(cfg.topY, cfg.botY, fallT);
-      const y = fallT < 0.11 ? cfg.topY - yCrestDrop : yMain;
+      const y = fallT < 0.12 ? cfg.topY - yCrestDrop : yMain;
 
       // Gravity parabolic projection + mid-cliff rock-shelf bounce
       const gravityArc = Math.pow(fallT, 1.18) * (cfg.botZ - cfg.topZ);
-      const shelfBounce = Math.exp(-Math.pow((fallT - cfg.midLedgeT) / 0.13, 2)) * cfg.midLedgeOut;
+      const shelfBounce = Math.exp(-Math.pow((fallT - cfg.midLedgeT) / 0.125, 2)) * cfg.midLedgeOut;
       const zCenter = cfg.topZ + gravityArc + shelfBounce;
 
       // Natural organic widening as stream aerates & spreads into plunge pool
-      const halfW = THREE.MathUtils.lerp(cfg.topWidth, cfg.botWidth, Math.pow(fallT, 0.85)) * 0.5;
-      const xCenter = THREE.MathUtils.lerp(cfg.topX, cfg.botX, fallT) + Math.sin(fallT * Math.PI * 1.4) * 0.14;
+      const halfW = THREE.MathUtils.lerp(cfg.topWidth, cfg.botWidth, Math.pow(fallT, 0.84)) * 0.5;
+      const xCenter = THREE.MathUtils.lerp(cfg.topX, cfg.botX, fallT) + Math.sin(fallT * Math.PI * 1.4) * 0.15;
 
       for (let ix = 0; ix <= segsX; ix++) {
         const u = ix / segsX;
         const nx = (u - 0.5) * 2.0; // -1 .. +1 across stream width
         const x = xCenter + nx * halfW;
-        // Convex liquid curtain cross-section + subtle organic longitudinal ridges
+        // Convex liquid curtain cross-section + longitudinal water flutes & organic ripples
         const archCross = (1.0 - nx * nx) * cfg.bowOut * (0.45 + 0.55 * fallT);
-        const rippleZ = Math.sin(nx * 5.2 + fallT * 6.0) * 0.06 * fallT;
-        positions.push(x, y, zCenter + archCross + rippleZ);
+        const flutes = Math.sin(nx * Math.PI * 3.2 + fallT * 3.5) * 0.045 * fallT;
+        const rippleZ = Math.sin(nx * 5.6 + fallT * 6.8) * 0.055 * fallT;
+        positions.push(x, y, zCenter + archCross + flutes + rippleZ);
         uvs.push(u, v);
       }
     }
@@ -895,76 +1063,69 @@ export function createParadiseTerrain(
 
   // 3 Distinct Braided Natural Cascade Streams (Main Central + Left Silver Veil + Right Stepped Flow)
   const mainChuteGeo = createWaterfallRibbonGeo({
-    topX: -0.08,
+    topX: -0.06,
     botX: 0.05,
-    topY: 9.05,
-    botY: -0.35,
-    topZ: 0.85,
+    topY: 9.08,
+    botY: -0.38,
+    topZ: 0.82,
     midLedgeT: 0.49,
-    midLedgeOut: 0.58,
+    midLedgeOut: 0.62,
     botZ: 4.15,
-    topWidth: 2.35,
-    botWidth: 3.45,
-    bowOut: 0.48,
+    topWidth: 2.38,
+    botWidth: 3.52,
+    bowOut: 0.52,
+    segsX: 32,
+    segsY: 46,
   });
 
   const leftVeilGeo = createWaterfallRibbonGeo({
     topX: -1.42,
-    botX: -1.85,
-    topY: 8.65,
-    botY: -0.35,
-    topZ: 1.05,
+    botX: -1.86,
+    topY: 8.82,
+    botY: -0.36,
+    topZ: 1.02,
     midLedgeT: 0.64,
-    midLedgeOut: 0.46,
+    midLedgeOut: 0.48,
     botZ: 4.05,
-    topWidth: 0.88,
-    botWidth: 1.55,
-    bowOut: 0.28,
-    segsX: 16,
-    segsY: 28,
+    topWidth: 0.92,
+    botWidth: 1.62,
+    bowOut: 0.3,
+    segsX: 20,
+    segsY: 34,
   });
 
   const rightSteppedGeo = createWaterfallRibbonGeo({
     topX: 1.38,
-    botX: 1.82,
-    topY: 7.75,
-    botY: -0.35,
-    topZ: 1.32,
+    botX: 1.84,
+    topY: 7.82,
+    botY: -0.36,
+    topZ: 1.28,
     midLedgeT: 0.44,
-    midLedgeOut: 0.52,
+    midLedgeOut: 0.54,
     botZ: 4.1,
-    topWidth: 1.05,
-    botWidth: 1.78,
-    bowOut: 0.32,
-    segsX: 16,
-    segsY: 28,
+    topWidth: 1.08,
+    botWidth: 1.84,
+    bowOut: 0.34,
+    segsX: 20,
+    segsY: 34,
   });
 
   // Soft outer spray curtain hovering slightly proud of main cascade for volumetric depth
   const mainSprayVeilGeo = createWaterfallRibbonGeo({
-    topX: -0.04,
+    topX: -0.02,
     botX: 0.08,
-    topY: 8.75,
+    topY: 8.8,
     botY: -0.25,
     topZ: 1.12,
     midLedgeT: 0.49,
-    midLedgeOut: 0.72,
-    botZ: 4.55,
-    topWidth: 2.55,
-    botWidth: 4.15,
-    bowOut: 0.58,
-    segsX: 18,
-    segsY: 24,
+    midLedgeOut: 0.76,
+    botZ: 4.58,
+    topWidth: 2.6,
+    botWidth: 4.25,
+    bowOut: 0.6,
+    segsX: 26,
+    segsY: 32,
   });
-
-  const waterfallUniforms: Record<string, THREE.IUniform> = {
-    uTime: { value: 0 },
-    uDayFactor: { value: 1.0 },
-    uSkyHorizon: { value: new THREE.Color(0xbce0f7) },
-    uRainIntensity: { value: 0.0 },
-    uFogColor: { value: new THREE.Color(0xbce0f7) },
-    uFogDensity: { value: 0.0042 },
-  };
 
   const buildWaterfallShaderMat = (opts: { isVeil: boolean; flowSeed: number; shelfY: number; speedMult: number }) =>
     new THREE.ShaderMaterial({
@@ -988,6 +1149,8 @@ export function createParadiseTerrain(
         uniform float uTime;
         uniform float uDayFactor;
         uniform vec3 uSkyHorizon;
+        uniform vec3 uSunDir;
+        uniform vec3 uSunColor;
         uniform float uRainIntensity;
         uniform vec3 uFogColor;
         uniform float uFogDensity;
@@ -1024,54 +1187,58 @@ export function createParadiseTerrain(
 
         void main() {
           float fallProgress = 1.0 - vUv.y; // 0 at crest, 1 at plunge pool
-          float speed = (2.15 + uRainIntensity * 0.75) * ${opts.speedMult.toFixed(2)};
-          // True gravitational acceleration stretch along the drop
-          float accelV = vUv.y * 0.76 + (1.0 - fallProgress * fallProgress) * 0.24;
+          float speed = (2.25 + uRainIntensity * 0.78) * ${opts.speedMult.toFixed(2)};
+          // Gravitational acceleration stretch along the drop
+          float accelV = vUv.y * 0.74 + (1.0 - fallProgress * fallProgress) * 0.26;
 
           // Subtle lateral curl distortion so water threads braid naturally
-          float curl = (noise(vec2(vUv.x * 6.5 + ${opts.flowSeed.toFixed(2)}, accelV * 3.2 + uTime * 0.65)) - 0.5) * (0.14 + fallProgress * 0.18);
+          float curl = (noise(vec2(vUv.x * 6.8 + ${opts.flowSeed.toFixed(2)}, accelV * 3.4 + uTime * 0.68)) - 0.5) * (0.14 + fallProgress * 0.20);
 
-          // Anisotropic stretched vertical falling water filaments (6:1 vertical elongation!)
-          float coarseThreads = fbmStreak(vec2((vUv.x + curl) * 14.0 + ${opts.flowSeed.toFixed(2)}, accelV * 2.1 + uTime * speed));
-          float fineFilaments = fbmStreak(vec2((vUv.x - curl * 0.7) * 28.0 + ${opts.flowSeed.toFixed(2)} * 1.7, accelV * 3.8 + uTime * speed * 1.48));
-          float fineSpray = noise(vec2(vUv.x * 52.0, vUv.y * 14.0 + uTime * speed * 2.15));
+          // Anisotropic stretched vertical falling water filaments
+          float coarseThreads = fbmStreak(vec2((vUv.x + curl) * 14.5 + ${opts.flowSeed.toFixed(2)}, accelV * 2.1 + uTime * speed));
+          float fineFilaments = fbmStreak(vec2((vUv.x - curl * 0.7) * 30.0 + ${opts.flowSeed.toFixed(2)} * 1.7, accelV * 3.9 + uTime * speed * 1.52));
+          float fineSpray = noise(vec2(vUv.x * 56.0, vUv.y * 15.0 + uTime * speed * 2.25));
 
           // Braided river-chute channels (bright filaments separated by dark clear aqua troughs)
-          float braidMask = 0.62 + 0.38 * sin((vUv.x + curl * 0.5) * 18.8 + ${opts.flowSeed.toFixed(2)});
-          float filamentRaw = (coarseThreads * 0.48 + fineFilaments * 0.38 + fineSpray * 0.14) * mix(0.84, 1.16, braidMask);
+          float braidMask = 0.62 + 0.38 * sin((vUv.x + curl * 0.5) * 19.2 + ${opts.flowSeed.toFixed(2)});
+          float filamentRaw = (coarseThreads * 0.46 + fineFilaments * 0.39 + fineSpray * 0.15) * mix(0.84, 1.16, braidMask);
 
           // Smooth glassy intake near crest -> strongly aerated whitewater toward plunge
-          float aeroBoost = smoothstep(0.08, 0.85, fallProgress);
-          float whiteFilaments = smoothstep(${opts.isVeil ? '0.50, 0.86' : '0.38, 0.78'}, filamentRaw + aeroBoost * 0.14);
+          float aeroBoost = smoothstep(0.06, 0.84, fallProgress);
+          float whiteFilaments = smoothstep(${opts.isVeil ? '0.48, 0.85' : '0.36, 0.76'}, filamentRaw + aeroBoost * 0.15);
 
           // Organic splash burst where cascade strikes the mid-cliff basalt shelf
-          float ledgeImpact = exp(-pow((vUv.y - ${opts.shelfY.toFixed(2)}) / 0.085, 2.0)) * (0.45 + fineFilaments * 0.55);
+          float ledgeImpact = exp(-pow((vUv.y - ${opts.shelfY.toFixed(2)}) / 0.085, 2.0)) * (0.48 + fineFilaments * 0.52);
           // Churning plunge splash at pool contact
-          float plungeSplash = (1.0 - smoothstep(0.0, 0.24, vUv.y)) * (0.55 + fineFilaments * 0.45);
-          // Smooth crest feathering tucked into rock lip (zero flat geometric cut at top!)
-          float topFade = 1.0 - smoothstep(0.91, 1.0, vUv.y);
-          float topCrestRoll = exp(-pow((vUv.y - 0.90) / 0.06, 2.0)) * 0.32;
+          float plungeSplash = (1.0 - smoothstep(0.0, 0.24, vUv.y)) * (0.58 + fineFilaments * 0.42);
+          // Smooth crest feathering tucked into upper creek lip (zero flat geometric cut at top!)
+          float topFade = 1.0 - smoothstep(0.92, 1.0, vUv.y);
+          float topCrestRoll = exp(-pow((vUv.y - 0.90) / 0.065, 2.0)) * 0.36;
 
-          // Ragged, organic droplet-feathered left & right silhouettes (never crisp box edges!)
-          float edgeNoise = (fineFilaments - 0.5) * 0.18;
+          // Ragged, organic droplet-feathered left & right silhouettes
+          float edgeNoise = (fineFilaments - 0.5) * 0.19;
           float edgeMask = smoothstep(0.02, 0.22, vUv.x + edgeNoise) * (1.0 - smoothstep(0.78, 0.98, vUv.x - edgeNoise));
 
-          // Physically grounded mountain spring water palette: deep translucent teal-aqua core + crisp white aerated foam
+          // Physically grounded spring water palette: deep translucent emerald-aqua core + crisp white aerated foam
           vec3 clearSpring = mix(
-            vec3(0.05, 0.11, 0.17),
-            mix(vec3(0.14, 0.33, 0.38), uSkyHorizon * 0.72, 0.28),
+            vec3(0.05, 0.12, 0.19),
+            mix(vec3(0.11, 0.33, 0.37), uSkyHorizon * 0.72, 0.28),
             uDayFactor
           );
-          vec3 aeratedWhite = mix(vec3(0.42, 0.52, 0.64), vec3(0.95, 0.98, 1.0), uDayFactor);
-          float foamMix = clamp(whiteFilaments * 0.88 + ledgeImpact * 0.78 + plungeSplash * 0.82 + topCrestRoll, 0.0, 1.0);
+          vec3 aeratedWhite = mix(vec3(0.42, 0.53, 0.66), vec3(0.96, 0.99, 1.0), uDayFactor);
+          float foamMix = clamp(whiteFilaments * 0.88 + ledgeImpact * 0.80 + plungeSplash * 0.84 + topCrestRoll, 0.0, 1.0);
           vec3 col = mix(clearSpring, aeratedWhite, foamMix);
 
-          // Grazing Fresnel sky sheen + subtle sunlit specular droplets on convex water threads
+          // Dynamic sun/moon subsurface scattering & rim highlights on curved liquid sheets
           vec3 viewDir = normalize(cameraPosition - vWorldPos);
           vec3 nrm = normalize(vWorldNormal);
-          float fresnel = pow(1.0 - abs(dot(viewDir, nrm)), 2.5);
-          float sparkle = smoothstep(0.74, 0.96, fineSpray * fineFilaments) * uDayFactor * 0.26;
-          col += mix(vec3(0.4, 0.55, 0.72), vec3(0.92, 0.97, 1.0), uDayFactor) * (fresnel * 0.22 + sparkle);
+          vec3 lightDir = normalize(uSunDir);
+          float fresnel = pow(1.0 - abs(dot(viewDir, nrm)), 2.4);
+          float sss = pow(max(dot(viewDir, -lightDir), 0.0), 3.0) * (1.0 - foamMix * 0.65) * uDayFactor * (1.0 - uRainIntensity * 0.55);
+          col += vec3(0.08, 0.34, 0.32) * sss * 0.45;
+          float crestSunRim = pow(max(dot(nrm, lightDir), 0.0), 2.2) * (0.35 + topCrestRoll * 0.8);
+          float sparkle = smoothstep(0.73, 0.96, fineSpray * fineFilaments) * (0.28 + uDayFactor * 0.32) * (1.0 - uRainIntensity * 0.5);
+          col += mix(vec3(0.45, 0.62, 0.82), uSunColor, uDayFactor) * (fresnel * 0.22 + crestSunRim * 0.16 + sparkle);
 
           // Seamless atmospheric distance fog integration
           float distCam = length(cameraPosition - vWorldPos);
@@ -1080,12 +1247,12 @@ export function createParadiseTerrain(
 
           float density = ${
             opts.isVeil
-              ? 'whiteFilaments * 0.36 + ledgeImpact * 0.26 + plungeSplash * 0.30'
-              : '0.26 + whiteFilaments * 0.58 + ledgeImpact * 0.36 + plungeSplash * 0.38'
+              ? 'whiteFilaments * 0.38 + ledgeImpact * 0.28 + plungeSplash * 0.32'
+              : '0.28 + whiteFilaments * 0.58 + ledgeImpact * 0.38 + plungeSplash * 0.40'
           };
           float alpha = density * edgeMask * topFade;
           if (alpha < 0.018) discard;
-          gl_FragColor = vec4(col, clamp(alpha, 0.0, ${opts.isVeil ? '0.46' : '0.92'}));
+          gl_FragColor = vec4(col, clamp(alpha, 0.0, ${opts.isVeil ? '0.48' : '0.94'}));
         }
       `,
     });
@@ -1112,10 +1279,83 @@ export function createParadiseTerrain(
   sprayVeilMesh.renderOrder = 4;
   wfAnchor.add(sprayVeilMesh);
 
+  // Mid-Cliff Shattered Whitewater Splash Cushions perched right where chutes strike basalt shelves
+  const ledgeSplashGeo = new THREE.CircleGeometry(1.42, 28);
+  ledgeSplashGeo.rotateX(-Math.PI / 2);
+  waterfallGeos.push(ledgeSplashGeo);
+
+  const ledgeSplashMat = new THREE.ShaderMaterial({
+    uniforms: waterfallUniforms,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    vertexShader: /* glsl */ `
+      varying vec2 vLocal;
+      varying vec3 vWorldPos;
+      void main() {
+        vLocal = position.xz;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uDayFactor;
+      uniform vec3 uFogColor;
+      uniform float uFogDensity;
+      varying vec2 vLocal;
+      varying vec3 vWorldPos;
+
+      float lHash(vec2 p) {
+        p = fract(p * vec2(127.1, 311.7));
+        p += dot(p, p + 19.31);
+        return fract(p.x * p.y);
+      }
+      float lNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(lHash(i), lHash(i + vec2(1.0, 0.0)), u.x),
+          mix(lHash(i + vec2(0.0, 1.0)), lHash(i + vec2(1.0, 1.0)), u.x),
+          u.y
+        );
+      }
+
+      void main() {
+        float r = length(vLocal);
+        float boil = lNoise(vLocal * 2.8 - vec2(0.0, uTime * 2.8)) * 0.6 + lNoise(vLocal * 5.6 + uTime * 3.6) * 0.4;
+        float alpha = (1.0 - smoothstep(0.32, 1.38, r)) * smoothstep(0.28, 0.72, boil) * 0.76;
+        if (alpha < 0.02) discard;
+        vec3 col = mix(vec3(0.45, 0.56, 0.70), vec3(0.96, 0.99, 1.0), uDayFactor);
+        float distCam = length(cameraPosition - vWorldPos);
+        float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * distCam * distCam);
+        col = mix(col, uFogColor, clamp(fogFactor, 0.0, 1.0));
+        gl_FragColor = vec4(col, alpha);
+      }
+    `,
+  });
+  waterfallMats.push(ledgeSplashMat);
+
+  const mainLedgeSplash = new THREE.Mesh(ledgeSplashGeo, ledgeSplashMat);
+  mainLedgeSplash.position.set(-0.02, 4.58, 2.66);
+  mainLedgeSplash.scale.set(1.22, 1, 0.74);
+  mainLedgeSplash.rotation.x = 0.24;
+  mainLedgeSplash.renderOrder = 4;
+  wfAnchor.add(mainLedgeSplash);
+
+  const rightLedgeSplash = new THREE.Mesh(ledgeSplashGeo, ledgeSplashMat);
+  rightLedgeSplash.position.set(1.62, 4.22, 2.62);
+  rightLedgeSplash.scale.set(0.76, 1, 0.56);
+  rightLedgeSplash.rotation.x = 0.24;
+  rightLedgeSplash.renderOrder = 4;
+  wfAnchor.add(rightLedgeSplash);
+
   group.add(wfAnchor);
 
-  // Organic Turbulent Plunge-Pool Whitewater Foam Sheet (replaces synthetic concentric bullseye ring!)
-  const plungeDiscGeo = new THREE.CircleGeometry(5.1, 44);
+  // Organic Turbulent Plunge-Pool Whitewater Foam & Downstream Wake
+  const plungeDiscGeo = new THREE.CircleGeometry(5.6, 48);
   plungeDiscGeo.rotateX(-Math.PI / 2);
   waterfallGeos.push(plungeDiscGeo);
 
@@ -1169,62 +1409,68 @@ export function createParadiseTerrain(
       void main() {
         vec2 p = vLocalPos;
         float r = length(p);
-        // Domain-warped radial outward flow drifting naturally downstream (+x, +z)
+        // Domain-warped radial outward flow drifting downstream toward the stream head (+x, +z)
         vec2 dir = r > 0.001 ? p / r : vec2(0.0, 1.0);
-        vec2 advect = p * 0.92 - dir * uTime * 1.15 - vec2(0.45, 0.35) * uTime * 0.45;
+        vec2 advect = p * 0.92 - dir * uTime * 1.22 - vec2(0.45, 0.35) * uTime * 0.48;
         vec2 warp = vec2(
           pFbm(advect * 1.1 + vec2(1.3, 4.7)),
           pFbm(advect * 1.1 - vec2(2.8, 1.9))
         ) - 0.5;
 
-        float lacyFoam = pFbm(advect * 1.85 + warp * 1.75);
-        float fineBubbles = pNoise(advect * 5.2 - warp * 2.2);
+        float lacyFoam = pFbm(advect * 1.9 + warp * 1.8);
+        float fineBubbles = pNoise(advect * 5.6 - warp * 2.4);
+
+        // Downstream wake stretching naturally toward the winding stream
+        float wakeAlign = clamp(dot(p, vec2(0.76, 0.65)), 0.0, 5.4);
+        float wakeCross = abs(dot(p, vec2(-0.65, 0.76)));
+        float downstreamTail = (1.0 - smoothstep(0.6, 2.35, wakeCross)) * (1.0 - smoothstep(1.2, 5.4, wakeAlign)) * smoothstep(0.36, 0.74, lacyFoam);
 
         // Strongest turbulent boil directly beneath the 3 cascade impact zones, tapering organically outward
-        float coreImpact = 1.0 - smoothstep(0.6, 2.75, r);
-        float outerLace = (1.0 - smoothstep(1.4, 4.85, r)) * smoothstep(0.44, 0.78, lacyFoam * 0.72 + fineBubbles * 0.28);
-        float foamAlpha = clamp(coreImpact * (0.48 + lacyFoam * 0.52) + outerLace * 0.56, 0.0, 0.86);
+        float coreImpact = 1.0 - smoothstep(0.65, 2.85, r);
+        float outerLace = (1.0 - smoothstep(1.4, 5.3, r)) * smoothstep(0.42, 0.78, lacyFoam * 0.72 + fineBubbles * 0.28);
+        float foamAlpha = clamp(coreImpact * (0.52 + lacyFoam * 0.48) + outerLace * 0.56 + downstreamTail * 0.42, 0.0, 0.88);
 
-        vec3 col = mix(vec3(0.42, 0.52, 0.64), vec3(0.94, 0.98, 1.0), uDayFactor);
+        vec3 col = mix(vec3(0.42, 0.52, 0.64), vec3(0.95, 0.98, 1.0), uDayFactor);
         float distCam = length(cameraPosition - vWorldPos);
         float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * distCam * distCam);
         col = mix(col, uFogColor, clamp(fogFactor, 0.0, 1.0));
 
         if (foamAlpha < 0.018) discard;
-        gl_FragColor = vec4(col, foamAlpha * 0.78);
+        gl_FragColor = vec4(col, foamAlpha * 0.80);
       }
     `,
   });
   waterfallMats.push(plungeFoamMat);
 
   const plungeFoamMesh = new THREE.Mesh(plungeDiscGeo, plungeFoamMat);
-  plungeFoamMesh.position.set(-18.2, 0.05, -19.2);
+  const [plungeX, , plungeZ] = wfLocalToWorld(0.05, 0.06, 4.15);
+  plungeFoamMesh.position.set(plungeX, 0.06, plungeZ);
   plungeFoamMesh.renderOrder = 3;
   group.add(plungeFoamMesh);
 
-  // Soft Volumetric Rising Mist Clouds billowing gently from plunge pool & mid-cliff splash shelf
-  const mistCount = 26;
+  // Soft Volumetric Rising Mist Clouds billowing gently from plunge pool & mid-cliff splash shelves
+  const mistCount = 34;
   const mistGeo = new THREE.BufferGeometry();
   const mistPos = new Float32Array(mistCount * 3);
   const mistSeeds = new Float32Array(mistCount * 3);
   for (let i = 0; i < mistCount; i++) {
-    const isMidShelf = i >= 18;
+    const isMidShelf = i >= 22;
     const ang = (i / mistCount) * Math.PI * 2 + i * 0.7;
-    const rad = isMidShelf ? 0.4 + (i % 3) * 0.75 : 0.45 + (i % 4) * 0.85;
+    const rad = isMidShelf ? 0.35 + (i % 3) * 0.7 : 0.45 + (i % 4) * 0.95;
     if (isMidShelf) {
-      // Mid-cliff splash mist right over the mid-ledge impact zone
-      mistPos[i * 3] = -19.0 + Math.cos(ang) * rad;
-      mistPos[i * 3 + 1] = 4.2 + (i % 3) * 0.45;
-      mistPos[i * 3 + 2] = -20.6 + Math.sin(ang) * rad;
+      const [mx, my, mz] = wfLocalToWorld(Math.cos(ang) * rad, 4.35 + (i % 3) * 0.42, 2.55 + Math.sin(ang) * rad * 0.65);
+      mistPos[i * 3] = mx;
+      mistPos[i * 3 + 1] = my;
+      mistPos[i * 3 + 2] = mz;
     } else {
-      // Plunge-pool billowing mist
-      mistPos[i * 3] = -18.2 + Math.cos(ang) * rad;
-      mistPos[i * 3 + 1] = 0.35 + (i % 4) * 0.35;
-      mistPos[i * 3 + 2] = -19.2 + Math.sin(ang) * rad;
+      const [mx, my, mz] = wfLocalToWorld(0.05 + Math.cos(ang) * rad, 0.36 + (i % 4) * 0.35, 4.15 + Math.sin(ang) * rad * 0.85);
+      mistPos[i * 3] = mx;
+      mistPos[i * 3 + 1] = my;
+      mistPos[i * 3 + 2] = mz;
     }
     mistSeeds[i * 3] = i * 1.73;
-    mistSeeds[i * 3 + 1] = 0.62 + (i % 4) * 0.16;
-    mistSeeds[i * 3 + 2] = isMidShelf ? 0.72 + (i % 3) * 0.16 : 0.92 + (i % 4) * 0.22;
+    mistSeeds[i * 3 + 1] = 0.6 + (i % 4) * 0.16;
+    mistSeeds[i * 3 + 2] = isMidShelf ? 0.76 + (i % 3) * 0.18 : 0.96 + (i % 4) * 0.24;
   }
   mistGeo.setAttribute('position', new THREE.BufferAttribute(mistPos, 3));
   mistGeo.setAttribute('aSeed', new THREE.BufferAttribute(mistSeeds, 3));
@@ -1248,12 +1494,12 @@ export function createParadiseTerrain(
       void main() {
         float life = fract(uTime * 0.20 * aSeed.y + aSeed.x);
         vec3 pos = position;
-        pos.y += life * 2.65;
-        pos.x += sin(life * 3.4 + aSeed.x) * 0.95 + life * 0.65;
-        pos.z += cos(life * 3.1 + aSeed.x) * 0.85 + life * 0.55;
-        vLifeAlpha = sin(life * 3.14159265) * 0.28;
+        pos.y += life * 2.85;
+        pos.x += sin(life * 3.4 + aSeed.x) * 0.98 + life * 0.70;
+        pos.z += cos(life * 3.1 + aSeed.x) * 0.88 + life * 0.60;
+        vLifeAlpha = sin(life * 3.14159265) * 0.30;
         vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-        gl_PointSize = clamp((210.0 * aSeed.z * (0.72 + life * 0.82) * uPixelRatio) / max(1.0, -mv.z), 10.0, 145.0);
+        gl_PointSize = clamp((220.0 * aSeed.z * (0.74 + life * 0.84) * uPixelRatio) / max(1.0, -mv.z), 10.0, 150.0);
         gl_Position = projectionMatrix * mv;
       }
     `,
@@ -1279,22 +1525,20 @@ export function createParadiseTerrain(
   group.add(sprayMistPoints);
 
   // Fine Gravity-Arcing Falling Spray Droplets bouncing off mid-cliff ledges into plunge pool
-  const dropCount = 48;
+  const dropCount = 64;
   const dropGeo = new THREE.BufferGeometry();
   const dropPos = new Float32Array(dropCount * 3);
   const dropSeeds = new Float32Array(dropCount * 3);
   for (let i = 0; i < dropCount; i++) {
-    const spread = ((i % 12) / 11 - 0.5) * 3.4;
+    const spread = ((i % 16) / 15 - 0.5) * 3.6;
     const isUpper = i % 2 === 0;
     const localX = spread;
-    const localY = isUpper ? 7.8 - (i % 5) * 0.35 : 4.5 - (i % 4) * 0.25;
-    const localZ = isUpper ? 2.1 : 3.0;
-    // Transform from wfAnchor local space (rotY = 0.64) into world space
-    const c = Math.cos(0.64);
-    const s = Math.sin(0.64);
-    dropPos[i * 3] = -20.4 + localX * c + localZ * s;
-    dropPos[i * 3 + 1] = localY;
-    dropPos[i * 3 + 2] = -22.5 - localX * s + localZ * c;
+    const localY = isUpper ? 7.9 - (i % 5) * 0.35 : 4.55 - (i % 4) * 0.25;
+    const localZ = isUpper ? 2.05 : 2.95;
+    const [wx, wy, wz] = wfLocalToWorld(localX, localY, localZ);
+    dropPos[i * 3] = wx;
+    dropPos[i * 3 + 1] = wy;
+    dropPos[i * 3 + 2] = wz;
     dropSeeds[i * 3] = (i * 0.37) % 1.0;
     dropSeeds[i * 3 + 1] = 0.85 + (i % 5) * 0.14;
     dropSeeds[i * 3 + 2] = 0.65 + (i % 4) * 0.22;
@@ -1317,15 +1561,15 @@ export function createParadiseTerrain(
       uniform float uPixelRatio;
       varying float vDropAlpha;
       void main() {
-        float life = fract(uTime * 0.92 * aSeed.y + aSeed.x);
+        float life = fract(uTime * 0.94 * aSeed.y + aSeed.x);
         vec3 pos = position;
-        // Parabolic gravity fall curving outward toward plunge pool (+x, +z along waterfall axis)
-        pos.x += life * 1.45 * aSeed.z;
-        pos.z += life * 1.85 * aSeed.z;
+        // Parabolic gravity fall curving outward along waterfall local +Z axis into plunge pool
+        pos.x += life * ${wfSin.toFixed(4)} * 2.35 * aSeed.z;
+        pos.z += life * ${wfCos.toFixed(4)} * 2.35 * aSeed.z;
         pos.y -= life * life * 5.2;
-        vDropAlpha = sin(life * 3.14159265) * 0.72;
+        vDropAlpha = sin(life * 3.14159265) * 0.74;
         vec4 mv = modelViewMatrix * vec4(pos, 1.0);
-        gl_PointSize = clamp((24.0 * aSeed.z * uPixelRatio) / max(1.0, -mv.z), 2.0, 9.0);
+        gl_PointSize = clamp((24.0 * aSeed.z * uPixelRatio) / max(1.0, -mv.z), 2.0, 9.5);
         gl_Position = projectionMatrix * mv;
       }
     `,

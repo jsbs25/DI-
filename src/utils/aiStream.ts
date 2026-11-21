@@ -5,6 +5,7 @@ export interface AIRecalledMemorySummary {
 }
 
 export interface AIStreamResult {
+  reply?: string;
   tokens?: number;
   model?: string;
   sessionId?: string;
@@ -29,6 +30,7 @@ export async function readAIStream(
     }
     onDelta(data.reply);
     return {
+      reply: data.reply,
       tokens: data.tokens,
       model: data.model,
       sessionId: typeof data.sessionId === 'string' ? data.sessionId : undefined,
@@ -54,6 +56,7 @@ export async function readAIStream(
     if (chunk.done) {
       completed = true;
       result = {
+        reply: typeof chunk.reply === 'string' ? chunk.reply : undefined,
         tokens: chunk.tokens,
         model: chunk.model,
         sessionId: typeof chunk.sessionId === 'string' ? chunk.sessionId : undefined,

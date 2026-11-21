@@ -36,7 +36,7 @@ import { createParadiseCat } from './paradiseCat.ts';
 import { triggerImageDownload } from './SpiritSpeechBubble.tsx';
 import { LiveLanguageStudio } from '../learning/LiveLanguageStudio.tsx';
 
-type CameraPresetId = 'overlook' | 'bridge' | 'library' | 'pavilion' | 'aihub' | 'language';
+type CameraPresetId = 'overlook' | 'waterfall' | 'bridge' | 'library' | 'pavilion' | 'aihub' | 'language';
 
 interface CameraPreset {
   id: CameraPresetId;
@@ -48,6 +48,7 @@ interface CameraPreset {
 
 const CAMERA_PRESETS: CameraPreset[] = [
   { id: 'overlook', zh: '全景', en: 'Overlook', pos: [0.0, 9.6, 25.4], target: [0.0, 1.8, -0.4] },
+  { id: 'waterfall', zh: '瀑布', en: 'Waterfall', pos: [-9.2, 5.2, -10.8], target: [-18.8, 3.8, -20.6] },
   {
     id: 'bridge',
     zh: '溪桥',
@@ -932,6 +933,12 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       terrain.waterfallUniforms.uTime.value = elapsed;
       terrain.waterfallUniforms.uDayFactor.value = st.dayFactor;
       (terrain.waterfallUniforms.uSkyHorizon.value as THREE.Color).copy(st.horizonColor);
+      if (terrain.waterfallUniforms.uSunDir) {
+        (terrain.waterfallUniforms.uSunDir.value as THREE.Vector3).copy(useMoon ? st.moonDir : st.sunDir);
+      }
+      if (terrain.waterfallUniforms.uSunColor) {
+        (terrain.waterfallUniforms.uSunColor.value as THREE.Color).copy(useMoon ? st.hemiSkyColor : st.sunLightColor);
+      }
       terrain.waterfallUniforms.uRainIntensity.value = st.rainIntensity;
       (terrain.waterfallUniforms.uFogColor.value as THREE.Color).copy(st.fogColor);
       terrain.waterfallUniforms.uFogDensity.value = st.fogDensity;

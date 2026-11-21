@@ -90,7 +90,7 @@ function cleanHtmlTags(str?: string): string {
 }
 
 export function buildBilibiliEmbedUrl(bvid: string, autoplay = true): string {
-  return `https://player.bilibili.com/player.html?bvid=${bvid}&page=1&autoplay=${autoplay ? '1' : '0'}&danmaku=0&muted=0`;
+  return `https://player.bilibili.com/player.html?bvid=${bvid}&page=1&high_quality=1&as_wide=1&danmaku=0&autoplay=${autoplay ? '1' : '0'}`;
 }
 
 export async function searchBilibiliVideos(query: string, limit = 20): Promise<BilibiliVideoResult[]> {
@@ -124,9 +124,11 @@ export async function searchBilibiliVideos(query: string, limit = 20): Promise<B
       const bvid = item.bvid || (item.arcurl ? item.arcurl.match(/video\/(BV[0-9A-Za-z]+)/)?.[1] : '');
       if (!bvid) continue;
 
-      let pic = item.pic || '';
+      let pic = String(item.pic || '').trim();
       if (pic.startsWith('//')) {
         pic = 'https:' + pic;
+      } else if (pic.startsWith('http://')) {
+        pic = 'https://' + pic.slice(7);
       }
 
       const title = cleanHtmlTags(item.title) || 'Bilibili 视频';
@@ -186,8 +188,9 @@ export async function getBilibiliTrendingMusic(limit = 12): Promise<BilibiliVide
       if (list.length > 0) {
         return list.slice(0, limit).map((item: any) => {
           const bvid = String(item.bvid || '');
-          let pic = String(item.pic || '');
+          let pic = String(item.pic || '').trim();
           if (pic.startsWith('//')) pic = `https:${pic}`;
+          else if (pic.startsWith('http://')) pic = `https://${pic.slice(7)}`;
           const durSec = typeof item.duration === 'number' ? item.duration : 210;
           const viewsNum = Number(item?.stat?.view || 0);
           return {

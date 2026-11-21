@@ -9,6 +9,7 @@ import { aiGateway } from './aiGateway.ts';
 import { getGeminiClient } from './geminiClient.ts';
 import { runUnifiedAiTurn } from './ai/unifiedAiCore.ts';
 import { lookupAuthoritativeDictionary } from './dictionaryService.ts';
+import { sanitizeImportedBookText, sanitizeImportedChapterTitle } from '../src/utils/bookTextCleaner.ts';
 
 type DataStore = typeof appStore;
 
@@ -1211,22 +1212,35 @@ export function registerNoorIslamicLibraryRoutes(
       }
 
       if (isTextOrMd) {
-        const textContent = buf.toString('utf8').trim();
+        const rawTextContent = buf.toString('utf8').trim();
+        if (!rawTextContent) {
+          return res.status(400).json({ success: false, error: '文件内容为空。' });
+        }
+        const mdSections = rawTextContent.split(/\n(?=#{1,2}\s+)/).filter((s) => s.trim().length > 0);
+        const textContent = sanitizeImportedBookText(rawTextContent, { preserveBlankLines: true });
         if (!textContent) {
           return res.status(400).json({ success: false, error: '文件内容为空。' });
         }
-        const mdSections = textContent.split(/\n(?=#{1,2}\s+)/).filter((s) => s.trim().length > 0);
         let chapters: Array<{ id: string; title: string; content: string }>;
         if (mdSections.length >= 2) {
-          chapters = mdSections.slice(0, 200).map((sec, idx) => {
-            const firstLine = sec.split('\n')[0].replace(/^#+\s*/, '').trim();
-            const body = sec.replace(/^#+\s*[^\n]*\n?/, '').trim() || sec.trim();
-            return {
-              id: `ch_${idx + 1}`,
-              title: firstLine || `第 ${idx + 1} 节`,
-              content: body,
-            };
-          });
+          chapters = mdSections
+            .slice(0, 200)
+            .map((sec, idx) => {
+              const firstLine = sanitizeImportedChapterTitle(
+                sec.split('\n')[0].replace(/^#+\s*/, '').trim(),
+                `第 ${idx + 1} 节`
+              );
+              const body = sanitizeImportedBookText(
+                sec.replace(/^#+\s*[^\n]*\n?/, '').trim() || sec.trim(),
+                { preserveBlankLines: true }
+              );
+              return {
+                id: `ch_${idx + 1}`,
+                title: firstLine,
+                content: body,
+              };
+            })
+            .filter((ch) => ch.content.length > 0);
         } else {
           const rawParas = textContent.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
           const units = rawParas.length >= 3 ? rawParas : textContent.split(/\n+/).map((p) => p.trim()).filter(Boolean);
@@ -1245,7 +1259,7 @@ export function registerNoorIslamicLibraryRoutes(
           if (chunk.trim()) {
             chapters.push({
               id: `ch_${idx}`,
-              title: idx === 1 ? derivedTitle : `第 ${idx} 节`,
+              title: idx === 1 ? sanitizeImportedChapterTitle(derivedTitle, derivedTitle) : `第 ${idx} 节`,
               content: chunk.trim(),
             });
           }
@@ -1253,7 +1267,7 @@ export function registerNoorIslamicLibraryRoutes(
 
         const newBook: Book = {
           id: `book_upload_txt_${hash}`,
-          title: derivedTitle.slice(0, 180),
+          title: sanitizeImportedChapterTitle(derivedTitle, derivedTitle).slice(0, 180),
           author: String(author || '本地导入电子书').trim().slice(0, 120),
           category: resolvedCategory,
           language: cleanLang,
@@ -1264,7 +1278,7 @@ export function registerNoorIslamicLibraryRoutes(
           coverImage: coverUrl,
           description: textContent.slice(0, 220),
           readProgress: 0,
-          chapters: chapters.length > 0 ? chapters : [{ id: 'ch_1', title: derivedTitle, content: textContent }],
+          chapters: chapters.length > 0 ? chapters : [{ id: 'ch_1', title: sanitizeImportedChapterTitle(derivedTitle, derivedTitle), content: textContent }],
         };
 
         const existingIdx = store.books.findIndex((b: Book) => b.id === newBook.id);
@@ -1296,9 +1310,13 @@ export function registerNoorIslamicLibraryRoutes(
             .slice(0, 300)
             .map((c: any, idx: number) => ({
               id: typeof c.id === 'string' && c.id.trim() ? c.id.trim().slice(0, 64) : `ch_${idx + 1}`,
-              title: typeof c.title === 'string' && c.title.trim() ? c.title.trim().slice(0, 140) : `第 ${idx + 1} 章`,
-              content: String(c.content).trim(),
+              title: sanitizeImportedChapterTitle(
+                typeof c.title === 'string' ? c.title.slice(0, 140) : '',
+                `第 ${idx + 1} 章`
+              ),
+              content: sanitizeImportedBookText(String(c.content), { preserveBlankLines: true }),
             }))
+            .filter((c) => c.content.length > 0)
         : [];
 
       const totalPagesNum = Number.isFinite(Number(pageCount)) && Number(pageCount) > 0 ? Math.floor(Number(pageCount)) : undefined;

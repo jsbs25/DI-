@@ -3,10 +3,11 @@
  * Real networked fetching, search, and crawler workers for the Digital Library,
  * Web Browser, and Content Crawler subsystems.
  *
- * Uses Node's built-in global `fetch` (Node 18+). No third-party dependencies.
+ * Runs in Node's built-in global `fetch` (Node 18+). No third-party dependencies.
  * Robust to network failures: every call is bounded by a timeout and degrades
  * gracefully so the UI never crashes on a dead link.
  */
+import { sanitizeImportedBookText, sanitizeImportedChapterTitle } from '../src/utils/bookTextCleaner.ts';
 
 export interface SearchResult {
   title: string;
@@ -1030,21 +1031,15 @@ export async function fetchWikisourceFullText(
   const author = isEn ? 'Wikisource · Public Domain' : '维基文库 · 公版文献';
 
   const cleanChunk = (chunk: string): string => {
-    return chunk
+    const pre = chunk
       .replace(/\{\{[^}]*\}\}/g, ' ')
       .replace(/\[\[File:[^\]]*\]\]/g, ' ')
       .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1')
       .replace(/\[https?:[^\]\s]+\s([^\]]+)\]/g, '$1')
       .replace(/<ref[^>]*>[\s\S]*?<\/ref>/g, ' ')
       .replace(/<[^>]+>/g, ' ')
-      .replace(/['*#\[\]{}|]/g, ' ')
-      .replace(/[ \t]+/g, ' ')
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0)
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+      .replace(/['*#\[\]{}|]/g, ' ');
+    return sanitizeImportedBookText(pre, { preserveBlankLines: true });
   };
 
   const sections = wikitext.split(/\n\s*(?=={2,6}[^=])/);
@@ -1192,7 +1187,7 @@ export async function fetchArabicWikisourceFullText(
   html = html.replace(/<style[\s\S]*?<\/style>/gi, ' ');
 
   const toText = (chunk: string): string => {
-    return chunk
+    const decoded = chunk
       .replace(/<(?:p|div|li|tr|br|h[1-6])[^>]*>/gi, '\n')
       .replace(/<[^>]+>/g, ' ')
       .replace(/&nbsp;/g, ' ')
@@ -1201,13 +1196,8 @@ export async function fetchArabicWikisourceFullText(
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .split('\n')
-      .map(l => l.trim())
-      .filter(l => l.length > 0)
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+      .replace(/&quot;/g, '"');
+    return sanitizeImportedBookText(decoded, { preserveBlankLines: true });
   };
 
   const navNoise = /(السابق|التالي|تصنيف|مصدر|ملاحظات|رأسية|نثر|صندوق)/i;
@@ -1224,7 +1214,7 @@ export async function fetchArabicWikisourceFullText(
       const body = toText(html.slice(lastIndex, m.index));
       if (body.length > 20) sections.push({ heading: lastHeading, body });
     }
-    lastHeading = toText(m[2]);
+    lastHeading = sanitizeImportedChapterTitle(toText(m[2]), 'قسم');
     lastIndex = headingRe.lastIndex;
   }
   // trailing content
@@ -1248,7 +1238,7 @@ export async function fetchArabicWikisourceFullText(
     }
   }
 
-  const title = pageTitle.replace(/\/.*$/, '').trim();
+  const title = sanitizeImportedChapterTitle(pageTitle.replace(/\/.*$/, '').trim(), 'كتاب عربي');
   return { title, author: 'Arabic Wikisource · الملك العام', chapters: chapters.slice(0, 60) };
 }
 
@@ -1339,11 +1329,13 @@ export async function fetchInternetArchiveFullText(
   let body = raw.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 
   // Some IA texts have a leading metadata header; drop obvious boilerplate lines
-  body = body
-    .split('\n')
-    .filter(l => !/^https?:\/\//i.test(l.trim()) && !/^Identifier:/i.test(l.trim()))
-    .join('\n')
-    .trim();
+  body = sanitizeImportedBookText(
+    body
+      .split('\n')
+      .filter(l => !/^https?:\/\//i.test(l.trim()) && !/^Identifier:/i.test(l.trim()))
+      .join('\n'),
+    { preserveBlankLines: true }
+  );
 
   const paragraphs = body.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 25);
   const chunkSize = Math.max(1, Math.ceil(paragraphs.length / 30));
@@ -1401,11 +1393,11 @@ export async function fetchBookFullText(textUrl: string): Promise<{ title: strin
   let m: RegExpExecArray | null;
 
   while ((m = headingRe.exec(body)) !== null) {
-    const heading = m[0].trim().replace(/[.\] ]+$/, '');
+    const heading = sanitizeImportedChapterTitle(m[0].trim().replace(/[.\] ]+$/, ''), `Chapter ${chapters.length + 1}`);
     const start = m.index;
     // Text between the previous heading and this one belongs to the previous chapter
     if (lastHeading) {
-      const content = body.slice(lastIndex, start).trim();
+      const content = sanitizeImportedBookText(body.slice(lastIndex, start), { preserveBlankLines: true });
       if (content.length >= 40) chapters.push({ title: lastHeading, content });
     }
     lastHeading = heading;
@@ -1414,19 +1406,20 @@ export async function fetchBookFullText(textUrl: string): Promise<{ title: strin
 
   // Trailing content after the final heading
   if (lastHeading) {
-    const content = body.slice(lastIndex).trim();
+    const content = sanitizeImportedBookText(body.slice(lastIndex), { preserveBlankLines: true });
     if (content.length >= 40) chapters.push({ title: lastHeading, content });
   }
 
   // If no chapter markers were found, fall back to paragraph chunking.
   if (chapters.length <= 1) {
-    let paragraphs = body.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 20);
+    const cleanedBody = sanitizeImportedBookText(body, { preserveBlankLines: true });
+    let paragraphs = cleanedBody.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 20);
 
     // Poetry, Quranic verse and many scanned texts use single newlines instead
     // of blank lines. If blank-line splitting yields almost nothing, group
     // single lines into readable chunks so the book is never collapsed to 1 page.
     if (paragraphs.length <= 1) {
-      const lines = body.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      const lines = cleanedBody.split('\n').map(l => l.trim()).filter(l => l.length > 0);
       const linesPerChunk = Math.max(1, Math.ceil(lines.length / 24));
       paragraphs = [];
       for (let i = 0; i < lines.length; i += linesPerChunk) {
@@ -1440,8 +1433,8 @@ export async function fetchBookFullText(textUrl: string): Promise<{ title: strin
       const chunk = paragraphs.slice(i, i + chunkSize);
       fallback.push({ title: `Chapter ${fallback.length + 1}`, content: chunk.join('\n\n') });
     }
-    return { title, author, chapters: fallback.slice(0, 60) };
+    return { title: sanitizeImportedChapterTitle(title, 'Untitled Book'), author, chapters: fallback.slice(0, 60) };
   }
 
-  return { title, author, chapters: chapters.slice(0, 80) };
+  return { title: sanitizeImportedChapterTitle(title, 'Untitled Book'), author, chapters: chapters.slice(0, 80) };
 }

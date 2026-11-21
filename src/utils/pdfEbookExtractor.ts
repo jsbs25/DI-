@@ -11,6 +11,7 @@ import {
   repairUnambiguousArabicLigatures,
   sanitizePdfExtractedText,
 } from './arabicTextNormalize.ts';
+import { sanitizeImportedBookText, sanitizeImportedChapterTitle } from './bookTextCleaner.ts';
 
 export type EbookBlockKind = 'h1' | 'h2' | 'paragraph' | 'footnote' | 'table';
 
@@ -295,13 +296,13 @@ export async function extractStructuredPdfPage(
     line.columnSegments = cols;
   }
 
-  // Filter out standalone header/footer page numbers at extreme top/bottom margins
+  // Filter out standalone page numbers, folios, and pure symbol/separator noise anywhere on the page
   const filteredLines = lines.filter((line) => {
-    const trimmed = line.text.trim();
+    const trimmed = sanitizeImportedBookText(line.text, { preserveBlankLines: false });
     if (!trimmed) return false;
-    const isStandaloneNum = /^[-–—\s]*[\d٠-٩]{1,4}[-–—\s]*$/.test(trimmed);
-    const nearEdge = line.y < viewport.height * 0.08 || line.y > viewport.height * 0.92;
-    if (isStandaloneNum && nearEdge) return false;
+    line.text = trimmed;
+    const isStandaloneNum = /^[-–—()[\]\s]*(?:第\s*[\d一二三四五六七八九十百千万]+\s*页|page\s*\d+|p\.?\s*\d+|صفحة\s*[\d٠-٩]+|ص\s*[:.]?\s*[\d٠-٩]+|[\d٠-٩]{1,4}|[ivxlcdm]{2,5})[-–—()[\]\s]*$/i.test(trimmed);
+    if (isStandaloneNum) return false;
     return true;
   });
 
@@ -622,14 +623,13 @@ export async function convertPdfDocumentToEbook(
 
     for (const { p, ep } of results) {
       if (ep && !ep.isLikelyScanned && ep.plainText.trim().length >= 24) {
-        const formatted = ep.blocks
-          .map((b) => {
-            if (b.kind === 'h1') return `【${b.text}】`;
-            if (b.kind === 'h2') return b.text;
-            return b.text;
-          })
-          .join('\n\n')
-          .trim();
+        const formatted = sanitizeImportedBookText(
+          ep.blocks
+            .map((b) => sanitizeImportedBookText(b.text, { preserveBlankLines: true }))
+            .filter(Boolean)
+            .join('\n\n'),
+          { preserveBlankLines: true }
+        );
         if (formatted) {
           pageTexts.set(p, formatted);
           cleanPages += 1;
@@ -811,7 +811,10 @@ function assemblePagesIntoChapters(
           if (!body) continue;
           chapters.push({
             id: `ch_${chapters.length + 1}`,
-            title: `${topToc[i].title.slice(0, 90)}（第 ${sub[0]}–${sub[sub.length - 1]} 页）`,
+            title: sanitizeImportedChapterTitle(
+              `${topToc[i].title.slice(0, 90)}（第 ${sub[0]}–${sub[sub.length - 1]} 页）`,
+              `第 ${chapters.length + 1} 章`
+            ),
             content: body,
           });
         }
@@ -820,7 +823,7 @@ function assemblePagesIntoChapters(
         if (body) {
           chapters.push({
             id: `ch_${chapters.length + 1}`,
-            title: topToc[i].title.slice(0, 120),
+            title: sanitizeImportedChapterTitle(topToc[i].title.slice(0, 120), `第 ${chapters.length + 1} 章`),
             content: body,
           });
         }
@@ -838,7 +841,7 @@ function assemblePagesIntoChapters(
     const lastP = slice[slice.length - 1];
     const body = slice.map((p) => pageTexts.get(p) || '').filter(Boolean).join('\n\n').trim();
     if (!body) continue;
-    const firstLine = body.split('\n')[0]?.replace(/^【|】$/g, '').trim() || '';
+    const firstLine = sanitizeImportedChapterTitle(body.split('\n')[0] || '', '');
     const useHeading = firstLine.length >= 3 && firstLine.length <= 42 && !/[。！？.!?]$/.test(firstLine);
     const chNum = chapters.length + 1;
     chapters.push({
@@ -846,7 +849,7 @@ function assemblePagesIntoChapters(
       title: useHeading
         ? `${firstLine}（第 ${firstP}–${lastP} 页）`
         : firstP === lastP
-          ? `${bookTitle.slice(0, 24)} · 第 ${firstP} 页`
+          ? `${sanitizeImportedChapterTitle(bookTitle, '电子书').slice(0, 24)} · 第 ${firstP} 页`
           : `第 ${chNum} 部分（第 ${firstP}–${lastP} 页）`,
       content: body,
     });

@@ -119,7 +119,9 @@ import {
 import { decideNotification } from './server/notificationPolicy.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import { searchBilibiliVideos } from './server/bilibiliCrawler.ts';
+import { buildBilibiliEmbedUrl, searchBilibiliVideos } from './server/bilibiliCrawler.ts';
+import { sanitizeAiPlainReply } from './src/utils/aiPlainText.ts';
+import { sanitizeImportedBookText, sanitizeImportedChapterTitle } from './src/utils/bookTextCleaner.ts';
 import { getRegisteredProviders } from './server/media/providers.ts';
 import { probeDirectMediaUrl, probeEmbedUrl } from './server/media/probe.ts';
 import { CURATED_GLOBAL_CN_MUSIC, enrichMusicTrack, enrichVideoItem, getCombinedEnrichedVideos } from './server/media/catalog.ts';
@@ -3631,7 +3633,9 @@ app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
       });
 
       if (result.success) {
-        const finalContent = stripAiControlTags(result.content || streamedText).reply || (result.content || streamedText).trim();
+        const finalContent =
+          stripAiControlTags(result.content || streamedText, { preserveCodeBlocks: mode === 'code' }).reply ||
+          (result.content || streamedText).trim();
         const savedMemories = persistTurnAndExtractMemories({
           ctx,
           rawUserInput: userPrompt,
@@ -3647,6 +3651,7 @@ app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
           res.write(
             `${JSON.stringify({
               done: true,
+              reply: finalContent,
               tokens: result.tokens,
               model: 'ONE AI',
               taskType: result.taskType,
@@ -3664,7 +3669,7 @@ app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
         }
       } else {
         const fallback = await generateContextAwareFallbackReply(ctx, mode);
-        const cleanFallback = stripAiControlTags(fallback.text).reply || fallback.text;
+        const cleanFallback = stripAiControlTags(fallback.text, { preserveCodeBlocks: mode === 'code' }).reply || fallback.text;
         const savedMemories = persistTurnAndExtractMemories({
           ctx,
           rawUserInput: userPrompt,
@@ -3739,7 +3744,9 @@ app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
   const result = await runOneAiOrGateway();
 
   if (result.success) {
-    const cleanReply = stripAiControlTags(result.content).reply || result.content.trim();
+    const cleanReply =
+      stripAiControlTags(result.content, { preserveCodeBlocks: mode === 'code' }).reply ||
+      result.content.trim();
     const savedMemories = persistTurnAndExtractMemories({
       ctx,
       rawUserInput: userPrompt,
@@ -4360,7 +4367,7 @@ function sanitizeCompanionReply(rawText: string): {
 } {
   let extractedEmotion: string | null = null;
   const extractedToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
-  const cleanReply = (rawText || '')
+  const stripped = (rawText || '')
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
     .replace(/<(?:think|thought)>[\s\S]*$/i, '')
@@ -4381,6 +4388,7 @@ function sanitizeCompanionReply(rawText: string): {
     .replace(/\[\[(?:EMO|EMOTION)(?::[a-z_-]*)?\]?\]?$/i, '')
     .replace(/^\s*\n+/, '')
     .trim();
+  const cleanReply = sanitizeAiPlainReply(stripped, { preserveCodeBlocks: false });
   return { cleanReply, extractedEmotion, extractedToolCalls };
 }
 
@@ -5114,7 +5122,7 @@ app.get('/api/bilibili/search', async (req, res) => {
       enrichVideoItem(
         {
           ...b,
-          embedUrl: `https://player.bilibili.com/player.html?bvid=${b.bvid}&page=1&autoplay=0&danmaku=0`,
+          embedUrl: buildBilibiliEmbedUrl(b.bvid, false),
           source: 'Bilibili',
         },
         regionCtx.region
@@ -5291,7 +5299,7 @@ app.post('/api/library/ingest', async (req, res) => {
     let category: import('./src/types/index.ts').Book['category'] = 'literature';
     const book: import('./src/types/index.ts').Book = {
       id: bookId,
-      title: record.title || fullText.title || title || 'Untitled',
+      title: sanitizeImportedChapterTitle(record.title || fullText.title || title || 'Untitled', 'Untitled'),
       author: record.author || fullText.author || author || 'Unknown Author',
       category,
       language: record.language !== 'und' ? record.language : language || 'en',
@@ -5300,13 +5308,18 @@ app.post('/api/library/ingest', async (req, res) => {
       publisher: record.publisher,
       isbn: record.isbn?.[0],
       coverImage: record.coverImage || coverImage,
-      description: record.description || description || `Readable full text from ${record.sourceName}.`,
+      description: sanitizeImportedBookText(
+        record.description || description || `Readable full text from ${record.sourceName}.`,
+        { preserveBlankLines: false }
+      ),
       readProgress: 0,
-      chapters: fullText.chapters.map((ch, i) => ({
-        id: `ch${i + 1}`,
-        title: ch.title,
-        content: ch.content
-      })),
+      chapters: fullText.chapters
+        .map((ch, i) => ({
+          id: `ch${i + 1}`,
+          title: sanitizeImportedChapterTitle(ch.title, `Chapter ${i + 1}`),
+          content: sanitizeImportedBookText(ch.content, { preserveBlankLines: true }),
+        }))
+        .filter((ch) => ch.content.length > 0),
       epubUrl: record.epubUrl || undefined,
       externalReadUrl: record.sourceUrl,
       sourceUrl: record.sourceUrl,

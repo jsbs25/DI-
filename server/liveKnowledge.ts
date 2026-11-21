@@ -5,6 +5,7 @@
  * Simplified Chinese / English Wikipedia single-trip extracts and DuckDuckGo Instant Answers.
  */
 import { solvePrecisionQuery } from '../src/utils/precisionSolver.ts';
+import { sanitizeAiPlainReply } from '../src/utils/aiPlainText.ts';
 import { searchWeb } from './webFetcher.ts';
 
 interface CachedAnswer {
@@ -44,7 +45,8 @@ function summarizeExtract(rawExtract: string, maxSentences = 2, maxChars = 190):
     if (candidate.length > maxChars && out) break;
     out = candidate;
   }
-  return out || cleaned.slice(0, maxChars);
+  const rawOut = out || cleaned.slice(0, maxChars);
+  return sanitizeAiPlainReply(rawOut, { preserveCodeBlocks: false });
 }
 
 async function queryWikipediaSingleTrip(topic: string, lang: 'zh' | 'en', isVoice: boolean): Promise<string | null> {

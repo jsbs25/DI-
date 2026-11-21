@@ -242,7 +242,9 @@ export function attachAiLiveWs(
 
       const finishTurn = (rawReplyText: string, modelLabel: string) => {
         if (controller.signal.aborted || activeTurnId !== params.turnId) return;
-        const clean = stripAiControlTags(rawReplyText).reply || rawReplyText.trim();
+        const clean =
+          stripAiControlTags(rawReplyText, { preserveCodeBlocks: params.mode === 'code' }).reply ||
+          rawReplyText.trim();
         const savedMemories = persistTurnAndExtractMemories({
           ctx,
           rawUserInput: params.prompt,
@@ -455,8 +457,8 @@ export function attachAiLiveWs(
                   if (bufferedUserSpeech.trim()) {
                     flushAudioUserTurnMemory(bufferedUserSpeech, undefined);
                   }
-                  const cleanChunk = stripAiControlTags(sc.outputTranscription.text).reply;
-                  currentAssistantSpeech += cleanChunk || sc.outputTranscription.text;
+                  const cleanChunk = stripAiControlTags(sc.outputTranscription.text, { preserveCodeBlocks: false }).reply;
+                  currentAssistantSpeech += cleanChunk || '';
                   if (cleanChunk) {
                     safeSend(clientWs, {
                       type: 'output_transcript',
