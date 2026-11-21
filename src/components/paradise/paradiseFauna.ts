@@ -105,33 +105,26 @@ export function createParadiseFauna(
         ];
 
   // =========================================================================
-  // 1. Textured Patterned Butterflies + 2 Bioluminescent Glowing Blue Morphos
+  // 1. Sparse, Natural Garden Butterflies drifting gently over flower meadows
   // =========================================================================
-  const bflyGeo = trackGeo(new THREE.PlaneGeometry(0.3, 0.22, 6, 2));
+  const bflyGeo = trackGeo(new THREE.PlaneGeometry(0.26, 0.2, 6, 2));
   bflyGeo.rotateX(-Math.PI / 2);
 
   // Species palettes: [innerWing, outerBorder, accentSpot]
   const butterflySpecies: Array<[number, number, number]> = [
-    [0x5bbce8, 0x162b4d, 0xd8f3ff], // Blue Morpho
     [0xf09d38, 0x2a1810, 0xfff0d4], // Monarch Amber
     [0xf7e37e, 0x3b3520, 0x7bc2e8], // Swallowtail Citrine
     [0xfbf2f5, 0x7c4f60, 0xffd5e2], // Sakura Pieris
+    [0x6ab4d8, 0x1a314d, 0xd8f3ff], // Soft Blue Morpho
   ];
 
-  const totalButterflies = quality.butterflyCount + 2;
-  const glowingSpawnSpots = [
-    new THREE.Vector3(-2.4, 1.38, 6.4),
-    new THREE.Vector3(2.9, 1.48, 2.4),
-  ];
+  const totalButterflies = Math.max(2, Math.min(5, quality.butterflyCount));
 
   const butterflies: ButterflyAgent[] = [];
   const butterflyPositions: THREE.Vector3[] = [];
   for (let i = 0; i < totalButterflies; i++) {
-    const isGlowingBlue = i >= quality.butterflyCount;
-    const glowingIdx = i - quality.butterflyCount;
-    const [cMain, cEdge, cSpot] = isGlowingBlue
-      ? [0x3be0ff, 0x0d4599, 0xe2fbff]
-      : butterflySpecies[i % butterflySpecies.length];
+    const isGlowingBlue = false;
+    const [cMain, cEdge, cSpot] = butterflySpecies[i % butterflySpecies.length];
 
     const mat = trackMat(
       new THREE.ShaderMaterial({
@@ -209,57 +202,32 @@ export function createParadiseFauna(
     );
 
     const mesh = new THREE.Mesh(bflyGeo, mat);
-    const homeIdx = i % anchors.length;
-    const origin = isGlowingBlue ? glowingSpawnSpots[glowingIdx % glowingSpawnSpots.length] : anchors[homeIdx];
-    const startPos = isGlowingBlue
-      ? origin.clone()
-      : origin
-          .clone()
-          .add(new THREE.Vector3((Math.random() - 0.5) * 4, 0.6 + Math.random() * 1.4, (Math.random() - 0.5) * 4));
+    const homeIdx = (i * 3) % anchors.length;
+    const origin = anchors[homeIdx];
+    const startPos = origin
+      .clone()
+      .add(new THREE.Vector3((Math.random() - 0.5) * 4.5, 0.45 + Math.random() * 0.95, (Math.random() - 0.5) * 4.5));
     mesh.position.copy(startPos);
-    mesh.scale.setScalar(isGlowingBlue ? 1.28 : 0.85 + Math.random() * 0.45);
+    mesh.scale.setScalar(0.74 + Math.random() * 0.22);
     group.add(mesh);
-
-    let halo: THREE.Sprite | undefined;
-    let haloMat: THREE.SpriteMaterial | undefined;
-    if (isGlowingBlue) {
-      haloMat = trackMat(
-        new THREE.SpriteMaterial({
-          map: textures.softGlow,
-          color: 0x4ce2ff,
-          transparent: true,
-          opacity: 0.72,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        })
-      );
-      halo = new THREE.Sprite(haloMat);
-      halo.position.copy(startPos);
-      halo.scale.set(0.88, 0.88, 0.88);
-      group.add(halo);
-    }
 
     butterflies.push({
       mesh,
       mat,
-      halo,
-      haloMat,
       isGlowingBlue,
       pos: startPos,
       target: origin.clone().add(new THREE.Vector3(0, 0.45, 0)),
-      speed: isGlowingBlue ? 1.35 + glowingIdx * 0.22 : 1.4 + Math.random() * 0.72,
+      speed: 0.95 + Math.random() * 0.42,
       yaw: Math.random() * Math.PI * 2,
       roll: 0,
-      restTimer: Math.random() * 3.5,
+      restTimer: 1.2 + Math.random() * 3.5,
       curiousTimer: 0,
-      resting: false,
+      resting: i % 2 === 1,
       phase: Math.random() * Math.PI * 2,
       homeFlowerIdx: homeIdx,
     });
     butterflyPositions.push(startPos);
   }
-
-  let nextCameraVisitAt = 5.5;
 
   // =========================================================================
   // 2. Graceful Soaring White Egrets (白鹭) with Articulated 2-Joint Cambered Wings
@@ -610,28 +578,9 @@ export function createParadiseFauna(
       1
     );
 
-    // Periodic camera-curiosity fly-by: pick one nearby butterfly to float past the camera view
-    if (
-      cameraPos &&
-      cameraForward &&
-      bflyVis > 0.45 &&
-      butterflies.length > 0 &&
-      elapsed >= nextCameraVisitAt
-    ) {
-      nextCameraVisitAt = elapsed + 11 + Math.random() * 8;
-      // Choose the butterfly closest to camera for a natural organic approach
-      let bestIdx = 0;
-      let bestDist = Infinity;
-      for (let i = 0; i < butterflies.length; i++) {
-        const d = butterflies[i].pos.distanceToSquared(cameraPos);
-        if (d < bestDist) {
-          bestDist = d;
-          bestIdx = i;
-        }
-      }
-      butterflies[bestIdx].curiousTimer = 4.2;
-      butterflies[bestIdx].resting = false;
-    }
+    // Keep butterflies serenely drifting over flowerbeds (no aggressive camera-lens fly-bys)
+    void cameraPos;
+    void cameraForward;
 
     for (const b of butterflies) {
       const activeVis = b.isGlowingBlue

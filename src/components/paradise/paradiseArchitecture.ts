@@ -381,13 +381,96 @@ export function createParadiseArchitecture(
   });
   materials.push(lanternGlassMat);
 
+  type SignIconKind = 'library' | 'music' | 'language' | 'ai' | 'phone';
+
+  const drawSignIcon = (
+    ctx: CanvasRenderingContext2D,
+    kind: SignIconKind,
+    cx: number,
+    cy: number,
+    r: number,
+    color: string
+  ) => {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = r * 0.14;
+
+    if (kind === 'library') {
+      // Crisp minimalist open book icon
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r * 0.55);
+      ctx.quadraticCurveTo(cx - r * 0.45, cy - r * 0.72, cx - r * 0.88, cy - r * 0.48);
+      ctx.lineTo(cx - r * 0.88, cy + r * 0.55);
+      ctx.quadraticCurveTo(cx - r * 0.45, cy + r * 0.35, cx, cy + r * 0.56);
+      ctx.quadraticCurveTo(cx + r * 0.45, cy + r * 0.35, cx + r * 0.88, cy + r * 0.55);
+      ctx.lineTo(cx + r * 0.88, cy - r * 0.48);
+      ctx.quadraticCurveTo(cx + r * 0.45, cy - r * 0.72, cx, cy - r * 0.55);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r * 0.55);
+      ctx.lineTo(cx, cy + r * 0.56);
+      ctx.stroke();
+    } else if (kind === 'music') {
+      // Clean double eighth-note icon
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.36, cy + r * 0.42);
+      ctx.lineTo(cx - r * 0.36, cy - r * 0.52);
+      ctx.lineTo(cx + r * 0.56, cy - r * 0.72);
+      ctx.lineTo(cx + r * 0.56, cy + r * 0.24);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(cx - r * 0.52, cy + r * 0.48, r * 0.24, r * 0.18, -0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cx + r * 0.4, cy + r * 0.3, r * 0.24, r * 0.18, -0.25, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind === 'language') {
+      // Minimalist globe meridian emblem
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.76, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r * 0.38, r * 0.76, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.74, cy);
+      ctx.lineTo(cx + r * 0.74, cy);
+      ctx.stroke();
+    } else if (kind === 'ai') {
+      // Crisp 4-point star emblem
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r * 0.85);
+      ctx.quadraticCurveTo(cx + r * 0.1, cy - r * 0.1, cx + r * 0.85, cy);
+      ctx.quadraticCurveTo(cx + r * 0.1, cy + r * 0.1, cx, cy + r * 0.85);
+      ctx.quadraticCurveTo(cx - r * 0.1, cy + r * 0.1, cx - r * 0.85, cy);
+      ctx.quadraticCurveTo(cx - r * 0.1, cy - r * 0.1, cx, cy - r * 0.85);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Classic curved telephone handset icon
+      ctx.lineWidth = r * 0.24;
+      ctx.beginPath();
+      ctx.arc(cx + r * 0.16, cy - r * 0.16, r * 0.72, Math.PI * 0.62, Math.PI * 1.18);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx - r * 0.44, cy - r * 0.42, r * 0.2, 0, Math.PI * 2);
+      ctx.arc(cx + r * 0.44, cy + r * 0.42, r * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  };
+
   /**
    * Builds a grounded, realistic garden wooden-and-stone standing signpost (庭院立牌)
-   * placed neatly beside a building, displaying ONLY a single crisp minimalist title
-   * with zero subtitle or floating UI clutter.
+   * placed neatly beside a building, displaying a clear minimalist icon + short title
+   * with zero lengthy text or floating UI clutter.
    */
   const createStandingSignpost = (opts: {
     title: string;
+    icon: SignIconKind;
     worldX: number;
     worldZ: number;
     boardW: number;
@@ -417,17 +500,29 @@ export function createParadiseArchitecture(
       ctx.strokeRect(28, 28, canvas.width - 56, canvas.height - 56);
       ctx.globalAlpha = 1;
 
-      // Single-line ultra-crisp title centered cleanly (no English subtitle or extra text)
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const fontSize = opts.title.length >= 4 ? 276 : opts.title.length === 3 ? 316 : 340;
+      // Measure text to center [icon + short title] cleanly as one cohesive lockup
+      const fontSize = opts.title.length >= 4 ? 236 : opts.title.length === 3 ? 268 : 292;
       ctx.font = `700 ${fontSize}px "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif`;
+      const textW = ctx.measureText(opts.title).width;
+      const iconR = 112;
+      const gap = 64;
+      const totalW = iconR * 2 + gap + textW;
+      const startX = (canvas.width - totalW) * 0.5;
+      const centerY = canvas.height * 0.52;
+
+      // Crisp gilded icon badge on left
+      drawSignIcon(ctx, opts.icon, startX + iconR, centerY, iconR * 0.84, opts.borderHex);
+
+      // Crisp single-line short title on right
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
       ctx.lineJoin = 'round';
-      ctx.lineWidth = 14;
+      ctx.lineWidth = 13;
       ctx.strokeStyle = 'rgba(8, 7, 6, 0.78)';
-      ctx.strokeText(opts.title, canvas.width / 2, canvas.height * 0.52);
+      const textX = startX + iconR * 2 + gap;
+      ctx.strokeText(opts.title, textX, centerY);
       ctx.fillStyle = opts.textHex;
-      ctx.fillText(opts.title, canvas.width / 2, canvas.height * 0.52);
+      ctx.fillText(opts.title, textX, centerY);
     }
 
     const tex = new THREE.CanvasTexture(canvas);
@@ -865,9 +960,10 @@ export function createParadiseArchitecture(
   // Grounded garden standing signpost placed cleanly beside the Music Pavilion
   const musicSign = createStandingSignpost({
     title: '音乐馆',
+    icon: 'music',
     worldX: 12.9,
     worldZ: -4.2,
-    boardW: 2.35,
+    boardW: 2.45,
     boardH: 0.84,
     postH: 2.3,
     bgHex: '#2f1317',
@@ -1115,21 +1211,16 @@ export function createParadiseArchitecture(
   buildStoneLantern(8.8, -8.2);
 
   // =========================================================================
-  // 4. Stratified Granite Shoreline & Waterfall Cliff Boulders
+  // 4. Natural Shoreline Accent Boulders (trimmed cleanly — waterfall gorge rocks live in paradiseTerrain)
   // =========================================================================
   const rockDefs: Array<[number, number, number, number, number]> = [
-    [-22.2, -23.0, 2.7, 2.3, 0.5],
-    [-17.8, -22.2, 2.5, 2.0, 1.1],
-    [-23.6, -19.2, 2.2, 1.7, 2.0],
-    [-16.2, -19.0, 1.85, 1.35, 0.8],
-    [-11.5, -13.0, 1.65, 1.15, 1.7],
-    [-11.8, -6.5, 1.35, 0.88, 2.3],
-    [-4.8, -12.6, 1.25, 0.86, 0.4],
-    [13.4, -2.6, 1.4, 0.85, 2.8],
-    [14.2, 2.0, 1.5, 0.92, 0.6],
-    [12.4, 6.2, 1.3, 0.78, 1.5],
-    [-5.4, 3.2, 1.1, 0.68, 2.1],
-    [5.8, 3.4, 1.15, 0.68, 0.9],
+    [-11.8, -13.2, 1.55, 1.05, 1.7],
+    [-12.0, -6.5, 1.3, 0.82, 2.3],
+    [-5.0, -12.8, 1.2, 0.82, 0.4],
+    [13.8, -2.4, 1.35, 0.82, 2.8],
+    [14.2, 2.2, 1.45, 0.88, 0.6],
+    [-5.6, 3.4, 1.05, 0.64, 2.1],
+    [5.9, 3.6, 1.1, 0.64, 0.9],
   ];
 
   for (let idx = 0; idx < rockDefs.length; idx++) {
@@ -1157,30 +1248,113 @@ export function createParadiseArchitecture(
     group.add(rock);
   }
 
-  // Flagstone stepping pads along garden footpath
-  const stoneStepGeo = trackGeo(new THREE.CylinderGeometry(0.46, 0.54, 0.09, 7));
-  const stepRand = (seed: number) => {
-    const s = Math.sin(seed * 91.7) * 43758.54;
-    return s - Math.floor(s);
-  };
-  let placed = 0;
-  for (let z = 18; z >= -14 && placed < 46; z -= 1.35) {
-    for (let x = -9; x <= 14 && placed < 46; x += 1.25) {
-      const pf = gardenPathFactor(x, z);
-      const h = terrainHeightAt(x, z);
-      if (pf > 0.62 && h > 0.24) {
-        const jx = x + (stepRand(x * 3 + z) - 0.5) * 0.36;
-        const jz = z + (stepRand(z * 5 - x) - 0.5) * 0.36;
-        const pad = new THREE.Mesh(stoneStepGeo, plinthStoneMat);
-        pad.position.set(jx, terrainHeightAt(jx, jz) + 0.018, jz);
-        pad.rotation.y = stepRand(x + z * 2) * Math.PI;
-        pad.scale.set(0.85 + stepRand(placed) * 0.4, 1, 0.75 + stepRand(placed + 9) * 0.38);
-        pad.receiveShadow = quality.enableShadows;
-        group.add(pad);
-        placed++;
+  // Keep reference to gardenPathFactor clean (unused stepping-stone disc clutter removed)
+  void gardenPathFactor;
+
+  // =========================================================================
+  // 4b. Classic Wooden Garden Crossroads Wayfinding Signpost (庭院路口指路牌)
+  //     Positioned cleanly beside the main foreground courtyard fork at (1.85, y, 11.4)
+  // =========================================================================
+  const buildCrossroadsSignpost = (wx: number, wz: number) => {
+    const cg = new THREE.Group();
+    const gy = terrainHeightAt(wx, wz);
+    cg.position.set(wx, gy, wz);
+
+    // Carved granite base plinth + timber main post + bronze finial
+    const base = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.28, 0.36, 0.42, 8)), graniteMat);
+    base.position.y = 0.04;
+    base.castShadow = quality.enableShadows;
+    base.receiveShadow = quality.enableShadows;
+    cg.add(base);
+
+    const mainPost = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.085, 0.1, 2.45, 10)), rosewoodMat);
+    mainPost.position.y = 1.42;
+    mainPost.castShadow = quality.enableShadows;
+    cg.add(mainPost);
+
+    const postCap = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.18, 0.16, 8)), ceramicTileMat);
+    postCap.position.y = 2.68;
+    cg.add(postCap);
+    const capKnob = new THREE.Mesh(trackGeo(new THREE.SphereGeometry(0.055, 8, 8)), bronzeMat);
+    capKnob.position.y = 2.78;
+    cg.add(capKnob);
+
+    // 4 slim wooden directional arrow arms pointing cleanly toward each garden zone
+    const armDefs: Array<{ label: string; y: number; targetX: number; targetZ: number }> = [
+      { label: 'AI 中心', y: 2.34, targetX: 0.0, targetZ: -10.8 },
+      { label: '音乐馆', y: 2.02, targetX: 9.8, targetZ: -6.2 },
+      { label: '语言中心', y: 1.7, targetX: 8.2, targetZ: 6.8 },
+      { label: '图书馆 · 通讯', y: 1.38, targetX: -9.8, targetZ: 1.6 },
+    ];
+
+    for (const arm of armDefs) {
+      const armCanvas = document.createElement('canvas');
+      armCanvas.width = 768;
+      armCanvas.height = 192;
+      const actx = armCanvas.getContext('2d');
+      if (actx) {
+        actx.fillStyle = '#251710';
+        actx.fillRect(0, 0, armCanvas.width, armCanvas.height);
+        actx.strokeStyle = '#d8b768';
+        actx.lineWidth = 8;
+        actx.strokeRect(12, 12, armCanvas.width - 24, armCanvas.height - 24);
+        actx.fillStyle = '#fff9ec';
+        actx.textAlign = 'center';
+        actx.textBaseline = 'middle';
+        actx.font = '700 84px "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+        actx.fillText(arm.label, armCanvas.width * 0.5, armCanvas.height * 0.53);
       }
+      const armTex = new THREE.CanvasTexture(armCanvas);
+      armTex.colorSpace = THREE.SRGBColorSpace;
+      armTex.anisotropy = 8;
+      signTextures.push(armTex);
+
+      const armMat = new THREE.MeshStandardMaterial({
+        map: armTex,
+        emissiveMap: armTex,
+        emissive: new THREE.Color(0xffe4aa),
+        emissiveIntensity: 0.24,
+        roughness: 0.82,
+        metalness: 0.04,
+      });
+      materials.push(armMat);
+
+      const armGroup = new THREE.Group();
+      armGroup.position.y = arm.y;
+      // Rotate so arm's +X tip points naturally toward the destination building
+      const dirAng = Math.atan2(-(arm.targetZ - wz), arm.targetX - wx);
+      armGroup.rotation.y = dirAng;
+
+      const armW = 1.18;
+      const armH = 0.26;
+      const plank = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(armW, armH, 0.055)), rosewoodMat);
+      plank.position.x = armW * 0.48;
+      plank.castShadow = quality.enableShadows;
+      armGroup.add(plank);
+
+      // Pointed arrow tip triangle at outer end (+X)
+      const tipGeo = trackGeo(new THREE.ConeGeometry(armH * 0.54, 0.22, 4));
+      tipGeo.rotateZ(-Math.PI / 2);
+      tipGeo.rotateX(Math.PI / 4);
+      const tip = new THREE.Mesh(tipGeo, bronzeMat);
+      tip.position.x = armW * 0.98 + 0.08;
+      armGroup.add(tip);
+
+      // Front & back legible lettering strips
+      const stripGeo = trackGeo(new THREE.PlaneGeometry(armW - 0.06, armH - 0.04));
+      const fStrip = new THREE.Mesh(stripGeo, armMat);
+      fStrip.position.set(armW * 0.48, 0, 0.032);
+      const bStrip = new THREE.Mesh(stripGeo, armMat);
+      bStrip.position.set(armW * 0.48, 0, -0.032);
+      bStrip.rotation.y = Math.PI;
+      armGroup.add(fStrip, bStrip);
+
+      cg.add(armGroup);
     }
-  }
+
+    group.add(cg);
+  };
+  buildCrossroadsSignpost(1.85, 11.4);
 
   // =========================================================================
   // 5. Realistic East-Asian Library Cottage (图书馆) at (-9.8, y, 1.6)
@@ -1488,10 +1662,11 @@ export function createParadiseArchitecture(
   // Grounded garden standing signpost placed cleanly beside the Library cottage
   const librarySign = createStandingSignpost({
     title: '图书馆',
+    icon: 'library',
     worldX: -6.8,
     worldZ: 3.3,
-    boardW: 2.05,
-    boardH: 0.74,
+    boardW: 2.2,
+    boardH: 0.76,
     postH: 2.1,
     bgHex: '#24150e',
     borderHex: '#e6c473',
@@ -1675,10 +1850,11 @@ export function createParadiseArchitecture(
   // Grounded garden standing signpost placed cleanly beside the Language Center
   const languageSign = createStandingSignpost({
     title: '语言中心',
+    icon: 'language',
     worldX: 5.3,
     worldZ: 8.6,
-    boardW: 2.15,
-    boardH: 0.72,
+    boardW: 2.3,
+    boardH: 0.76,
     postH: 2.02,
     bgHex: '#102c24',
     borderHex: '#e8c87a',
@@ -1807,9 +1983,10 @@ export function createParadiseArchitecture(
   // Grounded garden standing signpost placed cleanly beside the AI Center
   const aiSign = createStandingSignpost({
     title: 'AI 中心',
+    icon: 'ai',
     worldX: 3.9,
     worldZ: -8.8,
-    boardW: 2.55,
+    boardW: 2.65,
     boardH: 0.88,
     postH: 2.4,
     bgHex: '#0e1b2b',
@@ -1877,27 +2054,6 @@ export function createParadiseArchitecture(
   const pbFloor = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.36, 0.08, 1.36)), plinthStoneMat);
   pbFloor.position.y = 0.22;
   phoneBoothGroup.add(pbFloor);
-
-  // Twin carved stone planter urns with floral accents flanking the Telephone Booth doorway
-  const planterPotGeo = trackGeo(new THREE.CylinderGeometry(0.24, 0.17, 0.34, 12));
-  const planterBushGeo = trackGeo(new THREE.IcosahedronGeometry(0.24, 1));
-  const planterBloomMat = trackMat(
-    new THREE.MeshStandardMaterial({
-      color: 0xf4b6c8,
-      roughness: 0.6,
-      metalness: 0.02,
-    })
-  );
-  for (const px of [-1.18, 1.18]) {
-    const pot = new THREE.Mesh(planterPotGeo, graniteMat);
-    pot.position.set(px, 0.2, 0.64);
-    pot.castShadow = quality.enableShadows;
-    phoneBoothGroup.add(pot);
-    const bush = new THREE.Mesh(planterBushGeo, planterBloomMat);
-    bush.position.set(px, 0.48, 0.64);
-    bush.scale.set(1.12, 0.85, 1.12);
-    phoneBoothGroup.add(bush);
-  }
 
   // 4 Sturdy Heritage Red Corner Pilasters
   const pbHalf = 0.62;
@@ -2011,10 +2167,11 @@ export function createParadiseArchitecture(
   // Grounded garden standing signpost placed cleanly beside the Red Telephone Booth
   const phoneSign = createStandingSignpost({
     title: '通讯',
+    icon: 'phone',
     worldX: -1.95,
     worldZ: 10.6,
-    boardW: 1.55,
-    boardH: 0.62,
+    boardW: 1.72,
+    boardH: 0.66,
     postH: 1.82,
     bgHex: '#591216',
     borderHex: '#ebd082',
