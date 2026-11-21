@@ -18,7 +18,6 @@ export interface ArchitecturePortal {
   group: THREE.Group;
   signMat: THREE.MeshStandardMaterial;
   worldPos: THREE.Vector3;
-  labelPos: THREE.Vector3;
 }
 
 export interface ParadiseArchitectureHandle {
@@ -383,74 +382,52 @@ export function createParadiseArchitecture(
   materials.push(lanternGlassMat);
 
   /**
-   * Builds a crisp, physical 3D framed architectural plaque/signboard (牌匾) with
-   * high-DPI canvas typography, brass border molding, and warm subtle backlighting
-   * so every building's identity is unmistakable day & night.
+   * Builds a grounded, realistic garden wooden-and-stone standing signpost (庭院立牌)
+   * placed neatly beside a building, displaying ONLY a single crisp minimalist title
+   * with zero subtitle or floating UI clutter.
    */
-  const createArchitecturalPlaque = (opts: {
-    titleZh: string;
-    subtitle: string;
-    width: number;
-    height: number;
+  const createStandingSignpost = (opts: {
+    title: string;
+    worldX: number;
+    worldZ: number;
+    boardW: number;
+    boardH: number;
+    postH: number;
     bgHex: string;
     borderHex: string;
     textHex: string;
-    subHex: string;
     emissiveHex: number;
   }): { group: THREE.Group; faceMat: THREE.MeshStandardMaterial } => {
     const canvas = document.createElement('canvas');
-    canvas.width = 2048;
-    canvas.height = 640;
+    canvas.width = 1536;
+    canvas.height = 540;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      // Rich matte dark architectural lacquer gradient for maximum foreground text contrast
+      // Rich matte dark timber/lacquer backdrop for clean, glare-free contrast
       const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
       grad.addColorStop(0, opts.bgHex);
-      grad.addColorStop(1, '#09090b');
+      grad.addColorStop(1, '#100d0b');
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Crisp double gilded architectural frame
+      // Subtle single inner gilded hairline border
       ctx.strokeStyle = opts.borderHex;
-      ctx.lineWidth = 22;
-      ctx.strokeRect(30, 30, canvas.width - 60, canvas.height - 60);
-      ctx.lineWidth = 7;
-      ctx.globalAlpha = 0.8;
-      ctx.strokeRect(60, 60, canvas.width - 120, canvas.height - 120);
+      ctx.lineWidth = 14;
+      ctx.globalAlpha = 0.85;
+      ctx.strokeRect(28, 28, canvas.width - 56, canvas.height - 56);
       ctx.globalAlpha = 1;
 
-      // Delicate corner rivets
-      ctx.fillStyle = opts.borderHex;
-      for (const [cx, cy] of [
-        [92, 92],
-        [canvas.width - 92, 92],
-        [92, canvas.height - 92],
-        [canvas.width - 92, canvas.height - 92],
-      ]) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Ultra-sharp heavy Chinese title with crisp dark halo stroke for razor legibility from afar
+      // Single-line ultra-crisp title centered cleanly (no English subtitle or extra text)
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const fontSize = opts.titleZh.length >= 6 ? 228 : opts.titleZh.length >= 4 ? 268 : 300;
-      ctx.font = `800 ${fontSize}px "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif`;
+      const fontSize = opts.title.length >= 4 ? 276 : opts.title.length === 3 ? 316 : 340;
+      ctx.font = `700 ${fontSize}px "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif`;
       ctx.lineJoin = 'round';
-      ctx.lineWidth = 18;
-      ctx.strokeStyle = 'rgba(6, 6, 8, 0.85)';
-      ctx.strokeText(opts.titleZh, canvas.width / 2, canvas.height * 0.43);
+      ctx.lineWidth = 14;
+      ctx.strokeStyle = 'rgba(8, 7, 6, 0.78)';
+      ctx.strokeText(opts.title, canvas.width / 2, canvas.height * 0.52);
       ctx.fillStyle = opts.textHex;
-      ctx.fillText(opts.titleZh, canvas.width / 2, canvas.height * 0.43);
-
-      // Clean high-contrast English subtitle
-      ctx.font = '700 72px "Plus Jakarta Sans", "Helvetica Neue", system-ui, sans-serif';
-      ctx.lineWidth = 8;
-      ctx.strokeStyle = 'rgba(6, 6, 8, 0.72)';
-      ctx.strokeText(opts.subtitle.toUpperCase(), canvas.width / 2, canvas.height * 0.79);
-      ctx.fillStyle = opts.subHex;
-      ctx.fillText(opts.subtitle.toUpperCase(), canvas.width / 2, canvas.height * 0.79);
+      ctx.fillText(opts.title, canvas.width / 2, canvas.height * 0.52);
     }
 
     const tex = new THREE.CanvasTexture(canvas);
@@ -461,50 +438,113 @@ export function createParadiseArchitecture(
     tex.needsUpdate = true;
     signTextures.push(tex);
 
-    // Matte anti-glare finish so sunlight never reflects white washout across the lettering
     const faceMat = new THREE.MeshStandardMaterial({
       map: tex,
       emissiveMap: tex,
       emissive: new THREE.Color(opts.emissiveHex),
-      emissiveIntensity: 0.36,
+      emissiveIntensity: 0.34,
       roughness: 0.86,
       metalness: 0.02,
     });
     materials.push(faceMat);
 
-    const pGroup = new THREE.Group();
-    const depth = 0.09;
-    // Solid carved backing board
-    const board = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(opts.width, opts.height, depth)), rosewoodMat);
-    board.castShadow = quality.enableShadows;
-    pGroup.add(board);
+    const signGroup = new THREE.Group();
+    const groundY = terrainHeightAt(opts.worldX, opts.worldZ);
+    signGroup.position.set(opts.worldX, groundY, opts.worldZ);
+    // Face naturally toward the Overlook viewer at (0, y, 25.4)
+    signGroup.rotation.y = Math.atan2(0.0 - opts.worldX, 25.4 - opts.worldZ);
 
-    // Gilded bronze trim bars framing all 4 edges
-    const rimT = 0.055;
-    const topRim = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(opts.width + rimT * 1.4, rimT, depth + 0.03)), bronzeMat);
-    topRim.position.y = opts.height * 0.5 + rimT * 0.35;
-    const botRim = topRim.clone();
-    botRim.position.y = -opts.height * 0.5 - rimT * 0.35;
-    const leftRim = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(rimT, opts.height + rimT * 1.4, depth + 0.03)), bronzeMat);
-    leftRim.position.x = -opts.width * 0.5 - rimT * 0.35;
-    const rightRim = leftRim.clone();
-    rightRim.position.x = opts.width * 0.5 + rimT * 0.35;
-    pGroup.add(topRim, botRim, leftRim, rightRim);
+    const postOffsetX = opts.boardW * 0.44;
+    const boardCenterY = opts.postH - opts.boardH * 0.5 - 0.14;
+    const boardDepth = 0.095;
 
-    // High-resolution front face plane (+Z)
-    const face = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(opts.width - 0.04, opts.height - 0.04)), faceMat);
-    face.position.z = depth * 0.5 + 0.008;
-    pGroup.add(face);
+    // Grounded carved granite foundation plinth seated cleanly into earth
+    const stonePlinth = new THREE.Mesh(
+      trackGeo(new THREE.BoxGeometry(opts.boardW + 0.36, 0.44, 0.48)),
+      graniteMat
+    );
+    stonePlinth.position.y = -0.04;
+    stonePlinth.castShadow = quality.enableShadows;
+    stonePlinth.receiveShadow = quality.enableShadows;
+    signGroup.add(stonePlinth);
 
-    // Brass hanging mount rods attaching top of plaque to building beam
-    const rodGeo = trackGeo(new THREE.CylinderGeometry(0.018, 0.018, 0.24, 6));
-    for (const rx of [-opts.width * 0.32, opts.width * 0.32]) {
-      const rod = new THREE.Mesh(rodGeo, bronzeMat);
-      rod.position.set(rx, opts.height * 0.5 + 0.12, 0);
-      pGroup.add(rod);
+    const stoneCap = new THREE.Mesh(
+      trackGeo(new THREE.BoxGeometry(opts.boardW + 0.22, 0.09, 0.38)),
+      plinthStoneMat
+    );
+    stoneCap.position.y = 0.21;
+    stoneCap.receiveShadow = quality.enableShadows;
+    signGroup.add(stoneCap);
+
+    // Twin rosewood timber posts + stone collar bases
+    const postGeo = trackGeo(new THREE.BoxGeometry(0.115, opts.postH, 0.115));
+    const shoeGeo = trackGeo(new THREE.BoxGeometry(0.17, 0.14, 0.17));
+    for (const px of [-postOffsetX, postOffsetX]) {
+      const shoe = new THREE.Mesh(shoeGeo, bronzeMat);
+      shoe.position.set(px, 0.29, 0);
+      signGroup.add(shoe);
+
+      const post = new THREE.Mesh(postGeo, rosewoodMat);
+      post.position.set(px, 0.22 + opts.postH * 0.5, 0);
+      post.castShadow = quality.enableShadows;
+      post.receiveShadow = quality.enableShadows;
+      signGroup.add(post);
     }
 
-    return { group: pGroup, faceMat };
+    // Horizontal lower tie-rail between the twin posts
+    const lowerRail = new THREE.Mesh(
+      trackGeo(new THREE.BoxGeometry(postOffsetX * 2, 0.075, 0.075)),
+      rosewoodMat
+    );
+    lowerRail.position.y = Math.max(0.56, boardCenterY - opts.boardH * 0.5 - 0.22);
+    signGroup.add(lowerRail);
+
+    // Solid walnut sign board backing + subtle bronze frame trim
+    const board = new THREE.Mesh(
+      trackGeo(new THREE.BoxGeometry(opts.boardW, opts.boardH, boardDepth)),
+      rosewoodMat
+    );
+    board.position.y = boardCenterY;
+    board.castShadow = quality.enableShadows;
+    board.receiveShadow = quality.enableShadows;
+    signGroup.add(board);
+
+    const trimT = 0.042;
+    const topTrim = new THREE.Mesh(
+      trackGeo(new THREE.BoxGeometry(opts.boardW + trimT * 1.4, trimT, boardDepth + 0.025)),
+      bronzeMat
+    );
+    topTrim.position.y = boardCenterY + opts.boardH * 0.5 + trimT * 0.3;
+    const botTrim = topTrim.clone();
+    botTrim.position.y = boardCenterY - opts.boardH * 0.5 - trimT * 0.3;
+    signGroup.add(topTrim, botTrim);
+
+    // Front & back crisp single-line lettering faces
+    const faceGeo = trackGeo(new THREE.PlaneGeometry(opts.boardW - 0.04, opts.boardH - 0.04));
+    const frontFace = new THREE.Mesh(faceGeo, faceMat);
+    frontFace.position.set(0, boardCenterY, boardDepth * 0.5 + 0.008);
+    const backFace = new THREE.Mesh(faceGeo, faceMat);
+    backFace.position.set(0, boardCenterY, -(boardDepth * 0.5 + 0.008));
+    backFace.rotation.y = Math.PI;
+    signGroup.add(frontFace, backFace);
+
+    // Traditional miniature pitched slate eaves cap (小牌檐) sheltering the wooden sign
+    const capY = 0.22 + opts.postH + 0.04;
+    const capW = opts.boardW + 0.52;
+    const capSlopeGeo = trackGeo(new THREE.BoxGeometry(capW, 0.055, 0.36));
+    const frontEave = new THREE.Mesh(capSlopeGeo, ceramicTileMat);
+    frontEave.position.set(0, capY, 0.14);
+    frontEave.rotation.x = 0.34;
+    frontEave.castShadow = quality.enableShadows;
+    const backEave = new THREE.Mesh(capSlopeGeo, ceramicTileMat);
+    backEave.position.set(0, capY, -0.14);
+    backEave.rotation.x = -0.34;
+    backEave.castShadow = quality.enableShadows;
+    const capRidge = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(capW + 0.06, 0.075, 0.09)), ridgeStoneMat);
+    capRidge.position.set(0, capY + 0.085, 0);
+    signGroup.add(frontEave, backEave, capRidge);
+
+    return { group: signGroup, faceMat };
   };
 
   // =========================================================================
@@ -822,23 +862,22 @@ export function createParadiseArchitecture(
   guqinTrim.position.set(0, 1.42, -0.32);
   pav.add(guqinTrim);
 
-  // Traditional Gilded Pavilion Plaque (匾额) — 「音乐馆 · MUSIC HALL」
-  const musicPlaque = createArchitecturalPlaque({
-    titleZh: '音乐馆',
-    subtitle: 'Music Hall',
-    width: 3.15,
-    height: 1.02,
-    bgHex: '#331015',
-    borderHex: '#f0cf78',
-    textHex: '#ffffff',
-    subHex: '#f2d99b',
-    emissiveHex: 0xffe4a8,
+  // Grounded garden standing signpost placed cleanly beside the Music Pavilion
+  const musicSign = createStandingSignpost({
+    title: '音乐馆',
+    worldX: 12.9,
+    worldZ: -4.2,
+    boardW: 2.35,
+    boardH: 0.84,
+    postH: 2.3,
+    bgHex: '#2f1317',
+    borderHex: '#e6c677',
+    textHex: '#fffcf5',
+    emissiveHex: 0xffe4aa,
   });
-  musicPlaque.group.position.set(0, 3.28, 1.94);
-  musicPlaque.group.rotation.x = 0.05;
-  pav.add(musicPlaque.group);
-
-  group.add(pav);
+  const musicPortalGroup = new THREE.Group();
+  musicPortalGroup.add(pav, musicSign.group);
+  group.add(musicPortalGroup);
 
   // =========================================================================
   // 2. Realistic Bank-to-Bank Arched Timber & Granite Bridge (连岸石基木拱桥)
@@ -1446,23 +1485,22 @@ export function createParadiseArchitecture(
   restHouseLight.position.set(0, 1.35, 1.35);
   restHouseGroup.add(restHouseLight);
 
-  // Carved Walnut & Gold Architectural Plaque — 「图书馆 · LIBRARY」
-  const libraryPlaque = createArchitecturalPlaque({
-    titleZh: '图书馆',
-    subtitle: 'Library',
-    width: 2.68,
-    height: 0.88,
-    bgHex: '#24120c',
-    borderHex: '#f0cc75',
-    textHex: '#ffffff',
-    subHex: '#edd69d',
+  // Grounded garden standing signpost placed cleanly beside the Library cottage
+  const librarySign = createStandingSignpost({
+    title: '图书馆',
+    worldX: -6.8,
+    worldZ: 3.3,
+    boardW: 2.05,
+    boardH: 0.74,
+    postH: 2.1,
+    bgHex: '#24150e',
+    borderHex: '#e6c473',
+    textHex: '#fffcf5',
     emissiveHex: 0xffe2a4,
   });
-  libraryPlaque.group.position.set(0, 2.74, 1.82);
-  libraryPlaque.group.rotation.x = 0.05;
-  restHouseGroup.add(libraryPlaque.group);
-
-  group.add(restHouseGroup);
+  const libraryPortalGroup = new THREE.Group();
+  libraryPortalGroup.add(restHouseGroup, librarySign.group);
+  group.add(libraryPortalGroup);
 
   const extraLights: THREE.PointLight[] = [];
   const extraWindowMats: THREE.MeshStandardMaterial[] = [];
@@ -1634,23 +1672,22 @@ export function createParadiseArchitecture(
   langHouseGroup.add(langHouseLight);
   extraLights.push(langHouseLight);
 
-  // Emerald & Gold Plaque — 「语言中心 · LANGUAGE CENTER」
-  const languagePlaque = createArchitecturalPlaque({
-    titleZh: '语言中心',
-    subtitle: 'Language Center',
-    width: 2.74,
-    height: 0.9,
-    bgHex: '#0d2e25',
-    borderHex: '#f0cf7b',
-    textHex: '#ffffff',
-    subHex: '#d0f2e3',
+  // Grounded garden standing signpost placed cleanly beside the Language Center
+  const languageSign = createStandingSignpost({
+    title: '语言中心',
+    worldX: 5.3,
+    worldZ: 8.6,
+    boardW: 2.15,
+    boardH: 0.72,
+    postH: 2.02,
+    bgHex: '#102c24',
+    borderHex: '#e8c87a',
+    textHex: '#fffcf5',
     emissiveHex: 0xffe8ad,
   });
-  languagePlaque.group.position.set(0, 2.72, 1.86);
-  languagePlaque.group.rotation.x = 0.05;
-  langHouseGroup.add(languagePlaque.group);
-
-  group.add(langHouseGroup);
+  const languagePortalGroup = new THREE.Group();
+  languagePortalGroup.add(langHouseGroup, languageSign.group);
+  group.add(languagePortalGroup);
 
   // =========================================================================
   // 7. Starlight Timber-and-Glass AI Atelier (AI 中心)
@@ -1767,23 +1804,22 @@ export function createParadiseArchitecture(
   aiHouseGroup.add(aiHouseLight);
   extraLights.push(aiHouseLight);
 
-  // Obsidian & Sky-Gold Architectural Plaque — 「AI 中心 · ONE AI」
-  const aiPlaque = createArchitecturalPlaque({
-    titleZh: 'AI 中心',
-    subtitle: 'ONE AI',
-    width: 3.45,
-    height: 1.12,
-    bgHex: '#0a1828',
-    borderHex: '#8ce0ff',
+  // Grounded garden standing signpost placed cleanly beside the AI Center
+  const aiSign = createStandingSignpost({
+    title: 'AI 中心',
+    worldX: 3.9,
+    worldZ: -8.8,
+    boardW: 2.55,
+    boardH: 0.88,
+    postH: 2.4,
+    bgHex: '#0e1b2b',
+    borderHex: '#92daf7',
     textHex: '#ffffff',
-    subHex: '#b8ecff',
-    emissiveHex: 0xb0e8ff,
+    emissiveHex: 0xb6e8ff,
   });
-  aiPlaque.group.position.set(0, 3.24, 1.94);
-  aiPlaque.group.rotation.x = 0.05;
-  aiHouseGroup.add(aiPlaque.group);
-
-  group.add(aiHouseGroup);
+  const aiPortalGroup = new THREE.Group();
+  aiPortalGroup.add(aiHouseGroup, aiSign.group);
+  group.add(aiPortalGroup);
 
   // =========================================================================
   // 8. Classic Heritage Red Telephone Booth (通讯 · 电话亭)
@@ -1972,23 +2008,22 @@ export function createParadiseArchitecture(
   pbCrown.position.y = 3.42;
   phoneBoothGroup.add(pbCrown);
 
-  // Crisp Heritage Crimson & Gold Plaque atop front cornice — 「通讯 · 电话亭」
-  const phonePlaque = createArchitecturalPlaque({
-    titleZh: '通讯 · 电话亭',
-    subtitle: 'Telephone',
-    width: 1.96,
-    height: 0.68,
-    bgHex: '#691014',
-    borderHex: '#f5d682',
-    textHex: '#ffffff',
-    subHex: '#fae2b6',
+  // Grounded garden standing signpost placed cleanly beside the Red Telephone Booth
+  const phoneSign = createStandingSignpost({
+    title: '通讯',
+    worldX: -1.95,
+    worldZ: 10.6,
+    boardW: 1.55,
+    boardH: 0.62,
+    postH: 1.82,
+    bgHex: '#591216',
+    borderHex: '#ebd082',
+    textHex: '#fffcf5',
     emissiveHex: 0xffe4ad,
   });
-  phonePlaque.group.position.set(0, 3.06, 0.86);
-  phonePlaque.group.rotation.x = 0.04;
-  phoneBoothGroup.add(phonePlaque.group);
-
-  group.add(phoneBoothGroup);
+  const phonePortalGroup = new THREE.Group();
+  phonePortalGroup.add(phoneBoothGroup, phoneSign.group);
+  group.add(phonePortalGroup);
 
   const portals: ArchitecturePortal[] = [
     {
@@ -1996,50 +2031,45 @@ export function createParadiseArchitecture(
       labelZh: '图书馆',
       labelEn: 'Library',
       labelAr: 'المكتبة',
-      group: restHouseGroup,
-      signMat: libraryPlaque.faceMat,
+      group: libraryPortalGroup,
+      signMat: librarySign.faceMat,
       worldPos: REST_HOUSE_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(rhX, rhBaseY + 4.35 * rhScale, rhZ),
     },
     {
       id: 'venus',
       labelZh: '音乐馆',
       labelEn: 'Music Hall',
       labelAr: 'قاعة الموسيقى',
-      group: pav,
-      signMat: musicPlaque.faceMat,
+      group: musicPortalGroup,
+      signMat: musicSign.faceMat,
       worldPos: PAVILION_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(pavX, pavBaseY + 6.45 * pavScale, pavZ),
     },
     {
       id: 'arabic-learning',
       labelZh: '语言中心',
       labelEn: 'Language Center',
       labelAr: 'مركز اللغات',
-      group: langHouseGroup,
-      signMat: languagePlaque.faceMat,
+      group: languagePortalGroup,
+      signMat: languageSign.faceMat,
       worldPos: LANGUAGE_HOUSE_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(lhX, lhBaseY + 4.75 * lhScale, lhZ),
     },
     {
       id: 'aihub',
       labelZh: 'AI 中心',
-      labelEn: 'ONE AI Center',
+      labelEn: 'AI Center',
       labelAr: 'مركز الذكاء',
-      group: aiHouseGroup,
-      signMat: aiPlaque.faceMat,
+      group: aiPortalGroup,
+      signMat: aiSign.faceMat,
       worldPos: AI_HOUSE_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(aiX, aiBaseY + 6.05 * aiScale, aiZ),
     },
     {
       id: 'chat',
-      labelZh: '通讯 · 电话亭',
+      labelZh: '通讯',
       labelEn: 'Telephone',
-      labelAr: 'الهاتف والتواصل',
-      group: phoneBoothGroup,
-      signMat: phonePlaque.faceMat,
+      labelAr: 'الهاتف',
+      group: phonePortalGroup,
+      signMat: phoneSign.faceMat,
       worldPos: PHONE_BOOTH_WORLD_POS.clone(),
-      labelPos: new THREE.Vector3(pbX, pbBaseY + 4.05 * pbScale, pbZ),
     },
   ];
 

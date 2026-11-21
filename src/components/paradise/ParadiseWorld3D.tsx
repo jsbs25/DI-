@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { ChevronDown, ChevronUp, Compass, Download, Loader2, LocateFixed, MapPin, Radio, RotateCcw, Search, SlidersHorizontal, SunMedium, Wind, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Compass, Download, Loader2, LocateFixed, Radio, RotateCcw, Search, SlidersHorizontal, SunMedium, Wind, X } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
 import { uiStateManager, useAgentUiState } from '../../agent/uiStateManager.ts';
 import {
@@ -61,19 +61,6 @@ const CAMERA_PRESETS: CameraPreset[] = [
   { id: 'aihub', zh: 'AI 中心', en: 'AI Center', pos: [0.0, 4.8, 0.2], target: [0.0, 2.6, -10.8] },
 ];
 
-const BUILDING_LANDMARKS: ReadonlyArray<{
-  id: 'library' | 'chat' | 'aihub' | 'venus' | 'arabic-learning';
-  zh: string;
-  en: string;
-  ar: string;
-}> = [
-  { id: 'library', zh: '图书馆', en: 'Library', ar: 'المكتبة' },
-  { id: 'chat', zh: '通讯 · 电话亭', en: 'Telephone', ar: 'الهاتف' },
-  { id: 'aihub', zh: 'AI 中心', en: 'ONE AI', ar: 'الذكاء' },
-  { id: 'venus', zh: '音乐馆', en: 'Music Hall', ar: 'الموسيقى' },
-  { id: 'arabic-learning', zh: '语言中心', en: 'Language Center', ar: 'اللغات' },
-];
-
 function getResponsiveCameraConfig(aspect: number): { fov: number; distScale: number } {
   if (aspect < 0.72) {
     // Portrait phone: expanded panoramic lens so all 5 spaciously separated houses fit immediately in one screen
@@ -128,7 +115,6 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const onSelectTabRef = useRef(onSelectTab);
   onSelectTabRef.current = onSelectTab;
-  const [hoveredLandmark, setHoveredLandmark] = useState<{ id: string; label: string } | null>(null);
 
   const agentSnap = useAgentUiState();
   const [webglReady, setWebglReady] = useState<boolean>(() => detectWebGLSupport());
@@ -150,7 +136,6 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const spiritStateRef = useRef(agentSnap.spiritState);
   spiritStateRef.current = agentSnap.spiritState;
   const spiritBubbleRef = useRef<HTMLDivElement | null>(null);
-  const portalLabelRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const lastHandledEnvSeqRef = useRef<number>(0);
 
   const persistedRef = useRef<{
@@ -398,80 +383,6 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       setTimeOfDay(TIME_PRESET_VALUES[cmd.timePreset]);
     }
   }, [agentSnap.weatherCommand]);
-
-  // Subtle, quiet feature-reminder whispers from the butterfly while idling
-  useEffect(() => {
-    const promptsZh = [
-      {
-        text: '点击花园里的「图书馆」木屋，就能直接进去静心读书。',
-        quickActions: [{ label: '进图书馆', action: 'open_library' as const }],
-      },
-      {
-        text: '湖畔飞檐亭是「音乐馆」，点一下亭子或直接跟我说都能听歌。',
-        quickActions: [{ label: '听轻音乐', action: 'play_music' as const }],
-      },
-      {
-        text: '花园里的图书馆、语言中心、AI 中心、音乐馆和红色电话亭，点哪座就能进哪座。',
-        quickActions: [],
-      },
-    ];
-    const promptsEn = [
-      {
-        text: 'Click the Library house on the left meadow anytime to read.',
-        quickActions: [{ label: 'Library', action: 'open_library' as const }],
-      },
-      {
-        text: 'The lakeside pavilion is our Music Hall — tap it or ask me for music.',
-        quickActions: [{ label: 'Play Music', action: 'play_music' as const }],
-      },
-      {
-        text: 'Click any labeled building or the red Telephone Booth in the garden to enter.',
-        quickActions: [],
-      },
-    ];
-
-    let idx = 0;
-    let hideTimer: number | null = null;
-    const scheduleNext = () => {
-      const snap = uiStateManager.getSnapshot();
-      const busy =
-        snap.liveVoiceActive ||
-        snap.voiceListening ||
-        snap.musicPlaying ||
-        snap.commDrawerOpen ||
-        snap.languageStudioOpen ||
-        Boolean(snap.spiritBubble?.visible) ||
-        Boolean(snap.pendingConfirmation);
-      if (busy) return;
-
-      const list = lang === 'zh' ? promptsZh : promptsEn;
-      const item = list[idx % list.length];
-      idx += 1;
-      uiStateManager.setSpiritBubble({
-        visible: true,
-        isLoading: false,
-        isAmbientHint: true,
-        badge: '',
-        text: item.text,
-        quickActions: item.quickActions,
-      });
-      if (hideTimer) window.clearTimeout(hideTimer);
-      hideTimer = window.setTimeout(() => {
-        const cur = uiStateManager.getSnapshot().spiritBubble;
-        if (cur?.visible && cur.isAmbientHint) {
-          uiStateManager.hideSpiritBubble();
-        }
-      }, 7500);
-    };
-
-    const initialTimer = window.setTimeout(scheduleNext, 16000);
-    const interval = window.setInterval(scheduleNext, 48000);
-    return () => {
-      window.clearTimeout(initialTimer);
-      window.clearInterval(interval);
-      if (hideTimer) window.clearTimeout(hideTimer);
-    };
-  }, [lang]);
 
   useEffect(() => {
     if (!webglReady) return;
@@ -721,17 +632,6 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           if (renderer) {
             renderer.domElement.style.cursor = hoveredPortal ? 'pointer' : '';
           }
-          if (hoveredPortal) {
-            const label =
-              lang === 'ar'
-                ? hoveredPortal.labelAr
-                : lang === 'en'
-                  ? hoveredPortal.labelEn
-                  : hoveredPortal.labelZh;
-            setHoveredLandmark({ id: hoveredPortal.id, label });
-          } else {
-            setHoveredLandmark(null);
-          }
         }
       }
 
@@ -788,11 +688,10 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         return;
       }
 
-      // 2. Check ALL 5 Permanent Labeled Architectural Landmarks (click directly to enter!)
+      // 2. Check ALL 5 Architectural Landmarks & their adjacent Standing Signposts (click directly to enter)
       const clickedPortal = findHitPortal();
       if (clickedPortal) {
         weatherFX.emitPetalBurst(clickedPortal.worldPos);
-        setHoveredLandmark(null);
         onSelectTabRef.current?.(clickedPortal.id);
         return;
       }
@@ -811,7 +710,6 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       if (hoveredPortalId !== null) {
         hoveredPortalId = null;
         if (renderer) renderer.domElement.style.cursor = '';
-        setHoveredLandmark(null);
       }
     };
 
@@ -1141,29 +1039,6 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         bubbleEl.style.transform = `translate3d(${Math.round(sx)}px, ${Math.round(sy)}px, 0)`;
       }
 
-      // Project crisp clickable 2D DOM architectural waypoint tags cleanly over each of the 5 buildings
-      // (GPU translate3d direct DOM updates — zero React re-renders per frame)
-      const labelRect = container.getBoundingClientRect();
-      const lvw = labelRect.width || window.innerWidth;
-      const lvh = labelRect.height || window.innerHeight;
-      for (const portal of architecture.portals) {
-        const tagEl = portalLabelRefs.current[portal.id];
-        if (!tagEl) continue;
-        tmpKeyWorld.copy(portal.labelPos).project(camera);
-        const inFront = tmpKeyWorld.z >= -1 && tmpKeyWorld.z <= 1;
-        const px = (tmpKeyWorld.x * 0.5 + 0.5) * lvw;
-        const py = (-tmpKeyWorld.y * 0.5 + 0.5) * lvh;
-        const visible = inFront && px > 36 && px < lvw - 36 && py > 62 && py < lvh - 32;
-        if (visible) {
-          tagEl.style.opacity = '1';
-          tagEl.style.pointerEvents = 'auto';
-          tagEl.style.transform = `translate3d(${Math.round(px)}px, ${Math.round(py)}px, 0) translate(-50%, -100%)`;
-        } else {
-          tagEl.style.opacity = '0';
-          tagEl.style.pointerEvents = 'none';
-        }
-      }
-
       // Persist state continuously in case quality tier is switched seamlessly
       persistedRef.current.hasCam = true;
       persistedRef.current.camPos.copy(camera.position);
@@ -1381,51 +1256,6 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           <p className="mt-1.5 text-xs text-white/80">
             {isZh ? '3D 实时花园环境（需要启用 WebGL 渲染支持）' : 'Interactive 3D Paradise Garden (WebGL required)'}
           </p>
-        </div>
-      )}
-
-      {/* Crisp 3D-Tracked Architectural Building Labels — razor-sharp vector text pinned above each of the 5 landmarks */}
-      {webglReady && !contextLost && !immersive && (
-        <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
-          {BUILDING_LANDMARKS.map((lm) => {
-            const labelText = lang === 'ar' ? lm.ar : lang === 'en' ? lm.en : lm.zh;
-            const isHovered = hoveredLandmark?.id === lm.id;
-            return (
-              <button
-                key={lm.id}
-                ref={(el) => {
-                  portalLabelRefs.current[lm.id] = el;
-                }}
-                type="button"
-                onClick={() => onSelectTabRef.current?.(lm.id)}
-                onMouseEnter={() => setHoveredLandmark({ id: lm.id, label: labelText })}
-                onMouseLeave={() => setHoveredLandmark((prev) => (prev?.id === lm.id ? null : prev))}
-                style={{ opacity: 0, willChange: 'transform, opacity' }}
-                className={`absolute left-0 top-0 inline-flex items-center whitespace-nowrap rounded-lg border px-2.5 sm:px-3 py-1 sm:py-1.5 text-[12.5px] sm:text-[14px] font-semibold tracking-wide transition-colors duration-150 cursor-pointer ${
-                  isDayUi
-                    ? isHovered
-                      ? 'border-[#1d2d25]/45 bg-[#1b2b23] text-[#fffaf0] shadow-[0_6px_18px_rgba(12,24,18,0.34)]'
-                      : 'border-[#1d2d25]/28 bg-[#1b2b23]/88 text-[#fcf8ef] hover:bg-[#1b2b23] shadow-[0_5px_16px_rgba(12,24,18,0.3)]'
-                    : isHovered
-                      ? 'border-[#e8cc82]/60 bg-[#0d1724] text-[#fff8e6] shadow-[0_8px_22px_rgba(0,0,0,0.48)]'
-                      : 'border-white/24 bg-[#0d1724]/88 text-[#f6f1e6] hover:bg-[#152436] shadow-[0_6px_18px_rgba(0,0,0,0.44)]'
-                }`}
-              >
-                <span>{labelText}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Subtle Hover Prompt ONLY while pointing at one of the 5 clickable 3D buildings */}
-      {hoveredLandmark && (
-        <div className="pointer-events-none fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-[52] -translate-x-1/2">
-          <div className={`inline-flex items-center rounded-full border px-4 py-1.5 text-xs font-medium tracking-wide transition-all ${dockShellCls}`}>
-            <span>
-              {isZh ? `点击进入 · ${hoveredLandmark.label}` : `Click to enter · ${hoveredLandmark.label}`}
-            </span>
-          </div>
         </div>
       )}
 
