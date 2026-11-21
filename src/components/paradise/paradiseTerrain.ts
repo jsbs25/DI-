@@ -128,7 +128,7 @@ export function streamDistanceAndFlow(x: number, z: number): { dist: number; wid
   const distPool = Math.hypot(x - -19.5, z - -20.5);
   const isPlungePool = distPool < 4.7;
 
-  const ox = 7.4;
+  const ox = 8.8;
   const oz = -1.2;
   const ex = 62;
   const ez = 16;
@@ -175,7 +175,7 @@ export function streamVelocityAt(x: number, z: number, out: THREE.Vector2): THRE
   const lx = x - 1.2;
   const lz = z + 1.6;
   const lr = Math.hypot(lx, lz) || 1;
-  if (lr < 10.5) {
+  if (lr < 11.5) {
     const swirlX = (-lz / lr) * 0.16 + 0.14;
     const swirlZ = (lx / lr) * 0.12 + 0.04;
     return out.set(swirlX, swirlZ);
@@ -187,18 +187,18 @@ export function streamVelocityAt(x: number, z: number, out: THREE.Vector2): THRE
 
 /**
  * Lake signed distance (negative inside lake)
- * Compact jewel-like central courtyard mirror-lake so all 5 buildings frame the water up close
+ * Tranquil, open central mirror-lake giving generous breathing room between all 5 buildings
  */
 export function lakeSignedDist(x: number, z: number): number {
-  const lx = (x - 1.2) / 5.9;
-  const lz = (z + 1.6) / 4.5;
-  const wobble = Math.sin(x * 0.28 + z * 0.21) * 0.08 + Math.cos(x * 0.17 - z * 0.31) * 0.06;
-  return (Math.hypot(lx, lz) - 1.0 + wobble) * 6.4;
+  const lx = (x - 1.2) / 7.6;
+  const lz = (z + 1.6) / 5.2;
+  const wobble = Math.sin(x * 0.28 + z * 0.21) * 0.09 + Math.cos(x * 0.17 - z * 0.31) * 0.07;
+  return (Math.hypot(lx, lz) - 1.0 + wobble) * 7.2;
 }
 
 /**
- * Curved natural garden stone footpath: foreground meadow -> SW bridgehead -> NE bridgehead -> lakeside terrace
- * Routed cleanly with dedicated cobblestone spurs to all 5 buildings (Phone Booth sits 3.7m off the road in its flower alcove!)
+ * Curved natural garden stone footpath: foreground meadow -> SW shore -> bridgehead -> north walk -> lakeside pavilion
+ * Spacious routing with dedicated spurs to all 5 buildings (Phone Booth sits 4.4m cleanly off the main path!)
  */
 export function gardenPathFactor(x: number, z: number): number {
   const segDist = (ax: number, az: number, bx: number, bz: number) => {
@@ -208,27 +208,27 @@ export function gardenPathFactor(x: number, z: number): number {
     return Math.hypot(x - (ax + sdx * st), z - (az + sdz * st));
   };
 
-  // Segment 1: Foreground entry (1.6, 16.8) -> courtyard plaza (1.4, 7.8) -> SW shore (-4.2, 4.2) -> SW bridge landing (bankA)
-  const dEntry = segDist(1.6, 16.8, 1.4, 7.8);
-  const dWestCurve = segDist(1.4, 7.8, -4.2, 4.2);
-  const dToBridge = segDist(-4.2, 4.2, BRIDGE_CONFIG.bankAX, BRIDGE_CONFIG.bankAZ);
+  // Segment 1: Foreground entry (0.4, 18.5) -> open courtyard fork (0.4, 9.6) -> SW shore (-6.2, 5.0) -> SW bridge landing
+  const dEntry = segDist(0.4, 18.5, 0.4, 9.6);
+  const dWestCurve = segDist(0.4, 9.6, -6.2, 5.0);
+  const dToBridge = segDist(-6.2, 5.0, BRIDGE_CONFIG.bankAX, BRIDGE_CONFIG.bankAZ);
 
-  // Segment 2: NE bridge landing (bankB) -> north waterfront AI Center (-0.2, -9.0) -> Music Hall (7.0, -5.8)
-  const dNorthWalk = segDist(BRIDGE_CONFIG.bankBX, BRIDGE_CONFIG.bankBZ, -0.2, -7.2);
-  const dToMusic = segDist(-0.2, -7.2, 6.2, -5.6);
+  // Segment 2: NE bridge landing -> north waterfront AI Center (0.0, -10.8) -> Music Hall (9.8, -6.2)
+  const dNorthWalk = segDist(BRIDGE_CONFIG.bankBX, BRIDGE_CONFIG.bankBZ, 0.0, -8.8);
+  const dToMusic = segDist(0.0, -8.8, 8.6, -6.2);
 
   // Landing aprons right at both ends of the bridge
   const dBankA = Math.hypot(x - BRIDGE_CONFIG.bankAX, z - BRIDGE_CONFIG.bankAZ) * 0.85;
   const dBankB = Math.hypot(x - BRIDGE_CONFIG.bankBX, z - BRIDGE_CONFIG.bankBZ) * 0.85;
 
   // Dedicated stone spur trails branching cleanly off the main footpath to each building's terrace
-  const dSpurLib = segDist(-4.2, 4.2, -6.4, 0.8) + 0.22;
-  const dSpurBooth = segDist(1.4, 8.4, -0.9, 8.4) + 0.28;
-  const dBoothAlcove = Math.hypot(x + 2.2, z - 8.4) * 0.88;
-  const dSpurLang = segDist(1.4, 7.6, 4.6, 6.2) + 0.22;
+  const dSpurLib = segDist(-6.2, 5.0, -8.6, 2.2) + 0.22;
+  const dSpurBooth = segDist(0.4, 9.8, -2.8, 9.8) + 0.28;
+  const dBoothAlcove = Math.hypot(x + 4.2, z - 9.8) * 0.88;
+  const dSpurLang = segDist(0.4, 9.2, 6.8, 7.2) + 0.22;
 
   const d = Math.min(dEntry, dWestCurve, dToBridge, dNorthWalk, dToMusic, dBankA, dBankB, dSpurLib, dSpurBooth, dBoothAlcove, dSpurLang);
-  return 1 - smoothstep(0.62, 1.72, d);
+  return 1 - smoothstep(0.62, 1.78, d);
 }
 
 export interface TerrainBiomeSample {
@@ -259,26 +259,26 @@ export function sampleTerrainBiome(x: number, z: number): TerrainBiomeSample {
     h = THREE.MathUtils.lerp(h, basinBottom, lakeCarve);
   }
 
-  // Sculpted dry elevated terrace pads for ALL 5 enlarged courtyard buildings:
-  // Music Hall (7.0, -5.8), Library (-7.0, -0.4), Language Center (5.4, 6.0),
-  // AI Center (-0.2, -9.0), and Roadside Phone Booth Alcove (-2.2, 8.4)
-  const pavDist = Math.hypot(x - 7.0, z + 5.8);
-  const pavFlat = 1 - smoothstep(3.2, 6.2, pavDist);
-  h = THREE.MathUtils.lerp(h, 1.08, pavFlat);
+  // Spacious dry elevated terrace pads with 10-16m breathing room between all 5 buildings:
+  // Music Hall (9.8, -6.2), Library (-9.8, 1.6), Language Center (8.2, 6.8),
+  // AI Center (0.0, -10.8), and Roadside Phone Booth Alcove (-4.2, 9.8)
+  const pavDist = Math.hypot(x - 9.8, z + 6.2);
+  const pavFlat = 1 - smoothstep(3.1, 6.1, pavDist);
+  h = THREE.MathUtils.lerp(h, 1.06, pavFlat);
 
-  const restDist = Math.hypot(x + 7.0, z + 0.4);
-  const restFlat = 1 - smoothstep(2.9, 5.4, restDist);
-  h = THREE.MathUtils.lerp(h, 1.38, restFlat);
+  const restDist = Math.hypot(x + 9.8, z - 1.6);
+  const restFlat = 1 - smoothstep(2.7, 5.2, restDist);
+  h = THREE.MathUtils.lerp(h, 1.36, restFlat);
 
-  const langDist = Math.hypot(x - 5.4, z - 6.0);
-  const langFlat = 1 - smoothstep(2.9, 5.4, langDist);
+  const langDist = Math.hypot(x - 8.2, z - 6.8);
+  const langFlat = 1 - smoothstep(2.8, 5.3, langDist);
   h = THREE.MathUtils.lerp(h, 1.24, langFlat);
 
-  const aiDist = Math.hypot(x + 0.2, z + 9.0);
-  const aiFlat = 1 - smoothstep(3.4, 6.2, aiDist);
-  h = THREE.MathUtils.lerp(h, 1.32, aiFlat);
+  const aiDist = Math.hypot(x - 0.0, z + 10.8);
+  const aiFlat = 1 - smoothstep(3.2, 6.0, aiDist);
+  h = THREE.MathUtils.lerp(h, 1.26, aiFlat);
 
-  const boothDist = Math.hypot(x + 2.2, z - 8.4);
+  const boothDist = Math.hypot(x + 4.2, z - 9.8);
   const boothFlat = 1 - smoothstep(1.8, 3.6, boothDist);
   h = THREE.MathUtils.lerp(h, 0.96, boothFlat);
 

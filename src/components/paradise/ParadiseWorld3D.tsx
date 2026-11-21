@@ -47,18 +47,18 @@ interface CameraPreset {
 }
 
 const CAMERA_PRESETS: CameraPreset[] = [
-  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [0.0, 7.6, 20.4], target: [0.0, 2.2, 0.0] },
+  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [0.0, 9.6, 25.4], target: [0.0, 1.8, -0.4] },
   {
     id: 'bridge',
     zh: '溪桥',
     en: 'Bridge',
-    pos: [BRIDGE_CONFIG.centerX + 5.4, 3.8, BRIDGE_CONFIG.centerZ + 10.6],
+    pos: [BRIDGE_CONFIG.centerX + 5.6, 3.8, BRIDGE_CONFIG.centerZ + 10.8],
     target: [BRIDGE_CONFIG.centerX, 1.25, BRIDGE_CONFIG.centerZ],
   },
-  { id: 'library', zh: '图书馆', en: 'Library', pos: [-2.8, 4.2, 8.8], target: [-7.0, 2.4, -0.4] },
-  { id: 'language', zh: '语言中心', en: 'Language', pos: [1.4, 4.0, 14.6], target: [5.4, 2.3, 6.0] },
-  { id: 'pavilion', zh: '音乐馆', en: 'Music Hall', pos: [2.2, 4.6, 3.6], target: [7.0, 2.9, -5.8] },
-  { id: 'aihub', zh: 'AI 中心', en: 'AI Center', pos: [-0.2, 4.8, 1.2], target: [-0.2, 2.8, -9.0] },
+  { id: 'library', zh: '图书馆', en: 'Library', pos: [-4.8, 4.2, 11.4], target: [-9.8, 2.3, 1.6] },
+  { id: 'language', zh: '语言中心', en: 'Language', pos: [3.6, 4.0, 15.8], target: [8.2, 2.2, 6.8] },
+  { id: 'pavilion', zh: '音乐馆', en: 'Music Hall', pos: [4.2, 4.6, 4.2], target: [9.8, 2.7, -6.2] },
+  { id: 'aihub', zh: 'AI 中心', en: 'AI Center', pos: [0.0, 4.8, 0.2], target: [0.0, 2.6, -10.8] },
 ];
 
 const BUILDING_LANDMARKS: ReadonlyArray<{
@@ -76,15 +76,15 @@ const BUILDING_LANDMARKS: ReadonlyArray<{
 
 function getResponsiveCameraConfig(aspect: number): { fov: number; distScale: number } {
   if (aspect < 0.72) {
-    // Portrait phone: wide enough to show all 5 enlarged houses simultaneously at close-up scale
-    return { fov: 60, distScale: 1.2 };
+    // Portrait phone: expanded panoramic lens so all 5 spaciously separated houses fit immediately in one screen
+    return { fov: 68, distScale: 1.32 };
   }
   if (aspect < 1.05) {
     // Portrait / square tablet (e.g. iPad portrait)
-    return { fov: 48, distScale: 1.08 };
+    return { fov: 62, distScale: 1.18 };
   }
-  // Landscape tablet / desktop: close-up enlarged courtyard presence
-  return { fov: 42, distScale: 1.0 };
+  // Landscape tablet / desktop: expanded wide-screen panoramic vista showing the entire spacious garden upfront
+  return { fov: 54, distScale: 1.0 };
 }
 
 const QUALITY_OPTIONS: Array<{ id: UserQualityChoice; zh: string; en: string }> = [
@@ -167,8 +167,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     weather: 'clear',
     autoWeather: false,
     hasCam: false,
-    camPos: new THREE.Vector3(0.0, 7.6, 20.4),
-    camTarget: new THREE.Vector3(0.0, 2.2, 0.0),
+    camPos: new THREE.Vector3(0.0, 9.6, 25.4),
+    camTarget: new THREE.Vector3(0.0, 1.8, -0.4),
   });
 
   const cameraMoveRef = useRef<{
@@ -177,8 +177,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     targetLook: THREE.Vector3;
   }>({
     active: false,
-    targetPos: new THREE.Vector3(0.0, 7.6, 20.4),
-    targetLook: new THREE.Vector3(0.0, 2.2, 0.0),
+    targetPos: new THREE.Vector3(0.0, 9.6, 25.4),
+    targetLook: new THREE.Vector3(0.0, 1.8, -0.4),
   });
 
   const [locating, setLocating] = useState(false);
@@ -529,8 +529,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     if (persistedRef.current.hasCam) {
       camera.position.copy(persistedRef.current.camPos);
     } else {
-      const baseTarget = new THREE.Vector3(0.0, 2.2, 0.0);
-      const basePos = new THREE.Vector3(0.0, 7.6, 20.4);
+      const baseTarget = new THREE.Vector3(0.0, 1.8, -0.4);
+      const basePos = new THREE.Vector3(0.0, 9.6, 25.4);
       basePos.sub(baseTarget).multiplyScalar(camCfg.distScale).add(baseTarget);
       camera.position.copy(basePos);
     }
@@ -546,14 +546,14 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       ONE: THREE.TOUCH.ROTATE,
       TWO: THREE.TOUCH.DOLLY_PAN,
     };
-    controls.minDistance = 5.0;
-    controls.maxDistance = 38.0;
+    controls.minDistance = 5.5;
+    controls.maxDistance = 46.0;
     controls.minPolarAngle = Math.PI * 0.14;
     controls.maxPolarAngle = Math.PI * 0.465;
     if (persistedRef.current.hasCam) {
       controls.target.copy(persistedRef.current.camTarget);
     } else {
-      controls.target.set(0.0, 2.2, 0.0);
+      controls.target.set(0.0, 1.8, -0.4);
     }
     controls.update();
 

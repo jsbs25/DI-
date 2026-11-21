@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import type { ParadiseQualityProfile, ProceduralTextureSet } from './paradiseQuality.ts';
 import { BRIDGE_CONFIG, gardenPathFactor, terrainHeightAt } from './paradiseTerrain.ts';
 
-export const PAVILION_WORLD_POS = new THREE.Vector3(7.0, terrainHeightAt(7.0, -5.8) + 0.82, -5.8);
-export const REST_HOUSE_WORLD_POS = new THREE.Vector3(-7.0, terrainHeightAt(-7.0, -0.4) + 0.42, -0.4);
-export const LANGUAGE_HOUSE_WORLD_POS = new THREE.Vector3(5.4, terrainHeightAt(5.4, 6.0) + 0.42, 6.0);
-export const AI_HOUSE_WORLD_POS = new THREE.Vector3(-0.2, terrainHeightAt(-0.2, -9.0) + 0.48, -9.0);
-export const PHONE_BOOTH_WORLD_POS = new THREE.Vector3(-2.2, terrainHeightAt(-2.2, 8.4) + 0.28, 8.4);
+export const PAVILION_WORLD_POS = new THREE.Vector3(9.8, terrainHeightAt(9.8, -6.2) + 0.74, -6.2);
+export const REST_HOUSE_WORLD_POS = new THREE.Vector3(-9.8, terrainHeightAt(-9.8, 1.6) + 0.38, 1.6);
+export const LANGUAGE_HOUSE_WORLD_POS = new THREE.Vector3(8.2, terrainHeightAt(8.2, 6.8) + 0.38, 6.8);
+export const AI_HOUSE_WORLD_POS = new THREE.Vector3(0.0, terrainHeightAt(0.0, -10.8) + 0.44, -10.8);
+export const PHONE_BOOTH_WORLD_POS = new THREE.Vector3(-4.2, terrainHeightAt(-4.2, 9.8) + 0.26, 9.8);
 
 export type ArchitecturePortalId = 'library' | 'arabic-learning' | 'aihub' | 'chat' | 'venus';
 
@@ -508,12 +508,12 @@ export function createParadiseArchitecture(
   };
 
   // =========================================================================
-  // 1. Waterside Double-Eave Timber Pavilion (音乐馆) at (7.0, y, -5.8)
+  // 1. Waterside Double-Eave Timber Pavilion (音乐馆) at (9.8, y, -6.2)
   // =========================================================================
   const pav = new THREE.Group();
-  const pavX = 7.0;
-  const pavZ = -5.8;
-  const pavScale = 1.3;
+  const pavX = 9.8;
+  const pavZ = -6.2;
+  const pavScale = 1.18;
   const pavBaseY = terrainHeightAt(pavX, pavZ);
   pav.position.set(pavX, pavBaseY, pavZ);
   pav.rotation.y = -0.36; // angled cleanly toward lake & Overlook viewer so plaque reads sharply
@@ -1084,13 +1084,13 @@ export function createParadiseArchitecture(
     [-23.6, -19.2, 2.2, 1.7, 2.0],
     [-16.2, -19.0, 1.85, 1.35, 0.8],
     [-11.5, -13.0, 1.65, 1.15, 1.7],
-    [-10.8, -6.5, 1.35, 0.88, 2.3],
-    [-4.8, -11.4, 1.25, 0.86, 0.4],
-    [10.8, -2.6, 1.4, 0.85, 2.8],
-    [12.2, 1.6, 1.5, 0.92, 0.6],
-    [10.2, 5.2, 1.3, 0.78, 1.5],
-    [-4.2, 2.4, 1.1, 0.68, 2.1],
-    [4.6, 2.4, 1.15, 0.68, 0.9],
+    [-11.8, -6.5, 1.35, 0.88, 2.3],
+    [-4.8, -12.6, 1.25, 0.86, 0.4],
+    [13.4, -2.6, 1.4, 0.85, 2.8],
+    [14.2, 2.0, 1.5, 0.92, 0.6],
+    [12.4, 6.2, 1.3, 0.78, 1.5],
+    [-5.4, 3.2, 1.1, 0.68, 2.1],
+    [5.8, 3.4, 1.15, 0.68, 0.9],
   ];
 
   for (let idx = 0; idx < rockDefs.length; idx++) {
@@ -1144,12 +1144,12 @@ export function createParadiseArchitecture(
   }
 
   // =========================================================================
-  // 5. Realistic East-Asian Library Cottage (图书馆) at (-7.0, y, -0.4)
+  // 5. Realistic East-Asian Library Cottage (图书馆) at (-9.8, y, 1.6)
   // =========================================================================
   const restHouseGroup = new THREE.Group();
-  const rhX = -7.0;
-  const rhZ = -0.4;
-  const rhScale = 1.28;
+  const rhX = -9.8;
+  const rhZ = 1.6;
+  const rhScale = 1.15;
   const rhBaseY = terrainHeightAt(rhX, rhZ);
   restHouseGroup.position.set(rhX, rhBaseY, rhZ);
   restHouseGroup.rotation.y = 0.38; // face southeast cleanly toward viewer & main courtyard
@@ -1469,12 +1469,12 @@ export function createParadiseArchitecture(
 
   // =========================================================================
   // 6. Warm Sand-Plaster & Arched Language Center Hall (语言中心)
-  //    at (5.4, y, 6.0) — right-foreground flower terrace facing camera & path
+  //    at (8.2, y, 6.8) — right-foreground sunlit flower meadow
   // =========================================================================
   const langHouseGroup = new THREE.Group();
-  const lhX = 5.4;
-  const lhZ = 6.0;
-  const lhScale = 1.28;
+  const lhX = 8.2;
+  const lhZ = 6.8;
+  const lhScale = 1.16;
   const lhBaseY = terrainHeightAt(lhX, lhZ);
   langHouseGroup.position.set(lhX, lhBaseY, lhZ);
   langHouseGroup.rotation.y = -0.34; // angled cleanly toward viewer & foreground path
@@ -1654,12 +1654,12 @@ export function createParadiseArchitecture(
 
   // =========================================================================
   // 7. Starlight Timber-and-Glass AI Atelier (AI 中心)
-  //    at (-0.2, y, -9.0) — hero north lakeside terrace right across the mirror-lake
+  //    at (0.0, y, -10.8) — hero north lakeside terrace right across the mirror-lake
   // =========================================================================
   const aiHouseGroup = new THREE.Group();
-  const aiX = -0.2;
-  const aiZ = -9.0;
-  const aiScale = 1.34;
+  const aiX = 0.0;
+  const aiZ = -10.8;
+  const aiScale = 1.22;
   const aiBaseY = terrainHeightAt(aiX, aiZ);
   aiHouseGroup.position.set(aiX, aiBaseY, aiZ);
   aiHouseGroup.rotation.y = 0.02; // face south straight across lake toward viewer
@@ -1787,15 +1787,15 @@ export function createParadiseArchitecture(
 
   // =========================================================================
   // 8. Classic Heritage Red Telephone Booth (通讯 · 电话亭)
-  //    at (-2.2, y, 8.4) — nestled in a landscaped roadside cobblestone flower alcove 3.6m off the footpath!
+  //    at (-4.2, y, 9.8) — nestled in a landscaped roadside cobblestone flower alcove 4.4m off the footpath!
   // =========================================================================
   const phoneBoothGroup = new THREE.Group();
-  const pbX = -2.2;
-  const pbZ = 8.4;
-  const pbScale = 1.24;
+  const pbX = -4.2;
+  const pbZ = 9.8;
+  const pbScale = 1.14;
   const pbBaseY = terrainHeightAt(pbX, pbZ);
   phoneBoothGroup.position.set(pbX, pbBaseY, pbZ);
-  phoneBoothGroup.rotation.y = 0.2; // face viewer & lane gracefully from its dedicated side alcove
+  phoneBoothGroup.rotation.y = 0.22; // face viewer & lane gracefully from its dedicated side alcove
   phoneBoothGroup.scale.setScalar(pbScale);
 
   const boothRedMat = trackMat(
