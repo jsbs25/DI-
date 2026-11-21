@@ -81,12 +81,13 @@ function applyBacklitFoliageNormalPatch(mat: THREE.MeshStandardMaterial) {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <normal_fragment_begin>',
       `
-      float faceDirection = 1.0;
-      vec3 normal = normalize( vNormal );
+      #include <normal_fragment_begin>
+      normal = normalize( vNormal );
+      nonPerturbedNormal = normal;
       `
     );
   };
-  mat.customProgramCacheKey = () => 'one_intro_backlit_foliage_v1';
+  mat.customProgramCacheKey = () => 'one_intro_backlit_foliage_v2';
 }
 
 function buildIntroTerrainGeometry(segments: number): THREE.BufferGeometry {
