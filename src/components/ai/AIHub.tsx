@@ -23,6 +23,7 @@ import {
   Edit3,
   ImagePlus,
   Languages,
+  Loader2,
   Lock,
   Mic,
   MicOff,
@@ -581,40 +582,38 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
   ];
 
   return (
-    <div className="flex h-[calc(100dvh-8.4rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-h-[500px] flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
-      {/* Minimal Clean Top Bar */}
-      <div className="mx-auto flex w-full max-w-[820px] shrink-0 flex-wrap items-center justify-between gap-2 px-3 pb-2.5 pt-1 sm:px-6">
-        <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none]">
-          <div className="inline-flex items-center rounded-full border border-[var(--color-one-border)] bg-[var(--color-one-surface)] p-0.5">
-            {modes.map((m) => {
-              const Icon = m.icon;
-              const active = capabilityMode === m.id;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setCapabilityMode(m.id)}
-                  className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                    active
-                      ? 'bg-[#247864] text-white dark:bg-[#e5d9be] dark:text-[#141d28]'
-                      : 'text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
-                  }`}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  <span>{m.label}</span>
-                </button>
-              );
-            })}
-          </div>
+    <div className="flex h-[calc(100dvh-3.75rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-h-[500px] flex-col bg-[var(--color-one-bg)] text-[var(--color-one-text)]">
+      {/* Clean Editorial Hairline Top Bar with Underline Mode Tabs */}
+      <div className="mx-auto flex w-full max-w-[820px] shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--color-one-border)] px-3 pb-0 pt-1 sm:px-6">
+        <div className="flex items-center gap-1 overflow-x-auto [scrollbar-width:none]">
+          {modes.map((m) => {
+            const Icon = m.icon;
+            const active = capabilityMode === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setCapabilityMode(m.id)}
+                className={`inline-flex h-10 items-center gap-1.5 border-b-2 px-3 text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                  active
+                    ? 'border-[#247864] text-[#247864] dark:border-[#d6b77f] dark:text-[#d6b77f]'
+                    : 'border-transparent text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span>{m.label}</span>
+              </button>
+            );
+          })}
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 pb-1.5">
           <button
             type="button"
             onClick={() => setShowMemoryDrawer((v) => !v)}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition-colors cursor-pointer ${
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors cursor-pointer ${
               showMemoryDrawer
-                ? 'border-[#247864] bg-[#247864]/12 text-[#247864] dark:border-[#d6b77f] dark:bg-[#d6b77f]/15 dark:text-[#d6b77f]'
+                ? 'border-[#247864]/45 bg-[#247864]/10 text-[#247864] dark:border-[#d6b77f]/45 dark:bg-[#d6b77f]/12 dark:text-[#d6b77f]'
                 : 'border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
             }`}
             title={isZh ? '长期记忆' : 'Long-term memory'}
@@ -626,9 +625,9 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           <button
             type="button"
             onClick={() => setStrictPrivacyMode((v) => !v)}
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors cursor-pointer ${
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors cursor-pointer ${
               strictPrivacyMode
-                ? 'border-[#247864] bg-[#247864]/12 text-[#247864] dark:border-[#52b798] dark:text-[#52b798]'
+                ? 'border-[#247864]/45 bg-[#247864]/10 text-[#247864] dark:border-[#52b798]/45 dark:text-[#52b798]'
                 : 'border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
             }`}
             title={strictPrivacyMode ? (isZh ? '隐私无痕模式已开启' : 'Strict privacy active') : (isZh ? '切换隐私无痕模式' : 'Toggle privacy mode')}
@@ -639,9 +638,9 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
           <button
             type="button"
             onClick={() => setVoiceOutput((v) => !v)}
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors cursor-pointer ${
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors cursor-pointer ${
               voiceOutput
-                ? 'border-[#247864] bg-[#247864]/12 text-[#247864] dark:border-[#52b798] dark:text-[#52b798]'
+                ? 'border-[#247864]/45 bg-[#247864]/10 text-[#247864] dark:border-[#52b798]/45 dark:text-[#52b798]'
                 : 'border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)]'
             }`}
             title={isZh ? '自动语音朗读' : 'Auto voice readback'}
@@ -653,7 +652,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             <button
               type="button"
               onClick={() => setShowAdminConsole(true)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)] cursor-pointer"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)] cursor-pointer"
               title={isZh ? '调度控制台' : 'Router Admin'}
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -664,7 +663,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
             <button
               type="button"
               onClick={handleClearChat}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)] cursor-pointer"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-one-border)] bg-[var(--color-one-surface)] text-[var(--color-one-text-muted)] hover:text-[var(--color-one-text)] cursor-pointer"
               title={isZh ? '开启新对话' : 'New thread'}
             >
               <RotateCcw className="h-3.5 w-3.5" />
@@ -866,7 +865,7 @@ export const AIHub: React.FC<AIHubProps> = ({ lang }) => {
 
               {isLoading && !streamingMessageId && (
                 <div className="flex items-center gap-2 text-sm text-[var(--color-one-text-muted)]">
-                  <Sparkles className="h-4 w-4 text-[var(--color-one-accent)] animate-pulse" />
+                  <Loader2 className="h-4 w-4 text-[var(--color-one-accent)] animate-spin" />
                   <span>{isZh ? '正在思考…' : 'Thinking…'}</span>
                 </div>
               )}

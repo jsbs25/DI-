@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { ChevronDown, ChevronUp, Compass, Download, Loader2, LocateFixed, MapPin, Radio, RotateCcw, Search, SlidersHorizontal, SunMedium, Wind, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Compass, Download, Loader2, LocateFixed, Radio, RotateCcw, Search, SlidersHorizontal, SunMedium, Wind, X } from 'lucide-react';
 import type { Language } from '../../types/index.ts';
 import { uiStateManager, useAgentUiState } from '../../agent/uiStateManager.ts';
 import {
@@ -25,7 +25,7 @@ import {
   type TimePreset,
   type WeatherKind,
 } from './paradiseEnvironment.ts';
-import { createParadiseTerrain, terrainHeightAt } from './paradiseTerrain.ts';
+import { BRIDGE_CONFIG, createParadiseTerrain, terrainHeightAt } from './paradiseTerrain.ts';
 import { createParadiseArchitecture } from './paradiseArchitecture.ts';
 import { createParadiseFlora } from './paradiseFlora.ts';
 import { createParadiseFauna } from './paradiseFauna.ts';
@@ -36,7 +36,7 @@ import { createParadiseCat } from './paradiseCat.ts';
 import { triggerImageDownload } from './SpiritSpeechBubble.tsx';
 import { LiveLanguageStudio } from '../learning/LiveLanguageStudio.tsx';
 
-type CameraPresetId = 'overlook' | 'bridge' | 'blossoms' | 'pavilion';
+type CameraPresetId = 'overlook' | 'bridge' | 'library' | 'pavilion' | 'aihub' | 'language';
 
 interface CameraPreset {
   id: CameraPresetId;
@@ -47,23 +47,31 @@ interface CameraPreset {
 }
 
 const CAMERA_PRESETS: CameraPreset[] = [
-  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [-4.5, 8.2, 23.5], target: [2.5, 1.8, -2.5] },
-  { id: 'bridge', zh: '溪桥', en: 'Bridge', pos: [-2.2, 4.2, 5.8], target: [-6.4, 1.3, -8.4] },
-  { id: 'blossoms', zh: '银杏樱林', en: 'Ginkgo & Sakura', pos: [-11.2, 3.8, 15.2], target: [3.2, 2.2, 1.2] },
-  { id: 'pavilion', zh: '亭台', en: 'Pavilion', pos: [3.2, 4.2, 5.2], target: [12.8, 2.6, -7.8] },
+  { id: 'overlook', zh: '全景', en: 'Overlook', pos: [0.0, 9.6, 25.4], target: [0.0, 1.8, -0.4] },
+  {
+    id: 'bridge',
+    zh: '溪桥',
+    en: 'Bridge',
+    pos: [BRIDGE_CONFIG.centerX + 5.6, 3.8, BRIDGE_CONFIG.centerZ + 10.8],
+    target: [BRIDGE_CONFIG.centerX, 1.25, BRIDGE_CONFIG.centerZ],
+  },
+  { id: 'library', zh: '图书馆', en: 'Library', pos: [-4.8, 4.2, 11.4], target: [-9.8, 2.3, 1.6] },
+  { id: 'language', zh: '语言中心', en: 'Language', pos: [3.6, 4.0, 15.8], target: [8.2, 2.2, 6.8] },
+  { id: 'pavilion', zh: '音乐馆', en: 'Music Hall', pos: [4.2, 4.6, 4.2], target: [9.8, 2.7, -6.2] },
+  { id: 'aihub', zh: 'AI 中心', en: 'AI Center', pos: [0.0, 4.8, 0.2], target: [0.0, 2.6, -10.8] },
 ];
 
 function getResponsiveCameraConfig(aspect: number): { fov: number; distScale: number } {
   if (aspect < 0.72) {
-    // Portrait phone: balanced FOV so garden foreground & trees frame naturally without excess sky
-    return { fov: 46, distScale: 1.16 };
+    // Portrait phone: expanded panoramic lens so all 5 spaciously separated houses fit immediately in one screen
+    return { fov: 68, distScale: 1.32 };
   }
   if (aspect < 1.05) {
     // Portrait / square tablet (e.g. iPad portrait)
-    return { fov: 42, distScale: 1.08 };
+    return { fov: 62, distScale: 1.18 };
   }
-  // Landscape tablet / desktop
-  return { fov: 40, distScale: 1.0 };
+  // Landscape tablet / desktop: expanded wide-screen panoramic vista showing the entire spacious garden upfront
+  return { fov: 54, distScale: 1.0 };
 }
 
 const QUALITY_OPTIONS: Array<{ id: UserQualityChoice; zh: string; en: string }> = [
@@ -92,17 +100,21 @@ function readStoredQuality(): UserQualityChoice {
 
 interface ParadiseWorld3DProps {
   lang: Language;
+  onSelectTab?: (tab: string) => void;
   immersive?: boolean;
   onImmersiveChange?: (v: boolean) => void;
 }
 
 export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   lang,
+  onSelectTab,
   immersive = false,
   onImmersiveChange,
 }) => {
   const isZh = lang === 'zh';
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const onSelectTabRef = useRef(onSelectTab);
+  onSelectTabRef.current = onSelectTab;
 
   const agentSnap = useAgentUiState();
   const [webglReady, setWebglReady] = useState<boolean>(() => detectWebGLSupport());
@@ -140,8 +152,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     weather: 'clear',
     autoWeather: false,
     hasCam: false,
-    camPos: new THREE.Vector3(-4.5, 8.2, 23.5),
-    camTarget: new THREE.Vector3(2.5, 1.4, -2.5),
+    camPos: new THREE.Vector3(0.0, 9.6, 25.4),
+    camTarget: new THREE.Vector3(0.0, 1.8, -0.4),
   });
 
   const cameraMoveRef = useRef<{
@@ -150,8 +162,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     targetLook: THREE.Vector3;
   }>({
     active: false,
-    targetPos: new THREE.Vector3(-4.5, 8.2, 23.5),
-    targetLook: new THREE.Vector3(2.5, 1.4, -2.5),
+    targetPos: new THREE.Vector3(0.0, 9.6, 25.4),
+    targetLook: new THREE.Vector3(0.0, 1.8, -0.4),
   });
 
   const [locating, setLocating] = useState(false);
@@ -166,6 +178,30 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // Sync browser status-bar theme-color & document backdrop while 3D Garden is active
+  // so iPhone / iPad top notch safe-area matches the deep sky and NEVER flashes white glare.
+  const isGardenDayTheme = agentSnap.gardenDaylight > 0.44;
+  useEffect(() => {
+    const skyColor = isGardenDayTheme ? '#1e4f94' : '#091322';
+    const metaTags = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'));
+    const prevMetaValues = metaTags.map((m) => m.getAttribute('content'));
+    metaTags.forEach((m) => m.setAttribute('content', skyColor));
+
+    const prevHtmlBg = document.documentElement.style.backgroundColor;
+    const prevBodyBg = document.body.style.backgroundColor;
+    document.documentElement.style.backgroundColor = skyColor;
+    document.body.style.backgroundColor = skyColor;
+
+    return () => {
+      metaTags.forEach((m, idx) => {
+        const orig = prevMetaValues[idx];
+        if (orig !== null) m.setAttribute('content', orig);
+      });
+      document.documentElement.style.backgroundColor = prevHtmlBg;
+      document.body.style.backgroundColor = prevBodyBg;
+    };
+  }, [isGardenDayTheme]);
 
   // Real-time external weather & standard location fetcher (GPS -> saved -> IP -> IANA timezone)
   const fetchLiveWeather = async (useGeoPrompt = false, customCity?: string) => {
@@ -348,80 +384,6 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     }
   }, [agentSnap.weatherCommand]);
 
-  // Subtle, quiet feature-reminder whispers from the butterfly while idling
-  useEffect(() => {
-    const promptsZh = [
-      {
-        text: '图书馆收录了全球典籍，点上方即可静心阅读。',
-        quickActions: [{ label: '去图书馆', action: 'open_library' as const }],
-      },
-      {
-        text: '想听歌随时告诉我，我会直接在这里为你播放。',
-        quickActions: [{ label: '听轻音乐', action: 'play_music' as const }],
-      },
-      {
-        text: '上方可随时进入语言学习中心、通讯或音乐空间。',
-        quickActions: [],
-      },
-    ];
-    const promptsEn = [
-      {
-        text: 'World Library is right above whenever you want to read.',
-        quickActions: [{ label: 'Library', action: 'open_library' as const }],
-      },
-      {
-        text: 'Ask for music anytime and I will play it right here.',
-        quickActions: [{ label: 'Play Music', action: 'play_music' as const }],
-      },
-      {
-        text: 'Use the top bar for Library, Language, Comm, or Music.',
-        quickActions: [],
-      },
-    ];
-
-    let idx = 0;
-    let hideTimer: number | null = null;
-    const scheduleNext = () => {
-      const snap = uiStateManager.getSnapshot();
-      const busy =
-        snap.liveVoiceActive ||
-        snap.voiceListening ||
-        snap.musicPlaying ||
-        snap.commDrawerOpen ||
-        snap.languageStudioOpen ||
-        Boolean(snap.spiritBubble?.visible) ||
-        Boolean(snap.pendingConfirmation);
-      if (busy) return;
-
-      const list = lang === 'zh' ? promptsZh : promptsEn;
-      const item = list[idx % list.length];
-      idx += 1;
-      uiStateManager.setSpiritBubble({
-        visible: true,
-        isLoading: false,
-        isAmbientHint: true,
-        badge: '',
-        text: item.text,
-        quickActions: item.quickActions,
-      });
-      if (hideTimer) window.clearTimeout(hideTimer);
-      hideTimer = window.setTimeout(() => {
-        const cur = uiStateManager.getSnapshot().spiritBubble;
-        if (cur?.visible && cur.isAmbientHint) {
-          uiStateManager.hideSpiritBubble();
-        }
-      }, 7500);
-    };
-
-    const initialTimer = window.setTimeout(scheduleNext, 16000);
-    const interval = window.setInterval(scheduleNext, 48000);
-    return () => {
-      window.clearTimeout(initialTimer);
-      window.clearInterval(interval);
-      if (hideTimer) window.clearTimeout(hideTimer);
-    };
-  }, [lang]);
-
   useEffect(() => {
     if (!webglReady) return;
     const container = stageRef.current;
@@ -478,8 +440,8 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     if (persistedRef.current.hasCam) {
       camera.position.copy(persistedRef.current.camPos);
     } else {
-      const baseTarget = new THREE.Vector3(2.5, 1.4, -2.5);
-      const basePos = new THREE.Vector3(-4.5, 8.2, 23.5);
+      const baseTarget = new THREE.Vector3(0.0, 1.8, -0.4);
+      const basePos = new THREE.Vector3(0.0, 9.6, 25.4);
       basePos.sub(baseTarget).multiplyScalar(camCfg.distScale).add(baseTarget);
       camera.position.copy(basePos);
     }
@@ -496,13 +458,13 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       TWO: THREE.TOUCH.DOLLY_PAN,
     };
     controls.minDistance = 5.5;
-    controls.maxDistance = 44.0;
+    controls.maxDistance = 46.0;
     controls.minPolarAngle = Math.PI * 0.14;
     controls.maxPolarAngle = Math.PI * 0.465;
     if (persistedRef.current.hasCam) {
       controls.target.copy(persistedRef.current.camTarget);
     } else {
-      controls.target.set(2.5, 1.4, -2.5);
+      controls.target.set(0.0, 1.8, -0.4);
     }
     controls.update();
 
@@ -584,8 +546,14 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
     scene.add(weatherFX.group);
 
     // 4. Volumetric God-Rays + Depth-Aware DOF + Subtle Bloom Post-Processing
+    // Skip HalfFloat EffectComposer on touch devices (phones/tablets) & when all post FX are off:
+    // direct MSAA rendering eliminates mobile Safari/iPadOS HalfFloat FBO white glare at the top sky!
     let postPipeline: ParadisePostPipeline | null = null;
-    if (quality.enableBloom || quality.enableGodRays || quality.enableDOF) {
+    if (
+      !quality.isSoftwareGl &&
+      !quality.isTouch &&
+      (quality.enableBloom || quality.enableGodRays || dynDofEnabled)
+    ) {
       postPipeline = createParadisePostPipeline(
         renderer,
         scene,
@@ -634,11 +602,39 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       return null;
     };
 
+    const portalGroups = architecture.portals.map((p) => p.group);
+    let hoveredPortalId: string | null = null;
+
+    const findHitPortal = () => {
+      raycaster.setFromCamera(pointerNdc, camera);
+      const hits = raycaster.intersectObjects(portalGroups, true);
+      if (hits.length === 0) return null;
+      let obj: THREE.Object3D | null = hits[0].object;
+      while (obj) {
+        const match = architecture.portals.find((p) => p.group === obj);
+        if (match) return match;
+        obj = obj.parent;
+      }
+      return null;
+    };
+
     const onPointerMove = (e: PointerEvent) => {
       const now = performance.now();
       if (now - lastRaycastMs < 40) return;
       lastRaycastMs = now;
       updateNdc(e.clientX, e.clientY);
+
+      if (e.pointerType !== 'touch') {
+        const hoveredPortal = findHitPortal();
+        const nextId = hoveredPortal ? hoveredPortal.id : null;
+        if (nextId !== hoveredPortalId) {
+          hoveredPortalId = nextId;
+          if (renderer) {
+            renderer.domElement.style.cursor = hoveredPortal ? 'pointer' : '';
+          }
+        }
+      }
+
       const hit = raycastGroundOrWater();
       if (hit) {
         pointerWorld.copy(hit.point);
@@ -665,14 +661,15 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       updateNdc(e.clientX, e.clientY);
 
       raycaster.setFromCamera(pointerNdc, camera);
-      const actorHits = raycaster.intersectObjects([spirit.hitTarget, cat.hitTarget, architecture.pavilionGroup], true);
+
+      // 1. Check Spirit Butterfly & Garden Cat first
+      const actorHits = raycaster.intersectObjects([spirit.hitTarget, cat.hitTarget], true);
       if (actorHits.length > 0) {
         const hitObj = actorHits[0].object;
         if (hitObj === cat.hitTarget) {
           weatherFX.emitPetalBurst(cat.group.position);
           return;
         }
-        // Clicked Spirit or Waterside Pavilion: wake Spirit & speak ONLY inside the overhead bubble (no duplicate HUD!)
         uiStateManager.setPavilionHudOpen(false);
         if (spiritStateRef.current === 'idle_explore' || spiritStateRef.current === 'sleeping_in_house' || spiritStateRef.current === 'returning_to_rest') {
           uiStateManager.setSpiritState('woken_approaching');
@@ -684,10 +681,18 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           badge: lang === 'zh' ? '花径伴侣' : 'Garden Companion',
           text:
             lang === 'zh'
-              ? `我在呢！你可以直接打字，或点下方「实时语音」跟我一对一聊天、练英语口语，或者让我帮你画图。`
-              : `I'm right here! Type below or tap Live Voice to talk with ${aiName}, practice speaking, or paint an image.`,
+              ? `我在呢！点击花园里的图书馆、音乐馆、语言中心、AI 中心或红色电话亭都可以直接进入，也可以直接和我聊天。`
+              : `I'm right here! Click any labeled building or the red Phone Booth to enter, or chat directly with ${aiName}.`,
         });
         weatherFX.emitPetalBurst(spirit.spiritPos);
+        return;
+      }
+
+      // 2. Check ALL 5 Architectural Landmarks & their adjacent Standing Signposts (click directly to enter)
+      const clickedPortal = findHitPortal();
+      if (clickedPortal) {
+        weatherFX.emitPetalBurst(clickedPortal.worldPos);
+        onSelectTabRef.current?.(clickedPortal.id);
         return;
       }
 
@@ -702,6 +707,10 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
 
     const onPointerLeave = () => {
       pointerActive = 0;
+      if (hoveredPortalId !== null) {
+        hoveredPortalId = null;
+        if (renderer) renderer.domElement.style.cursor = '';
+      }
     };
 
     renderer.domElement.addEventListener('pointermove', onPointerMove);
@@ -876,12 +885,23 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       lightningLight.intensity = st.lightningFlash * 3.4;
       lightningLight.position.set(st.lightningAzimuth * 30, 32, -36);
 
-      // Warm lakeside pavilion lantern, Spirit Rest Cottage hearth & rain material wetness
+      // Warm lakeside Music Pavilion lantern, Library hearth, Language Hall, AI Center & Red Phone Booth glow
       architecture.lanternLight.intensity = st.lanternGlow * 2.2;
       architecture.lanternGlassMat.emissiveIntensity = 0.12 + st.lanternGlow * 1.85;
       const spiritSleeping = spiritStateRef.current === 'sleeping_in_house' || spiritStateRef.current === 'returning_to_rest';
       architecture.restHouseLight.intensity = 0.25 + st.lanternGlow * 1.5 + (spiritSleeping ? 0.85 : 0);
       architecture.restWindowMat.emissiveIntensity = 0.18 + st.lanternGlow * 1.35 + (spiritSleeping ? 0.55 : 0);
+      for (const lgt of architecture.extraLights) {
+        lgt.intensity = 0.35 + st.lanternGlow * 1.75;
+      }
+      for (const wMat of architecture.extraWindowMats) {
+        wMat.emissiveIntensity = 0.28 + st.lanternGlow * 1.25;
+      }
+      for (const portal of architecture.portals) {
+        const isHovered = hoveredPortalId === portal.id;
+        portal.signMat.emissiveIntensity = (isHovered ? 0.66 : 0.3) + st.lanternGlow * 0.44;
+      }
+      architecture.aiCrownGroup.rotation.y = elapsed * 0.42;
       for (const mat of architecture.wettableMaterials) {
         const baseR = typeof mat.userData.baseRoughness === 'number' ? mat.userData.baseRoughness : 0.7;
         mat.roughness = THREE.MathUtils.lerp(baseR, Math.max(0.14, baseR * 0.36), st.wetness);
@@ -931,14 +951,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
       camera.getWorldDirection(camForward);
 
       // Flora, Fauna, AI Spirit, Garden Cat, Weather FX
-      flora.update(
-        elapsed,
-        reducedMotion ? st.windStrength * 0.25 : st.windStrength,
-        st.dewAmount,
-        st.nightFactor,
-        st.dayFactor,
-        st.sunDir
-      );
+      flora.update(elapsed, reducedMotion ? st.windStrength * 0.25 : st.windStrength, st.dewAmount, st.nightFactor);
       fauna.update(
         elapsed,
         dt,
@@ -1211,9 +1224,10 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
   const currentClockLabel = formatClockTime(timeOfDay);
   const activeWeatherMeta = WEATHER_OPTIONS.find((w) => w.id === activeWeather) || WEATHER_OPTIONS[0];
   const isDayUi = agentSnap.gardenDaylight > 0.44;
+  // Glare-free natural stone/obsidian surfaces (no backdrop-blur or bright white rings over WebGL)
   const dockShellCls = isDayUi
-    ? 'border-[#1f3028]/14 bg-[#f5f2ea]/92 text-[#223029] shadow-[0_8px_22px_rgba(18,30,24,0.14)]'
-    : 'border-white/15 bg-[#101824]/88 text-[#f2eee6] shadow-[0_12px_28px_rgba(4,8,14,0.42)]';
+    ? 'border-[#1d2d25]/14 bg-[#f3eee4]/92 text-[#1d2b24] shadow-[0_6px_18px_rgba(16,28,22,0.14)]'
+    : 'border-white/12 bg-[#0f1722]/88 text-[#f2eee6] shadow-[0_8px_22px_rgba(4,8,14,0.34)]';
   const dockBorderCls = isDayUi ? 'border-black/10' : 'border-white/10';
   const dockDividerCls = isDayUi ? 'divide-black/10' : 'divide-white/12';
   const dockPillCls = isDayUi
@@ -1292,37 +1306,36 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
         </div>
       )}
 
-      {/* Top-Center Desktop / Tablet / Phone Clock, Standard Location & Live Weather Pill */}
+      {/* Top-Center Clock, Location & Live Weather Pill — strictly aligned on the same row as top navbar on phone, tablet & desktop */}
       <div
-        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[calc(3.45rem+env(safe-area-inset-top))] lg:top-[max(0.65rem,env(safe-area-inset-top))] z-[56] flex flex-col items-center gap-2 max-w-[calc(100vw-1rem)]"
+        className="pointer-events-none fixed left-1/2 -translate-x-1/2 top-[max(0.5rem,env(safe-area-inset-top))] sm:top-[max(0.65rem,env(safe-area-inset-top))] z-[56] flex flex-col items-center gap-2 max-w-[calc(100vw-11.25rem)] sm:max-w-[calc(100vw-13.5rem)] md:max-w-[calc(100vw-18.5rem)] lg:max-w-[calc(100vw-25rem)]"
       >
-        <div className={`pointer-events-auto inline-flex items-center rounded-full border divide-x overflow-hidden transition-colors ${dockShellCls} ${dockDividerCls}`}>
+        <div className={`pointer-events-auto inline-flex h-8 sm:h-9 max-w-full items-center rounded-full border divide-x overflow-hidden transition-colors ${dockShellCls} ${dockDividerCls}`}>
           <button
             type="button"
             onClick={() => setControlsOpen((o) => !o)}
-            className="inline-flex h-8 sm:h-9 items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 text-[11px] sm:text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
-            title={isZh ? '实时时间、精准定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
+            className="inline-flex h-8 sm:h-9 min-w-0 max-w-full items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 text-[11px] sm:text-[11.5px] font-medium hover:opacity-85 transition-opacity cursor-pointer whitespace-nowrap"
+            title={isZh ? '实时时间、定位与昼夜天气设置' : 'Live time, location, daylight & weather'}
           >
-            <span className="tabular-nums text-[12px] sm:text-[13px] font-semibold tracking-tight">
+            <span className="tabular-nums text-[11px] sm:text-[12.5px] font-semibold tracking-tight leading-none shrink-0">
               {agentSnap.realtimeSync
                 ? `${String(liveClockNow.getHours()).padStart(2, '0')}:${String(liveClockNow.getMinutes()).padStart(2, '0')}`
                 : currentClockLabel}
             </span>
-            <span className="opacity-35">·</span>
-            <span className="inline-flex items-center gap-1 max-w-[96px] xs:max-w-[130px] sm:max-w-[180px] truncate opacity-90">
-              <MapPin className="h-3 w-3 shrink-0 opacity-75" />
-              <span className="truncate">
+            <span className="opacity-35 leading-none shrink-0">·</span>
+            <span className="inline-flex items-center min-w-0 max-w-[5.25rem] sm:max-w-[8.5rem] md:max-w-[10.5rem] lg:max-w-[175px] truncate opacity-90">
+              <span className="truncate leading-none">
                 {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable
                   ? agentSnap.liveWeather.locationName
                   : isZh
-                    ? '定位中…'
-                    : 'Locating…'}
+                    ? '定位中'
+                    : 'Locating'}
               </span>
             </span>
             {agentSnap.liveWeather && !agentSnap.liveWeather.unavailable && (
               <>
-                <span className="hidden xs:inline opacity-35">·</span>
-                <span className="hidden xs:inline opacity-85">
+                <span className="hidden md:inline opacity-35 leading-none shrink-0">·</span>
+                <span className="hidden md:inline opacity-85 leading-none shrink-0">
                   {Math.round(agentSnap.liveWeather.temperatureC)}°C {isZh ? activeWeatherMeta.zh : activeWeatherMeta.en}
                 </span>
               </>
@@ -1334,7 +1347,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             type="button"
             onClick={() => void fetchLiveWeather(true)}
             disabled={locating}
-            className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45"
+            className="hidden md:inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-45 shrink-0"
             title={isZh ? '高精度 GPS 重新定位' : 'Refresh precise GPS location'}
             aria-label={isZh ? '高精度定位' : 'Locate'}
           >
@@ -1344,7 +1357,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
           <button
             type="button"
             onClick={() => moveCameraToPreset(CAMERA_PRESETS[0])}
-            className="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer"
+            className="hidden md:inline-flex h-9 w-9 items-center justify-center opacity-80 hover:opacity-100 transition-opacity cursor-pointer shrink-0"
             title={isZh ? '重置视角' : 'Reset View'}
             aria-label={isZh ? '重置视角' : 'Reset View'}
           >
@@ -1355,7 +1368,7 @@ export const ParadiseWorld3D: React.FC<ParadiseWorld3DProps> = ({
             <button
               type="button"
               onClick={() => onImmersiveChange(false)}
-              className={`h-8 sm:h-9 px-2.5 sm:px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
+              className={`h-8 sm:h-9 px-2 sm:px-3 text-[11px] font-medium transition-colors cursor-pointer whitespace-nowrap ${dockActiveCls}`}
             >
               {isZh ? '退出' : 'Exit'}
             </button>

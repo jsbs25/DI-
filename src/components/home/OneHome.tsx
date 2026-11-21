@@ -34,13 +34,15 @@ type Props = {
 
 export const OneHome: React.FC<Props> = ({
   lang,
+  onSelectTab,
   immersive = false,
   onImmersiveChange,
 }) => {
   return (
-    <main className="relative h-[100dvh] w-full overflow-hidden bg-[#0e1928]">
+    <main className="relative h-[100dvh] w-full overflow-hidden bg-gradient-to-b from-[#17365c] via-[#1f4859] to-[#23402e]">
       <ParadiseWorld3D
         lang={lang}
+        onSelectTab={onSelectTab}
         immersive={immersive}
         onImmersiveChange={onImmersiveChange}
       />

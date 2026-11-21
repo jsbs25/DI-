@@ -29,7 +29,7 @@ import { loadBookProgress, saveBookProgress, TEXT_COLOR_PRESETS } from '../../ut
 import { containsArabic, isArabicHeavyText, normalizeArabicProse } from '../../utils/arabicTextNormalize.ts';
 
 export type AppleThemeId = 'original' | 'quiet' | 'paper' | 'calm' | 'midnight' | 'custom';
-export type AppleFontId = 'serif' | 'sans' | 'kai' | 'georgia' | 'amiri' | 'naskh';
+export type AppleFontId = 'serif' | 'sans' | 'kai' | 'georgia' | 'amiri' | 'scheherazade' | 'naskh' | 'plex_ar';
 export type AppleLayoutMode = 'spread' | 'single' | 'scroll';
 export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple';
 
@@ -167,38 +167,60 @@ const THEME_TOKENS: Record<
   },
 };
 
-const FONT_STACKS: Record<AppleFontId, { label: string; sample: string; family: string }> = {
+const FONT_STACKS: Record<AppleFontId, { label: string; sample: string; script: 'zh' | 'ar' | 'en'; family: string }> = {
   serif: {
     label: '典雅宋体',
     sample: '宋',
+    script: 'zh',
     family: '"Songti SC", "Noto Serif SC", "Source Han Serif SC", Georgia, "Times New Roman", serif',
   },
   sans: {
     label: '黑体无衬线',
     sample: '黑',
+    script: 'zh',
     family: '-apple-system, BlinkMacSystemFont, "PingFang SC", "SF Pro Text", "Helvetica Neue", sans-serif',
   },
   kai: {
     label: '书卷楷体',
     sample: '楷',
+    script: 'zh',
     family: '"Kaiti SC", "STKaiti", "LXGW WenKai", "BiauKai", Georgia, serif',
+  },
+  amiri: {
+    label: 'Amiri 古典',
+    sample: 'أبجد',
+    script: 'ar',
+    family: '"Amiri", "Traditional Arabic", serif',
+  },
+  scheherazade: {
+    label: 'Scheherazade 典籍',
+    sample: 'أبجد',
+    script: 'ar',
+    family: '"Scheherazade New", "Traditional Arabic", serif',
+  },
+  naskh: {
+    label: 'Noto Naskh 纳斯赫',
+    sample: 'أبجد',
+    script: 'ar',
+    family: '"Noto Naskh Arabic", "Geeza Pro", serif',
+  },
+  plex_ar: {
+    label: 'IBM Plex 现代阿语',
+    sample: 'أبجد',
+    script: 'ar',
+    family: '"IBM Plex Sans Arabic", "Cairo", sans-serif',
   },
   georgia: {
     label: 'Georgia',
     sample: 'Aa',
+    script: 'en',
     family: 'Georgia, "Iowan Old Style", "Palatino Linotype", "Songti SC", serif',
   },
-  amiri: {
-    label: 'Amiri 古典阿语',
-    sample: 'ع',
-    family: '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif',
-  },
-  naskh: {
-    label: 'Naskh 阿语清晰',
-    sample: 'ن',
-    family: '"Noto Naskh Arabic", "Amiri", "Scheherazade New", "Geeza Pro", serif',
-  },
 };
+
+function isArabicAppleFont(font: AppleFontId): boolean {
+  return font === 'amiri' || font === 'scheherazade' || font === 'naskh' || font === 'plex_ar';
+}
 
 const HIGHLIGHT_SWATCHES: Array<{ id: HighlightColor; label: string; dot: string; lightBg: string; darkBg: string }> = [
   { id: 'yellow', label: '琥珀黄', dot: '#F7C948', lightBg: 'rgba(252, 224, 120, 0.48)', darkBg: 'rgba(234, 179, 8, 0.30)' },
@@ -1726,7 +1748,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
         className="flex-1 overflow-y-auto pr-1 cursor-text"
         style={{
           fontFamily:
-            rtl && prefs.font !== 'amiri' && prefs.font !== 'naskh'
+            rtl && !isArabicAppleFont(prefs.font)
               ? '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif'
               : fontMeta.family,
           fontSize: `${rtl ? Math.max(prefs.fontSize + 4, 22) : prefs.fontSize}px`,
@@ -2084,33 +2106,50 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               </div>
             </div>
 
-            {/* Font Family (Chinese / Arabic / English) */}
-            <div className="py-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-              <div className="mb-2 text-[11px]" style={{ color: theme.muted }}>
-                {isZh ? '字体类型（中 / 阿 / 英）' : 'Typeface'}
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(Object.keys(FONT_STACKS) as AppleFontId[]).map((fid) => {
-                  const f = FONT_STACKS[fid];
-                  const active = prefs.font === fid;
-                  return (
-                    <button
-                      key={fid}
-                      type="button"
-                      onClick={() => setPrefs((p) => ({ ...p, font: fid }))}
-                      className="flex items-center justify-between rounded-xl px-2.5 py-1.5 text-xs transition-colors cursor-pointer"
-                      style={{
-                        fontFamily: f.family,
-                        border: `1px solid ${active ? theme.accent : theme.border}`,
-                        color: active ? theme.accent : theme.ink,
-                      }}
-                    >
-                      <span className="truncate">{f.label}</span>
-                      {active && <Check className="h-3.5 w-3.5 shrink-0" />}
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Font Family — Cleanly Grouped by Script (Chinese / Arabic / English) */}
+            <div className="py-3 space-y-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+              {([
+                { script: 'zh' as const, title: isZh ? '中文字体' : 'Chinese' },
+                { script: 'ar' as const, title: isZh ? '阿拉伯语字体 · العربية' : 'Arabic · العربية' },
+                { script: 'en' as const, title: isZh ? '英文字体' : 'English' },
+              ]).map((group) => (
+                <div key={group.script}>
+                  <div className="mb-1.5 text-[11px] font-medium" style={{ color: theme.muted }}>
+                    {group.title}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(Object.keys(FONT_STACKS) as AppleFontId[])
+                      .filter((fid) => FONT_STACKS[fid].script === group.script)
+                      .map((fid) => {
+                        const f = FONT_STACKS[fid];
+                        const active = prefs.font === fid;
+                        return (
+                          <button
+                            key={fid}
+                            type="button"
+                            onClick={() => setPrefs((p) => ({ ...p, font: fid }))}
+                            className="flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-xs transition-colors cursor-pointer"
+                            style={{
+                              border: `1px solid ${active ? theme.accent : theme.border}`,
+                              backgroundColor: active ? `${theme.accent}18` : 'transparent',
+                              color: active ? theme.accent : theme.ink,
+                            }}
+                          >
+                            <span className="truncate font-sans text-[11px]">{f.label}</span>
+                            <span
+                              dir={group.script === 'ar' ? 'rtl' : 'ltr'}
+                              lang={group.script === 'ar' ? 'ar' : undefined}
+                              className="shrink-0 text-sm leading-none"
+                              style={{ fontFamily: f.family }}
+                            >
+                              {f.sample}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* Custom Text Color + Reset */}
@@ -2519,7 +2558,7 @@ export const AppleBookReader: React.FC<AppleBookReaderProps> = ({
               <div
                 style={{
                   fontFamily:
-                    rtl && prefs.font !== 'amiri' && prefs.font !== 'naskh'
+                    rtl && !isArabicAppleFont(prefs.font)
                       ? '"Amiri", "Noto Naskh Arabic", "Scheherazade New", "Traditional Arabic", serif'
                       : fontMeta.family,
                   fontSize: `${rtl ? Math.max(prefs.fontSize + 4, 22) : prefs.fontSize}px`,

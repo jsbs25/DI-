@@ -3,11 +3,13 @@ import {
   containsArabic,
   detectArabicVisualReversal,
   detectBrokenArabicEncoding,
+  detectGarbledOrNumericPdfText,
   isArabicChar,
   isArabicCombiningMark,
   isArabicHeavyText,
   normalizeArabicProse,
   repairUnambiguousArabicLigatures,
+  sanitizePdfExtractedText,
 } from './arabicTextNormalize.ts';
 
 export type EbookBlockKind = 'h1' | 'h2' | 'paragraph' | 'footnote' | 'table';
@@ -25,7 +27,7 @@ export interface ExtractedEbookPage {
   blocks: EbookBlock[];
   plainText: string;
   isLikelyScanned: boolean;
-  extractionIssue?: 'scanned' | 'garbled_arabic';
+  extractionIssue?: 'scanned' | 'garbled_arabic' | 'garbled_numeric';
   ocrApplied?: boolean;
 }
 
@@ -260,8 +262,10 @@ export async function extractStructuredPdfPage(
   const pageIsVisuallyReversed = isRtl && detectArabicVisualReversal(pageRawLinesSample);
 
   const normalizeTextForPage = (raw: string): string => {
-    if (!containsArabic(raw)) return raw.replace(/\s+/g, ' ').trim();
-    return normalizeArabicProse(raw, {
+    const cleaned = sanitizePdfExtractedText(raw);
+    if (!cleaned) return '';
+    if (!containsArabic(cleaned)) return cleaned.replace(/\s+/g, ' ').trim();
+    return normalizeArabicProse(cleaned, {
       forceReverse: pageIsVisuallyReversed,
       skipReverseCheck: pageIsVisuallyReversed,
     });
@@ -407,19 +411,29 @@ export async function extractStructuredPdfPage(
   flushParagraph();
   flushFootnote();
 
-  const plainText = blocks.map((b) => b.text).join('\n\n').trim();
+  const plainText = sanitizePdfExtractedText(blocks.map((b) => b.text).join('\n\n'));
   const nonSpaceChars = plainText.replace(/\s+/g, '').length;
   const hasBrokenArabic =
     detectBrokenArabicEncoding(plainText) || detectBrokenArabicEncoding(pageRawLinesSample);
-  const isScanned = nonSpaceChars < 30;
+  const hasGarbledOrNumeric =
+    !hasBrokenArabic &&
+    (detectGarbledOrNumericPdfText(plainText) || detectGarbledOrNumericPdfText(pageRawLinesSample));
+  const isScanned = nonSpaceChars < 28;
+  const isUnusableTextLayer = isScanned || hasBrokenArabic || hasGarbledOrNumeric;
 
   return {
     pageNumber,
     dir: isRtl ? 'rtl' : 'ltr',
-    blocks: hasBrokenArabic ? [] : blocks,
-    plainText: hasBrokenArabic ? '' : plainText,
-    isLikelyScanned: isScanned || hasBrokenArabic,
-    extractionIssue: hasBrokenArabic ? 'garbled_arabic' : isScanned ? 'scanned' : undefined,
+    blocks: isUnusableTextLayer ? [] : blocks,
+    plainText: isUnusableTextLayer ? '' : plainText,
+    isLikelyScanned: isUnusableTextLayer,
+    extractionIssue: hasBrokenArabic
+      ? 'garbled_arabic'
+      : hasGarbledOrNumeric
+        ? 'garbled_numeric'
+        : isScanned
+          ? 'scanned'
+          : undefined,
   };
 }
 
@@ -490,4 +504,352 @@ export async function renderPdfPageToJpegDataUrl(
   canvas.width = 0;
   canvas.height = 0;
   return dataUrl;
+}
+
+/**
+ * Renders Page 1 of a PDF into a crisp, compact 2:3-friendly book cover JPEG data URL.
+ */
+export async function renderPdfCoverThumbnail(pdf: PDFDocumentProxy): Promise<string | undefined> {
+  try {
+    const page = await pdf.getPage(1);
+    const baseVp = page.getViewport({ scale: 1 });
+    const targetWidth = 360;
+    const scale = Math.min(1.4, Math.max(0.4, targetWidth / Math.max(1, baseVp.width)));
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.floor(viewport.width));
+    canvas.height = Math.max(1, Math.floor(viewport.height));
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return undefined;
+    ctx.fillStyle = '#FAF8F4';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+    canvas.width = 0;
+    canvas.height = 0;
+    return dataUrl;
+  } catch {
+    return undefined;
+  }
+}
+
+export interface ConvertedPdfChapter {
+  id: string;
+  title: string;
+  content: string;
+}
+
+export interface WholePdfConversionProgress {
+  stage: 'analyzing' | 'extracting' | 'ocr' | 'finalizing';
+  currentPage: number;
+  totalPages: number;
+  cleanPages: number;
+  ocrPages: number;
+  message: string;
+}
+
+export interface WholePdfConversionResult {
+  chapters: ConvertedPdfChapter[];
+  language: 'ar' | 'zh' | 'en';
+  pageCount: number;
+  cleanPages: number;
+  ocrPages: number;
+  coverageRatio: number;
+  isFullElectronicCoverage: boolean;
+  needsFurtherOcrPages: number[];
+  coverImage?: string;
+}
+
+/**
+ * Converts an ENTIRE PDF document into clean, structured electronic book chapters in one pass:
+ *  - Extracts clean Unicode pages in parallel batches (8 pages at once) across the whole book
+ *  - Detects scanned / garbled-number / broken-Arabic pages automatically (NEVER leaking raw numbers)
+ *  - Computes exact full-book coverageRatio so partial/scanned 100+ page PDFs are NEVER truncated to 2 chapters
+ */
+export async function convertPdfDocumentToEbook(
+  pdf: PDFDocumentProxy,
+  bookTitle: string,
+  options?: {
+    maxAutoOcrPages?: number;
+    onProgress?: (p: WholePdfConversionProgress) => void;
+    onBatchReady?: (chapters: ConvertedPdfChapter[], donePages: number, totalPages: number) => void;
+    signal?: AbortSignal;
+  }
+): Promise<WholePdfConversionResult> {
+  const totalPages = pdf.numPages;
+  const maxAutoOcrPages = options?.maxAutoOcrPages ?? 0;
+  const onProgress = options?.onProgress;
+
+  onProgress?.({
+    stage: 'analyzing',
+    currentPage: 0,
+    totalPages,
+    cleanPages: 0,
+    ocrPages: 0,
+    message: `正在快速解析目录与封面（共 ${totalPages} 页）…`,
+  });
+
+  const [toc, coverImage] = await Promise.all([
+    extractPdfToc(pdf),
+    renderPdfCoverThumbnail(pdf),
+  ]);
+
+  const pageTexts = new Map<number, string>();
+  const scannedOrGarbledPages: number[] = [];
+  let arCharTotal = 0;
+  let zhCharTotal = 0;
+  let enCharTotal = 0;
+  let cleanPages = 0;
+
+  // Pass 1: High-speed parallel local geometry extraction across ALL pages (8 pages per batch)
+  const BATCH_SIZE = 8;
+  for (let start = 1; start <= totalPages; start += BATCH_SIZE) {
+    if (options?.signal?.aborted) break;
+    const end = Math.min(totalPages, start + BATCH_SIZE - 1);
+    const batchNums: number[] = [];
+    for (let p = start; p <= end; p++) batchNums.push(p);
+
+    const results = await Promise.all(
+      batchNums.map(async (p) => {
+        try {
+          const ep = await extractStructuredPdfPage(pdf, p);
+          return { p, ep };
+        } catch {
+          return { p, ep: null };
+        }
+      })
+    );
+
+    for (const { p, ep } of results) {
+      if (ep && !ep.isLikelyScanned && ep.plainText.trim().length >= 24) {
+        const formatted = ep.blocks
+          .map((b) => {
+            if (b.kind === 'h1') return `【${b.text}】`;
+            if (b.kind === 'h2') return b.text;
+            return b.text;
+          })
+          .join('\n\n')
+          .trim();
+        if (formatted) {
+          pageTexts.set(p, formatted);
+          cleanPages += 1;
+          arCharTotal += (formatted.match(/[\u0600-\u06FF]/g) || []).length;
+          zhCharTotal += (formatted.match(/[\u4E00-\u9FFF]/g) || []).length;
+          enCharTotal += (formatted.match(/[A-Za-z]/g) || []).length;
+        } else {
+          scannedOrGarbledPages.push(p);
+        }
+      } else {
+        scannedOrGarbledPages.push(p);
+      }
+    }
+
+    onProgress?.({
+      stage: 'extracting',
+      currentPage: end,
+      totalPages,
+      cleanPages,
+      ocrPages: 0,
+      message: `正在极速解析全书文字：第 ${end} / ${totalPages} 页…`,
+    });
+  }
+
+  // Pass 2: Optional Vision OCR only when explicitly requested (maxAutoOcrPages > 0)
+  let ocrPages = 0;
+  const remainingOcrPages: number[] = [];
+  if (scannedOrGarbledPages.length > 0 && maxAutoOcrPages > 0 && !options?.signal?.aborted) {
+    const pagesToOcrNow = scannedOrGarbledPages.slice(0, maxAutoOcrPages);
+    remainingOcrPages.push(...scannedOrGarbledPages.slice(maxAutoOcrPages));
+
+    const languageHint =
+      arCharTotal > zhCharTotal && arCharTotal > enCharTotal
+        ? 'ar'
+        : /[\u0600-\u06FF]/.test(bookTitle)
+          ? 'ar'
+          : zhCharTotal > enCharTotal || /[\u4E00-\u9FFF]/.test(bookTitle)
+            ? 'zh'
+            : 'auto';
+
+    let consecutiveErrors = 0;
+    for (let i = 0; i < pagesToOcrNow.length; i++) {
+      if (options?.signal?.aborted) break;
+      const pNum = pagesToOcrNow[i];
+      onProgress?.({
+        stage: 'ocr',
+        currentPage: i + 1,
+        totalPages: pagesToOcrNow.length,
+        cleanPages,
+        ocrPages,
+        message: `检测到扫描/特殊字体页，正在自动 AI 识字转电子版（第 ${pNum} 页 · ${i + 1}/${pagesToOcrNow.length}）…`,
+      });
+      try {
+        const jpeg = await renderPdfPageToJpegDataUrl(pdf, pNum, 1.35);
+        const res = await fetch('/api/library/ai/ocr-page', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pageImageBase64: jpeg,
+            pageNumber: pNum,
+            bookTitle,
+            language: languageHint,
+          }),
+          signal: options?.signal,
+        });
+        const data = await res.json();
+        if (res.ok && data?.success && typeof data.text === 'string' && data.text.trim().length > 12) {
+          const blocks = parseOcrMarkdownToBlocks(data.text, pNum);
+          const cleanBody = blocks.map((b) => b.text).filter(Boolean).join('\n\n').trim();
+          if (cleanBody && !detectGarbledOrNumericPdfText(cleanBody)) {
+            pageTexts.set(pNum, cleanBody);
+            ocrPages += 1;
+            consecutiveErrors = 0;
+            arCharTotal += (cleanBody.match(/[\u0600-\u06FF]/g) || []).length;
+            zhCharTotal += (cleanBody.match(/[\u4E00-\u9FFF]/g) || []).length;
+            enCharTotal += (cleanBody.match(/[A-Za-z]/g) || []).length;
+          }
+        } else {
+          consecutiveErrors += 1;
+          remainingOcrPages.push(pNum);
+        }
+      } catch {
+        consecutiveErrors += 1;
+        remainingOcrPages.push(pNum);
+      }
+
+      if (consecutiveErrors >= 2) {
+        remainingOcrPages.push(...pagesToOcrNow.slice(i + 1));
+        break;
+      }
+
+      if (ocrPages > 0 && ocrPages % 4 === 0 && options?.onBatchReady) {
+        const partialChapters = assemblePagesIntoChapters(pageTexts, toc, totalPages, bookTitle);
+        options.onBatchReady(partialChapters, cleanPages + ocrPages, totalPages);
+      }
+    }
+  } else if (scannedOrGarbledPages.length > 0) {
+    remainingOcrPages.push(...scannedOrGarbledPages);
+  }
+
+  onProgress?.({
+    stage: 'finalizing',
+    currentPage: totalPages,
+    totalPages,
+    cleanPages,
+    ocrPages,
+    message: '正在整理电子书目录并保存到书架…',
+  });
+
+  const extractedTotal = cleanPages + ocrPages;
+  const coverageRatio = totalPages > 0 ? extractedTotal / totalPages : 0;
+  const isFullElectronicCoverage =
+    totalPages > 0 && (totalPages <= 3 ? extractedTotal >= 1 : coverageRatio >= 0.72);
+
+  const chapters = isFullElectronicCoverage
+    ? assemblePagesIntoChapters(pageTexts, toc, totalPages, bookTitle)
+    : [];
+
+  const detectedLang: 'ar' | 'zh' | 'en' =
+    arCharTotal >= Math.max(zhCharTotal, enCharTotal) && (arCharTotal > 20 || /[\u0600-\u06FF]/.test(bookTitle))
+      ? 'ar'
+      : zhCharTotal >= enCharTotal && (zhCharTotal > 20 || /[\u4E00-\u9FFF]/.test(bookTitle))
+        ? 'zh'
+        : 'en';
+
+  return {
+    chapters,
+    language: detectedLang,
+    pageCount: totalPages,
+    cleanPages,
+    ocrPages,
+    coverageRatio,
+    isFullElectronicCoverage,
+    needsFurtherOcrPages: remainingOcrPages,
+    coverImage,
+  };
+}
+
+function assemblePagesIntoChapters(
+  pageTexts: Map<number, string>,
+  toc: PdfTocItem[],
+  totalPages: number,
+  bookTitle: string
+): ConvertedPdfChapter[] {
+  const sortedPageNums = Array.from(pageTexts.keys()).sort((a, b) => a - b);
+  if (sortedPageNums.length === 0) return [];
+
+  // Use embedded PDF TOC bookmarks only when they provide genuine multi-chapter coverage
+  // (avoid collapsing a 100-page PDF into 2 giant chapters if TOC only has 2 top-level bookmarks)
+  const topToc = toc
+    .filter((t) => t.level <= 1 && t.pageNumber >= 1 && t.pageNumber <= totalPages)
+    .reduce<PdfTocItem[]>((acc, item) => {
+      if (!acc.some((x) => x.pageNumber === item.pageNumber)) acc.push(item);
+      return acc;
+    }, [])
+    .sort((a, b) => a.pageNumber - b.pageNumber);
+
+  if (topToc.length >= 3 || (topToc.length >= 2 && totalPages <= 25)) {
+    const chapters: ConvertedPdfChapter[] = [];
+    const prePages = sortedPageNums.filter((p) => p < topToc[0].pageNumber);
+    if (prePages.length > 0) {
+      chapters.push({
+        id: 'ch_preface',
+        title: '前言 / 卷首',
+        content: prePages.map((p) => pageTexts.get(p) || '').filter(Boolean).join('\n\n'),
+      });
+    }
+    for (let i = 0; i < topToc.length; i++) {
+      const startP = topToc[i].pageNumber;
+      const endP = i + 1 < topToc.length ? topToc[i + 1].pageNumber - 1 : totalPages;
+      const chPages = sortedPageNums.filter((p) => p >= startP && p <= endP);
+      if (chPages.length === 0) continue;
+
+      // Subdivide overly long TOC ranges (> 25 pages) into readable ~12-page sections
+      if (chPages.length > 25) {
+        for (let k = 0; k < chPages.length; k += 12) {
+          const sub = chPages.slice(k, k + 12);
+          const body = sub.map((p) => pageTexts.get(p) || '').filter(Boolean).join('\n\n').trim();
+          if (!body) continue;
+          chapters.push({
+            id: `ch_${chapters.length + 1}`,
+            title: `${topToc[i].title.slice(0, 90)}（第 ${sub[0]}–${sub[sub.length - 1]} 页）`,
+            content: body,
+          });
+        }
+      } else {
+        const body = chPages.map((p) => pageTexts.get(p) || '').filter(Boolean).join('\n\n').trim();
+        if (body) {
+          chapters.push({
+            id: `ch_${chapters.length + 1}`,
+            title: topToc[i].title.slice(0, 120),
+            content: body,
+          });
+        }
+      }
+    }
+    if (chapters.length > 0) return chapters;
+  }
+
+  // Fallback: Group cleanly into well-proportioned electronic chapters covering ALL extracted pages
+  const PAGES_PER_CHAPTER = sortedPageNums.length <= 16 ? 4 : 8;
+  const chapters: ConvertedPdfChapter[] = [];
+  for (let i = 0; i < sortedPageNums.length; i += PAGES_PER_CHAPTER) {
+    const slice = sortedPageNums.slice(i, i + PAGES_PER_CHAPTER);
+    const firstP = slice[0];
+    const lastP = slice[slice.length - 1];
+    const body = slice.map((p) => pageTexts.get(p) || '').filter(Boolean).join('\n\n').trim();
+    if (!body) continue;
+    const firstLine = body.split('\n')[0]?.replace(/^【|】$/g, '').trim() || '';
+    const useHeading = firstLine.length >= 3 && firstLine.length <= 42 && !/[。！？.!?]$/.test(firstLine);
+    const chNum = chapters.length + 1;
+    chapters.push({
+      id: `ch_${chNum}`,
+      title: useHeading
+        ? `${firstLine}（第 ${firstP}–${lastP} 页）`
+        : firstP === lastP
+          ? `${bookTitle.slice(0, 24)} · 第 ${firstP} 页`
+          : `第 ${chNum} 部分（第 ${firstP}–${lastP} 页）`,
+      content: body,
+    });
+  }
+  return chapters;
 }

@@ -15,6 +15,7 @@ import { aiGateway } from './server/aiGateway.ts';
 import { createOneAiAdminRouter } from './server/oneAi/adminRoutes.ts';
 import { createOneAiAgentRouter } from './server/oneAi/agentOrchestrator.ts';
 import { handleEnvironmentWeatherRoute } from './server/environmentWeather.ts';
+import { handleReaderFontAssetRoute, handleReaderFontsCssRoute } from './server/chinaFontProxy.ts';
 import { oneAiDb } from './server/oneAi/db.ts';
 import { autoActivateReadyEndpoints, runGlobalModelDiscovery } from './server/oneAi/discovery.ts';
 import { oneAiRouter } from './server/oneAi/router.ts';
@@ -211,7 +212,11 @@ app.use((req, res, next) => {
 
 app.use((req, res, next) => {
   if (req.path === '/api/messenger/upload/stream') return next();
-  if (req.path === '/api/library/islamic/upload-pdf') {
+  if (
+    req.path === '/api/library/islamic/upload-pdf' ||
+    req.path === '/api/library/upload-pdf' ||
+    /^\/api\/library\/books\/[^/]+\/ebook-chapters$/.test(req.path)
+  ) {
     return express.json({ limit: '65mb' })(req, res, next);
   }
   return express.json({ limit: '20mb' })(req, res, next);
@@ -3180,6 +3185,8 @@ app.get('/api/games/rooms', (req, res) => {
 // -------------------------------------------------------------
 app.use('/api/admin/ai', createOneAiAdminRouter(getSessionUser));
 app.get('/api/environment/weather', handleEnvironmentWeatherRoute);
+app.get('/api/fonts/reader.css', handleReaderFontsCssRoute);
+app.get('/api/fonts/asset', handleReaderFontAssetRoute);
 app.use(
   '/api/one-ai/agent',
   createOneAiAgentRouter({
@@ -3463,7 +3470,16 @@ app.post(['/api/ai/chat', '/api/one-ai/chat'], async (req, res) => {
       hasUnifiedLiveEngine();
 
     if (useUnifiedCore) {
-      const fastMode = mode === 'search' || mode === 'browser' || mode === 'voice-agent' || mode === 'quick' || userPrompt.length < 180;
+      const explicitDeepMode =
+        mode === 'reasoning' ||
+        mode === 'deep' ||
+        mode === 'code' ||
+        mode === 'research' ||
+        mode === 'writer' ||
+        mode === 'tutor';
+      const fastMode =
+        !explicitDeepMode &&
+        (mode === 'search' || mode === 'browser' || mode === 'voice-agent' || mode === 'quick' || userPrompt.length < 90);
       const unifiedRes = await runUnifiedAiTurn({
         prompt: userPrompt,
         systemInstruction: ctx.systemPrompt,

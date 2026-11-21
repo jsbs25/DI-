@@ -49,9 +49,9 @@ export function resolveUserTier(user: User | undefined | null): UserTier {
 }
 
 const TIER_LIMITS: Record<UserTier, { dailyRequests: number; dailyTokens: number; rpm: number; allowPaid: boolean }> = {
-  guest: { dailyRequests: 25, dailyTokens: 45_000, rpm: 8, allowPaid: false },
-  free: { dailyRequests: 150, dailyTokens: 350_000, rpm: 24, allowPaid: true },
-  pro: { dailyRequests: 1000, dailyTokens: 2_500_000, rpm: 60, allowPaid: true },
+  guest: { dailyRequests: 120, dailyTokens: 250_000, rpm: 20, allowPaid: true },
+  free: { dailyRequests: 500, dailyTokens: 1_200_000, rpm: 40, allowPaid: true },
+  pro: { dailyRequests: 2000, dailyTokens: 5_000_000, rpm: 80, allowPaid: true },
   admin: { dailyRequests: 100_000, dailyTokens: 100_000_000, rpm: 300, allowPaid: true },
 };
 
@@ -64,7 +64,7 @@ const rpmWindow = new Map<string, number[]>();
 const activeStreams = new Map<string, number>();
 
 export function acquireStreamLock(subjectKey: string, tier: UserTier): { ok: boolean; release: () => void } {
-  const maxConcurrent = tier === 'admin' ? 8 : tier === 'pro' ? 3 : 1;
+  const maxConcurrent = tier === 'admin' ? 10 : tier === 'pro' ? 5 : 3;
   const current = activeStreams.get(subjectKey) || 0;
   if (current >= maxConcurrent) {
     return { ok: false, release: () => {} };

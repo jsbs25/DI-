@@ -34,14 +34,13 @@ export function getGeminiClient(): GoogleGenAI | null {
     cachedKey = apiKey;
     cachedClient = new GoogleGenAI({
       apiKey,
-      apiVersion: 'v1beta',
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
         },
       },
     });
-    cachedLiveClient = cachedClient;
+    cachedLiveClient = null;
   }
   return cachedClient;
 }
@@ -52,7 +51,16 @@ export function getGeminiLiveClient(): GoogleGenAI | null {
     return null;
   }
   if (!cachedLiveClient || cachedKey !== apiKey) {
-    getGeminiClient();
+    cachedKey = apiKey;
+    cachedLiveClient = new GoogleGenAI({
+      apiKey,
+      apiVersion: 'v1beta',
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
   }
   return cachedLiveClient;
 }
